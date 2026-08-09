@@ -393,11 +393,14 @@ required. Wrong columns or constraints, gaps, duplicates, rogue negative or lowe
 storage types take the fixed path-free failure. Snapshot, read-only database, and schema-check
 callers share the validator. Existing guide migration fixtures remain compatible.
 
-VM provisioning and initialization state plus every nested VM, workspace, and session mode JSON
-surface now use closed persisted-enum projection. Invalid strings, bytes, and control-bearing values
-become the stable `unknown` sentinel before rendering and never echo their raw value. Valid human
-bytes remain unchanged. Computed session status retains exactly running, stopped, broken, unknown,
-and unavailable, with unavailable reserved for skipped or inconclusive live inspection.
+The VM, workspace, and session list and describe fact paths now project provisioning,
+initialization, and session mode against frozen, output-owned JSON v1 vocabularies. Future domain
+enum additions therefore remain `unknown` until the output contract changes explicitly. On those
+operational surfaces, invalid strings, bytes, and control-bearing values become the stable `unknown`
+sentinel without echoing their raw value, while valid human bytes remain unchanged. This evidence
+does not claim closure for doctor's independent human diagnostics. Computed session status retains
+exactly running, stopped, broken, unknown, and unavailable, with unavailable reserved for skipped or
+inconclusive live inspection.
 
 Descriptor, schema-history, and persisted-enum correction validation passed:
 

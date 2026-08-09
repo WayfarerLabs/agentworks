@@ -139,10 +139,11 @@ conventional SIGINT exit code (130).
 ## Commands
 
 The complete command surface, machine-readable JSON v1 contract, guide behavior, and session/tmux
-details live in the focused [CLI command reference](command-reference.md). Persisted provisioning,
-initialization, and session-mode values use closed JSON vocabularies. Valid values retain their
-existing human bytes; a corrupt value renders as the stable `unknown` sentinel through shared facts
-and never echoes its stored text in either human or JSON output.
+details live in the focused [CLI command reference](command-reference.md). The VM, workspace, and
+session list and describe paths project persisted provisioning, initialization, and session-mode
+values through frozen JSON v1 vocabularies owned by the output contract. On those operational
+surfaces, valid values retain their existing human bytes and corrupt values render as the stable
+`unknown` sentinel without echoing their stored text. Doctor diagnostics are a separate surface.
 
 ## Configuration
 

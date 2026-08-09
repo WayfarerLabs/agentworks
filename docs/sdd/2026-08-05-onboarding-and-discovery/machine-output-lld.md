@@ -241,9 +241,11 @@ agent_name, and pid are nullable. pid is a positive integer or null only. The st
 sentinel is rendered as null, never as a negative number. Opaque harness state, boot identifier, and
 socket path are excluded.
 
-The shared VM, workspace, and session fact builders close these persisted enum values before either
-renderer receives them. Valid values preserve existing human bytes. A corrupt value renders as
-unknown in human and JSON output, and its raw or control-bearing text is never forwarded.
+For VM, workspace, and session list and describe, shared fact builders close persisted enum values
+against frozen, output-owned JSON v1 vocabularies before either renderer receives them. Future
+domain enum additions do not expand those vocabularies. On these operational surfaces, valid values
+preserve existing human bytes; a corrupt value renders as unknown without forwarding its raw or
+control-bearing text. This closure claim does not cover doctor's independent human diagnostics.
 
 console.list.data is {consoles}, where entries are {name, vm_name, session_count} in current name
 order after filter validation. console.describe.data is {console}. console is {name, vm_name,

@@ -7,8 +7,12 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.db import SYSTEM_SLUG_KEY, InitStatus, ProvisioningStatus, SessionMode, VMStatus
-from agentworks.db.projections import project_persisted_enum
+from agentworks.db import SYSTEM_SLUG_KEY, VMStatus
+from agentworks.db.projections import (
+    project_session_mode,
+    project_vm_initialization_status,
+    project_vm_provisioning_status,
+)
 from agentworks.errors import (
     AgentworksError,
     UserAbort,
@@ -155,8 +159,8 @@ class VMDetailFacts:
             site=vm.site,
             template=vm.template,
             admin_template=vm.admin_template,
-            provisioning_status=project_persisted_enum(vm.provisioning_status, ProvisioningStatus),
-            initialization_status=project_persisted_enum(vm.init_status, InitStatus),
+            provisioning_status=project_vm_provisioning_status(vm.provisioning_status),
+            initialization_status=project_vm_initialization_status(vm.init_status),
             tailscale_host=vm.tailscale_host,
             cpus=vm.cpus,
             memory_gib=vm.memory_gib,
@@ -228,8 +232,8 @@ def vm_listing_data(listing: VMListing) -> JsonObject:
                 "name": vm.name,
                 "site": vm.site,
                 "template": vm.template,
-                "provisioning_status": project_persisted_enum(vm.provisioning_status, ProvisioningStatus),
-                "initialization_status": project_persisted_enum(vm.initialization_status, InitStatus),
+                "provisioning_status": project_vm_provisioning_status(vm.provisioning_status),
+                "initialization_status": project_vm_initialization_status(vm.initialization_status),
                 "workspace_count": vm.workspace_count,
                 "agent_count": vm.agent_count,
                 "session_count": vm.session_count,
@@ -261,8 +265,8 @@ def vm_description_data(description: VMDescription) -> JsonObject:
             "template": vm.template,
             "admin_template": vm.admin_template,
             "admin_username": vm.admin_username,
-            "provisioning_status": project_persisted_enum(vm.provisioning_status, ProvisioningStatus),
-            "initialization_status": project_persisted_enum(vm.initialization_status, InitStatus),
+            "provisioning_status": project_vm_provisioning_status(vm.provisioning_status),
+            "initialization_status": project_vm_initialization_status(vm.initialization_status),
             "tailscale_host": vm.tailscale_host,
             "last_seen_at": vm.last_seen_at,
             "provisioned_resources": {
@@ -303,7 +307,7 @@ def vm_description_data(description: VMDescription) -> JsonObject:
                         {
                             "name": session.name,
                             "template": session.template,
-                            "mode": project_persisted_enum(session.mode, SessionMode),
+                            "mode": project_session_mode(session.mode),
                             "agent_name": session.agent_name,
                         }
                         for session in workspace.sessions
@@ -356,8 +360,8 @@ def vm_listing(db: Database) -> VMListing:
                 name=vm.name,
                 site=vm.site,
                 template=vm.template,
-                provisioning_status=project_persisted_enum(vm.provisioning_status, ProvisioningStatus),
-                initialization_status=project_persisted_enum(vm.init_status, InitStatus),
+                provisioning_status=project_vm_provisioning_status(vm.provisioning_status),
+                initialization_status=project_vm_initialization_status(vm.init_status),
                 workspace_count=db.count_workspaces_on_vm(vm.name),
                 agent_count=db.count_agents_on_vm(vm.name),
                 session_count=db.count_sessions_on_vm(vm.name),
@@ -517,7 +521,7 @@ def vm_description(
                 VMDetailSession(
                     name=session.name,
                     template=session.template,
-                    mode=project_persisted_enum(session.mode, SessionMode),
+                    mode=project_session_mode(session.mode),
                     agent_name=session.agent_name,
                 )
                 for session in db.list_sessions(workspace_name=workspace.name)

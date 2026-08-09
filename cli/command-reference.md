@@ -131,7 +131,9 @@ rules as resource describe.
 
 `template` and `tailscale_host` are nullable. VMs retain name order. Provisioning is `pending`,
 `in_progress`, `complete`, `failed`, or `unknown`; initialization additionally permits `partial`.
-`unknown` is the stable sentinel for an invalid persisted value and never echoes that stored value.
+These frozen JSON v1 vocabularies do not expand when domain enums gain members. In this VM list JSON
+projection, `unknown` is the stable sentinel for an invalid persisted value and never echoes that
+stored value.
 
 `agw vm describe NAME --output json` uses command `vm.describe` and data `{vm, issues}`. `vm` has
 this ordered shape:
@@ -163,10 +165,10 @@ nullable integers. `live_resources` is null or this record:
 raw names outside that closed set project as `unknown` and never echo their stored text. `detail` is
 reserved and always JSON `null` in v1 because persisted event detail is unbounded diagnostic text;
 no non-null detail grammar exists. `agent_name` is nullable, and mode is `admin`, `agent`, or
-`unknown`. The sentinel closes invalid persisted modes without echoing them. These arrays retain
-database order. `issues[]` is `{source, code}` in encounter order: source is `site_lookup`,
-`preflight`, `secret_resolution`, or `platform_status`, and code is always `unavailable`. Issues do
-not carry backend text or exception details.
+`unknown`. In this nested VM JSON projection, the sentinel closes invalid persisted modes without
+echoing them. These arrays retain database order. `issues[]` is `{source, code}` in encounter order:
+source is `site_lookup`, `preflight`, `secret_resolution`, or `platform_status`, and code is always
+`unavailable`. Issues do not carry backend text or exception details.
 
 ```bash
 agw vm list --output json
@@ -182,7 +184,7 @@ workspace name order after filtering. `agw workspace describe NAME --output json
 `{name, vm_name, template, path, created_at, sessions, agents}`. Session entries are
 `{name, template, mode, agent_name}` and agent entries are `{name, linux_user}`. `template` and
 `agent_name` are nullable, and mode is `admin`, `agent`, or `unknown`. An invalid persisted mode
-maps to `unknown` without exposing its raw value.
+maps to `unknown` without exposing its raw value in this workspace JSON projection.
 
 `agw agent list --output json` uses `agent.list` and
 `{agents: [{name, vm_name, template, grant_all, grants}]}`. `template` is nullable, `grant_all` is
@@ -198,10 +200,11 @@ nullable `template` and session entries `{name, template, workspace_name}`.
 `{name, workspace_name, vm_name, template, harness_integration, mode, agent_name, status}`.
 `harness_integration` and `agent_name` are nullable; mode is `admin`, `agent`, or `unknown`; status
 is exactly `running`, `stopped`, `broken`, `unknown`, or `unavailable`. A bad persisted mode maps to
-`unknown` without exposing its raw value. `unavailable` is reserved for skipped or inconclusive live
-status work, not invalid persisted state or a human display sentinel. Rows retain workspace then
-session name order. `agw session describe NAME --output json` uses `session.describe` and
-`{session}`. Session is this record:
+`unknown` without exposing its raw value in these session JSON projections. The frozen output mode
+vocabulary does not expand when the domain enum gains a member. `unavailable` is reserved for
+skipped or inconclusive live status work, not invalid persisted state or a human display sentinel.
+Rows retain workspace then session name order. `agw session describe NAME --output json` uses
+`session.describe` and `{session}`. Session is this record:
 
 ```text
 {name, workspace_name, vm_name, template, harness_integration, mode, agent_name,

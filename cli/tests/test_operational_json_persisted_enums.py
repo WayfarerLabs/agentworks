@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import contextlib
 import json
+from enum import StrEnum
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
 from typer.testing import CliRunner
 
 from agentworks.cli import app
-from agentworks.db import PID_STOPPED, SessionMode, SessionStatus
+from agentworks.db import PID_STOPPED, SessionMode, SessionStatus, VMStatus
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -83,6 +85,8 @@ def test_real_list_and_describe_clis_never_echo_invalid_persisted_enums(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from agentworks.sessions import manager as sessions
+    from agentworks.vms import sites
+    from agentworks.vms.manager import inspect as vm_inspection
 
     _seed_invalid_persisted_enums(db)
     config = make_config()
@@ -95,9 +99,22 @@ def test_real_list_and_describe_clis_never_echo_invalid_persisted_enums(
     monkeypatch.setattr(sessions, "_prepare_vm", prepared_vm)
     monkeypatch.setattr(sessions, "_ensure_pid", lambda row, **_kwargs: row)
     monkeypatch.setattr(sessions, "check_session_status", lambda row, **_kwargs: SessionStatus.STOPPED)
+    platform = SimpleNamespace(
+        name="fixture-platform",
+        display_backend_name=lambda _vm: "fixture-backend",
+        status=lambda _vm, _context: VMStatus.RUNNING,
+    )
+    site = SimpleNamespace(platform=platform)
+    monkeypatch.setattr(sites, "lookup_site", lambda *_args, **_kwargs: site)
+    monkeypatch.setattr(
+        vm_inspection,
+        "_live_vm_boundary",
+        lambda *_args, **_kwargs: (SimpleNamespace(site=site), object()),
+    )
 
     runner = CliRunner()
     vm_list = runner.invoke(app, ["vm", "list", "--output", "json"])
+    vm_describe = runner.invoke(app, ["vm", "describe", "box", "--output", "json"])
     workspace_describe = runner.invoke(app, ["workspace", "describe", "ws", "--output", "json"])
     session_list = runner.invoke(app, ["session", "list", "--no-status", "--output", "json"])
     session_describe = runner.invoke(app, ["session", "describe", "session-a", "--output", "json"])
@@ -105,6 +122,13 @@ def test_real_list_and_describe_clis_never_echo_invalid_persisted_enums(
     vm_data = _json_data(vm_list)
     vm = cast("list[dict[str, object]]", vm_data["vms"])[0]
     assert vm["provisioning_status"] == vm["initialization_status"] == "unknown"
+    vm_describe_data = _json_data(vm_describe)
+    described_vm = cast("dict[str, object]", vm_describe_data["vm"])
+    assert described_vm["provisioning_status"] == described_vm["initialization_status"] == "unknown"
+    described_workspaces = cast("list[dict[str, object]]", described_vm["workspaces"])
+    described_sessions = cast("list[dict[str, object]]", described_workspaces[0]["sessions"])
+    assert described_sessions[0]["mode"] == "unknown"
+    assert "operator-private-invalid" not in vm_describe.stdout
     workspace_data = _json_data(workspace_describe)
     workspace = cast("dict[str, object]", workspace_data["workspace"])
     assert cast("list[dict[str, object]]", workspace["sessions"])[0]["mode"] == "unknown"
@@ -119,6 +143,7 @@ def test_real_list_and_describe_clis_never_echo_invalid_persisted_enums(
 
     human_commands = (
         ["vm", "list", "--output", "human"],
+        ["vm", "describe", "box", "--output", "human"],
         ["workspace", "describe", "ws", "--output", "human"],
         ["session", "list", "--no-status", "--output", "human"],
         ["session", "describe", "session-a", "--output", "human"],
@@ -127,6 +152,40 @@ def test_real_list_and_describe_clis_never_echo_invalid_persisted_enums(
     assert _RAW_TEXT.encode() not in all_output
     assert _RAW_BYTES not in all_output
     assert all_output.count(b"unknown") >= 4
+
+
+def test_future_domain_members_do_not_expand_frozen_json_v1_vocabularies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.db import models
+    from agentworks.db.projections import (
+        project_session_mode,
+        project_vm_initialization_status,
+        project_vm_provisioning_status,
+    )
+
+    class FutureProvisioningStatus(StrEnum):
+        PENDING = "pending"
+        QUEUED = "queued"
+
+    class FutureInitializationStatus(StrEnum):
+        PENDING = "pending"
+        DEFERRED = "deferred"
+
+    class FutureSessionMode(StrEnum):
+        ADMIN = "admin"
+        OBSERVER = "observer"
+
+    monkeypatch.setattr(models, "ProvisioningStatus", FutureProvisioningStatus)
+    monkeypatch.setattr(models, "InitStatus", FutureInitializationStatus)
+    monkeypatch.setattr(models, "SessionMode", FutureSessionMode)
+
+    assert project_vm_provisioning_status(FutureProvisioningStatus.PENDING.value) == "pending"
+    assert project_vm_initialization_status(FutureInitializationStatus.PENDING.value) == "pending"
+    assert project_session_mode(FutureSessionMode.ADMIN.value) == "admin"
+    assert project_vm_provisioning_status(FutureProvisioningStatus.QUEUED.value) == "unknown"
+    assert project_vm_initialization_status(FutureInitializationStatus.DEFERRED.value) == "unknown"
+    assert project_session_mode(FutureSessionMode.OBSERVER.value) == "unknown"
 
 
 def test_projection_boundaries_close_manual_invalid_facts() -> None:

@@ -8,8 +8,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH
-from agentworks.db import SessionMode
-from agentworks.db.projections import project_persisted_enum
+from agentworks.db.projections import project_session_mode
 from agentworks.errors import AlreadyExistsError, NotFoundError
 from agentworks.name_filters import validate_name_filters
 from agentworks.naming import validate_name
@@ -114,7 +113,7 @@ def workspace_description_data(description: WorkspaceDescription) -> JsonObject:
                 {
                     "name": session.name,
                     "template": session.template,
-                    "mode": project_persisted_enum(session.mode, SessionMode),
+                    "mode": project_session_mode(session.mode),
                     "agent_name": session.agent_name,
                 }
                 for session in description.sessions
@@ -263,7 +262,7 @@ def workspace_description(db: Database, name: str) -> WorkspaceDescription:
         WorkspaceSession(
             name=session.name,
             template=session.template,
-            mode=project_persisted_enum(session.mode, SessionMode),
+            mode=project_session_mode(session.mode),
             agent_name=session.agent_name,
         )
         for session in db.list_sessions(workspace_name=name)
