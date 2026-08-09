@@ -273,8 +273,10 @@ agw doctor --output json
 
 `--names-only` is completion-only and cannot be combined with JSON output on resource and secret
 lists or resource kinds. An unknown output format and this conflict are usage errors before config,
-registry, database, network, or service work. Domain and configuration errors write no JSON to
-stdout; they retain the normal stderr message and nonzero exit status.
+registry, database, network, or service work. For the ordinary covered commands, domain and
+configuration errors write no JSON to stdout; they retain the normal stderr message and nonzero exit
+status. Doctor is the exception: it converts checkable failures into its complete report, emits that
+JSON document, then exits 1.
 
 JSON v1 is additive. New optional fields may be added while preserving existing meanings and types.
 Removing a field, changing a type, changing a value's meaning, changing collection order, or
