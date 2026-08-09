@@ -58,8 +58,9 @@ in `.github/workflows/pages.yml` runs only for pushes to `main`. Its read-only b
 tests, normalizes the Pages-reported base path to `/` or the builder's slash-bounded project form,
 proves a second full build is byte-identical, and uploads only the generated
 `$RUNNER_TEMP/agentworks-site` directory. A separate `github-pages` deployment job alone receives
-Pages write and OIDC permissions, and it verifies the built source SHA still matches the event
-commit before deploying.
+Pages write and OIDC permissions. The build job verifies exact event-commit checkout and a clean
+tracked/untracked worktree after the tests and again immediately before artifact upload; deployment
+is conditional on that verified source SHA still matching the event commit.
 
 The package-free browser, responsive, motion, touch, and assistive-technology checks are in
 [`tests/lander-browser-checklist.md`](tests/lander-browser-checklist.md). Complete its pending rows

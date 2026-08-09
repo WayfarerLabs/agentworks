@@ -27,11 +27,18 @@ jobs:
           clean: true
           persist-credentials: false
 
-      - uses: actions/setup-node@v7
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
         with:
           node-version-file: .node-version
 
-      - name: Verify source commit
+      - name: Python website tests
+        run: python3 -m unittest discover -s website/tests -p 'test_*.py'
+
+      - name: Node website model tests
+        run: node --test website/tests/lander-model.test.mjs
+
+      - name: Verify tested source state
         id: source
         env:
           EXPECTED_SHA: ${{ github.sha }}
@@ -41,13 +48,13 @@ jobs:
             echo "::error::Checked out $checked_out_sha instead of event commit $EXPECTED_SHA."
             exit 1
           fi
+          worktree_state="$(git status --porcelain=v1 --untracked-files=all)"
+          if [[ -n "$worktree_state" ]]; then
+            echo "::error::Repository tests left tracked or untracked worktree changes."
+            printf '%s\n' "$worktree_state"
+            exit 1
+          fi
           printf 'sha=%s\n' "$checked_out_sha" >> "$GITHUB_OUTPUT"
-
-      - name: Python website tests
-        run: python3 -m unittest discover -s website/tests -p 'test_*.py'
-
-      - name: Node website model tests
-        run: node --test website/tests/lander-model.test.mjs
 
       - name: Configure GitHub Pages
         id: pages
@@ -85,6 +92,22 @@ jobs:
           diff --recursive --no-dereference \
             "${RUNNER_TEMP}/agentworks-site" \
             "${RUNNER_TEMP}/agentworks-site-repeat"
+
+      - name: Verify upload source state
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          checked_out_sha="$(git rev-parse HEAD)"
+          if [[ "$checked_out_sha" != "$EXPECTED_SHA" ]]; then
+            echo "::error::Checked out $checked_out_sha instead of event commit $EXPECTED_SHA."
+            exit 1
+          fi
+          worktree_state="$(git status --porcelain=v1 --untracked-files=all)"
+          if [[ -n "$worktree_state" ]]; then
+            echo "::error::Pages build left tracked or untracked worktree changes."
+            printf '%s\n' "$worktree_state"
+            exit 1
+          fi
 
       - name: Upload exact Pages artifact
         uses: actions/upload-pages-artifact@v5

@@ -131,12 +131,14 @@ jobs:
     name: Website
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - name: Check out source commit
+        uses: actions/checkout@v7
         with:
           clean: true
           persist-credentials: false
 
-      - uses: actions/setup-node@v7
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
         with:
           node-version-file: .node-version
 
@@ -165,9 +167,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Verify all required jobs passed
+        env:
+          REQUIRED_RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
-          if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
-            echo "::error::One or more required CI jobs failed or were cancelled."
+          read -r -a results <<< "$REQUIRED_RESULTS"
+          if [[ "${#results[@]}" -ne 6 ]]; then
+            echo "::error::Expected six required CI job results."
             exit 1
           fi
+          for result in "${results[@]}"; do
+            if [[ "$result" != "success" ]]; then
+              echo "::error::A required CI job ended with non-success result: $result."
+              exit 1
+            fi
+          done
           echo "All required CI jobs passed."
