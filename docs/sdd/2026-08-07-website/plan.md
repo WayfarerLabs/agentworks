@@ -155,39 +155,39 @@ sources, with an explicit removable notice and no branch-only or speculative onb
 
 ## Phase 4: interim site implementation
 
-- [ ] Delegate implementation to an `agentworks-dev` subagent with ownership of `website/`, focused
+- [x] Delegate implementation to an `agentworks-dev` subagent with ownership of `website/`, focused
       website tests, and generated-output ignore entries. The subagent is not alone in the codebase
       and must preserve concurrent changes.
-- [ ] Extend the Phase 2 builder into the deterministic home/security/404 build per the shell LLD;
+- [x] Extend the Phase 2 builder into the deterministic home/security/404 build per the shell LLD;
       write only below an explicit output directory, leave output uncommitted, and keep one
       rendering path for local, default-Pages, and custom-domain bases.
-- [ ] Generate every product/security passage from uniquely selected permanent-doc sections using
+- [x] Generate every product/security passage from uniquely selected permanent-doc sections using
       the closed normalization contract; fail on missing/duplicate headings, content drift,
       reporting-link drift, or unsupported Markdown. Keep site-owned connective copy free of product
       and security claims.
-- [ ] Implement semantic document structure, metadata, stable GitHub/PyPI/rationale links, the
+- [x] Implement semantic document structure, metadata, stable GitHub/PyPI/rationale links, the
       secondary `We take security seriously.` link, the sourced security deep-dive page and private
       reporting path, local responsive CSS, the selected AGW visual system, and the ordinary-text
       onboarding availability notice.
-- [ ] Express `simple but powerful` through restrained terminal/TUI cues shared by home, security,
+- [x] Express `simple but powerful` through restrained terminal/TUI cues shared by home, security,
       and 404: monospaced accents, bounded regions, compact status details, strong hierarchy, and
       efficient density. Reject fake terminal chrome, green-screen pastiche, decorative command
       noise, or interactions that assume keyboard/terminal fluency.
-- [ ] Assert that the artifact has no bootstrap code region, install command, copy control/script,
+- [x] Assert that the artifact has no bootstrap code region, install command, copy control/script,
       empty onboarding container, alternate release mode, or unexpanded template token.
-- [ ] Add deterministic, malformed-input, escaping, no-external-runtime, product/security
+- [x] Add deterministic, malformed-input, escaping, no-external-runtime, product/security
       source-extraction, reporting-link, DOM-contract, responsive, accessibility, terminal-cue, and
       no-JavaScript tests.
-- [ ] Add `website/README.md` with local build/test instructions, content ownership, output
+- [x] Add `website/README.md` with local build/test instructions, content ownership, output
       contract, staged release, Pages/DNS setup, deployment, rollback, and hosting-migration
       guidance.
-- [ ] Update the top-level `README.md` component inventory in the same PR so it no longer claims
+- [x] Update the top-level `README.md` component inventory in the same PR so it no longer claims
       `cli/` is the repository's only component after `website/` lands.
 - [ ] Complete the Phase 2 Firefox, WebKit, screen-reader, and human touch/motion checks before
       proposing a public release.
-- [ ] Run focused tests and `./scripts/lint-files.sh --fix`; confirm generated output does not
+- [x] Run focused tests and `./scripts/lint-files.sh --fix`; confirm generated output does not
       appear in Git status.
-- [ ] `agentworks-reviewer` and a fresh-eyes reviewer inspect the implementation; valid findings go
+- [x] `agentworks-reviewer` and a fresh-eyes reviewer inspect the implementation; valid findings go
       back to the implementing subagent and are resolved before re-review.
 
 Definition of done: R4-R11, R13, C1-C5, and the local portions of AC5-AC11/AC13-AC14 hold in a
