@@ -88,9 +88,9 @@ replaced only when every entry belongs to the complete manifest.
 
 Local directory URLs and trailing `index.html` aliases resolve to one manifest destination, and
 every local fragment must exist in its actual HTML or SVG target. Shared shell labels must remain
-visible direct text. `static/site.css` may not introduce normalized `display:none`,
-`visibility:hidden`, `opacity:0`, or `content-visibility:hidden` declarations; the manual checklist
-still verifies browser-computed visibility.
+visible direct text. In `static/site.css`, `display` accepts only `grid`, `flex`, or `inline-flex`,
+and `opacity`, `visibility`, and `content-visibility` declarations are forbidden. The manual
+checklist still verifies browser-computed visibility.
 
 Replacement uses a sibling backup. A failed installation or installed-manifest check restores the
 previous output. Once the installed manifest is verified, the new artifact is committed. A failure

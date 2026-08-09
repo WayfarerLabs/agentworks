@@ -1290,19 +1290,19 @@ def _validate_runtime_asset(path: Path, source: str) -> None:
         if HTTP_URL_PATTERN.search(source) or QUOTED_PROTOCOL_RELATIVE_URL_PATTERN.search(source):
             raise ValueError(f"{path}: remote CSS URLs are forbidden")
         if path == Path("static/site.css"):
-            normalized = re.sub(r"\s+", "", re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)).lower()
-            concealment = (
-                "display:none" in normalized
-                or "visibility:hidden" in normalized
-                or "content-visibility:hidden" in normalized
-                or re.search(
-                    r"(?:^|[;{])opacity:[+-]?(?:0+|0*\.0+)(?:e[+-]?\d+)?(?:!important)?(?:[;}]|\Z)",
-                    normalized,
-                )
-                is not None
+            without_comments = re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)
+            declarations = (
+                (match.group(1).lower(), re.sub(r"\s+", "", match.group(2)).lower())
+                for match in re.finditer(r"(?:^|[;{])\s*([A-Za-z-]+)\s*:\s*([^;{}]+)", without_comments)
             )
-            if concealment:
-                raise ValueError(f"{path}: shared CSS cannot conceal reviewed shell content")
+            forbidden = {"opacity", "visibility", "content-visibility"}
+            display_values = {"grid", "flex", "inline-flex"}
+            if any(
+                property_name in forbidden
+                or (property_name == "display" and value not in display_values)
+                for property_name, value in declarations
+            ):
+                raise ValueError(f"{path}: shared CSS declaration is outside the reviewed layout contract")
     elif path.suffix == ".js":
         if HTTP_URL_PATTERN.search(source) or QUOTED_PROTOCOL_RELATIVE_URL_PATTERN.search(source):
             raise ValueError(f"{path}: remote JavaScript URLs are forbidden")

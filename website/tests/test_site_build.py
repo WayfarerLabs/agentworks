@@ -722,15 +722,23 @@ class BuildAndInstallTests(RepositoryFixture):
         source = stylesheet.read_text(encoding="utf-8")
         mutations = (
             ".canary { display /* normalized */ : none; }",
-            ".canary { VISIBILITY : HIDDEN !important; }",
+            ".canary { display: var(--concealed); }",
+            ".canary { display: table; }",
+            ".canary { display: block; }",
+            ".canary { VISIBILITY : collapse; }",
+            ".canary { visibility: visible; }",
             ".canary { opacity : 0; }",
-            ".canary { opacity : 0.0 !important; }",
-            ".canary { content-visibility : hidden; }",
+            ".canary { opacity: 0%; }",
+            ".canary { opacity: -0.0%; }",
+            ".canary { opac/**/ity: calc(0); }",
+            ".canary { opacity: 0.75; }",
+            ".canary { content-visibility: hidden; }",
+            ".canary { content-visibility: auto; }",
         )
         for mutation in mutations:
             stylesheet.write_text(f"{source}\n{mutation}\n", encoding="utf-8")
             with self.subTest(mutation=mutation), self.assertRaisesRegex(
-                ValueError, "shared CSS cannot conceal"
+                ValueError, "outside the reviewed layout contract"
             ):
                 site_builder.build_site(self.root, output, "/")
             self.assertEqual(snapshot(output), before)

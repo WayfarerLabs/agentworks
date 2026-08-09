@@ -157,9 +157,9 @@ One local-reference resolver serves both route uniqueness and manifest validatio
 and their trailing `index.html` forms resolve to the same manifest path, including fragment-bearing
 references; root and `/index.html` likewise resolve together. Every same- or cross-document fragment
 must identify an actual element in its HTML or SVG target. Shared shell labels are visible leaf
-text, not text inherited from hidden or structural descendants. The builder also rejects normalized
-`display:none`, `visibility:hidden`, `opacity:0`, and `content-visibility:hidden` declarations in
-`static/site.css`; manual acceptance still verifies computed styles.
+text, not text inherited from hidden or structural descendants. In `static/site.css`, the builder
+allows `display` only as `grid`, `flex`, or `inline-flex` and rejects every `opacity`, `visibility`,
+or `content-visibility` declaration; manual acceptance still verifies computed styles.
 
 The same inputs and arguments produce byte-identical output. Artifacts contain no timestamps,
 environment prose, or generated `CNAME`, and successful builds leave the repository clean.
