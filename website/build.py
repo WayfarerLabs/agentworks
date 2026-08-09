@@ -29,6 +29,20 @@ REPORTING_URL: Final = (
     "https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing-"
     "information-about-vulnerabilities/privately-reporting-a-security-vulnerability"
 )
+APPROVED_EXTERNAL_URLS: Final = frozenset(
+    {
+        "https://agentworks.build/",
+        "https://agentworks.build/security/",
+        "https://agentworks.build/404.html",
+        REPOSITORY_URL,
+        "https://pypi.org/project/agentworks-cli/",
+        RATIONALE_URL,
+        f"{REPOSITORY_URL}/security/policy",
+        f"{REPOSITORY_URL}/issues/224",
+        CLI_SECRETS_URL,
+        REPORTING_URL,
+    }
+)
 
 FULL_MANIFEST: Final = frozenset(
     {
@@ -595,9 +609,17 @@ def _validate_template(name: str, template: str) -> None:
 def render_named_template(name: str, template: str, site_base: str, substitutions: dict[str, str]) -> str:
     """Render one template through its closed, builder-owned vocabulary."""
     _validate_template(name, template)
-    rendered = template.replace(SITE_BASE_TOKEN, site_base)
-    for token, value in substitutions.items():
-        rendered = rendered.replace(f"{{{{{token}}}}}", value)
+    values = {SITE_BASE_TOKEN: site_base}
+    values.update({f"{{{{{token}}}}}": value for token, value in substitutions.items()})
+    required = TEMPLATE_TOKENS[name]
+    missing = sorted(required - values.keys())
+    if missing:
+        raise ValueError(f"{name}: missing substitutions for required tokens: {missing}")
+    for token in required:
+        value = values[token]
+        if TOKEN_PATTERN.search(value) or "{{" in value or "}}" in value:
+            raise ValueError(f"{name}: substitution for {token} contains brace-like token syntax")
+    rendered = TOKEN_PATTERN.sub(lambda match: values[match.group(0)], template)
     if TOKEN_PATTERN.search(rendered) or "{{" in rendered or "}}" in rendered:
         raise ValueError(f"{name}: rendered template contains an unexpanded token")
     return rendered
@@ -631,6 +653,8 @@ def _validate_local_references(rendered: dict[Path, bytes], manifest: frozenset[
         parser.feed(content.decode("utf-8"))
         for reference in parser.references:
             if reference.startswith("https://"):
+                if reference not in APPROVED_EXTERNAL_URLS:
+                    raise ValueError(f"{path}: unapproved external URL: {reference}")
                 continue
             if not reference.startswith(base):
                 raise ValueError(f"{path}: local reference is outside site base: {reference}")
