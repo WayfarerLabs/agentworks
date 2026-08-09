@@ -77,9 +77,9 @@ browser. Safari or another WebKit browser is required before public launch.
 - Motion preference: no preference, reduced before load, and reduced changed during flight and
   deployment
 - Tester: isolated `agentworks-tester` acceptance using Chromium DevTools Protocol
-- Outcome: PARTIAL PASS, 113 of 113 measured assertions passed with no product defect; the current
-  Chromium rows are complete, while cross-engine, spoken screen-reader, and physical touch/motion
-  acceptance remain pending
+- Outcome: HISTORICAL PARTIAL PASS, 113 of 113 measured assertions passed with no product defect at
+  the recorded source; cross-engine, spoken screen-reader, and physical touch/motion acceptance
+  remained pending
 - Clean context: DOM ready in 4.7 milliseconds and load in 8.9 milliseconds; the tester identified
   the product, interim onboarding status, repository, package, rationale, and security choices from
   rendered copy with no intervention
@@ -94,6 +94,11 @@ control, so the 400-percent case used the standard 1280 divided by 4 equals 320 
 equivalent. Chromium's accessibility tree passed, but it is not evidence of spoken announcement
 quality. Emulated touch geometry, events, and timing passed, but it is not a physical-device feel
 review.
+
+The later compact-landing refinement materially changed home structure, link placement, and logo
+scale. The record above remains evidence for its named source and for unchanged 404 behavior, but it
+does not accept the current home page. Every shared-shell row that exercises home is pending until a
+new run records the refined source.
 
 ## Static recovery and initial presentation
 
@@ -208,7 +213,7 @@ review.
       and wide desktop, home, security, and 404 have no page overflow, clipped text or navigation,
       overlap, or fixed-height content loss. Record browser versions, viewport, date, and result
       before public release.
-- [x] With JavaScript disabled, home and security retain all content and links, while 404 retains
+- [ ] With JavaScript disabled, home and security retain all content and links, while 404 retains
       its message, named scene, and home link. No surface depends on terminal familiarity.
 - [ ] Keyboard-only traversal reaches the visible skip links, security and 404 linked brands,
       navigation, home destination links, 404 home link, and lander start control in source order
@@ -219,6 +224,6 @@ review.
 - [ ] With reduced motion enabled, home and security remain motion-free and the 404 follows the
       existing no-cue, direct-success contract. Human touch checks confirm page scroll outside the
       active scene and tap, hold, and drag behavior inside it.
-- [x] In a clean context, a visitor identifies what Agentworks is, sees that guided onboarding is
+- [ ] In a clean context, a visitor identifies what Agentworks is, sees that guided onboarding is
       not yet published, and can choose the repository, PyPI package, rationale, or security path
       without explanation. Record timing and any intervention.

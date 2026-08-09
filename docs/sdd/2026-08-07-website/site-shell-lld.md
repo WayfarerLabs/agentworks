@@ -90,6 +90,19 @@ Other exact destination labels are `View the GitHub repository`, `View the PyPI 
 `GitHub private vulnerability reporting`, and `Return to agentworks.build`. Labels and section
 headings make no new behavior, security, or installation claim.
 
+The four home destinations bind exact href values to normalized visible labels:
+
+| Href                                         | Visible label                           |
+| -------------------------------------------- | --------------------------------------- |
+| `https://github.com/WayfarerLabs/agentworks` | `View the GitHub repository`            |
+| `https://pypi.org/project/agentworks-cli/`   | `View the PyPI package`                 |
+| the rationale URL from section 2             | `Read why Agentworks is built this way` |
+| `{{SITE_BASE}}security/`                     | `We take security seriously.`           |
+
+Template validation parses each anchor, collapses visible-label whitespace, and validates the pair.
+Possessing all four href values and all four labels independently is insufficient; swapping labels
+is a contract failure. The accessible skip link remains the sole anchor outside this mapping.
+
 ## 4. Current-main content contracts
 
 The builder's manifest names exactly `README.md`, `docs/why-agentworks.md`, and `SECURITY.md` as
@@ -297,9 +310,9 @@ footer: text-only repository identity; no anchor
 ```
 
 The skip link is the only additional home-page anchor. Each four-destination URL occurs exactly once
-in source and generated markup. No header, footer, alternate label, image link, or repeated call to
-action targets one of them. There is no `#problem` or `#principles` section and no corresponding
-home template token.
+in source and generated markup with its bound section 3 label. No header, footer, alternate label,
+image link, or repeated call to action targets one of them. There is no `#problem` or `#principles`
+section and no corresponding home template token.
 
 `section#onboarding` is the future bootstrap insertion point. It is useful and nonempty now. The
 later integration keeps the section and heading relationship, deletes `p#onboarding-availability`,
@@ -441,7 +454,7 @@ reference against the output manifest for both `/` and `/agentworks/`.
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Source selection                   | Every section 4 happy path; identity-backed home metadata; no home problem/principles contract; long-rationale changes leave home bytes unchanged; missing/duplicate/reordered headings; heading-shaped fenced-code canary and unclosed fence; expected passage missing/duplicated/drifted; CRLF normalization; invalid UTF-8 and byte-order mark; unsupported Markdown; escaping of `<`, `>`, `&`, quotes, and code; source reordering outside a selected section does not fail.          |
 | Reporting                          | Exact `gh-private` definition and selected reference; missing, duplicate, renamed, non-HTTPS, or changed URL fails; both generated reporting anchors use the parsed URL; permanent policy link is exact.                                                                                                                                                                                                                                                                                   |
-| Template contract                  | Per-template closed token sets and counts; home destination URLs exactly once each; unknown, missing, duplicate, wrong-template, brace-like, and unexpanded tokens fail; extracted fragments are escaped and cannot create script, style, event-handler, or template markup.                                                                                                                                                                                                               |
+| Template contract                  | Per-template closed token sets and counts; exact home href/normalized-visible-label mappings and a swapped-label canary; home destination URLs exactly once each; unknown, missing, duplicate, wrong-template, brace-like, and unexpanded tokens fail; extracted fragments are escaped and cannot create script, style, event-handler, or template markup.                                                                                                                                 |
 | Builder and manifest               | Full and focused CLI shapes; root and `/agentworks/` bases; invalid bases; clean deterministic builds; exact trees; safe replacement; unknown file, symlink, and special-entry refusal; output and staging remain outside the repository; injected rename/verification failures restore exact existing output; no Git status residue.                                                                                                                                                      |
 | Interim guards                     | Exact availability notice exists once in ordinary markup; `#onboarding` is nonempty; no `pre` in home, copy/clipboard selector or script, bootstrap token/comment, disabled control, `uv tool install`, `pipx install`, `git clone`, `agw config init`, or alternative release mode; home and security contain no script, while 404 contains only its same-origin module.                                                                                                                  |
 | DOM and links                      | HTML language, titles, descriptions, canonicals, skip links, landmarks, one `h1`, nested heading order, named navs, duplicate IDs, useful labels, exact URLs, home hero, absent problem/principles sections, one home anchor per repository/package/rationale/security destination, no repeated header/footer destinations, secondary security link, reporting links, 404 fallback, and all local references at both bases. Run assertions against parsed generated HTML, not regex alone. |

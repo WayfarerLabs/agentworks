@@ -346,6 +346,14 @@ class TemplateContractTests(RepositoryFixture):
             ):
                 site_builder._validate_template("index.html", changed)
 
+    def test_landing_destination_labels_are_bound_to_their_reviewed_hrefs(self) -> None:
+        template = (self.root / "website/templates/index.html").read_text(encoding="utf-8")
+        swapped = template.replace("View the GitHub repository", "SWAPPED LABEL", 1)
+        swapped = swapped.replace("View the PyPI package", "View the GitHub repository", 1)
+        swapped = swapped.replace("SWAPPED LABEL", "View the PyPI package", 1)
+        with self.assertRaisesRegex(ValueError, "destination .* reviewed label"):
+            site_builder._validate_template("index.html", swapped)
+
     def test_duplicate_attributes_cannot_bypass_template_contracts(self) -> None:
         template = (self.root / "website/templates/index.html").read_text(encoding="utf-8")
         variants = (
@@ -752,6 +760,14 @@ class GeneratedDocumentTests(RepositoryFixture):
         self.assertEqual(len(links), 5)
         for destination in destinations:
             self.assertEqual(hrefs.count(destination), 1)
+        parsed_home = site_builder._TemplatePlacementParser()
+        parsed_home.feed(self.pages["home"])
+        rendered_pairs = {href: " ".join("".join(parts).split()) for href, parts in parsed_home.anchors}
+        expected_pairs = {
+            href.replace(site_builder.SITE_BASE_TOKEN, "/"): label
+            for href, label in site_builder.LANDING_DESTINATION_LABELS.items()
+        }
+        self.assertEqual({href: rendered_pairs[href] for href in expected_pairs}, expected_pairs)
         destination_elements = [
             (attributes, ancestors)
             for tag, attributes, ancestors in document.elements
@@ -759,7 +775,10 @@ class GeneratedDocumentTests(RepositoryFixture):
         ]
         self.assertTrue(
             all(
-                any(tag == "nav" and attributes.get("aria-label") == "Explore Agentworks" for tag, attributes in ancestors)
+                any(
+                    tag == "nav" and attributes.get("aria-label") == "Explore Agentworks"
+                    for tag, attributes in ancestors
+                )
                 for _, ancestors in destination_elements
             )
         )
