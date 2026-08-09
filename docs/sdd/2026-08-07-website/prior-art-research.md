@@ -1,24 +1,27 @@
 # Prior Art Research: The agentworks.build Website
 
 - Date: 2026-08-07
+- Last revised: 2026-08-09
 - Scope: first-slice hosting, deployment, content sharing, accessibility, branding, and browser
   behavior
 
 ## Executive summary
 
-The smallest architecture that satisfies the FRD is a one-page, repository-native static site
-published to GitHub Pages by GitHub Actions. The repository is public, the site is an open-source
+The smallest architecture that satisfies the FRD is a two-page, repository-native static site
+published to GitHub Pages by GitHub Actions. The focused home and security pages are still a tiny
+site rather than a documentation system. The repository is public, the site is an open-source
 project front door rather than a transaction surface, and the required deployment automation already
 lives beside GitHub Actions. GitHub Pages can publish a custom Actions artifact, serve an apex and
 `www` custom domain, provision HTTPS, and redirect between the two domain forms. This avoids a cloud
 account, infrastructure state, a new package ecosystem, or moving DNS away from GoDaddy.
 
-The site should use semantic HTML, local CSS, system fonts, and two focused progressive-enhancement
-scripts: one for the copy button and one for the bounded 404 game. The bootstrap remains selectable
-without JavaScript. The build consumes the onboarding effort's canonical bootstrap source after that
-source lands on `main`, and tooling proves that the built page, canonical source, and README fenced
-block are byte-identical. Other product claims are generated from uniquely selected permanent-doc
-paragraphs; site-owned labels and instructions make no product claims.
+The site should use semantic HTML, local CSS, system fonts, and focused progressive enhancement. The
+bounded 404 game can ship with a useful public shell before onboarding. That interim release has no
+bootstrap or copy script; it uses ordinary semantic text to say guided onboarding is not yet
+published. After the canonical source lands on `main`, the same build consumes it, adds the copy
+enhancement, and proves that the built page, canonical source, and README fenced block are
+byte-identical. Other product claims are generated from uniquely selected permanent-doc paragraphs;
+site-owned labels and instructions make no product claims.
 
 GitHub Pages also supports a custom `404.html`, which gives the selected AGW rocket a bounded place
 for a progressively enhanced lunar deployment game. DOM/SVG rendering, Pointer Events, and a
@@ -108,10 +111,12 @@ README and harness wrappers. The website is another rendering target of that sam
 independent owner. The source has not landed on `main` yet, so its eventual file path and generator
 API are not coordinated facts.
 
-Design tie-in: the website implementation waits for onboarding Phase 3 to land. Its LLD binds to the
-merged canonical source. The website build reads that source directly, while a separate contract
-test extracts the README block and decoded HTML code text and compares both byte for byte. The site
-does not parse rendered README HTML or copy prose from the onboarding branch.
+Design tie-in: only bootstrap integration waits for onboarding Phase 3 to land. The shell LLD and
+interim release bind exclusively to permanent sources already on `main` and omit bootstrap-shaped
+UI. After Phase 3 lands, a focused integration LLD binds to the merged canonical source. The website
+build reads that source directly, while a separate contract test extracts the README block and
+decoded HTML code text and compares both byte for byte. The site does not parse rendered README HTML
+or copy prose from the onboarding branch.
 
 Problem and principle passages are matched under unique headings by exact expected text rather than
 paragraph position, then generated through a closed normalization transform. Unrelated structural
@@ -155,6 +160,24 @@ deeper orange-red edges follows the defensible hot-center, cooler-edge progressi
 Design tie-in: use three flat flame layers, no glow or flashing, and scale each engine's layers as a
 unit so collective and differential thrust remain legible without visual noise.
 
+### F8. Security depth and terminal character do not require home-page weight
+
+The repository already separates long-form security reasoning from vulnerability reporting:
+`docs/why-agentworks.md` explains the threat landscape, isolation model, and limitations, while
+`SECURITY.md` owns the private reporting path. Generating a focused security page from those sources
+adds useful depth without duplicating claims or forcing the full argument into the landing-page
+journey. The home page needs only a clear, secondary link.
+
+Terminal and TUI design language is likewise a matter of hierarchy and interaction density, not a
+terminal emulator. System monospace accents, bounded regions, aligned status details, and restrained
+color can carry the association in semantic HTML. Fake window chrome, prompt decoration, and
+green-screen styling add visual noise without improving the site's operator task.
+
+Design tie-in: generate `/security/` from permanent repository sources, keep private reporting
+authoritative in `SECURITY.md`, and use shared terminal/TUI-derived tokens across the home,
+security, and 404 surfaces. Keep ordinary web links and controls recognizable and verify the result
+without relying on terminal familiarity.
+
 ## Refuted or rejected claims
 
 - **"GitHub Pages needs Jekyll."** Rejected. GitHub documents custom Actions workflows that upload
@@ -169,6 +192,9 @@ unit so collective and differential thrust remain legible without visual noise.
 - **"Analytics are necessary at launch."** Rejected by the FRD default and the onboarding effort's
   no-telemetry first-release posture. No cookie, beacon, log-processing pipeline, or tracking script
   is added.
+- **"Terminal-inspired means the site should look like a terminal."** Rejected. The desired signal
+  comes from typography, structure, density, and status details; terminal cosplay would make a
+  simple site noisier and less accessible.
 
 ## Open questions not resolved by prior art
 

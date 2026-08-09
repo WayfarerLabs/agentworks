@@ -2,6 +2,7 @@
 
 - Status: Selected for implementation
 - Date: 2026-08-08
+- Last revised: 2026-08-09
 - Decision owner: operator
 
 ## Selected mark
@@ -20,9 +21,11 @@ plumes, captured in `logo-concept-10-twin-flame.svg`.
 - The selected twin plume is intentionally a little wider than the bottom elbow above it. The
   aligned twin-plume exploration was considered and rejected.
 
-The geometry is custom and font-independent. JetBrains Mono remains a favored direction for the
-eventual wordmark and terminal-inspired site typography, but no remote or bundled font is required
-by the first slice.
+The geometry is custom and font-independent. The wider visual language hints at terminal and TUI
+paradigms through monospaced accents, crisp bounded regions, compact status details, strong
+hierarchy, and efficient density: simple but powerful. JetBrains Mono remains a favored wordmark
+reference, but no remote or bundled font is required by the first slice. The site is not presented
+as a fake terminal, green-screen theme, or command-prompt collage.
 
 ## Interactive behavior
 
@@ -43,8 +46,9 @@ The custom 404 page treats the mark as a lunar deployment vehicle.
   `Agent deployed. Mission continues.`
 
 The 404 remains a useful static error page with a normal home link in every state. The game deploys
-only with the complete website. The powered NOC is session-local game state; reload or restart
-begins a fresh mission without cookies or browser storage.
+only with a complete, publicly accepted site release; the interim non-onboarding release qualifies
+when its shell, pipeline, and acceptance gates are complete. The powered NOC is session-local game
+state; reload or restart begins a fresh mission without cookies or browser storage.
 
 ## Promotion rule
 

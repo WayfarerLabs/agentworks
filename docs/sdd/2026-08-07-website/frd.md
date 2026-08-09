@@ -1,8 +1,8 @@
 # FRD: The agentworks.build Website
 
-- Status: Requirements accepted; owned by the website effort lead
+- Status: Staged-release revision proposed; pending roadmap-lead review
 - Date: 2026-08-07
-- Last revised: 2026-08-08
+- Last revised: 2026-08-09
 - Seeded by: the roadmap lead, at operator request. This is a standalone effort, deliberately NOT a
   child of the 2026-08-04-next-steps roadmap (see that roadmap's `target-state.md` out-of-scope
   section for the recorded relationship). It follows the ordinary SDD process: the effort lead owns
@@ -11,13 +11,17 @@
 ## Purpose
 
 Agentworks gets a public front door at `agentworks.build` (domain purchased 2026-08-07): the place a
-curious human or their agent lands first, learns what Agentworks is, and leaves with the one
-copy-paste block that starts onboarding.
+curious human or their agent lands first and learns what Agentworks is. In the completed site, they
+leave with the one copy-paste block that starts onboarding. Until that contract is ready, the public
+site gives them useful product/security depth, permanent project links, and an honest availability
+notice.
 
 The operator's sizing mandate is the controlling constraint: **super simple at first**. The first
 slice is a small static site, its publishing pipeline, and one bounded interactive surprise on the
-otherwise useful 404 page. Every ambition beyond that is recorded as a growth path so nothing
-forecloses it, and none of it is in scope now.
+otherwise useful 404 page. It may ship in two complete stages: a useful public landing page while
+the onboarding contract is still in development, followed by the canonical bootstrap as soon as that
+contract lands. Every ambition beyond that is recorded as a growth path so nothing forecloses it,
+and none of it is in scope now.
 
 ## Requirements (first slice)
 
@@ -52,6 +56,31 @@ forecloses it, and none of it is in scope now.
 - R9. The 404 content and route home work without JavaScript. The game has no audio, telemetry,
   network request, storage, or critical content; it pauses when inactive, can be exited, and honors
   reduced motion for all nonessential animation. Powered-NOC state lasts only for the current run.
+- R10. Before the onboarding effort's canonical bootstrap source lands, an **interim public
+  release** may serve the complete site shell, repository-sourced problem and principle content,
+  selected brand, permanent links, custom 404, deployment pipeline, and custom domain. It states
+  plainly that guided onboarding is not yet published and provides no substitute installation
+  command, bootstrap text, disabled copy affordance, or implication that onboarding is available.
+  The later bootstrap integration replaces this bounded notice; it does not require a redesign or a
+  second site.
+- R11. The main page includes the restrained link text `We take security seriously.` as optional
+  depth, not a warning gate or dominant call to action. It leads to a dedicated static security page
+  that explains the actual threat model, isolation and control model, material limitations,
+  credential/secret posture, and vulnerability-reporting path from repository-owned sources. The
+  page is candid and specific without assuming every visitor wants a security lecture.
+- R12. The completed onboarding surface makes the access tradeoff plain before setup: the onboarding
+  agent runs on the machine the operator intends to use as their workstation and needs full file
+  inspection and command execution access with the permissions of the workstation account running
+  the harness. This does not grant root implicitly; privilege elevation remains a separate, explicit
+  action. It recommends a strict harness security posture for approval and visibility, not a sandbox
+  that prevents the access onboarding needs. This language remains owned by onboarding's canonical
+  bootstrap/disclosure contract; the website must consume or link that source, never paraphrase it
+  into a drifting second copy.
+- R13. The visual language hints at terminal and TUI paradigms while remaining a modern website:
+  monospaced accents, crisp bounded regions, compact status-like details, strong hierarchy, and
+  efficient use of space should communicate `simple but powerful`. It must not become a fake
+  terminal, green-on-black pastiche, command-line prerequisite, or excuse to weaken reflow,
+  readability, pointer use, or accessibility.
 
 ## Settled constraints (inherited; do not reopen)
 
@@ -60,7 +89,7 @@ forecloses it, and none of it is in scope now.
   copy, not re-authored into a second hand-maintained version. The mechanism is the effort lead's
   call (build-time include, CI check, or generation), but two independently edited copies of the
   bootstrap block is a rejected outcome.
-- C2. **Simplicity mandate** (operator, 2026-08-07). Choose the smallest tech that meets R1-R9; a
+- C2. **Simplicity mandate** (operator, 2026-08-07). Choose the smallest tech that meets R1-R13; a
   static generator or plain HTML both qualify. Anything requiring a running service does not. The
   `development-principles` rule's bad-complexity test applies to the stack choice itself.
 - C3. The site never becomes a second source of truth for product behavior. Reference and teaching
@@ -68,6 +97,10 @@ forecloses it, and none of it is in scope now.
   `agw guide` and the reference surfaces.
 - C4. The logo and lander are local SVG and plain JavaScript, not a reason to add a framework,
   package ecosystem, canvas renderer, remote asset, or general game engine.
+- C5. The interim release is a real, useful release, not a preview mode or a parallel product. It
+  introduces no runtime flag, alternate URL, duplicated product prose, speculative onboarding
+  contract, or permanent staging architecture. Each public stage must be honest and operable on its
+  own terms.
 
 ## Growth path (recorded, explicitly out of scope now)
 
@@ -100,10 +133,38 @@ merged and settled on `main`. The first slice must not build toward them specula
 - AC8. Automated and browser acceptance cover state transitions, input mapping, consistent
   fixed-step physics across representative frame schedules, route-home fallback, hidden-until-start
   instructions, reduced motion, keyboard focus, narrow screens, and paused background behavior.
+- AC9. Before onboarding is available, `https://agentworks.build` serves the useful interim release
+  described by R10 over TLS. The page contains no bootstrap code region, copy control, installation
+  instruction, empty onboarding container, or unexpanded template token, and its availability notice
+  is exposed in ordinary semantic markup.
+- AC10. The interim release satisfies AC1, AC2, and AC5-AC8 independently. AC3 and AC4 remain
+  explicitly unaccepted until the canonical bootstrap is integrated; replacing the interim notice
+  with that bootstrap leaves the established information architecture, visual system, URLs, 404, and
+  deployment path intact.
+- AC11. The home-page security link is visible but visually secondary, works without JavaScript, and
+  resolves to a semantic security page at a stable URL. That page distinguishes claims, boundaries,
+  current limitations, operator practices, and private vulnerability reporting; every
+  product/security claim is sourced from or verified against permanent repository documentation.
+- AC12. Before the onboarding integration is accepted, tooling or a pinned contract test proves the
+  canonical disclosure explicitly covers the intended-workstation requirement, full
+  workstation-account file/command access, separately explicit elevation, and strict-posture
+  recommendation. The interim release does not invent or imply that disclosure while the upstream
+  contract is absent.
+- AC13. The landing, security, and 404 surfaces share a restrained terminal/TUI-derived visual
+  system at desktop and narrow widths. Text remains real semantic content, ordinary links and
+  controls remain recognizable, and the design meets the existing contrast, focus, zoom, reflow,
+  reduced-motion, keyboard, and touch requirements without depending on terminal familiarity.
+- AC14. In a clean-context interim-release check, a visitor with no prior Agentworks knowledge can
+  understand what the project is, recognize that guided onboarding is not yet published, and choose
+  the repository, package, rationale, or security path without explanation. This is the interim
+  usefulness bar; it does not claim AC4's completed onboarding handoff.
 
 ## Settled implementation rulings
 
 - GitHub Pages hosts the site, with an operator-coordinated GoDaddy DNS cutover.
 - A standard-library Python builder produces the static artifact, and CI runs the README identity
   check.
-- The first slice is one content page plus the host-required custom 404 error surface.
+- The first slice is a landing page, one security deep-dive page, and the host-required custom 404
+  error surface.
+- The first public release intentionally omits onboarding rather than blocking the rest of the site;
+  canonical onboarding follows as a separately reviewed additive release.
