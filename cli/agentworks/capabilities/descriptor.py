@@ -1,40 +1,18 @@
 """The capability-kind descriptor table: one frozen record per kind.
 
-This table IS the enumeration of the four capability kinds
-(``vm-platform``, ``harness-integration``, ``git-credential-provider``,
-``secret-backend``). Seven sites used to enumerate them independently: the
-adapter table, the graph's kind set and readiness dispatch, the per-kind
-registry loaders, bootstrap publication, the plugin snapshot/restore tuple,
-and manifest decode's capability-field map. Each derives from here now, so a
-kind is described once and a fifth would be added in one place rather than
-found in seven.
+This table enumerates ``vm-platform``, ``harness-integration``,
+``git-credential-provider``, and ``secret-backend`` for framework consumers.
 
 Two structural rules make the table safe to consume from anywhere:
 
-- **Per-package contribution.** Each capability package builds its own record
-  beside its kind strategy (``capabilities/vm_platform/kinds.py``,
-  ``capabilities/harness_integration/kinds.py``,
-  ``capabilities/git_credential/kinds.py``, ``secrets/kinds.py``), the way
-  each package used to carry its own publisher. Nothing here knows a
-  kind's internals.
+- **Per-package contribution.** Each capability package builds its record
+  beside its kind strategy. Nothing here knows a kind's internals.
 - **Lazy collection, for cycle safety.** :func:`capability_descriptors`
-  imports the four contributing modules INSIDE the function, and consumers
-  call it inside their own functions rather than binding the table at module
-  import. Early modules (``resources/graph.py``, ``plugins/adapters.py``,
-  ``manifests/decode.py``) load before the capability packages, so this
-  inherits the cycle discipline the graph builder's per-kind registry
-  loaders already used rather than inventing a new one (those loaders now
-  derive from this table). The ``registry`` field is a callable for
-  the same reason. Cycle safety is the whole benefit: it buys no import
-  DEFERRAL, because ``resources/kinds/__init__`` already imports all four
-  contributing modules, so anything reaching the resource machinery has
-  loaded them regardless.
+  imports contributing modules inside the function. The ``registry`` field
+  is callable for the same reason.
 
-``KIND_REGISTRY`` stays the all-kinds runtime map and each capability's
-``KIND_REGISTRY[...] = ...`` line stays co-located with its kind, exactly
-like every declarable kind. The relationship is pinned, not merged: a
-descriptor's ``kind_strategy`` IS the object in ``KIND_REGISTRY``, and the
-table's self-test asserts that identity so the two cannot drift.
+Each descriptor's ``kind_strategy`` is the same object registered in
+``KIND_REGISTRY``; the table self-test asserts that identity.
 """
 
 from __future__ import annotations
@@ -64,13 +42,7 @@ class RegistryPolicy(Enum):
     git-credential-provider)."""
 
     CONSTRUCTED_SINGLETON = "constructed-singleton"
-    """One constructed INSTANCE, built at seating time. The interim
-    exception, carried by ``secret-backend`` alone: the graph stamping and
-    the resolve loop consume constructed backends today, so ending it means
-    choosing a construction point and touching the resolve machinery. That
-    is a change of its own; until it happens this field is where the
-    asymmetry lives, so nothing else has to special-case
-    ``secret-backend``."""
+    """One instance built at seating time. Used by ``secret-backend``."""
 
 
 @dataclass(frozen=True)
@@ -101,17 +73,9 @@ class ConfigContract:
 class HostSurface:
     """How a capability kind is selected inside a declarable kind's spec.
 
-    The manifest shape is one tagged table on the naming field
-    (``platform: {name: lima, placement: {...}}``), and it is the only shape:
-    the legacy sibling pair (``platform: lima`` plus
-    ``platform_config: {...}``) is a hard error on every surface. Decode
-    reads the two field names off this record, so there is one refusal
-    rather than one per host, and the row carries the table as written.
-
-    The record carried a ``legacy_string_shape`` field while the two folds
-    differed, because session-template hardened ahead of its siblings.
-    Nothing distinguishes the surfaces now, so the field is gone rather
-    than left describing a difference that no longer exists.
+    The live manifest shape is one tagged table on ``naming_field``. Decode
+    also uses ``config_field`` to recognize the release-scoped sibling shape
+    and provide its migration error.
     """
 
     host_kind: str
@@ -147,13 +111,8 @@ class CapabilityKindDescriptor:
     """The capability kind identifier, matching ``KIND_REGISTRY``'s key."""
 
     contract_version: int
-    """The single implementation contract version this build supports. Every
-    impl declares its own ``contract_version`` and registration requires an
-    exact match, so a contract change is a HARD CUTOVER: bumping this number
-    refuses every impl still on the old one until each is migrated. That is
-    the intent at 2.0 (one version, nothing to straddle); supporting two
-    versions at once would need a supported-range field and a compatibility
-    rule, which is a decision to make when a real migration needs it."""
+    """The implementation contract version this build accepts. Registration
+    requires an exact match."""
 
     implementation_contract: type
     """The base class or protocol an impl must satisfy. NOT uniform in

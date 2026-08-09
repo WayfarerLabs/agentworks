@@ -183,12 +183,10 @@ A `git-credential`'s `spec.provider` is one tagged table: its `name` key selects
 capability and the remaining keys are that provider's configuration, which
 `agw resource describe-kind git-credential-provider/<name>` documents.
 
-A provider's `token` field is itself a tagged acquisition choice. Today it has one arm:
+A provider's `token` field is a tagged acquisition choice with one supported arm:
 `token: {mode: stored, secret: my-github-token}` names a secret holding a stored token. Omitting
-`token` selects that arm and defaults its secret to `git-token-<credential name>`, while the
-existing `token: my-github-token` scalar remains shorthand for the same stored arm. Token minting is
-not implemented. When it arrives it will be another acquisition arm; repositories, scopes,
-permissions, and other minting parameters remain credential configuration, not secret mappings.
+`token` selects that arm and defaults its secret to `git-token-<credential name>`, while the scalar
+`token: my-github-token` is shorthand for the same stored arm.
 
 A github credential may carry a scope there, and the choice is the part worth explaining:
 `repos: ["owner/name", ...]` pins the credential to specific repositories (always a list, even for
@@ -207,15 +205,11 @@ store, include, and helper, built from their own credential lists). Declaring a 
 credential and its org under another is fine: the more specific scope wins, and org scopes cover
 repos cloned ad hoc that nothing declared.
 
-Clone with plain https URLs; no username needed anywhere. Credentials are served by the
-agentworks-owned helper (`~/.agentworks-git-cred-helper.sh`, replacing git's `credential-store`):
-when the remote rejects a credential it prints which credential and secret to fix instead of
-silently deleting the provisioned entry (which is what `credential-store` does on every failed
-auth); an embedded username in a remote URL is reviewed per provider (GitHub flags it, since it
-bypasses scoping; Azure DevOps accepts its org, which is both the username and the owner scope); and
-if git stops sending repository paths (a local git config overriding `useHttpPath`), the helper
-warns and serves the host default. The credential's resource name appears as the username on scoped
-store lines and in provider-side logs; remotes are never rewritten.
+Clone with plain https URLs; no username is needed. The agentworks-owned helper
+(`~/.agentworks-git-cred-helper.sh`) identifies a rejected credential and the secret to fix. GitHub
+warns when an embedded username bypasses scope selection; Azure DevOps accepts its organization as
+the username. If git does not send repository paths, the helper warns and serves the host default.
+Remotes are never rewritten.
 
 ## VM sites and platforms
 
@@ -489,12 +483,9 @@ with. Authoring a system plugin is documented in the plugins package README
 gate USE, not validation: a `vm-site` naming the `proxmox` platform has its platform config checked
 when the manifest loads, even on a host where the `proxmox` plugin is not enabled, and the same
 holds for a resource that is merely not-ready (a `wsl2` site validates off Windows). So a misspelled
-key is a hard error naming the fields the capability declares, on every host, rather than something
-that lies dormant until you opt in. That is deliberate: a typo that only surfaced on the one machine
-that had the plugin turned on would be a configuration error you carry around unnoticed. What
-enablement and readiness DO defer is the consequence, not the check: a resource whose capability is
-disabled is not-ready with an "enable plugin `<name>`" hint and is refused at use, never misreported
-as a config mistake.
+key is a hard error naming the fields the capability declares on every host. A resource whose
+capability is disabled is instead not-ready with an "enable plugin `<name>`" hint and is refused at
+use.
 
 **Which plugins you need follows from what your resources reference.** Enable `onepassword` if a
 secret maps the `onepassword` backend; `proxmox` if a `vm-site` uses the `proxmox` platform; `azure`
@@ -552,12 +543,10 @@ wins. You are never prompted for the same secret twice in one command, and all p
 front, before the command starts changing anything. The walk considers a candidate only when it is
 **present, enabled, ready, opted-in, and would-attempt** the secret.
 
-A **not-ready** opted-in backend is **skipped with a warning** and the chain falls through to the
-next candidate (so a configured `onepassword` with no `op` installed no longer halts resolution; it
-warns and the next backend, e.g. `prompt`, takes over). The anti-masking halt is kept only for a
-_ready_ store's hard miss (available, but definitively no value), so a misconfigured store never
-falls silently through to a prompt. A secret no active backend can resolve fails at preflight with a
-hint, before any prompt and before anything changes.
+A **not-ready** opted-in backend is **skipped with a warning**, and resolution continues with the
+next candidate. A _ready_ store's hard miss stops the chain so a bad mapping cannot fall through to
+a prompt. A secret no active backend can resolve fails at preflight with a hint, before any prompt
+or mutation.
 
 Readiness is offline and honest; it sits UNDER the optimistic interactivity preview. A `prompt` (or
 a biometric `op`) is still previewed optimistically on would-attempt alone: the inspection surfaces
@@ -600,7 +589,5 @@ JSON diagnostic message and hint fields are closed safe diagnostics, so troubles
 as configuration paths, backend responses, exception text, and secret-adjacent text remains only in
 the human report.
 
-The design rationale (the config/resource split, capability kinds, the vocabulary rules, and the
-vm-site / vm-platform pair) is recorded in ADR 0016. Its dual-path section records the original
-keep-both-paths stance, since superseded by ADR 0022: YAML manifests are the single
-resource-declaration frontend, and `config.toml` is settings only.
+ADRs 0016 and 0022 record the design of the config/resource split, capability kinds, and YAML as the
+resource-declaration frontend.

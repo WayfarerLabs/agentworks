@@ -65,8 +65,7 @@ class AdminConfig(DeclaredResource):
     """Names of ``user-install-command`` resources run during admin init."""
 
     dotfiles_source: str | None = None
-    """Where to fetch the admin user's dotfiles from. ``None`` installs
-    none, which is the only field here with nothing to default to."""
+    """Where to fetch the admin user's dotfiles from. Omit to install none."""
 
     dotfiles_destination: str = "~/.dotfiles"
     """Where the fetched dotfiles are checked out."""
@@ -75,10 +74,8 @@ class AdminConfig(DeclaredResource):
     """The command run inside the checkout to install the dotfiles."""
 
     mise_activate: bool = True
-    """Whether to activate mise in the admin user's shell. A boolean, written unquoted:
-    ``false`` and YAML's ``no`` both read as false. A QUOTED ``"no"`` is
-    a string, refused now, and it used to mean TRUE, the opposite of
-    what it reads as."""
+    """Whether to activate mise in the admin user's shell. Write booleans
+    unquoted; quoted strings such as ``"no"`` are invalid."""
 
     mise_packages: list[str] = Field(default_factory=list)
     """Tools to install with mise, each as ``name@version``."""
@@ -88,31 +85,20 @@ class AdminConfig(DeclaredResource):
 
     mise_allow_unlocked: bool = False
     """Whether to install ``mise_packages`` with no lockfile present.
-    A boolean, written unquoted:
-    ``false`` and YAML's ``no`` both read as false. A QUOTED ``"no"`` is
-    a string, refused now, and it used to mean TRUE, the opposite of
-    what it reads as."""
+    Write booleans unquoted; quoted strings such as ``"no"`` are invalid."""
 
     mise_install_before: str = "7d"
-    """How OLD a tool version must be before mise will install it, as
-    supply-chain defense against a freshly published one: a positive
-    duration such as ``7d``, or an ISO date. Only fuzzy requests
-    (``latest``, ``node@20``) are filtered; an explicitly pinned version
-    installs regardless."""
+    """Minimum age for fuzzy mise versions such as ``latest`` or ``node@20``:
+    a positive duration such as ``7d``, or an ISO date. Explicitly pinned
+    versions install regardless."""
 
     mise_prune_on_reinit: bool = True
     """Whether re-running init removes mise tools no longer declared.
-    A boolean, written unquoted:
-    ``false`` and YAML's ``no`` both read as false. A QUOTED ``"no"`` is
-    a string, refused now, and it used to mean TRUE, the opposite of
-    what it reads as."""
+    Write booleans unquoted; quoted strings such as ``"no"`` are invalid."""
 
     git_force_safe_directory: bool = True
     """Whether to mark checkouts as git ``safe.directory`` for this user.
-    A boolean, written unquoted:
-    ``false`` and YAML's ``no`` both read as false. A QUOTED ``"no"`` is
-    a string, refused now, and it used to mean TRUE, the opposite of
-    what it reads as."""
+    Write booleans unquoted; quoted strings such as ``"no"`` are invalid."""
 
     claude_marketplaces: list[str] = Field(default_factory=list)
     """Claude Code marketplaces to register for the admin user."""

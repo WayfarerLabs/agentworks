@@ -1081,30 +1081,10 @@ def accepted_annotation(
     (``dict[str, EnvEntry]`` reads ``dict[str, str | EnvEntry]``), and an
     owner-templated reference widened to accept ``null``.
 
-    Both widenings are the same correction, and it is what keeps the two
-    derivations of a model saying the same thing. Each is a
-    before-validator, which is invisible to an annotation and to
-    ``model_json_schema`` alike; emitted schema learns it from
-    :meth:`~agentworks.schema.AgwModel.__get_pydantic_json_schema__` and
-    every human surface learns it here, from the same declaration.
-
-    Left out, each has the same consequence, and both have shipped:
-    ``describe-kind`` rendered a bare "table" for a field whose emitted
-    schema offers ``{anyOf: [string, object]}``, so an operator who
-    trusted the surface the resources guide calls the authority rewrote
-    every plaintext env value into a table for no reason; and it rendered
-    a bare "string" for a secret-naming field whose emitted schema offers
-    ``{anyOf: [string, null]}`` and whose loader reads ``secret: null`` as
-    the instruction to use the owner template. The parity guard
-    (``tests/manifests/test_accepted_type_parity.py``) is what holds this
-    function to the emitted side; ``null`` used to be subtracted there,
-    which is precisely how the second one hid.
-
-    The MODEL is not replaced, only the annotation naming it: a walker
-    still expands the block through ``nested_model`` or ``item_model``,
-    because a shorthand adds a spelling rather than removing one. The
-    same goes for ``null``: an operator who writes it gets the templated
-    name, so the field still names a Resource and still has a type.
+    These before-validation spellings are not visible in the annotation or
+    ordinary pydantic schema. Model schema hooks and human-facing derivations
+    therefore read the same declarations explicitly. Widening changes the
+    displayed annotation only; walkers still expand the underlying model.
 
     ``marker`` is the field's OWN reference marker, which is where the
     template lives; a collection's element marker cannot carry one
@@ -1350,18 +1330,9 @@ def _arms_of(annotation: object, discriminator: str) -> tuple[UnionArmType, ...]
 def _tags_of(arm: type[BaseModel], discriminator: str) -> tuple[str, ...]:
     """Every tag value that selects ``arm``, in declaration order.
 
-    An arm may answer to SEVERAL, which pydantic accepts and which a
-    renamed capability keeping its old name would use
-    (``Literal["aws-ec2", "ec2"]``). Reading only the first would leave
-    the old name silently unaddressable.
-
-    Non-string tags are out of scope, and that is a boundary rather than
-    an oversight. The justification used to be that every discriminator
-    here is a capability or kind NAME; that stopped being true when the
-    platform auth and placement unions arrived tagged by ``mode``. The
-    boundary stands on its own terms instead: a tag is an identifier the
-    OPERATOR writes in a document, so it is a string, and a model tagged
-    otherwise contributes no arms here.
+    Pydantic allows several string literals to select one arm, and all of
+    them remain addressable. Non-string discriminator values are outside the
+    operator manifest contract and contribute no arms here.
     """
     fields = model_fields_of(arm)
     if fields is None or discriminator not in fields:

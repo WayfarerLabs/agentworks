@@ -1,28 +1,22 @@
 """VM sites: the declared resource that exposes a configured platform,
 plus site resolution (the only constructor of platform instances).
 
-A ``vm-site`` is "a configured place to create VMs" (ADR 0016's
-instance-identity test): consumers name the site (``agw vm create
---site``, ``defaults.site``, ``vms.site`` provenance; never a
-template: placement is host/operator-scoped), and one platform backs
-many sites. Site rows arrive from the built-in bundle (``lima-local``,
-``wsl2``), operator manifests, and the legacy ``[azure]`` /
-``[proxmox]`` TOML sections.
+A ``vm-site`` is a configured place to create VMs. Consumers name the
+site through ``agw vm create --site``, ``defaults.site``, and VM
+provenance; one platform can back many sites. Site rows come from the
+built-in bundle (``lima-local``, ``wsl2``) and operator manifests.
 
 Every site registers UNCONDITIONALLY (bundled and declared alike,
 whatever the host). Whether it can run here is READINESS, computed by
 the finalize fold and stored on the graph: a site is not-ready when its
 platform is host-unsupported (wsl2 off Windows) or the bound config
 reports a missing requirement (a local-Lima site without ``limactl``).
-An UNKNOWN platform (a typo, or an uninstalled plugin) is no longer a
-self-disable but a hard finalize error (R9.2): the site emits its
-platform edge unconditionally and the absent capability row is a loud
-miss. A not-ready site still lists, describes, and holds references;
+An unknown platform (a typo, or an uninstalled plugin) is a hard
+finalize error. A not-ready site still lists, describes, and holds references;
 using it (:func:`resolve_site`) is a typed error with the reason, and
 existing references to it (VMs, ``defaults.site``) degrade to doctor
 warnings rather than breaking every command. That degradation is about
-UNREADINESS only. A name that resolves to NO site at all is a different
-answer and always has been: it is a hard error, from the generic
+UNREADINESS only. A name that resolves to no site at all is a hard error from the generic
 settings-reference check for ``defaults.site``
 (``config.references.validate_setting_references``) and from finalize for a
 manifest's ``site`` field. Readiness is folded once at finalize and
@@ -62,9 +56,8 @@ class VMSiteDecl(DeclaredResource):
     NAME_MAX_LENGTH: ClassVar[int | None] = MAX_FREEFORM_NAME_LENGTH
 
     platform: CapabilityBlock
-    """The vm-platform backing this site: one table whose ``name`` selects
-    the platform and whose remaining keys are that platform's own config
-    (``{name: lima, placement: {mode: ssh, host: me@box}}``)."""
+    """The platform backing this site. ``name`` selects it and the
+    remaining keys configure it."""
 
     @model_validator(mode="after")
     def _no_shadowed_platform(self) -> VMSiteDecl:
@@ -72,8 +65,8 @@ class VMSiteDecl(DeclaredResource):
 
         A ``vm-site/azure-vm`` backed by lima would make every
         ``--site azure-vm`` mean something other than it says. A
-        cross-field rule over ``name`` and ``platform.name``, and it reads
-        the platform registry at exactly the moment decode used to.
+        cross-field rule over ``name`` and ``platform.name`` reads the
+        platform registry during decode.
         """
         from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 
@@ -91,10 +84,8 @@ class VMSiteDecl(DeclaredResource):
         from agentworks.resources.reference import sourced_references
 
         source = ("vm-site", self.name)
-        # A site ALWAYS emits its platform edge (the suppression is gone,
-        # R13/R12): the platform node is always present (published
-        # unconditionally), so the edge always resolves; an unknown platform
-        # is now a hard finalize miss (R9.2), not a silently-dropped edge.
+        # A site always emits its platform edge. Built-in platform nodes are
+        # published unconditionally, and an unknown platform is a hard miss.
         # Whether this site can run on the host is READINESS (the fold), and
         # readiness gates whether its config-implied secrets materialize (R12),
         # so the edges are emitted unconditionally here and gated downstream.
@@ -354,13 +345,6 @@ def ensure_site_ready(decl: VMSiteDecl, registry: Registry) -> None:
         )
 
 
-# ``validate_sites`` used to live here: the post-finalize check that
-# ``defaults.site`` names a real vm-site. It was one of three hand-written
-# answers to a single question, so it is now a row in
-# ``config.references``'s table of settings that name resources, which
-# raises the same message shape a dangling manifest reference gets. Nothing
-# about it was vm-specific: it looked a name up in the registry.
-#
-# What IS vm-specific stayed put. Whether a site that exists can be USED
-# here is :func:`ensure_site_ready` above, and it is a different (typed,
-# non-config) error on purpose.
+# Setting references to sites are validated by ``config.references``.
+# Whether an existing site can be used on this host is the VM-specific
+# readiness check in :func:`ensure_site_ready` above.
