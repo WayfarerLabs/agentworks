@@ -218,3 +218,25 @@ Consolidated review correction validation passed:
 
 The full non-integration suite was not repeated for this narrow review correction. The integrated
 base's 6,689-test result remains recorded above, and the lead reruns that suite after integration.
+
+## Component-pinning correction
+
+The final P1 correction removes the remaining intermediate-ancestor race. After resolving supported
+requested-path symlinks, snapshot acquisition walks from the trusted filesystem anchor one component
+at a time. Each directory is opened relative to the previously pinned fd with directory-only and
+no-follow flags, and the resulting parent fd supplies every main, WAL, and SHM open. A deterministic
+active-sidecar test replaces an intermediate ancestor with a symlink after path resolution and
+proves the replacement database is never accepted. Stable requested paths containing a component
+symlink remain supported because they resolve to the real identity before the descriptor walk.
+
+Component-pinning correction validation passed:
+
+- focused adversarial snapshot and compatibility suite: 20 passed;
+- wider doctor, entrypoint, machine-output, and parity slice: 178 passed;
+- Ruff check and format check: 625 files clean;
+- full mypy: 625 source files clean;
+- locked-SDD validation: clean;
+- mandatory file lint: Prettier, markdownlint, and cspell clean.
+
+The full non-integration suite was not repeated for this narrow P1 correction. The lead reruns that
+suite after integration.

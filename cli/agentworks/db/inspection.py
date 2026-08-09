@@ -52,20 +52,32 @@ def _metadata_tuple(fingerprint: _FileFingerprint) -> tuple[int, int, int, int]:
     return fingerprint.device, fingerprint.inode, fingerprint.size, fingerprint.mtime_ns
 
 
+def _required_open_flag(name: str) -> int:
+    value = getattr(os, name, None)
+    if not isinstance(value, int) or not value:
+        raise _UnsupportedSnapshotEntry
+    return value
+
+
 def _source_flags() -> int:
     """Return the complete source-acquisition flags or fail closed."""
-    nonblocking = getattr(os, "O_NONBLOCK", None)
-    no_follow = getattr(os, "O_NOFOLLOW", None)
-    if not isinstance(nonblocking, int) or not nonblocking:
-        raise _UnsupportedSnapshotEntry
-    if not isinstance(no_follow, int) or not no_follow:
-        raise _UnsupportedSnapshotEntry
-    return os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0) | nonblocking | no_follow
+    return (
+        os.O_RDONLY
+        | getattr(os, "O_BINARY", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+        | _required_open_flag("O_NONBLOCK")
+        | _required_open_flag("O_NOFOLLOW")
+    )
+
+
+def _directory_flags() -> int:
+    """Return flags that acquire only a real directory descriptor."""
+    return _source_flags() | _required_open_flag("O_DIRECTORY")
 
 
 def _require_snapshot_protocol() -> None:
     """Reject hosts lacking any primitive required by safe acquisition."""
-    _source_flags()
+    _directory_flags()
     supports_dir_fd = getattr(os, "supports_dir_fd", ())
     try:
         has_openat = os.open in supports_dir_fd
@@ -96,17 +108,50 @@ def _regular_file_stat(descriptor: int) -> os.stat_result:
     return source_stat
 
 
-@contextmanager
-def _pinned_directory(directory: Path) -> Iterator[int]:
-    """Pin the resolved parent directory for all relative source opens."""
-    flags = _source_flags() | getattr(os, "O_DIRECTORY", 0)
+def _opened_directory(descriptor: int) -> int:
+    """Validate an acquired descriptor, closing it on classification failure."""
     try:
-        directory_fd = os.open(directory, flags)
+        source_stat = os.fstat(descriptor)
+    except OSError:
+        os.close(descriptor)
+        raise
+    if not stat.S_ISDIR(source_stat.st_mode):
+        os.close(descriptor)
+        raise _UnsupportedSnapshotEntry
+    return descriptor
+
+
+def _open_directory_anchor(anchor: str) -> int:
+    """Open the trusted filesystem anchor that starts a descriptor walk."""
+    try:
+        return _opened_directory(os.open(anchor, _directory_flags()))
     except (NotImplementedError, TypeError):
         raise _UnsupportedSnapshotEntry from None
+
+
+def _open_directory_component(name: str, parent_fd: int) -> int:
+    """Open one real directory relative to its already pinned parent."""
     try:
-        if not stat.S_ISDIR(os.fstat(directory_fd).st_mode):
-            raise _UnsupportedSnapshotEntry
+        return _opened_directory(os.open(name, _directory_flags(), dir_fd=parent_fd))
+    except (NotImplementedError, TypeError):
+        raise _UnsupportedSnapshotEntry from None
+
+
+@contextmanager
+def _pinned_directory(directory: Path) -> Iterator[int]:
+    """Walk from a trusted anchor and pin the resolved parent directory."""
+    anchor = directory.anchor
+    components = directory.parts[1:]
+    if not anchor or not directory.is_absolute() or any(component in {"", ".", ".."} for component in components):
+        raise _UnsupportedSnapshotEntry
+
+    directory_fd = _open_directory_anchor(anchor)
+    try:
+        for component in components:
+            next_fd = _open_directory_component(component, directory_fd)
+            previous_fd = directory_fd
+            directory_fd = next_fd
+            os.close(previous_fd)
         yield directory_fd
     finally:
         os.close(directory_fd)

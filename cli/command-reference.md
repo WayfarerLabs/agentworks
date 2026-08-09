@@ -243,7 +243,9 @@ through SQLite. Broken or looping symlinks, FIFOs, devices, directories, sockets
 unsupported entries fail closed with path-free diagnostics. The original database and sidecars are
 never opened through SQLite, migrated, created, or changed. Hosts without non-blocking, no-follow,
 and directory-relative open support fail closed before any database or sidecar entry is inspected.
-Agentworks does not substitute a path check followed by an unsafe open on those hosts.
+After resolving supported requested-path symlinks, Agentworks walks each parent component from its
+filesystem anchor with directory-only, no-follow relative opens. The resulting pinned fd supplies
+every database and sidecar open. No path check followed by an unsafe open is substituted.
 
 #### Errors and compatibility
 

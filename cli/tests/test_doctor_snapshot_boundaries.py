@@ -168,6 +168,87 @@ def test_inspection_snapshot_resolves_symlink_before_active_sidecars(
     assert not Path(f"{alias_path}-shm").exists()
 
 
+def test_inspection_snapshot_resolves_stable_component_symlink(
+    tmp_path: Path,
+) -> None:
+    """A stable symlinked ancestor resolves before the no-follow descriptor walk."""
+    from agentworks.db import Database
+
+    real_parent = tmp_path / "real-parent"
+    real_directory = real_parent / "nested"
+    real_directory.mkdir(parents=True)
+    alias_parent = tmp_path / "alias-parent"
+    alias_parent.symlink_to(real_parent, target_is_directory=True)
+    db_path = real_directory / "state.db"
+    alias_path = alias_parent / "nested" / "state.db"
+    writer = Database(db_path)
+    writer.set_setting("system_slug", "stable-component-target")
+    paths = _database_files(db_path)
+    before = _file_bytes(paths)
+    assert all(content is not None for content in before)
+    try:
+        with Database.inspection_snapshot(alias_path) as (exists, current, latest, snapshot):
+            assert exists and current == latest and snapshot is not None
+            assert snapshot.get_setting("system_slug") == "stable-component-target"
+        after = _file_bytes(paths)
+    finally:
+        writer.close()
+
+    assert after == before
+
+
+def test_inspection_snapshot_rejects_intermediate_ancestor_symlink_swap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An ancestor replaced after resolve cannot redirect snapshot acquisition."""
+    import agentworks.db.inspection as inspection_module
+    from agentworks.db import Database
+    from agentworks.errors import StateError
+
+    container = tmp_path / "container"
+    original_ancestor = container / "mutable-ancestor"
+    original_directory = original_ancestor / "nested"
+    original_directory.mkdir(parents=True)
+    original_db = original_directory / "operator-private-original.db"
+    original_writer = Database(original_db)
+    original_writer.set_setting("system_slug", "original-target")
+
+    replacement_ancestor = container / "replacement-ancestor"
+    replacement_directory = replacement_ancestor / "nested"
+    replacement_directory.mkdir(parents=True)
+    replacement_db = replacement_directory / original_db.name
+    replacement_writer = Database(replacement_db)
+    replacement_writer.set_setting("system_slug", "replacement-must-not-be-read")
+    assert all(path.exists() for path in _database_files(original_db))
+    assert all(path.exists() for path in _database_files(replacement_db))
+
+    moved_ancestor = container / "pinned-original"
+    original_copy = inspection_module._copy_verified_file_set
+    swapped = False
+
+    def swap_before_directory_walk(source_db: Path, snapshot_db: Path) -> None:
+        nonlocal swapped
+        if not swapped:
+            original_ancestor.rename(moved_ancestor)
+            original_ancestor.symlink_to(replacement_ancestor, target_is_directory=True)
+            swapped = True
+        original_copy(source_db, snapshot_db)
+
+    monkeypatch.setattr(inspection_module, "_copy_verified_file_set", swap_before_directory_walk)
+    try:
+        with pytest.raises(StateError) as raised, Database.inspection_snapshot(original_db):
+            pytest.fail("an ancestor replacement must not be yielded")
+    finally:
+        original_writer.close()
+        replacement_writer.close()
+
+    assert swapped
+    assert str(raised.value) == "state database inspection snapshot could not be created"
+    assert "operator-private" not in str(raised.value)
+    assert "replacement-must-not-be-read" not in str(raised.value)
+
+
 def test_inspection_snapshot_retry_exhaustion_is_clean_and_path_free(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -259,7 +340,7 @@ def test_inspection_snapshot_rejects_directory_device_and_socket(tmp_path: Path)
         listener.close()
 
 
-@pytest.mark.parametrize("missing_primitive", ["O_NOFOLLOW", "O_NONBLOCK", "openat"])
+@pytest.mark.parametrize("missing_primitive", ["O_NOFOLLOW", "O_NONBLOCK", "O_DIRECTORY", "openat"])
 def test_inspection_snapshot_fails_before_source_access_without_required_protocol(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -315,14 +396,22 @@ def test_inspection_snapshot_uses_complete_protocol_for_main_wal_and_shm(
     source_paths = _database_files(db_path)
     assert all(path.exists() for path in source_paths)
     original_open_source = inspection_module._open_source
+    original_open_directory_component = inspection_module._open_directory_component
     acquisitions: list[tuple[str, int, int]] = []
+    directory_acquisitions: list[tuple[str, int, int]] = []
 
     def record_open_source(name: str, directory_fd: int) -> int:
         flags = inspection_module._source_flags()
         acquisitions.append((name, directory_fd, flags))
         return original_open_source(name, directory_fd)
 
+    def record_open_directory_component(name: str, parent_fd: int) -> int:
+        flags = inspection_module._directory_flags()
+        directory_acquisitions.append((name, parent_fd, flags))
+        return original_open_directory_component(name, parent_fd)
+
     monkeypatch.setattr(inspection_module, "_open_source", record_open_source)
+    monkeypatch.setattr(inspection_module, "_open_directory_component", record_open_directory_component)
     try:
         with Database.inspection_snapshot(db_path) as (exists, current, latest, snapshot):
             assert exists and current == latest and snapshot is not None
@@ -335,6 +424,10 @@ def test_inspection_snapshot_uses_complete_protocol_for_main_wal_and_shm(
     assert all(directory_fd >= 0 for _name, directory_fd, _flags in acquisitions)
     assert all(flags & os.O_NOFOLLOW for _name, _directory_fd, flags in acquisitions)
     assert all(flags & os.O_NONBLOCK for _name, _directory_fd, flags in acquisitions)
+    assert directory_acquisitions
+    assert all(parent_fd >= 0 for _name, parent_fd, _flags in directory_acquisitions)
+    assert all(flags & os.O_DIRECTORY for _name, _parent_fd, flags in directory_acquisitions)
+    assert all(flags & os.O_NOFOLLOW for _name, _parent_fd, flags in directory_acquisitions)
 
 
 def _installed_agw() -> Path:

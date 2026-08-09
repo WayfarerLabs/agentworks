@@ -289,14 +289,17 @@ Reads are bounded to the acquired size. Broken or looping symlinks, FIFOs, devic
 sockets, and other unsupported entries fail closed with a path-free inspection-unavailable error.
 The complete acquisition protocol requires non-blocking and no-follow flags plus directory-relative
 open support. A host lacking any required primitive fails closed with the same path-free error
-before inspecting a database or sidecar entry; it never substitutes a check-then-open sequence. The
-same bounded protocol handles main-only and active sets. A main-only candidate requires sidecar
-absence to remain stable throughout copying and verification. Doctor reopens and re-fingerprints the
-complete source set and accepts only an exact match, then validates and opens only the disposable
-copy through SQLite. A concurrent clean-to-active transition, checkpoint, replacement, or sidecar
-transition discards the candidate and retries a small bounded number of times; exhaustion is the
-same path-free error. The report-scoped snapshot is cleaned up after all database facts are
-collected; doctor neither migrates nor creates or changes the original database, WAL, or SHM files.
+before inspecting a database or sidecar entry; it never substitutes a check-then-open sequence.
+After resolving supported requested-path symlinks, doctor opens the filesystem anchor, then walks
+each parent component with directory-only, no-follow opens relative to the previously pinned fd. The
+final parent fd supplies every main, WAL, and SHM open. The same bounded protocol handles main-only
+and active sets. A main-only candidate requires sidecar absence to remain stable throughout copying
+and verification. Doctor reopens and re-fingerprints the complete source set and accepts only an
+exact match, then validates and opens only the disposable copy through SQLite. A concurrent
+clean-to-active transition, checkpoint, replacement, or sidecar transition discards the candidate
+and retries a small bounded number of times; exhaustion is the same path-free error. The
+report-scoped snapshot is cleaned up after all database facts are collected; doctor neither migrates
+nor creates or changes the original database, WAL, or SHM files.
 
 --names-only remains completion plumbing and is mutually exclusive with --output json on every
 covered list or kinds command that already has it. Validate that conflict before service work. It
