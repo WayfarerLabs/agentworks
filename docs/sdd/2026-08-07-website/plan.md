@@ -53,7 +53,7 @@ website code binds to the onboarding feature branch.
       re-reviewed.
 - [x] Saga lead reviews and blesses the staged interim release, dedicated security page, and
       terminal/TUI visual direction before Phase 3 implementation begins.
-- [ ] After that blessing, deliver a single-file coordination message through `main` to the
+- [x] After that blessing, deliver a single-file coordination message through `main` to the
       onboarding effort: its canonical disclosure must say the agent runs on the intended
       workstation and needs full file inspection and command execution access as the workstation
       account, without implicit root. Elevation stays separate and explicit; a strict posture
@@ -78,9 +78,10 @@ Operator evidence:
   onboarding text.
 - 2026-08-09: the saga lead blesses the staged interim release, dedicated security page, and
   terminal/TUI visual direction. Phase 3 implementation is authorized.
-- 2026-08-09: coordination PR #464 delivers the required canonical workstation-access disclosure to
-  the onboarding effort as a single new message file. Its merge to `main` remains required before
-  onboarding integration, but it does not block the independent interim shell.
+- 2026-08-09: merged coordination PR #464 delivers the required canonical workstation-access
+  disclosure to the onboarding effort as a single new message file. The onboarding owner now has the
+  requirement on `main`; its implementation remains a prerequisite only for the later bootstrap
+  integration, not the independent interim shell.
 - 2026-08-09: as a narrow expansion from the original one-page scope, the operator adds a visually
   secondary `We take security seriously.` path to a dedicated security deep dive; the home page
   stays concise and non-preachy. The operator also requires the eventual onboarding disclosure to
