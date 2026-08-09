@@ -222,14 +222,15 @@ is configured database state, never live tmux state.
 ```text
 {
   groups: [{name, checks: [{name, status, message, hint}]}],
-  counts: {ok, info, warn, fail}
+  counts: {ok, info, unavailable, warn, fail}
 }
 ```
 
-`status` is exactly `ok`, `info`, `warn`, or `fail`. Group and check arrays keep report construction
-order, and counts are integers from the complete report. `message` and `hint` are nullable closed
-diagnostics. They never contain raw configuration, secret values, backend responses, exception text,
-or arbitrary host diagnostics. A failing report is still written in full, then the command exits 1:
+`status` is exactly `ok`, `info`, `unavailable`, `warn`, or `fail`. Group and check arrays keep
+report construction order, and counts are integers from the complete report. `message` and `hint`
+are nullable closed diagnostics. They never contain raw configuration, secret values, backend
+responses, exception text, or arbitrary host diagnostics. A failing report is still written in full,
+then the command exits 1:
 
 ```bash
 agw doctor --output json
@@ -242,10 +243,13 @@ accepts regular files only, bounds each read to the acquired size, and validates
 through SQLite. Broken or looping symlinks, FIFOs, devices, directories, sockets, and other
 unsupported entries fail closed with path-free diagnostics. The original database and sidecars are
 never opened through SQLite, migrated, created, or changed. Hosts without non-blocking, no-follow,
-and directory-relative open support fail closed before any database or sidecar entry is inspected.
-After resolving supported requested-path symlinks, Agentworks walks each parent component from its
-filesystem anchor with directory-only, no-follow relative opens. The resulting pinned fd supplies
-every database and sidecar open. No path check followed by an unsafe open is substituted.
+directory-only, and directory-relative open support report secure database inspection as
+`unavailable` before any database or sidecar entry is inspected. Those rows do not count as warnings
+or failures, and an otherwise healthy report exits 0. An invalid source or malformed schema version
+remains a failure and makes doctor exit 1. After resolving supported requested-path symlinks,
+Agentworks walks each parent component from its filesystem anchor with directory-only, no-follow
+relative opens. The resulting pinned fd supplies every database and sidecar open. No path check
+followed by an unsafe open is substituted.
 
 #### Errors and compatibility
 

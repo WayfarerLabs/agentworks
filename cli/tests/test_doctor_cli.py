@@ -4,7 +4,7 @@ colorization (STATUS role, realized via `output.style_status`).
 `agentworks/doctor.py` (the service layer) returns a `HealthReport` of bare
 `Status` values and does no rendering; these tests exercise the renderer in
 `cli/commands/doctor.py`, which maps `Status` to `StatusStyle` and colors the
-`[ok]`/`[info]`/`[warn]`/`[FAIL]` labels and the summary counts. See
+`[ok]`/`[info]`/`[unavailable]`/`[warn]`/`[FAIL]` labels and the summary counts. See
 `tests/test_typer_output.py` for the lower-level `style_status` unit tests
 this renderer builds on.
 """
@@ -47,6 +47,7 @@ def _fake_report() -> HealthReport:
     g = HealthGroup("Sample")
     g.ok("thing-ok", "fine")
     g.info("thing-info", "fyi")
+    g.unavailable("thing-unavailable", "not supported here")
     g.warn("thing-warn", "careful")
     g.fail("thing-fail", "broken")
     report.groups.append(g)
@@ -101,6 +102,13 @@ class TestDoctorColorOnATty:
         out = _run_doctor(capsys)
         assert "  [info] thing-info: fyi\n" in out
 
+    def test_unavailable_label_is_unstyled(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _tty(monkeypatch)
+        out = _run_doctor(capsys)
+        assert "  [unavailable] thing-unavailable: not supported here\n" in out
+
     def test_label_column_width_unaffected_by_ansi(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -119,10 +127,11 @@ class TestDoctorColorOnATty:
         out = _run_doctor(capsys)
         expected = (
             f"Results: {click.style('1', fg='green')} ok, 1 info, "
-            f"{click.style('1', fg='yellow')} warn, {click.style('1', fg='red')} fail\n"
+            f"1 unavailable, {click.style('1', fg='yellow')} warn, "
+            f"{click.style('1', fg='red')} fail\n"
         )
         assert expected in out
-        assert "Results: 1 ok, 1 info, 1 warn, 1 fail\n" in _plain(out)
+        assert "Results: 1 ok, 1 info, 1 unavailable, 1 warn, 1 fail\n" in _plain(out)
 
 
 @pytest.mark.usefixtures("_stub_run_checks", "_typer_handler")
@@ -136,7 +145,7 @@ class TestDoctorPlainFallback:
         out = _run_doctor(capsys)
         assert _ANSI_RE.search(out) is None
         assert "  [ok]   thing-ok: fine\n" in out
-        assert "Results: 1 ok, 1 info, 1 warn, 1 fail\n" in out
+        assert "Results: 1 ok, 1 info, 1 unavailable, 1 warn, 1 fail\n" in out
 
     def test_no_color_env_forces_byte_plain_even_on_a_tty(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]

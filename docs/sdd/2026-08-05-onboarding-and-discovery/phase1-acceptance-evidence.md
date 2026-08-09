@@ -254,3 +254,31 @@ Final integrated validation passed:
 - full mypy: 625 source files clean;
 - Rulesync generated-output check and locked-SDD validation: clean;
 - mandatory file lint: Prettier, markdownlint, and cspell clean.
+
+## Unsupported-host and malformed-schema correction
+
+The final re-review correction distinguishes an unsupported secure snapshot protocol from invalid
+database state. Missing or runtime-unsupported non-blocking, no-follow, directory-only, or
+directory-relative open primitives now produce closed `unavailable` checks for the System, VM sites,
+and Database groups. Those checks have their own JSON status and count, do not increment warn or
+fail, and leave an otherwise healthy human or JSON doctor run at exit 0. The protocol gate runs
+before checking whether the requested database exists, so absent and active databases follow the
+same no-access rule on unsupported hosts. Ordinary acquisition errors, unsupported source entries,
+copy failures, retry exhaustion, and malformed schema versions remain path-free failures.
+
+Schema inspection now accepts only null as version 0 or an exact nonnegative integer. Focused tests
+reject text, bytes, floating-point, boolean, and negative values; an installed-entrypoint regression
+proves a text-valued schema version produces one complete safe JSON report, empty stderr, and
+exit 1. Human, JSON, guide-action, exact-envelope, and installed-entrypoint tests pin the expanded
+status and count contract. No CLI option changed, so completions and sample configuration require no
+update.
+
+Unsupported-host and malformed-schema correction validation passed:
+
+- focused adversarial snapshot and installed-entrypoint suite: 37 passed;
+- wider doctor, JSON, parity, guide-action, and database slice: 198 passed;
+- full non-integration suite: 6,716 passed and 3 deselected;
+- Ruff check and format check: 625 files clean;
+- full mypy: 625 source files clean;
+- Rulesync generated-output check and locked-SDD validation: clean;
+- mandatory file lint: 277 Markdown files clean, 250 spelling files clean, and Prettier clean.

@@ -246,10 +246,10 @@ position and shell order. This is configured DB state, never live tmux state.
 ### Doctor
 
 doctor.data is {groups, counts}. groups[] is {name, checks}; checks[] is {name, status, message,
-hint}; counts is {ok, info, warn, fail}. status is exactly ok, info, warn, or fail; message and hint
-are nullable. Group and check order is HealthReport construction order. Counts are integers from the
-complete report. JSON is emitted for a failing report, then doctor exits 1 exactly when it does
-today. Reports with no failed checks exit 0.
+hint}; counts is {ok, info, unavailable, warn, fail}. status is exactly ok, info, unavailable, warn,
+or fail; message and hint are nullable. Group and check order is HealthReport construction order.
+Counts are integers from the complete report. JSON is emitted for a failing report, then doctor
+exits 1. Reports with no failed checks exit 0; unavailable checks do not increment warn or fail.
 
 ## Ordering, error, and terminal behavior
 
@@ -288,18 +288,25 @@ non-blocking, no-follow descriptors and accepted only when the descriptor identi
 Reads are bounded to the acquired size. Broken or looping symlinks, FIFOs, devices, directories,
 sockets, and other unsupported entries fail closed with a path-free inspection-unavailable error.
 The complete acquisition protocol requires non-blocking and no-follow flags plus directory-relative
-open support. A host lacking any required primitive fails closed with the same path-free error
-before inspecting a database or sidecar entry; it never substitutes a check-then-open sequence.
-After resolving supported requested-path symlinks, doctor opens the filesystem anchor, then walks
-each parent component with directory-only, no-follow opens relative to the previously pinned fd. The
-final parent fd supplies every main, WAL, and SHM open. The same bounded protocol handles main-only
-and active sets. A main-only candidate requires sidecar absence to remain stable throughout copying
-and verification. Doctor reopens and re-fingerprints the complete source set and accepts only an
-exact match, then validates and opens only the disposable copy through SQLite. A concurrent
+open and directory-only support. A host lacking any required primitive raises a distinct typed
+protocol-unavailable result before inspecting a database or sidecar entry; it never substitutes a
+check-then-open sequence. Doctor projects that result as fixed, path-free `unavailable` rows in the
+System, applicable VM sites, and Database groups. It is non-failing and an otherwise healthy report
+exits 0. Unsupported source entries, copy or retry failures, and malformed schema versions remain
+the path-free database-inspection failure path and make the Database row fail. After resolving
+supported requested-path symlinks, doctor opens the filesystem anchor, then walks each parent
+component with directory-only, no-follow opens relative to the previously pinned fd. The final
+parent fd supplies every main, WAL, and SHM open. The same bounded protocol handles main-only and
+active sets. A main-only candidate requires sidecar absence to remain stable throughout copying and
+verification. Doctor reopens and re-fingerprints the complete source set and accepts only an exact
+match, then validates and opens only the disposable copy through SQLite. A concurrent
 clean-to-active transition, checkpoint, replacement, or sidecar transition discards the candidate
 and retries a small bounded number of times; exhaustion is the same path-free error. The
 report-scoped snapshot is cleaned up after all database facts are collected; doctor neither migrates
-nor creates or changes the original database, WAL, or SHM files.
+nor creates or changes the original database, WAL, or SHM files. The schema-version boundary accepts
+only SQLite null as version 0 or an exact nonnegative integer. Text, bytes, floating-point, boolean,
+and negative values are malformed state and fail closed before any version comparison or public
+diagnostic can expose the raw value.
 
 --names-only remains completion plumbing and is mutually exclusive with --output json on every
 covered list or kinds command that already has it. Validate that conflict before service work. It

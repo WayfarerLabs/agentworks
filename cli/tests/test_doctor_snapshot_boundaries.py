@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import socket
+import sqlite3
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from textwrap import dedent
 from time import monotonic
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
@@ -43,22 +46,20 @@ def test_inspection_snapshot_retries_concurrent_checkpoint_after_main_copy(
     checkpointed: tuple[bytes | None, ...] | None = None
 
     def checkpoint_after_main_copy(
-        directory: Path,
         name: str,
-        directory_fd: int | None,
+        directory_fd: int,
         *,
         expected: tuple[int, int, int, int],
         destination: Path | None = None,
     ):  # noqa: ANN202
         nonlocal checkpointed
         fingerprint = original_fingerprint(
-            directory,
             name,
             directory_fd,
             expected=expected,
             destination=destination,
         )
-        if directory / name == db_path and destination is not None and checkpointed is None:
+        if name == db_path.name and destination is not None and checkpointed is None:
             writer.close()
             checkpointed = _file_bytes(paths)
         return fingerprint
@@ -101,22 +102,20 @@ def test_inspection_snapshot_retries_clean_to_active_transition_after_main_copy(
         original_copy(source_db, snapshot_db)
 
     def activate_after_main_copy(
-        directory: Path,
         name: str,
-        directory_fd: int | None,
+        directory_fd: int,
         *,
         expected: tuple[int, int, int, int],
         destination: Path | None = None,
     ):  # noqa: ANN202
         nonlocal committed_files, writer
         fingerprint = original_fingerprint(
-            directory,
             name,
             directory_fd,
             expected=expected,
             destination=destination,
         )
-        if directory / name == db_path and destination is not None and writer is None:
+        if name == db_path.name and destination is not None and writer is None:
             writer = Database(db_path)
             writer.set_setting("system_slug", "committed-after-clean-observation")
             committed_files = _file_bytes(paths)
@@ -340,22 +339,36 @@ def test_inspection_snapshot_rejects_directory_device_and_socket(tmp_path: Path)
         listener.close()
 
 
-@pytest.mark.parametrize("missing_primitive", ["O_NOFOLLOW", "O_NONBLOCK", "O_DIRECTORY", "openat"])
+@pytest.mark.parametrize("database_state", ["absent", "active"])
+@pytest.mark.parametrize(
+    ("primitive", "value"),
+    [
+        ("O_NOFOLLOW", None),
+        ("O_NONBLOCK", 0),
+        ("O_DIRECTORY", 0),
+        ("openat", None),
+    ],
+)
 def test_inspection_snapshot_fails_before_source_access_without_required_protocol(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    missing_primitive: str,
+    database_state: str,
+    primitive: str,
+    value: int | None,
 ) -> None:
     """An incomplete host protocol cannot touch the main, WAL, or SHM entries."""
     import agentworks.db.inspection as inspection_module
     from agentworks.db import Database
-    from agentworks.errors import StateError
+    from agentworks.errors import DatabaseInspectionUnavailable
 
     db_path = tmp_path / "operator-private-capability.db"
-    writer = Database(db_path)
-    writer.set_setting("system_slug", "active-sidecars")
-    source_paths = _database_files(db_path)
-    assert all(path.exists() for path in source_paths)
+    writer: Database | None = None
+    if database_state == "active":
+        writer = Database(db_path)
+        writer.set_setting("system_slug", "active-sidecars")
+        assert all(path.exists() for path in _database_files(db_path))
+    else:
+        assert not db_path.exists()
 
     requested_entries: list[Path] = []
 
@@ -364,22 +377,84 @@ def test_inspection_snapshot_fails_before_source_access_without_required_protoco
         return True
 
     monkeypatch.setattr(inspection_module, "_requested_entry_exists", record_requested_entry)
-    if missing_primitive == "openat":
+    if primitive == "openat":
         monkeypatch.setattr(os, "supports_dir_fd", frozenset())
+    elif value is None:
+        monkeypatch.delattr(os, primitive, raising=False)
     else:
-        monkeypatch.delattr(os, missing_primitive, raising=False)
+        monkeypatch.setattr(os, primitive, value)
 
     started = monotonic()
     try:
-        with pytest.raises(StateError) as raised, Database.inspection_snapshot(db_path):
+        with pytest.raises(DatabaseInspectionUnavailable) as raised, Database.inspection_snapshot(db_path):
             pytest.fail("an incomplete snapshot protocol must not be yielded")
+    finally:
+        if writer is not None:
+            writer.close()
+
+    assert monotonic() - started < 1
+    assert str(raised.value) == "secure database inspection is unavailable on this host"
+    assert str(db_path) not in str(raised.value)
+    assert requested_entries == []
+
+
+@pytest.mark.parametrize("error_kind", ["not_implemented", "not_supported"])
+def test_inspection_snapshot_maps_runtime_primitive_unavailability(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    error_kind: str,
+) -> None:
+    from agentworks.db import Database
+    from agentworks.errors import DatabaseInspectionUnavailable
+
+    db_path = tmp_path / "runtime-unavailable.db"
+    writer = Database(db_path)
+    writer.set_setting("system_slug", "must-not-be-read")
+    original_open = os.open
+
+    def unavailable_open(path: str, flags: int, *args: object, **kwargs: object) -> int:
+        if flags & os.O_DIRECTORY:
+            if error_kind == "not_implemented":
+                raise NotImplementedError
+            raise OSError(errno.EOPNOTSUPP, "operator-private-runtime-detail")
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", unavailable_open)
+    monkeypatch.setattr(os, "supports_dir_fd", frozenset({unavailable_open}))
+    try:
+        with pytest.raises(DatabaseInspectionUnavailable) as raised, Database.inspection_snapshot(db_path):
+            pytest.fail("runtime primitive unavailability must not yield a snapshot")
     finally:
         writer.close()
 
-    assert monotonic() - started < 1
+    assert str(raised.value) == "secure database inspection is unavailable on this host"
+    assert "operator-private" not in str(raised.value)
+
+
+def test_inspection_snapshot_keeps_ordinary_open_errors_as_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.db import Database
+    from agentworks.errors import StateError
+
+    db_path = tmp_path / "ordinary-error.db"
+    database = Database(db_path)
+    database.close()
+    original_open = os.open
+
+    def denied_open(path: str, flags: int, *args: object, **kwargs: object) -> int:
+        if flags & os.O_DIRECTORY:
+            raise OSError(errno.EACCES, "operator-private-permission-detail")
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", denied_open)
+    monkeypatch.setattr(os, "supports_dir_fd", frozenset({denied_open}))
+    with pytest.raises(StateError) as raised, Database.inspection_snapshot(db_path):
+        pytest.fail("an ordinary acquisition error must not yield a snapshot")
+
     assert str(raised.value) == "state database inspection snapshot could not be created"
-    assert str(db_path) not in str(raised.value)
-    assert requested_entries == []
+    assert "operator-private" not in str(raised.value)
 
 
 def test_inspection_snapshot_uses_complete_protocol_for_main_wal_and_shm(
@@ -437,12 +512,23 @@ def _installed_agw() -> Path:
     return entrypoint
 
 
-def _run_installed_doctor(home: Path, *, timeout: float = 10) -> subprocess.CompletedProcess[bytes]:
+def _run_installed_doctor(
+    home: Path,
+    *,
+    output_format: str = "json",
+    extra_environment: dict[str, str] | None = None,
+    timeout: float = 10,
+) -> subprocess.CompletedProcess[bytes]:
     environment = os.environ.copy()
     environment["HOME"] = str(home)
     environment.pop("AGW_DEBUG", None)
+    if extra_environment is not None:
+        environment.update(extra_environment)
+    arguments = [_installed_agw(), "doctor"]
+    if output_format != "human":
+        arguments.extend(("--output", output_format))
     return subprocess.run(  # noqa: S603
-        [_installed_agw(), "doctor", "--output", "json"],
+        arguments,
         cwd=home,
         env=environment,
         capture_output=True,
@@ -462,6 +548,7 @@ def _assert_complete_failing_doctor(process: subprocess.CompletedProcess[bytes])
     assert document["command"] == "doctor"
     data = cast("dict[str, object]", document["data"])
     counts = cast("dict[str, int]", data["counts"])
+    assert list(counts) == ["ok", "info", "unavailable", "warn", "fail"]
     assert counts["fail"] > 0
     groups = cast("list[dict[str, object]]", data["groups"])
     assert groups and groups[-1]["name"] in {"Database", "Shell completions"}
@@ -471,6 +558,63 @@ def _assert_complete_failing_doctor(process: subprocess.CompletedProcess[bytes])
 def test_installed_entrypoint_propagates_failing_json_doctor_status(tmp_path: Path) -> None:
     """The installed console script emits one report and preserves exit 1."""
     _assert_complete_failing_doctor(_run_installed_doctor(tmp_path))
+
+
+@pytest.mark.parametrize("value", ["operator-private-version", b"7", 7.5, -1])
+def test_inspection_snapshot_rejects_malformed_schema_versions(tmp_path: Path, value: object) -> None:
+    import agentworks.db.inspection as inspection_module
+    from agentworks.db import LATEST_VERSION, Database
+    from agentworks.errors import StateError
+
+    assert inspection_module._validated_schema_version(None) == 0
+    assert inspection_module._validated_schema_version(0) == 0
+    assert inspection_module._validated_schema_version(LATEST_VERSION) == LATEST_VERSION
+    with pytest.raises(StateError, match="^state database inspection snapshot could not be created$"):
+        inspection_module._validated_schema_version(True)
+
+    db_path = tmp_path / "malformed-version.db"
+    database = Database(db_path)
+    database.close()
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute("DELETE FROM schema_version")
+        connection.execute("INSERT INTO schema_version (version) VALUES (?)", (value,))
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(StateError) as raised, Database.inspection_snapshot(db_path):
+        pytest.fail("a malformed schema version must not be yielded")
+    message = str(raised.value)
+    assert message == "state database inspection snapshot could not be created"
+    assert "operator-private" not in message
+
+
+def test_installed_json_doctor_rejects_text_schema_version_safely(tmp_path: Path) -> None:
+    from agentworks.db import Database
+
+    marker = "operator-private-malformed-schema-value"
+    config_dir = tmp_path / ".config" / "agentworks"
+    config_dir.mkdir(parents=True)
+    db_path = config_dir / "agentworks.db"
+    database = Database(db_path)
+    database.close()
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute("DELETE FROM schema_version")
+        connection.execute("INSERT INTO schema_version (version) VALUES (?)", (marker,))
+        connection.commit()
+    finally:
+        connection.close()
+
+    process = _run_installed_doctor(tmp_path)
+    document = _assert_complete_failing_doctor(process)
+    rendered = json.dumps(document)
+    assert '"name": "Database", "status": "fail"' in rendered
+    assert "database check failed" in rendered
+    assert marker not in rendered
+    assert str(db_path) not in rendered
+    assert "TypeError" not in rendered
 
 
 @pytest.mark.parametrize("link_kind", ["dangling", "loop"])
@@ -530,9 +674,162 @@ def _stub_doctor_environment(monkeypatch: pytest.MonkeyPatch) -> object:
         ("_check_vm_platforms", "VM platforms"),
         ("_check_secret_backends", "Secret backends"),
         ("_check_secrets", "Secrets"),
+        ("_check_completions", "Shell completions"),
     ):
         monkeypatch.setattr(doctor, function_name, lambda *_args, _name=group_name, **_kwargs: group(_name))
     return config
+
+
+@pytest.mark.parametrize("database_state", ["absent", "active"])
+@pytest.mark.parametrize("primitive", ["missing_no_follow", "zero_nonblocking"])
+def test_doctor_renders_protocol_unavailable_as_complete_nonfailing_reports(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    database_state: str,
+    primitive: str,
+) -> None:
+    from typer.testing import CliRunner
+
+    import agentworks.db as db_module
+    import agentworks.db.inspection as inspection_module
+    from agentworks.cli import app
+    from agentworks.db import Database
+
+    marker = "operator-private-unavailable-source"
+    db_path = tmp_path / "operator-private-unavailable.db"
+    writer: Database | None = None
+    if database_state == "active":
+        writer = Database(db_path)
+        writer.set_setting("system_slug", marker)
+        assert all(path.exists() for path in _database_files(db_path))
+    monkeypatch.setattr(db_module, "DB_PATH", db_path)
+    _stub_doctor_environment(monkeypatch)
+    source_access: list[Path] = []
+
+    def record_source_access(path: Path) -> bool:
+        source_access.append(path)
+        return True
+
+    monkeypatch.setattr(inspection_module, "_requested_entry_exists", record_source_access)
+    if primitive == "missing_no_follow":
+        monkeypatch.delattr(os, "O_NOFOLLOW", raising=False)
+    else:
+        monkeypatch.setattr(os, "O_NONBLOCK", 0)
+
+    try:
+        human = CliRunner().invoke(app, ["doctor"])
+        machine = CliRunner().invoke(app, ["doctor", "--output", "json"])
+    finally:
+        if writer is not None:
+            writer.close()
+
+    expected_message = "secure database inspection is unavailable on this host"
+    assert human.exit_code == 0, human.output
+    assert human.stderr == ""
+    assert human.stdout.count("[unavailable]") == 3
+    assert human.stdout.count(expected_message) == 3
+    assert "Results: 9 ok, 0 info, 3 unavailable, 0 warn, 0 fail\n" in human.stdout
+    assert machine.exit_code == 0, machine.output
+    assert machine.stderr == ""
+    assert machine.stdout.count("\n") == 1
+    document = cast("dict[str, object]", json.loads(machine.stdout))
+    data = cast("dict[str, object]", document["data"])
+    assert data["counts"] == {"ok": 9, "info": 0, "unavailable": 3, "warn": 0, "fail": 0}
+    groups = cast("list[dict[str, object]]", data["groups"])
+    unavailable = [
+        check
+        for group in groups
+        for check in cast("list[dict[str, object]]", group["checks"])
+        if check["status"] == "unavailable"
+    ]
+    assert len(unavailable) == 3
+    assert {check["name"] for check in unavailable} == {"System slug", "VM sites", "Database"}
+    assert all(check["message"] == expected_message and check["hint"] is None for check in unavailable)
+    combined = human.stdout + machine.stdout
+    assert marker not in combined
+    assert str(db_path) not in combined
+    assert "\x00" not in combined
+    assert source_access == []
+
+
+def test_installed_doctor_reports_secure_inspection_unavailable_without_failure(tmp_path: Path) -> None:
+    from agentworks.db import Database
+
+    marker = "operator-private-installed-unavailable"
+    config_dir = tmp_path / ".config" / "agentworks"
+    config_dir.mkdir(parents=True)
+    db_path = config_dir / "agentworks.db"
+    writer = Database(db_path)
+    writer.set_setting("system_slug", marker)
+    assert all(path.exists() for path in _database_files(db_path))
+
+    hook_directory = tmp_path / "python-hook"
+    hook_directory.mkdir()
+    (hook_directory / "sitecustomize.py").write_text(
+        dedent(
+            """\
+            import os
+            from types import SimpleNamespace
+
+            os.O_NOFOLLOW = 0
+
+            from agentworks import doctor
+            from agentworks.resources import Registry
+
+            def group(name):
+                result = doctor.HealthGroup(name)
+                result.ok("Fixture")
+                return result
+
+            config_group = group("Configuration")
+            config = SimpleNamespace(defaults=SimpleNamespace(site=None))
+            registry = Registry.empty()
+            doctor._check_config = lambda **_kwargs: (config_group, config, registry)
+            for function_name, group_name in (
+                ("_check_python", "Python"),
+                ("_check_required_tools", "Required tools"),
+                ("_check_tailscale", "Tailscale"),
+                ("_check_plugins", "System plugins"),
+                ("_check_vm_platforms", "VM platforms"),
+                ("_check_secret_backends", "Secret backends"),
+                ("_check_secrets", "Secrets"),
+                ("_check_completions", "Shell completions"),
+            ):
+                setattr(doctor, function_name, lambda *_args, _name=group_name, **_kwargs: group(_name))
+            """
+        )
+    )
+    python_path = str(hook_directory)
+    if inherited_path := os.environ.get("PYTHONPATH"):
+        python_path += os.pathsep + inherited_path
+    environment = {"PYTHONPATH": python_path}
+
+    try:
+        machine = _run_installed_doctor(tmp_path, extra_environment=environment)
+        human = _run_installed_doctor(tmp_path, output_format="human", extra_environment=environment)
+    finally:
+        writer.close()
+
+    expected_message = "secure database inspection is unavailable on this host"
+    assert machine.returncode == 0
+    assert machine.stderr == b""
+    assert machine.stdout.count(b"\n") == 1
+    document = cast("dict[str, object]", json.loads(machine.stdout))
+    data = cast("dict[str, object]", document["data"])
+    assert data["counts"] == {"ok": 9, "info": 0, "unavailable": 3, "warn": 0, "fail": 0}
+    rendered = json.dumps(document)
+    assert rendered.count('"status": "unavailable"') == 3
+    assert rendered.count(expected_message) == 3
+    assert human.returncode == 0
+    assert human.stderr == b""
+    human_text = human.stdout.decode()
+    assert human_text.count("[unavailable]") == 3
+    assert human_text.count(expected_message) == 3
+    assert "Results: 9 ok, 0 info, 3 unavailable, 0 warn, 0 fail\n" in human_text
+    combined = rendered + human_text
+    assert marker not in combined
+    assert str(db_path) not in combined
+    assert "\x00" not in combined
 
 
 def test_doctor_projects_one_snapshot_failure_consistently(

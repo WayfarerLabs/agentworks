@@ -663,7 +663,7 @@ def test_doctor_json_writes_complete_failing_report_before_exit(monkeypatch) -> 
     assert result.exit_code == 1
     data = _json_document(result)["data"]
     assert isinstance(data, dict)
-    assert data["counts"] == {"ok": 0, "info": 0, "warn": 0, "fail": 1}
+    assert data["counts"] == {"ok": 0, "info": 0, "unavailable": 0, "warn": 0, "fail": 1}
     assert data["groups"][0]["checks"][0]["status"] == "fail"
 
     human_default = CliRunner().invoke(app, ["doctor"])
@@ -677,7 +677,7 @@ def test_doctor_json_writes_complete_failing_report_before_exit(monkeypatch) -> 
         b"Configuration:\n"
         b"  [FAIL] Config: missing config\n"
         b"         hint: run agw config init\n\n"
-        b"Results: 0 ok, 0 info, 0 warn, 1 fail\n",
+        b"Results: 0 ok, 0 info, 0 unavailable, 0 warn, 1 fail\n",
         exit_code=1,
     )
 
@@ -737,7 +737,7 @@ def test_malformed_config_doctor_json_is_safe_and_human_keeps_legacy_bytes(
                 ],
             },
         ],
-        "counts": {"ok": 1, "info": 0, "warn": 0, "fail": 1},
+        "counts": {"ok": 1, "info": 0, "unavailable": 0, "warn": 0, "fail": 1},
     }
 
     expected_human_stdout = (
@@ -745,7 +745,7 @@ def test_malformed_config_doctor_json_is_safe_and_human_keeps_legacy_bytes(
         b"Configuration:\n"
         + f"  [ok]   Config file: {config_path}\n".encode()
         + b"  [FAIL] Config: failed to load\n\n"
-        + b"Results: 1 ok, 0 info, 0 warn, 1 fail\n"
+        + b"Results: 1 ok, 0 info, 0 unavailable, 0 warn, 1 fail\n"
     )
     assert human_default.exit_code == human_explicit.exit_code == 1
     assert human_default.stdout_bytes == human_explicit.stdout_bytes == expected_human_stdout

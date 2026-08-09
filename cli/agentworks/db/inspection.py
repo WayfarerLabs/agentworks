@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agentworks.db.migrations import LATEST_VERSION
-from agentworks.errors import StateError
+from agentworks.errors import DatabaseInspectionUnavailable, StateError
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -48,14 +48,10 @@ def _metadata(source_stat: os.stat_result) -> tuple[int, int, int, int]:
     return source_stat.st_dev, source_stat.st_ino, source_stat.st_size, source_stat.st_mtime_ns
 
 
-def _metadata_tuple(fingerprint: _FileFingerprint) -> tuple[int, int, int, int]:
-    return fingerprint.device, fingerprint.inode, fingerprint.size, fingerprint.mtime_ns
-
-
 def _required_open_flag(name: str) -> int:
     value = getattr(os, name, None)
     if not isinstance(value, int) or not value:
-        raise _UnsupportedSnapshotEntry
+        raise DatabaseInspectionUnavailable
     return value
 
 
@@ -84,7 +80,15 @@ def _require_snapshot_protocol() -> None:
     except TypeError:
         has_openat = False
     if not has_openat:
-        raise _UnsupportedSnapshotEntry
+        raise DatabaseInspectionUnavailable
+
+
+def _raise_if_unsupported_operation(error: OSError) -> None:
+    unavailable_errnos = {errno.EOPNOTSUPP}
+    if hasattr(errno, "ENOTSUP"):
+        unavailable_errnos.add(errno.ENOTSUP)
+    if error.errno in unavailable_errnos:
+        raise DatabaseInspectionUnavailable from None
 
 
 def _open_source(name: str, directory_fd: int) -> int:
@@ -92,17 +96,24 @@ def _open_source(name: str, directory_fd: int) -> int:
     try:
         return os.open(name, _source_flags(), dir_fd=directory_fd)
     except (NotImplementedError, TypeError):
-        raise _UnsupportedSnapshotEntry from None
+        raise DatabaseInspectionUnavailable from None
     except OSError as error:
+        _raise_if_unsupported_operation(error)
         if error.errno == errno.ENOENT:
             raise FileNotFoundError from None
-        if error.errno in {errno.ELOOP, errno.ENXIO, errno.ENODEV, errno.EOPNOTSUPP}:
+        if error.errno in {errno.ELOOP, errno.ENXIO, errno.ENODEV}:
             raise _UnsupportedSnapshotEntry from None
         raise
 
 
 def _regular_file_stat(descriptor: int) -> os.stat_result:
-    source_stat = os.fstat(descriptor)
+    try:
+        source_stat = os.fstat(descriptor)
+    except (NotImplementedError, TypeError):
+        raise DatabaseInspectionUnavailable from None
+    except OSError as error:
+        _raise_if_unsupported_operation(error)
+        raise
     if not stat.S_ISREG(source_stat.st_mode):
         raise _UnsupportedSnapshotEntry
     return source_stat
@@ -112,8 +123,12 @@ def _opened_directory(descriptor: int) -> int:
     """Validate an acquired descriptor, closing it on classification failure."""
     try:
         source_stat = os.fstat(descriptor)
-    except OSError:
+    except (NotImplementedError, TypeError):
         os.close(descriptor)
+        raise DatabaseInspectionUnavailable from None
+    except OSError as error:
+        os.close(descriptor)
+        _raise_if_unsupported_operation(error)
         raise
     if not stat.S_ISDIR(source_stat.st_mode):
         os.close(descriptor)
@@ -126,7 +141,10 @@ def _open_directory_anchor(anchor: str) -> int:
     try:
         return _opened_directory(os.open(anchor, _directory_flags()))
     except (NotImplementedError, TypeError):
-        raise _UnsupportedSnapshotEntry from None
+        raise DatabaseInspectionUnavailable from None
+    except OSError as error:
+        _raise_if_unsupported_operation(error)
+        raise
 
 
 def _open_directory_component(name: str, parent_fd: int) -> int:
@@ -134,7 +152,10 @@ def _open_directory_component(name: str, parent_fd: int) -> int:
     try:
         return _opened_directory(os.open(name, _directory_flags(), dir_fd=parent_fd))
     except (NotImplementedError, TypeError):
-        raise _UnsupportedSnapshotEntry from None
+        raise DatabaseInspectionUnavailable from None
+    except OSError as error:
+        _raise_if_unsupported_operation(error)
+        raise
 
 
 @contextmanager
@@ -157,7 +178,7 @@ def _pinned_directory(directory: Path) -> Iterator[int]:
         os.close(directory_fd)
 
 
-def _file_metadata(directory: Path, name: str, directory_fd: int) -> tuple[int, int, int, int] | None:
+def _file_metadata(name: str, directory_fd: int) -> tuple[int, int, int, int] | None:
     """Acquire one entry first, then classify and record its descriptor."""
     try:
         descriptor = _open_source(name, directory_fd)
@@ -170,7 +191,6 @@ def _file_metadata(directory: Path, name: str, directory_fd: int) -> tuple[int, 
 
 
 def _fingerprint_stream(
-    directory: Path,
     name: str,
     directory_fd: int,
     *,
@@ -216,11 +236,10 @@ def _fingerprint_stream(
 
 
 def _current_metadata(
-    directory: Path,
     names: tuple[str, str, str],
     directory_fd: int,
 ) -> tuple[tuple[int, int, int, int] | None, ...]:
-    return tuple(_file_metadata(directory, name, directory_fd) for name in names)
+    return tuple(_file_metadata(name, directory_fd) for name in names)
 
 
 def _copy_verified_file_set(source_db: Path, snapshot_db: Path) -> None:
@@ -234,7 +253,7 @@ def _copy_verified_file_set(source_db: Path, snapshot_db: Path) -> None:
     )
 
     with _pinned_directory(source_directory) as directory_fd:
-        initial = _current_metadata(source_directory, source_names, directory_fd)
+        initial = _current_metadata(source_names, directory_fd)
         if initial[0] is None:
             raise _SnapshotChanged
 
@@ -245,14 +264,13 @@ def _copy_verified_file_set(source_db: Path, snapshot_db: Path) -> None:
                 continue
             copied.append(
                 _fingerprint_stream(
-                    source_directory,
                     name,
                     directory_fd,
                     expected=expected,
                     destination=destination,
                 )
             )
-            if _current_metadata(source_directory, source_names, directory_fd) != initial:
+            if _current_metadata(source_names, directory_fd) != initial:
                 raise _SnapshotChanged
 
         verified: list[_FileFingerprint | None] = []
@@ -261,13 +279,12 @@ def _copy_verified_file_set(source_db: Path, snapshot_db: Path) -> None:
                 None
                 if expected is None
                 else _fingerprint_stream(
-                    source_directory,
                     name,
                     directory_fd,
                     expected=expected,
                 )
             )
-            if _current_metadata(source_directory, source_names, directory_fd) != initial:
+            if _current_metadata(source_names, directory_fd) != initial:
                 raise _SnapshotChanged
         if tuple(copied) != tuple(verified):
             raise _SnapshotChanged
@@ -290,10 +307,7 @@ def inspection_snapshot(
     requested_path: Path,
 ) -> Iterator[tuple[bool, int, int, Database | None]]:
     """Open a private, non-migrating, verified snapshot for inspection."""
-    try:
-        _require_snapshot_protocol()
-    except _UnsupportedSnapshotEntry:
-        raise StateError(_SNAPSHOT_ERROR) from None
+    _require_snapshot_protocol()
 
     if not _requested_entry_exists(requested_path):
         yield False, 0, LATEST_VERSION, None
@@ -342,7 +356,7 @@ def inspection_snapshot(
             raise StateError(_SNAPSHOT_ERROR)
         try:
             row = connection.execute("SELECT MAX(version) FROM schema_version").fetchone()
-            current = row[0] or 0
+            current = _validated_schema_version(row[0])
         except sqlite3.OperationalError:
             current = 0
         if current == LATEST_VERSION:
@@ -360,3 +374,12 @@ def inspection_snapshot(
             connection.close()
         if temporary is not None:
             temporary.cleanup()
+
+
+def _validated_schema_version(value: object) -> int:
+    """Accept only SQLite null or an exact nonnegative integer version."""
+    if value is None:
+        return 0
+    if type(value) is int and value >= 0:
+        return value
+    raise StateError(_SNAPSHOT_ERROR)

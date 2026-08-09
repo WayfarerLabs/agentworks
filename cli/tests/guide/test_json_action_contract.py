@@ -12,7 +12,7 @@ from click.testing import Result
 from typer.testing import CliRunner
 
 from agentworks.cli import app
-from agentworks.doctor import HealthGroup, HealthReport
+from agentworks.doctor import HealthGroup, HealthReport, MachineDiagnostic
 from agentworks.guide import ActionList, GuideAction, onboarding_actions
 from agentworks.guide.contributions import guide_contributions
 from agentworks.origin import Origin
@@ -215,7 +215,42 @@ def test_guide_doctor_actions_emit_one_parseable_report_without_sensitive_diagno
     document = _parse_exact_v1(result, "doctor", exit_code=1)
     assert sensitive not in result.stdout
     data = cast("dict[str, object]", document["data"])
-    assert data["counts"] == {"ok": 0, "info": 0, "warn": 0, "fail": 1}
+    assert data["counts"] == {"ok": 0, "info": 0, "unavailable": 0, "warn": 0, "fail": 1}
+
+
+def test_guide_doctor_action_accepts_closed_inspection_unavailable_report(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks import doctor
+
+    report = HealthReport()
+    group = HealthGroup("Database")
+    group.unavailable(
+        "Database",
+        "operator-private-human-detail",
+        machine_diagnostic=MachineDiagnostic.DATABASE_INSPECTION_UNAVAILABLE,
+    )
+    report.groups.append(group)
+    monkeypatch.setattr(doctor, "run_checks", lambda **_kwargs: report)
+    action = onboarding_actions()[0]
+    assert action.command is not None
+
+    result = CliRunner().invoke(app, list(action.command[1:]))
+
+    document = _parse_exact_v1(result, "doctor")
+    data = cast("dict[str, object]", document["data"])
+    assert data["counts"] == {"ok": 0, "info": 0, "unavailable": 1, "warn": 0, "fail": 0}
+    groups = cast("list[dict[str, object]]", data["groups"])
+    checks = cast("list[dict[str, object]]", groups[0]["checks"])
+    assert checks == [
+        {
+            "name": "Database",
+            "status": "unavailable",
+            "message": "secure database inspection is unavailable on this host",
+            "hint": None,
+        }
+    ]
+    assert "operator-private" not in result.stdout
 
 
 def test_validate_manifest_action_keeps_human_detail_and_verifies_redacted_json(

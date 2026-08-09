@@ -17,6 +17,8 @@ from ._helpers import (
     _vm_scope,
 )
 from .boundary import _live_vm_boundary, _platform_ops_ctx
+
+# Preserve every inspection name importable from this module before the split.
 from .inspect import (
     _NAME_CELL_WIDTH as _NAME_CELL_WIDTH,
 )

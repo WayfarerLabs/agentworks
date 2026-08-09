@@ -22,12 +22,14 @@ class DoctorDatabaseFacts:
     system_slug: str | None = None
     vms: tuple[VMRow, ...] = ()
     workspace_count: int = 0
+    inspection_unavailable: bool = False
     error: Exception | None = None
 
 
 def collect_database_facts() -> DoctorDatabaseFacts:
     """Read every database-backed doctor fact from one source generation."""
     from agentworks.db import SYSTEM_SLUG_KEY, Database
+    from agentworks.errors import DatabaseInspectionUnavailable
 
     try:
         with Database.inspection_snapshot() as (exists, current, latest, database):
@@ -42,6 +44,13 @@ def collect_database_facts() -> DoctorDatabaseFacts:
                 vms=tuple(database.list_vms()),
                 workspace_count=len(database.list_workspaces()),
             )
+    except DatabaseInspectionUnavailable:
+        return DoctorDatabaseFacts(
+            exists=False,
+            current=0,
+            latest=0,
+            inspection_unavailable=True,
+        )
     except Exception as error:
         return DoctorDatabaseFacts(exists=True, current=0, latest=0, error=error)
 
@@ -49,9 +58,16 @@ def collect_database_facts() -> DoctorDatabaseFacts:
 def check_system(facts: DoctorDatabaseFacts) -> HealthGroup:
     """Project the install-level system slug from shared database facts."""
     from agentworks.doctor import HealthGroup, MachineDiagnostic
+    from agentworks.errors import DatabaseInspectionUnavailable
 
     group = HealthGroup("System")
-    if facts.error is not None:
+    if facts.inspection_unavailable:
+        group.unavailable(
+            "System slug",
+            DatabaseInspectionUnavailable.MESSAGE,
+            machine_diagnostic=MachineDiagnostic.DATABASE_INSPECTION_UNAVAILABLE,
+        )
+    elif facts.error is not None:
         group.warn(
             "System slug",
             f"could not check the database: {facts.error}",
@@ -79,8 +95,16 @@ def append_vm_site_checks(
 ) -> None:
     """Project stored VM-to-site consistency from shared database facts."""
     from agentworks.doctor import MachineDiagnostic
+    from agentworks.errors import DatabaseInspectionUnavailable
     from agentworks.vms.sites import site_manifest_hint
 
+    if facts.inspection_unavailable:
+        group.unavailable(
+            "VM sites",
+            DatabaseInspectionUnavailable.MESSAGE,
+            machine_diagnostic=MachineDiagnostic.DATABASE_INSPECTION_UNAVAILABLE,
+        )
+        return
     if facts.error is not None:
         group.warn(
             "VM sites",
@@ -113,9 +137,16 @@ def append_vm_site_checks(
 def check_database(facts: DoctorDatabaseFacts) -> HealthGroup:
     """Project schema and contents checks from shared database facts."""
     from agentworks.doctor import HealthGroup, MachineDiagnostic
+    from agentworks.errors import DatabaseInspectionUnavailable
 
     group = HealthGroup("Database")
-    if facts.error is not None:
+    if facts.inspection_unavailable:
+        group.unavailable(
+            "Database",
+            DatabaseInspectionUnavailable.MESSAGE,
+            machine_diagnostic=MachineDiagnostic.DATABASE_INSPECTION_UNAVAILABLE,
+        )
+    elif facts.error is not None:
         group.fail(
             "Database",
             str(facts.error),

@@ -115,11 +115,11 @@ On an interactive terminal, output is tastefully colorized by role so it is easy
 glance: a yellow `Warning:` prefix, a red `Error:` prefix, bold section headers, a dim-green result
 line (the closing "VM deleted", "rekeyed", etc.), and dimmed secondary detail. `agw doctor` colors
 its per-check status labels the same way (green `[ok]`, yellow `[warn]`, red `[FAIL]`, unstyled
-`[info]`), plus its summary line's `fail`/`warn`/`ok` counts. Color is a presentation aid only,
-never carried in the message text. It is suppressed automatically when the target stream is not a
-terminal (pipes, redirects, CI capture) and under `--non-interactive`, so scripted and captured
-output stays byte-plain. Set the `NO_COLOR` environment variable (any value, honored by its
-presence) to opt out of color even on a terminal.
+`[info]` and `[unavailable]`), plus its summary line's `fail`/`warn`/`unavailable`/`ok` counts.
+Color is a presentation aid only, never carried in the message text. It is suppressed automatically
+when the target stream is not a terminal (pipes, redirects, CI capture) and under
+`--non-interactive`, so scripted and captured output stays byte-plain. Set the `NO_COLOR`
+environment variable (any value, honored by its presence) to opt out of color even on a terminal.
 
 Pressing Ctrl-C during a long-running operation triggers best-effort cleanup. Where the operation
 can roll back (e.g. `vm create` during the provisioning phase, `workspace create`, `agent create`,
@@ -484,7 +484,12 @@ the WAL and shared-memory sidecars when present. A main-only source is accepted 
 absence remains stable through copying and verification. A second source fingerprint must prove the
 complete set stayed unchanged before SQLite validates the private copy; concurrent transitions are
 retried. Doctor reports a pending migration without applying it and does not create or change the
-original database, WAL, or shared-memory files.
+original database, WAL, or shared-memory files. If the host cannot provide every primitive required
+for secure descriptor-first inspection, the System, VM sites, and Database rows report
+`[unavailable]`; that state is neither a warning nor a failure, so it does not by itself change the
+exit status. Invalid database entries and malformed schema versions still fail closed and make
+doctor exit nonzero. See the [doctor JSON contract](command-reference.md#doctor-json-schema) for the
+matching machine-readable status and count shape.
 
 ## Environment Variables
 

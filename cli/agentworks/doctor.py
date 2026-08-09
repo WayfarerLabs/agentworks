@@ -14,6 +14,7 @@ from enum import Enum, StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from agentworks.errors import DatabaseInspectionUnavailable
 from agentworks.path_rendering import format_host_path
 
 if TYPE_CHECKING:
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
 class Status(Enum):
     OK = "ok"
     INFO = "info"
+    UNAVAILABLE = "unavailable"
     WARN = "warn"
     FAIL = "fail"
 
@@ -39,6 +41,7 @@ class MachineDiagnostic(StrEnum):
     MANIFEST_INVALID = "manifest_invalid"
     RESOURCE_REGISTRY_INVALID = "resource_registry_invalid"
     DATABASE_UNAVAILABLE = "database_unavailable"
+    DATABASE_INSPECTION_UNAVAILABLE = "database_inspection_unavailable"
     SITE_PREFLIGHT_FAILED = "site_preflight_failed"
     TAILSCALE_TIMED_OUT = "tailscale_timed_out"
 
@@ -49,6 +52,7 @@ _MACHINE_DIAGNOSTICS: dict[MachineDiagnostic, tuple[str | None, str | None]] = {
     MachineDiagnostic.MANIFEST_INVALID: ("resource manifests did not load", None),
     MachineDiagnostic.RESOURCE_REGISTRY_INVALID: ("resource registry did not build", None),
     MachineDiagnostic.DATABASE_UNAVAILABLE: ("database check failed", None),
+    MachineDiagnostic.DATABASE_INSPECTION_UNAVAILABLE: (DatabaseInspectionUnavailable.MESSAGE, None),
     MachineDiagnostic.SITE_PREFLIGHT_FAILED: ("site preflight failed", None),
     MachineDiagnostic.TAILSCALE_TIMED_OUT: ("timed out", None),
 }
@@ -126,6 +130,16 @@ class HealthGroup:
     ) -> None:
         self._append(Status.WARN, name, message, hint, machine_diagnostic)
 
+    def unavailable(
+        self,
+        name: str,
+        message: str | None = None,
+        *,
+        hint: str | None = None,
+        machine_diagnostic: MachineDiagnostic | None = None,
+    ) -> None:
+        self._append(Status.UNAVAILABLE, name, message, hint, machine_diagnostic)
+
     def fail(
         self,
         name: str,
@@ -162,6 +176,10 @@ class HealthReport:
         return self.counts()[Status.WARN]
 
     @property
+    def unavailable_count(self) -> int:
+        return self.counts()[Status.UNAVAILABLE]
+
+    @property
     def fail_count(self) -> int:
         return self.counts()[Status.FAIL]
 
@@ -184,6 +202,7 @@ def health_report_data(report: HealthReport) -> JsonObject:
         "counts": {
             "ok": counts[Status.OK],
             "info": counts[Status.INFO],
+            "unavailable": counts[Status.UNAVAILABLE],
             "warn": counts[Status.WARN],
             "fail": counts[Status.FAIL],
         },
