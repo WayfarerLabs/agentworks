@@ -222,7 +222,7 @@ blocks and the migration workflow only; the broader registry-inventory scope rem
       reject invalid and special database paths without blocking, share one verified database
       snapshot across doctor groups, restore focused module sizes, reconcile final artifacts, and
       rerun project, fresh-eyes, full, and PR gates before requesting re-review.
-- [ ] Resolve the native-Windows and malformed-schema re-review round: represent unavailable secure
+- [x] Resolve the native-Windows and malformed-schema re-review round: represent unavailable secure
       database inspection as a first-class non-failing doctor outcome, reject non-integer schema
       versions through a complete path-free report, clean the accepted inspection seams, and rerun
       project, fresh-eyes, full, and PR gates before requesting re-review.

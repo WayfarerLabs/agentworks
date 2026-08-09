@@ -357,3 +357,21 @@ Dangling parent classification validation passed:
 - full mypy: 626 source files clean;
 - Rulesync generated-output check and locked-SDD validation: clean;
 - mandatory file lint: clean.
+
+## Final unsupported-host review closure
+
+The lead integrated every accepted correction, the canonical workstation-access disclosure from
+main, and the later concise operator-content changes from PR #463. The sole merge conflict retained
+this effort's JSON automation reference while adopting main's concise ADR wording. The project
+reviewer and independent fresh-eyes reviewer then approved the exact integrated boundary with no
+findings.
+
+Final integrated validation passed:
+
+- focused doctor, guide, schema, and concise-content merge slice: 258 passed;
+- full non-integration suite before the final main merge: 6,731 passed and 3 deselected;
+- Ruff check and format check: 626 files clean;
+- full mypy: 626 source files clean;
+- Rulesync generated-output check, locked-SDD validation, and mandatory file lint: clean;
+- GitHub Python 3.12, 3.13, and 3.14 tests, python-checks, CodeQL, lint-files, Rulesync, locked-SDD,
+  and the aggregate CI success check: all passed.
