@@ -58,7 +58,8 @@ locked.
 - [x] Facet returns as a plain noun (2026-08-06, operator ruling): the level a capability is driven
       at (vm, user, workspace, session), pairing methods and config; core owns the scope-to-facet
       mapping; the retired machinery meaning stays dead
-- [ ] Reviewed and merged to `main`
+- [x] Reviewed and merged to `main` (PR #407, 2026-08-06; staleness caught by integration review
+      2026-08-08, reconciled in this round)
 
 ### Onboarding and discovery (destination 1): 2026-08-05-onboarding-and-discovery
 
@@ -99,8 +100,9 @@ locked.
       plugins before the 0.14.0 cut, with a first-class disabled-error experience
 - [x] Seeded (FRD, PR #440, 2026-08-07; launchable whenever, with the moves consuming wave 2's
       descriptor registration and the guide topics consuming onboarding's first slice)
-- [ ] FRD merged to `main`
-- [ ] Picked up by an effort lead (inventory-first, phased artifact review)
+- [x] FRD merged to `main` (PR #440, 2026-08-08; ownership transferred to the effort lead)
+- [x] Picked up by an effort lead (inventory-first: R1 inventory draft PR #451 in phased artifact
+      review, three saga-lead findings pending as of 2026-08-08)
 - [ ] Implementation complete (moves, disabled errors, guide topics, upgrade-guide step)
 - [ ] Ships in 0.14.0 (gates the cut per `phasing.md` release mapping)
 - [ ] Locked
@@ -178,11 +180,12 @@ open-ended research placeholder.
 7. Done (2026-08-05): onboarding-and-discovery seeded (FRD, PR #413).
 8. Done (2026-08-06): onboarding seed merged (PR #413). Launch its effort lead when ready.
 9. Saga lead reviews wave 2 and onboarding PRs as they arrive.
-10. Design track: scope participation contract in review (PR #407); then the instance-state store
-    schema and the event vocabulary's first slice.
-11. Installer-plugins child seeded (PR #440, 2026-08-07). Launch its effort lead whenever; the R1
-    inventory can start immediately.
-12. Pre-0.14 gates in flight (2026-08-08): the installer-plugins child (FRD PR #440 pending merge,
-    R1 inventory PR #451 in phased review), the git-credential restructure (PR #455 in review), the
-    wave 3 breaking slice (design PR #453 converged), and the onboarding README bootstrap (later
-    onboarding phase). The cut waits for all four.
+10. Done (2026-08-06): scope participation contract merged (PR #407). Next design-track items: the
+    instance-state store schema and the event vocabulary's first slice.
+11. Done (2026-08-08): installer-plugins FRD merged (PR #440); its effort lead is active (R1
+    inventory PR #451 in phased review).
+12. Pre-0.14 gates in flight (2026-08-08, post-#455): the installer-plugins implementation (R1
+    inventory PR #451 in phased review), the wave 3 breaking slice (design PR #453 converged,
+    awaiting merge and implementation), and the onboarding README bootstrap (later onboarding
+    phase). The git-credential restructure gate is satisfied (PR #455, merged 2026-08-08). The cut
+    waits for the three open gates.

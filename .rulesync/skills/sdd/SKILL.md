@@ -91,9 +91,10 @@ no other's: do not update another SDD's content (a saga SDD's ledger, a sibling 
 unless specifically instructed to, and treat such an instruction as the exception, not standard
 process. When work surfaces an inconsistency in another SDD (a stale claim, a checkbox that no
 longer matches reality, a statement your change invalidates), flag it to the operator rather than
-editing it yourself. If you also have a working communication channel to that SDD's owner (for a
-child SDD, the saga lead), flag it there too; until such channels exist, the operator is the
-reliable route.
+editing it yourself. If you also have a working communication channel to that SDD's owner, flag it
+there too: for a transferred child artifact (FRD, HLA, plan, implementation) the owner is its effort
+lead, and for saga artifacts and rulings it is the saga lead; until such channels exist, the
+operator is the reliable route.
 
 One sanctioned channel does exist: new-file message passing. Adding a NEW file to another SDD's
 feature directory as a message is fine (a saga delivering seed notes into an adopted child's
@@ -295,6 +296,14 @@ date-anchored planning vocabulary and over-promised timeline semantics): child e
 independently and completely, intermediate states are visible on `main` rather than isolated, a lead
 orchestrates instead of locking, and the whole either runs to its lock or is deliberately
 compensated by unwinding.
+
+Compensation is deliberately minimal, not a hidden lifecycle. Only the operator can abandon a saga
+(in whole or in part), and the decision is a dated ruling recorded in target-state like any other.
+Already-merged children stay merged: compensation is new forward work (reverting or removing
+surfaces through ordinary reviewed PRs), never history rewriting, and the ledger records outcomes as
+new entries without unchecking anything. The terminal artifact state is the same lockfile as
+success, recording what completed and what was abandoned and why. Nothing else is promised; if a
+real abandonment ever needs more protocol, it is designed then, as saga work.
 
 The settled rules for the species:
 
