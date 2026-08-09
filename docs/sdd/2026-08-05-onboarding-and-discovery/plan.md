@@ -217,7 +217,7 @@ blocks and the migration workflow only; the broader registry-inventory scope rem
       and completions updated in the same commits.
 - [x] All focused and full gates pass; step reviewed by `agentworks-reviewer` and a fresh-eyes
       reviewer; valid findings resolved.
-- [ ] Always-green ready-to-merge PR opened and roadmap-lead review requested.
+- [x] Always-green ready-to-merge PR opened and roadmap-lead review requested.
 
 Definition of done: R7 and AC4 hold across the named commands, with human and JSON renderers sharing
 one fact source.
