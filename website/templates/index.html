@@ -14,21 +14,21 @@
     </head>
     <body>
         <a class="skip-link" href="#main-content">Skip to main content</a>
-        <header class="site-header">
-            <a class="brand" href="{{SITE_BASE}}">
-                <img src="{{SITE_BASE}}assets/agw-rocket.svg" alt="Agentworks home" />
-                <span aria-hidden="true">Agentworks</span>
-            </a>
-            <nav aria-label="Primary">
-                <a href="https://github.com/WayfarerLabs/agentworks">GitHub</a>
-                <a href="https://pypi.org/project/agentworks-cli/">PyPI</a>
-            </nav>
+        <header class="site-header home-header">
+            <p class="site-kicker">Agentworks / Product overview</p>
         </header>
-        <main id="main-content">
+        <main id="main-content" class="home-main">
             <section class="identity-panel" aria-labelledby="home-heading">
-                <div>
-                    <p class="eyebrow">Project / Overview</p>
-                    <h1 id="home-heading">Agentworks</h1>
+                <div class="hero-heading">
+                    <img
+                        class="hero-mark"
+                        src="{{SITE_BASE}}assets/agw-rocket.svg"
+                        alt="AGW rocket mark"
+                    />
+                    <div>
+                        <p class="eyebrow">Project / Overview</p>
+                        <h1 id="home-heading">Agentworks</h1>
+                    </div>
                 </div>
                 <div class="sourced-content">{{HOME_IDENTITY}}</div>
             </section>
@@ -40,22 +40,6 @@
                     Guided onboarding is not yet published. You can still explore the repository, PyPI package,
                     rationale, and security model.
                 </p>
-            </section>
-
-            <section id="problem" class="content-section">
-                <p class="section-index" aria-hidden="true">01</p>
-                <div>
-                    <h2>The problem space</h2>
-                    <div class="sourced-content">{{HOME_PROBLEM}}</div>
-                </div>
-            </section>
-
-            <section id="principles" class="content-section">
-                <p class="section-index" aria-hidden="true">02</p>
-                <div>
-                    <h2>Why it is built this way</h2>
-                    <div class="sourced-content">{{HOME_PRINCIPLES}}</div>
-                </div>
             </section>
 
             <nav class="explore-panel" aria-label="Explore Agentworks">
@@ -71,11 +55,7 @@
             </nav>
         </main>
         <footer>
-            <p>
-                <a href="https://github.com/WayfarerLabs/agentworks">Agentworks on GitHub</a>
-                <span aria-hidden="true">/</span>
-                <a href="{{SITE_BASE}}security/">Security</a>
-            </p>
+            <p>Agentworks</p>
         </footer>
     </body>
 </html>

@@ -138,52 +138,6 @@ CONTRACTS: Final = (
         ),
     ),
     ContentContract(
-        "HOME_PROBLEM",
-        Path("docs/why-agentworks.md"),
-        ((1, "Why Agentworks"), (2, "The Problem Space"), (3, "Workload Management")),
-        (
-            paragraph(
-                "Anyone who has had more than a few parallel agentic sessions has likely run into the problem "
-                "of keeping track of which agents are doing what, which sessions are active, what tools and "
-                "credentials are available in each session, how to coordinate work across multiple agents "
-                "(possibly working in the same repository or worktree), how to keep them all running reliably "
-                "(e.g. even when you close your laptop or lose your network connection), etc."
-            ),
-            paragraph(
-                "These are real challenges that impose real limits on how many agentic workloads a single "
-                "operator can reasonably manage at once. Most devs who have leaned into this space have "
-                "developed some amount of custom tooling to help with this problem. Solving for this at the "
-                "platform layer lets devs and their agents focus on shipping code instead of fiddling with "
-                "infrastructure."
-            ),
-        ),
-    ),
-    ContentContract(
-        "HOME_PRINCIPLES",
-        Path("README.md"),
-        ((1, "Agentworks"), (2, "Why It's Built This Way")),
-        (
-            paragraph("A few convictions shape the whole design. The short version:"),
-            unordered(
-                "**Autonomy and control are not a tradeoff.** Much of the ecosystem treats loss of control as "
-                "the price of agentic autonomy; Agentworks is built on the opposite bet, that the right "
-                "platform lets you have both.",
-                "**Composable, Linux-native isolation.** The hard boundary is the VM; agents are Linux users "
-                "and workspaces are Linux groups. Use the full model or any subset, and because it is all "
-                "ordinary users, groups, and filesystem permissions, graduated privilege between cooperating "
-                "agents (a low-privilege researcher handing artifacts to a privileged actor) is an everyday "
-                "pattern, not a special case.",
-                "**Support for differing levels of ephemerality.** Different operators have different needs "
-                "for how long-lived their workloads and related resources are. Robust, declarative templates "
-                "facilitate rapid setup and scale, while idempotent reinitialization and reuse of resources "
-                "across workloads allow durable resources such as agents to accumulate state and context.",
-                "**Declarative and idempotent.** Every layer is templated and declared, and the long-lived "
-                "resources (VMs and agents) can be reinitialized to pick up changes, so environments stay "
-                "consistent and evolve predictably rather than drifting.",
-            ),
-        ),
-    ),
-    ContentContract(
         "SECURITY_THREATS",
         Path("docs/why-agentworks.md"),
         ((1, "Why Agentworks"), (2, "The Problem Space"), (3, "Security")),
@@ -298,8 +252,6 @@ TEMPLATE_TOKENS: Final = {
         SITE_BASE_TOKEN,
         "{{HOME_META_DESCRIPTION}}",
         "{{HOME_IDENTITY}}",
-        "{{HOME_PROBLEM}}",
-        "{{HOME_PRINCIPLES}}",
     },
     "security.html": {
         SITE_BASE_TOKEN,
@@ -315,6 +267,9 @@ TEMPLATE_TOKENS: Final = {
 TEMPLATE_REQUIRED_LITERALS: Final = {
     "index.html": {
         "Guided onboarding is not yet published. You can still explore the repository, PyPI package,",
+        "View the GitHub repository",
+        "View the PyPI package",
+        "Read why Agentworks is built this way",
         "We take security seriously.",
         f'href="{REPOSITORY_URL}"',
         'href="https://pypi.org/project/agentworks-cli/"',
@@ -332,8 +287,6 @@ CONTENT_TOKEN_PLACEMENTS: Final = {
     "index.html": {
         "{{HOME_META_DESCRIPTION}}": ("meta", "description"),
         "{{HOME_IDENTITY}}": ("section-class", "identity-panel"),
-        "{{HOME_PROBLEM}}": ("section-id", "problem"),
-        "{{HOME_PRINCIPLES}}": ("section-id", "principles"),
     },
     "security.html": {
         "{{SECURITY_META_DESCRIPTION}}": ("meta", "description"),
@@ -611,10 +564,10 @@ def extract_content(repo_root: Path) -> dict[str, str]:
         contract_id: _render_blocks(blocks, contract, references)
         for contract_id, (contract, blocks) in extracted.items()
     }
-    home_problem, home_problem_blocks = extracted["HOME_PROBLEM"]
+    home_identity, home_identity_blocks = extracted["HOME_IDENTITY"]
     security_threats, security_threat_blocks = extracted["SECURITY_THREATS"]
     rendered["HOME_META_DESCRIPTION"] = html.escape(
-        _plain_inline(str(home_problem_blocks[0].value), home_problem, references), quote=True
+        _plain_inline(str(home_identity_blocks[0].value), home_identity, references), quote=True
     )
     rendered["SECURITY_META_DESCRIPTION"] = html.escape(
         _plain_inline(str(security_threat_blocks[0].value), security_threats, references), quote=True
@@ -640,6 +593,7 @@ class _TemplatePlacementParser(HTMLParser):
         self.onboarding_text: list[str] = []
         self.onboarding_sections: list[dict[str, str | None]] = []
         self.onboarding_headings = 0
+        self.anchor_hrefs: list[str] = []
 
     def _record_attributes(self, tag: str, attributes: dict[str, str | None]) -> None:
         for attribute, value in attributes.items():
@@ -658,6 +612,8 @@ class _TemplatePlacementParser(HTMLParser):
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attributes = _attribute_map(tag, attrs)
         self._record_attributes(tag, attributes)
+        if tag == "a" and attributes.get("href") is not None:
+            self.anchor_hrefs.append(str(attributes["href"]))
         self.stack.append((tag, attributes))
         if tag == "section" and attributes.get("id") == "onboarding":
             self.onboarding_sections.append(attributes)
@@ -734,6 +690,16 @@ def _validate_interim_template(name: str, parser: _TemplatePlacementParser) -> N
         raise ValueError("index.html: onboarding section must reference onboarding-heading")
     if parser.onboarding_headings != 1 or not onboarding_text:
         raise ValueError("index.html: onboarding must contain its nonempty reviewed heading and notice")
+    landing_destinations = (
+        REPOSITORY_URL,
+        "https://pypi.org/project/agentworks-cli/",
+        RATIONALE_URL,
+        f"{SITE_BASE_TOKEN}security/",
+    )
+    if any(parser.anchor_hrefs.count(destination) != 1 for destination in landing_destinations):
+        raise ValueError("index.html: each repository, package, rationale, and security destination is required once")
+    if len(parser.anchor_hrefs) != 5 or parser.anchor_hrefs.count("#main-content") != 1:
+        raise ValueError("index.html: landing anchors must be one skip link plus the four reviewed destinations")
 
 
 def _validate_template(name: str, template: str) -> None:

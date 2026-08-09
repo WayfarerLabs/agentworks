@@ -200,14 +200,19 @@ review.
 
 ## Shared shell acceptance
 
+- [ ] The compact home page shows the AGW rocket at two to three times the small-header scale,
+      followed by the repository-sourced identity, onboarding availability, and one link each for
+      GitHub, PyPI, longer rationale, and security. It renders no problem or principles section, and
+      its header and footer repeat none of those four destinations.
 - [ ] In current Chromium, Firefox, and WebKit at 320 CSS pixels, 400 percent zoom, touch landscape,
       and wide desktop, home, security, and 404 have no page overflow, clipped text or navigation,
       overlap, or fixed-height content loss. Record browser versions, viewport, date, and result
       before public release.
 - [x] With JavaScript disabled, home and security retain all content and links, while 404 retains
       its message, named scene, and home link. No surface depends on terminal familiarity.
-- [x] Keyboard-only traversal reaches the visible skip link, linked brand, navigation, content
-      links, 404 home link, and lander start control in source order with a visible focus outline.
+- [ ] Keyboard-only traversal reaches the visible skip links, security and 404 linked brands,
+      navigation, home destination links, 404 home link, and lander start control in source order
+      with a visible focus outline.
 - [ ] A screen reader reports each page title, header, main, footer, one `h1`, nested section
       headings, named navigation, sourced links, and 404 status/focus behavior. Initial game
       controls remain hidden.

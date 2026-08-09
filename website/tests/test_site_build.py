@@ -135,7 +135,10 @@ class SourceContractTests(RepositoryFixture):
         expected = {contract.contract_id for contract in site_builder.CONTRACTS}
         expected.update({"HOME_META_DESCRIPTION", "SECURITY_META_DESCRIPTION"})
         self.assertEqual(set(content), expected)
+        self.assertNotIn("HOME_PROBLEM", content)
+        self.assertNotIn("HOME_PRINCIPLES", content)
         self.assertIn("<strong>Durable agents</strong>", content["HOME_IDENTITY"])
+        self.assertTrue(content["HOME_META_DESCRIPTION"].startswith("A comprehensive toolkit"))
         self.assertIn("<em>when</em>", content["SECURITY_BOUNDARIES"])
         self.assertIn(site_builder.CLI_SECRETS_URL, content["SECURITY_SECRETS"])
         self.assertIn(site_builder.REPORTING_URL, content["SECURITY_REPORTING"])
@@ -147,14 +150,14 @@ class SourceContractTests(RepositoryFixture):
         source = rationale.read_text(encoding="utf-8")
         source = source.replace("# Why Agentworks\n", "# Why Agentworks\n\n## Unrelated\n\nStable.\n")
         rationale.write_text(source, encoding="utf-8")
-        self.assertIn("HOME_PROBLEM", site_builder.extract_content(self.root))
+        self.assertIn("SECURITY_THREATS", site_builder.extract_content(self.root))
 
     def test_heading_shaped_fenced_canary_is_ignored_and_unclosed_fence_fails(self) -> None:
         rationale = self.root / "docs/why-agentworks.md"
         source = rationale.read_text(encoding="utf-8")
-        canary = "```sh\n# Why Agentworks\n## The Problem Space\n### Workload Management\n```\n\n"
+        canary = "```sh\n# Why Agentworks\n## The Problem Space\n### Security\n```\n\n"
         rationale.write_text(canary + source, encoding="utf-8")
-        self.assertIn("HOME_PROBLEM", site_builder.extract_content(self.root))
+        self.assertIn("SECURITY_THREATS", site_builder.extract_content(self.root))
         rationale.write_text("```sh\n# hidden\n" + source, encoding="utf-8")
         with self.assertRaisesRegex(site_builder.ContractError, "unclosed fence"):
             site_builder.extract_content(self.root)
@@ -177,14 +180,37 @@ class SourceContractTests(RepositoryFixture):
     def test_duplicate_expected_sequence_within_one_section_fails(self) -> None:
         rationale = self.root / "docs/why-agentworks.md"
         source = rationale.read_text(encoding="utf-8")
-        before, remainder = source.split("### Workload Management\n", 1)
-        body, after = remainder.split("### Consistency", 1)
+        contract = next(contract for contract in site_builder.CONTRACTS if contract.contract_id == "SECURITY_THREATS")
+        duplicate = "\n\n".join(block.markdown for block in contract.expected)
         rationale.write_text(
-            before + "### Workload Management\n" + body + body + "### Consistency" + after,
+            source.replace("### Security\n", f"### Security\n\n{duplicate}\n", 1),
             encoding="utf-8",
         )
         with self.assertRaisesRegex(site_builder.ContractError, "duplicate expected block sequence"):
             site_builder.extract_content(self.root)
+
+    def test_longer_problem_and_principles_sources_do_not_change_the_landing(self) -> None:
+        before = (self.build() / "index.html").read_bytes()
+        readme = self.root / "README.md"
+        readme.write_text(
+            readme.read_text(encoding="utf-8").replace(
+                "A few convictions shape the whole design.",
+                "Several convictions shape the whole design.",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        rationale = self.root / "docs/why-agentworks.md"
+        rationale.write_text(
+            rationale.read_text(encoding="utf-8").replace(
+                "Anyone who has had more than a few parallel agentic sessions",
+                "Anyone coordinating several parallel agentic sessions",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        after = (self.build() / "index.html").read_bytes()
+        self.assertEqual(after, before)
 
     def test_invalid_utf8_bom_and_missing_input_fail_closed(self) -> None:
         policy = self.root / "SECURITY.md"
@@ -260,7 +286,7 @@ class TemplateContractTests(RepositoryFixture):
             template.replace("{{HOME_IDENTITY}}", "{{HOME_IDENTITY}}{{HOME_IDENTITY}}"),
             template.replace("{{HOME_IDENTITY}}", "{{SECURITY_THREATS}}"),
             template + "{{not-a-token}}",
-            template.replace('href="{{SITE_BASE}}"', 'data-base="{{SITE_BASE}}"', 1),
+            template.replace('href="{{SITE_BASE}}security/"', 'data-base="{{SITE_BASE}}security/"', 1),
         )
         for changed in variants:
             with self.subTest(changed=changed[-40:]), self.assertRaises(ValueError):
@@ -271,7 +297,7 @@ class TemplateContractTests(RepositoryFixture):
         substitutions = site_builder.extract_content(self.root)
         for injection in (
             "&lt;script&gt;{{ATTACK}}&lt;/script&gt;",
-            "{{HOME_PROBLEM}}",
+            "{{HOME_IDENTITY}}",
         ):
             with self.subTest(injection=injection):
                 substitutions["HOME_IDENTITY"] = injection
@@ -301,16 +327,23 @@ class TemplateContractTests(RepositoryFixture):
             ):
                 site_builder._validate_template("index.html", changed)
 
-    def test_interim_notice_section_and_heading_relationship_are_guarded(self) -> None:
+    def test_interim_notice_section_heading_and_landing_destinations_are_guarded(self) -> None:
         template = (self.root / "website/templates/index.html").read_text(encoding="utf-8")
         variants = (
             template.replace("</body>", f"<p>{NOTICE}</p></body>"),
             template.replace('id="onboarding"', 'id="onboarding-moved"'),
             template.replace('aria-labelledby="onboarding-heading"', 'aria-labelledby="other"', 1),
             template.replace('<h2 id="onboarding-heading">', '<h2 id="other">'),
+            template.replace(
+                "</footer>",
+                '<a href="https://github.com/WayfarerLabs/agentworks">Repeated repository</a></footer>',
+            ),
+            template.replace("</footer>", '<a href="#main-content">Repeated skip link</a></footer>'),
         )
         for changed in variants:
-            with self.subTest(change=changed[-100:]), self.assertRaisesRegex(ValueError, "onboarding|notice"):
+            with self.subTest(change=changed[-100:]), self.assertRaisesRegex(
+                ValueError, "onboarding|notice|destination|anchor"
+            ):
                 site_builder._validate_template("index.html", changed)
 
     def test_duplicate_attributes_cannot_bypass_template_contracts(self) -> None:
@@ -321,8 +354,8 @@ class TemplateContractTests(RepositoryFixture):
                 'name="description" content="safe" content="{{HOME_META_DESCRIPTION}}"',
             ),
             template.replace(
-                '<section id="problem" class="content-section">',
-                '<section id="unreviewed" id="problem" class="content-section">',
+                '<section class="identity-panel" aria-labelledby="home-heading">',
+                '<section class="unreviewed" class="identity-panel" aria-labelledby="home-heading">',
             ),
             template.replace(
                 'aria-labelledby="onboarding-heading">',
@@ -337,6 +370,7 @@ class TemplateContractTests(RepositoryFixture):
     def test_reviewed_destination_and_reporting_literals_cannot_drift(self) -> None:
         for name, old, new in (
             ("index.html", site_builder.RATIONALE_URL, "https://example.com/rationale"),
+            ("index.html", "Read why Agentworks is built this way", "Read the manifesto"),
             ("security.html", site_builder.REPORTING_URL, "https://example.com/report"),
             (
                 "security.html",
@@ -378,7 +412,7 @@ class BuildAndInstallTests(RepositoryFixture):
     def test_unapproved_external_url_fails_before_output_changes(self) -> None:
         output = self.build()
         before = snapshot(output)
-        template = self.root / "website/templates/index.html"
+        template = self.root / "website/templates/security.html"
         source = template.read_text(encoding="utf-8")
         template.write_text(
             source.replace("</main>", '<a href="https://example.com/unapproved">Unapproved</a>\n</main>'),
@@ -611,7 +645,7 @@ class BuildAndInstallTests(RepositoryFixture):
         ):
             site_builder.build_site(self.root, output, "/agentworks/")
         self.assertIn("warning: installed output is valid; retained backup", errors.getvalue())
-        self.assertIn('href="/agentworks/"', (output / "index.html").read_text(encoding="utf-8"))
+        self.assertIn('href="/agentworks/security/"', (output / "index.html").read_text(encoding="utf-8"))
 
     def test_cli_requires_full_shape_and_reports_one_line_errors(self) -> None:
         result = subprocess.run(
@@ -682,10 +716,11 @@ class GeneratedDocumentTests(RepositoryFixture):
 
     def test_home_outline_links_and_interim_guards_are_exact(self) -> None:
         document = self.documents["home"]
-        self.assertEqual(
-            document.headings,
-            ["Agentworks", "Guided onboarding", "The problem space", "Why it is built this way"],
-        )
+        self.assertEqual(document.headings, ["Agentworks", "Guided onboarding"])
+        self.assertNotIn("problem", document.ids)
+        self.assertNotIn("principles", document.ids)
+        self.assertNotIn("Anyone who has had more than a few parallel agentic sessions", self.pages["home"])
+        self.assertNotIn("A few convictions shape the whole design", self.pages["home"])
         notice = " ".join(document.text_by_id["onboarding-availability"].split())
         self.assertEqual(notice, NOTICE)
         document_text = " ".join("".join(document.all_text).split())
@@ -706,10 +741,41 @@ class GeneratedDocumentTests(RepositoryFixture):
             and any(parent == "section" and attrs.get("id") == "onboarding" for parent, attrs in ancestors)
         ]
         self.assertEqual(len(headings), 1)
-        self.assertEqual(self.pages["home"].count("We take security seriously."), 1)
+        destinations = (
+            site_builder.REPOSITORY_URL,
+            "https://pypi.org/project/agentworks-cli/",
+            site_builder.RATIONALE_URL,
+            "/security/",
+        )
         links = document.tags("a")
-        self.assertIn("/security/", [link.get("href") for link in links])
+        hrefs = [link.get("href") for link in links]
+        self.assertEqual(len(links), 5)
+        for destination in destinations:
+            self.assertEqual(hrefs.count(destination), 1)
+        destination_elements = [
+            (attributes, ancestors)
+            for tag, attributes, ancestors in document.elements
+            if tag == "a" and attributes.get("href") in destinations
+        ]
+        self.assertTrue(
+            all(
+                any(tag == "nav" and attributes.get("aria-label") == "Explore Agentworks" for tag, attributes in ancestors)
+                for _, ancestors in destination_elements
+            )
+        )
+        self.assertFalse(
+            [
+                attributes
+                for tag, attributes, ancestors in document.elements
+                if tag == "a" and any(parent in {"header", "footer"} for parent, _ in ancestors)
+            ]
+        )
+        self.assertEqual(self.pages["home"].count("We take security seriously."), 1)
         self.assertTrue(any(link.get("class") == "security-link" for link in links))
+        hero = [image for image in document.tags("img") if image.get("class") == "hero-mark"]
+        self.assertEqual(len(hero), 1)
+        self.assertEqual(hero[0].get("src"), "/assets/agw-rocket.svg")
+        self.assertEqual(hero[0].get("alt"), "AGW rocket mark")
         forbidden = (
             "<pre",
             "clipboard",
@@ -804,7 +870,7 @@ class GeneratedDocumentTests(RepositoryFixture):
         for fake_terminal in ("window-control", "crt", "green-on-black", "prompt-glyph"):
             self.assertNotIn(fake_terminal, lowered)
 
-    def test_home_identity_grid_contains_its_scoped_heading_at_desktop_width(self) -> None:
+    def test_home_identity_grid_and_rocket_hero_reflow_at_desktop_width(self) -> None:
         css = (self.output / "static/site.css").read_text(encoding="utf-8")
         heading_rule = css.split(".identity-panel h1 {", 1)[1].split("}", 1)[0]
         self.assertIn("max-width: 100%", heading_rule)
@@ -814,6 +880,12 @@ class GeneratedDocumentTests(RepositoryFixture):
         desktop = css.split("@media (min-width: 48rem)", 1)[1]
         identity_rule = desktop.split(".identity-panel {", 1)[1].split("}", 1)[0]
         self.assertIn("grid-template-columns: minmax(0, 1fr) minmax(0, 1fr)", identity_rule)
+        hero_rule = css.split(".hero-mark {", 1)[1].split("}", 1)[0]
+        self.assertIn("width: clamp(3.2rem, 12vw, 4.8rem)", hero_rule)
+        self.assertIn("height: clamp(4.8rem, 18vw, 7.2rem)", hero_rule)
+        self.assertIn("object-fit: contain", hero_rule)
+        home_main_rule = css.split(".home-main {", 1)[1].split("}", 1)[0]
+        self.assertIn("gap: clamp(1.5rem, 4vw, 2.75rem)", home_main_rule)
 
     def test_pinned_color_contrasts_meet_text_component_and_status_thresholds(self) -> None:
         expected = (

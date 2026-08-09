@@ -8,10 +8,12 @@ from permanent repository documentation. Generated output stays outside the repo
 published by any static host.
 
 The current release is intentionally useful without guided onboarding. It offers the product
-overview, operating principles, permanent project links, security deep dive, and custom 404. The
-home page states that guided onboarding is not yet published and contains no substitute command or
-copy control. A later change will replace that notice with the canonical onboarding source after
-that source is available on `main`.
+identity, permanent project links, security deep dive, and custom 404. The compact home page renders
+the repository-sourced identity and states that guided onboarding is not yet published. It does not
+render the longer problem statement or principles, which remain maintained in
+`docs/why-agentworks.md` behind one rationale link. The page contains no substitute command or copy
+control. A later change will replace the notice with the canonical onboarding source after that
+source is available on `main`.
 
 ## Local build and test
 
@@ -68,7 +70,7 @@ before a public release.
 
 ## Artifact contract
 
-The complete output contains exactly:
+Generated output is not maintained or edited. The complete output contains exactly:
 
 ```text
 404.html
@@ -104,9 +106,11 @@ repository is rejected, a successful build creates no Git status residue.
 
 The builder reads three permanent repository inputs:
 
-- `README.md` owns the short product identity and design principles.
-- `docs/why-agentworks.md` owns the problem statement, threat model, isolation boundaries,
-  limitations, operator posture, and credential/secret explanation.
+- `README.md` owns the concise product identity rendered on the landing page. Its short design
+  summary remains repository documentation, not additional landing-page content.
+- `docs/why-agentworks.md` owns the longer problem-and-principles rationale linked once from the
+  landing page. It also owns the threat model, isolation boundaries, limitations, operator posture,
+  and credential/secret explanation rendered on the security page.
 - `SECURITY.md` owns private vulnerability reporting and the reporting URL.
 
 Passages are selected by complete heading keypaths and exact normalized blocks, then escaped and
@@ -119,6 +123,11 @@ Templates own only headings, navigation, destination labels, presentation-neutra
 and the bounded interim availability notice. `website/` does not own product behavior, security
 claims, vulnerability contact details, or installation instructions. The selected SVG and lander
 implementation are permanent assets and must not be regenerated from design-history files.
+
+The landing template exposes exactly one anchor each for the repository, PyPI package, longer
+rationale, and security deep dive. Its header and footer do not repeat those destinations. Build
+artifacts are disposable projections of the templates and permanent sources; maintain the sources,
+not a generated `index.html` or `security/index.html`.
 
 ## Release stages
 
