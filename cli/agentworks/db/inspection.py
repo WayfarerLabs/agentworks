@@ -374,19 +374,32 @@ def _schema_version_from_history(connection: sqlite3.Connection) -> int:
     if connection.execute("PRAGMA foreign_key_list(schema_version)").fetchall():
         raise StateError(_SNAPSHOT_ERROR)
 
-    rows = connection.execute("SELECT version, typeof(version) FROM schema_version ORDER BY rowid").fetchall()
-    if not rows:
-        return 0
-    versions: list[int] = []
-    for version, storage in rows:
-        if type(version) is not int or storage != "integer":
-            raise StateError(_SNAPSHOT_ERROR)
-        versions.append(version)
-    current = max(versions)
-    first = 0 if legacy_shape and 0 in versions else 1
-    if current < first or sorted(versions) != list(range(first, current + 1)):
+    history = connection.execute(
+        """
+        SELECT
+            COUNT(*),
+            COUNT(DISTINCT version),
+            COALESCE(SUM(CASE WHEN typeof(version) = 'integer' THEN 0 ELSE 1 END), 0),
+            MIN(version),
+            MAX(version)
+        FROM schema_version
+        """
+    ).fetchone()
+    if history is None:
         raise StateError(_SNAPSHOT_ERROR)
-    return current
+    row_count, distinct_count, invalid_type_count, minimum, maximum = history
+    if not all(type(value) is int for value in (row_count, distinct_count, invalid_type_count)):
+        raise StateError(_SNAPSHOT_ERROR)
+    if row_count == 0:
+        if distinct_count != 0 or invalid_type_count != 0 or minimum is not None or maximum is not None:
+            raise StateError(_SNAPSHOT_ERROR)
+        return 0
+    if invalid_type_count != 0 or type(minimum) is not int or type(maximum) is not int:
+        raise StateError(_SNAPSHOT_ERROR)
+    first = 0 if legacy_shape and minimum == 0 else 1
+    if minimum != first or row_count != distinct_count or row_count != maximum - first + 1:
+        raise StateError(_SNAPSHOT_ERROR)
+    return maximum
 
 
 def _requested_entry_exists(requested_path: Path) -> bool:
