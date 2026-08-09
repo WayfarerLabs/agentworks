@@ -27,6 +27,8 @@ rules[14]:
     description: Always use the latest stable version when installing or updating software
     applyTo[1]: **/*
   - path: @.codex/memories/message-signatures.md
+    description: Sign every outward-facing message with your session identity
+    applyTo[1]: **/*
   - path: @.codex/memories/permission-to-fail.md
     description: It is ok to say you don't know or that something isn't working
     applyTo[1]: **/*

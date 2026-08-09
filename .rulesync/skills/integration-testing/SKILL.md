@@ -207,11 +207,9 @@ offers; it does not act. Wait for explicit operator authorization before any com
 honestly: failures get their actual output attached, not a paraphrase, and any step you skipped gets
 named as skipped, not omitted.
 
-Identify yourself in every PR comment and disposition: read the session name from the
-`AGENTWORKS_SESSION` environment variable at the time you post, and sign off with it, for example a
-trailing line like `-- <name> (agentworks integration-test session)`. Never hardcode a name; read it
-fresh each time. If `AGENTWORKS_SESSION` is not present in the environment, fall back to the plain
-label "integration tester" instead of guessing or leaving the comment unsigned.
+Identify yourself in every PR comment and disposition per the always-on `message-signatures` rule;
+this skill's role descriptor is "agentworks integration-test session", and the unset-variable
+fallback label is "integration tester".
 
 ## Delegating to tester subagents
 
