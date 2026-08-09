@@ -658,6 +658,12 @@ Consumers use ordinary direct control flow. They do not add cleanup fences, scru
 rollback-on-interrupt machinery, or intermediate owner graphs for in-memory erasure. The workstation
 process is trusted, and Python local/reference lifetime is best-effort only.
 
+VM providers may stage a bootstrap script containing a resolved credential only for the duration of
+the delivery operation. Any local, host-side, or guest-side staging file is private, is removed on
+success and every failure or interrupt path, and has verified failure-path coverage. This is durable
+file hygiene, not permission to add process-memory owners, traceback rewriting, or generic cleanup
+fences. Provider-retained configuration remains credential-free.
+
 ### Explicit caller policy
 
 `InteractionPolicy` moves with one shared validator to `agentworks.secrets.policy`:
@@ -1273,8 +1279,8 @@ state MUST:
    typed batches without consumer-side memory-erasure machinery;
 3. replace string/none preview with pure typed previews and migrate orchestration prediction;
 4. migrate list, describe, doctor, and env reveal records and rendering;
-5. migrate the already-existing verification service to validated names, all outcomes, and its
-   cleanup fence while its CLI may retain the one-name checkpoint shape;
+5. migrate the already-existing verification service to validated names and all outcomes while its
+   CLI may retain the one-name checkpoint shape;
 6. remove aliases, dict/error/quiet wrappers, `disabled_plugin_backends`, old root exports, and
    every stale consumer;
 7. add the manifest-driven signature, first-statement, reverse-closure, forwarding-edge, runtime
