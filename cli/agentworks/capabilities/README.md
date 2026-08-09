@@ -601,9 +601,10 @@ graph traversal selects these arms from table keys. Registration checks all of t
 including on unions whose arms currently contain no resource markers, before an implementation is
 seated.
 
-A union default may select only the omission-compatible arm. Scalar shorthands must dispatch through
-the same union-level declaration used by validation, filling, extraction, schema emission, and
-conformance; an arm-local shorthand alone cannot select an arm.
+A union default may select only the arm that the field's omitted spelling means; adding an arm must
+not change that meaning. Scalar shorthands must dispatch through the same union-level declaration
+used by validation, filling, extraction, schema emission, and conformance; an arm-local shorthand
+alone cannot select an arm.
 
 Name each arm for the mechanism it selects rather than its position (`ssh`, not `remote`; `ambient`,
 `service-principal`, `access-key`). Pick the discriminator key by the field's grammar. Action-named
@@ -665,9 +666,12 @@ rather than folding each capability into its consuming domain, where the layerin
 capability-imports-domain violation would go unseen. It is also the natural home for the base class
 and this guide and, in a plugin world, the canonical answer to "what does the system support."
 
-`vm-platform` implementations live under `capabilities/vm_platform/`, and `git-credential-provider`
-implementations live under `capabilities/git_credential/`. Consuming resources and materialization
-code stay in their domain packages.
+`vm-platform`, `harness-integration`, and `git-credential-provider` implementations live under
+`capabilities/vm_platform/`, `capabilities/harness_integration/`, and
+`capabilities/git_credential/`. `secret-backend` currently lives under `secrets/` and implements its
+own protocol rather than the shared capability base;
+[#374](https://github.com/WayfarerLabs/agentworks/issues/374) tracks that alignment. Consuming
+resources and materialization code stay in their domain packages.
 
 ### Related
 

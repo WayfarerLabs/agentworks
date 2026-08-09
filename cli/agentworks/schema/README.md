@@ -55,13 +55,16 @@ The main comparators are:
 - `tests/schema/test_owner_templates.py` for D5;
 - `tests/capabilities/test_declare_once_end_to_end.py` for D1 through D5 from one declaration.
 
+D6 has no independent comparator against D3: its tests pin error paths as literals rather than
+checking that field documentation can address them.
+
 ## Structural unions
 
 `StructuralUnion` is selector-free. Its closed model arms must be distinguishable by required and
 allowed operator-written keys. Registration rejects overlapping or open arms, validation aliases, a
-coexisting discriminator, reference markers on the union holder, and reference-bearing arms that can
-be reached only through scalar shorthand. These refusals keep validation, schema, filling, and
-extraction on the same selector.
+coexisting discriminator, reference markers on the union holder, and any shorthand-bearing arm that
+contains a reference marker. These refusals keep validation, schema, filling, and extraction on the
+same selector.
 
 Scalar shorthand remains valid for marker-free arms. Reference markers belong on fields inside an
 arm. See the capability modeling tiers for when a structural union is appropriate.

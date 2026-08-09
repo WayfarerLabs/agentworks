@@ -205,7 +205,7 @@ def test_a_nested_tagged_union_renders_every_arm_with_its_own_fields() -> None:
     assert "      mode  (one of: ssh, required)" in text
     assert "      host  (string, required, min length 1, e.g. me@gpu-box)" in text
     assert _field_entry(text, "host").endswith("The SSH host running `limactl` (e.g. `user@host`).")
-    assert "vm_host" not in _field_entry(text, "host")
+    assert "vm_host" not in text
 
 
 def test_a_nested_union_arm_summary_reaches_the_terminal_as_plain_text() -> None:

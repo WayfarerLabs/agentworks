@@ -268,7 +268,8 @@ class GitCredentialProvider(Capability):
         is set globally in the managed include), and picks the most
         specific credential: exact repo, then owner (first path
         segment), then the host's default (an entry without scopes),
-        then the first store line for the host.
+        then the first store line for the host, which keeps entries added
+        through ``vm add-git-credential`` usable.
         """
 
     @abstractmethod
