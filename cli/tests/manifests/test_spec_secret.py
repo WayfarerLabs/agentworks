@@ -27,7 +27,9 @@ def test_every_field_round_trips() -> None:
     )
 
 
-def test_all_three_mapping_shapes_validate() -> None:
+def test_raw_mapping_carrier_preserves_legacy_shapes_before_registry_validation() -> None:
+    """Decode is lossless; source-specific registry validation rejects legacy rows."""
+
     row = decode(
         "secret",
         "npm-token",

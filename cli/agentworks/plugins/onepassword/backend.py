@@ -18,9 +18,10 @@ whoami to report). A signed-out state is therefore detected from a failing
 ``op read`` (see the marker classification below).
 
 The ``--account`` selection path (the flag name, and that it may precede the
-positional reference) matches 1Password CLI v2 docs but is asserted from
-docs, not exercised: there is no ``op`` binary in the dev environment, so
-the tests fake the subprocess seam.
+positional reference) matches 1Password CLI v2 docs. Tests deliberately use
+a closed fake-provider boundary so they neither depend on nor authenticate
+through an operator's credentials; real multi-account parsing therefore
+remains externally unexercised.
 
 Mapping is required (there is no derive-from-name convention). Each mapping
 is one native ``op://vault/item/field`` reference string; an optional
@@ -67,9 +68,10 @@ _OP_BINARY = "op"
 # ``op whoami`` is not a reliable liveness probe, because under the 1Password
 # app's CLI integration it reports "not signed in" even when ``op read``
 # works, so a whoami gate would abort a working setup. Classification of a
-# failing read: signed-out markers -> ConnectivityError; the narrow not-found
-# markers -> SecretMappingError; anything else -> ExternalError (the fail-safe
-# halt). The not-found markers are deliberately NARROW and item/field-specific:
+# failing read: signed-out markers -> authentication failure; the narrow
+# not-found markers -> hard mapping failure; anything else -> external failure
+# (the fail-safe halt). The not-found markers are deliberately NARROW and
+# item/field-specific:
 # a broad marker like "no such" would also match a Go-style transport error
 # ("dial tcp: lookup ...: no such host") and mislabel connectivity as a hard
 # mapping error with misleading remediation. Anything not matched by the

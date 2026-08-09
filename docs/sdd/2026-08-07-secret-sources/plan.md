@@ -1,6 +1,6 @@
 # Plan: Secret Sources
 
-- Status: Draft for pre-implementation review
+- Status: Active — final closeout
 - FRD: [frd.md](./frd.md)
 - Architecture: [hla.md](./hla.md)
 - Migration: [migration-strategy.md](./migration-strategy.md)
@@ -54,7 +54,7 @@ describe, never as final polish.
       whole feature is ready.
 - [x] Migration strategy and this plan pass repository gates and independent `agentworks-reviewer`
       review with every valid finding resolved.
-- [ ] Roadmap lead reviews the migration strategy and plan; Phase 0 closes when review converges,
+- [x] Roadmap lead reviews the migration strategy and plan; Phase 0 closes when review converges,
       while the feature PR remains draft for implementation.
 
 **Definition of done:** design intent, migration boundary, phase sequence, and objective gates are
@@ -248,7 +248,7 @@ the new command.
 - [x] Exercise the real CLI in an isolated configuration: implied env-var resolution, prompt
       refusal, `secret verify`, unknown direct `onepassword` remediation, and a declared OnePassword
       source without printing any secret value.
-- [ ] Run Green on every supported Python version through CI. Complete `agentworks-reviewer`,
+- [x] Run Green on every supported Python version through CI. Complete `agentworks-reviewer`,
       roadmap-lead, and fresh-eyes review (the fallback if Copilot is unavailable) with every valid
       finding resolved.
 - [ ] Create `locked.md` only in the final feature commit, summarizing shipped behavior, the 0.14
