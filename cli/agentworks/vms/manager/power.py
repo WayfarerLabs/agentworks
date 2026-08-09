@@ -210,8 +210,12 @@ def vm_description_data(description: VMDescription) -> JsonObject:
                 }
                 for workspace in description.workspaces
             ],
+            # Event details are historical free text, including messages written
+            # by older failure paths. They have no closed safe contract, so JSON
+            # must fail closed rather than expose a command or secret-bearing
+            # diagnostic. The human renderer retains the legacy detail display.
             "events": [
-                {"created_at": event.created_at, "event": event.event, "detail": event.detail}
+                {"created_at": event.created_at, "event": event.event, "detail": None}
                 for event in description.events
             ],
         },
@@ -365,8 +369,15 @@ def vm_description(
                 issues.append(issue)
                 diagnostics.append(VMDiagnostic(issue=issue, error=exc))
             else:
-                if vm.tailscale_host is not None and observed not in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
-                    live_resources = _mgr._query_live_resources(vm, config)
+                pass
+
+    # A platform-status diagnostic does not make the bounded resource helper
+    # unsafe. Preserve the legacy best-effort facts unless the observation
+    # definitively says the host is stopped.
+    if vm.tailscale_host is not None and observed_status not in {"stopped", "deallocated"}:
+        import agentworks.vms.manager as _mgr
+
+        live_resources = _mgr._query_live_resources(vm, config)
 
     stored_slug = db.get_setting(SYSTEM_SLUG_KEY)
     if stored_slug is None:

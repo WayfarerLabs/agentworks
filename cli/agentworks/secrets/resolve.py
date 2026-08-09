@@ -387,7 +387,7 @@ def resolve_secrets(
         backends,
         errors=errors,
         registry=registry,
-        reporter=reporter or OutputResolutionReporter(),
+        reporter=OutputResolutionReporter() if reporter is None else reporter,
         interactive_available=output.is_interactive(),
     )
 

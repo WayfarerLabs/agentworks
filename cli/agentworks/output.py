@@ -363,12 +363,27 @@ class _DefaultHandler:
 # (as today) so output emitted from an existing worker thread still sees
 # the installed handler. See output-model-lld.md sec 1 for the rationale.
 _level: ContextVar[int] = ContextVar("_output_level", default=0)
+_presentation_suppressed: ContextVar[bool] = ContextVar("_presentation_suppressed", default=False)
 _handler: OutputHandler = _DefaultHandler()
 
 
 def _current_level() -> int:
     """The ambient section level for the current flow (0 = top level)."""
     return _level.get()
+
+
+@contextmanager
+def suppress_presentation() -> Iterator[None]:
+    """Temporarily suppress ordinary service presentation for machine output.
+
+    Prompts retain their handler path and interactivity; this only prevents
+    service status, progress, and resolver narration from corrupting stdout.
+    """
+    token = _presentation_suppressed.set(True)
+    try:
+        yield
+    finally:
+        _presentation_suppressed.reset(token)
 
 
 @contextmanager
@@ -451,7 +466,8 @@ def truncate(text: str, width: int) -> str:
 
 def info(message: str) -> None:
     """Emit a top-level status message."""
-    _handler.emit(Role.BODY, message, _current_level())
+    if not _presentation_suppressed.get():
+        _handler.emit(Role.BODY, message, _current_level())
 
 
 def detail(message: str) -> None:
@@ -463,12 +479,14 @@ def detail(message: str) -> None:
     in a :func:`section` block; a headerless ``section()`` pushes a level
     with no header line.
     """
-    _handler.emit(Role.DETAIL, message, _current_level())
+    if not _presentation_suppressed.get():
+        _handler.emit(Role.DETAIL, message, _current_level())
 
 
 def warn(message: str) -> None:
     """Emit a non-fatal warning."""
-    _handler.emit(Role.WARNING, message, _current_level())
+    if not _presentation_suppressed.get():
+        _handler.emit(Role.WARNING, message, _current_level())
 
 
 def result(message: str) -> None:
@@ -478,7 +496,8 @@ def result(message: str) -> None:
     closing line of a command stays flush-left even inside nested
     sections.
     """
-    _handler.emit(Role.RESULT, message, 0)
+    if not _presentation_suppressed.get():
+        _handler.emit(Role.RESULT, message, 0)
 
 
 def error(message: str) -> None:

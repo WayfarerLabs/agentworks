@@ -86,11 +86,13 @@ def session_describe(
     if output_format is OutputFormat.JSON:
         from click import get_binary_stream
 
+        from agentworks import output
         from agentworks.machine_output import MachineOutputCommand, write_json_envelope
         from agentworks.secrets.resolve import QuietResolutionReporter
         from agentworks.sessions.manager._queries import session_description_data
 
-        description = session_description(get_db(), config, name=name, reporter=QuietResolutionReporter())
+        with output.suppress_presentation():
+            description = session_description(get_db(), config, name=name, reporter=QuietResolutionReporter())
         write_json_envelope(
             MachineOutputCommand.SESSION_DESCRIBE,
             session_description_data(description),
@@ -142,20 +144,22 @@ def session_list(
     if output_format is OutputFormat.JSON:
         from click import get_binary_stream
 
+        from agentworks import output
         from agentworks.machine_output import MachineOutputCommand, write_json_envelope
         from agentworks.secrets.resolve import QuietResolutionReporter
         from agentworks.sessions.manager._queries import session_listing_data
 
-        listing = session_listing(
-            db,
-            config,
-            workspace_name=parse_csv_filter(workspace),
-            vm_name=parse_csv_filter(vm),
-            agent_name=parsed_agent,
-            admin_only=admin,
-            no_status=no_status,
-            reporter=QuietResolutionReporter(),
-        )
+        with output.suppress_presentation():
+            listing = session_listing(
+                db,
+                config,
+                workspace_name=parse_csv_filter(workspace),
+                vm_name=parse_csv_filter(vm),
+                agent_name=parsed_agent,
+                admin_only=admin,
+                no_status=no_status,
+                reporter=QuietResolutionReporter(),
+            )
         write_json_envelope(
             MachineOutputCommand.SESSION_LIST,
             session_listing_data(listing),

@@ -65,7 +65,11 @@ def agent_list(
     if names_only and output_format is OutputFormat.JSON:
         raise typer.BadParameter("cannot be used with --output json", param_hint="--names-only")
 
-    from agentworks.agents.manager import agent_listing, render_agent_listing
+    from agentworks.agents.manager import agent_listing, list_agents, render_agent_listing
+
+    if names_only:
+        list_agents(get_db(), vm_name=parse_csv_filter(vm), names_only=True)
+        return
 
     listing = agent_listing(get_db(), vm_name=parse_csv_filter(vm))
     if output_format is OutputFormat.JSON:

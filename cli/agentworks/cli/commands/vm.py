@@ -88,7 +88,11 @@ def vm_list(
     if names_only and output_format is OutputFormat.JSON:
         raise typer.BadParameter("cannot be used with --output json", param_hint="--names-only")
 
-    from agentworks.vms.manager import render_vm_listing, vm_listing
+    from agentworks.vms.manager import list_vms, render_vm_listing, vm_listing
+
+    if names_only:
+        list_vms(get_db(), names_only=True)
+        return
 
     listing = vm_listing(get_db())
     if output_format is OutputFormat.JSON:
@@ -133,11 +137,13 @@ def vm_describe(
     if output_format is OutputFormat.JSON:
         from click import get_binary_stream
 
+        from agentworks import output
         from agentworks.machine_output import MachineOutputCommand, write_json_envelope
         from agentworks.secrets.resolve import QuietResolutionReporter
         from agentworks.vms.manager.power import vm_description_data
 
-        description = vm_description(get_db(), config, name, reporter=QuietResolutionReporter())
+        with output.suppress_presentation():
+            description = vm_description(get_db(), config, name, reporter=QuietResolutionReporter())
         write_json_envelope(
             MachineOutputCommand.VM_DESCRIBE,
             vm_description_data(description),
