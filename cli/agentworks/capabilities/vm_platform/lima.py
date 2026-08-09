@@ -319,6 +319,16 @@ class LimaPlatform(VMPlatform):
             )
 
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
+        try:
+            return self._create(request, ctx)
+        except BaseException:
+            # A failed create retains every frame in its traceback. Scrub the
+            # caller-owned carrier in place so neither this frame nor the
+            # delegated create frame keeps the resolved key alive.
+            request.tailscale_auth_key = None
+            raise
+
+    def _create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
         if not self.is_remote:
             # Preflight re-runs the same check at the composition root;
             # keeping it here too costs one PATH scan and keeps the op's
@@ -391,7 +401,12 @@ class LimaPlatform(VMPlatform):
         try:
             if self.is_remote:
                 redactions = (request.tailscale_auth_key,) if request.tailscale_auth_key else ()
-                self._create_remote(instance_name, rendered, redactions=redactions)
+                try:
+                    self._create_remote(instance_name, rendered, redactions=redactions)
+                finally:
+                    # A later join failure retains this create frame. The
+                    # remote create has already consumed the logger redactions.
+                    redactions = ()
             else:
                 self._create_local(instance_name, rendered)
 
@@ -480,6 +495,7 @@ class LimaPlatform(VMPlatform):
             )
         finally:
             key_input = ""
+            auth_key = ""
 
     def _restart_sentinel_present(self, instance_name: str) -> bool:
         """True if a bootstrap step left the restart sentinel in the guest.
@@ -542,6 +558,8 @@ class LimaPlatform(VMPlatform):
         except SSHError:
             self._log_provision_errors(instance_name)
             raise
+        finally:
+            lima_yaml = ""
 
     def _host_transport(self, logger: SSHLogger | None = None) -> SSHTransport:
         """An exec transport to the site's placement host (remote sites only):

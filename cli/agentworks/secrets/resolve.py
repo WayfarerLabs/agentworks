@@ -340,7 +340,7 @@ def active_sources(config: Config, registry: Registry) -> tuple[ActiveSource, ..
             origin = getattr(backend_row, "origin", None)
             if getattr(origin, "variant", None) == "system-plugin":
                 plugin = getattr(origin, "plugin", None)
-                if type(plugin) is not str:
+                if not isinstance(plugin, str) or not plugin or "/" in plugin:
                     raise StateError(f"secret-backend/{source.backend.name} has invalid plugin attribution")
                 disabled_backend_plugin = plugin
         validated = validate_capability_config(

@@ -42,8 +42,11 @@ if TYPE_CHECKING:
 _REMOTE_TEMPLATE_DIR = "/tmp/agentworks-lima-template.A1b2C3d4E5"
 
 
-def _assert_secret_absent_from_agentworks_exception_graph(exc: BaseException, secret: str) -> None:
-    """Inspect every linked exception and retained sensitive-boundary frame."""
+def _assert_secret_absent_from_agentworks_exception_graph(
+    exc: BaseException,
+    secret: str,
+) -> None:
+    """Inspect every Agentworks frame across the linked exception graph."""
     pending = [exc]
     seen: set[int] = set()
     while pending:
@@ -55,17 +58,15 @@ def _assert_secret_absent_from_agentworks_exception_graph(exc: BaseException, se
         traceback = current.__traceback__
         while traceback is not None:
             module = str(traceback.tb_frame.f_globals.get("__name__", ""))
-            function = traceback.tb_frame.f_code.co_name
-            if (module, function) in {
-                ("agentworks.ssh", "run"),
-                ("agentworks.capabilities.vm_platform.lima", "_run_lima"),
-            }:
+            if module.startswith("agentworks."):
                 assert secret not in repr(traceback.tb_frame.f_locals)
             traceback = traceback.tb_next
         if current.__cause__ is not None:
             pending.append(current.__cause__)
         if current.__context__ is not None:
             pending.append(current.__context__)
+        if isinstance(current, BaseExceptionGroup):
+            pending.extend(current.exceptions)
 
 
 def _remote_ssh_success(command: str) -> SimpleNamespace:
