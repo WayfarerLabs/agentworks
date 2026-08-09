@@ -220,6 +220,9 @@ def test_remote_lima_join_failure_scrubs_full_production_call_chain(
     monkeypatch: pytest.MonkeyPatch,
     control_flow: BaseException | None,
 ) -> None:
+    from agentworks import remote_exec
+    from agentworks.remote_exec import DetachedResult
+
     resolvers, readers, requests = _capture_secret_owners(monkeypatch)
     cleanup_events: list[str] = []
     remote_site = ManifestDoc(
@@ -246,18 +249,12 @@ def test_remote_lima_join_failure_scrubs_full_production_call_chain(
 
     monkeypatch.setattr(LimaPlatform, "create", _recording_create)
 
-    def _created(
-        self: LimaPlatform,
-        name: str,
-        yaml: str,
-        *,
-        redactions: tuple[str, ...],
-    ) -> None:
-        del self, yaml
-        assert redactions == (_SENTINEL,)
-        cleanup_events.append(f"create:{name}")
+    def _detached(*args: object, **kwargs: object) -> DetachedResult:
+        del args, kwargs
+        cleanup_events.append("create:remote-chain")
+        return DetachedResult(exit_code=0, output="created")
 
-    monkeypatch.setattr(LimaPlatform, "_create_remote", _created)
+    monkeypatch.setattr(remote_exec, "run_detached", _detached)
     monkeypatch.setattr(
         LimaPlatform,
         "_cleanup_partial_create",
@@ -265,15 +262,19 @@ def test_remote_lima_join_failure_scrubs_full_production_call_chain(
     )
 
     def _subprocess_run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        assert kwargs["input"] == f"{_SENTINEL}\n"
-        if control_flow is not None:
-            raise control_flow
-        return subprocess.CompletedProcess(
-            args,
-            1,
-            stdout=f"reflected {_SENTINEL}",
-            stderr=f"rejected {_SENTINEL}",
-        )
+        input_text = kwargs.get("input")
+        if "mktemp -d" in repr(args):
+            return subprocess.CompletedProcess(args, 0, stdout="/tmp/agentworks-lima-template.A1b2C3d4E5\n", stderr="")
+        if input_text == f"{_SENTINEL}\n":
+            if control_flow is not None:
+                raise control_flow
+            return subprocess.CompletedProcess(
+                args,
+                1,
+                stdout=f"reflected {_SENTINEL}",
+                stderr=f"rejected {_SENTINEL}",
+            )
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
 
     monkeypatch.setattr("agentworks.ssh.subprocess.run", _subprocess_run)
 
@@ -334,6 +335,7 @@ def test_post_platform_create_paths_scrub_request_contexts_tokens_cache_and_logg
         *args: object,
         tailscale_ctx: RunContext,
         git_tokens: dict[str, str],
+        on_logger_ready: Callable[[SSHLogger], None],
         **kwargs: object,
     ) -> tuple[object, SSHLogger, str]:
         del db_, config_, args, kwargs
@@ -344,6 +346,7 @@ def test_post_platform_create_paths_scrub_request_contexts_tokens_cache_and_logg
             redactions=(tailscale_ctx.secret(secret_name), *git_tokens.values()),
         )
         loggers.append(logger)
+        on_logger_ready(logger)
         return SimpleNamespace(), logger, "/home/agentworks"
 
     def _initialize(*args: object, **kwargs: object) -> None:
@@ -428,4 +431,156 @@ def test_nonordinary_lima_failure_cleans_backend_before_exact_pending_row(
         "row-cleanup:ordered-cleanup",
     ]
     assert db.get_vm("ordered-cleanup") is None
+    _assert_secret_absent_from_agentworks_exception_graph(caught.value, _SENTINEL)
+
+
+@pytest.mark.parametrize("stage", ["constructor", "append", "copy"], ids=("constructor", "append", "copy"))
+def test_scoped_secret_registration_interruptions_never_strand_copied_values(
+    create_config,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+) -> None:
+    from agentworks.orchestration.secrets import ScopedSecrets
+    from agentworks.vms.manager import lifecycle
+
+    resolvers, readers, requests = _capture_secret_owners(monkeypatch)
+    failure = SystemExit(41)
+
+    if stage == "constructor":
+
+        def fail_empty(cls: type[ScopedSecrets], names: object) -> ScopedSecrets:
+            del cls, names
+            raise failure
+
+        monkeypatch.setattr(ScopedSecrets, "empty", classmethod(fail_empty))
+    elif stage == "append":
+        original_cleanup_init = lifecycle._CreateSecretCleanup.__init__  # noqa: SLF001
+
+        class HostileReaders(list[ScopedSecrets]):
+            def append(self, reader: ScopedSecrets) -> None:
+                super().append(reader)
+                raise failure
+
+        def hostile_cleanup_init(self: object) -> None:
+            original_cleanup_init(self)  # type: ignore[arg-type]
+            self.readers = HostileReaders()  # type: ignore[attr-defined]
+
+        monkeypatch.setattr(lifecycle._CreateSecretCleanup, "__init__", hostile_cleanup_init)  # noqa: SLF001
+    else:
+        original_copy_values = ScopedSecrets.copy_values
+
+        def fail_copy(self: ScopedSecrets, values: dict[str, str]) -> None:
+            secret_names = self._names & values.keys()  # noqa: SLF001
+            if secret_names:
+                name = next(iter(secret_names))
+                self._values[name] = values[name]  # noqa: SLF001
+                raise failure
+            original_copy_values(self, values)
+
+        monkeypatch.setattr(ScopedSecrets, "copy_values", fail_copy)
+
+    with pytest.raises(SystemExit) as caught:
+        vm_manager.create_vm(
+            db,
+            create_config(),
+            name=f"scope-{stage}",
+            interaction=InteractionPolicy.REFUSE,
+        )
+
+    assert caught.value is failure
+    assert all(not resolver.resolved for resolver in resolvers)
+    assert all(reader._values == {} for reader in readers)  # noqa: SLF001
+    assert requests == []
+    _assert_secret_absent_from_agentworks_exception_graph(caught.value, _SENTINEL)
+
+
+def test_provision_request_secret_assignment_is_owned_before_interruption(
+    create_config,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.capabilities.vm_platform import ProvisionRequest
+
+    resolvers, readers, requests = _capture_secret_owners(monkeypatch)
+    failure = GeneratorExit()
+    original_setattr = ProvisionRequest.__setattr__
+
+    def interrupt_after_assignment(self: ProvisionRequest, name: str, value: object) -> None:
+        original_setattr(self, name, value)
+        if name == "tailscale_auth_key" and value == _SENTINEL:
+            requests.append(self)
+            raise failure
+
+    monkeypatch.setattr(ProvisionRequest, "__setattr__", interrupt_after_assignment)
+
+    with pytest.raises(GeneratorExit) as caught:
+        vm_manager.create_vm(
+            db,
+            create_config(),
+            name="request-transfer",
+            interaction=InteractionPolicy.REFUSE,
+        )
+
+    assert caught.value is failure
+    _assert_owners_scrubbed(resolvers, readers, requests)
+    _assert_secret_absent_from_agentworks_exception_graph(caught.value, _SENTINEL)
+
+
+def test_bootstrap_logger_callback_owns_logger_before_handoff_interrupt(
+    create_config,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loggers: list[SSHLogger] = []
+    failure = SystemExit(43)
+
+    def _create(
+        self: LimaPlatform,
+        request: ProvisionRequest,
+        ctx: RunContext,
+    ) -> ProvisionResult:
+        del self, ctx
+        return ProvisionResult(
+            native_transport=SimpleNamespace(),  # type: ignore[arg-type]
+            platform_metadata={"instance_name": request.vm_name},
+            bootstrap_complete=True,
+            tailscale_ip="100.64.0.9",
+        )
+
+    def _bootstrap(
+        db_: Database,
+        config_: object,
+        vm_template: ResolvedVMTemplate,
+        vm_name: str,
+        *args: object,
+        tailscale_ctx: RunContext,
+        git_tokens: dict[str, str],
+        on_logger_ready: Callable[[SSHLogger], None],
+        **kwargs: object,
+    ) -> tuple[object, SSHLogger, str]:
+        del db_, config_, args, kwargs
+        logger = SSHLogger(
+            vm_name,
+            "vm-create",
+            redactions=(tailscale_ctx.secret(vm_template.tailscale_auth_key), *git_tokens.values()),
+        )
+        loggers.append(logger)
+        on_logger_ready(logger)
+        raise failure
+
+    monkeypatch.setattr(LimaPlatform, "create", _create)
+    monkeypatch.setattr(LimaPlatform, "vm_active", _noop_hold)
+    monkeypatch.setattr(vm_manager, "bootstrap_vm", _bootstrap)
+
+    with pytest.raises(SystemExit) as caught:
+        vm_manager.create_vm(
+            db,
+            create_config(),
+            name="logger-handoff",
+            interaction=InteractionPolicy.REFUSE,
+        )
+
+    assert caught.value is failure
+    assert loggers and all(logger._redact == () for logger in loggers)  # noqa: SLF001
     _assert_secret_absent_from_agentworks_exception_graph(caught.value, _SENTINEL)

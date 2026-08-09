@@ -228,6 +228,19 @@ class ScopedSecrets:
         self._names = frozenset(names)
         self._values = {name: values[name] for name in self._names if name in values}
 
+    @classmethod
+    def empty(cls, names: Iterable[str]) -> ScopedSecrets:
+        """Build a value-free reader before an operation registers ownership."""
+        return cls({}, names)
+
+    def copy_values(self, values: dict[str, str]) -> None:
+        """Copy declared values from a caller-owned, scrub-capable transfer."""
+        if self._values:
+            raise StateError("scoped secret values were already copied")
+        for name in self._names:
+            if name in values:
+                self._values[name] = values[name]
+
     def scrub_values(self) -> None:
         """Discard this scoped copy after its operation finishes."""
         self._values.clear()

@@ -68,6 +68,9 @@ class SSHResult:
         return self.returncode == 0
 
 
+_EMPTY_SSH_RESULT = SSHResult(returncode=0, stdout="", stderr="")
+
+
 class SSHError(ConnectivityError):
     """Raised when an SSH command fails unexpectedly (transport failure,
     timeout, non-zero exit under ``check=True``).
@@ -88,6 +91,21 @@ class _PropagatingFileHandler(logging.FileHandler):
 
     def handleError(self, record: logging.LogRecord) -> None:  # noqa: N802, ARG002
         raise
+
+
+class _PendingLogText:
+    """Mutable transfer from raw caller text to the sanitized write sink."""
+
+    def __init__(self) -> None:
+        self.raw = ""
+        self.sanitized = ""
+
+    def scrub(self) -> None:
+        self.raw = ""
+        self.sanitized = ""
+
+    def __repr__(self) -> str:
+        return "_PendingLogText(<scrubbed>)"
 
 
 class SSHLogger:
@@ -112,17 +130,15 @@ class SSHLogger:
         *,
         redactions: tuple[str, ...] = (),
     ) -> None:
-        from datetime import UTC, datetime
-
-        timestamp = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%SZ")
-        self.vm_name = vm_name
-        self.path = LOG_DIR / f"{vm_name}-{timestamp}-{command_stem}.log"
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._active_handler: _PropagatingFileHandler | None = None
         normalized: list[str] = []
         secret = ""
         representation = ""
         try:
+            from datetime import UTC, datetime
+
+            self._redact: tuple[str, ...] = ()
+            self._warnings: list[str] = []
+            self._active_handler: _PropagatingFileHandler | None = None
             for secret in redactions:
                 if not secret:
                     continue
@@ -132,8 +148,15 @@ class SSHLogger:
             # Prefer the longest representation so an overlapping shorter token
             # cannot rewrite part of it before the complete value is matched.
             self._redact = tuple(sorted(normalized, key=len, reverse=True))
-            self._warnings: list[str] = []
+            redactions = ()
+            secret = ""
+            representation = ""
+            normalized.clear()
 
+            timestamp = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%SZ")
+            self.vm_name = vm_name
+            self.path = LOG_DIR / f"{vm_name}-{timestamp}-{command_stem}.log"
+            self.path.parent.mkdir(parents=True, exist_ok=True)
             ts = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
             self._write(f"# Log: {vm_name} ({command_stem})\n# Started: {ts}\n\n")
         except BaseException:
@@ -167,56 +190,127 @@ class SSHLogger:
         return format_host_path(self.path)
 
     def _sanitize(self, text: str) -> str:
-        for secret in self._redact:
-            text = text.replace(secret, "[REDACTED]")
-        return text
+        sanitized = ""
+        secret = ""
+        try:
+            sanitized = text
+            for secret in self._redact:
+                sanitized = sanitized.replace(secret, "[REDACTED]")
+            return sanitized
+        finally:
+            text = ""
+            secret = ""
 
     def step(self, name: str) -> None:
         """Log the start of a named step."""
         from datetime import UTC, datetime
 
-        ts = datetime.now(tz=UTC).strftime("%H:%M:%S")
-        self._write(f"--- [{ts}] {name} ---\n")
+        pending: _PendingLogText | None = None
+        try:
+            pending = _PendingLogText()
+            ts = datetime.now(tz=UTC).strftime("%H:%M:%S")
+            pending.raw = f"--- [{ts}] {name} ---\n"
+            name = ""
+            self._write_pending(pending)
+        finally:
+            name = ""
+            if pending is not None:
+                pending.scrub()
 
     def output(self, text: str) -> None:
         """Log general output."""
-        if text:
-            self._write(text if text.endswith("\n") else text + "\n")
+        pending: _PendingLogText | None = None
+        try:
+            if text:
+                pending = _PendingLogText()
+                pending.raw = text if text.endswith("\n") else text + "\n"
+                text = ""
+                self._write_pending(pending)
+        finally:
+            text = ""
+            if pending is not None:
+                pending.scrub()
 
     def log_command(self, command: str, result: SSHResult) -> None:
         """Log a completed command with its output."""
         from datetime import UTC, datetime
 
-        ts = datetime.now(tz=UTC).strftime("%H:%M:%S")
-        lines = [f"[{ts}] $ {command}  (exit {result.returncode})"]
-        if result.stdout:
-            lines.append(result.stdout.rstrip())
-        if result.stderr:
-            lines.append(f"STDERR: {result.stderr.rstrip()}")
-        lines.append("")
-        self._write("\n".join(lines) + "\n")
+        pending: _PendingLogText | None = None
+        lines: list[str] = []
+        try:
+            pending = _PendingLogText()
+            ts = datetime.now(tz=UTC).strftime("%H:%M:%S")
+            lines = [f"[{ts}] $ {command}  (exit {result.returncode})"]
+            if result.stdout:
+                lines.append(result.stdout.rstrip())
+            if result.stderr:
+                lines.append(f"STDERR: {result.stderr.rstrip()}")
+            lines.append("")
+            pending.raw = "\n".join(lines) + "\n"
+            command = ""
+            result = _EMPTY_SSH_RESULT
+            lines.clear()
+            self._write_pending(pending)
+        finally:
+            command = ""
+            result = _EMPTY_SSH_RESULT
+            lines.clear()
+            if pending is not None:
+                pending.scrub()
 
     def log_timeout(self, command: str, attempt: int, retries: int) -> None:
         """Log a timeout event."""
         from datetime import UTC, datetime
 
-        ts = datetime.now(tz=UTC).strftime("%H:%M:%S")
-        self._write(f"[{ts}] TIMEOUT (attempt {attempt}/{retries}): {command}\n")
+        pending: _PendingLogText | None = None
+        try:
+            pending = _PendingLogText()
+            ts = datetime.now(tz=UTC).strftime("%H:%M:%S")
+            pending.raw = f"[{ts}] TIMEOUT (attempt {attempt}/{retries}): {command}\n"
+            command = ""
+            self._write_pending(pending)
+        finally:
+            command = ""
+            if pending is not None:
+                pending.scrub()
 
     def warning(self, msg: str) -> None:
         """Record warning text in memory and persist its sanitized form."""
         from datetime import UTC, datetime
 
-        self._warnings.append(msg)
-        ts = datetime.now(tz=UTC).strftime("%H:%M:%S")
-        self._write(f"[{ts}] WARNING: {msg}\n")
+        pending: _PendingLogText | None = None
+        prior_warning_count = len(self._warnings)
+        try:
+            pending = _PendingLogText()
+            pending.raw = msg
+            self._warnings.append(msg)
+            msg = ""
+            ts = datetime.now(tz=UTC).strftime("%H:%M:%S")
+            pending.raw = f"[{ts}] WARNING: {pending.raw}\n"
+            self._write_pending(pending)
+        except BaseException:
+            del self._warnings[prior_warning_count:]
+            raise
+        finally:
+            msg = ""
+            if pending is not None:
+                pending.scrub()
 
     def log_error(self, msg: str) -> None:
         """Log an error message."""
         from datetime import UTC, datetime
 
-        ts = datetime.now(tz=UTC).strftime("%H:%M:%S")
-        self._write(f"[{ts}] ERROR: {msg}\n")
+        pending: _PendingLogText | None = None
+        try:
+            pending = _PendingLogText()
+            ts = datetime.now(tz=UTC).strftime("%H:%M:%S")
+            pending.raw = f"[{ts}] ERROR: {msg}\n"
+            msg = ""
+            self._write_pending(pending)
+        finally:
+            msg = ""
+            if pending is not None:
+                pending.scrub()
 
     @property
     def warnings(self) -> list[str]:
@@ -250,19 +344,67 @@ class SSHLogger:
         import traceback
         from datetime import UTC, datetime
 
-        exc_type, exc, exc_tb = sys.exc_info()
-        if exc is not None:
-            ts_exc = datetime.now(tz=UTC).strftime("%H:%M:%S")
-            tb_text = "".join(traceback.format_exception(exc_type, exc, exc_tb))
-            self._write(f"[{ts_exc}] EXCEPTION:\n{tb_text}\n")
+        pending: _PendingLogText | None = None
+        exc_type = None
+        exc: BaseException | None = None
+        exc_tb = None
+        tb_text = ""
+        lines: list[str] = []
+        try:
+            exc_type, exc, exc_tb = sys.exc_info()
+            if exc is not None:
+                pending = _PendingLogText()
+                ts_exc = datetime.now(tz=UTC).strftime("%H:%M:%S")
+                tb_text = "".join(traceback.format_exception(exc_type, exc, exc_tb))
+                pending.raw = f"[{ts_exc}] EXCEPTION:\n{tb_text}\n"
+                tb_text = ""
+                exc_type = None
+                exc = None
+                exc_tb = None
+                self._write_pending(pending)
+                pending.scrub()
 
-        ts = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
-        lines = [f"\n# Finished: {ts}"]
-        if self._warnings:
-            lines.append(f"# Warnings: {len(self._warnings)}")
-        self._write("\n".join(lines) + "\n")
+            ts = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+            lines = [f"\n# Finished: {ts}"]
+            if self._warnings:
+                lines.append(f"# Warnings: {len(self._warnings)}")
+            pending = _PendingLogText()
+            pending.raw = "\n".join(lines) + "\n"
+            lines.clear()
+            self._write_pending(pending)
+        finally:
+            exc_type = None
+            exc = None
+            exc_tb = None
+            tb_text = ""
+            lines.clear()
+            if pending is not None:
+                pending.scrub()
 
     def _write(self, text: str) -> None:
+        pending: _PendingLogText | None = None
+        try:
+            pending = _PendingLogText()
+            pending.raw = text
+            text = ""
+            self._write_pending(pending)
+        finally:
+            text = ""
+            if pending is not None:
+                pending.scrub()
+
+    def _write_pending(self, pending: _PendingLogText) -> None:
+        try:
+            try:
+                pending.sanitized = self._sanitize(pending.raw)
+            finally:
+                pending.raw = ""
+            self._write_sanitized(pending.sanitized)
+        except BaseException:
+            self.discard_redactions()
+            raise
+
+    def _write_sanitized(self, text: str) -> None:
         # Every byte that reaches the file handler passes through this choke
         # point. The guarantee covers the complete redaction set supplied at
         # construction, even when a caller passes those values in raw text.
@@ -274,30 +416,45 @@ class SSHLogger:
         # this function. CodeQL's clear-text-storage query recognizes this
         # local data flow; moving either side behind a helper reopens the alert
         # even though the runtime behavior would be equivalent.
-        record = logging.LogRecord(
-            name="agentworks.ssh.operation",
-            level=logging.INFO,
-            pathname="",
-            lineno=0,
-            msg=self._sanitize(text),
-            args=(),
-            exc_info=None,
-        )
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        handler = _PropagatingFileHandler(self.path, mode="a", encoding="utf-8", errors="replace")
-        self._active_handler = handler
         try:
-            handler.setFormatter(logging.Formatter("%(message)s"))
-            handler.terminator = ""
-            handler.handle(record)
-        finally:
-            self._close_active_handler()
+            record = logging.LogRecord(
+                name="agentworks.ssh.operation",
+                level=logging.INFO,
+                pathname="",
+                lineno=0,
+                msg=text,
+                args=(),
+                exc_info=None,
+            )
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            handler = _PropagatingFileHandler(self.path, mode="a", encoding="utf-8", errors="replace")
+            self._active_handler = handler
+            try:
+                handler.setFormatter(logging.Formatter("%(message)s"))
+                handler.terminator = ""
+                handler.handle(record)
+            finally:
+                self._close_active_handler()
+        except BaseException:
+            # A propagated write failure retains every Agentworks frame.
+            # Once persistence has failed the logger cannot safely continue,
+            # so release its plaintext mask tokens before re-raising the
+            # original exception unchanged.
+            self.discard_redactions()
+            raise
 
     def _close_active_handler(self) -> None:
+        import sys
+
+        active_failure = sys.exc_info()[1]
         handler = self._active_handler
         self._active_handler = None
         if handler is not None:
-            handler.close()
+            try:
+                handler.close()
+            except BaseException:
+                if active_failure is None:
+                    raise
 
 
 SSH_CONNECT_TIMEOUT = 30
@@ -395,23 +552,24 @@ def run(
     Returns:
         SSHResult with exit code, stdout, and stderr.
     """
-    if input_text is not None and logger is not None:
-        raise ValueError("SSH stdin input cannot be combined with command logging")
-
-    args = _ssh_base_args(target, env=env)
-    # Fence the remote command from ssh's option parser. See
-    # ``SSHTransport.run`` in ``transports/ssh.py`` for the rationale.
-    args.append("--")
-    if target.login_shell:
-        args.append(f"$SHELL -lc {shlex.quote(command)}")
-    else:
-        args.append(command)
-
     sensitive_input = input_text is not None
+    args: list[str] = []
     last_err: Exception | None = None
     result: subprocess.CompletedProcess[str] | None = None
     ssh_result: SSHResult | None = None
     try:
+        if input_text is not None and logger is not None:
+            raise ValueError("SSH stdin input cannot be combined with command logging")
+
+        args = _ssh_base_args(target, env=env)
+        # Fence the remote command from ssh's option parser. See
+        # ``SSHTransport.run`` in ``transports/ssh.py`` for the rationale.
+        args.append("--")
+        if target.login_shell:
+            args.append(f"$SHELL -lc {shlex.quote(command)}")
+        else:
+            args.append(command)
+
         for attempt in range(retries):
             if attempt > 0 and on_retry is not None:
                 on_retry(attempt, retries)
@@ -489,6 +647,7 @@ def run(
         # BaseException control flow, preserving the exact exception while
         # removing secret-bearing values from this frame's retained locals.
         input_text = None
+        args.clear()
         result = None
         ssh_result = None
         last_err = None

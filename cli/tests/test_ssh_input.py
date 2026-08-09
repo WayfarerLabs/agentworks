@@ -10,6 +10,18 @@ import pytest
 from agentworks.ssh import SSHError, SSHTarget, run
 
 
+def _assert_agentworks_tracebacks_scrubbed(exc: BaseException, secret: str) -> set[str]:
+    functions: set[str] = set()
+    traceback = exc.__traceback__
+    while traceback is not None:
+        module = str(traceback.tb_frame.f_globals.get("__name__", ""))
+        if module.startswith("agentworks."):
+            functions.add(traceback.tb_frame.f_code.co_name)
+            assert secret not in repr(traceback.tb_frame.f_locals)
+        traceback = traceback.tb_next
+    return functions
+
+
 def test_ssh_run_streams_input_without_logging_it() -> None:
     secret = "ssh-stdin-swordfish"
 
@@ -87,6 +99,32 @@ def test_ssh_run_rejects_logging_sensitive_input_before_subprocess() -> None:
 
     process.assert_not_called()
     assert secret not in str(caught.value)
+    assert "run" in _assert_agentworks_tracebacks_scrubbed(caught.value, secret)
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [KeyboardInterrupt("stop"), SystemExit(8), GeneratorExit()],
+    ids=("keyboard-interrupt", "system-exit", "generator-exit"),
+)
+def test_ssh_run_scrubs_input_when_argv_building_is_interrupted(
+    monkeypatch: pytest.MonkeyPatch,
+    failure: BaseException,
+) -> None:
+    from agentworks import ssh
+
+    secret = "ssh-argv-build-sentinel"
+
+    def fail_argv(*args: object, **kwargs: object) -> list[str]:
+        del args, kwargs
+        raise failure
+
+    monkeypatch.setattr(ssh, "_ssh_base_args", fail_argv)
+    with pytest.raises(type(failure)) as caught:
+        run(SSHTarget(host="vm-host"), "cat > /tmp/key", input_text=secret)
+
+    assert caught.value is failure
+    assert "run" in _assert_agentworks_tracebacks_scrubbed(caught.value, secret)
 
 
 def test_ssh_run_translates_sensitive_native_failure_without_exception_link() -> None:

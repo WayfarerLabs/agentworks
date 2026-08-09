@@ -22,6 +22,7 @@ from agentworks.capabilities.retired_shapes import RetiredPresenceShape
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
 from agentworks.capabilities.vm_platform.bootstrap_script import (
     REBOOT_SENTINEL_PATH,
+    BootstrapOutput,
     generate_bootstrap_script,
     parse_bootstrap_output,
 )
@@ -58,9 +59,9 @@ _REMOTE_TEMPLATE_RANDOM_LENGTH = 10
 class _RemoteCreateSensitiveState:
     """Mutable secret-bearing state for one remote create attempt."""
 
-    def __init__(self, lima_yaml: str, redactions: tuple[str, ...]) -> None:
-        self.lima_yaml = lima_yaml
-        self.redactions = redactions
+    def __init__(self) -> None:
+        self.lima_yaml = ""
+        self.redactions: tuple[str, ...] = ()
         self.ssh_logger: SSHLogger | None = None
         self.host_target: SSHTransport | None = None
         self.result: DetachedResult | None = None
@@ -74,6 +75,10 @@ class _RemoteCreateSensitiveState:
             self.ssh_logger.discard_redactions()
         if self.host_target is not None:
             self.host_target.logger = None
+        if self.result is not None:
+            self.result.output = ""
+        if self.bootstrap is not None:
+            self.bootstrap.scrub()
         self.result = None
         self.bootstrap = None
         self.operation_failure = None
@@ -273,21 +278,17 @@ class LimaPlatform(VMPlatform):
 
     def _run_lima(self, command: str, *, check: bool = True, input_text: str | None = None) -> str:
         """Run a limactl command, locally or on the site's placement host."""
-        if self.is_remote:
-            assert self._remote_host is not None
-            target = SSHTarget(host=self._remote_host, user=None, login_shell=True)
-            result = None
-            try:
+        result = None
+        proc = None
+        try:
+            if self.is_remote:
+                assert self._remote_host is not None
+                target = SSHTarget(host=self._remote_host, user=None, login_shell=True)
                 result = ssh_run(target, command, check=check, input_text=input_text)
                 return result.stdout
-            finally:
-                input_text = None
-                result = None
-        else:
-            import subprocess
+            else:
+                import subprocess
 
-            proc = None
-            try:
                 proc = subprocess.run(
                     shlex.split(command),
                     input=input_text,
@@ -308,9 +309,10 @@ class LimaPlatform(VMPlatform):
                 # Sensitive stdin commands do not expose their output either:
                 # an arbitrary program can reflect stdin to either stream.
                 return "" if input_text is not None else proc.stdout
-            finally:
-                input_text = None
-                proc = None
+        finally:
+            input_text = None
+            result = None
+            proc = None
 
     def preflight(self, ctx: RunContext) -> None:
         """Local sites: ``limactl`` must be on PATH. Remote sites defer
@@ -356,6 +358,7 @@ class LimaPlatform(VMPlatform):
             raise
 
     def _create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
+        has_tailscale_key = bool(request.tailscale_auth_key)
         if not self.is_remote:
             # Preflight re-runs the same check at the composition root;
             # keeping it here too costs one PATH scan and keeps the op's
@@ -441,9 +444,9 @@ class LimaPlatform(VMPlatform):
 
             tailscale_ip = None
             bootstrap_complete = False
-            if request.tailscale_auth_key:
+            if has_tailscale_key:
                 output.detail("Joining Tailscale...")
-                self._join_tailscale_ephemerally(instance_name, request.tailscale_auth_key)
+                self._join_tailscale_ephemerally(instance_name, request)
                 # The secret-bearing operation is complete. A later discovery
                 # failure must not select the Phase A bootstrap script, which
                 # would deliver the key a second time through a different
@@ -470,7 +473,7 @@ class LimaPlatform(VMPlatform):
 
             # If Tailscale was joined through the ephemeral boundary,
             # extract the IP without retaining the key in provider state.
-            if request.tailscale_auth_key:
+            if has_tailscale_key:
                 output.detail("Retrieving Tailscale IP...")
                 try:
                     ip_output = self._run_lima(f"limactl shell {instance_name} sudo tailscale ip -4")
@@ -504,8 +507,8 @@ class LimaPlatform(VMPlatform):
             tailscale_ip=tailscale_ip,
         )
 
-    def _join_tailscale_ephemerally(self, instance_name: str, auth_key: str) -> None:
-        """Join without putting ``auth_key`` in Lima state or host argv.
+    def _join_tailscale_ephemerally(self, instance_name: str, request: ProvisionRequest) -> None:
+        """Join without putting the request's auth key in Lima state or host argv.
 
         Lima stores provision scripts in its instance YAML. The fixed command
         reads exactly one key from stdin inside the guest, then invokes
@@ -514,15 +517,13 @@ class LimaPlatform(VMPlatform):
         The guest ``tailscale`` process necessarily receives its CLI auth-key
         argument transiently; this boundary makes no guest-process-table claim.
         """
-        key_input = f"{auth_key}\n"
         try:
             self._run_lima(
                 f"limactl shell {instance_name} {_TAILSCALE_JOIN_STDIN_COMMAND}",
-                input_text=key_input,
+                input_text=f"{request.tailscale_auth_key}\n",
             )
         finally:
-            key_input = ""
-            auth_key = ""
+            request.tailscale_auth_key = None
 
     def _restart_sentinel_present(self, instance_name: str) -> bool:
         """True if a bootstrap step left the restart sentinel in the guest.
@@ -614,13 +615,19 @@ class LimaPlatform(VMPlatform):
         *,
         redactions: tuple[str, ...],
     ) -> None:
-        sensitive = _RemoteCreateSensitiveState(lima_yaml, redactions)
+        sensitive: _RemoteCreateSensitiveState | None = None
         try:
-            self._create_remote_sensitive(instance_name, sensitive)
-        finally:
-            sensitive.scrub()
+            sensitive = _RemoteCreateSensitiveState()
+            sensitive.lima_yaml = lima_yaml
+            sensitive.redactions = redactions
             lima_yaml = ""
             redactions = ()
+            self._create_remote_sensitive(instance_name, sensitive)
+        finally:
+            lima_yaml = ""
+            redactions = ()
+            if sensitive is not None:
+                sensitive.scrub()
 
     def _create_remote_sensitive(
         self,
@@ -676,10 +683,12 @@ class LimaPlatform(VMPlatform):
                 )
                 if sensitive.result.exit_code != 0:
                     # Parse structured markers from provision script output if present
-                    sensitive.bootstrap = parse_bootstrap_output(
-                        sensitive.result.output,
-                        sensitive.result.exit_code,
-                    )
+                    bootstrap_output = BootstrapOutput()
+                    try:
+                        bootstrap_output.text = sensitive.result.output
+                        sensitive.bootstrap = parse_bootstrap_output(bootstrap_output, sensitive.result.exit_code)
+                    finally:
+                        bootstrap_output.scrub()
                     step = None
                     try:
                         for step in sensitive.bootstrap.steps:
@@ -715,7 +724,7 @@ class LimaPlatform(VMPlatform):
                         sensitive.ssh_logger.close()
                     except OSError:
                         pass
-                    except KeyboardInterrupt:
+                    except BaseException:
                         if active_failure is None:
                             raise
                 finally:
@@ -839,18 +848,31 @@ class LimaPlatform(VMPlatform):
 
     def _log_provision_errors(self, instance_name: str) -> None:
         """Attempt to surface provision script errors from Lima logs."""
+        bootstrap_output = BootstrapOutput()
+        bootstrap = None
+        step = None
+        log_output = ""
         try:
             log_output = self._run_lima(
                 f"limactl shell {instance_name} cat /var/log/cloud-init-output.log 2>/dev/null || true",
                 check=False,
             )
             if log_output.strip():
-                bootstrap = parse_bootstrap_output(log_output, 1)
+                bootstrap_output.text = log_output
+                log_output = ""
+                bootstrap = parse_bootstrap_output(bootstrap_output, 1)
                 for step in bootstrap.steps:
                     if step.error:
                         output.warn(f"Provision error ({step.name}): {step.error}")
         except SSHError:
             pass
+        finally:
+            log_output = ""
+            bootstrap_output.scrub()
+            if bootstrap is not None:
+                bootstrap.scrub()
+            bootstrap = None
+            step = None
 
     def start(self, vm: VMRow, ctx: RunContext) -> None:
         # Idempotency guard (the ABC flags start): `limactl start` on a

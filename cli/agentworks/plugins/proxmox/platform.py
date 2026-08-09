@@ -463,7 +463,7 @@ class ProxmoxPlatform(VMPlatform):
 
         Returns the Tailscale IP if bootstrap succeeds, None otherwise.
         """
-        from agentworks.capabilities.vm_platform.bootstrap_script import parse_bootstrap_output
+        from agentworks.capabilities.vm_platform.bootstrap_script import BootstrapOutput, parse_bootstrap_output
 
         # Write script to VM via guest agent file-write
         self._api(ctx).guest_agent_file_write(node, vmid, "/tmp/agentworks-bootstrap.sh", script)
@@ -484,7 +484,14 @@ class ProxmoxPlatform(VMPlatform):
 
         exit_code = result.get("exitcode", -1)
         stdout = result.get("out-data", "")
-        parsed = parse_bootstrap_output(stdout, exit_code)
+        bootstrap_output = BootstrapOutput()
+        try:
+            bootstrap_output.text = stdout
+            stdout = ""
+            parsed = parse_bootstrap_output(bootstrap_output, exit_code)
+        finally:
+            stdout = ""
+            bootstrap_output.scrub()
 
         if parsed.ok:
             return parsed.tailscale_ip

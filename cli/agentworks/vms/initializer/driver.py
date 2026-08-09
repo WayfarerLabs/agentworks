@@ -68,14 +68,23 @@ if TYPE_CHECKING:
 
 
 class _BootstrapSecretCleanup:
-    def __init__(self, git_tokens: dict[str, str]) -> None:
-        self.git_tokens = git_tokens
+    def __init__(self) -> None:
+        self.git_tokens: dict[str, str] | None = None
         self.logger: SSHLogger | None = None
 
     def scrub_failure(self) -> None:
-        self.git_tokens.clear()
+        if self.git_tokens is not None:
+            self.git_tokens.clear()
         if self.logger is not None:
             self.logger.discard_redactions()
+
+
+def _close_logger_after_failure(logger: SSHLogger) -> None:
+    """Best-effort close that cannot replace an active primary failure."""
+    try:
+        logger.close()
+    except BaseException:
+        output.warn("could not close the VM operation log after failure")
 
 
 def bootstrap_vm(
@@ -90,12 +99,15 @@ def bootstrap_vm(
     admin_username: str,
     tailscale_ctx: RunContext,
     git_tokens: dict[str, str],
+    on_logger_ready: Callable[[SSHLogger], None] | None = None,
     bootstrap_complete: bool = False,
     tailscale_ip: str | None = None,
     on_tailscale_ready: Callable[[], None] | None = None,
 ) -> tuple[Transport, SSHLogger, str]:
-    cleanup = _BootstrapSecretCleanup(git_tokens)
+    cleanup: _BootstrapSecretCleanup | None = None
     try:
+        cleanup = _BootstrapSecretCleanup()
+        cleanup.git_tokens = git_tokens
         return _bootstrap_vm(
             db,
             config,
@@ -107,13 +119,16 @@ def bootstrap_vm(
             admin_username=admin_username,
             tailscale_ctx=tailscale_ctx,
             git_tokens=git_tokens,
+            on_logger_ready=on_logger_ready,
             bootstrap_complete=bootstrap_complete,
             tailscale_ip=tailscale_ip,
             on_tailscale_ready=on_tailscale_ready,
             _secret_cleanup=cleanup,
         )
     except BaseException:
-        cleanup.scrub_failure()
+        git_tokens.clear()
+        if cleanup is not None:
+            cleanup.scrub_failure()
         raise
 
 
@@ -129,6 +144,7 @@ def _bootstrap_vm(
     admin_username: str,
     tailscale_ctx: RunContext,
     git_tokens: dict[str, str],
+    on_logger_ready: Callable[[SSHLogger], None] | None = None,
     bootstrap_complete: bool = False,
     tailscale_ip: str | None = None,
     on_tailscale_ready: Callable[[], None] | None = None,
@@ -181,6 +197,8 @@ def _bootstrap_vm(
         redactions=(tailscale_ctx.secret(vm_template.tailscale_auth_key), *(git_tokens or {}).values()),
     )
     logger = _secret_cleanup.logger
+    if on_logger_ready is not None:
+        on_logger_ready(logger)
 
     # Attach logger to the provisioning transport. ``Transport`` declares
     # ``logger`` on the ABC; the assignment is polymorphic.
@@ -236,7 +254,7 @@ def _bootstrap_vm(
             platform.secure_failed_vm(vm_row, ctx)
         except Exception as secure_error:
             output.warn(f"could not secure the failed VM: {secure_error}")
-        logger.close()
+        _close_logger_after_failure(logger)
         output.warn(f"Log: {logger.display_path}")
         raise
     except BaseException:
@@ -255,6 +273,7 @@ def _bootstrap_vm(
             platform.secure_failed_vm(vm_row, ctx)
         except Exception as secure_error:
             output.warn(f"could not secure the interrupted VM: {secure_error}")
+        _close_logger_after_failure(logger)
         raise
 
     # Tailscale is up; the platform hook closes provisioning access
@@ -340,7 +359,10 @@ def run_initialization(
     except Exception as e:
         db.update_vm_init_status(vm_name, InitStatus.FAILED)
         db.insert_vm_event(vm_name, "init_failed", str(e))
-        logger.close()
+        _close_logger_after_failure(logger)
+        raise
+    except BaseException:
+        _close_logger_after_failure(logger)
         raise
 
     if logger.has_warnings:
@@ -462,6 +484,7 @@ def _run_bootstrap_script(
     import tempfile
 
     from agentworks.capabilities.vm_platform.bootstrap_script import (
+        BootstrapOutput,
         generate_bootstrap_script,
         parse_bootstrap_output,
     )
@@ -514,48 +537,69 @@ def _run_bootstrap_script(
     #   2>&1         - merge stderr into captured stdout so apt-get noise
     #                  lands alongside the script's ##STEP## markers when
     #                  we need to diagnose a failure.
-    output.detail("Running bootstrap script...")
-    result = exec_target.run(
-        f"setsid sudo -n /bin/bash {remote_script} </dev/null 2>&1",
-        check=False,
-        timeout=900,  # 15 min hard cap; apt-get dist-upgrade is the long pole
-    )
-    exec_target.run(f"rm -f {remote_script}", sudo=True, check=False)
+    result = None
+    bootstrap = None
+    bootstrap_output = BootstrapOutput()
+    step = None
+    warning = ""
+    tailscale_ip = ""
+    try:
+        output.detail("Running bootstrap script...")
+        result = exec_target.run(
+            f"setsid sudo -n /bin/bash {remote_script} </dev/null 2>&1",
+            check=False,
+            timeout=900,  # 15 min hard cap; apt-get dist-upgrade is the long pole
+        )
+        exec_target.run(f"rm -f {remote_script}", sudo=True, check=False)
 
-    # Parse structured output
-    bootstrap = parse_bootstrap_output(result.stdout, result.returncode)
+        # Transfer raw output into a scrub-capable carrier before parsing.
+        bootstrap_output.text = result.stdout
+        bootstrap = parse_bootstrap_output(bootstrap_output, result.returncode)
 
-    # Feed results into logger and console
-    for step in bootstrap.steps:
-        logger.step(step.name)
-        if step.success_msg:
-            output.detail(f"{step.name}: {step.success_msg}")
-            logger.output(step.success_msg)
-        for warning in step.warnings:
-            output.warn(warning)
-            logger.warning(warning)
-        if step.error:
-            output.warn(f"Error: {step.error}")
-            logger.log_error(step.error)
+        # Feed results into logger and console
+        for step in bootstrap.steps:
+            logger.step(step.name)
+            if step.success_msg:
+                output.detail(f"{step.name}: {step.success_msg}")
+                logger.output(step.success_msg)
+            for warning in step.warnings:
+                output.warn(warning)
+                logger.warning(warning)
+            warning = ""
+            if step.error:
+                output.warn(f"Error: {step.error}")
+                logger.log_error(step.error)
 
-    # Log full output for troubleshooting
-    if result.stdout:
-        logger.output(result.stdout)
-
-    if not bootstrap.ok:
-        msg = f"Bootstrap script failed (exit {result.returncode})"
+        # Log full output for troubleshooting. SSHLogger performs redaction.
         if result.stdout:
-            msg += f"\n{result.stdout[-500:]}"
-        raise SSHError(msg)
+            logger.output(result.stdout)
 
-    # Update DB with Tailscale info
-    assert bootstrap.tailscale_ip is not None
-    tailscale_ip = bootstrap.tailscale_ip
-    output.detail(f"Tailscale IP: {tailscale_ip}")
-    db.update_vm_tailscale(vm_name, tailscale_ip)
-    db.update_vm_provisioning_status(vm_name, ProvisioningStatus.COMPLETE)
+        if not bootstrap.ok:
+            raise SSHError(
+                f"Bootstrap script failed (exit {result.returncode}); "
+                f"sanitized output is in SSH log: {logger.display_path}"
+            )
 
-    return tailscale_ip
+        # Update DB with Tailscale info
+        assert bootstrap.tailscale_ip is not None
+        tailscale_ip = bootstrap.tailscale_ip
+        output.detail(f"Tailscale IP: {tailscale_ip}")
+        db.update_vm_tailscale(vm_name, tailscale_ip)
+        db.update_vm_provisioning_status(vm_name, ProvisioningStatus.COMPLETE)
+
+        return tailscale_ip
+    finally:
+        bootstrap_output.scrub()
+        if result is not None:
+            result.stdout = ""
+            result.stderr = ""
+        if bootstrap is not None:
+            bootstrap.scrub()
+        result = None
+        bootstrap = None
+        step = None
+        warning = ""
+        tailscale_ip = ""
 
 
 def _phase_b_setup(

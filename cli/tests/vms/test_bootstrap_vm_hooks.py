@@ -24,6 +24,7 @@ import pytest
 
 from agentworks.capabilities.base import RunContext
 from agentworks.orchestration.secrets import ScopedSecrets
+from agentworks.ssh import SSHLogger
 from agentworks.vms.initializer import driver
 
 if TYPE_CHECKING:
@@ -228,3 +229,81 @@ def test_interrupt_hook_failure_does_not_mask_the_interrupt(
         _call_bootstrap(db, platform, lambda: None)
 
     assert any("could not secure the interrupted VM" in w for w in captured_output.warnings)
+
+
+@pytest.mark.parametrize(
+    "primary",
+    [RuntimeError("bootstrap failed"), KeyboardInterrupt("bootstrap interrupted")],
+    ids=("exception", "base-exception"),
+)
+def test_bootstrap_logger_close_failure_never_masks_primary(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    _hermetic_driver: None,
+    captured_output: Any,
+    primary: BaseException,
+) -> None:
+    db.insert_vm("hookvm", site="stub", hostname="hookvm")
+
+    def fail_phase(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise primary
+
+    def fail_close(self: object) -> None:
+        del self
+        raise SystemExit(91)
+
+    monkeypatch.setattr(driver, "_phase_a_bootstrap", fail_phase)
+    monkeypatch.setattr("agentworks.ssh.SSHLogger.close", fail_close)
+
+    with pytest.raises(type(primary)) as caught:
+        _call_bootstrap(db, _SpyPlatform(), lambda: None)
+
+    assert caught.value is primary
+    assert captured_output.warnings.count("could not close the VM operation log after failure") == 1
+
+
+@pytest.mark.parametrize(
+    "primary",
+    [RuntimeError("initialization failed"), GeneratorExit()],
+    ids=("exception", "base-exception"),
+)
+def test_initialization_logger_close_failure_never_masks_primary(
+    db: Database,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: Any,
+    primary: BaseException,
+) -> None:
+    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
+    db.insert_vm("hookvm", site="stub", hostname="hookvm")
+    logger = SSHLogger("hookvm", "vm-create")
+
+    def fail_phase(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise primary
+
+    def fail_close() -> None:
+        raise SystemExit(92)
+
+    monkeypatch.setattr(driver, "_phase_b_setup", fail_phase)
+    monkeypatch.setattr(logger, "close", fail_close)
+
+    with pytest.raises(type(primary)) as caught:
+        driver.run_initialization(
+            db,
+            SimpleNamespace(),  # type: ignore[arg-type]
+            SimpleNamespace(),  # type: ignore[arg-type]
+            SimpleNamespace(),  # type: ignore[arg-type]
+            SimpleNamespace(),  # type: ignore[arg-type]
+            "hookvm",
+            SimpleNamespace(),  # type: ignore[arg-type]
+            {},
+            "/home/agentworks",
+            "agentworks",
+            logger,
+            git_tokens={},
+        )
+
+    assert caught.value is primary
+    assert captured_output.warnings.count("could not close the VM operation log after failure") == 1

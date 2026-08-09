@@ -313,27 +313,65 @@ class BootstrapResult:
     def ok(self) -> bool:
         return self.exit_code == 0 and self.tailscale_ip is not None
 
+    def scrub(self) -> None:
+        """Discard provider-controlled output retained by this result graph."""
+        for step in self.steps:
+            step.name = ""
+            step.success_msg = None
+            step.warnings.clear()
+            step.error = None
+        self.steps.clear()
+        self.tailscale_ip = None
+        self.raw_output = ""
 
-def parse_bootstrap_output(stdout: str, exit_code: int) -> BootstrapResult:
+
+class BootstrapOutput:
+    """Mutable ownership carrier for raw bootstrap process output."""
+
+    def __init__(self) -> None:
+        self.text = ""
+
+    def scrub(self) -> None:
+        self.text = ""
+
+    def __repr__(self) -> str:
+        return "BootstrapOutput(<scrubbed>)"
+
+
+def parse_bootstrap_output(output: BootstrapOutput, exit_code: int) -> BootstrapResult:
     """Parse structured markers from bootstrap script output."""
-    result = BootstrapResult(exit_code=exit_code, raw_output=stdout)
+    result = BootstrapResult(exit_code=exit_code)
     current_step: StepResult | None = None
+    line = ""
+    msg = ""
 
-    for line in stdout.splitlines():
-        if line.startswith("##STEP## "):
-            current_step = StepResult(name=line[9:])
-            result.steps.append(current_step)
-        elif line.startswith("##SUCCESS## "):
-            msg = line[12:]
-            if current_step is not None:
-                current_step.success_msg = msg
-            if msg.startswith("tailscale-ip="):
-                result.tailscale_ip = msg.split("=", 1)[1].strip()
-        elif line.startswith("##WARN## "):
-            if current_step is not None:
-                current_step.warnings.append(line[9:])
-        elif line.startswith("##ERROR## "):
-            if current_step is not None:
-                current_step.error = line[10:]
+    try:
+        result.raw_output = output.text
+        for line in output.text.splitlines():
+            if line.startswith("##STEP## "):
+                current_step = StepResult(name="")
+                current_step.name = line[9:]
+                line = ""
+                result.steps.append(current_step)
+            elif line.startswith("##SUCCESS## "):
+                msg = line[12:]
+                if current_step is not None:
+                    current_step.success_msg = msg
+                if msg.startswith("tailscale-ip="):
+                    result.tailscale_ip = msg.split("=", 1)[1].strip()
+            elif line.startswith("##WARN## "):
+                if current_step is not None:
+                    current_step.warnings.append(line[9:])
+            elif line.startswith("##ERROR## "):
+                if current_step is not None:
+                    current_step.error = line[10:]
 
-    return result
+        return result
+    except BaseException:
+        result.scrub()
+        raise
+    finally:
+        output.scrub()
+        current_step = None
+        line = ""
+        msg = ""

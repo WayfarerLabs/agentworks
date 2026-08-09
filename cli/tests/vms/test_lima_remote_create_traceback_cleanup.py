@@ -15,7 +15,12 @@ from agentworks.ssh import SSHError, SSHLogger
 _REMOTE_DIR = "/tmp/agentworks-lima-template.A1b2C3d4E5"
 
 
-def _assert_secret_absent_from_agentworks_exception_graph(exc: BaseException, secret: str) -> None:
+def _assert_secret_absent_from_agentworks_exception_graph(
+    exc: BaseException,
+    secret: str,
+    *,
+    required_functions: set[str] | None = None,
+) -> None:
     pending = [exc]
     seen: set[int] = set()
     found_functions: set[str] = set()
@@ -38,7 +43,8 @@ def _assert_secret_absent_from_agentworks_exception_graph(exc: BaseException, se
             pending.append(current.__context__)
         if isinstance(current, BaseExceptionGroup):
             pending.extend(current.exceptions)
-    assert {"_create_remote", "_create_remote_sensitive"} <= found_functions
+    required = required_functions or {"_create_remote", "_create_remote_sensitive"}
+    assert required <= found_functions
 
 
 class _HostTransport:
@@ -136,6 +142,72 @@ def test_remote_create_control_flow_scrubs_every_agentworks_frame_and_preserves_
         )
 
     assert caught.value is control_flow
+    assert loggers and all(logger._redact == () for logger in loggers)  # noqa: SLF001
+    assert hosts and all(host.logger is None for host in hosts)
+    _assert_secret_absent_from_agentworks_exception_graph(caught.value, secret)
+
+
+def test_remote_sensitive_owner_constructor_entry_is_inside_cleanup_fence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = "remote-owner-constructor-sentinel"
+    failure = GeneratorExit()
+
+    def interrupt_constructor(self: object) -> None:
+        del self
+        raise failure
+
+    monkeypatch.setattr(lima_mod._RemoteCreateSensitiveState, "__init__", interrupt_constructor)  # noqa: SLF001
+
+    with pytest.raises(GeneratorExit) as caught:
+        LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._create_remote(
+            "myvm",
+            f"embedded: {secret}",
+            redactions=(secret,),
+        )
+
+    assert caught.value is failure
+    _assert_secret_absent_from_agentworks_exception_graph(
+        caught.value,
+        secret,
+        required_functions={"_create_remote"},
+    )
+
+
+def test_remote_create_logger_write_failure_scrubs_reflected_result_graph(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from agentworks import remote_exec, ssh
+
+    secret = "remote-create-log-write-sentinel"
+    loggers, hosts = _wire_remote_create(monkeypatch, tmp_path, secret)
+    monkeypatch.setattr(
+        remote_exec,
+        "run_detached",
+        lambda *args, **kwargs: DetachedResult(
+            exit_code=1,
+            output=f"##STEP## Provision\n##ERROR## reflected {secret}\n",
+        ),
+    )
+
+    original_emit = ssh._PropagatingFileHandler.emit
+
+    def fail_emit(self: object, record: object) -> None:
+        if str(record.getMessage()).startswith("# Log:"):  # type: ignore[attr-defined]
+            original_emit(self, record)  # type: ignore[arg-type]
+            return
+        raise OSError("disk full")
+
+    monkeypatch.setattr(ssh._PropagatingFileHandler, "emit", fail_emit)
+
+    with pytest.raises(OSError, match="disk full") as caught:
+        LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._create_remote(
+            "myvm",
+            f"embedded: {secret}",
+            redactions=(secret,),
+        )
+
     assert loggers and all(logger._redact == () for logger in loggers)  # noqa: SLF001
     assert hosts and all(host.logger is None for host in hosts)
     _assert_secret_absent_from_agentworks_exception_graph(caught.value, secret)

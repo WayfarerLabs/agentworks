@@ -21,6 +21,18 @@ if TYPE_CHECKING:
     from typing import Any
 
 
+def _assert_agentworks_tracebacks_scrubbed(exc: BaseException, secret: str) -> set[str]:
+    functions: set[str] = set()
+    traceback = exc.__traceback__
+    while traceback is not None:
+        module = str(traceback.tb_frame.f_globals.get("__name__", ""))
+        if module.startswith("agentworks."):
+            functions.add(traceback.tb_frame.f_code.co_name)
+            assert secret not in repr(traceback.tb_frame.f_locals)
+        traceback = traceback.tb_next
+    return functions
+
+
 @pytest.fixture
 def logger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[SSHLogger]:
     """Build a fresh ``SSHLogger`` rooted in ``tmp_path`` (not the user's
@@ -206,3 +218,85 @@ def test_close_redacts_secrets_from_traceback(
     text = logger.path.read_text()
     assert secret not in text
     assert "[REDACTED]" in text
+
+
+def test_constructor_scrubs_redactions_when_log_directory_setup_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = "constructor-redaction-sentinel"
+    occupied = tmp_path / "not-a-directory"
+    occupied.write_text("occupied")
+    monkeypatch.setattr("agentworks.ssh.LOG_DIR", occupied)
+
+    with pytest.raises(FileExistsError) as caught:
+        SSHLogger("vm1", "test-op", redactions=(secret,))
+
+    functions = _assert_agentworks_tracebacks_scrubbed(caught.value, secret)
+    assert {"__init__", "_write", "_write_pending", "_write_sanitized"} & functions
+
+
+@pytest.mark.parametrize(
+    "surface",
+    [
+        lambda logger, secret: logger.output(f"remote reflected {secret}"),
+        lambda logger, secret: logger.log_error(f"remote reflected {secret}"),
+        lambda logger, secret: logger.log_command(
+            "remote command",
+            SSHResult(1, f"remote reflected {secret}", f"stderr reflected {secret}"),
+        ),
+        lambda logger, secret: logger._write(f"remote reflected {secret}"),  # noqa: SLF001
+    ],
+    ids=("output", "error", "command", "write"),
+)
+def test_log_write_oserror_scrubs_reflected_text_from_all_agentworks_frames(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    surface: Any,
+) -> None:
+    from agentworks import ssh
+
+    secret = "remote-reflection-write-sentinel"
+    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
+    logger = SSHLogger("vm1", "test-op", redactions=(secret,))
+
+    def fail_emit(self: object, record: object) -> None:
+        del self, record
+        raise OSError("disk full")
+
+    monkeypatch.setattr(ssh._PropagatingFileHandler, "emit", fail_emit)
+    with pytest.raises(OSError, match="disk full") as caught:
+        surface(logger, secret)
+
+    functions = _assert_agentworks_tracebacks_scrubbed(caught.value, secret)
+    assert {"_write_pending", "_write_sanitized"} <= functions
+    assert logger._redact == ()  # noqa: SLF001
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [KeyboardInterrupt("stop"), SystemExit(4), GeneratorExit()],
+    ids=("keyboard-interrupt", "system-exit", "generator-exit"),
+)
+def test_log_handler_construction_control_flow_preserves_identity_and_scrubs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: BaseException,
+) -> None:
+    from agentworks import ssh
+
+    secret = "handler-construction-sentinel"
+    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
+    logger = SSHLogger("vm1", "test-op", redactions=(secret,))
+
+    def fail_handler(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise failure
+
+    monkeypatch.setattr(ssh, "_PropagatingFileHandler", fail_handler)
+    with pytest.raises(type(failure)) as caught:
+        logger.output(f"remote reflected {secret}")
+
+    assert caught.value is failure
+    functions = _assert_agentworks_tracebacks_scrubbed(caught.value, secret)
+    assert {"output", "_write_pending", "_write_sanitized"} <= functions

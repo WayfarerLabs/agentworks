@@ -135,6 +135,10 @@ class _CreateSecretCleanup:
         if self.logger is not None:
             self.logger.discard_redactions()
 
+    def adopt_logger(self, logger: SSHLogger) -> None:
+        """Own the bootstrap logger before it crosses the return boundary."""
+        self.logger = logger
+
 
 def create_vm(
     db: Database,
@@ -300,8 +304,17 @@ def _create_vm(
     scope = OperationScope(level=ScopeLevel.VM, system_slug=slug, vm=vm_name)
 
     def scoped_ctx(secret_names: tuple[str, ...]) -> RunContext:
-        reader = ScopedSecrets(resolver.values, secret_names)
+        # Register the empty reader before copying any values. Constructor or
+        # append failure therefore owns no plaintext; after registration, the
+        # operation fence can scrub every partial or complete copy.
+        reader = ScopedSecrets.empty(secret_names)
         _secret_cleanup.readers.append(reader)
+        transfer: dict[str, str] = {}
+        try:
+            transfer = resolver.values
+            reader.copy_values(transfer)
+        finally:
+            transfer.clear()
         return RunContext(
             config=config,
             operation_scope=scope,
@@ -369,10 +382,10 @@ def _create_vm(
             site_node.runup(scoped_ctx(site_node.secret_refs()))
             tailscale_ctx = scoped_ctx(template_node.secret_refs())
             # Each credential's token, read through its node's SCOPED delivery.
-            _secret_cleanup.git_tokens = {
-                node.provider.owner_name: scoped_ctx(node.secret_refs()).secret(node.provider.secret_name)
-                for node in cred_nodes
-            }
+            for node in cred_nodes:
+                _secret_cleanup.git_tokens[node.provider.owner_name] = scoped_ctx(node.secret_refs()).secret(
+                    node.provider.secret_name
+                )
 
             # The VM's OS hostname, computed once at create time and recorded on the
             # row: {slug}-{name} with a slug, the bare name without. Bounded by
@@ -413,19 +426,23 @@ def _create_vm(
             platform_obj = site_node.platform
             from agentworks.capabilities.vm_platform import ProvisionRequest
 
-            _secret_cleanup.request = ProvisionRequest(
+            request = ProvisionRequest(
                 vm_name=vm_name,
                 hostname=hostname,
                 system_slug=slug,
                 admin_username=resolved_admin_username,
                 ssh_public_key=config.operator.ssh_public_key.read_text().strip(),
                 ssh_private_key=config.operator.ssh_private_key,
-                tailscale_auth_key=tailscale_ctx.secret(vm_tmpl.tailscale_auth_key),
+                tailscale_auth_key=None,
                 cpus=resolved_cpus,
                 memory_gib=resolved_memory,
                 disk_gib=resolved_disk,
                 swap_gib=vm_tmpl.swap,
             )
+            # Arm operation ownership while the request is still value-free,
+            # then expose the resolved scalar only through the owned object.
+            _secret_cleanup.request = request
+            request.tailscale_auth_key = tailscale_ctx.secret(vm_tmpl.tailscale_auth_key)
 
             # The op-start context for the platform's create op: secrets scoped
             # to the site's declared names.
@@ -436,7 +453,7 @@ def _create_vm(
             # detail one notch deeper).
             output.info(f"Creating VM '{vm_name}' on vm-site '{site}'...")
             try:
-                result = platform_obj.create(_secret_cleanup.request, platform_ctx)
+                result = platform_obj.create(request, platform_ctx)
             except KeyboardInterrupt:
                 # The platform's create owns rolling back its own partial
                 # backend resources before this interrupt propagates (the
@@ -489,7 +506,7 @@ def _create_vm(
                 # so a failure to open it maps like any other init failure, as
                 # it did when the hold was entered inside the old initialize_vm.
                 init_stack.enter_context(platform_obj.vm_active(init_row, config=config))
-                ts_target, _secret_cleanup.logger, home = _mgr.bootstrap_vm(
+                ts_target, logger, home = _mgr.bootstrap_vm(
                     db,
                     config,
                     vm_tmpl,
@@ -500,6 +517,7 @@ def _create_vm(
                     admin_username=resolved_admin_username,
                     tailscale_ctx=tailscale_ctx,
                     git_tokens=_secret_cleanup.git_tokens,
+                    on_logger_ready=_secret_cleanup.adopt_logger,
                     bootstrap_complete=result.bootstrap_complete,
                     tailscale_ip=result.tailscale_ip,
                     on_tailscale_ready=_on_tailscale_ready,
@@ -528,7 +546,7 @@ def _create_vm(
                 providers,
                 home,
                 resolved_admin_username,
-                _secret_cleanup.logger,
+                logger,
                 git_tokens=_secret_cleanup.git_tokens,
                 is_first_init=True,
             )
