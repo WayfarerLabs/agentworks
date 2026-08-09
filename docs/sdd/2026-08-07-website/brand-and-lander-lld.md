@@ -2,7 +2,7 @@
 
 <!-- cspell:ignore focusout keyup pointerdown unitless -->
 
-- Status: Ready for lead review
+- Status: Approved for implementation
 - Date: 2026-08-08
 - FRD: `frd.md`, specifically R6-R9
 - HLA: `hla.md`, specifically D5 and D7
@@ -34,11 +34,11 @@ Implementation uses these permanent names:
 `lander-game.js` alone imports the model and owns the frame and pointer; no scheduler is duplicated.
 Phase 2 owns the production build-time seam:
 `website/build.py --only 404 --repo-root ROOT --output OUT --site-base BASE` renders `404.html` and
-copies its local assets/static files. `BASE` is a URL path bounded by `/`; `/` and `/agentworks/`
-pass. Reject schemes, authorities, queries, fragments, backslashes, `//`, and dot segments. The only
-template token, `{{SITE_BASE}}`, prefixes home, CSS, module, and every SVG URL; missing required
-uses or an unexpanded token fails. Phase 4 extends this builder to index and pins the project-base
-to custom-domain-base transition at go-live.
+copies its assets. `BASE` is a slash-bounded URL path; `/` and `/agentworks/` pass. A closed ASCII
+segment grammar rejects encoding, whitespace, controls, HTML delimiters, URL components,
+backslashes, `//`, and dot segments. Output beneath the repository is rejected before staging. The
+sole token `{{SITE_BASE}}` prefixes home and local asset URLs; missing uses or tokens fail. Phase 4
+extends this builder and pins the project-to-custom-domain base transition.
 
 ## 3. AGW SVG contract
 
@@ -138,15 +138,15 @@ sceneX = worldX * 10
 sceneY = 548 - worldY * 10
 ```
 
-Surface collision is world `y=0`, scene `y=548`; terrain cannot cover the zone, NOC, status, or
-focus outline.
+Surface collision is world `y=0`, scene `y=548`. That exact horizon spans the zone through the NOC,
+so terrain cannot cover the operational geometry.
 
 Pinned game geometry, in world metres, is:
 
 | Object                    | Geometry                                                 |
 | ------------------------- | -------------------------------------------------------- |
 | Playable horizontal bound | Lander reference `x` in `[7, 93]`                        |
-| Playable vertical bound   | Lander reference `y` in `[0, 48]` during `flying`        |
+| Playable vertical bound   | Lander reference `y <= 48`; `y <= 0` is ground contact   |
 | Landing zone              | Surface segment `x` in `[18, 42]`                        |
 | Zone marker               | Scene line `(180, 548)` to `(420, 548)`, two units thick |
 | NOC west module           | Rectangle `x=[54, 59]`, `y=[0, 4.2]`                     |
@@ -178,18 +178,17 @@ to scene `y=68`, keeping the rotating mark visible.
 `--lander-x`/`--lander-y` are scene `px`, `--lander-angle` is `deg`, and plume scale/opacity are
 unitless. Render writes them once after a frame's steps; CSS never infers model state.
 
-`lander.css` selects those attributes and structural IDs. Its only keyframes are
-`agw-preflight-cue`, `agw-agent-route`, and `agw-antenna-signal`. Controller clocks, never CSS
-events, advance and test state. `data-paused="true"` pauses every active keyframe.
+`lander.css` selects those attributes and structural IDs. Its only keyframes are `agw-preflight-cue`
+and `agw-agent-route`. Controller clocks, never CSS events, advance and test state.
+`data-paused="true"` pauses every active keyframe; powered antenna arcs remain static.
 
 Initial enhancement sets `data-cue="running"` once for a 2.4-second, three-pulse plume scale from
 `0.08` to `0.28`, then `settled`. Reduced motion and START settle it immediately. EXIT restores
 settled preflight and never replays it; only reload creates a new cue opportunity.
 
-Under `@media (prefers-reduced-motion: reduce)`, all three animations and all CSS transitions are
-`none`. The preflight plume is statically present at scale `0.08`. Physics motion remains because it
-is essential to the deliberately started game, but the post-touchdown decorative sequence follows
-section 11's reduced-motion shortcut.
+Reduced motion disables animations/transitions. Settled preflight variables keep plumes at `0.08`;
+no media rule overrides live flight plume commands. Essential physics remains, while the decorative
+post-touchdown sequence uses section 11's shortcut.
 
 ## 7. Mission state machine
 
@@ -330,12 +329,10 @@ abs(normalizeDegrees(angle)) <= 8.0
 abs(angularVelocity) <= 12.0
 ```
 
-Compute all contacts/bound violations from the post-step pose, then clamp every violated `x`/`y`
-coordinate independently before rendering, regardless of the winning event. Precedence is NOC
-intersection (`UNSAFE_CONTACT`, cause `noc`), unsafe ground (`UNSAFE_CONTACT`, cause `surface`),
-playable bound (`OUT_OF_BOUNDS`), then safe touchdown. The antenna/signals do not collide; scripted
-departure ignores bounds. Safe touchdown sets the lower foot to `y=0` and zeros velocities. Fuel is
-not a landing predicate.
+Classify the raw post-step pose in this order: NOC `UNSAFE_CONTACT`; ground as safe touchdown or
+`UNSAFE_CONTACT`/`surface`; then `x` or upper-`y` `OUT_OF_BOUNDS`. Ground crossing is not a bound.
+Settle safe contact from raw pose with its lower foot at `y=0`; clamp only frozen failures.
+Antenna/signals do not collide, departure ignores bounds, and fuel is not a landing predicate.
 
 Failure status is exactly `Landing unsuccessful. Press R to restart or Escape to exit.` There is no
 shake, flash, explosion, layout movement, or home-link change.
@@ -437,7 +434,8 @@ preference on mid-sequence uses this shortcut; changing it in flight does not al
 
 Section 14's forbidden surfaces enforce in-memory runs; reload starts fresh. Home precedes game;
 never intercept Tab or move/trap focus. Restart retains shell focus. `destroy()` cancels
-clocks/listeners, clears input/capture/active ARIA, zeros thrust, and leaves recovery intact.
+clocks/listeners, clears input/capture/active ARIA, status, and thrust, hides its now-dead start
+control, and leaves the static no-JavaScript recovery intact.
 
 ## 13. Deterministic vectors
 
