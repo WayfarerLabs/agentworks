@@ -134,10 +134,14 @@ class _SensitiveExceptionGraphCleanup:
 def _strip_sensitive_exception_graph(failure: BaseException) -> None:
     """Detach downstream frames and links that may retain sensitive input."""
     cleanup = _SensitiveExceptionGraphCleanup()
-    cleanup.pending.append(failure)
     try:
+        cleanup.pending.append(failure)
         cleanup.detach()
     except BaseException as interruption:
+        # Adoption itself is inside this fence. Re-adopt the root before
+        # scrubbing so an interruption on the first transfer line cannot
+        # leave its native traceback linked through the retained parameter.
+        cleanup.pending.append(failure)
         cleanup.scrub()
         interruption.__cause__ = None
         interruption.__context__ = None

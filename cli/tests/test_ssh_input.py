@@ -285,6 +285,67 @@ def test_exception_graph_detach_interrupt_scrubs_mutable_owner_and_preserves_ide
     assert found_detach
 
 
+def test_exception_graph_first_transfer_interrupt_is_inside_cleanup_fence() -> None:
+    from agentworks import ssh
+
+    secret = "first-transfer-interrupt-sentinel"
+    native_failure = OSError("native failure")
+    interruption = GeneratorExit()
+    strip_source, strip_start = inspect.getsourcelines(ssh._strip_sensitive_exception_graph)  # noqa: SLF001
+    transfer_line = next(
+        line_number
+        for line_number, line in enumerate(strip_source, start=strip_start)
+        if "cleanup.pending.append(failure)" in line
+    )
+
+    def native_run() -> None:
+        retained_input = secret
+        assert retained_input == secret
+        raise native_failure
+
+    def interrupt_first_transfer(frame: FrameType, event: str, arg: object) -> object | None:
+        del arg
+        if (
+            event == "line"
+            and frame.f_code.co_name == "_strip_sensitive_exception_graph"
+            and frame.f_lineno == transfer_line
+        ):
+            sys.settrace(None)
+            raise interruption
+        return interrupt_first_transfer
+
+    try:
+        native_run()
+    except OSError as failure:
+        sys.settrace(interrupt_first_transfer)
+        try:
+            with pytest.raises(GeneratorExit) as caught:
+                ssh._strip_sensitive_exception_graph(failure)  # noqa: SLF001
+        finally:
+            sys.settrace(None)
+
+    assert caught.value is interruption
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    assert native_failure.__traceback__ is None
+    assert native_failure.__cause__ is None
+    assert native_failure.__context__ is None
+    assert "native_run" not in _complete_frame_functions(caught.value)
+    traceback = caught.value.__traceback__
+    found_strip = False
+    while traceback is not None:
+        if traceback.tb_frame.f_code.co_name == "_strip_sensitive_exception_graph":
+            found_strip = True
+            cleanup = traceback.tb_frame.f_locals["cleanup"]
+            assert cleanup.pending == []
+            assert cleanup.current is None
+            assert cleanup.tracebacks == []
+            assert cleanup.seen == set()
+            assert secret not in repr(traceback.tb_frame.f_locals)
+        traceback = traceback.tb_next
+    assert found_strip
+
+
 def test_ssh_run_sensitive_timeout_drops_partial_output_and_native_exception() -> None:
     secret = "ssh-timeout-swordfish"
     timeout = subprocess.TimeoutExpired(

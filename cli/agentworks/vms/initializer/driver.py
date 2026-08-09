@@ -238,7 +238,7 @@ def _bootstrap_vm(
         # (not NSG-gated).
         secure_failed_vm_after_failure(platform, vm_row, ctx, interrupted=False)
         close_logger_after_failure(logger)
-        warn_after_failure(f"Log: {logger.display_path}")
+        warn_after_failure(lambda: f"Log: {logger.display_path}")
         raise
     except BaseException:
         # An operator interrupt (KeyboardInterrupt) or another

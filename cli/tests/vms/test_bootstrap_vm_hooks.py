@@ -275,6 +275,32 @@ def test_secure_hook_and_every_failure_warning_preserve_exact_primary(
         assert warning_calls[1].startswith("Log: ")
 
 
+def test_log_path_rendering_failure_cannot_replace_bootstrap_primary(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    _hermetic_driver: None,
+) -> None:
+    primary = RuntimeError("bootstrap primary")
+    rendering_failure = SystemExit(44)
+    db.insert_vm("hookvm", site="stub", hostname="hookvm")
+
+    def fail_phase(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise primary
+
+    def fail_display_path(self: SSHLogger) -> str:
+        del self
+        raise rendering_failure
+
+    monkeypatch.setattr(driver, "_phase_a_bootstrap", fail_phase)
+    monkeypatch.setattr(SSHLogger, "display_path", property(fail_display_path))
+
+    with pytest.raises(RuntimeError) as caught:
+        _call_bootstrap(db, _SpyPlatform(), lambda: None)
+
+    assert caught.value is primary
+
+
 @pytest.mark.parametrize(
     "primary",
     [RuntimeError("bootstrap failed"), KeyboardInterrupt("bootstrap interrupted")],

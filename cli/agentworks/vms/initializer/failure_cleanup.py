@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 from agentworks import output
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.db import VMRow
@@ -28,10 +30,10 @@ class BootstrapSecretCleanup:
             self.logger.discard_redactions()
 
 
-def warn_after_failure(message: str) -> None:
-    """Emit a best-effort warning without replacing the active primary."""
+def warn_after_failure(render_message: Callable[[], str]) -> None:
+    """Build and emit a warning without replacing the active primary."""
     with contextlib.suppress(BaseException):
-        output.warn(message)
+        output.warn(render_message())
 
 
 def close_logger_after_failure(logger: SSHLogger) -> None:
@@ -39,7 +41,7 @@ def close_logger_after_failure(logger: SSHLogger) -> None:
     try:
         logger.close()
     except BaseException:
-        warn_after_failure("could not close the VM operation log after failure")
+        warn_after_failure(lambda: "could not close the VM operation log after failure")
 
 
 def secure_failed_vm_after_failure(
@@ -54,4 +56,4 @@ def secure_failed_vm_after_failure(
         platform.secure_failed_vm(vm_row, ctx)
     except BaseException:
         state = "interrupted" if interrupted else "failed"
-        warn_after_failure(f"could not secure the {state} VM")
+        warn_after_failure(lambda: f"could not secure the {state} VM")
