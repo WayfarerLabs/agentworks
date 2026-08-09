@@ -276,6 +276,10 @@ custom properties; scripts remain same-origin and connections remain disabled. T
 uses the linked AGW image with the accessible name `Agentworks home`; its small nav contains
 ordinary anchors and no menu control.
 
+The 404 keeps title `Page not found | Agentworks`, uses meta description
+`The requested Agentworks page was not found.`, and has canonical URL
+`https://agentworks.build/404.html`.
+
 The home outline and source placement are exact:
 
 ```text

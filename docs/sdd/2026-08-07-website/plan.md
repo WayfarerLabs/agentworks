@@ -138,15 +138,15 @@ but are not deployed or merged as a partial website.
 ## Phase 3: interim shell LLD
 
 - [x] Check the website feature directory on `origin/main` for late messages before starting.
-- [ ] Delegate `site-shell-lld.md` to an `agentworks-dev` subagent. It pins exact current-`main`
+- [x] Delegate `site-shell-lld.md` to an `agentworks-dev` subagent. It pins exact current-`main`
       product/security source paths and selectors, extraction errors, the exact site-owned
       availability notice and security-link label, site files and URLs, closed template vocabulary,
       page outlines, responsive layout, terminal/TUI-derived visual tokens, builder CLI, output
       tree, Pages-base transition, and interim test matrix.
-- [ ] Pin the future bootstrap insertion point as layout structure only. Do not inspect or depend on
+- [x] Pin the future bootstrap insertion point as layout structure only. Do not inspect or depend on
       the onboarding feature branch, invent onboarding text, add a copy control, or create a runtime
       release-mode abstraction.
-- [ ] Lead reviews the LLD against R10/R11/R13, AC11/AC13/AC14, C5, and D1/D3/D5/D10 and updates the
+- [x] Lead reviews the LLD against R10/R11/R13, AC11/AC13/AC14, C5, and D1/D3/D5/D10 and updates the
       lead-owned artifacts if detail exposes a gap.
 - [ ] `agentworks-reviewer` reviews the LLD; all valid findings are resolved and re-reviewed.
 
