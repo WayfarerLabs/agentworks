@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 import yaml
+from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 
 from agentworks.env import EnvEntry, PlaintextEnvEntry, SecretEnvEntry
@@ -72,17 +73,12 @@ def test_all_spellings_are_exposed_by_a_structural_one_of() -> None:
     documentation too."""
     emitted = EnvEntry.model_json_schema()
     assert "anyOf" not in emitted
-    assert emitted["oneOf"] == [
-        {"$ref": "#/$defs/PlaintextEnvEntry"},
-        {"$ref": "#/$defs/SecretEnvEntry"},
-    ]
-    plaintext = emitted["$defs"]["PlaintextEnvEntry"]
-    secret = emitted["$defs"]["SecretEnvEntry"]
+    plaintext, secret = emitted["oneOf"]
     assert plaintext["anyOf"][0] == {"type": "string"}
     assert plaintext["anyOf"][1]["required"] == ["value"]
-    assert set(plaintext["anyOf"][1]["properties"]) == {"value"}
+    assert plaintext["anyOf"][1]["properties"]["secret"] == {"type": "null"}
     assert secret["required"] == ["secret"]
-    assert set(secret["properties"]) == {"secret"}
+    assert secret["properties"]["value"] == {"type": "null"}
 
 
 def test_the_runtime_wrapper_contains_one_closed_arm() -> None:
@@ -136,6 +132,21 @@ def test_a_yaml_null_companion_still_loads() -> None:
 
     assert loaded == {"value": "vim", "secret": None}
     assert EnvEntry.model_validate(loaded).model_dump() == {"value": "vim"}
+
+
+@pytest.mark.parametrize(
+    "legacy",
+    [
+        {"value": "vim", "secret": None},
+        {"value": None, "secret": "editor-token"},
+    ],
+)
+def test_emitted_schema_accepts_every_legacy_null_companion_the_loader_accepts(
+    legacy: dict[str, object],
+) -> None:
+    EnvEntry.model_validate(legacy)
+
+    assert list(Draft202012Validator(EnvEntry.model_json_schema()).iter_errors(legacy)) == []
 
 
 @pytest.mark.parametrize(

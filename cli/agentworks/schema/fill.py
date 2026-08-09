@@ -230,7 +230,11 @@ def _filled_value(shape: FieldShape, value: object, owner: RefOwner, on_path: _P
         model = _armed_model(shape.arms, shape.discriminator, shape.union_scalar_shorthand, value)
         return value if model is None else (yield _filled_block(model, value, owner, on_path))
     if shape.structural_arms:
-        model, canonical = structural_arm_and_value(shape.structural_arms, value)
+        model, canonical = structural_arm_and_value(
+            shape.structural_arms,
+            value,
+            canonicalize_null_companions=shape.structural_null_companions,
+        )
         return value if model is None else (yield _filled_block(model, canonical, owner, on_path))
     if shape.union_model is not None:
         return (yield _filled_union(shape.union_model, shape.union_members, value, owner, on_path))
@@ -273,7 +277,11 @@ def _filled_element(shape: FieldShape, element: object, owner: RefOwner, on_path
         )
         return element if model is None else (yield _filled_block(model, element, owner, on_path))
     if shape.item_structural_arms:
-        model, canonical = structural_arm_and_value(shape.item_structural_arms, element)
+        model, canonical = structural_arm_and_value(
+            shape.item_structural_arms,
+            element,
+            canonicalize_null_companions=shape.item_structural_null_companions,
+        )
         return element if model is None else (yield _filled_block(model, canonical, owner, on_path))
     if shape.item_union_model is not None:
         return (yield _filled_union(shape.item_union_model, shape.item_union_members, element, owner, on_path))

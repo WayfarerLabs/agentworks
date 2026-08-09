@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Annotated, ClassVar, Literal
 
 import pytest
+from jsonschema import Draft202012Validator
 from pydantic import AliasChoices, BaseModel, Discriminator, Field
 
 from agentworks.schema import (
@@ -71,6 +72,16 @@ class OptionalDefaultItemsHolder(AgwModel):
     sources: list[DefaultSource | None] = Field(default_factory=list)
 
 
+AnnotatedCompatSource = Annotated[
+    Annotated[PlainArm, Field(title="annotated plaintext")] | Annotated[SecretArm, Field(title="annotated secret")],
+    StructuralUnion(canonicalize_null_companions=True),
+]
+
+
+class AnnotatedCompatHolder(AgwModel):
+    source: AnnotatedCompatSource
+
+
 def _names(blob: object) -> list[str]:
     return [ref.name for ref in extract_references(Holder, blob)]
 
@@ -85,6 +96,28 @@ def test_malformed_or_ambiguous_tables_do_not_guess_an_edge() -> None:
     assert _names({"sources": {"neither": {}}}) == []
     assert _names({"sources": {"unknown": {"secrit": "api-token"}}}) == []
     assert _names({"sources": {"bad-name": {"secret": 8}}}) == []
+
+
+def test_null_companion_compatibility_is_not_implicit_for_structural_unions() -> None:
+    blob = {"sources": {"plain": {"value": "text", "secret": None}}}
+
+    with pytest.raises(ValueError):
+        Holder.model_validate(blob)
+    assert _names(blob) == []
+
+    emitted = Holder.model_json_schema()
+    assert set(emitted["$defs"]["PlainArm"]["anyOf"][1]["properties"]) == {"value"}
+    assert set(emitted["$defs"]["SecretArm"]["properties"]) == {"secret"}
+
+
+def test_opt_in_null_companions_compose_with_annotated_union_arms() -> None:
+    legacy = {"source": {"value": None, "secret": "api-token"}}
+    canonical = {"source": {"secret": "api-token"}}
+
+    assert AnnotatedCompatHolder.model_validate(legacy).model_dump() == canonical
+    assert filled_defaults(AnnotatedCompatHolder, legacy, OWNER) == canonical
+    assert [ref.name for ref in extract_references(AnnotatedCompatHolder, legacy)] == ["api-token"]
+    assert list(Draft202012Validator(AnnotatedCompatHolder.model_json_schema()).iter_errors(legacy)) == []
 
 
 def test_owner_default_filling_uses_the_same_structural_selection() -> None:

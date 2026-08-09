@@ -211,6 +211,12 @@ class FieldShape:
     item_structural_arms: tuple[type[BaseModel], ...]
     """:attr:`structural_arms` one collection-element level down."""
 
+    structural_null_companions: bool
+    """Whether this structural union accepts foreign-arm ``null`` keys."""
+
+    item_structural_null_companions: bool
+    """:attr:`structural_null_companions` one collection-element level down."""
+
     @property
     def block(self) -> type[BaseModel] | None:
         """The model whose fields the field-documentation stream expands
@@ -304,6 +310,8 @@ def shape_of(field: FieldInfo) -> FieldShape:
     item_union_model: type[BaseModel] | None = None
     structural_arms: tuple[type[BaseModel], ...] = ()
     item_structural_arms: tuple[type[BaseModel], ...] = ()
+    structural_null_companions = False
+    item_structural_null_companions = False
 
     found = _collection_element(inner)
     if found is not None:
@@ -322,9 +330,10 @@ def shape_of(field: FieldInfo) -> FieldShape:
         elif _is_model(element):
             item_model = element
         elif _is_union(element):
-            if _has_structural_union(element_meta):
+            if (structural := _structural_union_of(element_meta)) is not None:
                 item_union_members = tuple(split_annotated(arg)[0] for arg in get_args(element))
                 item_structural_arms = _closed_model_arms(item_union_members)
+                item_structural_null_companions = structural.canonicalize_null_companions
             else:
                 item_union_members = tuple(split_annotated(arg)[0] for arg in get_args(element))
                 item_union_model = _sole_model(item_union_members)
@@ -343,9 +352,10 @@ def shape_of(field: FieldInfo) -> FieldShape:
             union_scalar_shorthand = _sole_union_scalar_shorthand(spine_metadata(field))
         elif _is_model(inner):
             nested_model = inner
-        elif _has_structural_union([*field.metadata, *inner_metadata]):
+        elif (structural := _structural_union_of([*field.metadata, *inner_metadata])) is not None:
             union_members = tuple(split_annotated(arg)[0] for arg in get_args(inner))
             structural_arms = _closed_model_arms(union_members)
+            structural_null_companions = structural.canonicalize_null_companions
         else:
             union_members = tuple(split_annotated(arg)[0] for arg in get_args(inner))
             union_model = _sole_model(union_members)
@@ -378,6 +388,8 @@ def shape_of(field: FieldInfo) -> FieldShape:
         item_union_model=item_union_model,
         structural_arms=structural_arms,
         item_structural_arms=item_structural_arms,
+        structural_null_companions=structural_null_companions,
+        item_structural_null_companions=item_structural_null_companions,
     )
 
 
@@ -392,6 +404,8 @@ class _ClosedShape:
 def structural_arm_and_value(
     arms: tuple[type[BaseModel], ...],
     value: object,
+    *,
+    canonicalize_null_companions: bool = False,
 ) -> tuple[type[BaseModel] | None, object]:
     """The structural arm ``value`` addresses and its canonical spelling.
 
@@ -408,6 +422,8 @@ def structural_arm_and_value(
     matched = [arm for arm, shape in shapes if _matches(shape, keys)]
     if len(matched) == 1:
         return matched[0], value
+    if not canonicalize_null_companions:
+        return None, value
     if not isinstance(value, dict):
         return None, value
     known = frozenset(name for _arm, shape in shapes for name in shape.allowed)
@@ -603,7 +619,12 @@ def _field_has_structural_union(field: FieldInfo) -> bool:
 
 
 def _has_structural_union(metadata: list[object]) -> bool:
-    return any(isinstance(item, StructuralUnion) for item in metadata)
+    return _structural_union_of(metadata) is not None
+
+
+def _structural_union_of(metadata: list[object]) -> StructuralUnion | None:
+    """The structural-union declaration in one metadata sequence, if any."""
+    return next((item for item in metadata if isinstance(item, StructuralUnion)), None)
 
 
 def _closed_model_arms(members: tuple[object, ...]) -> tuple[type[BaseModel], ...]:

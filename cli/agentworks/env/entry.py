@@ -58,7 +58,14 @@ class SecretEnvEntry(AgwModel):
     """The name of a declared secret whose value is exported."""
 
 
-class EnvEntry(AgwRootModel[Annotated[PlaintextEnvEntry | SecretEnvEntry, StructuralUnion()]]):
+class EnvEntry(
+    AgwRootModel[
+        Annotated[
+            PlaintextEnvEntry | SecretEnvEntry,
+            StructuralUnion(canonicalize_null_companions=True),
+        ]
+    ]
+):
     """One env var declaration, as a structural plaintext-or-secret union.
 
     ``PlaintextEnvEntry`` and ``SecretEnvEntry`` are distinct closed arms.
