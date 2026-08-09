@@ -256,10 +256,10 @@ position and shell order. This is configured DB state, never live tmux state.
 ### Doctor
 
 doctor.data is {groups, counts}. groups[] is {name, checks}; checks[] is {name, status, message,
-hint}; counts is {ok, info, unavailable, warn, fail}. status is exactly ok, info, unavailable, warn,
-or fail; message and hint are nullable. Group and check order is HealthReport construction order.
-Counts are integers from the complete report. JSON is emitted for a failing report, then doctor
-exits 1. Reports with no failed checks exit 0; unavailable checks do not increment warn or fail.
+hint}; counts is {ok, info, warn, fail}. status is exactly ok, info, warn, or fail; message and hint
+are nullable. Group and check order is HealthReport construction order. Counts are integers from the
+complete report. JSON is emitted for a failing report, then doctor exits 1. Reports with no failed
+checks exit 0.
 
 ## Ordering, error, and terminal behavior
 
@@ -288,50 +288,11 @@ mutation and passthrough arguments. The serializer writes stdout directly, rathe
 so the ambient handler cannot add presentation. --output human executes the exact current human
 renderer path.
 
-Doctor is inspection-only at both schema states. One report-scoped collection supplies the System,
-VM sites, and Database groups, so all three project facts from one verified database generation. A
-stale schema yields their pending-migration rows without opening the original database through
-SQLite. A current, existing database is resolved to its real identity, then doctor stream-copies the
-main file and any resolved WAL/SHM sidecars into a private writable directory while recording file
-identity, size, modification time, and content fingerprints. Source entries are acquired by
-non-blocking, no-follow descriptors and accepted only when the descriptor identifies a regular file.
-Reads are bounded to the acquired size. Broken or looping symlinks, FIFOs, devices, directories,
-sockets, and other unsupported entries fail closed with a path-free inspection-unavailable error.
-The complete acquisition protocol requires non-blocking and no-follow flags plus directory-relative
-open and directory-only support. A host lacking any required primitive raises a distinct typed
-protocol-unavailable result before inspecting a database or sidecar entry; it never substitutes a
-check-then-open sequence. After the static capability gate, preflight forms a rooted absolute
-lexical requested path and rejects drive-relative forms. It strictly resolves the nearest existing
-ancestor of the requested parent, pins that resolved ancestor through the component-by-component
-descriptor walk, and performs a directory-only, no-follow open of `.` relative to the resulting fd.
-Each candidate that fails strict resolution is classified with lstat before climbing. Only a
-lexically absent candidate permits the climb; an existing symlink that cannot resolve is invalid
-state and fails closed. This preserves healthy absent state when a fresh install's database parent
-does not exist and never creates that parent. If a final database entry exists, doctor retains the
-metadata access required to resolve supported final symlinks, then separately pins and probes the
-resolved target parent before acquiring any main, WAL, or SHM content. Runtime errors that report an
-unsupported or unimplemented operation, including `EOPNOTSUPP` and `ENOSYS`, take the same closed
-path. Doctor projects that result as fixed, path-free `unavailable` rows in the System, applicable
-VM sites, and Database groups. It is non-failing and an otherwise healthy report exits 0.
-Unsupported source entries, copy or retry failures, and malformed schema versions remain the
-path-free database-inspection failure path and make the Database row fail. Stable component and
-final database symlinks remain supported. Snapshot acquisition walks to the resolved target parent
-once. The resulting pinned fd supplies every main, WAL, and SHM metadata read, copy, second
-fingerprint, and retry until collection finishes, then closes before facts are yielded. No retry
-reacquires the source parent by pathname. The same bounded protocol handles main-only and active
-sets. A main-only candidate requires sidecar absence to remain stable throughout copying and
-verification. Doctor reopens and re-fingerprints the complete source set and accepts only an exact
-match, then validates and opens only the disposable copy through SQLite. A concurrent
-clean-to-active transition, checkpoint, replacement, or sidecar transition discards the candidate
-and retries a small bounded number of times; exhaustion is the same path-free error. The
-report-scoped snapshot is cleaned up after all database facts are collected; doctor neither migrates
-nor creates or changes the original database, WAL, or SHM files. The schema-version boundary treats
-an absent table or an empty accepted table as legacy version 0. It recognizes the maintained
-one-column table, whose history may be 0..N or 1..N, and the canonical version-plus-applied-at
-table, whose history is 1..N. Nonempty histories require exact SQLite integer storage, uniqueness,
-and contiguity. Wrong columns or constraints, gaps, duplicates, rogue lower rows, and text, blob, or
-floating-point storage are malformed state and fail closed before a public diagnostic can expose the
-raw value. The same validator protects snapshot, read-only database, and schema-check callers.
+Doctor checks schema state before opening current state through the existing read-only database
+connection. A stale schema yields pending-migration rows without running migrations. SQLite may
+perform ordinary read-side WAL and shared-memory bookkeeping. Doctor does not copy the database or
+claim protection from hostile same-account filesystem replacement. Recovery and automatic backups
+belong to the database migration boundary and are outside this JSON-output implementation.
 
 --names-only remains completion plumbing and is mutually exclusive with --output json on every
 covered list or kinds command that already has it. Validate that conflict before service work. It

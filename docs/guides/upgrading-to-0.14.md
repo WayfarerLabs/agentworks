@@ -71,7 +71,7 @@ Configuration:
          snap, swap, system_install_commands, tailscale_auth_key
          hint: `agw resource sample vm-template` prints this kind's fields
 
-Results: 15 ok, 7 info, 0 unavailable, 1 warn, 2 fail
+Results: 15 ok, 7 info, 1 warn, 2 fail
 ```
 
 Write a manifest, run `agw doctor`, fix what it names, repeat. Once every manifest is clean the
@@ -392,7 +392,7 @@ Secrets:
   [ok]   Secret 'gh-pat' (auto): would resolve via prompt
   [ok]   Secret 'npm-token': would resolve via prompt
 
-Results: 18 ok, 11 info, 0 unavailable, 0 warn, 0 fail
+Results: 18 ok, 11 info, 0 warn, 0 fail
 ```
 
 Read the **Secrets** group rather than skimming it. Every secret your manifests reference appears

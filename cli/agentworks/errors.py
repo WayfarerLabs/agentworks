@@ -8,7 +8,6 @@ Errors are categorized by *kind* (what went wrong) rather than by source module:
 - ConnectivityError, ExternalError: failures in external systems where the
   full traceback is preserved to the error log for diagnosis.
 - ConfigError: config file validation; rendered cleanly.
-- DatabaseInspectionUnavailable: this host cannot perform secure database inspection.
 - UserAbort: control flow signal when the user declines a confirmation.
 
 The optional entity_kind and entity_name attributes carry the "which entity"
@@ -75,15 +74,6 @@ class StateError(AgentworksError):
     operation scope): the code, not the operator, put things in the
     unsupported state.
     """
-
-
-class DatabaseInspectionUnavailable(AgentworksError):
-    """The host lacks a primitive required for secure database inspection."""
-
-    MESSAGE = "secure database inspection is unavailable on this host"
-
-    def __init__(self) -> None:
-        super().__init__(self.MESSAGE)
 
 
 class AuthorizationError(AgentworksError):

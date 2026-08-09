@@ -114,12 +114,12 @@ lines, which are otherwise suppressed so a credential failure renders once as th
 On an interactive terminal, output is tastefully colorized by role so it is easy to scan at a
 glance: a yellow `Warning:` prefix, a red `Error:` prefix, bold section headers, a dim-green result
 line (the closing "VM deleted", "rekeyed", etc.), and dimmed secondary detail. `agw doctor` colors
-its per-check status labels the same way (green `[ok]`, yellow `[warn]`, red `[FAIL]`, unstyled
-`[info]` and `[unavailable]`), plus its summary line's `fail`/`warn`/`unavailable`/`ok` counts.
-Color is a presentation aid only, never carried in the message text. It is suppressed automatically
-when the target stream is not a terminal (pipes, redirects, CI capture) and under
-`--non-interactive`, so scripted and captured output stays byte-plain. Set the `NO_COLOR`
-environment variable (any value, honored by its presence) to opt out of color even on a terminal.
+its per-check status labels the same way (green `[ok]`, yellow `[warn]`, red `[FAIL]`, and unstyled
+`[info]`), plus its summary line's `fail`/`warn`/`ok` counts. Color is a presentation aid only,
+never carried in the message text. It is suppressed automatically when the target stream is not a
+terminal (pipes, redirects, CI capture) and under `--non-interactive`, so scripted and captured
+output stays byte-plain. Set the `NO_COLOR` environment variable (any value, honored by its
+presence) to opt out of color even on a terminal.
 
 Pressing Ctrl-C during a long-running operation triggers best-effort cleanup. Where the operation
 can roll back (e.g. `vm create` during the provisioning phase, `workspace create`, `agent create`,
@@ -481,28 +481,14 @@ Completions include dynamic VM, vm-site, workspace, session, and template name l
 ## State
 
 All state is stored in `~/.config/agentworks/agentworks.db` (SQLite). Schema migrations are
-forward-only and run automatically when a normal Agentworks command opens state. `agw doctor`
-resolves the real database identity and inspects schema and current contents without opening an
-original through SQLite. Every existing database is stream-copied to private storage together with
-the WAL and shared-memory sidecars when present. A main-only source is accepted only when sidecar
-absence remains stable through copying and verification. A second source fingerprint must prove the
-complete set stayed unchanged before SQLite validates the private copy; concurrent transitions are
-retried through the same pinned resolved-parent descriptor, so a directory rename or final-link
-target change cannot redirect a later attempt. Doctor reports a pending migration without applying
-it and does not create or change the original database, WAL, or shared-memory files. If the host
-cannot provide every primitive required for secure descriptor-first inspection, the System,
-applicable VM sites, and Database rows report `[unavailable]`. The VM sites row applies when
-configuration and the registry load; otherwise its existing informational skip remains. That state
-is neither a warning nor a failure, so it does not by itself change the exit status. Invalid
-database entries and malformed schema versions still fail closed and make doctor exit nonzero. A
-genuinely missing state directory is treated as healthy, absent state and is not created by doctor;
-an existing dangling parent or component symlink remains invalid state. For an existing final
-database symlink, doctor resolves the link metadata and preflights the resolved target parent before
-acquiring database or sidecar content. See the
-[doctor JSON contract](command-reference.md#doctor-json-schema) for the matching machine-readable
-status and count shape. Schema history validation accepts an absent table or empty accepted table as
-legacy version 0, then requires an exact maintained table shape and unique contiguous integer
-history; malformed columns, types, gaps, duplicates, or lower rogue rows fail closed.
+forward-only and run automatically when a normal Agentworks command opens state. `agw doctor` checks
+the schema first and uses the existing read-only database connection only when the schema is
+current, so doctor does not run migrations. SQLite may still perform its ordinary read-side WAL and
+shared-memory bookkeeping. Doctor reports a pending migration and tells the operator to run a normal
+Agentworks command. Hostile same-account filesystem replacement is outside doctor's threat model;
+migration recovery and automatic backups belong to the database migration boundary rather than this
+inspection command. See the [doctor JSON contract](command-reference.md#doctor-json-schema) for the
+machine-readable result.
 
 ## Environment Variables
 

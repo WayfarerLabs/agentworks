@@ -52,7 +52,6 @@ def doctor(
     status_style = {
         Status.OK: StatusStyle.GOOD,
         Status.INFO: StatusStyle.NEUTRAL,
-        Status.UNAVAILABLE: StatusStyle.NEUTRAL,
         Status.WARN: StatusStyle.WARN,
         Status.FAIL: StatusStyle.BAD,
     }
@@ -64,7 +63,6 @@ def doctor(
             label = {
                 Status.OK: "[ok]",
                 Status.INFO: "[info]",
-                Status.UNAVAILABLE: "[unavailable]",
                 Status.WARN: "[warn]",
                 Status.FAIL: "[FAIL]",
             }[check.status].ljust(6)
@@ -95,9 +93,6 @@ def doctor(
     fail_count = str(c[Status.FAIL])
     if c[Status.FAIL] > 0:
         fail_count = style_status(fail_count, StatusStyle.BAD)
-    typer.echo(
-        f"Results: {ok_count} ok, {c[Status.INFO]} info, {c[Status.UNAVAILABLE]} unavailable, "
-        f"{warn_count} warn, {fail_count} fail"
-    )
+    typer.echo(f"Results: {ok_count} ok, {c[Status.INFO]} info, {warn_count} warn, {fail_count} fail")
     if c[Status.FAIL] > 0:
         raise typer.Exit(1)

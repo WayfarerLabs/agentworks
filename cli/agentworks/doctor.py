@@ -14,12 +14,10 @@ from enum import Enum, StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from agentworks.errors import DatabaseInspectionUnavailable
 from agentworks.path_rendering import format_host_path
 
 if TYPE_CHECKING:
     from agentworks.config import Config
-    from agentworks.doctor_database import DoctorDatabaseFacts
     from agentworks.machine_output import JsonObject
     from agentworks.resources.registry import Registry
     from agentworks.vms.sites import VMSiteDecl
@@ -28,7 +26,6 @@ if TYPE_CHECKING:
 class Status(Enum):
     OK = "ok"
     INFO = "info"
-    UNAVAILABLE = "unavailable"
     WARN = "warn"
     FAIL = "fail"
 
@@ -41,7 +38,6 @@ class MachineDiagnostic(StrEnum):
     MANIFEST_INVALID = "manifest_invalid"
     RESOURCE_REGISTRY_INVALID = "resource_registry_invalid"
     DATABASE_UNAVAILABLE = "database_unavailable"
-    DATABASE_INSPECTION_UNAVAILABLE = "database_inspection_unavailable"
     SITE_PREFLIGHT_FAILED = "site_preflight_failed"
     TAILSCALE_TIMED_OUT = "tailscale_timed_out"
 
@@ -52,7 +48,6 @@ _MACHINE_DIAGNOSTICS: dict[MachineDiagnostic, tuple[str | None, str | None]] = {
     MachineDiagnostic.MANIFEST_INVALID: ("resource manifests did not load", None),
     MachineDiagnostic.RESOURCE_REGISTRY_INVALID: ("resource registry did not build", None),
     MachineDiagnostic.DATABASE_UNAVAILABLE: ("database check failed", None),
-    MachineDiagnostic.DATABASE_INSPECTION_UNAVAILABLE: (DatabaseInspectionUnavailable.MESSAGE, None),
     MachineDiagnostic.SITE_PREFLIGHT_FAILED: ("site preflight failed", None),
     MachineDiagnostic.TAILSCALE_TIMED_OUT: ("timed out", None),
 }
@@ -130,16 +125,6 @@ class HealthGroup:
     ) -> None:
         self._append(Status.WARN, name, message, hint, machine_diagnostic)
 
-    def unavailable(
-        self,
-        name: str,
-        message: str | None = None,
-        *,
-        hint: str | None = None,
-        machine_diagnostic: MachineDiagnostic | None = None,
-    ) -> None:
-        self._append(Status.UNAVAILABLE, name, message, hint, machine_diagnostic)
-
     def fail(
         self,
         name: str,
@@ -176,10 +161,6 @@ class HealthReport:
         return self.counts()[Status.WARN]
 
     @property
-    def unavailable_count(self) -> int:
-        return self.counts()[Status.UNAVAILABLE]
-
-    @property
     def fail_count(self) -> int:
         return self.counts()[Status.FAIL]
 
@@ -202,7 +183,6 @@ def health_report_data(report: HealthReport) -> JsonObject:
         "counts": {
             "ok": counts[Status.OK],
             "info": counts[Status.INFO],
-            "unavailable": counts[Status.UNAVAILABLE],
             "warn": counts[Status.WARN],
             "fail": counts[Status.FAIL],
         },
@@ -254,11 +234,7 @@ def run_checks(
     else:
         config_group, config, registry = _check_config()
 
-    from agentworks.doctor_database import collect_database_facts
-
-    database_facts = collect_database_facts()
-
-    report.groups.append(_check_system(database_facts))
+    report.groups.append(_check_system())
     report.groups.append(_check_python())
     report.groups.append(_check_required_tools())
     report.groups.append(_check_tailscale())
@@ -282,7 +258,7 @@ def run_checks(
     else:
         report.groups.append(_skipped_group("VM platforms", "Installed platforms"))
     if config is not None and registry is not None:
-        report.groups.append(_check_vm_sites(config, registry, database_facts))
+        report.groups.append(_check_vm_sites(config, registry))
     else:
         report.groups.append(_skipped_group("VM sites", "Declared sites"))
     report.groups.append(config_group)
@@ -294,7 +270,7 @@ def run_checks(
         report.groups.append(_check_secrets(config, registry))
     else:
         report.groups.append(_skipped_group("Secrets", "Declared secrets"))
-    report.groups.append(_check_database(database_facts))
+    report.groups.append(_check_database())
 
     if completion_version is not None:
         report.groups.append(_check_completions(completion_version))
@@ -328,15 +304,15 @@ def _skipped_group(name: str, item: str) -> HealthGroup:
     return g
 
 
-def _check_system(database_facts: DoctorDatabaseFacts | None = None) -> HealthGroup:
+def _check_system() -> HealthGroup:
     """Install-level identity: the system slug. Not a VM-site concern
     (it namespaces hostnames, backend-side names, and the managed SSH
     config file install-wide), so it leads the report under its own
     header rather than hiding in the VM groups.
     """
-    from agentworks.doctor_database import check_system, collect_database_facts
+    from agentworks.doctor_state import check_system
 
-    return check_system(database_facts or collect_database_facts())
+    return check_system()
 
 
 def _check_python() -> HealthGroup:
@@ -456,7 +432,6 @@ def _platform_summary(decl: VMSiteDecl) -> str:
 def _check_vm_sites(
     config: Config,
     registry: Registry,
-    database_facts: DoctorDatabaseFacts | None = None,
 ) -> HealthGroup:
     """VM sites: every registered site's state, and every VM's site
     resolving to a usable declaration.
@@ -486,7 +461,8 @@ def _check_vm_sites(
     that names it, and a site whose credential is prompt-only reads ok
     here, correctly, because nothing about that site is unhealthy.
     """
-    from agentworks.vms.sites import VMSiteDecl
+    from agentworks.db import Database
+    from agentworks.vms.sites import VMSiteDecl, site_manifest_hint
 
     g = HealthGroup("VM sites")
 
@@ -530,14 +506,39 @@ def _check_vm_sites(
             f"names '{default_site}', which is not ready: {not_ready[default_site]}",
         )
 
-    from agentworks.doctor_database import append_vm_site_checks, collect_database_facts
-
-    append_vm_site_checks(
-        g,
-        database_facts or collect_database_facts(),
-        sites=sites,
-        not_ready=not_ready,
-    )
+    try:
+        db_exists, current, latest = Database.check_schema()
+        if not db_exists:
+            return g
+        if current != latest:
+            g.info(
+                "VM sites",
+                "pending database migration (see the Database group); "
+                "re-run doctor after migrating for the full report",
+            )
+            return g
+        db = Database(read_only=True)
+        try:
+            for vm in db.list_vms():
+                if vm.site in not_ready:
+                    g.warn(
+                        f"VM '{vm.name}'",
+                        f"site '{vm.site}' is not ready: {not_ready[vm.site]}",
+                    )
+                elif vm.site not in sites:
+                    g.fail(
+                        f"VM '{vm.name}'",
+                        f"site '{vm.site}' is not declared",
+                        hint=site_manifest_hint(vm.site),
+                    )
+        finally:
+            db.close()
+    except Exception as e:
+        g.warn(
+            "VM sites",
+            f"could not check the database: {e}",
+            machine_diagnostic=MachineDiagnostic.DATABASE_UNAVAILABLE,
+        )
     return g
 
 
@@ -879,10 +880,10 @@ def _check_secrets(config: Config, registry: Registry) -> HealthGroup:
     return g
 
 
-def _check_database(database_facts: DoctorDatabaseFacts | None = None) -> HealthGroup:
-    from agentworks.doctor_database import check_database, collect_database_facts
+def _check_database() -> HealthGroup:
+    from agentworks.doctor_state import check_database
 
-    return check_database(database_facts or collect_database_facts())
+    return check_database()
 
 
 def _check_completions(current_version: str) -> HealthGroup:

@@ -218,19 +218,12 @@ blocks and the migration workflow only; the broader registry-inventory scope rem
 - [x] All focused and full gates pass; step reviewed by `agentworks-reviewer` and a fresh-eyes
       reviewer; valid findings resolved.
 - [x] Always-green ready-to-merge PR opened and roadmap-lead review requested.
-- [x] Resolve the saga and installed-CLI review round: propagate failing JSON entrypoint status,
-      reject invalid and special database paths without blocking, share one verified database
-      snapshot across doctor groups, restore focused module sizes, reconcile final artifacts, and
-      rerun project, fresh-eyes, full, and PR gates before requesting re-review.
-- [x] Resolve the native-Windows and malformed-schema re-review round: represent unavailable secure
-      database inspection as a first-class non-failing doctor outcome, reject non-integer schema
-      versions through a complete path-free report, clean the accepted inspection seams, and rerun
-      project, fresh-eyes, full, and PR gates before requesting re-review.
-- [x] Resolve the pinned-parent, complete schema-history, and persisted-enum re-review round: carry
-      the resolved database directory identity through snapshot acquisition, distinguish an absent
-      schema history from malformed shape or rows, close corrupted persisted JSON enum values with
-      documented sentinels, and rerun project, fresh-eyes, full, and PR gates before requesting
-      re-review.
+- [x] Close corrupted persisted operational JSON enum values with documented sentinels and preserve
+      human-output compatibility.
+- [x] Apply the operator scope correction: remove the database-copying and hostile-filesystem
+      inspection subsystem, its unavailable-result protocol, tests, and documentation; retain only
+      straightforward non-migrating doctor reads and the independently required JSON projections;
+      then rerun project, fresh-eyes, full, and PR gates before requesting re-review.
 
 Definition of done: R7 and AC4 hold across the named commands, with human and JSON renderers sharing
 one fact source.

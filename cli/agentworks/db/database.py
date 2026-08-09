@@ -51,14 +51,14 @@ class Database:
     def __init__(self, path: Path | None = None, *, read_only: bool = False) -> None:
         db_path = path or _db.DB_PATH
         if read_only:
-            from agentworks.db.inspection import _schema_version_from_history
             from agentworks.errors import StateError
 
             connection: sqlite3.Connection | None = None
             try:
                 connection = sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True)
-                current = _schema_version_from_history(connection)
-            except (sqlite3.DatabaseError, StateError) as error:
+                row = connection.execute("SELECT MAX(version) FROM schema_version").fetchone()
+                current = row[0] or 0
+            except sqlite3.DatabaseError as error:
                 if connection is not None:
                     connection.close()
                 raise StateError(
@@ -86,25 +86,6 @@ class Database:
 
     def close(self) -> None:
         self._conn.close()
-
-    @classmethod
-    @contextmanager
-    def inspection_snapshot(
-        cls,
-        path: Path | None = None,
-    ) -> Iterator[tuple[bool, int, int, Database | None]]:
-        """Open a private, non-migrating snapshot for inspection.
-
-        Stream-copy a byte-stable database/WAL/SHM set, including a main-only
-        clean set, verify the resolved source set a second time, and let SQLite
-        coordinate only the disposable private copy. The source files are never
-        opened by SQLite. A sidecar transition invalidates the candidate and
-        retries the complete snapshot protocol.
-        """
-        from agentworks.db.inspection import inspection_snapshot
-
-        with inspection_snapshot(cls, path or _db.DB_PATH) as snapshot:
-            yield snapshot
 
     @contextmanager
     def transaction(self) -> Iterator[None]:
@@ -142,11 +123,12 @@ class Database:
         db_path = path or _db.DB_PATH
         if not db_path.exists():
             return (False, 0, LATEST_VERSION)
-        from agentworks.db.inspection import _schema_version_from_history
-
         conn = sqlite3.connect(str(db_path))
         try:
-            current = _schema_version_from_history(conn)
+            row = conn.execute("SELECT MAX(version) FROM schema_version").fetchone()
+            current = row[0] or 0
+        except sqlite3.OperationalError:
+            current = 0
         finally:
             conn.close()
         return (True, current, LATEST_VERSION)

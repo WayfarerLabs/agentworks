@@ -229,43 +229,24 @@ is configured database state, never live tmux state.
 ```text
 {
   groups: [{name, checks: [{name, status, message, hint}]}],
-  counts: {ok, info, unavailable, warn, fail}
+  counts: {ok, info, warn, fail}
 }
 ```
 
-`status` is exactly `ok`, `info`, `unavailable`, `warn`, or `fail`. Group and check arrays keep
-report construction order, and counts are integers from the complete report. `message` and `hint`
-are nullable closed diagnostics. They never contain raw configuration, secret values, backend
-responses, exception text, or arbitrary host diagnostics. A failing report is still written in full,
-then the command exits 1:
+`status` is exactly `ok`, `info`, `warn`, or `fail`. Group and check arrays keep report construction
+order, and counts are integers from the complete report. `message` and `hint` are nullable closed
+diagnostics. They never contain raw configuration, secret values, backend responses, exception text,
+or arbitrary host diagnostics. A failing report is still written in full, then the command exits 1:
 
 ```bash
 agw doctor --output json
 ```
 
-The System, VM sites, and Database groups share one report-scoped database fact collection. They
-therefore describe one verified database generation, rather than independently copying and checking
-the same state. Doctor acquires the database, WAL, and SHM entries through non-blocking descriptors,
-accepts regular files only, bounds each read to the acquired size, and validates only a private copy
-through SQLite. Broken or looping symlinks, FIFOs, devices, directories, sockets, and other
-unsupported entries fail closed with path-free diagnostics. The original database and sidecars are
-never opened through SQLite, migrated, created, or changed. Hosts without non-blocking, no-follow,
-directory-only, and directory-relative open support report secure database inspection as
-`unavailable` without acquiring database or sidecar content. Those rows do not count as warnings or
-failures, and an otherwise healthy report exits 0. An invalid source or malformed schema version
-remains a failure and makes doctor exit 1. The initial live protocol probe uses the nearest existing
-requested-parent ancestor, so a fresh install whose state directory does not yet exist remains
-healthy and absent. An existing parent or component symlink that cannot resolve is invalid state,
-not a missing directory. If the final database entry exists, Agentworks resolves its link metadata
-and preflights the resolved target parent before opening the database, WAL, or SHM. Each preflight
-and source acquisition walks from a filesystem anchor with directory-only, no-follow relative opens.
-After final resolution, one pinned target-parent descriptor supplies every main, WAL, and SHM
-metadata read, copy, second fingerprint, and retry. Renaming that directory or retargeting the final
-symlink cannot redirect a later attempt. No path check followed by an unsafe open is substituted.
-Schema inspection treats an absent table or an empty accepted table as legacy version 0. It accepts
-the maintained one-column legacy history and the canonical two-column history only when versions
-have exact SQLite integer storage, are unique, and form the permitted contiguous sequence. A wrong
-shape, duplicate, gap, rogue lower row, or mixed storage type remains a path-free failure.
+Doctor checks the schema before opening current state through the existing read-only database
+connection. It reports a pending migration without applying it. SQLite may perform ordinary
+read-side WAL and shared-memory bookkeeping. Doctor does not add a private database-copy protocol or
+claim protection from hostile same-account filesystem replacement. Database migration recovery and
+automatic backups are separate concerns at the migration boundary.
 
 #### Errors and compatibility
 

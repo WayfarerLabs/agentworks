@@ -28,17 +28,15 @@ def test_health_group_convenience_methods() -> None:
     g = HealthGroup("test")
     g.ok("check1", "all good")
     g.info("check2", "not applicable")
-    g.unavailable("check3", "not supported here")
-    g.warn("check4", "might be a problem")
-    g.fail("check5", "broken")
+    g.warn("check3", "might be a problem")
+    g.fail("check4", "broken")
 
-    assert len(g.checks) == 5
+    assert len(g.checks) == 4
     assert g.checks[0].status == Status.OK
     assert g.checks[1].status == Status.INFO
-    assert g.checks[2].status == Status.UNAVAILABLE
-    assert g.checks[3].status == Status.WARN
-    assert g.checks[4].status == Status.FAIL
-    assert [status.value for status in Status] == ["ok", "info", "unavailable", "warn", "fail"]
+    assert g.checks[2].status == Status.WARN
+    assert g.checks[3].status == Status.FAIL
+    assert [status.value for status in Status] == ["ok", "info", "warn", "fail"]
 
 
 def test_health_report_counts() -> None:
@@ -48,7 +46,6 @@ def test_health_report_counts() -> None:
     g1.ok("a")
     g1.ok("b")
     g1.info("c")
-    g1.unavailable("inspection")
     report.groups.append(g1)
 
     g2 = HealthGroup("group2")
@@ -59,7 +56,6 @@ def test_health_report_counts() -> None:
 
     assert report.ok_count == 3
     assert report.info_count == 1
-    assert report.unavailable_count == 1
     assert report.warn_count == 1
     assert report.fail_count == 1
     assert report.has_failures is True
@@ -75,7 +71,6 @@ def test_health_report_no_failures() -> None:
     assert report.has_failures is False
     assert report.fail_count == 0
     assert report.warn_count == 0
-    assert report.unavailable_count == 0
 
 
 def test_health_check_message_optional() -> None:
@@ -115,26 +110,6 @@ def test_machine_output_uses_only_closed_diagnostic_literals() -> None:
 
     assert check["message"] == "timed out"
     assert check["hint"] is None
-
-
-def test_machine_output_closes_database_inspection_unavailability() -> None:
-    report = HealthReport()
-    group = HealthGroup("Database")
-    group.unavailable(
-        "Database",
-        "host detail must not be emitted",
-        machine_diagnostic=MachineDiagnostic.DATABASE_INSPECTION_UNAVAILABLE,
-    )
-    report.groups.append(group)
-
-    check = _first_machine_check(report)
-
-    assert check == {
-        "name": "Database",
-        "status": "unavailable",
-        "message": "secure database inspection is unavailable on this host",
-        "hint": None,
-    }
 
 
 def test_config_exception_is_redacted_from_machine_output(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:

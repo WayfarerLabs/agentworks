@@ -6,7 +6,6 @@ removed `--vm-host` / `vm-host` group, and the doctor VM-sites group.
 from __future__ import annotations
 
 import re
-from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
@@ -171,12 +170,7 @@ def test_doctor_vm_sites_defers_on_pending_migration(db: Database, monkeypatch: 
 
     from agentworks.db import Database
 
-    @contextmanager
-    def pending_snapshot(path: object = None):  # noqa: ANN202
-        del path
-        yield True, 26, 27, None
-
-    monkeypatch.setattr(Database, "inspection_snapshot", staticmethod(pending_snapshot))
+    monkeypatch.setattr(Database, "check_schema", staticmethod(lambda path=None: (True, 26, 27)))
     # Deterministic site preflights: lima/wsl2 check their local
     # binary; pretend both are present regardless of the host.
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
