@@ -185,12 +185,12 @@ clients and typed core; only the deliberately narrow operation-result adapter re
 
 ### Phase 6: operator-surface LLD
 
-- [ ] Delegate `operator-surfaces-lld.md`. It pins outcome-to-error mapping, operation resolver
+- [x] Delegate `operator-surfaces-lld.md`. It pins outcome-to-error mapping, operation resolver
       adoption, preview/doctor/describe boundaries, verify command syntax and exits, renderer
       records, and completion/doc ownership.
-- [ ] Explicitly inventory every remaining `active_backends`, `resolve_secrets`, string-error
+- [x] Explicitly inventory every remaining `active_backends`, `resolve_secrets`, string-error
       out-parameter, and old capability-package import; the LLD assigns each to migrate or delete.
-- [ ] Lead and `agentworks-reviewer` close every valid LLD finding.
+- [x] Lead and `agentworks-reviewer` close every valid LLD finding.
 
 **Definition of done:** every consumer has one destination and deletion of the temporary adapter is
 mechanically provable.
@@ -202,6 +202,9 @@ mechanically provable.
       errors, cached operation lifetime, and per-node secret scoping.
 - [ ] Replace preview's boolean answer and inspection's partial string errors with value-free typed
       records. Describe remains side-effect-free and doctor remains non-probing and non-interactive.
+- [ ] Migrate the existing one-name `secret verify` service from its quiet dictionary wrapper and
+      parallel proof record to shared `ResolutionOutcome` rows. The pre-release one-name command may
+      remain as the Phase 7 presentation checkpoint, but no legacy resolution adapter survives it.
 - [ ] Ordinary commands derive interaction permission from stdin TTY plus global
       `--non-interactive`; global refusal wins. Preserve fail-before-prompt semantics exactly.
 - [ ] Remove the dict-returning compatibility adapter, old `ActiveBackend` vocabulary, error
@@ -211,10 +214,12 @@ mechanically provable.
 **Definition of done:** every internal consumer uses source-based typed results, and the temporary
 operation adapter is gone.
 
-### Phase 8: add `agw secret verify`
+### Phase 8: complete `agw secret verify`
 
-- [ ] Add `agw secret verify NAME...` as an explicit read surface. It defaults to interaction
-      refusal; `--allow-interaction` opts in unless global `--non-interactive` forbids it.
+- [ ] Reshape the existing command to `agw secret verify NAME...` as the final explicit read
+      surface. Replace the pre-release `--allow-interactive` spelling with `--allow-interaction`
+      without an alias. It defaults to interaction refusal; the opt-in is rejected when global
+      `--non-interactive` is set.
 - [ ] Human rendering reports one value-free row per requested secret with category, source, safe
       identifier, detail, and remediation. Exit is nonzero if any secret is not resolved.
 - [ ] Use the shared outcome records for future JSON compatibility; do not add a second result model
@@ -222,10 +227,10 @@ operation adapter is gone.
 - [ ] Test resolved, unavailable, refused-interaction, timeout, hard failure, duplicate names, mixed
       batches, disabled/not-ready sources, interaction precedence, exits, and sentinel
       non-disclosure.
-- [ ] Update the secrets CLI README and root CLI command reference. Add `secret verify` to the
-      shared dynamic-completer specification for variadic secret names, regenerate Bash, Zsh, and
-      PowerShell completions, and pin command-name plus all-shell variadic completion behavior in
-      the same commit.
+- [ ] Update the secrets CLI README and root CLI command reference. Repoint `secret verify` in the
+      shared dynamic-completer specification from the singular parameter to variadic secret names,
+      regenerate Bash, Zsh, and PowerShell completions, and pin command-name plus all-shell variadic
+      completion behavior in the same commit.
 - [ ] Run Green and phase review.
 
 **Definition of done:** AC5 is observable through a safe explicit command, and every shell teaches
