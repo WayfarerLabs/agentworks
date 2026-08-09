@@ -216,22 +216,22 @@ operation adapter is gone.
 
 ### Phase 8: complete `agw secret verify`
 
-- [ ] Reshape the existing command to `agw secret verify NAME...` as the final explicit read
+- [x] Reshape the existing command to `agw secret verify NAME...` as the final explicit read
       surface. Replace the pre-release `--allow-interactive` spelling with `--allow-interaction`
       without an alias. It defaults to interaction refusal; the opt-in is rejected when global
       `--non-interactive` is set.
-- [ ] Human rendering reports one value-free row per requested secret with category, source, safe
+- [x] Human rendering reports one value-free row per requested secret with category, source, safe
       identifier, detail, and remediation. Exit is nonzero if any secret is not resolved.
-- [ ] Use the shared outcome records for future JSON compatibility; do not add a second result model
+- [x] Use the shared outcome records for future JSON compatibility; do not add a second result model
       or expose `ResolutionBatch` to a renderer.
-- [ ] Test resolved, unavailable, refused-interaction, timeout, hard failure, duplicate names, mixed
+- [x] Test resolved, unavailable, refused-interaction, timeout, hard failure, duplicate names, mixed
       batches, disabled/not-ready sources, interaction precedence, exits, and sentinel
       non-disclosure.
-- [ ] Update the secrets CLI README and root CLI command reference. Repoint `secret verify` in the
+- [x] Update the secrets CLI README and root CLI command reference. Repoint `secret verify` in the
       shared dynamic-completer specification from the singular parameter to variadic secret names,
       regenerate Bash, Zsh, and PowerShell completions, and pin command-name plus all-shell variadic
       completion behavior in the same commit.
-- [ ] Run Green and phase review.
+- [x] Run Green and phase review.
 
 **Definition of done:** AC5 is observable through a safe explicit command, and every shell teaches
 the new command.
