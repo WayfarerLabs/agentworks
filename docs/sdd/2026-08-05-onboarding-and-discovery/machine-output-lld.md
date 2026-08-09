@@ -287,7 +287,10 @@ identity, size, modification time, and content fingerprints. Source entries are 
 non-blocking, no-follow descriptors and accepted only when the descriptor identifies a regular file.
 Reads are bounded to the acquired size. Broken or looping symlinks, FIFOs, devices, directories,
 sockets, and other unsupported entries fail closed with a path-free inspection-unavailable error.
-The same bounded protocol handles main-only and active sets. A main-only candidate requires sidecar
+The complete acquisition protocol requires non-blocking and no-follow flags plus directory-relative
+open support. A host lacking any required primitive fails closed with the same path-free error
+before inspecting a database or sidecar entry; it never substitutes a check-then-open sequence. The
+same bounded protocol handles main-only and active sets. A main-only candidate requires sidecar
 absence to remain stable throughout copying and verification. Doctor reopens and re-fingerprints the
 complete source set and accepts only an exact match, then validates and opens only the disposable
 copy through SQLite. A concurrent clean-to-active transition, checkpoint, replacement, or sidecar

@@ -259,6 +259,84 @@ def test_inspection_snapshot_rejects_directory_device_and_socket(tmp_path: Path)
         listener.close()
 
 
+@pytest.mark.parametrize("missing_primitive", ["O_NOFOLLOW", "O_NONBLOCK", "openat"])
+def test_inspection_snapshot_fails_before_source_access_without_required_protocol(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    missing_primitive: str,
+) -> None:
+    """An incomplete host protocol cannot touch the main, WAL, or SHM entries."""
+    import agentworks.db.inspection as inspection_module
+    from agentworks.db import Database
+    from agentworks.errors import StateError
+
+    db_path = tmp_path / "operator-private-capability.db"
+    writer = Database(db_path)
+    writer.set_setting("system_slug", "active-sidecars")
+    source_paths = _database_files(db_path)
+    assert all(path.exists() for path in source_paths)
+
+    requested_entries: list[Path] = []
+
+    def record_requested_entry(path: Path) -> bool:
+        requested_entries.append(path)
+        return True
+
+    monkeypatch.setattr(inspection_module, "_requested_entry_exists", record_requested_entry)
+    if missing_primitive == "openat":
+        monkeypatch.setattr(os, "supports_dir_fd", frozenset())
+    else:
+        monkeypatch.delattr(os, missing_primitive, raising=False)
+
+    started = monotonic()
+    try:
+        with pytest.raises(StateError) as raised, Database.inspection_snapshot(db_path):
+            pytest.fail("an incomplete snapshot protocol must not be yielded")
+    finally:
+        writer.close()
+
+    assert monotonic() - started < 1
+    assert str(raised.value) == "state database inspection snapshot could not be created"
+    assert str(db_path) not in str(raised.value)
+    assert requested_entries == []
+
+
+def test_inspection_snapshot_uses_complete_protocol_for_main_wal_and_shm(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every source-set entry uses nonblocking no-follow relative acquisition."""
+    import agentworks.db.inspection as inspection_module
+    from agentworks.db import Database
+
+    db_path = tmp_path / "complete-protocol.db"
+    writer = Database(db_path)
+    writer.set_setting("system_slug", "active-sidecars")
+    source_paths = _database_files(db_path)
+    assert all(path.exists() for path in source_paths)
+    original_open_source = inspection_module._open_source
+    acquisitions: list[tuple[str, int, int]] = []
+
+    def record_open_source(name: str, directory_fd: int) -> int:
+        flags = inspection_module._source_flags()
+        acquisitions.append((name, directory_fd, flags))
+        return original_open_source(name, directory_fd)
+
+    monkeypatch.setattr(inspection_module, "_open_source", record_open_source)
+    try:
+        with Database.inspection_snapshot(db_path) as (exists, current, latest, snapshot):
+            assert exists and current == latest and snapshot is not None
+            assert snapshot.get_setting("system_slug") == "active-sidecars"
+    finally:
+        writer.close()
+
+    required_names = {path.name for path in source_paths}
+    assert required_names <= {name for name, _directory_fd, _flags in acquisitions}
+    assert all(directory_fd >= 0 for _name, directory_fd, _flags in acquisitions)
+    assert all(flags & os.O_NOFOLLOW for _name, _directory_fd, flags in acquisitions)
+    assert all(flags & os.O_NONBLOCK for _name, _directory_fd, flags in acquisitions)
+
+
 def _installed_agw() -> Path:
     suffix = ".exe" if sys.platform == "win32" else ""
     entrypoint = Path(sys.executable).with_name(f"agw{suffix}")
@@ -460,10 +538,37 @@ def test_doctor_collects_large_database_once_per_report(
 def test_inspection_module_boundaries_and_compatibility_exports() -> None:
     from agentworks.db import Database
     from agentworks.vms.manager import inspect, power
+    from agentworks.vms.manager.power import VMDiagnostic
 
-    assert power.VMDescription is inspect.VMDescription
-    assert power.VMEventName is inspect.VMEventName
-    assert power.vm_description is inspect.vm_description
+    moved_symbols = (
+        "VMListRow",
+        "VMListing",
+        "VMIssueCode",
+        "VMIssue",
+        "VMDiagnostic",
+        "VMDetailAgent",
+        "VMDetailSession",
+        "VMDetailWorkspace",
+        "VMDetailEvent",
+        "VMEventName",
+        "VMDetailFacts",
+        "VMLiveResources",
+        "VMDescription",
+        "_project_vm_event_name",
+        "vm_listing_data",
+        "vm_description_data",
+        "_project_vm_issue",
+        "vm_listing",
+        "render_vm_listing",
+        "list_vms",
+        "vm_description",
+        "render_vm_description",
+        "describe_vm",
+    )
+    for symbol in moved_symbols:
+        assert getattr(power, symbol) is getattr(inspect, symbol)
+    assert VMDiagnostic is inspect.VMDiagnostic
+    assert power._NAME_CELL_WIDTH == inspect._NAME_CELL_WIDTH
     assert callable(Database.inspection_snapshot)
 
     package = Path(inspect.__file__).parents[2]

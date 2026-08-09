@@ -191,10 +191,30 @@ tests cover the installed entrypoint, snapshot generation consistency, bounded s
 handling, source integrity, aggregate call count, scale, human and JSON parity, and the extracted
 module boundaries.
 
-Final correction validation passed:
+Accepted-feedback correction validation passed:
 
 - full non-integration suite: 6,689 passed and 3 deselected;
 - Ruff check and format check: 625 files clean;
 - full mypy: 625 source files clean, superseding the inherited PR #455 note above;
 - Rulesync generated-output check and locked-SDD validation: clean;
 - mandatory file lint: Prettier, markdownlint, and cspell clean.
+
+## Consolidated review correction
+
+The consolidated review correction additionally pins the cross-platform protocol boundary. Hosts
+without non-blocking, no-follow, and directory-relative open support fail closed before inspecting
+the main database or its WAL/SHM entries. Focused tests simulate each missing primitive and verify
+bounded, path-free failure. The correction also restores and pins every inspection symbol moved from
+`agentworks.vms.manager.power`, including `VMDiagnostic`, as an explicit compatibility alias.
+
+Consolidated review correction validation passed:
+
+- focused adversarial snapshot and compatibility suite: 17 passed;
+- wider doctor, entrypoint, machine-output, and parity slice: 175 passed;
+- Ruff check and format check: 625 files clean;
+- full mypy: 625 source files clean;
+- locked-SDD validation: clean;
+- mandatory file lint: Prettier, markdownlint, and cspell clean.
+
+The full non-integration suite was not repeated for this narrow review correction. The integrated
+base's 6,689-test result remains recorded above, and the lead reruns that suite after integration.

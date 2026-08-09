@@ -241,7 +241,9 @@ the same state. Doctor acquires the database, WAL, and SHM entries through non-b
 accepts regular files only, bounds each read to the acquired size, and validates only a private copy
 through SQLite. Broken or looping symlinks, FIFOs, devices, directories, sockets, and other
 unsupported entries fail closed with path-free diagnostics. The original database and sidecars are
-never opened through SQLite, migrated, created, or changed.
+never opened through SQLite, migrated, created, or changed. Hosts without non-blocking, no-follow,
+and directory-relative open support fail closed before any database or sidecar entry is inspected.
+Agentworks does not substitute a path check followed by an unsafe open on those hosts.
 
 #### Errors and compatibility
 

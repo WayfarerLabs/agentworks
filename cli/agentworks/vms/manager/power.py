@@ -18,6 +18,9 @@ from ._helpers import (
 )
 from .boundary import _live_vm_boundary, _platform_ops_ctx
 from .inspect import (
+    _NAME_CELL_WIDTH as _NAME_CELL_WIDTH,
+)
+from .inspect import (
     VMDescription as VMDescription,
 )
 from .inspect import (
@@ -36,6 +39,9 @@ from .inspect import (
     VMDetailWorkspace as VMDetailWorkspace,
 )
 from .inspect import (
+    VMDiagnostic as VMDiagnostic,
+)
+from .inspect import (
     VMEventName as VMEventName,
 )
 from .inspect import (
@@ -52,6 +58,9 @@ from .inspect import (
 )
 from .inspect import (
     VMLiveResources as VMLiveResources,
+)
+from .inspect import (
+    _project_vm_event_name as _project_vm_event_name,
 )
 from .inspect import (
     _project_vm_issue as _project_vm_issue,

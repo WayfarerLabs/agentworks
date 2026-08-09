@@ -53,22 +53,34 @@ def _metadata_tuple(fingerprint: _FileFingerprint) -> tuple[int, int, int, int]:
 
 
 def _source_flags() -> int:
-    """Return nonblocking, no-follow flags available on this host."""
-    return (
-        os.O_RDONLY
-        | getattr(os, "O_BINARY", 0)
-        | getattr(os, "O_CLOEXEC", 0)
-        | getattr(os, "O_NONBLOCK", 0)
-        | getattr(os, "O_NOFOLLOW", 0)
-    )
+    """Return the complete source-acquisition flags or fail closed."""
+    nonblocking = getattr(os, "O_NONBLOCK", None)
+    no_follow = getattr(os, "O_NOFOLLOW", None)
+    if not isinstance(nonblocking, int) or not nonblocking:
+        raise _UnsupportedSnapshotEntry
+    if not isinstance(no_follow, int) or not no_follow:
+        raise _UnsupportedSnapshotEntry
+    return os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0) | nonblocking | no_follow
 
 
-def _open_source(directory: Path, name: str, directory_fd: int | None) -> int:
+def _require_snapshot_protocol() -> None:
+    """Reject hosts lacking any primitive required by safe acquisition."""
+    _source_flags()
+    supports_dir_fd = getattr(os, "supports_dir_fd", ())
+    try:
+        has_openat = os.open in supports_dir_fd
+    except TypeError:
+        has_openat = False
+    if not has_openat:
+        raise _UnsupportedSnapshotEntry
+
+
+def _open_source(name: str, directory_fd: int) -> int:
     """Open one directory entry without following its final symlink."""
     try:
-        if directory_fd is not None:
-            return os.open(name, _source_flags(), dir_fd=directory_fd)
-        return os.open(directory / name, _source_flags())
+        return os.open(name, _source_flags(), dir_fd=directory_fd)
+    except (NotImplementedError, TypeError):
+        raise _UnsupportedSnapshotEntry from None
     except OSError as error:
         if error.errno == errno.ENOENT:
             raise FileNotFoundError from None
@@ -85,26 +97,25 @@ def _regular_file_stat(descriptor: int) -> os.stat_result:
 
 
 @contextmanager
-def _pinned_directory(directory: Path) -> Iterator[int | None]:
-    """Pin the resolved parent directory when the platform supports openat."""
-    directory_fd: int | None = None
-    if os.open in os.supports_dir_fd:
-        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_DIRECTORY", 0)
+def _pinned_directory(directory: Path) -> Iterator[int]:
+    """Pin the resolved parent directory for all relative source opens."""
+    flags = _source_flags() | getattr(os, "O_DIRECTORY", 0)
+    try:
         directory_fd = os.open(directory, flags)
-        try:
-            if not stat.S_ISDIR(os.fstat(directory_fd).st_mode):
-                raise _UnsupportedSnapshotEntry
-            yield directory_fd
-        finally:
-            os.close(directory_fd)
-        return
-    yield None
+    except (NotImplementedError, TypeError):
+        raise _UnsupportedSnapshotEntry from None
+    try:
+        if not stat.S_ISDIR(os.fstat(directory_fd).st_mode):
+            raise _UnsupportedSnapshotEntry
+        yield directory_fd
+    finally:
+        os.close(directory_fd)
 
 
-def _file_metadata(directory: Path, name: str, directory_fd: int | None) -> tuple[int, int, int, int] | None:
+def _file_metadata(directory: Path, name: str, directory_fd: int) -> tuple[int, int, int, int] | None:
     """Acquire one entry first, then classify and record its descriptor."""
     try:
-        descriptor = _open_source(directory, name, directory_fd)
+        descriptor = _open_source(name, directory_fd)
     except FileNotFoundError:
         return None
     try:
@@ -116,14 +127,14 @@ def _file_metadata(directory: Path, name: str, directory_fd: int | None) -> tupl
 def _fingerprint_stream(
     directory: Path,
     name: str,
-    directory_fd: int | None,
+    directory_fd: int,
     *,
     expected: tuple[int, int, int, int],
     destination: Path | None = None,
 ) -> _FileFingerprint:
     """Hash one acquired regular file, optionally copying exactly its size."""
     try:
-        descriptor = _open_source(directory, name, directory_fd)
+        descriptor = _open_source(name, directory_fd)
     except FileNotFoundError:
         raise _SnapshotChanged from None
 
@@ -162,7 +173,7 @@ def _fingerprint_stream(
 def _current_metadata(
     directory: Path,
     names: tuple[str, str, str],
-    directory_fd: int | None,
+    directory_fd: int,
 ) -> tuple[tuple[int, int, int, int] | None, ...]:
     return tuple(_file_metadata(directory, name, directory_fd) for name in names)
 
@@ -234,6 +245,11 @@ def inspection_snapshot(
     requested_path: Path,
 ) -> Iterator[tuple[bool, int, int, Database | None]]:
     """Open a private, non-migrating, verified snapshot for inspection."""
+    try:
+        _require_snapshot_protocol()
+    except _UnsupportedSnapshotEntry:
+        raise StateError(_SNAPSHOT_ERROR) from None
+
     if not _requested_entry_exists(requested_path):
         yield False, 0, LATEST_VERSION, None
         return
