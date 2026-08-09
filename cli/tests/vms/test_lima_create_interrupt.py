@@ -184,6 +184,8 @@ def test_local_stdin_io_failure_refuses_start_without_secret_diagnostic(
         LimaPlatform("lima", {})._create_local("myvm", f"embedded: {secret}")
 
     assert caught.value is failure
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
     assert commands == [["limactl", "create", "--name", "myvm", "--tty=false", "-"]]
     assert secret not in repr(caught.value)
     assert secret not in repr(commands)
@@ -355,6 +357,111 @@ def test_nonordinary_exit_rolls_back_created_instance_and_preserves_identity(
 
     assert caught.value is control_flow
     assert _deletes(ran) == ["limactl delete --force myvm"]
+
+
+@pytest.mark.parametrize(
+    "primary",
+    [SystemExit(17), GeneratorExit()],
+    ids=("system-exit", "generator-exit"),
+)
+def test_cleanup_control_flow_and_warning_failures_cannot_replace_primary(
+    monkeypatch: pytest.MonkeyPatch,
+    primary: BaseException,
+) -> None:
+    secondary = GeneratorExit() if isinstance(primary, SystemExit) else SystemExit(18)
+    events: list[str] = []
+    platform = LimaPlatform("lima", {"placement": {"mode": "local"}})
+    monkeypatch.setattr(LimaPlatform, "_ensure_limactl", lambda self: None)
+    monkeypatch.setattr(LimaPlatform, "_instance_exists", lambda self, name: False)
+
+    def fail_create(self: LimaPlatform, name: str, yaml: str) -> None:
+        del self, yaml
+        events.append(f"create:{name}")
+        raise primary
+
+    def fail_delete(self: LimaPlatform, name: str) -> None:
+        del self
+        events.append(f"delete:{name}")
+        raise secondary
+
+    def fail_detail(message: str) -> None:
+        if message.startswith("Cleaning up"):
+            events.append(f"detail:{message}")
+            raise KeyboardInterrupt("detail sink interrupted")
+
+    def fail_warning(message: str) -> None:
+        events.append(f"warn:{message}")
+        raise KeyboardInterrupt("warning sink interrupted")
+
+    monkeypatch.setattr(LimaPlatform, "_create_local", fail_create)
+    monkeypatch.setattr(LimaPlatform, "_delete_instance", fail_delete)
+    monkeypatch.setattr("agentworks.capabilities.vm_platform.lima.output.detail", fail_detail)
+    monkeypatch.setattr("agentworks.capabilities.vm_platform.lima.output.warn", fail_warning)
+
+    with pytest.raises(type(primary)) as caught:
+        platform.create(_request(), RunContext())
+
+    assert caught.value is primary
+    assert [event.split(":", 1)[0] for event in events] == ["create", "detail", "delete", "warn", "warn"]
+
+
+def test_remote_kill_control_flow_cannot_skip_delete_or_replace_primary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks import remote_exec
+
+    primary = SystemExit(19)
+    events: list[str] = []
+    platform = LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})
+    monkeypatch.setattr(LimaPlatform, "_instance_exists", lambda self, name: False)
+    monkeypatch.setattr(
+        LimaPlatform,
+        "_create_remote",
+        lambda self, name, yaml, *, redactions: (_ for _ in ()).throw(primary),
+    )
+    monkeypatch.setattr(LimaPlatform, "_host_transport", lambda self, logger=None: SimpleNamespace())
+
+    def fail_kill(target: object, path: str) -> None:
+        del target, path
+        events.append("kill")
+        raise GeneratorExit()
+
+    def delete(self: LimaPlatform, name: str) -> None:
+        del self
+        events.append(f"delete:{name}")
+
+    monkeypatch.setattr(remote_exec, "kill_detached", fail_kill)
+    monkeypatch.setattr(LimaPlatform, "_delete_instance", delete)
+
+    with pytest.raises(SystemExit) as caught:
+        platform.create(_request(), RunContext())
+
+    assert caught.value is primary
+    assert events == ["kill", "delete:myvm"]
+
+
+def test_cleanup_notice_failure_cannot_replace_first_keyboard_interrupt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    primary = KeyboardInterrupt("first")
+    platform = LimaPlatform("lima", {"placement": {"mode": "local"}})
+    monkeypatch.setattr(LimaPlatform, "_ensure_limactl", lambda self: None)
+    monkeypatch.setattr(LimaPlatform, "_instance_exists", lambda self, name: False)
+    monkeypatch.setattr(
+        LimaPlatform,
+        "_create_local",
+        lambda self, name, yaml: (_ for _ in ()).throw(primary),
+    )
+    monkeypatch.setattr(LimaPlatform, "_delete_instance", lambda self, name: None)
+    monkeypatch.setattr(
+        "agentworks.capabilities.vm_platform.lima.output.warn",
+        lambda message: (_ for _ in ()).throw(SystemExit(20)),
+    )
+
+    with pytest.raises(KeyboardInterrupt) as caught:
+        platform.create(_request(), RunContext())
+
+    assert caught.value is primary
 
 
 def test_ephemeral_tailscale_join_failure_cleans_up_without_key_in_error(
@@ -727,8 +834,13 @@ def test_remote_template_rejects_untrusted_allocation_path(
 
 @pytest.mark.parametrize(
     "cleanup_failure",
-    [SSHError("unlink refused swordfish"), KeyboardInterrupt("cleanup interrupted swordfish")],
-    ids=("unlink", "keyboard-interrupt"),
+    [
+        SSHError("unlink refused swordfish"),
+        KeyboardInterrupt("cleanup interrupted swordfish"),
+        SystemExit(21),
+        GeneratorExit(),
+    ],
+    ids=("unlink", "keyboard-interrupt", "system-exit", "generator-exit"),
 )
 def test_remote_template_cleanup_retries_then_succeeds_without_surface(
     monkeypatch: pytest.MonkeyPatch,
@@ -758,8 +870,13 @@ def test_remote_template_cleanup_retries_then_succeeds_without_surface(
 
 @pytest.mark.parametrize(
     "cleanup_failure",
-    [SSHError("unlink refused swordfish"), KeyboardInterrupt("cleanup interrupted swordfish")],
-    ids=("unlink", "keyboard-interrupt"),
+    [
+        SSHError("unlink refused swordfish"),
+        KeyboardInterrupt("cleanup interrupted swordfish"),
+        SystemExit(22),
+        GeneratorExit(),
+    ],
+    ids=("unlink", "keyboard-interrupt", "system-exit", "generator-exit"),
 )
 def test_repeated_remote_template_cleanup_failure_reports_typed_residue(
     monkeypatch: pytest.MonkeyPatch,
@@ -878,6 +995,44 @@ def test_staging_and_repeated_cleanup_failure_reports_safe_combined_error(
     assert caught.value.hint is not None
     assert secret not in repr(caught.value)
     assert secret not in caught.value.hint
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+
+
+@pytest.mark.parametrize(
+    "cleanup_control_flow",
+    [SystemExit(23), GeneratorExit()],
+    ids=("system-exit", "generator-exit"),
+)
+def test_remote_cleanup_control_flow_yields_residue_precedence_over_primary(
+    monkeypatch: pytest.MonkeyPatch,
+    cleanup_control_flow: BaseException,
+) -> None:
+    primary = SSHError("template staging failed")
+
+    def _ssh_run(target: object, command: str, **kwargs: object) -> SimpleNamespace:
+        del target, kwargs
+        if "mktemp -d" in command:
+            return _remote_ssh_success(command)
+        raise primary
+
+    def fail_cleanup(self: LimaPlatform, target: object, remote_template_dir: str) -> None:
+        del self, target, remote_template_dir
+        raise cleanup_control_flow
+
+    monkeypatch.setattr(lima_mod, "ssh_run", _ssh_run)
+    monkeypatch.setattr(LimaPlatform, "_remove_remote_template_dir", fail_cleanup)
+
+    with pytest.raises(SensitiveDataCleanupError) as caught:
+        LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._create_remote(
+            "myvm",
+            "embedded: safe",
+            redactions=(),
+        )
+
+    assert str(caught.value) == (
+        "Lima provisioning failed and removal of sensitive Lima provisioning input could not be confirmed"
+    )
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
 

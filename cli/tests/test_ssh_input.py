@@ -22,6 +22,28 @@ def _assert_agentworks_tracebacks_scrubbed(exc: BaseException, secret: str) -> s
     return functions
 
 
+def _complete_frame_functions(exc: BaseException) -> set[str]:
+    functions: set[str] = set()
+    pending = [exc]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        traceback = current.__traceback__
+        while traceback is not None:
+            functions.add(traceback.tb_frame.f_code.co_name)
+            traceback = traceback.tb_next
+        if current.__cause__ is not None:
+            pending.append(current.__cause__)
+        if current.__context__ is not None:
+            pending.append(current.__context__)
+        if isinstance(current, BaseExceptionGroup):
+            pending.extend(current.exceptions)
+    return functions
+
+
 def test_ssh_run_streams_input_without_logging_it() -> None:
     secret = "ssh-stdin-swordfish"
 
@@ -131,7 +153,13 @@ def test_ssh_run_translates_sensitive_native_failure_without_exception_link() ->
     secret = "ssh-native-failure-swordfish"
     native_failure = OSError(f"write reflected {secret}")
 
-    with patch("agentworks.ssh.subprocess.run", side_effect=native_failure), pytest.raises(SSHError) as caught:
+    def native_run(*args: object, **kwargs: object) -> None:
+        del args
+        retained_input = kwargs["input"]
+        assert retained_input == secret
+        raise native_failure
+
+    with patch("agentworks.ssh.subprocess.run", side_effect=native_run), pytest.raises(SSHError) as caught:
         run(
             SSHTarget(host="vm-host"),
             "cat > /tmp/template.yaml",
@@ -142,20 +170,36 @@ def test_ssh_run_translates_sensitive_native_failure_without_exception_link() ->
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
     assert secret not in repr(caught.value)
+    assert "native_run" not in _complete_frame_functions(caught.value)
 
 
-def test_ssh_run_sensitive_interrupt_preserves_identity_after_clearing_frame() -> None:
+@pytest.mark.parametrize(
+    "control_flow",
+    [KeyboardInterrupt("operator interrupt"), SystemExit(9), GeneratorExit()],
+    ids=("keyboard-interrupt", "system-exit", "generator-exit"),
+)
+def test_ssh_run_sensitive_control_flow_strips_native_graph_and_preserves_identity(
+    control_flow: BaseException,
+) -> None:
     secret = "ssh-interrupt-swordfish"
-    interrupt = KeyboardInterrupt("operator interrupt")
 
-    with patch("agentworks.ssh.subprocess.run", side_effect=interrupt), pytest.raises(KeyboardInterrupt) as caught:
+    def native_run(*args: object, **kwargs: object) -> None:
+        del args
+        retained_input = kwargs["input"]
+        assert retained_input == secret
+        raise control_flow
+
+    with patch("agentworks.ssh.subprocess.run", side_effect=native_run), pytest.raises(type(control_flow)) as caught:
         run(
             SSHTarget(host="vm-host"),
             "cat > /tmp/template.yaml",
             input_text=secret,
         )
 
-    assert caught.value is interrupt
+    assert caught.value is control_flow
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    assert "native_run" not in _complete_frame_functions(caught.value)
     traceback = caught.value.__traceback__
     while traceback is not None:
         if traceback.tb_frame.f_code.co_name == "run" and traceback.tb_frame.f_globals.get("__name__") == (
@@ -163,6 +207,20 @@ def test_ssh_run_sensitive_interrupt_preserves_identity_after_clearing_frame() -
         ):
             assert secret not in repr(traceback.tb_frame.f_locals)
         traceback = traceback.tb_next
+
+
+def test_ssh_run_non_sensitive_native_error_keeps_identity_and_traceback() -> None:
+    native_failure = OSError("native failure")
+
+    def native_run(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise native_failure
+
+    with patch("agentworks.ssh.subprocess.run", side_effect=native_run), pytest.raises(OSError) as caught:
+        run(SSHTarget(host="vm-host"), "echo ok")
+
+    assert caught.value is native_failure
+    assert "native_run" in _complete_frame_functions(caught.value)
 
 
 def test_ssh_run_sensitive_timeout_drops_partial_output_and_native_exception() -> None:

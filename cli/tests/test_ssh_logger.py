@@ -18,7 +18,7 @@ from agentworks.ssh import SSHLogger, SSHResult
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-    from typing import Any
+    from typing import Any, SupportsIndex
 
 
 def _assert_agentworks_tracebacks_scrubbed(exc: BaseException, secret: str) -> set[str]:
@@ -300,3 +300,41 @@ def test_log_handler_construction_control_flow_preserves_identity_and_scrubs(
     assert caught.value is failure
     functions = _assert_agentworks_tracebacks_scrubbed(caught.value, secret)
     assert {"output", "_write_pending", "_write_sanitized"} <= functions
+
+
+def test_sanitize_mid_replacement_interrupt_clears_input_and_result_locals(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks import ssh
+
+    secret = "sanitize-replacement-sentinel"
+    failure = GeneratorExit()
+    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
+    logger = SSHLogger("vm1", "test-op", redactions=(secret,))
+
+    class InterruptingText(str):
+        def replace(self, old: str, new: str, count: SupportsIndex = -1) -> str:
+            del old, new, count
+            raise failure
+
+    pending = ssh._PendingLogText()  # noqa: SLF001
+    pending.raw = InterruptingText(secret)
+
+    with pytest.raises(GeneratorExit) as caught:
+        logger._write_pending(pending)  # noqa: SLF001
+
+    assert caught.value is failure
+    assert pending.raw == ""
+    assert pending.sanitized == ""
+    assert logger._redact == ()  # noqa: SLF001
+    traceback = caught.value.__traceback__
+    found_sanitize = False
+    while traceback is not None:
+        if traceback.tb_frame.f_globals.get("__name__") == "agentworks.ssh":
+            assert secret not in repr(traceback.tb_frame.f_locals)
+            if traceback.tb_frame.f_code.co_name == "_sanitize":
+                found_sanitize = True
+                assert traceback.tb_frame.f_locals["sanitized"] == ""
+        traceback = traceback.tb_next
+    assert found_sanitize

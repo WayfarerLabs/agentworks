@@ -307,3 +307,49 @@ def test_initialization_logger_close_failure_never_masks_primary(
 
     assert caught.value is primary
     assert captured_output.warnings.count("could not close the VM operation log after failure") == 1
+
+
+def test_close_and_warning_sink_failures_cannot_replace_initialization_primary(
+    db: Database,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    primary = GeneratorExit()
+    close_failure = SystemExit(92)
+    warning_failure = KeyboardInterrupt("warning sink interrupted")
+    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
+    db.insert_vm("hookvm", site="stub", hostname="hookvm")
+    logger = SSHLogger("hookvm", "vm-create")
+
+    def fail_phase(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise primary
+
+    def fail_close() -> None:
+        raise close_failure
+
+    def fail_warning(message: str) -> None:
+        del message
+        raise warning_failure
+
+    monkeypatch.setattr(driver, "_phase_b_setup", fail_phase)
+    monkeypatch.setattr(logger, "close", fail_close)
+    monkeypatch.setattr("agentworks.vms.initializer.driver.output.warn", fail_warning)
+
+    with pytest.raises(GeneratorExit) as caught:
+        driver.run_initialization(
+            db,
+            SimpleNamespace(),  # type: ignore[arg-type]
+            SimpleNamespace(),  # type: ignore[arg-type]
+            SimpleNamespace(),  # type: ignore[arg-type]
+            SimpleNamespace(),  # type: ignore[arg-type]
+            "hookvm",
+            SimpleNamespace(),  # type: ignore[arg-type]
+            {},
+            "/home/agentworks",
+            "agentworks",
+            logger,
+            git_tokens={},
+        )
+
+    assert caught.value is primary

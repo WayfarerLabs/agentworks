@@ -16,7 +16,7 @@ from agentworks.orchestration.unwind import RealizationLog
 class _N:
     key: str
     log: list[str]
-    fail_teardown: Exception | None = None
+    fail_teardown: BaseException | None = None
     realized: bool = field(default=False)
 
     def deps(self) -> tuple[_N, ...]:
@@ -102,3 +102,54 @@ def test_user_abort_during_teardown_is_reraised() -> None:
 
 def test_unwind_with_nothing_realized_is_a_no_op() -> None:
     RealizationLog().unwind()  # no raise, no output
+
+
+@pytest.mark.parametrize(
+    "primary",
+    [SystemExit(31), GeneratorExit()],
+    ids=("system-exit", "generator-exit"),
+)
+def test_secondary_control_flow_and_warning_failure_cannot_replace_primary(
+    monkeypatch: pytest.MonkeyPatch,
+    primary: BaseException,
+) -> None:
+    events: list[str] = []
+    lower = _N("vm/box", events)
+    upper = _N("agent/dev", events, fail_teardown=KeyboardInterrupt("secondary"))
+    log = RealizationLog()
+    log.mark_realized(lower)
+    log.mark_realized(upper)
+
+    def fail_warning(message: str) -> None:
+        events.append(f"warn:{message}")
+        raise SystemExit(32)
+
+    monkeypatch.setattr("agentworks.orchestration.unwind.output.warn", fail_warning)
+
+    try:
+        raise primary
+    except BaseException:
+        with pytest.raises(type(primary)) as caught:
+            try:
+                log.unwind()
+            finally:
+                raise
+
+    assert caught.value is primary
+    assert events[-2:] == ["warn:rollback: teardown of agent/dev failed: secondary", "teardown:vm/box"]
+    assert log.realized == ()
+
+
+def test_standalone_teardown_control_flow_still_propagates() -> None:
+    control_flow = GeneratorExit()
+    events: list[str] = []
+    node = _N("vm/box", events, fail_teardown=control_flow)
+    log = RealizationLog()
+    log.mark_realized(node)
+
+    with pytest.raises(GeneratorExit) as caught:
+        log.unwind()
+
+    assert caught.value is control_flow
+    assert len(log.realized) == 1
+    assert log.realized[0].key == node.key

@@ -18,6 +18,7 @@ either phase to the same operator-facing outcome.
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING
 
 from agentworks import output
@@ -73,11 +74,12 @@ def _warn_init_cancel(vm_name: str) -> None:
     propagates unchanged (never downgraded to a Provisioning/External
     error, matching ``delete_vm``'s best-effort discipline).
     """
-    output.warn(
-        f"Cancelling vm create '{vm_name}' during initialization. "
-        f"The VM exists but is partially initialized. "
-        f"Use 'vm reinit {vm_name}' to retry, or 'vm delete {vm_name} --force' to remove it."
-    )
+    with contextlib.suppress(BaseException):
+        output.warn(
+            f"Cancelling vm create '{vm_name}' during initialization. "
+            f"The VM exists but is partially initialized. "
+            f"Use 'vm reinit {vm_name}' to retry, or 'vm delete {vm_name} --force' to remove it."
+        )
 
 
 def _raise_init_failure(db: Database, vm_name: str, cause: Exception) -> NoReturn:
@@ -462,7 +464,8 @@ def _create_vm(
                 # the only artifact left to unwind; deleting it for a VM
                 # that still exists in a backend would orphan the backend
                 # side (#338).
-                output.warn(f"Cancelling vm create '{vm_name}'... rolling back.")
+                with contextlib.suppress(BaseException):
+                    output.warn(f"Cancelling vm create '{vm_name}'... rolling back.")
                 log.unwind()
                 raise
             except UserAbort:

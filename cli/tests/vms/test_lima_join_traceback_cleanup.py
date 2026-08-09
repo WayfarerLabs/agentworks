@@ -141,3 +141,90 @@ def test_remote_join_control_flow_scrubs_every_agentworks_traceback_frame(
     assert request.tailscale_auth_key is None
     assert events == ["create:myvm", "cleanup:myvm"]
     _assert_secret_absent_from_agentworks_exception_graph(caught.value, secret)
+
+
+def _traceback_functions(exc: BaseException) -> set[str]:
+    functions: set[str] = set()
+    traceback = exc.__traceback__
+    while traceback is not None:
+        functions.add(traceback.tb_frame.f_code.co_name)
+        traceback = traceback.tb_next
+    return functions
+
+
+@pytest.mark.parametrize(
+    "native_failure",
+    [KeyboardInterrupt("stop"), SystemExit(12), GeneratorExit()],
+    ids=("keyboard-interrupt", "system-exit", "generator-exit"),
+)
+def test_local_sensitive_lima_native_failure_strips_downstream_graph_and_preserves_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    native_failure: BaseException,
+) -> None:
+    secret = "local-lima-native-sentinel"
+
+    def native_run(*args: object, **kwargs: object) -> None:
+        del args
+        retained_input = kwargs["input"]
+        assert retained_input == secret
+        raise native_failure
+
+    monkeypatch.setattr(subprocess, "run", native_run)
+    platform = LimaPlatform("lima", {"placement": {"mode": "local"}})
+
+    with pytest.raises(type(native_failure)) as caught:
+        platform._run_lima("limactl create --tty=false -", input_text=secret)  # noqa: SLF001
+
+    assert caught.value is native_failure
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    assert "native_run" not in _traceback_functions(caught.value)
+    traceback = caught.value.__traceback__
+    while traceback is not None:
+        module = str(traceback.tb_frame.f_globals.get("__name__", ""))
+        if module.startswith("agentworks."):
+            assert secret not in repr(traceback.tb_frame.f_locals)
+        traceback = traceback.tb_next
+
+
+def test_local_sensitive_lima_ordinary_native_failure_strips_graph_and_preserves_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = "local-lima-ordinary-native-sentinel"
+    native_failure = OSError("native failure")
+
+    def native_run(*args: object, **kwargs: object) -> None:
+        del args
+        retained_input = kwargs["input"]
+        assert retained_input == secret
+        raise native_failure
+
+    monkeypatch.setattr(subprocess, "run", native_run)
+    platform = LimaPlatform("lima", {"placement": {"mode": "local"}})
+
+    with pytest.raises(OSError) as caught:
+        platform._run_lima("limactl create --tty=false -", input_text=secret)  # noqa: SLF001
+
+    assert caught.value is native_failure
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    assert secret not in repr(caught.value)
+    assert "native_run" not in _traceback_functions(caught.value)
+
+
+def test_local_non_sensitive_lima_native_error_keeps_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    native_failure = OSError("native failure")
+
+    def native_run(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise native_failure
+
+    monkeypatch.setattr(subprocess, "run", native_run)
+
+    with pytest.raises(OSError) as caught:
+        LimaPlatform("lima", {"placement": {"mode": "local"}})._run_lima("limactl list")  # noqa: SLF001
+
+    assert caught.value is native_failure
+    assert "native_run" in _traceback_functions(caught.value)

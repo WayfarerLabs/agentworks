@@ -17,6 +17,7 @@ owns only the per-phase step sequences and status/event bookkeeping.
 
 from __future__ import annotations
 
+import contextlib
 import shlex
 from collections.abc import Callable
 from typing import TYPE_CHECKING
@@ -84,7 +85,8 @@ def _close_logger_after_failure(logger: SSHLogger) -> None:
     try:
         logger.close()
     except BaseException:
-        output.warn("could not close the VM operation log after failure")
+        with contextlib.suppress(BaseException):
+            output.warn("could not close the VM operation log after failure")
 
 
 def bootstrap_vm(

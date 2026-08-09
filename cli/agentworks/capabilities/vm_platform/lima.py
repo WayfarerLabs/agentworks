@@ -30,7 +30,11 @@ from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.db import VMStatus
 from agentworks.errors import ProvisioningError, SensitiveDataCleanupError, StateError
 from agentworks.schema import AgwModel, NonEmptyStr
-from agentworks.ssh import SSHError, SSHTarget
+from agentworks.ssh import (
+    SSHError,
+    SSHTarget,
+    _reraise_stripped_sensitive_exception,
+)
 from agentworks.ssh import run as ssh_run
 from agentworks.topics import TopicProse
 from agentworks.transports import LimaTransport, RemoteLimaTransport, SSHTransport
@@ -54,6 +58,22 @@ _REMOTE_TEMPLATE_CLEANUP_ATTEMPTS = 3
 _REMOTE_TEMPLATE_ROOT = "/tmp"
 _REMOTE_TEMPLATE_PREFIX = "agentworks-lima-template."
 _REMOTE_TEMPLATE_RANDOM_LENGTH = 10
+
+
+def _warn_without_masking_primary(message: str, primary_failure: BaseException | None) -> None:
+    try:
+        output.warn(message)
+    except BaseException:
+        if primary_failure is None:
+            raise
+
+
+def _detail_without_masking_primary(message: str, primary_failure: BaseException | None) -> None:
+    try:
+        output.detail(message)
+    except BaseException:
+        if primary_failure is None:
+            raise
 
 
 class _RemoteCreateSensitiveState:
@@ -289,14 +309,20 @@ class LimaPlatform(VMPlatform):
             else:
                 import subprocess
 
-                proc = subprocess.run(
-                    shlex.split(command),
-                    input=input_text,
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                )
+                try:
+                    proc = subprocess.run(
+                        shlex.split(command),
+                        input=input_text,
+                        capture_output=True,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                    )
+                except BaseException as native_control_flow:
+                    if input_text is None:
+                        raise
+                    _reraise_stripped_sensitive_exception(native_control_flow)
+                assert proc is not None
                 if check and proc.returncode != 0:
                     if input_text is not None:
                         # A parser may echo template lines to stderr. Keep the
@@ -489,7 +515,12 @@ class LimaPlatform(VMPlatform):
             # SystemExit and GeneratorExit carry the same orphan-prevention
             # obligation as ordinary failures. Keep KeyboardInterrupt separate
             # so a second Ctrl-C retains the established abandon semantics.
-            output.detail(f"Cleaning up the partial Lima instance '{instance_name}'...")
+            primary_failure = sys.exception()
+            assert primary_failure is not None
+            _detail_without_masking_primary(
+                f"Cleaning up the partial Lima instance '{instance_name}'...",
+                primary_failure,
+            )
             try:
                 self._cleanup_partial_create(instance_name)
             except KeyboardInterrupt:
@@ -584,7 +615,8 @@ class LimaPlatform(VMPlatform):
             )
             self._run_lima(f"limactl start {instance_name}")
         except SSHError:
-            self._log_provision_errors(instance_name)
+            with contextlib.suppress(BaseException):
+                self._log_provision_errors(instance_name)
             raise
         finally:
             lima_yaml = ""
@@ -737,6 +769,13 @@ class LimaPlatform(VMPlatform):
             self._remove_remote_template_dir(target, remote_template_dir)
         except SensitiveDataCleanupError as exc:
             cleanup_failure = exc
+        except BaseException:
+            if sensitive.operation_failure is None:
+                raise
+            cleanup_failure = self._remote_template_cleanup_error(
+                remote_template_dir,
+                operation_failed=True,
+            )
 
         if cleanup_failure is not None:
             if sensitive.operation_failure is None:
@@ -774,7 +813,7 @@ class LimaPlatform(VMPlatform):
             try:
                 ssh_run(target, command)
                 return
-            except (SSHError, OSError, KeyboardInterrupt):
+            except (SSHError, OSError, KeyboardInterrupt, SystemExit, GeneratorExit):
                 continue
         raise self._remote_template_cleanup_error(remote_template_dir, operation_failed=False) from None
 
@@ -805,6 +844,7 @@ class LimaPlatform(VMPlatform):
         second Ctrl-C (``KeyboardInterrupt``) deliberately escapes so
         :meth:`_rollback_create_on_interrupt` can abandon the cleanup.
         """
+        primary_failure = sys.exception()
         if self.is_remote:
             # A failed or interrupted run_detached may still be alive on the
             # VM host and never reached its normal artifact cleanup. Stop it
@@ -812,13 +852,27 @@ class LimaPlatform(VMPlatform):
             # the instance it was mutating.
             from agentworks.remote_exec import kill_detached
 
-            with contextlib.suppress(Exception):
+            try:
                 kill_detached(self._host_transport(), self._remote_base_path(instance_name))
+            except KeyboardInterrupt:
+                raise
+            except BaseException as cleanup_failure:
+                if primary_failure is None and not isinstance(cleanup_failure, Exception):
+                    raise
         try:
             self._delete_instance(instance_name)
-        except Exception as e:
-            output.warn(f"could not clean up the partial Lima instance '{instance_name}': {e}")
-            output.warn(self._manual_removal_hint(instance_name))
+        except KeyboardInterrupt:
+            raise
+        except BaseException as cleanup_failure:
+            if primary_failure is None and not isinstance(cleanup_failure, Exception):
+                raise
+            try:
+                failure_message = f"could not clean up the partial Lima instance '{instance_name}': {cleanup_failure}"
+                _warn_without_masking_primary(failure_message, primary_failure)
+                _warn_without_masking_primary(self._manual_removal_hint(instance_name), primary_failure)
+            except BaseException:
+                if primary_failure is None:
+                    raise
 
     def _rollback_create_on_interrupt(self, instance_name: str) -> None:
         """Roll back the partially created instance after an operator
@@ -830,16 +884,19 @@ class LimaPlatform(VMPlatform):
         is absorbed so the caller re-raises the ORIGINAL interrupt,
         which then reaches ``create_vm``, whose unwind deletes the DB
         row it no longer needs."""
-        output.warn(
+        primary_failure = sys.exception()
+        _warn_without_masking_primary(
             f"Interrupted: cleaning up the partial Lima instance '{instance_name}', "
-            "please wait (Ctrl-C again to abandon it)..."
+            "please wait (Ctrl-C again to abandon it)...",
+            primary_failure,
         )
         try:
             self._cleanup_partial_create(instance_name)
         except KeyboardInterrupt:
-            output.warn(
+            _warn_without_masking_primary(
                 f"Cleanup abandoned: the Lima instance '{instance_name}' may remain; "
-                + self._manual_removal_hint(instance_name)
+                + self._manual_removal_hint(instance_name),
+                primary_failure,
             )
 
     def _manual_removal_hint(self, instance_name: str) -> str:

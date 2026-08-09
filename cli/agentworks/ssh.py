@@ -19,6 +19,7 @@ module retains the small set of bare-``SSHTarget`` helpers that aren't
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import shlex
 import subprocess
@@ -31,6 +32,7 @@ from agentworks.path_rendering import format_host_path
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from typing import NoReturn
 
 
 @dataclass(frozen=True)
@@ -69,6 +71,42 @@ class SSHResult:
 
 
 _EMPTY_SSH_RESULT = SSHResult(returncode=0, stdout="", stderr="")
+
+
+def _strip_sensitive_exception_graph(failure: BaseException) -> None:
+    """Detach downstream frames and links that may retain sensitive input."""
+    import traceback
+
+    pending = [failure]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+
+        cause = current.__cause__
+        context = current.__context__
+        if cause is not None:
+            pending.append(cause)
+        if context is not None:
+            pending.append(context)
+        if isinstance(current, BaseExceptionGroup):
+            pending.extend(current.exceptions)
+
+        native_traceback = current.__traceback__
+        current.__traceback__ = None
+        current.__cause__ = None
+        current.__context__ = None
+        if native_traceback is not None:
+            with contextlib.suppress(BaseException):
+                traceback.clear_frames(native_traceback)
+
+
+def _reraise_stripped_sensitive_exception(failure: BaseException) -> NoReturn:
+    """Re-raise the same control-flow object without its sensitive native graph."""
+    _strip_sensitive_exception_graph(failure)
+    raise failure from None
 
 
 class SSHError(ConnectivityError):
@@ -200,6 +238,7 @@ class SSHLogger:
         finally:
             text = ""
             secret = ""
+            sanitized = ""
 
     def step(self, name: str) -> None:
         """Log the start of a named step."""
@@ -601,14 +640,19 @@ def run(
                     last_err = err
                 if logger is not None:
                     logger.log_timeout(command, attempt + 1, retries)
-            except Exception:
+            except Exception as native_failure:
                 if not sensitive_input:
                     raise
                 # Native subprocess failures may retain input or reflected
                 # output in their args and traceback. Translate only for the
                 # sensitive-input mode, after leaving the except suite, so the
                 # native exception is not linked as context.
+                _strip_sensitive_exception_graph(native_failure)
                 sensitive_execution_failure = True
+            except BaseException as native_control_flow:
+                if not sensitive_input:
+                    raise
+                _reraise_stripped_sensitive_exception(native_control_flow)
 
             if sensitive_execution_failure:
                 raise SSHError(f"SSH stdin command could not be executed: {command}") from None
