@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 from types import SimpleNamespace
 from typing import ClassVar
@@ -37,6 +38,13 @@ from agentworks.secrets.policy import InteractionPolicy
 from agentworks.secrets.resolve import ActiveSource
 from agentworks.secrets.verification import render_verification, verify_secrets
 from tests.secrets.test_resolution_lifecycle import _Backend, _source
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _plain(text: str) -> str:
+    """Strip Rich SGR styling before asserting option-token text."""
+    return _ANSI_RE.sub("", text)
 
 
 class _InteractiveBackend(_Backend):
@@ -843,10 +851,16 @@ def test_secret_verify_cli_global_refusal_wins_before_config(
     assert captured.out == ""
 
 
-def test_secret_verify_cli_rejects_removed_flag() -> None:
-    result = CliRunner().invoke(app, ["secret", "verify", "token", "--allow-interactive"])
+@pytest.mark.parametrize("color", [False, True])
+def test_secret_verify_cli_rejects_removed_flag(color: bool) -> None:
+    result = CliRunner().invoke(
+        app,
+        ["secret", "verify", "token", "--allow-interactive"],
+        color=color,
+    )
+    plain = _plain(result.stderr)
     assert result.exit_code == 2
-    assert "No such option: --allow-interactive" in result.stderr
+    assert "No such option: --allow-interactive (Possible options: --allow-interaction)" in plain
 
 
 def test_secret_verify_cli_requires_at_least_one_name() -> None:
