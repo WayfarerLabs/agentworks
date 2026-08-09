@@ -31,7 +31,6 @@ INTERIM_NOTICE: Final = (
 )
 
 REPOSITORY_URL: Final = "https://github.com/WayfarerLabs/agentworks"
-RATIONALE_URL: Final = f"{REPOSITORY_URL}/blob/main/docs/why-agentworks.md"
 README_SOURCE_URL: Final = f"{REPOSITORY_URL}/blob/main/README.md"
 IDEMPOTENCY_URL: Final = f"{REPOSITORY_URL}/blob/main/docs/guides/idempotency.md"
 CLI_SECRETS_URL: Final = f"{REPOSITORY_URL}/blob/main/cli/README.md#environment-variables-and-secrets"
@@ -67,7 +66,6 @@ APPROVED_EXTERNAL_URLS: Final = frozenset(
         "https://agentworks.build/404.html",
         REPOSITORY_URL,
         PYPI_URL,
-        RATIONALE_URL,
         README_SOURCE_URL,
         IDEMPOTENCY_URL,
         f"{REPOSITORY_URL}/security/policy",
@@ -94,6 +92,12 @@ TEMPLATE_METADATA: Final = {
     "security.html": ("Security | Agentworks", "https://agentworks.build/security/"),
     "404.html": ("Page not found | Agentworks", "https://agentworks.build/404.html"),
 }
+MAIN_ATTRIBUTES: Final = {
+    "index.html": {"id": "main-content", "class": "home-main"},
+    "manifesto.html": {"id": "main-content", "class": "manifesto-main"},
+    "security.html": {"id": "main-content"},
+    "404.html": {"id": "main-content"},
+}
 
 FULL_MANIFEST: Final = frozenset(
     {
@@ -108,19 +112,7 @@ FULL_MANIFEST: Final = frozenset(
         Path("static/site.css"),
     }
 )
-FOCUSED_MANIFEST: Final = frozenset(
-    {
-        Path("404.html"),
-        Path("assets/agw-rocket.svg"),
-        Path("static/lander-game.js"),
-        Path("static/lander-model.js"),
-        Path("static/lander.css"),
-        Path("static/site.css"),
-    }
-)
-# Compatibility names retained for the accepted focused 404 tests.
-EXPECTED_FILES = FOCUSED_MANIFEST
-REQUIRED_TEMPLATE_REFERENCES = {
+REQUIRED_404_REFERENCES = {
     f'href="{SITE_BASE_TOKEN}"',
     f'href="{SITE_BASE_TOKEN}static/lander.css"',
     f'src="{SITE_BASE_TOKEN}static/lander-game.js"',
@@ -331,7 +323,7 @@ TEMPLATE_REQUIRED_LITERALS: Final = {
         f'href="{REPORTING_URL}"',
         f'href="{REPOSITORY_URL}/security/policy"',
     },
-    "404.html": REQUIRED_TEMPLATE_REFERENCES,
+    "404.html": REQUIRED_404_REFERENCES,
 }
 CONTENT_TOKEN_PLACEMENTS: Final = {
     "index.html": {
@@ -752,148 +744,287 @@ class _TemplatePlacementParser(HTMLParser):
                 self.exact_text_placements.add(token)
 
 
+class _ShellElement(NamedTuple):
+    tag: str
+    attributes: dict[str, str | None]
+    parent: int | None
+    text: list[str]
+
+
 class _ShellParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
-        self.stack: list[tuple[str, dict[str, str | None], int]] = []
-        self.elements: list[
-            tuple[str, dict[str, str | None], tuple[tuple[str, dict[str, str | None]], ...], list[str]]
-        ] = []
+        self.stack: list[int] = []
+        self.elements: list[_ShellElement] = []
+
+    def _append(self, tag: str, attrs: list[tuple[str, str | None]]) -> int:
+        parent = self.stack[-1] if self.stack else None
+        self.elements.append(_ShellElement(tag, _attribute_map(tag, attrs), parent, []))
+        return len(self.elements) - 1
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        attributes = _attribute_map(tag, attrs)
-        ancestors = tuple((name, values) for name, values, _ in self.stack)
-        self.elements.append((tag, attributes, ancestors, []))
-        self.stack.append((tag, attributes, len(self.elements) - 1))
+        self.stack.append(self._append(tag, attrs))
 
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        attributes = _attribute_map(tag, attrs)
-        ancestors = tuple((name, values) for name, values, _ in self.stack)
-        self.elements.append((tag, attributes, ancestors, []))
+        self._append(tag, attrs)
 
     def handle_endtag(self, tag: str) -> None:
-        for index in range(len(self.stack) - 1, -1, -1):
-            if self.stack[index][0] == tag:
-                del self.stack[index:]
+        for position in range(len(self.stack) - 1, -1, -1):
+            if self.elements[self.stack[position]].tag == tag:
+                del self.stack[position:]
                 return
 
     def handle_data(self, data: str) -> None:
-        for _, _, element_index in self.stack:
-            self.elements[element_index][3].append(data)
+        for element_index in self.stack:
+            self.elements[element_index].text.append(data)
 
 
 def _normalized_text(parts: list[str]) -> str:
     return " ".join("".join(parts).split())
 
 
-def _has_ancestor(
-    ancestors: tuple[tuple[str, dict[str, str | None]], ...], tag: str, **attributes: str
-) -> bool:
-    return any(name == tag and all(values.get(key) == value for key, value in attributes.items()) for name, values in ancestors)
+def _children(parser: _ShellParser, parent: int) -> list[int]:
+    return [index for index, element in enumerate(parser.elements) if element.parent == parent]
+
+
+def _descendants(parser: _ShellParser, parent: int, tag: str | None = None) -> list[int]:
+    matches: list[int] = []
+    pending = _children(parser, parent)
+    while pending:
+        index = pending.pop(0)
+        element = parser.elements[index]
+        if tag is None or element.tag == tag:
+            matches.append(index)
+        pending[0:0] = _children(parser, index)
+    return matches
+
+
+def _ancestors(parser: _ShellParser, index: int) -> list[int]:
+    result: list[int] = []
+    parent = parser.elements[index].parent
+    while parent is not None:
+        result.append(parent)
+        parent = parser.elements[parent].parent
+    return result
+
+
+def _hidden(parser: _ShellParser, index: int) -> bool:
+    for candidate in (index, *_ancestors(parser, index)):
+        attributes = parser.elements[candidate].attributes
+        if "hidden" in attributes or attributes.get("aria-hidden") == "true":
+            return True
+    return False
+
+
+def _one(parser: _ShellParser, indexes: list[int], reason: str) -> int:
+    if len(indexes) != 1:
+        raise ValueError(reason)
+    return indexes[0]
+
+
+def _local_route(href: str | None) -> str | None:
+    if href is None or not href.startswith(SITE_BASE_TOKEN):
+        return None
+    return href.split("#", 1)[0]
+
+
+def _validate_service_anchor(parser: _ShellParser, index: int, destination: str, label: str) -> None:
+    anchor = parser.elements[index]
+    if anchor.tag != "a" or anchor.attributes != {"href": destination} or _normalized_text(anchor.text) != label:
+        raise ValueError(f"service destination {destination} must use visible label {label!r}")
+    if _hidden(parser, index):
+        raise ValueError(f"service destination {destination} must remain visible")
+    children = _children(parser, index)
+    if [parser.elements[child].tag for child in children] != ["svg", "span"]:
+        raise ValueError(f"service destination {destination} must contain exactly one icon before its label")
+    icon = parser.elements[children[0]]
+    if icon.attributes != {
+        "class": "service-icon",
+        "aria-hidden": "true",
+        "focusable": "false",
+        "viewbox": "0 0 16 16",
+    }:
+        raise ValueError(f"service destination {destination} requires one hidden decorative icon")
+    label_element = parser.elements[children[1]]
+    if label_element.attributes or _hidden(parser, children[1]) or _normalized_text(label_element.text) != label:
+        raise ValueError(f"service destination {destination} has a misplaced visible label")
 
 
 def _validate_shared_shell(name: str, template: str) -> None:
     parser = _ShellParser()
     parser.feed(template)
     elements = parser.elements
-    anchors = [element for element in elements if element[0] == "a"]
-
     expected_title, expected_canonical = TEMPLATE_METADATA[name]
-    titles = [element for element in elements if element[0] == "title" and _has_ancestor(element[2], "head")]
-    canonicals = [
-        element for element in elements if element[0] == "link" and element[1].get("rel") == "canonical"
-    ]
-    if len(titles) != 1 or _normalized_text(titles[0][3]) != expected_title:
+
+    if any(element.tag == "style" or "style" in element.attributes for element in elements):
+        raise ValueError(f"{name}: inline style cannot alter the reviewed shell visibility")
+
+    html_index = _one(parser, [i for i, element in enumerate(elements) if element.tag == "html"], f"{name}: one html root is required")
+    head_index = _one(parser, [i for i in _children(parser, html_index) if elements[i].tag == "head"], f"{name}: one head is required")
+    body_index = _one(parser, [i for i in _children(parser, html_index) if elements[i].tag == "body"], f"{name}: one body is required")
+    if elements[html_index].attributes != {"lang": "en"} or elements[head_index].attributes or elements[body_index].attributes:
+        raise ValueError(f"{name}: html, head, and body root attributes are invalid")
+    title_index = _one(parser, [i for i in _children(parser, head_index) if elements[i].tag == "title"], f"{name}: one document title is required")
+    canonical_index = _one(
+        parser,
+        [i for i in _children(parser, head_index) if elements[i].tag == "link" and elements[i].attributes.get("rel") == "canonical"],
+        f"{name}: one canonical link is required",
+    )
+    if _normalized_text(elements[title_index].text) != expected_title:
         raise ValueError(f"{name}: document title must be {expected_title!r}")
-    if len(canonicals) != 1 or canonicals[0][1].get("href") != expected_canonical:
+    if elements[canonical_index].attributes.get("href") != expected_canonical:
         raise ValueError(f"{name}: canonical URL must be {expected_canonical}")
 
-    skip_links = [element for element in anchors if element[1].get("href") == "#main-content"]
-    if (
-        len(skip_links) != 1
-        or skip_links[0][1].get("class") != "skip-link"
-        or _normalized_text(skip_links[0][3]) != "Skip to main content"
-    ):
+    body_children = _children(parser, body_index)
+    if [elements[index].tag for index in body_children] != ["a", "header", "main", "footer"]:
+        raise ValueError(f"{name}: skip link, header, main, and footer must occur once in source order")
+    skip_index, header_index, main_index, footer_index = body_children
+    if elements[skip_index].attributes != {"class": "skip-link", "href": "#main-content"} or _normalized_text(elements[skip_index].text) != "Skip to main content":
         raise ValueError(f"{name}: exactly one reviewed skip link is required")
+    if elements[header_index].attributes != {"class": "site-header"}:
+        raise ValueError(f"{name}: header requires the exact site-header class")
+    if elements[main_index].attributes != MAIN_ATTRIBUTES[name]:
+        raise ValueError(f"{name}: main landmark requires its exact CSS-critical attributes")
+    if elements[footer_index].attributes != {"class": "site-footer"}:
+        raise ValueError(f"{name}: footer requires the exact site-footer class")
 
-    expected_destinations = dict(SHELL_DESTINATION_LABELS)
-    expected_destinations[SITE_BASE_TOKEN] = "Agentworks"
-    for destination, label in expected_destinations.items():
-        matching = [element for element in anchors if element[1].get("href") == destination]
-        if len(matching) != 1 or _normalized_text(matching[0][3]) != label:
-            raise ValueError(f"{name}: destination {destination} must occur once with label {label!r}")
+    header_children = _children(parser, header_index)
+    if name == "index.html":
+        if [elements[index].tag for index in header_children] != ["nav", "nav"]:
+            raise ValueError(f"{name}: header must contain breadcrumb then external navigation")
+        breadcrumb_index, external_index = header_children
+    else:
+        if [elements[index].tag for index in header_children] != ["div", "nav"]:
+            raise ValueError(f"{name}: header must contain identity then external navigation")
+        identity_index, external_index = header_children
+        if elements[identity_index].attributes != {"class": "header-identity"}:
+            raise ValueError(f"{name}: header identity requires its CSS-critical class")
+        identity_children = _children(parser, identity_index)
+        if [elements[index].tag for index in identity_children] != ["img", "nav"]:
+            raise ValueError(f"{name}: small rocket must occur immediately before the breadcrumb")
+        mark_index, breadcrumb_index = identity_children
+        if elements[mark_index].attributes != {
+            "class": "header-mark",
+            "src": f"{SITE_BASE_TOKEN}assets/agw-rocket.svg",
+            "alt": "",
+        }:
+            raise ValueError(f"{name}: small header rocket contract is invalid")
 
-    home_anchor = next(element for element in anchors if element[1].get("href") == SITE_BASE_TOKEN)
-    if not _has_ancestor(home_anchor[2], "header") or not _has_ancestor(
-        home_anchor[2], "nav", **{"aria-label": "Breadcrumb"}
-    ):
-        raise ValueError(f"{name}: Agentworks home crumb must be in the header breadcrumb")
-
-    for destination in (REPOSITORY_URL, PYPI_URL):
-        anchor = next(element for element in anchors if element[1].get("href") == destination)
-        if not _has_ancestor(anchor[2], "header") or not _has_ancestor(anchor[2], "nav", **{"aria-label": "External"}):
-            raise ValueError(f"{name}: service destination must be in the header External navigation")
-        icons = [
-            element
-            for element in elements
-            if element[0] == "svg"
-            and _has_ancestor(element[2], "a", href=destination)
-            and element[1].get("class") == "service-icon"
-        ]
-        if len(icons) != 1 or icons[0][1].get("aria-hidden") != "true" or icons[0][1].get("focusable") != "false":
-            raise ValueError(f"{name}: service destination requires one hidden decorative icon")
-
-    for destination in (f"{SITE_BASE_TOKEN}manifesto/", f"{SITE_BASE_TOKEN}security/"):
-        anchor = next(element for element in anchors if element[1].get("href") == destination)
-        if not _has_ancestor(anchor[2], "footer") or not _has_ancestor(anchor[2], "nav", **{"aria-label": "Footer"}):
-            raise ValueError(f"{name}: local depth destination must be in the footer navigation")
-
-    current = [element for element in elements if element[1].get("aria-current") == "page"]
-    if (
-        len(current) != 1
-        or current[0][0] == "a"
-        or _normalized_text(current[0][3]) != CURRENT_PAGE_LABELS[name]
-        or not _has_ancestor(current[0][2], "nav", **{"aria-label": "Breadcrumb"})
-    ):
+    if elements[breadcrumb_index].attributes != {"class": "breadcrumbs", "aria-label": "Breadcrumb"}:
+        raise ValueError(f"{name}: breadcrumb requires its exact class and accessible label")
+    breadcrumb_children = _children(parser, breadcrumb_index)
+    if [elements[index].tag for index in breadcrumb_children] != ["a", "span", "span"]:
+        raise ValueError(f"{name}: breadcrumb must contain home, separator, and current item in order")
+    home_index, separator_index, current_index = breadcrumb_children
+    if elements[home_index].attributes != {"href": SITE_BASE_TOKEN} or _normalized_text(elements[home_index].text) != "Agentworks":
+        raise ValueError(f"{name}: Agentworks home crumb contract is invalid")
+    if elements[separator_index].attributes != {"class": "breadcrumb-separator", "aria-hidden": "true"}:
+        raise ValueError(f"{name}: breadcrumb separator contract is invalid")
+    if elements[current_index].attributes != {"aria-current": "page"} or _normalized_text(elements[current_index].text) != CURRENT_PAGE_LABELS[name]:
         raise ValueError(f"{name}: breadcrumb current-page state is invalid")
-    separators = [
-        element
-        for element in elements
-        if element[1].get("class") == "breadcrumb-separator"
-        and _has_ancestor(element[2], "nav", **{"aria-label": "Breadcrumb"})
-    ]
-    if len(separators) != 1 or separators[0][1].get("aria-hidden") != "true":
-        raise ValueError(f"{name}: breadcrumb requires one hidden visual separator")
 
-    header_marks = [element for element in elements if element[0] == "img" and element[1].get("class") == "header-mark"]
-    expected_marks = 0 if name == "index.html" else 1
-    if len(header_marks) != expected_marks:
-        raise ValueError(f"{name}: expected {expected_marks} small header mark(s)")
-    if header_marks and (
-        header_marks[0][1].get("alt") != ""
-        or not _has_ancestor(header_marks[0][2], "header")
-        or not _has_ancestor(header_marks[0][2], "div", **{"class": "header-identity"})
+    if elements[external_index].attributes != {"class": "service-links", "aria-label": "External"}:
+        raise ValueError(f"{name}: external navigation requires its exact class and accessible label")
+    external_children = _children(parser, external_index)
+    if [elements[index].tag for index in external_children] != ["a", "a"]:
+        raise ValueError(f"{name}: external navigation must contain exactly GitHub then PyPI")
+    _validate_service_anchor(parser, external_children[0], REPOSITORY_URL, "GitHub")
+    _validate_service_anchor(parser, external_children[1], PYPI_URL, "PyPI")
+    service_icons = [index for index, element in enumerate(elements) if element.tag == "svg" and element.attributes.get("class") == "service-icon"]
+    expected_svg_count = 3 if name == "404.html" else 2
+    if (
+        len(_descendants(parser, external_index, "svg")) != 2
+        or len(_descendants(parser, header_index, "svg")) != 2
+        or len(service_icons) != 2
+        or len([element for element in elements if element.tag == "svg"]) != expected_svg_count
     ):
-        raise ValueError(f"{name}: small header mark must be decorative and adjacent to the breadcrumb")
-    if header_marks:
-        mark_index = elements.index(header_marks[0])
-        next_element = elements[mark_index + 1] if mark_index + 1 < len(elements) else None
-        if (
-            next_element is None
-            or next_element[0] != "nav"
-            or next_element[1].get("class") != "breadcrumbs"
-            or next_element[2] != header_marks[0][2]
-        ):
-            raise ValueError(f"{name}: small header mark must be immediately left of the breadcrumb")
+        raise ValueError(f"{name}: header must contain only the two reviewed service icons")
 
-    footer_paragraphs = [
-        element for element in elements if element[0] == "p" and _has_ancestor(element[2], "footer")
+    images = [index for index, element in enumerate(elements) if element.tag == "img"]
+    if len(images) != 1:
+        raise ValueError(f"{name}: document must contain exactly one reviewed rocket image")
+    if name == "index.html":
+        hero_index = images[0]
+        if elements[hero_index].attributes != {
+            "class": "hero-mark",
+            "src": f"{SITE_BASE_TOKEN}assets/agw-rocket.svg",
+            "alt": "AGW rocket mark",
+        }:
+            raise ValueError(f"{name}: Home must contain only its reviewed main hero rocket")
+        hero_heading_index = elements[hero_index].parent
+        if (
+            hero_heading_index is None
+            or elements[hero_heading_index].attributes != {"class": "hero-heading"}
+            or [elements[index].tag for index in _children(parser, hero_heading_index)] != ["img", "div"]
+            or main_index not in _ancestors(parser, hero_heading_index)
+        ):
+            raise ValueError(f"{name}: Home hero rocket must lead the reviewed hero heading")
+    elif images[0] != mark_index:
+        raise ValueError(f"{name}: the small header rocket must be the document's only image")
+
+    if name == "404.html":
+        scene_index = _one(
+            parser,
+            [index for index, element in enumerate(elements) if element.tag == "svg" and element.attributes.get("id") == "lander-scene"],
+            f"{name}: one reviewed lander scene SVG is required",
+        )
+        if elements[scene_index].attributes != {
+            "id": "lander-scene",
+            "viewbox": "0 0 1000 640",
+            "preserveaspectratio": "xMidYMid meet",
+            "role": "img",
+            "aria-labelledby": "lander-scene-title lander-scene-description",
+        }:
+            raise ValueError(f"{name}: lander scene SVG attributes are invalid")
+        scene_shell_index = elements[scene_index].parent
+        scene_section_index = elements[scene_shell_index].parent if scene_shell_index is not None else None
+        if (
+            scene_shell_index is None
+            or elements[scene_shell_index].attributes != {"id": "lander-scene-shell", "tabindex": "-1"}
+            or scene_section_index is None
+            or elements[scene_section_index].attributes != {
+                "id": "lander-game",
+                "aria-label": "Lunar deployment scene",
+            }
+            or main_index not in _ancestors(parser, scene_section_index)
+        ):
+            raise ValueError(f"{name}: lander scene SVG must remain inside its reviewed main section")
+
+    footer_children = _children(parser, footer_index)
+    if [elements[index].tag for index in footer_children] != ["p", "nav"]:
+        raise ValueError(f"{name}: footer ownership must precede footer navigation")
+    ownership_index, footer_nav_index = footer_children
+    if elements[ownership_index].attributes or _normalized_text(elements[ownership_index].text) != "Product of Wayfarer Labs, LLC":
+        raise ValueError(f"{name}: footer ownership text is invalid")
+    if elements[footer_nav_index].attributes != {"aria-label": "Footer"}:
+        raise ValueError(f"{name}: footer navigation label is invalid")
+    footer_links = _children(parser, footer_nav_index)
+    expected_footer = (
+        (f"{SITE_BASE_TOKEN}manifesto/", "Agentworks Manifesto"),
+        (f"{SITE_BASE_TOKEN}security/", "We take security seriously"),
+    )
+    if [elements[index].tag for index in footer_links] != ["a", "a"]:
+        raise ValueError(f"{name}: footer must contain exactly Manifesto then Security")
+    for index, (destination, label) in zip(footer_links, expected_footer, strict=True):
+        if elements[index].attributes != {"href": destination} or _normalized_text(elements[index].text) != label:
+            raise ValueError(f"{name}: footer destination {destination} is invalid")
+
+    anchors = [element for element in elements if element.tag == "a"]
+    invalid_local_hrefs = [
+        anchor.attributes.get("href")
+        for anchor in anchors
+        if not str(anchor.attributes.get("href") or "").startswith(("#", "https://", SITE_BASE_TOKEN))
     ]
-    ownership = [element for element in footer_paragraphs if _normalized_text(element[3]) == "Product of Wayfarer Labs, LLC"]
-    if len(ownership) != 1:
-        raise ValueError(f"{name}: footer ownership text is missing or duplicated")
-    if template.count("Product of Wayfarer Labs, LLC") != 1:
-        raise ValueError(f"{name}: footer ownership text must occur exactly once in the document")
+    if invalid_local_hrefs:
+        raise ValueError(f"{name}: local template links must use SITE_BASE: {invalid_local_hrefs}")
+    for destination, label in {SITE_BASE_TOKEN: "Agentworks", **SHELL_DESTINATION_LABELS}.items():
+        matching = [anchor for anchor in anchors if anchor.attributes.get("href") == destination]
+        if len(matching) != 1 or _normalized_text(matching[0].text) != label:
+            raise ValueError(f"{name}: destination {destination} must occur once with label {label!r}")
+    local_routes = [route for anchor in anchors if (route := _local_route(anchor.attributes.get("href"))) is not None]
+    duplicates = sorted({route for route in local_routes if local_routes.count(route) > 1})
+    if duplicates:
+        raise ValueError(f"{name}: duplicate normalized local route destinations: {duplicates}")
 
 
 def _validate_content_token_placements(name: str, template: str) -> _TemplatePlacementParser:
@@ -992,14 +1123,6 @@ def render_named_template(name: str, template: str, site_base: str, substitution
     return rendered
 
 
-def render_template(template: str, site_base: str) -> str:
-    """Render the accepted focused 404 template seam."""
-    for reference in REQUIRED_TEMPLATE_REFERENCES:
-        if reference not in template:
-            raise ValueError(f"template is missing required site-base reference: {reference}")
-    return render_named_template("404.html", template, validate_site_base(site_base), {})
-
-
 class _ReferenceParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
@@ -1044,12 +1167,6 @@ def _validate_local_references(rendered: dict[Path, bytes], manifest: frozenset[
             elif target.endswith("/"):
                 target += "index.html"
             if Path(target) not in manifest:
-                if manifest == FOCUSED_MANIFEST and Path(target) in {
-                    Path("index.html"),
-                    Path("manifesto/index.html"),
-                    Path("security/index.html"),
-                }:
-                    continue
                 raise ValueError(f"{path}: local reference is absent from manifest: {reference}")
 
 
@@ -1066,11 +1183,11 @@ def _validate_runtime_asset(path: Path, source: str) -> None:
             raise ValueError(f"{path}: remote JavaScript URLs are forbidden")
 
 
-def _render_artifact(repo_root: Path, site_base: str, focused: bool) -> tuple[dict[Path, bytes], frozenset[Path]]:
+def _render_artifact(repo_root: Path, site_base: str) -> tuple[dict[Path, bytes], frozenset[Path]]:
     website = repo_root / "website"
-    manifest = FOCUSED_MANIFEST if focused else FULL_MANIFEST
-    substitutions = {} if focused else extract_content(repo_root)
-    template_names = ("404.html",) if focused else ("404.html", "index.html", "manifesto.html", "security.html")
+    manifest = FULL_MANIFEST
+    substitutions = extract_content(repo_root)
+    template_names = ("404.html", "index.html", "manifesto.html", "security.html")
     rendered: dict[Path, bytes] = {}
     for name in template_names:
         template = _read_utf8(website / "templates" / name)
@@ -1091,7 +1208,7 @@ def _render_artifact(repo_root: Path, site_base: str, focused: bool) -> tuple[di
         _validate_runtime_asset(destination, content)
         rendered[destination] = content.encode()
     if set(rendered) != manifest:
-        raise RuntimeError("rendering invariant failure: artifact does not match selected manifest")
+        raise RuntimeError("rendering invariant failure: artifact does not match complete manifest")
     _validate_local_references(rendered, manifest, site_base)
     return rendered, manifest
 
@@ -1169,12 +1286,12 @@ def _install_staging(staging: Path, output: Path, manifest: frozenset[Path]) -> 
     return backup
 
 
-def build_site(repo_root: Path, output: Path, site_base: str, *, focused: bool = False) -> None:
-    """Build and atomically install the full site or focused 404 artifact."""
+def build_site(repo_root: Path, output: Path, site_base: str) -> None:
+    """Build and atomically install the complete linked site."""
     root = repo_root.resolve()
     base = validate_site_base(site_base)
     destination = validate_output_location(root, output)
-    rendered, manifest = _render_artifact(root, base, focused)
+    rendered, manifest = _render_artifact(root, base)
     _validate_existing_output(destination, manifest)
 
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -1197,14 +1314,8 @@ def build_site(repo_root: Path, output: Path, site_base: str, *, focused: bool =
             shutil.rmtree(staging)
 
 
-def build_404(repo_root: Path, output: Path, site_base: str) -> None:
-    """Build the accepted focused 404 artifact seam."""
-    build_site(repo_root, output, site_base, focused=True)
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--only", choices=("404",))
     parser.add_argument("--repo-root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--site-base", required=True)
@@ -1214,7 +1325,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     try:
-        build_site(args.repo_root, args.output, args.site_base, focused=args.only == "404")
+        build_site(args.repo_root, args.output, args.site_base)
     except (OSError, ValueError, RuntimeError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1

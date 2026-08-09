@@ -123,9 +123,9 @@ class RepositoryFixture(unittest.TestCase):
         shutil.copytree(WEBSITE / "assets", self.root / "website/assets")
         shutil.copytree(WEBSITE / "static", self.root / "website/static")
 
-    def build(self, site_base: str = "/", *, focused: bool = False) -> Path:
-        output = Path(self.temporary.name) / ("focused" if focused else "site")
-        site_builder.build_site(self.root, output, site_base, focused=focused)
+    def build(self, site_base: str = "/") -> Path:
+        output = Path(self.temporary.name) / "site"
+        site_builder.build_site(self.root, output, site_base)
         return output
 
 
@@ -347,7 +347,7 @@ class TemplateContractTests(RepositoryFixture):
         )
         for changed in variants:
             with self.subTest(change=changed[-100:]), self.assertRaisesRegex(
-                ValueError, "onboarding|notice|destination|skip link"
+                ValueError, "onboarding|notice|destination|skip link|footer"
             ):
                 site_builder._validate_template("index.html", changed)
 
@@ -359,22 +359,132 @@ class TemplateContractTests(RepositoryFixture):
         with self.assertRaisesRegex(ValueError, "destination"):
             site_builder._validate_template("index.html", swapped)
 
-    def test_shell_icons_breadcrumbs_locations_and_logo_exception_fail_closed(self) -> None:
+    def test_shell_css_classes_landmark_order_and_breadcrumb_order_fail_closed(self) -> None:
         for name in site_builder.TEMPLATE_TOKENS:
             template = (self.root / "website/templates" / name).read_text(encoding="utf-8")
+            footer = re.search(r"\n        <footer class=\"site-footer\">.*?</footer>", template, re.DOTALL)
+            self.assertIsNotNone(footer)
+            assert footer is not None
+            reordered = template.replace(footer.group(0), "", 1).replace(
+                "        <main ", f"{footer.group(0)}\n        <main ", 1
+            )
+            reversed_breadcrumb = re.sub(
+                r'(<a href="\{\{SITE_BASE\}\}">Agentworks</a>)(\s*)'
+                r'(<span class="breadcrumb-separator" aria-hidden="true">/</span>)',
+                r"\3\2\1",
+                template,
+                count=1,
+            )
             variants = (
-                template.replace('aria-hidden="true" focusable="false" viewBox="0 0 16 16"', 'focusable="false" viewBox="0 0 16 16"', 1),
+                template.replace('class="site-header"', 'class="site-top"', 1),
+                template.replace('class="site-footer"', 'class="site-bottom"', 1),
+                template.replace('class="breadcrumbs"', 'class="crumbs"', 1),
+                template.replace('class="service-links"', 'class="services"', 1),
+                template.replace(site_builder.MAIN_ATTRIBUTES[name].get("class", 'id="main-content"'), "drifted", 1),
                 template.replace('aria-label="External"', 'aria-label="Primary"', 1),
                 template.replace('aria-label="Footer"', 'aria-label="Elsewhere"', 1),
                 template.replace('aria-current="page"', 'aria-current="step"', 1),
-                template.replace('class="breadcrumb-separator" aria-hidden="true"', 'class="breadcrumb-separator"', 1),
+                reversed_breadcrumb,
+                reordered,
             )
-            if name == "index.html":
-                variants += (template.replace('<nav class="breadcrumbs"', '<img class="header-mark" src="{{SITE_BASE}}assets/agw-rocket.svg" alt="" /><nav class="breadcrumbs"', 1),)
-            else:
-                variants += (template.replace('class="header-mark"', 'class="moved-mark"', 1),)
+            if name != "index.html":
+                variants += (template.replace('class="header-identity"', 'class="identity"', 1),)
             for changed in variants:
                 with self.subTest(name=name, change=changed[:80]), self.assertRaises(ValueError):
+                    site_builder._validate_template(name, changed)
+
+    def test_service_ctas_reject_hidden_ancestors_and_icon_bypasses(self) -> None:
+        extra_icon = '<svg aria-hidden="true" focusable="false" viewBox="0 0 16 16"><path d="M0 0" /></svg>'
+        for name in site_builder.TEMPLATE_TOKENS:
+            template = (self.root / "website/templates" / name).read_text(encoding="utf-8")
+            variants = (
+                template.replace(f'<a href="{site_builder.REPOSITORY_URL}"', f'<a hidden href="{site_builder.REPOSITORY_URL}"', 1),
+                template.replace(f'<a href="{site_builder.REPOSITORY_URL}"', f'<a style="display: none" href="{site_builder.REPOSITORY_URL}"', 1),
+                template.replace('<header class="site-header">', '<header class="site-header" hidden>', 1),
+                template.replace('<body>', '<body hidden>', 1),
+                template.replace('<nav class="service-links" aria-label="External">', '<nav class="service-links" aria-label="External" aria-hidden="true">', 1),
+                template.replace('<span>GitHub</span>', '<span hidden>GitHub</span>', 1),
+                template.replace("</head>", "<style>.service-links { display: none }</style></head>", 1),
+                template.replace('<span>GitHub</span>', f'{extra_icon}<span>GitHub</span>', 1),
+                template.replace('</nav>\n        </header>', f'{extra_icon}</nav>\n        </header>', 1),
+                template.replace('</main>', f'{extra_icon}</main>', 1),
+                template.replace('class="service-icon"', 'class="icon"', 1),
+                template.replace('aria-hidden="true" focusable="false" viewBox="0 0 16 16"', 'focusable="false" viewBox="0 0 16 16"', 1),
+            )
+            for changed in variants:
+                with self.subTest(name=name, change=changed[:100]), self.assertRaises(ValueError):
+                    site_builder._validate_template(name, changed)
+
+    def test_rocket_inventory_rejects_unclassified_extra_and_misplaced_images(self) -> None:
+        extra = '<img src="{{SITE_BASE}}assets/agw-rocket.svg" alt="" />'
+        for name in site_builder.TEMPLATE_TOKENS:
+            template = (self.root / "website/templates" / name).read_text(encoding="utf-8")
+            variants = (
+                template.replace('<header class="site-header">', f'<header class="site-header">{extra}', 1),
+                template.replace('</main>', f'{extra}</main>', 1),
+            )
+            if name != "index.html":
+                variants += (
+                    template.replace('class="header-mark"', 'class="unclassified"', 1),
+                    template.replace(
+                        '<img class="header-mark" src="{{SITE_BASE}}assets/agw-rocket.svg" alt="" />\n                '
+                        '<nav class="breadcrumbs"',
+                        '<nav class="breadcrumbs"',
+                        1,
+                    ).replace(
+                        '</nav>\n            </div>',
+                        '</nav>\n                <img class="header-mark" '
+                        'src="{{SITE_BASE}}assets/agw-rocket.svg" alt="" />\n            </div>',
+                        1,
+                    ),
+                )
+            else:
+                variants += (
+                    template.replace(
+                        '<img class="hero-mark" src="{{SITE_BASE}}assets/agw-rocket.svg" alt="AGW rocket mark" />',
+                        "",
+                        1,
+                    ).replace(
+                        "</main>",
+                        '<img class="hero-mark" src="{{SITE_BASE}}assets/agw-rocket.svg" '
+                        'alt="AGW rocket mark" /></main>',
+                        1,
+                    ),
+                )
+            for changed in variants:
+                with self.subTest(name=name, change=changed[:100]), self.assertRaises(ValueError):
+                    site_builder._validate_template(name, changed)
+
+    def test_404_scene_svg_cannot_move_outside_its_reviewed_section(self) -> None:
+        template = (self.root / "website/templates/404.html").read_text(encoding="utf-8")
+        scene = re.search(r"\n                    <svg\n.*?\n                    </svg>", template, re.DOTALL)
+        self.assertIsNotNone(scene)
+        assert scene is not None
+        changed = template.replace(scene.group(0), "", 1).replace("</main>", f"{scene.group(0)}</main>", 1)
+        with self.assertRaisesRegex(ValueError, "lander scene SVG"):
+            site_builder._validate_template("404.html", changed)
+
+    def test_fragment_variants_cannot_duplicate_local_route_destinations(self) -> None:
+        for name in site_builder.TEMPLATE_TOKENS:
+            template = (self.root / "website/templates" / name).read_text(encoding="utf-8")
+            variants = (
+                (
+                    template.replace(
+                        "</main>",
+                        '<a href="{{SITE_BASE}}manifesto/#the-problem-space">Duplicate Manifesto route</a></main>',
+                        1,
+                    ),
+                    "duplicate normalized local route",
+                ),
+                (
+                    template.replace(
+                        "</main>", '<a href="/manifesto/#the-problem-space">Unbased route</a></main>', 1
+                    ),
+                    "must use SITE_BASE",
+                ),
+            )
+            for changed, reason in variants:
+                with self.subTest(name=name, reason=reason), self.assertRaisesRegex(ValueError, reason):
                     site_builder._validate_template(name, changed)
 
     def test_shell_title_and_canonical_metadata_fail_closed(self) -> None:
@@ -439,21 +549,43 @@ class TemplateContractTests(RepositoryFixture):
 
 
 class BuildAndInstallTests(RepositoryFixture):
-    def test_full_and_focused_dual_base_builds_have_exact_manifests(self) -> None:
-        for focused, manifest in (
-            (False, site_builder.FULL_MANIFEST),
-            (True, site_builder.FOCUSED_MANIFEST),
-        ):
-            for site_base in ("/", "/agentworks/"):
-                with self.subTest(focused=focused, site_base=site_base):
-                    output = Path(self.temporary.name) / f"build-{focused}-{site_base.count('agentworks')}"
-                    site_builder.build_site(self.root, output, site_base, focused=focused)
-                    self.assertEqual({Path(path) for path in snapshot(output)}, manifest)
-                    for path in output.rglob("*"):
-                        self.assertFalse(path.is_symlink())
-                    page = (output / "404.html").read_text(encoding="utf-8")
-                    self.assertIn(f'href="{site_base}"', page)
-                    self.assertNotIn("{{", page)
+    def test_dual_base_builds_have_the_exact_complete_manifest(self) -> None:
+        for site_base in ("/", "/agentworks/"):
+            with self.subTest(site_base=site_base):
+                output = Path(self.temporary.name) / f"build-{site_base.count('agentworks')}"
+                site_builder.build_site(self.root, output, site_base)
+                self.assertEqual({Path(path) for path in snapshot(output)}, site_builder.FULL_MANIFEST)
+                for path in output.rglob("*"):
+                    self.assertFalse(path.is_symlink())
+                page = (output / "404.html").read_text(encoding="utf-8")
+                self.assertIn(f'href="{site_base}"', page)
+                self.assertNotIn("{{", page)
+
+    def test_builder_has_no_partial_output_api_or_cli_option(self) -> None:
+        self.assertFalse(hasattr(site_builder, "build_404"))
+        self.assertFalse(hasattr(site_builder, "FOCUSED_MANIFEST"))
+        builder_source = BUILD_PATH.read_text(encoding="utf-8")
+        for retired in ("build_404", "FOCUSED_MANIFEST", 'add_argument("--only"'):
+            self.assertNotIn(retired, builder_source)
+        result = subprocess.run(
+            [
+                "python3",
+                str(BUILD_PATH),
+                "--only",
+                "404",
+                "--repo-root",
+                str(self.root),
+                "--output",
+                str(Path(self.temporary.name) / "partial"),
+                "--site-base",
+                "/",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unrecognized arguments: --only 404", result.stderr)
 
     def test_repeated_builds_are_byte_deterministic(self) -> None:
         first = self.build("/agentworks/")
@@ -477,13 +609,26 @@ class BuildAndInstallTests(RepositoryFixture):
             site_builder.build_site(self.root, output, "/agentworks/")
         self.assertEqual(snapshot(output), before)
 
+    def test_absent_local_route_has_no_partial_manifest_suppression(self) -> None:
+        output = self.build()
+        before = snapshot(output)
+        template = self.root / "website/templates/security.html"
+        source = template.read_text(encoding="utf-8")
+        template.write_text(
+            source.replace("</main>", '<a href="{{SITE_BASE}}missing/">Missing route</a>\n</main>'),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ValueError, "local reference is absent from manifest"):
+            site_builder.build_site(self.root, output, "/")
+        self.assertEqual(snapshot(output), before)
+
     def test_same_document_fragment_must_resolve_before_output_changes(self) -> None:
         output = self.build()
         before = snapshot(output)
         template = self.root / "website/templates/404.html"
         source = template.read_text(encoding="utf-8")
         template.write_text(source.replace('id="main-content"', 'id="renamed-main"'), encoding="utf-8")
-        with self.assertRaisesRegex(ValueError, "same-document fragment"):
+        with self.assertRaisesRegex(ValueError, "main landmark|same-document fragment"):
             site_builder.build_site(self.root, output, "/")
         self.assertEqual(snapshot(output), before)
 

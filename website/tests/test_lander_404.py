@@ -178,19 +178,12 @@ class SiteBaseTests(unittest.TestCase):
 
 
 class BuildTests(unittest.TestCase):
-    expected = {
-        Path("404.html"),
-        Path("assets/agw-rocket.svg"),
-        Path("static/lander.css"),
-        Path("static/lander-model.js"),
-        Path("static/lander-game.js"),
-        Path("static/site.css"),
-    }
+    expected = website_build.FULL_MANIFEST
 
     def build(self, site_base: str) -> tuple[Path, tempfile.TemporaryDirectory[str]]:
         temporary = tempfile.TemporaryDirectory()
         output = Path(temporary.name) / "site"
-        website_build.build_404(REPO_ROOT, output, site_base)
+        website_build.build_site(REPO_ROOT, output, site_base)
         return output, temporary
 
     def test_root_and_project_builds_have_the_exact_output_set(self) -> None:
@@ -212,11 +205,11 @@ class BuildTests(unittest.TestCase):
     def test_builder_replaces_only_an_owned_output_set(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary) / "site"
-            website_build.build_404(REPO_ROOT, output, "/")
-            website_build.build_404(REPO_ROOT, output, "/agentworks/")
+            website_build.build_site(REPO_ROOT, output, "/")
+            website_build.build_site(REPO_ROOT, output, "/agentworks/")
             (output / "unrelated.txt").write_text("keep", encoding="utf-8")
             with self.assertRaises(ValueError):
-                website_build.build_404(REPO_ROOT, output, "/")
+                website_build.build_site(REPO_ROOT, output, "/")
             self.assertEqual((output / "unrelated.txt").read_text(encoding="utf-8"), "keep")
 
     def test_builder_rejects_every_repository_output_before_writing(self) -> None:
@@ -240,7 +233,7 @@ class BuildTests(unittest.TestCase):
         )
         for target in targets:
             with self.subTest(target=target), self.assertRaises(ValueError):
-                website_build.build_404(REPO_ROOT, target, "/")
+                website_build.build_site(REPO_ROOT, target, "/")
         self.assertEqual({path: path.read_bytes() for path in protected}, before)
         self.assertEqual(set(REPO_ROOT.rglob("agentworks-404-*")), staging_before)
         self.assertFalse((WEBSITE / "templates" / "nested-output").exists())
@@ -250,10 +243,10 @@ class BuildTests(unittest.TestCase):
         template = (WEBSITE / "templates" / "404.html").read_text(encoding="utf-8")
         self.assertEqual(set(re.findall(r"{{[^{}]+}}", template)), {"{{SITE_BASE}}"})
         with self.assertRaises(ValueError):
-            website_build.render_template(template + "{{OTHER}}", "/")
-        for required in website_build.REQUIRED_TEMPLATE_REFERENCES:
+            website_build._validate_template("404.html", template + "{{OTHER}}")
+        for required in website_build.REQUIRED_404_REFERENCES:
             with self.subTest(required=required), self.assertRaises(ValueError):
-                website_build.render_template(template.replace(required, "missing"), "/")
+                website_build._validate_template("404.html", template.replace(required, "missing"))
 
 
 class StaticDocumentTests(unittest.TestCase):

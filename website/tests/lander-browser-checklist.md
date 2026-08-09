@@ -19,12 +19,12 @@ shared-shell rows and any 404 row that names the new breadcrumb route-home actio
 Build and serve from the repository root:
 
 ```console
-python3 website/build.py --only 404 --repo-root . --output /tmp/agentworks-404-demo --site-base /
-python3 -m http.server --directory /tmp/agentworks-404-demo 8000
+python3 website/build.py --repo-root . --output /tmp/agentworks-site-demo --site-base /
+python3 -m http.server --directory /tmp/agentworks-site-demo 8000
 ```
 
-Open `http://localhost:8000/404.html`. Keep the browser network panel open with request preservation
-enabled. Disable the browser cache for request-log checks.
+Open `http://localhost:8000/404.html` from the complete linked site. Keep the browser network panel
+open with request preservation enabled. Disable the browser cache for request-log checks.
 
 ## Execution record
 

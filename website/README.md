@@ -34,15 +34,8 @@ Then open `http://localhost:8000/`, `http://localhost:8000/manifesto/`,
 `http://localhost:8000/security/`, and `http://localhost:8000/404.html`. A project-Pages build uses
 the same source and command with `--site-base /agentworks/`.
 
-The focused 404 seam remains available for game work:
-
-```bash
-python3 website/build.py \
-  --only 404 \
-  --repo-root . \
-  --output /tmp/agentworks-404 \
-  --site-base /
-```
+Game work uses `/404.html` from this complete build. The builder has no partial-output mode because
+the 404 breadcrumb and footer link to the other generated pages.
 
 Run the automated suites and repository checks:
 
@@ -84,14 +77,14 @@ static/lander.css
 static/site.css
 ```
 
-The focused output omits `index.html` and `security/index.html`. The manifest is explicit in
-`build.py`; the builder never recursively copies source directories.
+This is the builder's only output shape. The manifest is explicit in `build.py`; the builder never
+recursively copies source directories or permits a generated local link outside the manifest.
 
 All three CLI paths are required. The output must be outside the repository. The site base is an
 ASCII, slash-bounded same-origin path such as `/` or `/agentworks/`; absolute URLs, dot segments,
 encoding, and unbounded paths are rejected. The builder validates all content and templates, stages
 an exact regular-file tree beside the destination, and then swaps it into place. Existing output is
-replaced only when every entry belongs to the selected manifest.
+replaced only when every entry belongs to the complete manifest.
 
 Replacement uses a sibling backup. A failed installation or installed-manifest check restores the
 previous output. Once the installed manifest is verified, the new artifact is committed. A failure

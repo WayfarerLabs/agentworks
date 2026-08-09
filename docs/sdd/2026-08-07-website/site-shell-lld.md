@@ -4,7 +4,7 @@
 
 - Status: Phase 4B implemented; release acceptance remains pending
 - Date: 2026-08-09
-- FRD: `frd.md`, specifically R10, R11, and R13-R16
+- FRD: `frd.md`, specifically R10, R11, and R13-R17
 - HLA: `hla.md`, specifically D1-D5, D8, and D10
 - Source baseline: `1a52d4250bc0c7ff7edf29beeb1ba8067beeb2e5`
 
@@ -52,8 +52,8 @@ static/site.css
 
 The supported public paths are `/`, `/manifesto/`, `/security/`, and `/404.html`. At the GitHub
 Pages project base, the same paths are rooted beneath `/agentworks/`. Canonical metadata always uses
-the custom-domain URLs at `https://agentworks.build`. The focused 404 artifact remains the accepted
-local game seam and keeps its smaller explicit manifest.
+the custom-domain URLs at `https://agentworks.build`. Game development and demos serve `/404.html`
+from this same complete linked artifact.
 
 ## 3. Shared header contract
 
@@ -141,15 +141,16 @@ brace-like tokens.
 
 ## 7. Builder and replacement safety
 
-The CLI requires `--repo-root`, `--output`, and `--site-base`; `--only 404` selects the focused game
-seam. Site bases accept only ASCII slash-bounded same-origin paths such as `/` and `/agentworks/`.
-Output must be outside the repository.
+The CLI requires `--repo-root`, `--output`, and `--site-base`. It has no partial-output option. Site
+bases accept only ASCII slash-bounded same-origin paths such as `/` and `/agentworks/`. Output must
+be outside the repository.
 
 The builder validates sources, templates, shell destinations, labels, landmark locations, current
-state, icons, logo counts, ownership text, and local references in memory. It renders the complete
-explicit manifest to a sibling staging directory, verifies exact regular files and directories, and
-atomically installs only after validation. Existing output is accepted only when every entry is
-builder-owned. A failed install restores the prior output.
+state, icons, complete image inventory, ownership text, normalized route uniqueness, and local
+references in memory. It renders the complete explicit manifest to a sibling staging directory,
+verifies exact regular files and directories, and atomically installs only after validation.
+Existing output is accepted only when every entry is builder-owned. No validator exception permits a
+generated local link outside the manifest. A failed install restores the prior output.
 
 The same inputs and arguments produce byte-identical output. Artifacts contain no timestamps,
 environment prose, or generated `CNAME`, and successful builds leave the repository clean.
@@ -172,9 +173,9 @@ wrapping to preserve one-dimensional reflow at 320 CSS pixels and the 400-percen
 | Contract                      | Automated evidence                                                                                                             |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | Source completeness and drift | Hash, heading-tree, UTF-8, fence, block, and link-map failure tests                                                            |
-| Template closure              | Token vocabulary, placement, duplicate-attribute, destination, label, icon, breadcrumb, logo, and ownership tests              |
+| Template closure              | Token vocabulary, exact shell tree, hidden CTA, icon, breadcrumb, image, route-duplicate, and ownership mutation tests         |
 | Generated semantics           | Four-page metadata, canonicals, landmarks, headings, skip links, shell, no-duplicate links, scripts, and local-reference tests |
-| Exact artifacts               | Full and focused manifest tests at `/` and `/agentworks/`                                                                      |
+| Exact artifacts               | The complete nine-file manifest at `/` and `/agentworks/`; no partial API or CLI option                                        |
 | Determinism and safety        | Repeated byte snapshots, hostile output trees, rollback injection, path and symlink tests                                      |
 | 404 preservation              | Python source/build tests plus Node model/controller contracts                                                                 |
 | Browser acceptance            | `website/tests/lander-browser-checklist.md` pending four-page manual run                                                       |
