@@ -241,7 +241,9 @@ one of: missing/unreadable input, invalid UTF-8 or byte-order mark, missing/dupl
 missing or duplicate expected block sequence, unsupported block or inline Markdown, invalid link,
 missing or duplicate reference definition, reporting-link drift, or rendering invariant failure.
 Template, base, manifest, staging, and output-ownership errors retain the same fail-closed behavior.
-Failure leaves an existing output tree byte-for-byte unchanged.
+Every failure before the installed-manifest commit point leaves an existing output tree
+byte-for-byte unchanged. Backup cleanup occurs after that point and follows section 9's warning
+contract.
 
 ## 6. Closed template vocabulary
 
@@ -268,10 +270,13 @@ conditional, include, loop, or arbitrary-key token.
 All pages have `lang="en"`, UTF-8 and viewport metadata, one descriptive title, one meta
 description, one canonical link, a visible skip link, `header`, `main`, and `footer`, and exactly
 one `h1`. Home uses title `Agentworks`, its canonical URL from section 2, and a plain-text,
-attribute-escaped `HOME_META_DESCRIPTION` derived from `HOME_PROBLEM`. Security uses title
-`Security | Agentworks`, its canonical URL from section 2, and `SECURITY_META_DESCRIPTION` derived
-from the opening paragraph of `SECURITY_THREATS`. These metadata tokens are alternate renderings of
-the same selected source blocks, not independently owned claims.
+attribute-escaped `HOME_META_DESCRIPTION` derived from only the first paragraph of `HOME_PROBLEM`.
+Security uses title `Security | Agentworks`, its canonical URL from section 2, and
+`SECURITY_META_DESCRIPTION` derived from the opening paragraph of `SECURITY_THREATS`. Metadata
+transformation removes accepted inline Markdown delimiters while preserving their decoded text,
+joins source lines with the section 5 paragraph rule, and performs no truncation or rewriting. These
+metadata tokens are alternate renderings of the same selected source blocks, not independently owned
+claims.
 
 Each document also carries this exact meta-delivered content security policy:
 
@@ -419,9 +424,10 @@ backup, rename the verified staging directory to output, verify the installed ma
 then delete the backup. If staging installation or installed-manifest verification fails, remove an
 incomplete new output if present and rename the untouched backup back to the original path before
 reporting the error. Failures before the first rename leave output untouched. Tests inject failure
-at each rename and verification boundary and assert exact restoration; cleanup failure after a
-successful install may leave only the sibling backup and must report its path without damaging the
-installed output.
+at each rename and verification boundary and assert exact restoration. Installed-manifest
+verification is the commit point. Backup cleanup failure after that point leaves the installed
+output valid, exits successfully, and emits one `warning:` line naming the retained sibling backup;
+it is not recast as a failed build.
 
 No source write, output escape, inherited unknown file, timestamp, commit ID, environment-dependent
 prose, or nondeterministic ordering enters output bytes. For the same input bytes and arguments,
