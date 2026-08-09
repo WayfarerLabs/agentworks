@@ -271,9 +271,10 @@ remains.
       split the oversized Phase 7 enforcement suite, and mark literal caller pins for the planned
       post-0.14 consolidation pass.
 - [ ] Run focused mutations, Green, provider-faithful persistence checks, live remote-Lima
-      validation with independent cleanup, all supported-version CI, and full re-review. Everything
-      except the live remote-Lima run is complete; that run is operator-gated on concrete inventory
-      and a fresh authorized Tailscale key. The previously exposed key must not be reused.
+      validation with independent cleanup, all supported-version CI, and full re-review. The local
+      portions are complete at independently reviewed `0dad790f`; supported-version CI and the live
+      remote-Lima run remain. The live run is operator-gated on concrete inventory and a fresh
+      authorized Tailscale key. The previously exposed key must not be reused.
 - [ ] Re-truth `locked.md` for the final implementation and residuals, then leave PR #453 ready and
       mergeable with no valid finding unresolved.
 

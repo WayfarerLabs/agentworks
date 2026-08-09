@@ -50,10 +50,9 @@ guide at `docs/guides/upgrading-to-0.14.md` contains the before/after configurat
 
 ## Acceptance and review evidence
 
-- The most recent complete pre-round local non-integration gate passed with **7,480 tests and 3
-  deselected**. Ruff, formatting, strict mypy over 639 files, file lint, Rulesync drift, locked-SDD,
-  and diff checks passed. This final review-fix round must rerun those gates before the record
-  locks.
+- The exact independently reviewed local head `0dad790f` passed **7,562 non-integration tests with 3
+  deselected**. Ruff, formatting, strict mypy over 646 files, file lint, Rulesync drift, locked-SDD,
+  and diff checks passed.
 - PR CI passed on Python 3.12, 3.13, and 3.14, including CodeQL and aggregate `ci-success`, at
   `f9381b46`. Every subsequent closeout commit must receive the same required CI before merge.
 - The permanent POSIX real-entry harness exercises the shipped console script with isolated config:
@@ -62,10 +61,12 @@ guide at `docs/guides/upgrading-to-0.14.md` contains the before/after configurat
   all-shell generated completion assertions. Every child result is scanned for the sentinel.
 - Mutation review proved that tests fail when descriptor-derived source-key validation, `false`
   opt-out, retired-path enforcement, implied prompt fallback, value-free verification, variadic
-  verification, or all-shell completion behavior is neutered; the restored tree passed its gates.
-- Two independent fix reviews were clean at `f9381b46`. The later integration disposition found a
-  remaining traceback-local cleanup defect and one plugin-name contract mismatch; Phase 10 remains
-  open until their fixes and the operator-gated live run are reviewed.
+  verification, all-shell completion behavior, VM-create operation scrubbing, remote-create state
+  scrubbing, or BaseException row unwind is neutered; each restored tree passed its focused gates.
+- Independent cold review converged cleanly at `0dad790f` after tracing the complete owned Lima
+  delivery graph through manager, remote creation, SSH input, initializer cleanup, and teardown.
+  Exact interruption tests cover first-transfer and post-transfer ownership, sensitive native
+  traceback removal, warning/cleanup non-masking, and SystemExit/GeneratorExit identity.
 - Marking PR #453 ready triggered the repository's Copilot reviewer. It declined because the diff
   exceeds its 20,000-line limit, so the required fresh-eyes fallback is the independent cold review
   recorded above. Findings from the latest fallback review are tracked in Phase 10 rather than
