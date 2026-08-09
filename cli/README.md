@@ -241,9 +241,13 @@ resolves or serializes a secret value.
 }}
 ```
 
-`hint`, `used_by`, mapping `identifier`, mapping `not_ready_reason`, and `resolved_by` may be null.
-`available` is boolean and equals whether `resolved_by` is non-null. Backend collections retain
-chain order. References and `used_by` have the same shapes and ordering rules as resource describe.
+`backend_mappings` is an array of exactly `{backend, would_attempt, identifier, not_ready_reason}`.
+`backend` is a string and `would_attempt` is boolean. `identifier` is null when a backend has no
+static lookup identifier or will not attempt the secret. `not_ready_reason` is null when that
+backend is ready. `hint`, `used_by`, `identifier`, `not_ready_reason`, and `resolved_by` may be
+null. `available` is boolean and equals whether `resolved_by` is non-null. `backend_mappings`
+retains active backend chain ordering. References and `used_by` have the same shapes and ordering
+rules as resource describe.
 
 #### Doctor JSON schema
 
