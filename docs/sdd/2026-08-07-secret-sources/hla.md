@@ -350,7 +350,9 @@ The resolution core returns one frozen, value-free `ResolutionOutcome` per reque
 `category` is a stable enum:
 
 - `resolved`: carries source and safe identifier only;
-- `unavailable`: every eligible source soft-missed or was not ready;
+- `unavailable`: every eligible source soft-missed or was not ready; a disabled backend system
+  plugin is represented by a structured plugin identity and fixed enable-plugin remediation, never
+  by copying a free-form readiness reason;
 - `refused-interaction`: resolution required a source excluded by policy;
 - `timeout`: an attempted source exceeded its backend-enforced external deadline;
 - `resolution-failure`: hard mapping, authentication, transport, malformed-value, or unexpected

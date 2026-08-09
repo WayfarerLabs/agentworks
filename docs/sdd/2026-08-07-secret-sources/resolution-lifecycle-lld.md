@@ -488,6 +488,7 @@ class ResolutionDetail(StrEnum):
     NO_ACTIVE_SOURCE = "no-active-source"
     NO_ATTEMPTABLE_SOURCE = "no-attemptable-source"
     SOURCE_NOT_READY = "source-not-ready"
+    SOURCE_BACKEND_PLUGIN_DISABLED = "source-backend-plugin-disabled"
     SOFT_MISS = "soft-miss"
     INTERACTION_REFUSED = "interaction-refused"
     BATCH_DOOMED = "batch-doomed-before-interaction"
@@ -504,6 +505,7 @@ class ResolutionRemediation(StrEnum):
     NONE = "none"
     CONFIGURE_SOURCE = "configure-source"
     ENABLE_SOURCE = "enable-source"
+    ENABLE_PLUGIN = "enable-plugin"
     ALLOW_INTERACTION = "allow-interaction"
     RESOLVE_BLOCKING_SECRETS = "resolve-blocking-secrets"
     CHECK_MAPPING = "check-mapping"
@@ -522,32 +524,44 @@ class ResolutionOutcome:
     remediation: ResolutionRemediation
     source: str | None = None
     identifier: str | None = None
+    remediation_target: str | None = None
 ```
 
 `ResolutionOutcome.__post_init__` uses this exhaustive table as its sole legality map. `Required`
 means `source` must be non-`None`; `Forbidden` means it must be `None`. `Allowed` means `identifier`
-may be a safe string or `None`; `Forbidden` means it must be `None`.
+may be a safe string or `None`; `Forbidden` means it must be `None`. The target column applies the
+same presence rule to `remediation_target`.
 
-| Detail                            | Category              | Remediation                 | Source    | Identifier |
-| --------------------------------- | --------------------- | --------------------------- | --------- | ---------- |
-| `resolved`                        | `resolved`            | `none`                      | Required  | Allowed    |
-| `no-active-source`                | `unavailable`         | `configure-source`          | Forbidden | Forbidden  |
-| `no-attemptable-source`           | `unavailable`         | `configure-source`          | Forbidden | Forbidden  |
-| `source-not-ready`                | `unavailable`         | `enable-source`             | Required  | Allowed    |
-| `soft-miss`                       | `unavailable`         | `configure-source`          | Required  | Allowed    |
-| `interaction-refused`             | `refused-interaction` | `allow-interaction`         | Required  | Allowed    |
-| `batch-doomed-before-interaction` | `unavailable`         | `resolve-blocking-secrets`  | Forbidden | Forbidden  |
-| `deadline-exceeded`               | `timeout`             | `increase-timeout`          | Required  | Allowed    |
-| `hard-mapping`                    | `resolution-failure`  | `check-mapping`             | Required  | Allowed    |
-| `authentication`                  | `resolution-failure`  | `sign-in`                   | Required  | Allowed    |
-| `connectivity`                    | `resolution-failure`  | `check-connectivity`        | Required  | Allowed    |
-| `external`                        | `resolution-failure`  | `retry`                     | Required  | Allowed    |
-| `malformed-value`                 | `resolution-failure`  | `remove-control-characters` | Required  | Allowed    |
-| `backend-protocol`                | `resolution-failure`  | `report-backend`            | Required  | Forbidden  |
-| `unexpected`                      | `resolution-failure`  | `report-backend`            | Required  | Allowed    |
+| Detail                            | Category              | Remediation                 | Source    | Identifier | Target    |
+| --------------------------------- | --------------------- | --------------------------- | --------- | ---------- | --------- |
+| `resolved`                        | `resolved`            | `none`                      | Required  | Allowed    | Forbidden |
+| `no-active-source`                | `unavailable`         | `configure-source`          | Forbidden | Forbidden  | Forbidden |
+| `no-attemptable-source`           | `unavailable`         | `configure-source`          | Forbidden | Forbidden  | Forbidden |
+| `source-not-ready`                | `unavailable`         | `enable-source`             | Required  | Allowed    | Forbidden |
+| `source-backend-plugin-disabled`  | `unavailable`         | `enable-plugin`             | Required  | Allowed    | Required  |
+| `soft-miss`                       | `unavailable`         | `configure-source`          | Required  | Allowed    | Forbidden |
+| `interaction-refused`             | `refused-interaction` | `allow-interaction`         | Required  | Allowed    | Forbidden |
+| `batch-doomed-before-interaction` | `unavailable`         | `resolve-blocking-secrets`  | Forbidden | Forbidden  | Forbidden |
+| `deadline-exceeded`               | `timeout`             | `increase-timeout`          | Required  | Allowed    | Forbidden |
+| `hard-mapping`                    | `resolution-failure`  | `check-mapping`             | Required  | Allowed    | Forbidden |
+| `authentication`                  | `resolution-failure`  | `sign-in`                   | Required  | Allowed    | Forbidden |
+| `connectivity`                    | `resolution-failure`  | `check-connectivity`        | Required  | Allowed    | Forbidden |
+| `external`                        | `resolution-failure`  | `retry`                     | Required  | Allowed    | Forbidden |
+| `malformed-value`                 | `resolution-failure`  | `remove-control-characters` | Required  | Allowed    | Forbidden |
+| `backend-protocol`                | `resolution-failure`  | `report-backend`            | Required  | Forbidden  | Forbidden |
+| `unexpected`                      | `resolution-failure`  | `report-backend`            | Required  | Allowed    | Forbidden |
 
 There is no fallback row. Adding a detail requires adding its complete tuple here and in the
 validator. No outcome has a value, exception, raw stderr, free-form detail, or free-form hint.
+
+`source-backend-plugin-disabled` is the one structured readiness attribution. The active source
+derives its target from the disabled `secret-backend` row's `system-plugin` origin, never from the
+free-form folded readiness reason. The target follows the plugin registration contract: a non-empty,
+slash-free string, including a `str` subclass. Human rendering uses the fixed `enable plugin`
+prefix, wraps the target in backticks, and deterministically ASCII-escapes every target character
+outside the safe alphanumeric, dot, underscore, and hyphen set. Generic not-ready sources remain
+`source-not-ready/enable-source` with no target. Printable or control-bearing readiness reasons are
+never copied into outcomes, errors, or renderer inputs.
 
 `identifier` comes only from `backend_class.describe_lookup` for the already validated request.
 Before storage, the core rejects any identifier containing a Unicode control or format character. An
@@ -747,8 +761,8 @@ is disabled, not ready, refused, or opted out does not save a secret.
 If any secret has no remaining attemptable source, the complete operation cannot succeed. The core
 does not call the interactive factory, enter its context, start `op`, invoke an interactive plugin,
 or call a broker. Causal secrets receive the ordinary terminal unavailable detail
-(`source-not-ready`, `soft-miss`, or `no-attemptable-source`). Other still-missing secrets that were
-skipped solely because the batch was already doomed receive
+(`source-not-ready`, `source-backend-plugin-disabled`, `soft-miss`, or `no-attemptable-source`).
+Other still-missing secrets that were skipped solely because the batch was already doomed receive
 `unavailable/batch-doomed-before-interaction/resolve-blocking-secrets`. The compatibility boundary
 then raises once. This preserves the command protection while making every requested secret's typed
 state total.
@@ -766,8 +780,10 @@ At end of chain each still-missing secret collapses deterministically:
    name the first such source in chain order, and recommend `allow-interaction`.
 2. Else if at least one ready source attempted and soft-missed, use `unavailable/soft-miss` and
    `configure-source`, naming the first soft-missing source in chain order.
-3. Else if at least one candidate was not ready, use `unavailable/source-not-ready`, name the first
-   such source in chain order, and recommend `enable-source`.
+3. Else if at least one candidate was not ready, name the first such source in chain order. If its
+   backend row is disabled by a system plugin, use
+   `unavailable/source-backend-plugin-disabled/enable-plugin` with that validated plugin identity as
+   the target. Otherwise use `unavailable/source-not-ready/enable-source` without a target.
 4. Else if the active chain is empty, use `unavailable/no-active-source`.
 5. Else use `unavailable/no-attemptable-source`.
 

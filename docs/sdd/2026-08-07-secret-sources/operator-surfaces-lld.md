@@ -644,11 +644,16 @@ class ResolutionOutcome:
     remediation: ResolutionRemediation
     source: str | None = None
     identifier: str | None = None
+    remediation_target: str | None = None
 ```
 
 `agentworks.secrets.resolve` imports these types. `outcomes.py` imports no resolver, batch, client,
 backend, Registry, output, or CLI module. This keeps verification and future JSON rendering on a
 module that cannot reach values by construction.
+
+The lifecycle LLD's central legality map also owns the structured disabled-plugin row:
+`source-backend-plugin-disabled` uses `enable-plugin` and requires a plugin-identity target. No
+free-form readiness reason enters this record or a renderer.
 
 `ResolutionBatch` remains in `agentworks.secrets.resolve`. It gains one safe terminal projection and
 one idempotent cleanup operation:
