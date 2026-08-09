@@ -24,7 +24,7 @@ No commit publishes a row from both its old and new provider.
 - [x] Revise the FRD and exhaustive inventory to the 2026-08-08 declared-resource-only ruling.
 - [x] Write and review the HLA, migration strategy, and this plan.
 - [x] Resolve every blocking and important artifact-review finding.
-- [ ] Rebase the artifact branch on current `main`, run scoped doc gates, and publish the artifacts
+- [x] Rebase the artifact branch on current `main`, run scoped doc gates, and publish the artifacts
       for roadmap review.
 
 Definition of done: the operator and independent reviewer agree that only the 16 declared rows move,
