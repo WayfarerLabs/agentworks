@@ -15,7 +15,11 @@ just-the-facts. Consumers choose whether to read the why.
    moving anything.
 2. Rename-and-absorb: `docs/why-agentworks.md` becomes `docs/manifesto.md` (git rename so history
    follows), absorbing the manifesto-voiced passages from elsewhere; anything just-the-facts in the
-   old file moves to the appropriate reference doc rather than staying.
+   old file moves to the appropriate reference doc rather than staying. **Your assembly is a rough
+   cut into a placeholder document, and your plan must say so explicitly**: organize the absorbed
+   passages coherently (ordering, section structure, deduplication), but do not polish the prose —
+   the operator will personally rewrite the document before this merges. Spend your care on the
+   survey, the dispositions, the structure, and the mechanical moves; the voice is the operator's.
 3. Fix every inbound link and anchor (`git grep why-agentworks` across the tree, including the
    pinned deep link consumers in `cli/`).
 4. Add the `concept-manifesto` guide topic through the guide-contributions mechanism, teaching
@@ -28,8 +32,10 @@ just-the-facts. Consumers choose whether to read the why.
 
 - **Merge order**: this PR merges only after PR #453 (wave 3) lands; its branch edits
   `docs/why-agentworks.md` and must not be conflicted underneath. Build and review freely meanwhile.
-- **Operator review gate**: the operator reviews the assembled manifesto text before this merges. It
-  is their voice; request that review explicitly in the PR.
+- **Operator rewrite gate**: the operator will rewrite the assembled manifesto text themselves
+  before this merges — plan for it (charter item 2). Request that handoff explicitly in the PR when
+  the rough cut is ready, and leave room in your sequencing for the rewrite to change structure, not
+  just wording.
 - **Website coordination** (updated 2026-08-09, after the website effort's Phase 4B design landed):
   the website now renders a generated `/manifesto/` page from `docs/why-agentworks.md` at build
   time, selecting content by heading path and failing closed on missing or drifted source. CI runs
