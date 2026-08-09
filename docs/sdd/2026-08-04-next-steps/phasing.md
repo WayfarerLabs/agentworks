@@ -76,8 +76,12 @@ Two things this graph deliberately does not serialize:
   channel, secret-source resolution, the event stream) rather than per-change; (2) test
   consolidation and removal, with the working assumption that the accreted unit-test estate can be
   cut in half, maybe more, without sacrificing any coverage or quality; (3) code cleanup: file-size
-  limits, vestigial code removal, package renaming and refactoring left behind by the waves' moves.
-  Findings are fixed before the roadmap locks.
+  limits, vestigial code removal, package renaming and refactoring left behind by the waves' moves,
+  and an SDD tombstoning sweep (operator ruling, 2026-08-08): superseded SDDs' contents are deleted
+  down to their `locked.md` tombstones per the sdd skill, with `2026-07-01-resource-manifests` the
+  first identified candidate (its lockfile already carries the supersession record) and individual
+  SDDs tombstoned earlier whenever reading them actively misleads. Findings are fixed before the
+  roadmap locks.
 - **Wave 8: external plugin API.** Registration conformance, discovery, namespacing, versioning, and
   the distribution-trust model, promised publicly only once the internal contracts survive
   first-party use.

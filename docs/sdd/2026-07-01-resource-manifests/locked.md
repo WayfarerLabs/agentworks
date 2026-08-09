@@ -300,3 +300,26 @@ What SURVIVES unchanged: the resource model itself. The config/resource split, t
 envelope and auto-load, `kind` + `name` identity, the origins, the capability/declarable category
 split, `agw resource migrate`'s whole operator-facing contract, and the manifest loader's boundaries
 all stand. Phase 2 changed how a spec is DESCRIBED, not what a resource is.
+
+## 2026-08-08
+
+This SDD is now substantially superseded and should be read as historical record only. Recorded here
+per the post-lock exception so searches landing on these artifacts find the correction:
+
+- **`agw resource migrate` no longer exists.** The wave 2 remediation-posture ruling (operator,
+  2026-08-07, recorded in the next-steps roadmap) deleted the migrator wholesale in favor of precise
+  hard errors plus guide-led remediation. The earlier amendment above says its operator-facing
+  contract "stands"; that is no longer true.
+- **The TOML decode path is gone.** The declarative-schema phase 1 TOML sunset (PR #316) removed the
+  frontend this SDD's loader parity was built against, and phase 2 (PR #414) moved schema authority
+  to registration-time models, superseding this SDD's validation model.
+- **The combined `EnvEntry` model is retired** by the variant-modeling rework (PR #455, in review at
+  this writing): env entries are a structural plaintext-or-secret union, and the
+  `EnvEntry(secret=name)` construction `runtime-model-lld.md` line 152 describes no longer exists.
+- **The secret provider/backend material predates the wave 3 secret-sources rework** (design
+  converged on PR #453), which replaces the resolution model this SDD settled.
+
+Operator ruling (2026-08-08): the next-steps roadmap carries an SDD tombstoning sweep that will
+delete superseded SDD contents down to their `locked.md` tombstones per the sdd skill. This SDD is
+the first identified candidate; when the sweep reaches it, this file gains the final tombstone note
+and the last-content SHA.
