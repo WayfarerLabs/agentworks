@@ -54,10 +54,15 @@ class Document(HTMLParser):
         self._heading: list[str] | None = None
         self._id_stack: list[str] = []
         self.text_by_id: dict[str, str] = {}
+        self.all_text: list[str] = []
+        self._element_stack: list[tuple[str, dict[str, str | None]]] = []
+        self.elements: list[tuple[str, dict[str, str | None], tuple[tuple[str, dict[str, str | None]], ...]]] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attributes = dict(attrs)
         self.start_tags.append((tag, attributes))
+        self.elements.append((tag, attributes, tuple(self._element_stack)))
+        self._element_stack.append((tag, attributes))
         element_id = attributes.get("id") or ""
         self._id_stack.append(element_id)
         if element_id:
@@ -76,8 +81,13 @@ class Document(HTMLParser):
             self._heading = None
         if self._id_stack:
             self._id_stack.pop()
+        for index in range(len(self._element_stack) - 1, -1, -1):
+            if self._element_stack[index][0] == tag:
+                del self._element_stack[index:]
+                break
 
     def handle_data(self, data: str) -> None:
+        self.all_text.append(data)
         if self._heading is not None:
             self._heading.append(data)
         for element_id in reversed(self._id_stack):
@@ -207,6 +217,20 @@ class SourceContractTests(RepositoryFixture):
                     site_builder.extract_content(self.root)
         policy.write_text(original, encoding="utf-8")
 
+    def test_reporting_reference_scan_ignores_code_and_rejects_unclosed_fences(self) -> None:
+        policy = self.root / "SECURITY.md"
+        original = policy.read_text(encoding="utf-8")
+        canaries = (
+            "```text\n[gh-private]: https://example.com/backtick\n```\n\n",
+            "~~~text\n[gh-private]: https://example.com/tilde\n~~~\n\n",
+            "    [gh-private]: https://example.com/indented\n\n",
+        )
+        policy.write_text("".join(canaries) + original, encoding="utf-8")
+        self.assertIn("SECURITY_REPORTING", site_builder.extract_content(self.root))
+        policy.write_text("```text\n[gh-private]: https://example.com/unclosed\n" + original, encoding="utf-8")
+        with self.assertRaisesRegex(site_builder.ContractError, "unclosed fence"):
+            site_builder.extract_content(self.root)
+
     def test_inline_renderer_escapes_text_and_rejects_unsupported_markdown(self) -> None:
         contract = site_builder.CONTRACTS[0]
         rendered = site_builder._render_inline('plain & "quoted" plus `<tag attr="value">`', contract, {})
@@ -253,6 +277,41 @@ class TemplateContractTests(RepositoryFixture):
                 substitutions["HOME_IDENTITY"] = injection
                 with self.assertRaisesRegex(ValueError, "brace-like token syntax"):
                     site_builder.render_named_template("index.html", template, "/", substitutions)
+
+    def test_content_tokens_cannot_move_to_hostile_or_unreviewed_contexts(self) -> None:
+        path = self.root / "website/templates/index.html"
+        template = path.read_text(encoding="utf-8")
+        identity = '<div class="sourced-content">{{HOME_IDENTITY}}</div>'
+        metadata = 'content="{{HOME_META_DESCRIPTION}}"'
+        variants = (
+            template.replace(metadata, 'content="safe" data-copy="{{HOME_META_DESCRIPTION}}"'),
+            template.replace(identity, "<script>{{HOME_IDENTITY}}</script>"),
+            template.replace(identity, "<style>{{HOME_IDENTITY}}</style>"),
+            template.replace(identity, '<div class="unreviewed">{{HOME_IDENTITY}}</div>'),
+            template.replace(identity, '<div class="sourced-content">prefix {{HOME_IDENTITY}}</div>'),
+            template.replace(
+                identity,
+                '</section><section id="unreviewed"><div class="sourced-content">{{HOME_IDENTITY}}</div>',
+            ),
+        )
+        for changed in variants:
+            with (
+                self.subTest(changed=changed[changed.find("{{HOME_") - 30 : changed.find("{{HOME_") + 50]),
+                self.assertRaisesRegex(ValueError, "content token|metadata token|sourced-content|reviewed section"),
+            ):
+                site_builder._validate_template("index.html", changed)
+
+    def test_interim_notice_section_and_heading_relationship_are_guarded(self) -> None:
+        template = (self.root / "website/templates/index.html").read_text(encoding="utf-8")
+        variants = (
+            template.replace("</body>", f"<p>{NOTICE}</p></body>"),
+            template.replace('id="onboarding"', 'id="onboarding-moved"'),
+            template.replace('aria-labelledby="onboarding-heading"', 'aria-labelledby="other"', 1),
+            template.replace('<h2 id="onboarding-heading">', '<h2 id="other">'),
+        )
+        for changed in variants:
+            with self.subTest(change=changed[-100:]), self.assertRaisesRegex(ValueError, "onboarding|notice"):
+                site_builder._validate_template("index.html", changed)
 
     def test_reviewed_destination_and_reporting_literals_cannot_drift(self) -> None:
         for name, old, new in (
@@ -308,6 +367,16 @@ class BuildAndInstallTests(RepositoryFixture):
             site_builder.build_site(self.root, output, "/agentworks/")
         self.assertEqual(snapshot(output), before)
 
+    def test_same_document_fragment_must_resolve_before_output_changes(self) -> None:
+        output = self.build()
+        before = snapshot(output)
+        template = self.root / "website/templates/404.html"
+        source = template.read_text(encoding="utf-8")
+        template.write_text(source.replace('id="main-content"', 'id="renamed-main"'), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "same-document fragment"):
+            site_builder.build_site(self.root, output, "/")
+        self.assertEqual(snapshot(output), before)
+
     def test_output_inside_repository_is_rejected_without_source_writes(self) -> None:
         before = snapshot(self.root / "website")
         targets = (self.root, self.root / "website", self.root / "website/generated")
@@ -315,6 +384,53 @@ class BuildAndInstallTests(RepositoryFixture):
             with self.subTest(target=target), self.assertRaises(ValueError):
                 site_builder.build_site(self.root, target, "/")
         self.assertEqual(snapshot(self.root / "website"), before)
+
+    def test_output_rejects_unsafe_name_and_dot_traversal(self) -> None:
+        targets = (
+            Path(self.temporary.name) / "unsafe name",
+            Path(self.temporary.name) / "parent" / ".." / "escaped",
+        )
+        for target in targets:
+            with self.subTest(target=target), self.assertRaisesRegex(ValueError, "safe named|dot traversal"):
+                site_builder.build_site(self.root, target, "/")
+            self.assertFalse(target.exists())
+
+    def test_output_rejects_parent_symlink_into_repository_when_supported(self) -> None:
+        linked_parent = Path(self.temporary.name) / "linked-parent"
+        try:
+            linked_parent.symlink_to(self.root, target_is_directory=True)
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"directory symlinks unavailable: {error}")
+        with self.assertRaisesRegex(ValueError, "repository"):
+            site_builder.build_site(self.root, linked_parent / "generated", "/")
+        self.assertFalse((self.root / "generated").exists())
+
+    def test_existing_top_level_directory_symlink_is_rejected_without_touching_target(self) -> None:
+        target = Path(self.temporary.name) / "external-target"
+        target.mkdir()
+        sentinel = target / "sentinel.txt"
+        sentinel.write_text("keep", encoding="utf-8")
+        output = Path(self.temporary.name) / "published"
+        try:
+            output.symlink_to(target, target_is_directory=True)
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"directory symlinks unavailable: {error}")
+        with self.assertRaisesRegex(ValueError, "real directory"):
+            site_builder.build_site(self.root, output, "/")
+        self.assertTrue(output.is_symlink())
+        self.assertEqual(sentinel.read_text(encoding="utf-8"), "keep")
+
+    def test_existing_top_level_broken_symlink_is_rejected_without_replacement(self) -> None:
+        missing_target = Path(self.temporary.name) / "missing-target"
+        output = Path(self.temporary.name) / "published-broken"
+        try:
+            output.symlink_to(missing_target, target_is_directory=True)
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"directory symlinks unavailable: {error}")
+        with self.assertRaisesRegex(ValueError, "real directory"):
+            site_builder.build_site(self.root, output, "/")
+        self.assertTrue(output.is_symlink())
+        self.assertFalse(missing_target.exists())
 
     def test_existing_output_may_contain_only_selected_owned_entries(self) -> None:
         output = self.build()
@@ -346,21 +462,54 @@ class BuildAndInstallTests(RepositoryFixture):
             site_builder.build_site(self.root, output, "/agentworks/")
         self.assertEqual(snapshot(output), before)
 
-    def test_symlink_special_entry_and_non_directory_outputs_are_rejected(self) -> None:
+    def test_symlink_entry_in_existing_output_is_rejected_when_supported(self) -> None:
         output = Path(self.temporary.name) / "unsafe"
         output.mkdir()
-        (output / "static").symlink_to(self.root / "website/static", target_is_directory=True)
+        try:
+            (output / "static").symlink_to(self.root / "website/static", target_is_directory=True)
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"directory symlinks unavailable: {error}")
         with self.assertRaisesRegex(ValueError, "symlink"):
             site_builder.build_site(self.root, output, "/")
-        output.unlink() if output.is_symlink() else shutil.rmtree(output)
+
+    def test_fifo_entry_in_existing_output_is_rejected_when_supported(self) -> None:
+        if not hasattr(os, "mkfifo"):
+            self.skipTest("FIFO creation unavailable")
+        output = Path(self.temporary.name) / "unsafe"
         output.mkdir()
-        os.mkfifo(output / "pipe")
+        try:
+            os.mkfifo(output / "pipe")
+        except OSError as error:
+            self.skipTest(f"FIFO creation unavailable: {error}")
         with self.assertRaisesRegex(ValueError, "special entry"):
             site_builder.build_site(self.root, output, "/")
-        shutil.rmtree(output)
+
+    def test_non_directory_output_is_rejected(self) -> None:
+        output = Path(self.temporary.name) / "unsafe"
         output.write_text("not a directory", encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "real directory"):
             site_builder.build_site(self.root, output, "/")
+
+    def test_remote_runtime_asset_references_fail_before_output_changes(self) -> None:
+        output = self.build()
+        before = snapshot(output)
+        mutations = (
+            ("website/static/site.css", '\n@import "theme.css";\n'),
+            ("website/static/site.css", "\nbody { background: url('/local.png'); }\n"),
+            ("website/static/site.css", "\n/* https://example.com/theme.css */\n"),
+            ("website/static/site.css", "\n/* //cdn.example.com/theme.css */\n"),
+            ("website/static/lander-game.js", '\nconst remote = "https://example.com/game.js";\n'),
+            ("website/static/lander-game.js", '\nconst remote = "//cdn.example.com/game.js";\n'),
+        )
+        for relative, addition in mutations:
+            path = self.root / relative
+            original = path.read_text(encoding="utf-8")
+            with self.subTest(relative=relative, addition=addition.strip()):
+                path.write_text(original + addition, encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "CSS|JavaScript"):
+                    site_builder.build_site(self.root, output, "/")
+                self.assertEqual(snapshot(output), before)
+                path.write_text(original, encoding="utf-8")
 
     def test_failure_before_and_during_each_swap_boundary_restores_exact_output(self) -> None:
         output = self.build()
@@ -485,7 +634,8 @@ class GeneratedDocumentTests(RepositoryFixture):
                 self.assertTrue(any(tag.get("name") == "description" for tag in document.tags("meta")))
                 policies = [tag for tag in document.tags("meta") if tag.get("http-equiv") == "Content-Security-Policy"]
                 self.assertEqual(policies[0]["content"], CSP)
-                self.assertTrue(any(tag.get("class") == "skip-link" for tag in document.tags("a")))
+                skip_links = [tag for tag in document.tags("a") if tag.get("class") == "skip-link"]
+                self.assertEqual([tag.get("href") for tag in skip_links], ["#main-content"])
 
     def test_home_outline_links_and_interim_guards_are_exact(self) -> None:
         document = self.documents["home"]
@@ -495,6 +645,24 @@ class GeneratedDocumentTests(RepositoryFixture):
         )
         notice = " ".join(document.text_by_id["onboarding-availability"].split())
         self.assertEqual(notice, NOTICE)
+        document_text = " ".join("".join(document.all_text).split())
+        self.assertEqual(document_text.count(NOTICE), 1)
+        onboarding = [
+            attributes
+            for tag, attributes, _ in document.elements
+            if tag == "section" and attributes.get("id") == "onboarding"
+        ]
+        self.assertEqual(len(onboarding), 1)
+        self.assertEqual(onboarding[0].get("aria-labelledby"), "onboarding-heading")
+        self.assertTrue(" ".join(document.text_by_id["onboarding"].split()))
+        headings = [
+            attributes
+            for tag, attributes, ancestors in document.elements
+            if tag == "h2"
+            and attributes.get("id") == "onboarding-heading"
+            and any(parent == "section" and attrs.get("id") == "onboarding" for parent, attrs in ancestors)
+        ]
+        self.assertEqual(len(headings), 1)
         self.assertEqual(self.pages["home"].count("We take security seriously."), 1)
         links = document.tags("a")
         self.assertIn("/security/", [link.get("href") for link in links])

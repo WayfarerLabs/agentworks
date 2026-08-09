@@ -172,9 +172,15 @@ uses `https://agentworks.build`, and that the deployed content matches the expec
 
 ## Rollback and recovery
 
-For a bad site merge, prefer a reviewed fix forward. GitHub Pages deployment history can redeploy a
-known-good artifact when an immediate rollback is necessary. Rebuild that commit with the same site
-base and verify its exact manifest before redeployment.
+For a bad site merge, prefer a reviewed fix forward. Use GitHub's
+[deployment history](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/view-deployment-history)
+to identify the affected deployment and retain its logs as evidence; deployment history is not a
+general-purpose artifact rollback mechanism. When the known-good Pages workflow run is still within
+GitHub's current rerun window, use the supported
+[workflow rerun](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs)
+for that historical run, then verify its commit, exact manifest, and public result. Outside that
+window, land a reviewed revert or fix commit on `main` and let the ordinary publishing workflow
+deploy it. A fix or revert on `main` is the durable recovery path in either case.
 
 For a DNS or certificate problem, keep the last verified Pages deployment available at its default
 URL and compare live records with the saved before-state. Do not disable HTTPS or add forwarding
