@@ -7,6 +7,7 @@ import io
 import json
 import sqlite3
 import sys
+import tempfile
 import threading
 from pathlib import Path
 from types import SimpleNamespace
@@ -324,7 +325,7 @@ def test_inspection_snapshot_retry_exhaustion_is_clean_and_path_free(
     writer.set_setting("system_slug", "busy")
     scratch = tmp_path / "scratch"
     scratch.mkdir()
-    real_temporary_directory = database_module.tempfile.TemporaryDirectory
+    real_temporary_directory = tempfile.TemporaryDirectory
     created: list[Path] = []
     attempts = 0
 
@@ -339,7 +340,7 @@ def test_inspection_snapshot_retry_exhaustion_is_clean_and_path_free(
         attempts += 1
         raise database_module._SnapshotChanged
 
-    monkeypatch.setattr(database_module.tempfile, "TemporaryDirectory", tracked_temporary_directory)
+    monkeypatch.setattr("agentworks.db.database.tempfile.TemporaryDirectory", tracked_temporary_directory)
     monkeypatch.setattr(database_module, "_copy_verified_file_set", always_changes)
     try:
         with pytest.raises(StateError) as raised, Database.inspection_snapshot(db_path):
@@ -448,10 +449,10 @@ def test_session_status_workers_receive_presentation_context(
 ) -> None:
     """The session executor explicitly propagates suppression to each worker."""
     from agentworks import output
-    from agentworks.db import SessionStatus
+    from agentworks.db import SessionRow, SessionStatus
     from agentworks.sessions import manager
 
-    session = SimpleNamespace(name="session-a", workspace_name="ws")
+    session = SessionRow("session-a", "ws", "default", "admin", "created", "updated")
     db = MagicMock()
     db.get_workspace.return_value = SimpleNamespace(vm_name="box")
     db.get_vm.return_value = SimpleNamespace(name="box", tailscale_host="100.64.0.9")

@@ -170,7 +170,10 @@ to `main`. It has no provisional branch dependency.
       default secret reference; Azure and AWS select ambient authentication through the defaulted
       `auth` union, Lima selects local placement through the defaulted `placement` union, and
       Proxmox has no no-secret mode. Written legacy authentication and placement fields receive
-      their exact hard-error rewrites before cutover.
+      their exact hard-error rewrites before cutover. Git credential token acquisition preserves
+      omission and scalar shorthand, retires an outer explicit null with its exact stored-mode
+      rewrite, and keeps omitted or null inner `secret` on the well-known default; no minted arm is
+      taught before one exists.
 - [x] Prove the topic remains available when operator config does not load, names exact live
       remediation surfaces, and verifies results through normal loading and doctor rather than a
       frozen migration oracle.
@@ -180,6 +183,9 @@ to `main`. It has no provisional branch dependency.
 - [x] Reconcile schema rendering and migration teaching with the final PR #444 union surfaces,
       confirm PR #446's context-free validation boundary adds no guide-side filling, then rerun the
       full Phase 1 and CI gates before requesting roadmap-lead re-review.
+- [ ] Revalidate schema rendering and migration teaching after PR #455's structural-union and git
+      credential token-acquisition contracts land, including the retained shorthand/default paths,
+      exact outer-null rewrite, stored arm, and absence of a minted arm.
 - [x] Round-3 performance follow-up: materialize global kind and implementation inventories only for
       concept views permitted to read them, replace snapshot list-membership deduplication with
       insertion-ordered identity maps, and pin bounded work and stable ordering structurally without
