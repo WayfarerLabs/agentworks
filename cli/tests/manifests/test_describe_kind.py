@@ -127,16 +127,7 @@ def test_an_optional_root_union_keeps_its_outer_null_spelling() -> None:
 
 
 def test_a_field_that_folds_a_scalar_offers_both_spellings() -> None:
-    """The shipped defect: an env table accepts ``FOO: a value`` and
-    ``FOO: {secret: x}``, the emitted schema said so, and this surface
-    documented the table alone, so an operator following the guide's
-    "authority on what a spec accepts" rewrote every plaintext value into
-    a table for no reason.
-
-    Both halves are asserted, because the fix has to ADD the scalar rather
-    than replace the block: the operator who needs the secret form still
-    has to be told what is in it.
-    """
+    """Env values document both the scalar and table spellings."""
     text = _text("vm-template")
 
     assert "  env  (table of string or table, optional)" in text
@@ -148,9 +139,7 @@ def test_a_field_that_folds_a_scalar_offers_both_spellings() -> None:
 
 
 def test_a_config_that_may_be_a_table_says_what_is_in_the_table() -> None:
-    """The same under-report in the other direction: a config that is a
-    string or a table named both arms and left the table's own fields to
-    the reader's imagination."""
+    """A scalar-or-table config documents the table's fields."""
     text = _text("secret-backend/onepassword")
 
     assert "config: (a value, not a table)" in text
@@ -161,8 +150,7 @@ def test_a_config_that_may_be_a_table_says_what_is_in_the_table() -> None:
 
 
 def test_a_config_that_is_only_ever_a_scalar_has_no_table_form() -> None:
-    """The negative twin: the label appears because a block was found, not
-    because a config is a value."""
+    """A scalar-only config does not advertise a table form."""
     text = _text("secret-backend/env-var")
 
     assert "config: (a value, not a table)" in text
@@ -208,14 +196,7 @@ def test_git_token_describe_keeps_the_one_arm_union_visible() -> None:
 
 
 def test_a_nested_tagged_union_renders_every_arm_with_its_own_fields() -> None:
-    """The rendering half of the same first-non-capability-union case
-    ``tests/manifests/test_reference.py`` pins structurally.
-
-    Each arm's fields sit under that arm, which is the only reading that
-    is true of both: ``mode: local`` takes nothing else and ``mode: ssh``
-    requires a ``host``, and a flat list under the field would attribute
-    each to the other.
-    """
+    """Each arm documents only its own fields."""
     text = _text("vm-platform/lima")
 
     assert "    - local: Run limactl on this machine." in text
@@ -223,6 +204,8 @@ def test_a_nested_tagged_union_renders_every_arm_with_its_own_fields() -> None:
     assert "      mode  (one of: local, required)" in text
     assert "      mode  (one of: ssh, required)" in text
     assert "      host  (string, required, min length 1, e.g. me@gpu-box)" in text
+    assert _field_entry(text, "host").endswith("The SSH host running `limactl` (e.g. `user@host`).")
+    assert "vm_host" not in _field_entry(text, "host")
 
 
 def test_a_nested_union_arm_summary_reaches_the_terminal_as_plain_text() -> None:
@@ -367,12 +350,11 @@ def test_the_target_list_covers_kinds_and_implementations() -> None:
     assert "vm-platform/never-enabled" not in targets, "the fixture is seated only inside its fixture"
 
 
-# --- the quoted-boolean trap ------------------------------------------
+# --- quoted booleans --------------------------------------------------
 
-#: Every field whose old TOML loader read it through ``bool(...)``, so a
-#: quoted ``no`` meant TRUE. Named as ``describe-kind`` targets, because
-#: the field reference is the surface every one of those errors points at.
-_INVERTING_BOOLEANS = [
+#: Boolean fields whose reference text reminds operators that YAML strings
+#: are not booleans.
+_DOCUMENTED_BOOLEANS = [
     ("apt-source", "key_dearmor"),
     ("admin-template", "mise_activate"),
     ("admin-template", "mise_allow_unlocked"),
@@ -386,43 +368,17 @@ _INVERTING_BOOLEANS = [
 ]
 
 
-@pytest.mark.parametrize(("target", "field"), _INVERTING_BOOLEANS)
-def test_a_boolean_that_used_to_invert_says_so(target: str, field: str) -> None:
-    """``must be a boolean`` is not enough to act on for these.
-
-    Each of these was read through ``bool(...)``, so ``key_dearmor: "no"``
-    meant TRUE: the opposite of what it reads as. An operator meeting the
-    new type error and writing the obvious `false` silently flips the
-    behavior they had, and the error's own remedy is to come here, so the
-    warning has to be here for the whole class rather than for the one
-    field somebody happened to think of.
-
-    The warning names the QUOTED spelling, and the assertion pins that
-    it does. It used to say a bare ``no`` was a string, which described
-    the retired TOML loader: manifests are YAML, where a bare ``no`` is a
-    boolean and means exactly what it reads as. Warning about the wrong
-    spelling is worse than not warning, because the whole hazard on these
-    fields is a silent inversion.
-    """
+@pytest.mark.parametrize(("target", "field"), _DOCUMENTED_BOOLEANS)
+def test_a_boolean_warns_that_quoted_strings_are_invalid(target: str, field: str) -> None:
+    """The field reference gives the valid spelling without migration history."""
     entry = _field_entry(_text(target), field)
 
-    assert "used to mean TRUE, the opposite of what it reads as" in entry, entry
-    assert 'QUOTED `"no"`' in entry, entry
+    assert 'Write booleans unquoted; quoted strings such as `"no"` are invalid.' in entry, entry
+    assert "used to" not in entry, entry
 
 
 def test_the_quoted_boolean_warning_describes_this_loader(tmp_path: Path) -> None:
-    """The property the warning asserts, executed against the loader.
-
-    A string match on prose only proves the prose did not change. What
-    makes the warning TRUE is the loader: a bare ``no`` is a boolean
-    (pyyaml resolves YAML 1.1) and the quoted one is a string the strict
-    models refuse. Pinned here, beside the text it justifies, so a change
-    to either has to face the other.
-
-    One field stands for the list above. The rule is the parser's and the
-    strict models', not any field's: every entry is a plain ``bool``, so
-    a second case would exercise the same two lines of pydantic.
-    """
+    """A bare YAML ``no`` is boolean; quoted ``"no"`` is an invalid string."""
     manifest = (
         "apiVersion: agentworks/v1\nkind: apt-source\nmetadata:\n  name: docker\nspec:\n"
         "  key_url: https://example.com/k.gpg\n  key_path: /etc/apt/keyrings/docker.gpg\n"

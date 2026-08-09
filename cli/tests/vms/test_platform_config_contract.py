@@ -329,18 +329,8 @@ TAGGED = [
 
 
 @pytest.mark.parametrize(("platform", "config", "field"), TAGGED)
-def test_the_union_defaults_to_the_mode_omission_used_to_select(
-    platform: str, config: dict[str, object], field: str
-) -> None:
-    """Omitting the field selects the declared default, which is the
-    same mechanism omission selected before the union existed (ambient
-    on the clouds, local on lima). An earlier revision made omission an
-    error; the operator ruling that reversed it is recorded at the union
-    sites, and this pins both halves: the default is a fact of the MODEL
-    (visible to describe-kind and the emitted schema, not conjured by a
-    validator), and validation really resolves an omitting document to
-    that arm.
-    """
+def test_omitting_the_union_uses_its_declared_default(platform: str, config: dict[str, object], field: str) -> None:
+    """The model, schema, and loader share one explicit default arm."""
     model = capability_config_model("vm-platform", platform)
     assert model is not None
     default = model.model_fields[field].default

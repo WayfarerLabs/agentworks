@@ -129,9 +129,7 @@ Two values map to things this guide produced rather than to anything Proxmox cal
 `token_id` is the `full-tokenid` the setup script printed, and `template_vmid` is the VMID you gave
 the template. `node` is the node name in the Proxmox UI sidebar, usually `pve`.
 
-(The legacy flat `[proxmox]` section in `config.toml` is a hard error at load now. Its keys are the
-same ones shown above, so rewriting it as the vm-site manifest above is a move rather than a
-translation; see [upgrading-to-0.14.md](upgrading-to-0.14.md).)
+For 0.13 configuration migration, see [Upgrading to 0.14](upgrading-to-0.14.md).
 
 The API token value is an ordinary agentworks secret named `proxmox-token` (auto-declared; rename
 per site via the `token_secret` key). The default env-var backend reads it from:
@@ -143,8 +141,7 @@ export AW_SECRET_PROXMOX_TOKEN="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 With no env var set, agentworks prompts for it when a command needs it.
 `agw secret describe proxmox-token` shows how it resolves.
 
-Upgrading from the legacy flow and already exporting `PROXMOX_TOKEN_SECRET`? Either rename the
-variable, or keep it by declaring the secret with a mapping:
+To use a different environment variable, declare a secret backend mapping:
 
 ```yaml
 apiVersion: agentworks/v1

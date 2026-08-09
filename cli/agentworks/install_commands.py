@@ -12,9 +12,8 @@ reference (an unknown command named by a vm-template, admin-template, or
 agent-template) surfaces as a framework ``ConfigError`` at
 ``build_registry`` time citing the reference's source. Built-in entries
 ship as bundled manifests under ``manifests/builtin/``; operators may add
-or override entries via YAML manifests. The ``_load_system_commands`` /
-``_load_user_commands`` helpers below survive the TOML sunset (ADR 0022)
-because the manifest install decoders delegate to them.
+or override entries via YAML manifests. Manifest decoders use the loading
+helpers below.
 
 ``agentworks.resources.kinds.__init__`` imports this module so the two
 kinds self-register into ``KIND_REGISTRY`` at load.
@@ -149,14 +148,6 @@ def _load_user_commands(
             **tests,
         )
     return entries
-
-
-# The operator install-command publisher was deleted with the TOML resource
-# surface (ADR 0022): built-in install commands ship as bundled YAML
-# manifests (via ``builtin_manifests.publish_to``), and operator
-# install-command entries are YAML manifests too. ``_load_system_commands``
-# / ``_load_user_commands`` above survive because the manifest install
-# decoders still delegate to them.
 
 
 # -- Framework kind strategies -------------------------------------------------
