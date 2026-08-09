@@ -215,7 +215,7 @@ blocks and the migration workflow only; the broader registry-inventory scope rem
       routing, and schema-version compatibility covered by CLI tests.
 - [x] JSON v1 documented as a permanent contract with examples and compatibility rules; command docs
       and completions updated in the same commits.
-- [ ] All focused and full gates pass; step reviewed by `agentworks-reviewer` and a fresh-eyes
+- [x] All focused and full gates pass; step reviewed by `agentworks-reviewer` and a fresh-eyes
       reviewer; valid findings resolved.
 - [ ] Always-green ready-to-merge PR opened and roadmap-lead review requested.
 
