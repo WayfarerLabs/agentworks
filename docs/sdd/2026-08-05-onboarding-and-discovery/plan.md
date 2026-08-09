@@ -193,8 +193,10 @@ blocks and the migration workflow only; the broader registry-inventory scope rem
 - [x] `machine-output-lld.md` inventories every covered list/describe service, pins JSON v1 schemas,
       enum spellings, ordering, nullability, error behavior, and human-output compatibility
       fixtures.
-- [x] Shared `--output human|json` option and v1 envelope serializer implemented without changing
-      the global output handler or implying support on mutation commands.
+- [x] Shared `--output human|json` option and v1 envelope serializer implemented without replacing
+      the global output handler, adding a process-global output mode or renderer, or implying
+      support on mutation commands; narrow request-scoped state controls presentation suppression
+      and error styling only for covered JSON commands.
 - [x] Resource list, kinds, and instance describe serialize their existing service fact records;
       human output remains byte-compatible.
 - [x] VM, workspace, agent, session, console, and secret list/describe paths return fact records and
