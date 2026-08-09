@@ -384,38 +384,46 @@ auto-declare names, and `builtin_override="allow"`.
 
 ```python
 from math import isfinite
-from typing import Annotated
+from typing import Annotated, cast
 
-from pydantic import AfterValidator, JsonValue
+from pydantic import BeforeValidator
 
-def require_finite_json_numbers(value: JsonValue) -> JsonValue:
-    if isinstance(value, float) and not isfinite(value):
+def require_exact_json_value(value: object) -> object:
+    value_type = type(value)
+    if value_type not in (type(None), bool, int, float, str, list, dict):
+        raise ValueError(
+            f"must use exact JSON-native runtime types (got {value_type.__name__})"
+        )
+    if value_type is float and not isfinite(cast("float", value)):
         raise ValueError("JSON numbers must be finite")
-    if isinstance(value, list):
-        for item in value:
-            require_finite_json_numbers(item)
-    elif isinstance(value, dict):
-        for item in value.values():
-            require_finite_json_numbers(item)
     return value
 
-MappingValue = Annotated[JsonValue, AfterValidator(require_finite_json_numbers)]
-backend_mappings: dict[str, MappingValue]
+def require_exact_json_string(value: object) -> object:
+    if type(value) is not str:
+        raise ValueError(f"must use exact JSON string keys (got {type(value).__name__})")
+    return value
+
+type JsonString = Annotated[str, BeforeValidator(require_exact_json_string)]
+type MappingValue = Annotated[
+    None | bool | int | float | str | list[MappingValue] | dict[JsonString, MappingValue],
+    BeforeValidator(require_exact_json_value),
+]
+backend_mappings: dict[JsonString, MappingValue]
 ```
 
 It accepts JSON null, booleans (including `True`), strings, integers, finite numbers, arrays, and
 string-keyed objects recursively. It rejects values outside that envelope, including YAML-native
-timestamps, sets, binary/tagged objects, non-string object keys, and non-finite numbers. It performs
-no backend-shape coercion: `SecretDecl` inherits the project's strict model config, and
-`require_finite_json_numbers` recursively rejects only non-finite floats while returning the same
-tree. Every value this carrier accepts is delivered unchanged to the selected backend's
-`mapping_model`, subject only to framework `False` interception when opt-out is enabled. The model
-then accepts or rejects that exact JSON-native value. The carrier does not make arbitrary Python
-inputs accepted by an `AgwRootModel` reachable: dates, bytes, tuples, sets, enum members, custom
-objects, and non-string-keyed mappings cannot arrive, and registration rejects a mapping model whose
-annotation vocabulary asks for them. The descriptor-derived spec projection replaces this raw field
-with the installed mapping union for emitted schema without narrowing what decode can carry to
-runtime validation.
+timestamps, sets, binary/tagged objects, non-string object keys, enum members, primitive subclasses,
+and non-finite numbers. It performs no backend-shape coercion: the recursive aliases attach exact
+type checks before Pydantic can normalize either a value or mapping key, and each validator returns
+the original object unchanged. Every value this carrier accepts is delivered unchanged to the
+selected backend's `mapping_model`, subject only to framework `False` interception when opt-out is
+enabled. The model then accepts or rejects that exact JSON-native value. The carrier does not make
+arbitrary Python inputs accepted by an `AgwRootModel` reachable: dates, bytes, tuples, sets, enum
+members, custom objects, and non-string-keyed mappings cannot arrive, and registration rejects a
+mapping model whose annotation vocabulary asks for them. The descriptor-derived spec projection
+replaces this raw field with the installed mapping union for emitted schema without narrowing what
+decode can carry to runtime validation.
 
 Its methods follow the existing `VMSiteDecl` contract:
 
