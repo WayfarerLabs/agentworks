@@ -126,50 +126,22 @@ class ResolutionBatch:
         *,
         _token: object,
     ) -> None:
-        try:
-            # Initialize both slots before doing any fallible copying so even
-            # an asynchronously interrupted instance remains safely redacted.
-            self._outcomes: tuple[ResolutionOutcome, ...] = ()
-            self._values: dict[str, str] = {}
-            copied_values: dict[str, str] = {}
-            name: object | None = None
-            value: object | None = None
-            if _token is not _BATCH_TOKEN:
-                raise TypeError("ResolutionBatch construction is internal")
-            copied_outcomes = tuple(outcomes)
-            names = tuple(outcome.name for outcome in copied_outcomes)
-            if len(names) != len(set(names)):
-                raise ValueError("resolution outcome names must be unique")
-            copied_values = dict(values)
-            for name, value in copied_values.items():
-                if type(name) is not str or type(value) is not str:
-                    raise TypeError("resolution values must be strings")
-                name = None
-                value = None
-            resolved_names = {o.name for o in copied_outcomes if o.category is ResolutionCategory.RESOLVED}
-            if set(copied_values) != resolved_names:
-                raise ValueError("resolution values must match resolved outcomes exactly")
-            self._outcomes = copied_outcomes
-            self._values = copied_values
-            copied_values = {}
-            values = {}
-            name = None
-            value = None
-            return None
-        except BaseException:
-            name = None
-            value = None
-            temporary = locals().get("copied_values")
-            if isinstance(temporary, dict):
-                temporary.clear()
-            assigned = getattr(self, "_values", None)
-            if isinstance(assigned, dict):
-                assigned.clear()
-            self._outcomes = ()
-            values = {}
-            temporary = None
-            assigned = None
-            raise
+        if _token is not _BATCH_TOKEN:
+            raise TypeError("ResolutionBatch construction is internal")
+        copied_outcomes = tuple(outcomes)
+        names = tuple(outcome.name for outcome in copied_outcomes)
+        if len(names) != len(set(names)):
+            raise ValueError("resolution outcome names must be unique")
+        copied_values = dict(values)
+        if any(type(name) is not str or type(value) is not str for name, value in copied_values.items()):
+            raise TypeError("resolution values must be strings")
+        resolved_names = {
+            outcome.name for outcome in copied_outcomes if outcome.category is ResolutionCategory.RESOLVED
+        }
+        if set(copied_values) != resolved_names:
+            raise ValueError("resolution values must match resolved outcomes exactly")
+        self._outcomes = copied_outcomes
+        self._values = copied_values
 
     @property
     def outcomes(self) -> tuple[ResolutionOutcome, ...]:
@@ -178,21 +150,7 @@ class ResolutionBatch:
     def complete_or_raise(self) -> dict[str, str]:
         if all(outcome.category is ResolutionCategory.RESOLVED for outcome in self._outcomes):
             return dict(self._values)
-        outcomes = self._outcomes
-        self._values.clear()
-        raise complete_resolution_error(outcomes) from None
-
-    def discard_values(self) -> tuple[ResolutionOutcome, ...]:
-        try:
-            outcomes = self._outcomes
-            self._values.clear()
-            return outcomes
-        except BaseException:
-            self._values.clear()
-            raise
-
-    def scrub_values(self) -> None:
-        self._values.clear()
+        raise complete_resolution_error(self._outcomes) from None
 
     def __repr__(self) -> str:
         outcomes = getattr(self, "_outcomes", ())
@@ -492,48 +450,22 @@ def _drive_source(
         clock=time.monotonic,
     )
     remaining = budget.remaining
-    context: AbstractContextManager[SecretSourceClient] | None = None
-    driver: _SourceContextDriver | None = None
-    client: SecretSourceClient | None = None
-    entered_client: SecretSourceClient | None = None
-    resolved: object | None = None
-    try:
+    _check_boundary(remaining)
+    context = source.backend_class.create_client(
+        source_name=source.name,
+        config=source.config,
+        interaction_broker=broker,
+        remaining_time=remaining,
+    )
+    _check_boundary(remaining)
+    driver = _SourceContextDriver(context, source_name=source.name, remaining_time=remaining)
+    with driver as client:
         _check_boundary(remaining)
-        context = source.backend_class.create_client(
-            source_name=source.name,
-            config=source.config,
-            interaction_broker=broker,
-            remaining_time=remaining,
-        )
+        client.prepare(requests, remaining_time=remaining)
         _check_boundary(remaining)
-        driver = _SourceContextDriver(context, source_name=source.name, remaining_time=remaining)
-        with driver as entered_client:
-            client = entered_client
-            _check_boundary(remaining)
-            client.prepare(requests, remaining_time=remaining)
-            _check_boundary(remaining)
-            resolved = client.resolve(requests, remaining_time=remaining)
-            _check_boundary(remaining)
-
-        # Keep the post-context and return boundaries inside the same fence:
-        # an asynchronous interruption here must first release every provider
-        # object as well as a successfully returned value mapping.
-        client = None
-        entered_client = None
-        driver = None
-        context = None
-        requests = ()
-        broker = None
-        return resolved
-    except BaseException:
-        resolved = None
-        client = None
-        entered_client = None
-        driver = None
-        context = None
-        requests = ()
-        broker = None
-        raise
+        resolved = client.resolve(requests, remaining_time=remaining)
+        _check_boundary(remaining)
+    return resolved
 
 
 def resolve_batch(
@@ -553,228 +485,184 @@ def resolve_batch(
 
     outcomes: dict[str, ResolutionOutcome] = {}
     values: dict[str, str] = {}
-    returned: object | None = None
-    returned_values: dict[str, str] | None = None
-    returned_detail: ResolutionDetail | None = None
-    raw_items: tuple[object, ...] | None = None
-    raw_item: object | None = None
-    raw_name: object | None = None
-    raw_value: object | None = None
-    value: str | None = None
-    batch: ResolutionBatch | None = None
     evidence = {secret.name: _Evidence.empty() for secret in deduped}
-    try:
-        for index, source in enumerate(sources):
-            missing = [secret for secret in deduped if secret.name not in outcomes]
-            if not missing:
-                break
-            projected: list[tuple[SecretLookupRequest, str | None]] = []
-            for secret in missing:
-                try:
-                    request, identifier = _lookup_projection(secret, source)
-                except _BackendProtocolError:
-                    outcomes[secret.name] = _outcome(
-                        secret.name,
-                        ResolutionDetail.BACKEND_PROTOCOL,
-                        source=source.name,
-                    )
-                    continue
-                if request is not None:
-                    projected.append((request, identifier))
-            if not projected:
-                continue
-            if not source.readiness.is_ready:
-                if not source.readiness.reason:
-                    raise StateError(f"secret-source/{source.name} has invalid readiness") from None
-                for request, identifier in projected:
-                    evidence[request.name].not_ready.append((source.name, identifier, source.disabled_backend_plugin))
-                continue
-            if source.interactive and policy.interaction is InteractionPolicy.REFUSE:
-                for request, identifier in projected:
-                    evidence[request.name].refused.append((source.name, identifier))
-                continue
-            if source.interactive and policy.completion is CompletionPolicy.COMPLETE:
-                still_missing = [secret for secret in deduped if secret.name not in outcomes]
-                terminal_exists = any(
-                    outcome.category is not ResolutionCategory.RESOLVED for outcome in outcomes.values()
+
+    for index, source in enumerate(sources):
+        missing = [secret for secret in deduped if secret.name not in outcomes]
+        if not missing:
+            break
+        projected: list[tuple[SecretLookupRequest, str | None]] = []
+        for secret in missing:
+            try:
+                request, identifier = _lookup_projection(secret, source)
+            except _BackendProtocolError:
+                outcomes[secret.name] = _outcome(
+                    secret.name,
+                    ResolutionDetail.BACKEND_PROTOCOL,
+                    source=source.name,
                 )
-                if not terminal_exists:
-                    for secret in still_missing:
-                        attemptable, protocol_source = _remaining_attemptable(
-                            secret,
-                            sources[index:],
-                            policy=policy,
+                continue
+            if request is not None:
+                projected.append((request, identifier))
+        if not projected:
+            continue
+        if not source.readiness.is_ready:
+            if not source.readiness.reason:
+                raise StateError(f"secret-source/{source.name} has invalid readiness") from None
+            for request, identifier in projected:
+                evidence[request.name].not_ready.append((source.name, identifier, source.disabled_backend_plugin))
+            continue
+        if source.interactive and policy.interaction is InteractionPolicy.REFUSE:
+            for request, identifier in projected:
+                evidence[request.name].refused.append((source.name, identifier))
+            continue
+        if source.interactive and policy.completion is CompletionPolicy.COMPLETE:
+            still_missing = [secret for secret in deduped if secret.name not in outcomes]
+            terminal_exists = any(outcome.category is not ResolutionCategory.RESOLVED for outcome in outcomes.values())
+            if not terminal_exists:
+                for secret in still_missing:
+                    attemptable, protocol_source = _remaining_attemptable(
+                        secret,
+                        sources[index:],
+                        policy=policy,
+                    )
+                    if protocol_source is not None:
+                        outcomes[secret.name] = _outcome(
+                            secret.name,
+                            ResolutionDetail.BACKEND_PROTOCOL,
+                            source=protocol_source,
                         )
-                        if protocol_source is not None:
-                            outcomes[secret.name] = _outcome(
-                                secret.name,
-                                ResolutionDetail.BACKEND_PROTOCOL,
-                                source=protocol_source,
-                            )
-                        elif not attemptable:
-                            outcomes[secret.name] = _collapse(
-                                secret.name,
-                                evidence[secret.name],
-                                sources_empty=not sources,
-                            )
-                    terminal_exists = any(secret.name in outcomes for secret in still_missing)
-                if terminal_exists:
-                    for secret in still_missing:
-                        if secret.name not in outcomes:
-                            outcomes[secret.name] = _outcome(secret.name, ResolutionDetail.BATCH_DOOMED)
-                    break
-            if source.backend_class.name == "prompt" and interaction_broker is None:
-                raise StateError("the prompt source requires an interaction broker")
-            requests = tuple(request for request, _identifier in projected)
-            identifiers = {request.name: identifier for request, identifier in projected}
-            broker = interaction_broker if source.backend_class.name == "prompt" else None
-            returned = None
-            failure_kind: SecretClientFailureKind | None = None
-            timed_out = False
-            unexpected = False
-            timeout_failed = False
-            try:
-                declared_timeout = source.backend_class.external_operation_timeout(source.config)
-            except Exception:
-                timeout_failed = True
-                declared_timeout = None
-            if timeout_failed:
-                for request in requests:
-                    outcomes[request.name] = _outcome(
-                        request.name,
-                        ResolutionDetail.UNEXPECTED,
-                        source=source.name,
-                        identifier=identifiers[request.name],
-                    )
-                continue
-            if declared_timeout is not None and (
-                type(declared_timeout) not in {int, float}
-                or not math.isfinite(declared_timeout)
-                or declared_timeout <= 0
-            ):
-                raise StateError(f"secret-source/{source.name} declared an invalid external-operation timeout")
-            timeout = None if declared_timeout is None else float(declared_timeout)
-            try:
-                returned = _drive_source(source, requests, broker=broker, timeout=timeout)
-            except UserAbort:
-                raise
-            except SecretClientTimeout:
-                timed_out = True
-            except SecretClientFailure as failure:
-                failure_kind = failure.kind
-            except Exception:
-                unexpected = True
-            if timed_out or failure_kind is not None or unexpected:
-                returned = None
-                if timed_out:
-                    detail = ResolutionDetail.DEADLINE_EXCEEDED
-                elif failure_kind is not None:
-                    detail = {
-                        SecretClientFailureKind.HARD_MAPPING: ResolutionDetail.HARD_MAPPING,
-                        SecretClientFailureKind.AUTHENTICATION: ResolutionDetail.AUTHENTICATION,
-                        SecretClientFailureKind.CONNECTIVITY: ResolutionDetail.CONNECTIVITY,
-                        SecretClientFailureKind.EXTERNAL: ResolutionDetail.EXTERNAL,
-                    }[failure_kind]
-                else:
-                    detail = ResolutionDetail.UNEXPECTED
-                for request in requests:
-                    outcomes[request.name] = _outcome(
-                        request.name,
-                        detail,
-                        source=source.name,
-                        identifier=identifiers[request.name],
-                    )
-                continue
-            # Snapshot the provider mapping in this already-protected frame.
-            # Passing it into a helper would expose the plaintext-bearing
-            # object in a callee frame before that helper could establish its
-            # own cleanup fence.
-            returned_values = {}
-            returned_detail = None
-            requested_names = frozenset(request.name for request in requests)
-            try:
-                if not isinstance(returned, Mapping):
-                    returned_detail = ResolutionDetail.BACKEND_PROTOCOL
-                else:
-                    raw_items = tuple(returned.items())
-                    for raw_item in raw_items:
-                        if type(raw_item) is not tuple or len(raw_item) != 2:
-                            returned_detail = ResolutionDetail.BACKEND_PROTOCOL
-                            break
-                        raw_name, raw_value = raw_item
-                        if type(raw_name) is not str or type(raw_value) is not str or raw_name not in requested_names:
-                            returned_detail = ResolutionDetail.BACKEND_PROTOCOL
-                            break
-                        returned_values[raw_name] = raw_value
-            except Exception:
-                returned_detail = ResolutionDetail.UNEXPECTED
-            returned = None
-            raw_items = None
-            raw_item = None
-            raw_name = None
-            raw_value = None
-            if returned_detail is not None:
-                returned_values.clear()
-                returned_values = None
-                for request in requests:
-                    outcomes[request.name] = _outcome(
-                        request.name,
-                        returned_detail,
-                        source=source.name,
-                    )
-                continue
-            assert returned_values is not None
+                    elif not attemptable:
+                        outcomes[secret.name] = _collapse(
+                            secret.name,
+                            evidence[secret.name],
+                            sources_empty=not sources,
+                        )
+                terminal_exists = any(secret.name in outcomes for secret in still_missing)
+            if terminal_exists:
+                for secret in still_missing:
+                    if secret.name not in outcomes:
+                        outcomes[secret.name] = _outcome(secret.name, ResolutionDetail.BATCH_DOOMED)
+                break
+        if source.backend_class.name == "prompt" and interaction_broker is None:
+            raise StateError("the prompt source requires an interaction broker")
+
+        requests = tuple(request for request, _identifier in projected)
+        identifiers = {request.name: identifier for request, identifier in projected}
+        broker = interaction_broker if source.backend_class.name == "prompt" else None
+        failure_kind: SecretClientFailureKind | None = None
+        timed_out = False
+        unexpected = False
+        try:
+            declared_timeout = source.backend_class.external_operation_timeout(source.config)
+        except Exception:
+            declared_timeout = None
+            unexpected = True
+        if unexpected:
             for request in requests:
-                if request.name not in returned_values:
-                    evidence[request.name].soft_missed.append((source.name, identifiers[request.name]))
-                    continue
-                value = returned_values[request.name]
-                if "\n" in value or "\r" in value or "\0" in value:
-                    outcomes[request.name] = _outcome(
-                        request.name,
-                        ResolutionDetail.MALFORMED_VALUE,
-                        source=source.name,
-                        identifier=identifiers[request.name],
-                    )
-                    value = None
-                    continue
-                values[request.name] = value
                 outcomes[request.name] = _outcome(
                     request.name,
-                    ResolutionDetail.RESOLVED,
+                    ResolutionDetail.UNEXPECTED,
                     source=source.name,
                     identifier=identifiers[request.name],
                 )
-                value = None
-            returned_values.clear()
-            returned_values = None
-
-        for secret in deduped:
-            if secret.name not in outcomes:
-                outcomes[secret.name] = _collapse(
-                    secret.name,
-                    evidence[secret.name],
-                    sources_empty=not sources,
+            continue
+        if declared_timeout is not None and (
+            type(declared_timeout) not in {int, float} or not math.isfinite(declared_timeout) or declared_timeout <= 0
+        ):
+            raise StateError(f"secret-source/{source.name} declared an invalid external-operation timeout")
+        timeout = None if declared_timeout is None else float(declared_timeout)
+        try:
+            returned = _drive_source(source, requests, broker=broker, timeout=timeout)
+        except UserAbort:
+            raise
+        except SecretClientTimeout:
+            timed_out = True
+            returned = None
+        except SecretClientFailure as failure:
+            failure_kind = failure.kind
+            returned = None
+        except Exception:
+            unexpected = True
+            returned = None
+        if timed_out or failure_kind is not None or unexpected:
+            if timed_out:
+                detail = ResolutionDetail.DEADLINE_EXCEEDED
+            elif failure_kind is not None:
+                detail = {
+                    SecretClientFailureKind.HARD_MAPPING: ResolutionDetail.HARD_MAPPING,
+                    SecretClientFailureKind.AUTHENTICATION: ResolutionDetail.AUTHENTICATION,
+                    SecretClientFailureKind.CONNECTIVITY: ResolutionDetail.CONNECTIVITY,
+                    SecretClientFailureKind.EXTERNAL: ResolutionDetail.EXTERNAL,
+                }[failure_kind]
+            else:
+                detail = ResolutionDetail.UNEXPECTED
+            for request in requests:
+                outcomes[request.name] = _outcome(
+                    request.name,
+                    detail,
+                    source=source.name,
+                    identifier=identifiers[request.name],
                 )
-        ordered = tuple(outcomes[secret.name] for secret in deduped)
-        batch = ResolutionBatch(ordered, values, _token=_BATCH_TOKEN)
-        values.clear()
-        return batch
-    except BaseException:
-        returned = None
-        if returned_values is not None:
-            returned_values.clear()
-        returned_detail = None
-        raw_items = None
-        raw_item = None
-        raw_name = None
-        raw_value = None
-        value = None
-        values.clear()
-        if batch is not None:
-            batch._values.clear()
-        batch = None
-        raise
+            continue
+
+        returned_values: dict[str, str] = {}
+        returned_detail: ResolutionDetail | None = None
+        requested_names = frozenset(request.name for request in requests)
+        try:
+            if not isinstance(returned, Mapping):
+                returned_detail = ResolutionDetail.BACKEND_PROTOCOL
+            else:
+                for item in returned.items():
+                    if type(item) is not tuple or len(item) != 2:
+                        returned_detail = ResolutionDetail.BACKEND_PROTOCOL
+                        break
+                    raw_name, raw_value = item
+                    if type(raw_name) is not str or type(raw_value) is not str or raw_name not in requested_names:
+                        returned_detail = ResolutionDetail.BACKEND_PROTOCOL
+                        break
+                    returned_values[raw_name] = raw_value
+        except Exception:
+            returned_detail = ResolutionDetail.UNEXPECTED
+        if returned_detail is not None:
+            for request in requests:
+                outcomes[request.name] = _outcome(
+                    request.name,
+                    returned_detail,
+                    source=source.name,
+                )
+            continue
+
+        for request in requests:
+            if request.name not in returned_values:
+                evidence[request.name].soft_missed.append((source.name, identifiers[request.name]))
+                continue
+            value = returned_values[request.name]
+            if "\n" in value or "\r" in value or "\0" in value:
+                outcomes[request.name] = _outcome(
+                    request.name,
+                    ResolutionDetail.MALFORMED_VALUE,
+                    source=source.name,
+                    identifier=identifiers[request.name],
+                )
+                continue
+            values[request.name] = value
+            outcomes[request.name] = _outcome(
+                request.name,
+                ResolutionDetail.RESOLVED,
+                source=source.name,
+                identifier=identifiers[request.name],
+            )
+
+    for secret in deduped:
+        if secret.name not in outcomes:
+            outcomes[secret.name] = _collapse(
+                secret.name,
+                evidence[secret.name],
+                sources_empty=not sources,
+            )
+    ordered = tuple(outcomes[secret.name] for secret in deduped)
+    return ResolutionBatch(ordered, values, _token=_BATCH_TOKEN)
 
 
 @dataclass(slots=True)
@@ -803,27 +691,16 @@ def resolve_partial_for_reveal(
     """Resolve independent values for the explicit env reveal surface."""
     interaction = validate_interaction_policy(interaction)
     broker = OutputInteractionBroker(secrets) if interaction is InteractionPolicy.ALLOW else None
-    projected: dict[str, str] = {}
-    result = PartialResolution(values={}, outcomes=())
     batch = resolve_batch(
         secrets,
         sources,
         policy=ResolutionPolicy(interaction=interaction, completion=CompletionPolicy.PARTIAL),
         interaction_broker=broker,
     )
-    try:
-        result.outcomes = batch.outcomes
-        projected = _copy_partial_values(batch)
-        batch.scrub_values()
-        result.values = projected
-        projected = {}
-        projected.clear()
-        return result
-    except BaseException:
-        projected.clear()
-        result.values.clear()
-        batch.scrub_values()
-        raise
+    return PartialResolution(
+        values=_copy_partial_values(batch),
+        outcomes=batch.outcomes,
+    )
 
 
 def validate_chain(config: Config, registry: Registry) -> None:

@@ -7,7 +7,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentworks.capabilities.base import RunContext
 from agentworks.vms.initializer import driver
 
 
@@ -51,7 +50,7 @@ def test_platform_complete_without_ip_never_selects_secret_bootstrap(
             "agw",
             "lima--myvm",
             logger,
-            tailscale_ctx=RunContext(),
+            tailscale_auth_key=secret,
             script_swap=4,
             bootstrap_complete=True,
             tailscale_ip=None,

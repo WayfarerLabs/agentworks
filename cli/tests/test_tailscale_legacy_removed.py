@@ -83,9 +83,8 @@ def test_vm_manager_does_not_read_legacy_env_for_tailscale_in_collect() -> None:
     back to the legacy env-var path -- it has to use the framework.
     """
     from agentworks.vms.manager import create_vm
-    from agentworks.vms.manager.lifecycle import _create_vm
 
-    src = inspect.getsource(create_vm) + inspect.getsource(_create_vm)
+    src = inspect.getsource(create_vm)
     forbidden_call = 'read_env_with_legacy("AW_TAILSCALE_AUTH_KEY"'
     assert forbidden_call not in src, (
         "found legacy env-var fallback in create_vm; the create path must resolve Tailscale via the framework"

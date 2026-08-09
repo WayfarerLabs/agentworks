@@ -161,7 +161,7 @@ def test_submitted_lima_configuration_never_contains_tailscale_key(
         monkeypatch.setattr(
             LimaPlatform,
             "_create_remote",
-            lambda self, name, lima_yaml, *, redactions: submitted.append(lima_yaml),
+            lambda self, name, lima_yaml: submitted.append(lima_yaml),
         )
 
     def _fake_run(self: LimaPlatform, command: str, **kwargs: object) -> str:

@@ -56,7 +56,7 @@ def verify_secrets(
     *,
     interaction: InteractionPolicy,
 ) -> tuple[ResolutionOutcome, ...]:
-    """Resolve requested declarations once, discard values, and return outcomes."""
+    """Resolve requested declarations once and return value-free outcomes."""
     interaction = validate_interaction_policy(interaction)
     if not names:
         raise ValidationError("at least one secret name is required")
@@ -105,10 +105,4 @@ def verify_secrets(
         policy=ResolutionPolicy(interaction=interaction, completion=CompletionPolicy.COMPLETE),
         interaction_broker=broker,
     )
-    try:
-        outcomes = batch.discard_values()
-        batch.scrub_values()
-        return outcomes
-    except BaseException:
-        batch.scrub_values()
-        raise
+    return batch.outcomes

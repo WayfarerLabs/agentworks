@@ -2,21 +2,11 @@
 
 from __future__ import annotations
 
-import pytest
-
 from agentworks.capabilities.vm_platform.bootstrap_script import (
     REBOOT_SENTINEL_PATH,
-    BootstrapOutput,
-    BootstrapResult,
     generate_bootstrap_script,
     parse_bootstrap_output,
 )
-
-
-def _parse(output: str, exit_code: int) -> BootstrapResult:
-    carrier = BootstrapOutput()
-    carrier.text = output
-    return parse_bootstrap_output(carrier, exit_code)
 
 
 def test_generate_bootstrap_script_all_steps() -> None:
@@ -355,7 +345,7 @@ def test_parse_bootstrap_output_success() -> None:
         "##SUCCESS## tailscale-ip=100.64.0.5\n"
     )
 
-    result = _parse(output, 0)
+    result = parse_bootstrap_output(output, 0)
 
     assert result.ok
     assert result.tailscale_ip == "100.64.0.5"
@@ -370,42 +360,9 @@ def test_parse_bootstrap_output_failure() -> None:
     """Parse output from a failed bootstrap."""
     output = "##STEP## Tailscale install\n##ERROR## curl failed\n"
 
-    result = _parse(output, 1)
+    result = parse_bootstrap_output(output, 1)
 
     assert not result.ok
     assert result.tailscale_ip is None
     assert len(result.steps) == 1
     assert result.steps[0].error == "curl failed"
-
-
-def test_parse_bootstrap_output_scrubs_carrier_and_partial_result_on_interrupt(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from agentworks.capabilities.vm_platform import bootstrap_script
-
-    secret = "bootstrap-parser-sentinel"
-    failure = GeneratorExit()
-    original_setattr = bootstrap_script.StepResult.__setattr__
-
-    def interrupt_after_name(self: object, name: str, value: object) -> None:
-        original_setattr(self, name, value)
-        if name == "name" and value == secret:
-            raise failure
-
-    monkeypatch.setattr(bootstrap_script.StepResult, "__setattr__", interrupt_after_name)
-    carrier = BootstrapOutput()
-    carrier.text = f"##STEP## {secret}\n##ERROR## reflected {secret}\n"
-
-    with pytest.raises(GeneratorExit) as caught:
-        parse_bootstrap_output(carrier, 1)
-
-    assert caught.value is failure
-    assert carrier.text == ""
-    traceback = caught.value.__traceback__
-    found_parser = False
-    while traceback is not None:
-        if traceback.tb_frame.f_globals.get("__name__") == bootstrap_script.__name__:
-            found_parser = True
-            assert secret not in repr(traceback.tb_frame.f_locals)
-        traceback = traceback.tb_next
-    assert found_parser

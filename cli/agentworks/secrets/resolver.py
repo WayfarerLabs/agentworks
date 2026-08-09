@@ -182,27 +182,8 @@ class Resolver:
         # source-chain pass); the boundary loop covers only the rest.
         missing = [decl for name, decl in self._decls.items() if name not in self._seeded]
         if not missing:
-            seeded_candidate: dict[str, str] = {}
-            published = False
-            try:
-                seeded_candidate = dict(self._seeded)
-                # Arm rollback before publishing: an asynchronous line event
-                # after the assignment must see publication as owned by this
-                # fence, never as an already-resolved empty cache.
-                published = True
-                self._values = seeded_candidate
-                seeded_candidate = {}
-                seeded_candidate.clear()
-                return
-            except BaseException:
-                seeded_candidate.clear()
-                if published and self._values is not None:
-                    self._values.clear()
-                    self._values = None
-                raise
-        projected: dict[str, str] = {}
-        candidate: dict[str, str] = {}
-        published = False
+            self._values = dict(self._seeded)
+            return
         broker = OutputInteractionBroker(missing) if interaction is InteractionPolicy.ALLOW else None
         batch = resolve_batch(
             missing,
@@ -210,26 +191,7 @@ class Resolver:
             policy=ResolutionPolicy(interaction=interaction, completion=CompletionPolicy.COMPLETE),
             interaction_broker=broker,
         )
-        try:
-            projected = batch.complete_or_raise()
-            batch.scrub_values()
-            candidate = {**self._seeded, **projected}
-            projected.clear()
-            # Arm rollback before publishing for the same asynchronous
-            # interruption window as the all-seeded path above.
-            published = True
-            self._values = candidate
-            candidate = {}
-            candidate.clear()
-            return
-        except BaseException:
-            projected.clear()
-            candidate.clear()
-            batch.scrub_values()
-            if published and self._values is not None:
-                self._values.clear()
-                self._values = None
-            raise
+        self._values = {**self._seeded, **batch.complete_or_raise()}
 
     def resolve_gate(self, name: str) -> str:
         """Resolve and seed one declaration before the operation boundary."""
@@ -249,8 +211,6 @@ class Resolver:
             resolve_batch,
         )
 
-        projected: dict[str, str] = {}
-        seeded = False
         broker = OutputInteractionBroker([decl]) if interaction is InteractionPolicy.ALLOW else None
         batch = resolve_batch(
             [decl],
@@ -258,22 +218,11 @@ class Resolver:
             policy=ResolutionPolicy(interaction=interaction, completion=CompletionPolicy.COMPLETE),
             interaction_broker=broker,
         )
-        try:
-            projected = batch.complete_or_raise()
-            batch.scrub_values()
-            if tuple(projected) != (name,):
-                raise StateError("gate secret resolution returned an invalid singleton result")
-            # Arm rollback before the seed becomes observable.
-            seeded = True
-            self._seeded[name] = projected.pop(name)
-            projected.clear()
-            return self._seeded[name]
-        except BaseException:
-            projected.clear()
-            batch.scrub_values()
-            if seeded:
-                self._seeded.pop(name, None)
-            raise
+        projected = batch.complete_or_raise()
+        if tuple(projected) != (name,):
+            raise StateError("gate secret resolution returned an invalid singleton result")
+        self._seeded[name] = projected[name]
+        return self._seeded[name]
 
     def resolve_late_repair(self, decl: SecretDecl) -> str:
         """Resolve one authorized repair secret without widening the cache."""
@@ -289,8 +238,6 @@ class Resolver:
             resolve_batch,
         )
 
-        projected: dict[str, str] = {}
-        transfer: dict[str, str] = {}
         broker = OutputInteractionBroker([decl]) if interaction is InteractionPolicy.ALLOW else None
         batch = resolve_batch(
             [decl],
@@ -298,19 +245,10 @@ class Resolver:
             policy=ResolutionPolicy(interaction=interaction, completion=CompletionPolicy.COMPLETE),
             interaction_broker=broker,
         )
-        try:
-            projected = batch.complete_or_raise()
-            batch.scrub_values()
-            if tuple(projected) != (decl.name,):
-                raise StateError("late repair resolution returned an invalid singleton result")
-            transfer[decl.name] = projected.pop(decl.name)
-            projected.clear()
-            return transfer.pop(decl.name)
-        except BaseException:
-            projected.clear()
-            transfer.clear()
-            batch.scrub_values()
-            raise
+        projected = batch.complete_or_raise()
+        if tuple(projected) != (decl.name,):
+            raise StateError("late repair resolution returned an invalid singleton result")
+        return projected[decl.name]
 
     def get(self, name: str) -> str:
         """A resolved value, from the boundary pass's cache (or, before
@@ -352,16 +290,3 @@ class Resolver:
                 "skipped that step."
             )
         return dict(self._values)
-
-    def scrub_values(self) -> None:
-        """Discard every value retained by this operation's resolver.
-
-        Composition roots call this from their operation-level cleanup
-        fence after the last consumer, on success and on every unwind.
-        Declarations and configuration remain intact, but a scrubbed
-        resolver is no longer resolved or seeded.
-        """
-        self._seeded.clear()
-        if self._values is not None:
-            self._values.clear()
-            self._values = None

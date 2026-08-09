@@ -23,8 +23,6 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from agentworks.capabilities.base import RunContext
-from agentworks.orchestration.secrets import ScopedSecrets
-from agentworks.ssh import SSHLogger
 from agentworks.vms.initializer import driver
 
 if TYPE_CHECKING:
@@ -40,7 +38,7 @@ class _SpyPlatform:
 
     def __init__(self) -> None:
         self.secured: list[str] = []
-        self.secure_error: BaseException | None = None
+        self.secure_error: Exception | None = None
 
     def secure_failed_vm(self, vm: object, ctx: object) -> None:
         if self.secure_error is not None:
@@ -52,10 +50,6 @@ def _stub_exec_target() -> Any:
     """The provisioning transport as the driver uses it directly: it
     assigns ``.logger`` and calls ``.describe()``."""
     return SimpleNamespace(describe=lambda: "stub-transport", logger=None)
-
-
-def _tailscale_ctx(secret: str) -> RunContext:
-    return RunContext(secrets=ScopedSecrets({"tailscale-auth-key": secret}, ("tailscale-auth-key",)))
 
 
 @pytest.fixture
@@ -72,13 +66,13 @@ def _call_bootstrap(db: Database, platform: _SpyPlatform, on_ready: Any) -> tupl
     return driver.bootstrap_vm(
         db,
         SimpleNamespace(),  # type: ignore[arg-type]  # config: unused past the stubbed seams
-        SimpleNamespace(swap=0, tailscale_auth_key="tailscale-auth-key"),  # type: ignore[arg-type]
+        SimpleNamespace(swap=0),  # type: ignore[arg-type]  # vm_template: only swap is read
         "hookvm",
         _stub_exec_target(),
         platform,  # type: ignore[arg-type]
         RunContext(),
         admin_username="agentworks",
-        tailscale_ctx=_tailscale_ctx("tskey-test"),
+        tailscale_auth_key="tskey-test",
         git_tokens={},
         on_tailscale_ready=on_ready,
     )
@@ -107,13 +101,13 @@ def test_bootstrap_logger_receives_every_resolved_secret(
     driver.bootstrap_vm(
         db,
         SimpleNamespace(),  # type: ignore[arg-type]
-        SimpleNamespace(swap=0, tailscale_auth_key="tailscale-auth-key"),  # type: ignore[arg-type]
+        SimpleNamespace(swap=0),  # type: ignore[arg-type]
         "hookvm",
         _stub_exec_target(),
         _SpyPlatform(),  # type: ignore[arg-type]
         RunContext(),
         admin_username="admin",
-        tailscale_ctx=_tailscale_ctx("tailscale-secret"),
+        tailscale_auth_key="tailscale-secret",
         git_tokens={"gh": "github-secret", "gl": "gitlab-secret"},
         on_tailscale_ready=lambda: None,
     )
@@ -229,197 +223,3 @@ def test_interrupt_hook_failure_does_not_mask_the_interrupt(
         _call_bootstrap(db, platform, lambda: None)
 
     assert any("could not secure the interrupted VM" in w for w in captured_output.warnings)
-
-
-@pytest.mark.parametrize(
-    ("primary", "hook_failure", "warning_failure"),
-    [
-        (RuntimeError("primary"), RuntimeError("hook"), RuntimeError("warn")),
-        (KeyboardInterrupt("primary"), KeyboardInterrupt("hook"), KeyboardInterrupt("warn")),
-        (SystemExit(41), SystemExit(42), SystemExit(43)),
-        (GeneratorExit(), GeneratorExit(), GeneratorExit()),
-    ],
-    ids=("exception", "keyboard-interrupt", "system-exit", "generator-exit"),
-)
-def test_secure_hook_and_every_failure_warning_preserve_exact_primary(
-    db: Database,
-    monkeypatch: pytest.MonkeyPatch,
-    _hermetic_driver: None,
-    primary: BaseException,
-    hook_failure: BaseException,
-    warning_failure: BaseException,
-) -> None:
-    db.insert_vm("hookvm", site="stub", hostname="hookvm")
-    warning_calls: list[str] = []
-
-    def fail_phase(*args: object, **kwargs: object) -> None:
-        del args, kwargs
-        raise primary
-
-    def fail_warning(message: str) -> None:
-        warning_calls.append(message)
-        raise warning_failure
-
-    platform = _SpyPlatform()
-    platform.secure_error = hook_failure
-    monkeypatch.setattr(driver, "_phase_a_bootstrap", fail_phase)
-    monkeypatch.setattr("agentworks.vms.initializer.failure_cleanup.output.warn", fail_warning)
-
-    with pytest.raises(type(primary)) as caught:
-        _call_bootstrap(db, platform, lambda: None)
-
-    assert caught.value is primary
-    state = "failed" if isinstance(primary, Exception) else "interrupted"
-    assert warning_calls[0] == f"could not secure the {state} VM"
-    if isinstance(primary, Exception):
-        assert warning_calls[1].startswith("Log: ")
-
-
-def test_log_path_rendering_failure_cannot_replace_bootstrap_primary(
-    db: Database,
-    monkeypatch: pytest.MonkeyPatch,
-    _hermetic_driver: None,
-) -> None:
-    primary = RuntimeError("bootstrap primary")
-    rendering_failure = SystemExit(44)
-    db.insert_vm("hookvm", site="stub", hostname="hookvm")
-
-    def fail_phase(*args: object, **kwargs: object) -> None:
-        del args, kwargs
-        raise primary
-
-    def fail_display_path(self: SSHLogger) -> str:
-        del self
-        raise rendering_failure
-
-    monkeypatch.setattr(driver, "_phase_a_bootstrap", fail_phase)
-    monkeypatch.setattr(SSHLogger, "display_path", property(fail_display_path))
-
-    with pytest.raises(RuntimeError) as caught:
-        _call_bootstrap(db, _SpyPlatform(), lambda: None)
-
-    assert caught.value is primary
-
-
-@pytest.mark.parametrize(
-    "primary",
-    [RuntimeError("bootstrap failed"), KeyboardInterrupt("bootstrap interrupted")],
-    ids=("exception", "base-exception"),
-)
-def test_bootstrap_logger_close_failure_never_masks_primary(
-    db: Database,
-    monkeypatch: pytest.MonkeyPatch,
-    _hermetic_driver: None,
-    captured_output: Any,
-    primary: BaseException,
-) -> None:
-    db.insert_vm("hookvm", site="stub", hostname="hookvm")
-
-    def fail_phase(*args: object, **kwargs: object) -> None:
-        del args, kwargs
-        raise primary
-
-    def fail_close(self: object) -> None:
-        del self
-        raise SystemExit(91)
-
-    monkeypatch.setattr(driver, "_phase_a_bootstrap", fail_phase)
-    monkeypatch.setattr("agentworks.ssh.SSHLogger.close", fail_close)
-
-    with pytest.raises(type(primary)) as caught:
-        _call_bootstrap(db, _SpyPlatform(), lambda: None)
-
-    assert caught.value is primary
-    assert captured_output.warnings.count("could not close the VM operation log after failure") == 1
-
-
-@pytest.mark.parametrize(
-    "primary",
-    [RuntimeError("initialization failed"), GeneratorExit()],
-    ids=("exception", "base-exception"),
-)
-def test_initialization_logger_close_failure_never_masks_primary(
-    db: Database,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output: Any,
-    primary: BaseException,
-) -> None:
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
-    db.insert_vm("hookvm", site="stub", hostname="hookvm")
-    logger = SSHLogger("hookvm", "vm-create")
-
-    def fail_phase(*args: object, **kwargs: object) -> None:
-        del args, kwargs
-        raise primary
-
-    def fail_close() -> None:
-        raise SystemExit(92)
-
-    monkeypatch.setattr(driver, "_phase_b_setup", fail_phase)
-    monkeypatch.setattr(logger, "close", fail_close)
-
-    with pytest.raises(type(primary)) as caught:
-        driver.run_initialization(
-            db,
-            SimpleNamespace(),  # type: ignore[arg-type]
-            SimpleNamespace(),  # type: ignore[arg-type]
-            SimpleNamespace(),  # type: ignore[arg-type]
-            SimpleNamespace(),  # type: ignore[arg-type]
-            "hookvm",
-            SimpleNamespace(),  # type: ignore[arg-type]
-            {},
-            "/home/agentworks",
-            "agentworks",
-            logger,
-            git_tokens={},
-        )
-
-    assert caught.value is primary
-    assert captured_output.warnings.count("could not close the VM operation log after failure") == 1
-
-
-def test_close_and_warning_sink_failures_cannot_replace_initialization_primary(
-    db: Database,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    primary = GeneratorExit()
-    close_failure = SystemExit(92)
-    warning_failure = KeyboardInterrupt("warning sink interrupted")
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
-    db.insert_vm("hookvm", site="stub", hostname="hookvm")
-    logger = SSHLogger("hookvm", "vm-create")
-
-    def fail_phase(*args: object, **kwargs: object) -> None:
-        del args, kwargs
-        raise primary
-
-    def fail_close() -> None:
-        raise close_failure
-
-    def fail_warning(message: str) -> None:
-        del message
-        raise warning_failure
-
-    monkeypatch.setattr(driver, "_phase_b_setup", fail_phase)
-    monkeypatch.setattr(logger, "close", fail_close)
-    monkeypatch.setattr("agentworks.vms.initializer.driver.output.warn", fail_warning)
-
-    with pytest.raises(GeneratorExit) as caught:
-        driver.run_initialization(
-            db,
-            SimpleNamespace(),  # type: ignore[arg-type]
-            SimpleNamespace(),  # type: ignore[arg-type]
-            SimpleNamespace(),  # type: ignore[arg-type]
-            SimpleNamespace(),  # type: ignore[arg-type]
-            "hookvm",
-            SimpleNamespace(),  # type: ignore[arg-type]
-            {},
-            "/home/agentworks",
-            "agentworks",
-            logger,
-            git_tokens={},
-        )
-
-    assert caught.value is primary

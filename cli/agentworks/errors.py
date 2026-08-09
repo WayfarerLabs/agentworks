@@ -135,14 +135,6 @@ class ProvisioningError(ExternalError):
     """
 
 
-class SensitiveDataCleanupError(ProvisioningError):
-    """Cleanup could not confirm removal of sensitive provisioning data.
-
-    This failure takes precedence over an earlier operation failure when
-    residue may remain and requires explicit operator remediation.
-    """
-
-
 class BackupError(ExternalError):
     """A backup operation failed (tar, scp, snapshot)."""
 

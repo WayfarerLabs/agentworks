@@ -16,8 +16,8 @@ from agentworks.capabilities.vm_platform import ProvisionRequest
 from agentworks.capabilities.vm_platform import lima as lima_mod
 from agentworks.capabilities.vm_platform.bootstrap_script import REBOOT_SENTINEL_PATH
 from agentworks.capabilities.vm_platform.lima import _REBOOT_CLEAR_MARKER, LimaPlatform
-from agentworks.errors import ProvisioningError, SensitiveDataCleanupError, StateError
-from agentworks.ssh import SSHError, SSHLogger
+from agentworks.errors import ProvisioningError, StateError
+from agentworks.ssh import SSHError
 
 if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
@@ -127,9 +127,6 @@ class _SilentProvisionLogger:
     def close(self) -> None:
         pass
 
-    def discard_redactions(self) -> None:
-        pass
-
 
 def _wire_remote_operation_success(monkeypatch: pytest.MonkeyPatch) -> None:
     from agentworks import remote_exec
@@ -154,7 +151,7 @@ def test_remote_abandon_warning_names_the_vm_host(
     monkeypatch.setattr(
         LimaPlatform,
         "_create_remote",
-        lambda self, name, yaml, *, redactions: (_ for _ in ()).throw(interrupt),
+        lambda self, name, yaml: (_ for _ in ()).throw(interrupt),
     )
 
     with pytest.raises(KeyboardInterrupt) as exc:
@@ -192,21 +189,16 @@ def test_remote_interrupt_kills_the_detached_limactl_before_deleting(
         lambda target, cmd, **kw: events.append(("ssh", cmd)) or _remote_ssh_success(cmd),
     )
 
-    captured_redactions: list[tuple[str, ...]] = []
-
     class _StubLogger:
         path = "/dev/null"
 
         def __init__(self, *a: object, **kw: object) -> None:
-            captured_redactions.append(kw.get("redactions", ()))  # type: ignore[arg-type]
+            del a, kw
 
         def log_error(self, msg: str) -> None:
             pass
 
         def close(self) -> None:
-            pass
-
-        def discard_redactions(self) -> None:
             pass
 
     monkeypatch.setattr("agentworks.ssh.SSHLogger", _StubLogger)
@@ -233,7 +225,6 @@ def test_remote_interrupt_kills_the_detached_limactl_before_deleting(
         LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}}).create(_request(), RunContext())
 
     assert exc.value is interrupt
-    assert captured_redactions == [("tskey-test",)]
     # The kill goes through run_detached's PID-file mechanism, and it
     # PRECEDES the delete.
     kill_cmd = "kill $(cat /tmp/agentworks-lima-myvm.pid)"
@@ -279,7 +270,6 @@ def test_remote_stdin_write_failure_removes_partial_template_and_preserves_error
         LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._create_remote(
             "myvm",
             f"embedded: {secret}",
-            redactions=(secret,),
         )
 
     assert caught.value is write_failure
@@ -310,7 +300,6 @@ def test_remote_template_staging_is_mode_0600_stdin_and_verified_cleanup(
     LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._create_remote(
         "myvm",
         f"embedded: {secret}",
-        redactions=(secret,),
     )
 
     assert len(calls) == 3
@@ -377,7 +366,6 @@ def test_remote_template_uses_private_random_directory_not_predictable_fifo(
     LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._create_remote(
         "myvm",
         f"embedded: {secret}",
-        redactions=(secret,),
     )
 
     assert staged_snapshots == [(0o700, 0o600, f"embedded: {secret}")]
@@ -406,289 +394,10 @@ def test_remote_template_rejects_untrusted_allocation_path(
         LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._create_remote(
             "myvm",
             "embedded: secret",
-            redactions=("secret",),
         )
 
     assert calls == ["umask 077 && mktemp -d /tmp/agentworks-lima-template.XXXXXXXXXX"]
     assert "/tmp/other" not in repr(caught.value)
-
-
-@pytest.mark.parametrize(
-    "cleanup_failure",
-    [
-        SSHError("unlink refused swordfish"),
-        KeyboardInterrupt("cleanup interrupted swordfish"),
-        SystemExit(21),
-        GeneratorExit(),
-    ],
-    ids=("unlink", "keyboard-interrupt", "system-exit", "generator-exit"),
-)
-def test_remote_template_cleanup_retries_then_succeeds_without_surface(
-    monkeypatch: pytest.MonkeyPatch,
-    cleanup_failure: BaseException,
-    captured_output: CapturedOutput,
-) -> None:
-    attempts = 0
-
-    def _ssh_run(target: object, command: str, **kwargs: object) -> SimpleNamespace:
-        nonlocal attempts
-        del target, command, kwargs
-        attempts += 1
-        if attempts == 1:
-            raise cleanup_failure
-        return SimpleNamespace(stdout="")
-
-    monkeypatch.setattr(lima_mod, "ssh_run", _ssh_run)
-
-    LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._remove_remote_template_dir(
-        SimpleNamespace(),  # type: ignore[arg-type]
-        _REMOTE_TEMPLATE_DIR,
-    )
-
-    assert attempts == 2
-    assert "swordfish" not in "\n".join([*captured_output.detail, *captured_output.warnings])
-
-
-@pytest.mark.parametrize(
-    "cleanup_failure",
-    [
-        SSHError("unlink refused swordfish"),
-        KeyboardInterrupt("cleanup interrupted swordfish"),
-        SystemExit(22),
-        GeneratorExit(),
-    ],
-    ids=("unlink", "keyboard-interrupt", "system-exit", "generator-exit"),
-)
-def test_repeated_remote_template_cleanup_failure_reports_typed_residue(
-    monkeypatch: pytest.MonkeyPatch,
-    cleanup_failure: BaseException,
-) -> None:
-    attempts = 0
-
-    def _ssh_run(target: object, command: str, **kwargs: object) -> SimpleNamespace:
-        nonlocal attempts
-        del target, command, kwargs
-        attempts += 1
-        raise cleanup_failure
-
-    monkeypatch.setattr(lima_mod, "ssh_run", _ssh_run)
-
-    with pytest.raises(SensitiveDataCleanupError) as caught:
-        LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._remove_remote_template_dir(
-            SimpleNamespace(),  # type: ignore[arg-type]
-            _REMOTE_TEMPLATE_DIR,
-        )
-
-    assert attempts == 3
-    assert str(caught.value) == "removal of sensitive Lima provisioning input could not be confirmed"
-    assert caught.value.hint is not None
-    assert f"recursively remove directory '{_REMOTE_TEMPLATE_DIR}'" in caught.value.hint
-    assert "swordfish" not in repr(caught.value)
-    assert "swordfish" not in caught.value.hint
-
-
-def test_remote_template_cleanup_propagates_programming_errors(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    programming_error = RuntimeError("bug in SSH adapter")
-    attempts = 0
-
-    def _ssh_run(target: object, command: str, **kwargs: object) -> SimpleNamespace:
-        nonlocal attempts
-        del target, command, kwargs
-        attempts += 1
-        raise programming_error
-
-    monkeypatch.setattr(lima_mod, "ssh_run", _ssh_run)
-
-    with pytest.raises(RuntimeError) as caught:
-        LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._remove_remote_template_dir(
-            SimpleNamespace(),  # type: ignore[arg-type]
-            _REMOTE_TEMPLATE_DIR,
-        )
-
-    assert caught.value is programming_error
-    assert attempts == 1
-
-
-def test_successful_remote_operation_with_cleanup_residue_fails_closed(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    secret = "success-cleanup-swordfish"
-    calls: list[str] = []
-    _wire_remote_operation_success(monkeypatch)
-
-    def _ssh_run(target: object, command: str, **kwargs: object) -> SimpleNamespace:
-        del target, kwargs
-        calls.append(command)
-        if "mktemp -d" in command:
-            return _remote_ssh_success(command)
-        if "cat >" in command:
-            return SimpleNamespace(stdout="")
-        raise SSHError(f"unlink exposed {secret}")
-
-    monkeypatch.setattr(lima_mod, "ssh_run", _ssh_run)
-
-    with pytest.raises(SensitiveDataCleanupError) as caught:
-        LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._create_remote(
-            "myvm",
-            f"embedded: {secret}",
-            redactions=(secret,),
-        )
-
-    assert len(calls) == 5
-    assert str(caught.value) == "removal of sensitive Lima provisioning input could not be confirmed"
-    assert caught.value.hint is not None
-    assert secret not in repr(caught.value)
-    assert secret not in caught.value.hint
-    assert caught.value.__context__ is None
-
-
-def test_staging_and_repeated_cleanup_failure_reports_safe_combined_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    secret = "combined-swordfish"
-    calls: list[str] = []
-
-    def _ssh_run(target: object, command: str, **kwargs: object) -> SimpleNamespace:
-        del target, kwargs
-        calls.append(command)
-        if "mktemp -d" in command:
-            return _remote_ssh_success(command)
-        if "cat >" in command:
-            raise SSHError(f"stdin write exposed {secret}")
-        raise SSHError(f"unlink exposed {secret}")
-
-    monkeypatch.setattr(lima_mod, "ssh_run", _ssh_run)
-
-    with pytest.raises(SensitiveDataCleanupError) as caught:
-        LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._create_remote(
-            "myvm",
-            f"embedded: {secret}",
-            redactions=(secret,),
-        )
-
-    assert len(calls) == 5
-    assert all(secret not in command for command in calls)
-    assert str(caught.value) == (
-        "Lima provisioning failed and removal of sensitive Lima provisioning input could not be confirmed"
-    )
-    assert caught.value.hint is not None
-    assert secret not in repr(caught.value)
-    assert secret not in caught.value.hint
-    assert caught.value.__cause__ is None
-    assert caught.value.__context__ is None
-
-
-@pytest.mark.parametrize(
-    "cleanup_control_flow",
-    [SystemExit(23), GeneratorExit()],
-    ids=("system-exit", "generator-exit"),
-)
-def test_remote_cleanup_control_flow_yields_residue_precedence_over_primary(
-    monkeypatch: pytest.MonkeyPatch,
-    cleanup_control_flow: BaseException,
-) -> None:
-    primary = SSHError("template staging failed")
-
-    def _ssh_run(target: object, command: str, **kwargs: object) -> SimpleNamespace:
-        del target, kwargs
-        if "mktemp -d" in command:
-            return _remote_ssh_success(command)
-        raise primary
-
-    def fail_cleanup(self: LimaPlatform, target: object, remote_template_dir: str) -> None:
-        del self, target, remote_template_dir
-        raise cleanup_control_flow
-
-    monkeypatch.setattr(lima_mod, "ssh_run", _ssh_run)
-    monkeypatch.setattr(LimaPlatform, "_remove_remote_template_dir", fail_cleanup)
-
-    with pytest.raises(SensitiveDataCleanupError) as caught:
-        LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._create_remote(
-            "myvm",
-            "embedded: safe",
-            redactions=(),
-        )
-
-    assert str(caught.value) == (
-        "Lima provisioning failed and removal of sensitive Lima provisioning input could not be confirmed"
-    )
-    assert caught.value.__cause__ is None
-    assert caught.value.__context__ is None
-
-
-def test_staging_interrupt_and_cleanup_interrupt_preserve_original_after_retry(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    secret = "interrupt-swordfish"
-    original = KeyboardInterrupt("staging interrupted")
-    attempts = 0
-
-    def _ssh_run(target: object, command: str, **kwargs: object) -> SimpleNamespace:
-        nonlocal attempts
-        del target, kwargs
-        attempts += 1
-        if "mktemp -d" in command:
-            return _remote_ssh_success(command)
-        if "cat >" in command:
-            raise original
-        if attempts == 3:
-            raise KeyboardInterrupt(f"cleanup interrupted {secret}")
-        return SimpleNamespace(stdout="")
-
-    monkeypatch.setattr(lima_mod, "ssh_run", _ssh_run)
-
-    with pytest.raises(KeyboardInterrupt) as caught:
-        LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._create_remote(
-            "myvm",
-            f"embedded: {secret}",
-            redactions=(secret,),
-        )
-
-    assert caught.value is original
-    assert attempts == 4
-    assert secret not in repr(caught.value)
-
-
-def test_logger_close_interrupt_preserves_active_interrupt_and_cleans_template(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from agentworks import remote_exec
-
-    original = KeyboardInterrupt("provisioning interrupted")
-    close_interrupt = KeyboardInterrupt("logger close interrupted")
-    calls: list[str] = []
-    _wire_remote_host(monkeypatch, [])
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
-
-    def _ssh_run(target: object, command: str, **kwargs: object) -> SimpleNamespace:
-        del target, kwargs
-        calls.append(command)
-        return _remote_ssh_success(command)
-
-    def _raise_original(*args: object, **kwargs: object) -> None:
-        del args, kwargs
-        raise original
-
-    def _interrupt_close(self: SSHLogger) -> None:
-        del self
-        raise close_interrupt
-
-    monkeypatch.setattr(lima_mod, "ssh_run", _ssh_run)
-    monkeypatch.setattr(remote_exec, "run_detached", _raise_original)
-    monkeypatch.setattr(SSHLogger, "close", _interrupt_close)
-
-    with pytest.raises(KeyboardInterrupt) as caught:
-        LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._create_remote(
-            "myvm",
-            "embedded: secret",
-            redactions=("secret",),
-        )
-
-    assert caught.value is original
-    assert calls[-1] == f"rm -rf -- {_REMOTE_TEMPLATE_DIR} && test ! -e {_REMOTE_TEMPLATE_DIR}"
 
 
 def test_remote_interrupt_preserves_original_when_artifact_cleanup_fails(
@@ -715,7 +424,7 @@ def test_remote_interrupt_preserves_original_when_artifact_cleanup_fails(
     monkeypatch.setattr(
         LimaPlatform,
         "_create_remote",
-        lambda self, name, yaml, *, redactions: (_ for _ in ()).throw(interrupt),
+        lambda self, name, yaml: (_ for _ in ()).throw(interrupt),
     )
 
     with pytest.raises(KeyboardInterrupt) as caught:
@@ -751,7 +460,7 @@ def test_remote_exception_kills_cleans_artifacts_then_deletes_without_masking(
     monkeypatch.setattr(
         LimaPlatform,
         "_create_remote",
-        lambda self, name, yaml, *, redactions: (_ for _ in ()).throw(original),
+        lambda self, name, yaml: (_ for _ in ()).throw(original),
     )
     monkeypatch.setattr(
         LimaPlatform,
@@ -779,37 +488,6 @@ def test_remote_exception_kills_cleans_artifacts_then_deletes_without_masking(
     surfaced = "\n".join([*captured_output.detail, *captured_output.warnings])
     assert "swordfish" not in surfaced
     assert "swordfish" not in repr(caught.value)
-
-
-def test_remote_provision_failure_redacts_log_and_raised_error(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Bootstrap output can echo the embedded key, so neither sink may."""
-    from agentworks import remote_exec
-
-    secret = "tskey-test"
-    _wire_remote_host(monkeypatch, [])
-    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
-    monkeypatch.setattr(lima_mod, "ssh_run", lambda target, command, **kwargs: _remote_ssh_success(command))
-    monkeypatch.setattr(
-        remote_exec,
-        "run_detached",
-        lambda *a, **k: SimpleNamespace(exit_code=1, output=f"bootstrap rejected {secret}"),
-    )
-
-    with pytest.raises(SSHError) as caught:
-        LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._create_remote(
-            "myvm",
-            f"embedded: {secret}",
-            redactions=(secret,),
-        )
-
-    assert secret not in str(caught.value)
-    (log_path,) = tmp_path.glob("*.log")
-    log_text = log_path.read_text()
-    assert secret not in log_text
-    assert "bootstrap rejected [REDACTED]" in log_text
 
 
 def test_cleanup_failure_warns_and_does_not_mask_the_original(

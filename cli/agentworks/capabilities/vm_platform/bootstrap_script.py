@@ -269,29 +269,23 @@ def generate_bootstrap_script(
     system default, free to disagree with the first. It did: this
     parameter defaulted to 0 while ``ResolvedVMTemplate.swap`` is 4.
     """
-    try:
-        return SCRIPT_TEMPLATE.format(
-            admin_username=shlex.quote(admin_username),
-            ssh_public_key=shlex.quote(ssh_public_key),
-            provisioning_packages=shlex.quote(" ".join(provisioning_packages)),
-            tailscale_auth_key=shlex.quote(tailscale_auth_key or ""),
-            vm_hostname=shlex.quote(hostname),
-            swap=swap,
-            ssh_preserve_path=SSH_PRESERVE_KEYS_PATH,
-            ssh_preserve_content=SSH_PRESERVE_KEYS_CONTENT,
-            reboot_sentinel=REBOOT_SENTINEL_PATH,
-            sve_apple_vz_grep=SVE_APPLE_VZ_GREP,
-            sve_cpuinfo_grep=SVE_CPUINFO_GREP,
-            sve_grub_path=SVE_NOSVE_GRUB_PATH,
-            sve_grub_content=SVE_NOSVE_GRUB_CONTENT,
-            bashrc_content=BASHRC,
-            zshrc_content=ZSHRC,
-        )
-    finally:
-        # A control-flow exception can preserve this production frame. The
-        # generated script is consumed by the caller, but the raw input need
-        # not remain bound here after either return or failure.
-        tailscale_auth_key = None
+    return SCRIPT_TEMPLATE.format(
+        admin_username=shlex.quote(admin_username),
+        ssh_public_key=shlex.quote(ssh_public_key),
+        provisioning_packages=shlex.quote(" ".join(provisioning_packages)),
+        tailscale_auth_key=shlex.quote(tailscale_auth_key or ""),
+        vm_hostname=shlex.quote(hostname),
+        swap=swap,
+        ssh_preserve_path=SSH_PRESERVE_KEYS_PATH,
+        ssh_preserve_content=SSH_PRESERVE_KEYS_CONTENT,
+        reboot_sentinel=REBOOT_SENTINEL_PATH,
+        sve_apple_vz_grep=SVE_APPLE_VZ_GREP,
+        sve_cpuinfo_grep=SVE_CPUINFO_GREP,
+        sve_grub_path=SVE_NOSVE_GRUB_PATH,
+        sve_grub_content=SVE_NOSVE_GRUB_CONTENT,
+        bashrc_content=BASHRC,
+        zshrc_content=ZSHRC,
+    )
 
 
 @dataclass
@@ -313,65 +307,27 @@ class BootstrapResult:
     def ok(self) -> bool:
         return self.exit_code == 0 and self.tailscale_ip is not None
 
-    def scrub(self) -> None:
-        """Discard provider-controlled output retained by this result graph."""
-        for step in self.steps:
-            step.name = ""
-            step.success_msg = None
-            step.warnings.clear()
-            step.error = None
-        self.steps.clear()
-        self.tailscale_ip = None
-        self.raw_output = ""
 
-
-class BootstrapOutput:
-    """Mutable ownership carrier for raw bootstrap process output."""
-
-    def __init__(self) -> None:
-        self.text = ""
-
-    def scrub(self) -> None:
-        self.text = ""
-
-    def __repr__(self) -> str:
-        return "BootstrapOutput(<scrubbed>)"
-
-
-def parse_bootstrap_output(output: BootstrapOutput, exit_code: int) -> BootstrapResult:
+def parse_bootstrap_output(stdout: str, exit_code: int) -> BootstrapResult:
     """Parse structured markers from bootstrap script output."""
-    result = BootstrapResult(exit_code=exit_code)
+    result = BootstrapResult(exit_code=exit_code, raw_output=stdout)
     current_step: StepResult | None = None
-    line = ""
-    msg = ""
 
-    try:
-        result.raw_output = output.text
-        for line in output.text.splitlines():
-            if line.startswith("##STEP## "):
-                current_step = StepResult(name="")
-                current_step.name = line[9:]
-                line = ""
-                result.steps.append(current_step)
-            elif line.startswith("##SUCCESS## "):
-                msg = line[12:]
-                if current_step is not None:
-                    current_step.success_msg = msg
-                if msg.startswith("tailscale-ip="):
-                    result.tailscale_ip = msg.split("=", 1)[1].strip()
-            elif line.startswith("##WARN## "):
-                if current_step is not None:
-                    current_step.warnings.append(line[9:])
-            elif line.startswith("##ERROR## "):
-                if current_step is not None:
-                    current_step.error = line[10:]
+    for line in stdout.splitlines():
+        if line.startswith("##STEP## "):
+            current_step = StepResult(name=line[9:])
+            result.steps.append(current_step)
+        elif line.startswith("##SUCCESS## "):
+            msg = line[12:]
+            if current_step is not None:
+                current_step.success_msg = msg
+            if msg.startswith("tailscale-ip="):
+                result.tailscale_ip = msg.split("=", 1)[1].strip()
+        elif line.startswith("##WARN## "):
+            if current_step is not None:
+                current_step.warnings.append(line[9:])
+        elif line.startswith("##ERROR## "):
+            if current_step is not None:
+                current_step.error = line[10:]
 
-        return result
-    except BaseException:
-        result.scrub()
-        raise
-    finally:
-        output.scrub()
-        current_step = None
-        line = ""
-        msg = ""
+    return result

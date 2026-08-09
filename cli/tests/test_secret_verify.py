@@ -137,21 +137,6 @@ def _run_main(monkeypatch: pytest.MonkeyPatch, *argv: str) -> int:
     return 0 if caught.value.code is None else int(caught.value.code)
 
 
-def _recursive_agentworks_traceback_text(exc: BaseException) -> str:
-    values: list[str] = []
-    seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        traceback = current.__traceback__
-        while traceback is not None:
-            if traceback.tb_frame.f_globals.get("__name__", "").startswith("agentworks."):
-                values.extend(repr(value) for value in traceback.tb_frame.f_locals.values())
-            traceback = traceback.tb_next
-        current = current.__cause__ or current.__context__
-    return "\n".join(values)
-
-
 def _verify(monkeypatch: pytest.MonkeyPatch, *names: str) -> tuple[ResolutionOutcome, ...]:
     monkeypatch.setattr("agentworks.secrets.resolve.active_sources", lambda config, registry: [_source()])
     return verify_secrets(
@@ -429,7 +414,7 @@ def test_verify_validates_every_name_before_lookup_or_source_work(monkeypatch: p
         pytest.param(_HostileName("token"), "sentinel-hostile-name-repr", id="hostile-str-subclass"),
     ],
 )
-def test_invalid_name_error_has_no_input_exception_graph_or_traceback_local(
+def test_invalid_name_error_is_safe_and_context_free(
     rejected: object,
     sentinel: str,
 ) -> None:
@@ -448,8 +433,8 @@ def test_invalid_name_error_has_no_input_exception_graph_or_traceback_local(
     )
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
-    retained = _recursive_agentworks_traceback_text(caught.value)
-    assert sentinel not in retained
+    assert sentinel not in repr(caught.value)
+    assert sentinel not in repr(caught.value.args)
 
 
 def test_unexpected_name_validator_failure_propagates_by_identity(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -629,7 +614,7 @@ def test_service_allow_is_explicit_under_global_noninteractive_and_uses_onepassw
     assert "sentinel-onepassword-value" not in repr(outcomes)
 
 
-def test_prompt_user_abort_propagates_by_identity_after_cleanup(
+def test_prompt_user_abort_propagates_by_identity_without_exposing_prior_value(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     abort = UserAbort("sentinel-user-abort")
@@ -658,7 +643,9 @@ def test_prompt_user_abort_propagates_by_identity_after_cleanup(
 
     assert caught.value is abort
     assert len(prompts) == 2
-    assert "sentinel-earlier-prompt-value" not in _recursive_agentworks_traceback_text(caught.value)
+    assert "sentinel-earlier-prompt-value" not in str(caught.value)
+    assert "sentinel-earlier-prompt-value" not in repr(caught.value)
+    assert "sentinel-earlier-prompt-value" not in repr(caught.value.args)
 
 
 def test_complete_batch_dooms_remaining_names_before_prompt_interaction(

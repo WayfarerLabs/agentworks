@@ -5,10 +5,7 @@ from __future__ import annotations
 import concurrent.futures
 import contextlib
 import getpass
-import inspect
-import sys
-from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -16,46 +13,7 @@ from agentworks import output
 from agentworks.output import Role
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
-
     from tests.conftest import CapturedOutput
-
-
-@contextmanager
-def _interrupt_exact_line(function: Any, source_line: str) -> Iterator[None]:
-    lines, first_line = inspect.getsourcelines(function)
-    matches = [first_line + index for index, line in enumerate(lines) if line.rstrip("\n") == source_line]
-    assert len(matches) == 1
-    target_line = matches[0]
-    target_code = function.__code__
-
-    def trace(frame: Any, event: str, argument: object) -> Any:
-        del argument
-        if frame.f_code is target_code and event == "line" and frame.f_lineno == target_line:
-            sys.settrace(None)
-            raise KeyboardInterrupt
-        return trace
-
-    sys.settrace(trace)
-    try:
-        yield
-    finally:
-        sys.settrace(None)
-
-
-def _agentworks_traceback_text(exc: BaseException) -> str:
-    values: list[str] = []
-    seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        traceback = current.__traceback__
-        while traceback is not None:
-            if traceback.tb_frame.f_globals.get("__name__", "").startswith("agentworks."):
-                values.extend(repr(value) for value in traceback.tb_frame.f_locals.values())
-            traceback = traceback.tb_next
-        current = current.__cause__ or current.__context__
-    return "\n".join(values)
 
 
 def test_count_pluralizes_regular_nouns() -> None:
@@ -335,19 +293,6 @@ def test_default_handler_prompt_indents_label_with_level(
     monkeypatch.setattr("builtins.input", lambda text="": prompts.append(text) or "")
     output._DefaultHandler().prompt("Name", 2)
     assert prompts == ["    Name: "]
-
-
-def test_default_secret_prompt_exact_return_interrupt_clears_plaintext(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(getpass, "getpass", lambda prompt: "sentinel-default-prompt-value")
-    with (
-        pytest.raises(KeyboardInterrupt) as caught,
-        _interrupt_exact_line(output._DefaultHandler.prompt_secret, "            return value"),
-    ):
-        output._DefaultHandler().prompt_secret("Token", 0)
-
-    assert "sentinel-default-prompt-value" not in _agentworks_traceback_text(caught.value)
 
 
 @pytest.mark.parametrize("failure", [EOFError(), KeyboardInterrupt()])

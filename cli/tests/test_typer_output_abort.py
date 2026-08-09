@@ -14,10 +14,7 @@ test_typer_output.py (stub the prompt function, no stdin/pty).
 
 from __future__ import annotations
 
-import inspect
 import sys
-from contextlib import contextmanager
-from typing import Any
 
 import click
 import pytest
@@ -25,43 +22,6 @@ import typer
 
 from agentworks.cli._typer_output import TyperHandler
 from agentworks.errors import UserAbort
-
-
-@contextmanager
-def _interrupt_exact_line(function: Any, source_line: str) -> Any:
-    lines, first_line = inspect.getsourcelines(function)
-    matches = [first_line + index for index, line in enumerate(lines) if line.rstrip("\n") == source_line]
-    assert len(matches) == 1
-    target_line = matches[0]
-    target_code = function.__code__
-
-    def trace(frame: Any, event: str, argument: object) -> Any:
-        del argument
-        if frame.f_code is target_code and event == "line" and frame.f_lineno == target_line:
-            sys.settrace(None)
-            raise KeyboardInterrupt
-        return trace
-
-    sys.settrace(trace)
-    try:
-        yield
-    finally:
-        sys.settrace(None)
-
-
-def _agentworks_traceback_text(exc: BaseException) -> str:
-    values: list[str] = []
-    seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        traceback = current.__traceback__
-        while traceback is not None:
-            if traceback.tb_frame.f_globals.get("__name__", "").startswith("agentworks."):
-                values.extend(repr(value) for value in traceback.tb_frame.f_locals.values())
-            traceback = traceback.tb_next
-        current = current.__cause__ or current.__context__
-    return "\n".join(values)
 
 
 def test_typer_and_click_abort_are_distinct_classes() -> None:
@@ -161,16 +121,3 @@ def test_prompt_secret_also_converts_vendored_abort_to_user_abort(monkeypatch: p
         TyperHandler().prompt_secret("Token", level=0)
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
-
-
-def test_typer_secret_prompt_exact_return_interrupt_clears_plaintext(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(click, "prompt", lambda *args, **kwargs: "sentinel-typer-prompt-value")
-    with (
-        pytest.raises(KeyboardInterrupt) as caught,
-        _interrupt_exact_line(TyperHandler.prompt_secret, "            return value"),
-    ):
-        TyperHandler().prompt_secret("Token", level=0)
-
-    assert "sentinel-typer-prompt-value" not in _agentworks_traceback_text(caught.value)

@@ -216,8 +216,6 @@ def resolve_for_command(
         resolve_batch,
     )
 
-    projected: dict[str, str] = {}
-    result: dict[str, str] = {}
     broker = OutputInteractionBroker(decls) if interaction is InteractionPolicy.ALLOW else None
     batch = resolve_batch(
         decls,
@@ -225,14 +223,4 @@ def resolve_for_command(
         policy=ResolutionPolicy(interaction=interaction, completion=CompletionPolicy.COMPLETE),
         interaction_broker=broker,
     )
-    try:
-        projected = batch.complete_or_raise()
-        batch.scrub_values()
-        result.update(projected)
-        projected.clear()
-        return result
-    except BaseException:
-        projected.clear()
-        result.clear()
-        batch.scrub_values()
-        raise
+    return batch.complete_or_raise()

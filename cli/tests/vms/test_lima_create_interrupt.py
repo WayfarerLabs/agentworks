@@ -38,11 +38,11 @@ if TYPE_CHECKING:
 _REMOTE_TEMPLATE_DIR = "/tmp/agentworks-lima-template.A1b2C3d4E5"
 
 
-def _assert_secret_absent_from_agentworks_exception_graph(
+def _assert_secret_absent_from_exception_graph(
     exc: BaseException,
     secret: str,
 ) -> None:
-    """Inspect every Agentworks frame across the linked exception graph."""
+    """Inspect rendered linked exception objects, including groups."""
     pending = [exc]
     seen: set[int] = set()
     while pending:
@@ -51,12 +51,6 @@ def _assert_secret_absent_from_agentworks_exception_graph(
             continue
         seen.add(id(current))
         assert secret not in repr(current)
-        traceback = current.__traceback__
-        while traceback is not None:
-            module = str(traceback.tb_frame.f_globals.get("__name__", ""))
-            if module.startswith("agentworks."):
-                assert secret not in repr(traceback.tb_frame.f_locals)
-            traceback = traceback.tb_next
         if current.__cause__ is not None:
             pending.append(current.__cause__)
         if current.__context__ is not None:
@@ -133,26 +127,6 @@ def _forbid_persistent_tempfiles(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("tempfile.NamedTemporaryFile", _forbidden)
 
 
-class _FakeHostTransport:
-    def __init__(self, events: list[tuple[str, str]]) -> None:
-        self._events = events
-
-    def write_file(self, path: str, content: str) -> None:
-        self._events.append(("host-write", path))
-
-    def run(self, cmd: str, **_kw: object) -> SimpleNamespace:
-        self._events.append(("host", cmd))
-        return SimpleNamespace(returncode=1, stdout="", stderr="", ok=False)
-
-
-def _wire_remote_host(monkeypatch: pytest.MonkeyPatch, events: list[tuple[str, str]]) -> None:
-    monkeypatch.setattr(
-        LimaPlatform,
-        "_host_transport",
-        lambda self, logger=None: _FakeHostTransport(events),
-    )
-
-
 def test_local_create_streams_template_without_persistent_file(monkeypatch: pytest.MonkeyPatch) -> None:
     secret = "stdin-swordfish"
     calls: list[tuple[str, dict[str, object]]] = []
@@ -223,10 +197,10 @@ def test_local_lima_failure_omits_secret_bearing_stderr(monkeypatch: pytest.Monk
         LimaPlatform("lima", {})._create_local("myvm", f"embedded: {secret}")
 
     assert str(caught.value) == ("limactl stdin command failed (exit 1): limactl create --name myvm --tty=false -")
-    _assert_secret_absent_from_agentworks_exception_graph(caught.value, secret)
+    _assert_secret_absent_from_exception_graph(caught.value, secret)
 
 
-def test_remote_lima_failure_clears_sensitive_input_and_raw_results(
+def test_remote_lima_failure_omits_sensitive_input_and_raw_results(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     secret = "remote-lima-result-swordfish"
@@ -247,24 +221,7 @@ def test_remote_lima_failure_clears_sensitive_input_and_raw_results(
         )
 
     assert str(caught.value) == "SSH stdin command failed (exit 1): limactl shell myvm cat"
-    _assert_secret_absent_from_agentworks_exception_graph(caught.value, secret)
-
-
-def test_remote_lima_sensitive_interrupt_clears_frames_and_preserves_identity(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    secret = "remote-lima-interrupt-swordfish"
-    interrupt = KeyboardInterrupt("operator interrupt")
-    monkeypatch.setattr("agentworks.ssh.subprocess.run", lambda *args, **kwargs: (_ for _ in ()).throw(interrupt))
-
-    with pytest.raises(KeyboardInterrupt) as caught:
-        LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._run_lima(
-            "limactl shell myvm cat",
-            input_text=secret,
-        )
-
-    assert caught.value is interrupt
-    _assert_secret_absent_from_agentworks_exception_graph(caught.value, secret)
+    _assert_secret_absent_from_exception_graph(caught.value, secret)
 
 
 def test_failure_mid_create_cleans_up_and_reraises(
@@ -343,141 +300,6 @@ def test_interrupt_during_ephemeral_tailscale_join_cleans_up_and_does_not_render
     assert _deletes(ran) == ["limactl delete --force myvm"]
     assert secret not in repr(ran)
     assert secret not in "\n".join([*captured_output.detail, *captured_output.warnings])
-
-
-@pytest.mark.parametrize(
-    "placement",
-    [
-        {"mode": "local"},
-        {"mode": "ssh", "host": "user@host"},
-    ],
-    ids=("local", "remote"),
-)
-@pytest.mark.parametrize("control_flow", [SystemExit(7), GeneratorExit()], ids=("system-exit", "generator-exit"))
-def test_nonordinary_exit_rolls_back_created_instance_and_preserves_identity(
-    monkeypatch: pytest.MonkeyPatch,
-    control_flow: BaseException,
-    placement: dict[str, str],
-) -> None:
-    ran = _wire(monkeypatch, errors={"tailscale up --auth-key": control_flow})
-    if placement["mode"] == "ssh":
-        monkeypatch.setattr(
-            LimaPlatform,
-            "_create_remote",
-            lambda self, name, yaml, *, redactions: None,
-        )
-        _wire_remote_host(monkeypatch, [])
-
-    with pytest.raises(type(control_flow)) as caught:
-        LimaPlatform("lima", {"placement": placement}).create(_request(), RunContext())
-
-    assert caught.value is control_flow
-    assert _deletes(ran) == ["limactl delete --force myvm"]
-
-
-@pytest.mark.parametrize(
-    "primary",
-    [SystemExit(17), GeneratorExit()],
-    ids=("system-exit", "generator-exit"),
-)
-def test_cleanup_control_flow_and_warning_failures_cannot_replace_primary(
-    monkeypatch: pytest.MonkeyPatch,
-    primary: BaseException,
-) -> None:
-    secondary = GeneratorExit() if isinstance(primary, SystemExit) else SystemExit(18)
-    events: list[str] = []
-    platform = LimaPlatform("lima", {"placement": {"mode": "local"}})
-    monkeypatch.setattr(LimaPlatform, "_ensure_limactl", lambda self: None)
-    monkeypatch.setattr(LimaPlatform, "_instance_exists", lambda self, name: False)
-
-    def fail_create(self: LimaPlatform, name: str, yaml: str) -> None:
-        del self, yaml
-        events.append(f"create:{name}")
-        raise primary
-
-    def fail_delete(self: LimaPlatform, name: str) -> None:
-        del self
-        events.append(f"delete:{name}")
-        raise secondary
-
-    def fail_detail(message: str) -> None:
-        if message.startswith("Cleaning up"):
-            events.append(f"detail:{message}")
-            raise KeyboardInterrupt("detail sink interrupted")
-
-    def fail_warning(message: str) -> None:
-        events.append(f"warn:{message}")
-        raise KeyboardInterrupt("warning sink interrupted")
-
-    monkeypatch.setattr(LimaPlatform, "_create_local", fail_create)
-    monkeypatch.setattr(LimaPlatform, "_delete_instance", fail_delete)
-    monkeypatch.setattr("agentworks.capabilities.vm_platform.lima.output.detail", fail_detail)
-    monkeypatch.setattr("agentworks.capabilities.vm_platform.lima.output.warn", fail_warning)
-
-    with pytest.raises(type(primary)) as caught:
-        platform.create(_request(), RunContext())
-
-    assert caught.value is primary
-    assert [event.split(":", 1)[0] for event in events] == ["create", "detail", "delete", "warn", "warn"]
-
-
-def test_remote_kill_control_flow_cannot_skip_delete_or_replace_primary(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from agentworks import remote_exec
-
-    primary = SystemExit(19)
-    events: list[str] = []
-    platform = LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})
-    monkeypatch.setattr(LimaPlatform, "_instance_exists", lambda self, name: False)
-    monkeypatch.setattr(
-        LimaPlatform,
-        "_create_remote",
-        lambda self, name, yaml, *, redactions: (_ for _ in ()).throw(primary),
-    )
-    monkeypatch.setattr(LimaPlatform, "_host_transport", lambda self, logger=None: SimpleNamespace())
-
-    def fail_kill(target: object, path: str) -> None:
-        del target, path
-        events.append("kill")
-        raise GeneratorExit()
-
-    def delete(self: LimaPlatform, name: str) -> None:
-        del self
-        events.append(f"delete:{name}")
-
-    monkeypatch.setattr(remote_exec, "kill_detached", fail_kill)
-    monkeypatch.setattr(LimaPlatform, "_delete_instance", delete)
-
-    with pytest.raises(SystemExit) as caught:
-        platform.create(_request(), RunContext())
-
-    assert caught.value is primary
-    assert events == ["kill", "delete:myvm"]
-
-
-def test_cleanup_notice_failure_cannot_replace_first_keyboard_interrupt(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    primary = KeyboardInterrupt("first")
-    platform = LimaPlatform("lima", {"placement": {"mode": "local"}})
-    monkeypatch.setattr(LimaPlatform, "_ensure_limactl", lambda self: None)
-    monkeypatch.setattr(LimaPlatform, "_instance_exists", lambda self, name: False)
-    monkeypatch.setattr(
-        LimaPlatform,
-        "_create_local",
-        lambda self, name, yaml: (_ for _ in ()).throw(primary),
-    )
-    monkeypatch.setattr(LimaPlatform, "_delete_instance", lambda self, name: None)
-    monkeypatch.setattr(
-        "agentworks.capabilities.vm_platform.lima.output.warn",
-        lambda message: (_ for _ in ()).throw(SystemExit(20)),
-    )
-
-    with pytest.raises(KeyboardInterrupt) as caught:
-        platform.create(_request(), RunContext())
-
-    assert caught.value is primary
 
 
 def test_ephemeral_tailscale_join_failure_cleans_up_without_key_in_error(

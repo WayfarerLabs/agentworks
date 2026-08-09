@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import inspect
 import subprocess
-import sys
-from contextlib import AbstractContextManager, contextmanager
-from typing import Any, cast
+from contextlib import AbstractContextManager
+from typing import cast
 
 import pytest
 from pydantic import ValidationError
@@ -22,49 +20,8 @@ from agentworks.plugins.onepassword.backend import (
     OnePasswordBackend,
     OnePasswordMapping,
     OnePasswordSourceConfig,
-    _bounded_read,
     _BoundedRead,
 )
-
-
-@contextmanager
-def _interrupt_exact_line(function: Any, source_line: str) -> Any:
-    lines, first_line = inspect.getsourcelines(function)
-    matches = [first_line + index for index, line in enumerate(lines) if line.rstrip("\n") == source_line]
-    assert len(matches) == 1
-    target_line = matches[0]
-    target_code = function.__code__
-
-    def trace(frame: Any, event: str, argument: object) -> Any:
-        del argument
-        if frame.f_code is target_code and event == "line" and frame.f_lineno == target_line:
-            sys.settrace(None)
-            raise KeyboardInterrupt
-        return trace
-
-    sys.settrace(trace)
-    try:
-        yield
-    finally:
-        sys.settrace(None)
-
-
-@contextmanager
-def _interrupt_call_entry(function: Any) -> Any:
-    target_code = function.__code__
-
-    def trace(frame: Any, event: str, argument: object) -> Any:
-        del argument
-        if frame.f_code is target_code and event == "call":
-            sys.settrace(None)
-            raise KeyboardInterrupt
-        return trace
-
-    sys.settrace(trace)
-    try:
-        yield
-    finally:
-        sys.settrace(None)
 
 
 def _request(reference: str = "op://Work/item/password") -> SecretLookupRequest:
@@ -210,7 +167,7 @@ def test_missing_binary_is_connectivity(monkeypatch: pytest.MonkeyPatch) -> None
     assert caught.value.kind is SecretClientFailureKind.CONNECTIVITY
 
 
-def test_later_failure_discards_earlier_value(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_later_failure_does_not_expose_earlier_value(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = 0
 
     def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -234,23 +191,8 @@ def test_later_failure_discards_earlier_value(monkeypatch: pytest.MonkeyPatch) -
     assert "sentinel-resolved" not in repr(caught.value)
 
 
-def _traceback_local_text(exc: BaseException) -> str:
-    values: list[str] = []
-    seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        traceback = current.__traceback__
-        while traceback is not None:
-            if traceback.tb_frame.f_globals.get("__name__", "").startswith("agentworks."):
-                values.extend(repr(value) for value in traceback.tb_frame.f_locals.values())
-            traceback = traceback.tb_next
-        current = current.__cause__ or current.__context__
-    return "\n".join(values)
-
-
 @pytest.mark.parametrize("native", ["timeout", "oserror", "result"])
-def test_native_failure_graph_and_traceback_locals_are_value_free(
+def test_native_failure_projects_to_safe_context_free_exception(
     monkeypatch: pytest.MonkeyPatch,
     native: str,
 ) -> None:
@@ -280,141 +222,8 @@ def test_native_failure_graph_and_traceback_locals_are_value_free(
         context.__exit__(None, None, None)
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
-    assert "sentinel-native" not in _traceback_local_text(caught.value)
-
-
-def test_actual_bounded_read_constructor_entry_never_receives_or_retains_plaintext(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        subprocess,
-        "run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(
-            ["op", "sentinel-native-reference"],
-            0,
-            stdout="sentinel-extracted-value",
-            stderr="sentinel-native-stderr",
-        ),
-    )
-
-    argv = ["read", "sentinel-constructor-argv", "op://Work/item/password"]
-    with pytest.raises(KeyboardInterrupt) as caught, _interrupt_call_entry(_BoundedRead.__init__):
-        _bounded_read(argv, timeout=1.0)
-
-    retained = _traceback_local_text(caught.value)
-    assert "sentinel-native" not in retained
-    assert "sentinel-extracted-value" not in retained
-    assert "sentinel-constructor-argv" not in retained
-    assert argv == []
-
-
-@pytest.mark.parametrize(
-    "source_line",
-    ["        if completed is not None:", "        return bounded"],
-    ids=["first-post-run-classification", "successful-return"],
-)
-def test_exact_bounded_read_boundaries_clear_native_result_value_and_argv(
-    monkeypatch: pytest.MonkeyPatch,
-    source_line: str,
-) -> None:
-    monkeypatch.setattr(
-        subprocess,
-        "run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(
-            ["op", "sentinel-native-argv"],
-            0,
-            stdout="sentinel-bounded-return-value",
-            stderr="sentinel-native-stderr",
-        ),
-    )
-    argv = ["read", "sentinel-caller-argv", "op://Work/item/password"]
-    with pytest.raises(KeyboardInterrupt) as caught, _interrupt_exact_line(_bounded_read, source_line):
-        _bounded_read(argv, timeout=1.0)
-
-    retained = _traceback_local_text(caught.value)
-    assert "sentinel-native" not in retained
-    assert "sentinel-caller-argv" not in retained
-    assert "sentinel-bounded-return-value" not in retained
-    assert argv == []
-
-
-def test_exact_native_stderr_classification_interrupt_has_no_helper_copy(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        subprocess,
-        "run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(
-            ["op", "sentinel-classification-argv"],
-            1,
-            stdout="sentinel-classification-stdout",
-            stderr="sentinel-classification-stderr no such item",
-        ),
-    )
-    argv = ["read", "sentinel-classification-caller-argv", "op://Work/item/password"]
-    with (
-        pytest.raises(KeyboardInterrupt) as caught,
-        _interrupt_exact_line(_bounded_read, "                    if signed_out_marker in stderr:"),
-    ):
-        _bounded_read(argv, timeout=1.0)
-
-    retained = _traceback_local_text(caught.value)
-    assert "sentinel-classification" not in retained
-    assert "<genexpr>" not in retained
-    assert argv == []
-
-
-def test_keyboard_interrupt_clears_prior_onepassword_values_from_traceback_locals(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls = 0
-
-    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            return subprocess.CompletedProcess(args, 0, stdout="sentinel-prior-value", stderr="")
-        raise KeyboardInterrupt
-
-    monkeypatch.setattr(subprocess, "run", run)
-    context, client = _client()
-    requests = (
-        SecretLookupRequest(name="first", mapping=OnePasswordMapping.model_validate("op://W/a/p")),
-        SecretLookupRequest(name="second", mapping=OnePasswordMapping.model_validate("op://W/b/p")),
-    )
-    try:
-        with pytest.raises(KeyboardInterrupt) as caught:
-            client.resolve(requests, remaining_time=lambda: 2.0)
-    finally:
-        context.__exit__(None, None, None)
-
-    assert "sentinel-prior-value" not in _traceback_local_text(caught.value)
-
-
-def test_exact_client_success_return_interrupt_clears_onepassword_value(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        subprocess,
-        "run",
-        lambda args, **kwargs: subprocess.CompletedProcess(
-            args,
-            0,
-            stdout="sentinel-onepassword-return-value",
-            stderr="",
-        ),
-    )
-    context, client = _client()
-    try:
-        with (
-            pytest.raises(KeyboardInterrupt) as caught,
-            _interrupt_exact_line(type(client).resolve, "            return resolved"),
-        ):
-            client.resolve((_request(),), remaining_time=lambda: 2.0)
-    finally:
-        context.__exit__(None, None, None)
-
-    assert "sentinel-onepassword-return-value" not in _traceback_local_text(caught.value)
+    rendered = repr((str(caught.value), repr(caught.value), caught.value.args))
+    assert "sentinel-native" not in rendered
 
 
 def test_factory_entry_and_prepare_are_subprocess_free(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -104,78 +104,31 @@ class _BoundedRead:
 
 
 def _bounded_read(args: list[str], *, timeout: float) -> _BoundedRead:
-    """Run one bounded final-client read and discard every native failure detail."""
-    completed: subprocess.CompletedProcess[str] | None = None
-    failure: SecretClientFailureKind | None = None
-    timed_out = False
-    value: str | None = None
-    stderr = ""
-    signed_out = False
-    not_found = False
-    bounded: _BoundedRead | None = None
+    """Run one bounded read and project native failures to fixed categories."""
     try:
-        try:
-            completed = subprocess.run(  # noqa: S603 - explicit argv, no shell
-                [_OP_BINARY, *args],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=timeout,
-            )
-        except subprocess.TimeoutExpired:
-            timed_out = True
-        except OSError:
-            failure = SecretClientFailureKind.CONNECTIVITY
+        completed = subprocess.run(  # noqa: S603 - explicit argv, no shell
+            [_OP_BINARY, *args],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return _BoundedRead(timed_out=True)
+    except OSError:
+        return _BoundedRead(failure=SecretClientFailureKind.CONNECTIVITY)
 
-        if completed is not None:
-            if completed.returncode == 0:
-                value = completed.stdout
-            else:
-                stderr = completed.stderr.lower()
-                for signed_out_marker in _SIGNED_OUT_MARKERS:
-                    if signed_out_marker in stderr:
-                        signed_out = True
-                        break
-                for not_found_marker in _NOT_FOUND_MARKERS:
-                    if not_found_marker in stderr:
-                        not_found = True
-                        break
-                if signed_out:
-                    failure = SecretClientFailureKind.AUTHENTICATION
-                elif not_found:
-                    failure = SecretClientFailureKind.HARD_MAPPING
-                else:
-                    failure = SecretClientFailureKind.EXTERNAL
+    if completed.returncode == 0:
+        return _BoundedRead(value=completed.stdout)
 
-        # A typed client failure is raised by the caller only after this frame
-        # is gone. Native exceptions, CompletedProcess, stderr, and
-        # failure-path stdout therefore cannot survive in its traceback or
-        # exception graph.
-        completed = None
-        stderr = ""
-        if failure is not None or timed_out:
-            value = None
-        # Never pass plaintext through the generated dataclass constructor:
-        # an interruption at function entry would retain its arguments before
-        # this surrounding cleanup fence could run.
-        bounded = _BoundedRead()
-        object.__setattr__(bounded, "value", value)
-        object.__setattr__(bounded, "failure", failure)
-        object.__setattr__(bounded, "timed_out", timed_out)
-        value = None
-        args.clear()
-        return bounded
-    except BaseException:
-        completed = None
-        stderr = ""
-        value = None
-        bounded = None
-        failure = None
-        timed_out = False
-        signed_out = False
-        not_found = False
-        args.clear()
-        raise
+    stderr = completed.stderr.lower()
+    if any(marker in stderr for marker in _SIGNED_OUT_MARKERS):
+        failure = SecretClientFailureKind.AUTHENTICATION
+    elif any(marker in stderr for marker in _NOT_FOUND_MARKERS):
+        failure = SecretClientFailureKind.HARD_MAPPING
+    else:
+        failure = SecretClientFailureKind.EXTERNAL
+    return _BoundedRead(failure=failure)
 
 
 def _raise_client_failure(kind: SecretClientFailureKind) -> NoReturn:
@@ -250,70 +203,26 @@ class _OnePasswordClient:
         remaining_time: RemainingTime,
     ) -> Mapping[str, str]:
         resolved: dict[str, str] = {}
-        current: SecretLookupRequest | None = None
-        mapping: BaseModel | None = None
-        args: list[str] | None = None
-        read: _BoundedRead | None = None
-        try:
-            for index in range(len(requests)):
-                current = requests[index]
-                mapping = current.mapping
-                if not isinstance(mapping, OnePasswordMapping):
-                    continue
-                args = ["read", "--no-newline"]
-                if self._config.account is not None:
-                    args += ["--account", self._config.account]
-                args.append(mapping.root)
-                budget_remaining = remaining_time()
-                timeout = (
-                    self._config.timeout if budget_remaining is None else min(self._config.timeout, budget_remaining)
-                )
-                budget_remaining = None
-                if timeout <= 0:
-                    resolved.clear()
-                    requests = ()
-                    current = None
-                    mapping = None
-                    args.clear()
-                    args = None
-                    _raise_client_timeout()
-                read = _bounded_read(args, timeout=timeout)
-                if read.timed_out or read.failure is not None:
-                    timed_out = read.timed_out
-                    failure = read.failure
-                    resolved.clear()
-                    requests = ()
-                    current = None
-                    mapping = None
-                    args.clear()
-                    args = None
-                    read = None
-                    if timed_out:
-                        _raise_client_timeout()
-                    assert failure is not None
-                    _raise_client_failure(failure)
-                assert read.value is not None
-                resolved[current.name] = read.value
-                read = None
-                current = None
-                mapping = None
-                args.clear()
-                args = None
-            requests = ()
-            current = None
-            mapping = None
-            read = None
-            return resolved
-        except BaseException:
-            resolved.clear()
-            requests = ()
-            current = None
-            mapping = None
-            if args is not None:
-                args.clear()
-            args = None
-            read = None
-            raise
+        for request in requests:
+            mapping = request.mapping
+            if not isinstance(mapping, OnePasswordMapping):
+                continue
+            args = ["read", "--no-newline"]
+            if self._config.account is not None:
+                args += ["--account", self._config.account]
+            args.append(mapping.root)
+            budget_remaining = remaining_time()
+            timeout = self._config.timeout if budget_remaining is None else min(self._config.timeout, budget_remaining)
+            if timeout <= 0:
+                _raise_client_timeout()
+            read = _bounded_read(args, timeout=timeout)
+            if read.timed_out:
+                _raise_client_timeout()
+            if read.failure is not None:
+                _raise_client_failure(read.failure)
+            assert read.value is not None
+            resolved[request.name] = read.value
+        return resolved
 
 
 class _OnePasswordContext(AbstractContextManager[SecretSourceClient]):

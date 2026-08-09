@@ -56,33 +56,13 @@ class _EnvVarClient:
         remaining_time: RemainingTime,
     ) -> Mapping[str, str]:
         resolved: dict[str, str] = {}
-        request: SecretLookupRequest | None = None
-        mapping: BaseModel | None = None
-        env_name: str | None = None
-        raw: str | None = None
-        try:
-            for request in requests:
-                mapping = request.mapping
-                env_name = mapping.root if isinstance(mapping, EnvVarMapping) else env_var_name_for(request.name)
-                raw = os.environ.get(env_name)
-                if raw is not None:
-                    resolved[request.name] = raw.rstrip("\r\n")
-                raw = None
-
-            requests = ()
-            request = None
-            mapping = None
-            env_name = None
-            raw = None
-            return resolved
-        except BaseException:
-            resolved.clear()
-            requests = ()
-            request = None
-            mapping = None
-            env_name = None
-            raw = None
-            raise
+        for request in requests:
+            mapping = request.mapping
+            env_name = mapping.root if isinstance(mapping, EnvVarMapping) else env_var_name_for(request.name)
+            raw = os.environ.get(env_name)
+            if raw is not None:
+                resolved[request.name] = raw.rstrip("\r\n")
+        return resolved
 
 
 class _EnvVarContext(AbstractContextManager[SecretSourceClient]):

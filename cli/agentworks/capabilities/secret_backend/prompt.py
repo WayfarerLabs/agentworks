@@ -74,15 +74,9 @@ class _PromptClient:
         if self._broker is None:
             raise StateError("the prompt source client requires an interaction broker")
         resolved: dict[str, str] = {}
-        try:
-            for request in requests:
-                resolved[request.name] = self._broker.request_secret(request.name)
-            requests = ()
-            return resolved
-        except BaseException:
-            resolved.clear()
-            requests = ()
-            raise
+        for request in requests:
+            resolved[request.name] = self._broker.request_secret(request.name)
+        return resolved
 
 
 class _PromptContext(AbstractContextManager[SecretSourceClient]):

@@ -2,15 +2,10 @@
 
 from __future__ import annotations
 
-import inspect
-import sys
-from contextlib import contextmanager
-from typing import Any
-
 import pytest
 
 from agentworks import output
-from agentworks.capabilities.secret_backend.client import InteractionBroker, SecretLookupRequest
+from agentworks.capabilities.secret_backend.client import InteractionBroker
 from agentworks.capabilities.secret_backend.prompt import PromptBackend, PromptSourceConfig
 from agentworks.errors import StateError, UserAbort
 from agentworks.resources.graph import Readiness
@@ -24,30 +19,6 @@ from agentworks.secrets.resolve import (
     ResolutionPolicy,
     resolve_batch,
 )
-
-
-@contextmanager
-def _interrupt_return_line(function: Any) -> Any:
-    lines, first_line = inspect.getsourcelines(function)
-    matches = [
-        first_line + index for index, line in enumerate(lines) if line.rstrip("\n") == "            return resolved"
-    ]
-    assert len(matches) == 1
-    target_line = matches[0]
-    target_code = function.__code__
-
-    def trace(frame: Any, event: str, argument: object) -> Any:
-        del argument
-        if frame.f_code is target_code and event == "line" and frame.f_lineno == target_line:
-            sys.settrace(None)
-            raise KeyboardInterrupt
-        return trace
-
-    sys.settrace(trace)
-    try:
-        yield
-    finally:
-        sys.settrace(None)
 
 
 class _Broker(InteractionBroker):
@@ -132,7 +103,7 @@ def test_prompt_uses_no_tty_or_global_interactivity_read(monkeypatch: pytest.Mon
     assert batch.complete_or_raise() == {"x": "value:x"}
 
 
-def test_prompt_abort_propagates_without_retaining_earlier_answers() -> None:
+def test_prompt_abort_does_not_expose_earlier_answers_in_exception() -> None:
     class _AbortBroker(_Broker):
         def request_secret(self, name: str, /) -> str:
             if name == "b":
@@ -166,31 +137,3 @@ def test_prompt_broker_user_abort_propagates_by_identity() -> None:
         )
 
     assert caught.value is abort
-
-
-def test_exact_success_return_interrupt_clears_prompt_value_from_traceback_locals() -> None:
-    class _ReturnBroker(_Broker):
-        def request_secret(self, name: str, /) -> str:
-            del name
-            return "sentinel-prompt-return-value"
-
-    context = PromptBackend.create_client(
-        source_name="prompt",
-        config=PromptSourceConfig(name="prompt"),
-        interaction_broker=_ReturnBroker(),
-        remaining_time=lambda: None,
-    )
-    client = context.__enter__()
-    try:
-        with pytest.raises(KeyboardInterrupt) as caught, _interrupt_return_line(type(client).resolve):
-            client.resolve((SecretLookupRequest(name="token", mapping=None),), remaining_time=lambda: None)
-    finally:
-        context.__exit__(None, None, None)
-
-    local_text: list[str] = []
-    traceback = caught.value.__traceback__
-    while traceback is not None:
-        if traceback.tb_frame.f_globals.get("__name__", "").startswith("agentworks."):
-            local_text.extend(repr(value) for value in traceback.tb_frame.f_locals.values())
-        traceback = traceback.tb_next
-    assert "sentinel-prompt-return-value" not in "\n".join(local_text)

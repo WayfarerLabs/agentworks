@@ -94,11 +94,7 @@ def test_create_vm_request_shape_and_row(
     monkeypatch.setattr(
         vm_manager,
         "bootstrap_vm",
-        lambda *a, **k: (
-            SimpleNamespace(),
-            SimpleNamespace(discard_redactions=lambda: None),
-            "/home/agentworks",
-        ),
+        lambda *a, **k: (SimpleNamespace(), SimpleNamespace(), "/home/agentworks"),
     )
     monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: None)
 
@@ -163,11 +159,7 @@ def test_create_vm_stores_and_provisions_selected_admin_template(
     monkeypatch.setattr(
         vm_manager,
         "bootstrap_vm",
-        lambda *a, **k: (
-            SimpleNamespace(),
-            SimpleNamespace(discard_redactions=lambda: None),
-            "/home/agentworks",
-        ),
+        lambda *a, **k: (SimpleNamespace(), SimpleNamespace(), "/home/agentworks"),
     )
     monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: None)
 
@@ -276,11 +268,7 @@ def test_create_vm_composes_r11_hostname_with_slug(
     monkeypatch.setattr(
         vm_manager,
         "bootstrap_vm",
-        lambda *a, **k: (
-            SimpleNamespace(),
-            SimpleNamespace(discard_redactions=lambda: None),
-            "/home/agentworks",
-        ),
+        lambda *a, **k: (SimpleNamespace(), SimpleNamespace(), "/home/agentworks"),
     )
     monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: None)
 

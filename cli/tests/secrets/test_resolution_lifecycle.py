@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import inspect
-import sys
 from collections.abc import ItemsView, Iterator, Mapping
-from contextlib import AbstractContextManager, contextmanager
+from contextlib import AbstractContextManager
 from dataclasses import FrozenInstanceError
 from typing import Any, ClassVar, Literal
 
@@ -39,13 +37,10 @@ from agentworks.secrets.outcomes import (
 )
 from agentworks.secrets.policy import InteractionPolicy
 from agentworks.secrets.resolve import (
-    _BATCH_TOKEN,
     ActiveSource,
     CompletionPolicy,
     OutputInteractionBroker,
-    ResolutionBatch,
     ResolutionPolicy,
-    _drive_source,
     resolve_batch,
 )
 
@@ -206,46 +201,6 @@ def _policy(
     return ResolutionPolicy(interaction=interaction, completion=completion)
 
 
-def _recursive_agentworks_traceback_text(exc: BaseException) -> str:
-    values: list[str] = []
-    seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        traceback = current.__traceback__
-        while traceback is not None:
-            if traceback.tb_frame.f_globals.get("__name__", "").startswith("agentworks."):
-                values.extend(repr(value) for value in traceback.tb_frame.f_locals.values())
-            traceback = traceback.tb_next
-        current = current.__cause__ or current.__context__
-    return "\n".join(values)
-
-
-@contextmanager
-def _interrupt_exact_line(function: Any, source_line: str) -> Iterator[None]:
-    lines, first_line = inspect.getsourcelines(function)
-    matches = [first_line + index for index, line in enumerate(lines) if line.rstrip("\n") == source_line]
-    assert matches, (function, source_line)
-    target_line = matches[0]
-    target_code = function.__code__
-    fired = False
-
-    def trace(frame: Any, event: str, argument: object) -> Any:
-        del argument
-        nonlocal fired
-        if not fired and frame.f_code is target_code and event == "line" and frame.f_lineno == target_line:
-            fired = True
-            sys.settrace(None)
-            raise KeyboardInterrupt
-        return trace
-
-    sys.settrace(trace)
-    try:
-        yield
-    finally:
-        sys.settrace(None)
-
-
 @pytest.fixture(autouse=True)
 def _reset_backend() -> None:
     _Backend.events = []
@@ -297,105 +252,6 @@ def test_allow_scopes_live_output_broker_to_prompt_factory(
     assert batch.complete_or_raise() == {"token": "prompt-value"}
 
 
-class _PostReturnClient(_Client):
-    def resolve(
-        self,
-        requests: tuple[SecretLookupRequest, ...],
-        *,
-        remaining_time: RemainingTime,
-    ) -> dict[str, str]:
-        self.events.append("resolve")
-        return {request.name: "sentinel-post-return-value" for request in requests}
-
-    def __repr__(self) -> str:
-        return "_PostReturnClient(sentinel-provider-client)"
-
-
-class _PostReturnContext(AbstractContextManager[SecretSourceClient]):
-    def __init__(self, events: list[str]) -> None:
-        self.events = events
-        self.client = _PostReturnClient(events, {}, None)
-
-    def __enter__(self) -> SecretSourceClient:
-        self.events.append("enter")
-        return self.client
-
-    def __exit__(self, *args: object) -> None:
-        self.events.append("exit")
-
-    def __repr__(self) -> str:
-        return "_PostReturnContext(sentinel-provider-context)"
-
-
-class _PostReturnBackend(_Backend):
-    events: ClassVar[list[str]] = []
-
-    @classmethod
-    def create_client(
-        cls,
-        *,
-        source_name: str,
-        config: AgwModel,
-        interaction_broker: InteractionBroker | None,
-        remaining_time: RemainingTime,
-    ) -> AbstractContextManager[SecretSourceClient]:
-        cls.events.append("factory")
-        return _PostReturnContext(cls.events)
-
-
-def test_post_resolve_boundary_interrupt_clears_mapping_client_and_context(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    checks = 0
-
-    def interrupt_after_resolve(remaining_time: RemainingTime) -> None:
-        del remaining_time
-        nonlocal checks
-        checks += 1
-        if checks == 5:
-            raise KeyboardInterrupt
-
-    _PostReturnBackend.events = []
-    monkeypatch.setattr("agentworks.secrets.resolve._check_boundary", interrupt_after_resolve)
-    with pytest.raises(KeyboardInterrupt) as caught:
-        resolve_batch(
-            [SecretDecl(name="token", description="token")],
-            [_source(backend_class=_PostReturnBackend)],
-            policy=_policy(),
-            interaction_broker=None,
-        )
-
-    retained = _recursive_agentworks_traceback_text(caught.value)
-    assert "sentinel-post-return-value" not in retained
-    assert "sentinel-provider-client" not in retained
-    assert "sentinel-provider-context" not in retained
-    assert _PostReturnBackend.events == ["factory", "enter", "prepare", "resolve", "exit"]
-
-
-@pytest.mark.parametrize(
-    "source_line",
-    ["        client = None", "        return resolved"],
-    ids=["first-post-context-line", "successful-return"],
-)
-def test_exact_drive_source_boundaries_clear_mapping_client_and_context(source_line: str) -> None:
-    _PostReturnBackend.events = []
-    with (
-        pytest.raises(KeyboardInterrupt) as caught,
-        _interrupt_exact_line(_drive_source, source_line),
-    ):
-        resolve_batch(
-            [SecretDecl(name="token", description="token")],
-            [_source(backend_class=_PostReturnBackend)],
-            policy=_policy(),
-            interaction_broker=None,
-        )
-
-    retained = _recursive_agentworks_traceback_text(caught.value)
-    assert "sentinel-post-return-value" not in retained
-    assert "sentinel-provider-client" not in retained
-    assert "sentinel-provider-context" not in retained
-
-
 def test_explicit_json_null_mapping_reaches_nullable_mapping_model() -> None:
     _NullableBackend.events = []
     _NullableBackend.values = {"token": "resolved-from-null"}
@@ -418,7 +274,7 @@ def test_explicit_json_null_mapping_reaches_nullable_mapping_model() -> None:
     assert _NullableBackend.events == ["factory", "enter", "prepare", "resolve", "exit"]
 
 
-def test_soft_miss_is_typed_and_incomplete_batch_clears_values() -> None:
+def test_soft_miss_is_typed_and_incomplete_batch_raises() -> None:
     batch = resolve_batch(
         [SecretDecl(name="missing", description="missing")],
         [_source()],
@@ -434,7 +290,6 @@ def test_soft_miss_is_typed_and_incomplete_batch_clears_values() -> None:
     )
     with pytest.raises(SecretUnavailableError):
         batch.complete_or_raise()
-    assert batch._values == {}
 
 
 @pytest.mark.parametrize(
@@ -669,45 +524,7 @@ def test_batch_has_no_generic_value_surface_and_success_returns_a_copy() -> None
     assert batch.complete_or_raise() == {"token": "sentinel-value"}
 
 
-@pytest.mark.parametrize(
-    "source_line",
-    [
-        "            self._values: dict[str, str] = {}",
-        "                if type(name) is not str or type(value) is not str:",
-        "            return None",
-    ],
-    ids=["slot-initialization", "after-value-extraction", "successful-return"],
-)
-def test_exact_batch_constructor_interrupt_clears_every_plaintext_copy(source_line: str) -> None:
-    outcome = ResolutionOutcome(
-        name="token",
-        category=ResolutionCategory.RESOLVED,
-        detail=ResolutionDetail.RESOLVED,
-        remediation=ResolutionRemediation.NONE,
-        source="primary",
-    )
-    with (
-        pytest.raises(KeyboardInterrupt) as caught,
-        _interrupt_exact_line(ResolutionBatch.__init__, source_line),
-    ):
-        ResolutionBatch(
-            (outcome,),
-            {"token": "sentinel-constructor-copy"},
-            _token=_BATCH_TOKEN,
-        )
-
-    assert "sentinel-constructor-copy" not in _recursive_agentworks_traceback_text(caught.value)
-    traceback_names: list[str] = []
-    traceback = caught.value.__traceback__
-    while traceback is not None:
-        traceback_names.append(traceback.tb_frame.f_code.co_name)
-        traceback = traceback.tb_next
-    assert "<genexpr>" not in traceback_names
-    partial = object.__new__(ResolutionBatch)
-    assert repr(partial) == "ResolutionBatch(outcomes=0, resolved=0, values=<redacted>)"
-
-
-def test_incomplete_batch_clears_resolved_values_before_error_traceback() -> None:
+def test_incomplete_batch_error_does_not_expose_resolved_values() -> None:
     _Backend.values = {"resolved": "sentinel-value"}
     batch = resolve_batch(
         [SecretDecl(name="resolved", description="resolved"), SecretDecl(name="missing", description="missing")],
@@ -717,16 +534,7 @@ def test_incomplete_batch_clears_resolved_values_before_error_traceback() -> Non
     )
     with pytest.raises(SecretUnavailableError) as caught:
         batch.complete_or_raise()
-    assert batch._values == {}
     assert "sentinel-value" not in repr(caught.value)
-    frames = []
-    traceback = caught.value.__traceback__
-    while traceback is not None:
-        frames.append(traceback.tb_frame)
-        traceback = traceback.tb_next
-    retained = [frame.f_locals.get("self") for frame in frames if frame.f_code.co_name == "complete_or_raise"]
-    assert retained == [batch]
-    assert retained[0]._values == {}
 
 
 def test_one_source_receives_one_ordered_batch() -> None:
@@ -831,17 +639,14 @@ def test_hostile_provider_mapping_traversal_is_sanitized_and_value_free(phase: s
     assert batch.outcomes[0].detail is ResolutionDetail.UNEXPECTED
     with pytest.raises(ExternalError) as caught:
         batch.complete_or_raise()
-    traceback_text: list[str] = []
-    traceback = caught.value.__traceback__
-    while traceback is not None:
-        if traceback.tb_frame.f_globals.get("__name__", "").startswith("agentworks."):
-            traceback_text.extend(repr(value) for value in traceback.tb_frame.f_locals.values())
-        traceback = traceback.tb_next
-    assert "sentinel-hostile" not in "\n".join(traceback_text)
-    assert "sentinel-provider-value" not in "\n".join(traceback_text)
+    rendered = repr((str(caught.value), repr(caught.value), caught.value.args))
+    assert "sentinel-hostile" not in rendered
+    assert "sentinel-provider-value" not in rendered
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
-def test_provider_membership_is_never_consulted_after_safe_snapshot() -> None:
+def test_provider_membership_is_not_consulted_during_mapping_validation() -> None:
     _ProtocolBackend.events = []
     _ProtocolClient.returned = _HostileMapping("membership")
     batch = resolve_batch(
@@ -851,57 +656,6 @@ def test_provider_membership_is_never_consulted_after_safe_snapshot() -> None:
         interaction_broker=None,
     )
     assert batch.complete_or_raise() == {"token": "sentinel-provider-value"}
-
-
-def test_exact_inlined_snapshot_entry_clears_provider_without_callee_transfer() -> None:
-    _ProtocolBackend.events = []
-    _ProtocolClient.returned = _HostileMapping("membership")
-    with (
-        pytest.raises(KeyboardInterrupt) as caught,
-        _interrupt_exact_line(resolve_batch, "            returned_values = {}"),
-    ):
-        resolve_batch(
-            [SecretDecl(name="token", description="token")],
-            [_source(backend_class=_ProtocolBackend)],
-            policy=_policy(),
-            interaction_broker=None,
-        )
-
-    retained = _recursive_agentworks_traceback_text(caught.value)
-    assert "sentinel-hostile" not in retained
-    assert "sentinel-provider-value" not in retained
-
-
-def test_exact_batch_finalization_interrupt_clears_resolved_values() -> None:
-    _Backend.values = {"token": "sentinel-finalization-value"}
-    with (
-        pytest.raises(KeyboardInterrupt) as caught,
-        _interrupt_exact_line(resolve_batch, "        for secret in deduped:"),
-    ):
-        resolve_batch(
-            [SecretDecl(name="token", description="token")],
-            [_source()],
-            policy=_policy(),
-            interaction_broker=None,
-        )
-
-    assert "sentinel-finalization-value" not in _recursive_agentworks_traceback_text(caught.value)
-
-
-def test_exact_batch_return_interrupt_clears_constructed_batch_values() -> None:
-    _Backend.values = {"token": "sentinel-batch-return-value"}
-    with (
-        pytest.raises(KeyboardInterrupt) as caught,
-        _interrupt_exact_line(resolve_batch, "        return batch"),
-    ):
-        resolve_batch(
-            [SecretDecl(name="token", description="token")],
-            [_source()],
-            policy=_policy(),
-            interaction_broker=None,
-        )
-
-    assert "sentinel-batch-return-value" not in _recursive_agentworks_traceback_text(caught.value)
 
 
 @pytest.mark.parametrize("value", ["\0x", "x\0", "\rx", "x\r", "\nx", "x\n", "x\ny"])

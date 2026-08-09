@@ -18,7 +18,6 @@ either phase to the same operator-facing outcome.
 
 from __future__ import annotations
 
-import contextlib
 from typing import TYPE_CHECKING
 
 from agentworks import output
@@ -41,12 +40,8 @@ from ._helpers import _require_vm
 if TYPE_CHECKING:
     from typing import NoReturn
 
-    from agentworks.capabilities.vm_platform import ProvisionRequest
     from agentworks.config import Config
     from agentworks.db import Database
-    from agentworks.orchestration.secrets import ScopedSecrets
-    from agentworks.secrets.resolver import Resolver
-    from agentworks.ssh import SSHLogger
 
 # NOTE on the initializer imports (``verify_tailscale_available``,
 # ``announce_git_credentials``, ``bootstrap_vm``, ``run_initialization``):
@@ -74,12 +69,11 @@ def _warn_init_cancel(vm_name: str) -> None:
     propagates unchanged (never downgraded to a Provisioning/External
     error, matching ``delete_vm``'s best-effort discipline).
     """
-    with contextlib.suppress(BaseException):
-        output.warn(
-            f"Cancelling vm create '{vm_name}' during initialization. "
-            f"The VM exists but is partially initialized. "
-            f"Use 'vm reinit {vm_name}' to retry, or 'vm delete {vm_name} --force' to remove it."
-        )
+    output.warn(
+        f"Cancelling vm create '{vm_name}' during initialization. "
+        f"The VM exists but is partially initialized. "
+        f"Use 'vm reinit {vm_name}' to retry, or 'vm delete {vm_name} --force' to remove it."
+    )
 
 
 def _raise_init_failure(db: Database, vm_name: str, cause: Exception) -> NoReturn:
@@ -115,33 +109,6 @@ def _raise_init_failure(db: Database, vm_name: str, cause: Exception) -> NoRetur
     ) from cause
 
 
-class _CreateSecretCleanup:
-    """Mutable owner for every secret carrier in one VM create."""
-
-    def __init__(self) -> None:
-        self.resolver: Resolver | None = None
-        self.readers: list[ScopedSecrets] = []
-        self.request: ProvisionRequest | None = None
-        self.logger: SSHLogger | None = None
-        self.git_tokens: dict[str, str] = {}
-
-    def scrub(self) -> None:
-        if self.request is not None:
-            self.request.tailscale_auth_key = None
-        for reader in self.readers:
-            reader.scrub_values()
-        self.readers.clear()
-        if self.resolver is not None:
-            self.resolver.scrub_values()
-        self.git_tokens.clear()
-        if self.logger is not None:
-            self.logger.discard_redactions()
-
-    def adopt_logger(self, logger: SSHLogger) -> None:
-        """Own the bootstrap logger before it crosses the return boundary."""
-        self.logger = logger
-
-
 def create_vm(
     db: Database,
     config: Config,
@@ -163,35 +130,6 @@ def create_vm(
     declared admin-template resource; an unknown name fails here, before
     any DB or backend work.
     """
-    interaction = validate_interaction_policy(interaction)
-    cleanup = _CreateSecretCleanup()
-    try:
-        _create_vm(
-            db,
-            config,
-            name=name,
-            template=template,
-            admin_template=admin_template,
-            site=site,
-            interaction=interaction,
-            _secret_cleanup=cleanup,
-        )
-    finally:
-        cleanup.scrub()
-
-
-def _create_vm(
-    db: Database,
-    config: Config,
-    *,
-    name: str,
-    template: str | None = None,
-    admin_template: str | None = None,
-    site: str | None = None,
-    interaction: InteractionPolicy,
-    _secret_cleanup: _CreateSecretCleanup,
-) -> None:
-    """Internal create choreography under the caller's secret fence."""
     interaction = validate_interaction_policy(interaction)
     import agentworks.vms.manager as _mgr
     from agentworks.bootstrap import load_request_registry
@@ -278,7 +216,6 @@ def _create_vm(
     )
 
     resolver = Resolver(config, registry, interaction=interaction)
-    _secret_cleanup.resolver = resolver
 
     # BUILD: the command names its direct resources (the resolved
     # template, the chosen site, the admin template's declared
@@ -306,21 +243,10 @@ def _create_vm(
     scope = OperationScope(level=ScopeLevel.VM, system_slug=slug, vm=vm_name)
 
     def scoped_ctx(secret_names: tuple[str, ...]) -> RunContext:
-        # Register the empty reader before copying any values. Constructor or
-        # append failure therefore owns no plaintext; after registration, the
-        # operation fence can scrub every partial or complete copy.
-        reader = ScopedSecrets.empty(secret_names)
-        _secret_cleanup.readers.append(reader)
-        transfer: dict[str, str] = {}
-        try:
-            transfer = resolver.values
-            reader.copy_values(transfer)
-        finally:
-            transfer.clear()
         return RunContext(
             config=config,
             operation_scope=scope,
-            secrets=reader,
+            secrets=ScopedSecrets(resolver.values, secret_names),
         )
 
     # PREFLIGHT-ALL, then the one boundary resolve: tailscale auth,
@@ -382,12 +308,12 @@ def _create_vm(
             # silent no-op for them. The credentials' write-step runup stays
             # deferred into initialization, under the skip-and-degrade policy.
             site_node.runup(scoped_ctx(site_node.secret_refs()))
-            tailscale_ctx = scoped_ctx(template_node.secret_refs())
+            tailscale_auth_key = scoped_ctx(template_node.secret_refs()).secret(vm_tmpl.tailscale_auth_key)
             # Each credential's token, read through its node's SCOPED delivery.
-            for node in cred_nodes:
-                _secret_cleanup.git_tokens[node.provider.owner_name] = scoped_ctx(node.secret_refs()).secret(
-                    node.provider.secret_name
-                )
+            git_tokens = {
+                node.provider.owner_name: scoped_ctx(node.secret_refs()).secret(node.provider.secret_name)
+                for node in cred_nodes
+            }
 
             # The VM's OS hostname, computed once at create time and recorded on the
             # row: {slug}-{name} with a slug, the bare name without. Bounded by
@@ -435,16 +361,12 @@ def _create_vm(
                 admin_username=resolved_admin_username,
                 ssh_public_key=config.operator.ssh_public_key.read_text().strip(),
                 ssh_private_key=config.operator.ssh_private_key,
-                tailscale_auth_key=None,
+                tailscale_auth_key=tailscale_auth_key,
                 cpus=resolved_cpus,
                 memory_gib=resolved_memory,
                 disk_gib=resolved_disk,
                 swap_gib=vm_tmpl.swap,
             )
-            # Arm operation ownership while the request is still value-free,
-            # then expose the resolved scalar only through the owned object.
-            _secret_cleanup.request = request
-            request.tailscale_auth_key = tailscale_ctx.secret(vm_tmpl.tailscale_auth_key)
 
             # The op-start context for the platform's create op: secrets scoped
             # to the site's declared names.
@@ -464,8 +386,7 @@ def _create_vm(
                 # the only artifact left to unwind; deleting it for a VM
                 # that still exists in a backend would orphan the backend
                 # side (#338).
-                with contextlib.suppress(BaseException):
-                    output.warn(f"Cancelling vm create '{vm_name}'... rolling back.")
+                output.warn(f"Cancelling vm create '{vm_name}'... rolling back.")
                 log.unwind()
                 raise
             except UserAbort:
@@ -482,11 +403,6 @@ def _create_vm(
                     entity_kind="vm",
                     entity_name=vm_name,
                 ) from e
-            except BaseException:
-                # Lima has already removed its partial backend instance. The
-                # exact pending row is now the only realized artifact left.
-                log.unwind()
-                raise
             # The unwind window closes here: provisioning succeeded, the VM
             # exists, and initialization failures keep it (with recovery
             # guidance), exactly as before.
@@ -518,9 +434,8 @@ def _create_vm(
                     platform_obj,
                     platform_ctx,
                     admin_username=resolved_admin_username,
-                    tailscale_ctx=tailscale_ctx,
-                    git_tokens=_secret_cleanup.git_tokens,
-                    on_logger_ready=_secret_cleanup.adopt_logger,
+                    tailscale_auth_key=tailscale_auth_key,
+                    git_tokens=git_tokens,
                     bootstrap_complete=result.bootstrap_complete,
                     tailscale_ip=result.tailscale_ip,
                     on_tailscale_ready=_on_tailscale_ready,
@@ -550,7 +465,7 @@ def _create_vm(
                 home,
                 resolved_admin_username,
                 logger,
-                git_tokens=_secret_cleanup.git_tokens,
+                git_tokens=git_tokens,
                 is_first_init=True,
             )
         except (KeyboardInterrupt, UserAbort):
