@@ -9,7 +9,7 @@
 
 ## Architectural summary
 
-Build two semantic static pages from repository-owned inputs and deploy their artifact to GitHub
+Build three semantic static pages from repository-owned inputs and deploy their artifact to GitHub
 Pages on every push to `main`. Site sources live in `website/`; generated output does not. A small
 standard-library Python builder performs explicit substitutions, escapes shared text for HTML, emits
 the finished artifact, and fails when a content contract required by the current release is
@@ -47,10 +47,10 @@ notice that guided onboarding is not yet published. It does not render an empty 
 disabled copy button, speculative command, wait-list form, countdown, or generic "coming soon"
 marketing panel. The notice is removed when the real bootstrap replaces it.
 
-The landing page does not render the longer problem statement or principles. Those passages remain
-in their permanent repository document behind the single deeper-rationale link. Each of the four
-landing-page destinations appears exactly once; the header and footer do not repeat body
-destinations under different labels.
+The landing page does not render the longer problem statement or principles. Those passages render
+on the generated Manifesto page from their permanent repository source. GitHub and PyPI appear once
+in the shared header; Manifesto and Security appear once in the shared footer. The body does not
+repeat those destinations under different labels.
 
 The home page gives the security posture one calm, visually secondary link labeled
 `We take security seriously.` That link opens a dedicated static security page with this order:
@@ -60,17 +60,43 @@ The home page gives the security posture one calm, visually secondary link label
 3. candid current limitations and credential/secret considerations;
 4. practical operator posture and the private vulnerability-reporting path.
 
-The security page is optional depth, not a modal, warning gate, prerequisite, or long security pitch
-on the home page. It and the host-required 404 are the only separate pages in the first slice; the
-primary product experience stays on the compact landing page. Pages have in-page navigation only if
-their final length makes it useful. A custom `404.html` is an error surface, not a content page or
-client-side route. There is no blog, documentation hierarchy, release feed, search, or client-side
-routing. Growth-path content gets its own design when its authoritative contracts have landed.
+The Manifesto and security pages are optional depth, not modals, warning gates, prerequisites, or
+long pitches on the home page. They and the host-required 404 are the only separate pages in the
+first slice; the primary product experience stays on the compact landing page. Pages have in-page
+navigation only if their final length makes it useful. A custom `404.html` is an error surface, not
+a content page or client-side route. There is no blog, documentation hierarchy, release feed,
+search, or client-side routing. Growth-path content gets its own design when its authoritative
+contracts have landed.
+
+Home, Manifesto, Security, and 404 share one landmark shape. A breadcrumb sits at the upper left:
+one linked `Agentworks` home crumb, a visual separator hidden from the accessibility tree, and a
+non-linked current item marked with `aria-current="page"`. The current item is `Home`, `Manifesto`,
+`Security`, or `404` as appropriate. Every page except Home places the small selected rocket
+immediately before the breadcrumb. The 404's linked `Agentworks` crumb replaces the body-level
+return-home action. One GitHub and one PyPI call to action sit at the upper right with visible
+labels and local decorative icons hidden from the accessibility tree. The home hero remains the only
+logo on Home.
+
+The shared footer contains `Product of Wayfarer Labs, LLC` at the left and the only manifesto and
+security links at the right, labeled `Agentworks Manifesto` and `We take security seriously`. The
+header and footer wrap in source order rather than collapsing behind a menu. This is consistent
+navigation across a tiny static site, not a new navigation system.
+
+### D1A. The Manifesto is a generated site page
+
+`/manifesto/` renders the long-form introduction, complete problem space, and complete key
+principles from `docs/why-agentworks.md`. The builder selects the reviewed canonical source
+structure by heading path and passes it through the same closed Markdown transform used by other
+repository-derived content. Source-relative links are mapped by an explicit allowlist to permanent
+repository URLs; no generic relative-URL rewriting or second prose copy is introduced. The page owns
+only its `Agentworks Manifesto` presentation title, metadata, breadcrumb label, and connective
+shell. If the permanent document adopts that title, the generated page follows it without a second
+rename mechanism.
 
 ### D2. Plain web technologies with a narrow build step
 
-The checked-in source consists of home, security, and 404 HTML templates, local CSS, focused
-progressive-enhancement JavaScript, SVG assets, and a standard-library Python builder under
+The checked-in source consists of home, Manifesto, security, and 404 HTML templates, local CSS,
+focused progressive-enhancement JavaScript, SVG assets, and a standard-library Python builder under
 `website/`. The 404 template references stable same-origin groups in the selected SVG rather than
 duplicating its paths. The builder substitutes a validated site base into the 404's home and local
 asset URLs, allowing the same source to run at the local/custom-domain root and at the pre-DNS
@@ -149,8 +175,8 @@ rocket mark. The mark stacks custom symmetric A, G, and W geometry into a rocket
 has four equal corner radii, with only its opening and inward stroke breaking O-like symmetry. The
 ordinary mark is neutral graphite. Its original twin-flame treatment uses compact pale-yellow hot
 cores within orange and deeper orange-red plumes. On the landing page the mark is a dominant hero
-element at two to three times the original small-header presentation, while the security and 404
-contexts may retain sizes appropriate to their jobs. The final checked-in SVG is self-contained,
+element at two to three times the original small-header presentation, while the Manifesto, security,
+and 404 contexts retain the shared compact size. The final checked-in SVG is self-contained,
 font-independent, semantic where displayed as content, and reusable without this SDD.
 
 The presentation should feel like a capable workbench rather than a generic SaaS landing page:
@@ -162,8 +188,8 @@ interaction. The interim notice occupies the future bootstrap region without mim
 after integration, the bootstrap becomes the visual center without requiring a layout redesign. No
 remote font, icon library, or existing architecture diagram is introduced.
 
-The shell LLD pins final tokens and layouts across the home, security, and 404 surfaces with these
-invariants:
+The shell LLD pins final tokens and layouts across the home, Manifesto, security, and 404 surfaces
+with these invariants:
 
 - useful at 320 CSS pixels and at 400 percent zoom without page-level horizontal scrolling;
 - WCAG 2.2 AA text, component, focus, and interaction contrast;
@@ -329,8 +355,8 @@ canonical bootstrap + README fenced block
 The detailed filenames belong in the shell and onboarding-integration LLDs, but responsibilities are
 fixed here:
 
-- `website/`: home, security, and 404 source; final SVG assets; focused CSS/JavaScript; builder;
-  tests; and permanent operator/developer runbook.
+- `website/`: home, Manifesto, security, and 404 source; final SVG assets; focused CSS/JavaScript;
+  builder; tests; and permanent operator/developer runbook.
 - `.github/workflows/`: Pages build/deploy workflow and the existing CI integration.
 - `.gitignore`: generated site artifact exclusion.
 - repository README and onboarding canonical source: inputs only after onboarding integration, not

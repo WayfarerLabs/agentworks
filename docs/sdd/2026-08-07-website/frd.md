@@ -86,9 +86,30 @@ and none of it is in scope now.
   original header scale, gives only the concise product identity and onboarding availability, and
   offers one link each to the repository, package, deeper rationale, and security deep dive. A
   destination must not be repeated in the landing page's header, body, and footer. Visitors who want
-  the longer problem statement or principles follow the single deeper-rationale link to their
-  permanent repository source. The dedicated security page and host-required 404 remain separate
-  optional/error surfaces rather than being folded into the landing page.
+  the longer problem statement or principles follow the single Manifesto link to a page generated
+  from their permanent repository source. The dedicated Manifesto, security, and host-required 404
+  pages remain separate optional/error surfaces rather than being folded into the landing page.
+- R15. Navigation follows familiar page conventions without reintroducing duplicate destinations.
+  Home, Manifesto, Security, and 404 use the same responsive header structure: a breadcrumb at the
+  upper left and one GitHub and one PyPI call to action at the upper right. Each external call to
+  action pairs its visible text with a local decorative service icon and remains understandable
+  without the icon. The breadcrumb contains one `Agentworks` link to the home route, a visual
+  separator, and a non-linked current-page label (`Home`, `Manifesto`, `Security`, or `404`) marked
+  as current. The home header omits the small rocket because the large mark immediately follows as
+  the hero; every other page places the small rocket immediately left of its breadcrumb. On the 404,
+  the breadcrumb's `Agentworks` link is the sole visible route-home action. A shared traditional
+  footer places the exact text `Product of Wayfarer Labs, LLC` at the left and one
+  `Agentworks Manifesto` and one `We take security seriously` link at the right. These placements
+  supersede the Phase 4A combined exploration panel while preserving one link per external,
+  manifesto, and security destination.
+- R16. The footer's `Agentworks Manifesto` link opens a semantic static page at `/manifesto/`, not
+  the repository document. The page renders the long-form argument from the canonical
+  `docs/why-agentworks.md` source at build time, including its problem-space and key-principles
+  structure, without a separately maintained site copy. Relative source links are deliberately
+  mapped to their permanent repository destinations. Missing, duplicate, unsupported, or drifted
+  canonical content fails the build before output replacement. The permanent source may be renamed
+  from `Why Agentworks` to `Agentworks Manifesto`; the website contract follows the reviewed source
+  change rather than maintaining a conflicting title.
 
 ## Settled constraints (inherited; do not reopen)
 
@@ -158,8 +179,8 @@ merged and settled on `main`. The first slice must not build toward them specula
   workstation-account file/command access, separately explicit elevation, and strict-posture
   recommendation. The interim release does not invent or imply that disclosure while the upstream
   contract is absent.
-- AC13. The landing, security, and 404 surfaces share a restrained terminal/TUI-derived visual
-  system at desktop and narrow widths. Text remains real semantic content, ordinary links and
+- AC13. The landing, Manifesto, security, and 404 surfaces share a restrained terminal/TUI-derived
+  visual system at desktop and narrow widths. Text remains real semantic content, ordinary links and
   controls remain recognizable, and the design meets the existing contrast, focus, zoom, reflow,
   reduced-motion, keyboard, and touch requirements without depending on terminal familiarity.
 - AC14. In a clean-context interim-release check, a visitor with no prior Agentworks knowledge can
@@ -170,6 +191,18 @@ merged and settled on `main`. The first slice must not build toward them specula
   PyPI package, deeper rationale, and security destinations; it contains no rendered problem-space
   or principles section. The selected rocket is a prominent hero element without displacing the page
   identity, availability notice, or four destinations at 320 CSS pixels or 400 percent zoom.
+- AC16. Generated Home, Manifesto, Security, and 404 documents expose the shared responsive header
+  and footer landmarks with the exact per-page breadcrumb current item. Home has no small header
+  mark; every other page has exactly one small header mark, and 404 has no separate body home link.
+  GitHub and PyPI occur once per page in the header with visible text and hidden decorative icons.
+  Manifesto and Security occur once per page in the footer, beside the exact Wayfarer Labs ownership
+  text. Link purposes, keyboard focus, accessible names, source order, narrow-screen wrapping, and
+  400-percent zoom stay useful with images or CSS unavailable.
+- AC17. `/manifesto/` renders the canonical `docs/why-agentworks.md` long-form introduction, problem
+  space, and key principles as semantic headings, paragraphs, and lists. Its generated content and
+  mapped links are verified against the permanent source, contain no unexpanded source-relative URL,
+  and remain useful without CSS or JavaScript. Changing a selected canonical passage without
+  updating its reviewed build contract fails closed.
 
 ## Settled implementation rulings
 

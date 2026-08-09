@@ -103,6 +103,15 @@ Operator evidence:
   to three times. The dedicated security deep dive and host-required 404 remain separate optional
   surfaces; "single page" governs the primary product experience rather than eliminating those
   previously accepted routes.
+- 2026-08-09: after reviewing the compact shell, the operator assigns each destination one
+  conventional location: GitHub and PyPI at the top right with icons, rationale and security at the
+  footer right, and Wayfarer Labs ownership at the footer left. Home and 404 gain the same
+  breadcrumb-led header; the 404's linked Agentworks crumb becomes its route-home action, retains a
+  small adjacent rocket, and Home omits that small mark because its large hero follows.
+- 2026-08-09: the operator clarifies that every non-Home page, including Security, keeps the small
+  breadcrumb-adjacent rocket. The repository's long-form Why document is becoming the Agentworks
+  Manifesto and should render as a first-class generated `/manifesto/` page, using the same
+  canonical-source model as Security rather than linking visitors out to the repository.
 
 Definition of done: requirements and architecture are review-clean, operator-significant choices are
 settled, and PR #439 truthfully carries the reviewed contract that implementation follows.
@@ -226,6 +235,33 @@ review-clean, deterministic interim artifact that is ready to publish but makes 
 
 Definition of done: R14 and AC15 hold without weakening the previously accepted onboarding,
 security, 404, source-ownership, responsive, accessibility, or deterministic-build contracts.
+
+## Phase 4B: shared navigation and generated Manifesto
+
+- [ ] Revise `site-shell-lld.md` and the permanent website runbook to pin one responsive
+      breadcrumb/header/footer shape across Home, Manifesto, Security, and 404, including exact link
+      placement, labels, icon semantics, logo exceptions, and the 404 route-home replacement.
+- [ ] Move GitHub and PyPI to the header as single icon-and-text calls to action; move the sole
+      Agentworks Manifesto and security links to the footer beside the exact Wayfarer Labs ownership
+      text.
+- [ ] Implement linked `Agentworks` plus non-linked current-page breadcrumb semantics for Home,
+      Manifesto, Security, and 404; omit the small mark only on Home and remove the separate 404
+      body return-home link.
+- [ ] Generate `/manifesto/` from the complete reviewed long-form argument in
+      `docs/why-agentworks.md`, explicitly map its allowed source-relative links, and add no second
+      hand-maintained product or principle prose.
+- [ ] Extend fail-closed template and generated-document tests to bind each destination, label,
+      location, icon, breadcrumb state, logo exception, footer ownership string, and no-duplicate
+      invariant at both supported site bases.
+- [ ] Rebuild the served preview and run focused website/game, lint, locked-SDD, Rulesync, and diff
+      gates without regressing no-JavaScript recovery, accessibility, reflow, or deterministic
+      output.
+- [ ] Obtain `agentworks-reviewer` and fresh-eyes approval and resolve every valid finding before
+      considering the refinement complete.
+
+Definition of done: R15-R16 and AC16-AC17 hold, the revised navigation is conventional and
+predictable, the Manifesto is canonical-source generated, and the site's tiny information
+architecture has no duplicate destination or hidden menu.
 
 ## Phase 5: CI and default Pages deployment
 
