@@ -101,14 +101,8 @@ provision:
 """
 
 
-# Why an arm with no fields but its tag exists at all: local and ssh are
-# different execution mechanisms (a local subprocess versus a two-hop SSH
-# transport) with different readiness rules, and before the union there
-# was no way to write the choice down: presence of ``vm_host`` selected
-# ssh, and a misspelled host key made an ssh site look local and report
-# ``limactl not installed``, naming a problem the operator did not have.
-# The union ends that: an ssh site's mistakes error inside the ssh arm,
-# and ``mode: local`` is the writable form of the default.
+# Local and SSH placement use different transports, readiness rules, and
+# required fields, so each is a distinct tagged arm.
 class LimaLocalPlacement(AgwModel):
     """Run limactl on this machine.
 
@@ -117,23 +111,10 @@ class LimaLocalPlacement(AgwModel):
     """
 
     mode: Literal["local"]
-    """Selects this arm."""
 
 
-# Tagged ``ssh`` rather than ``remote`` deliberately. "Remote" names a
-# POSITION and leaves the mechanism implicit, which would reproduce one
-# layer up the exact defect this union removes: absence implying a
-# mechanism would simply become a word implying one. ``ssh`` names what
-# actually happens, reads coherently with the arm's own field
-# (``mode: ssh, host: me@gpu-box``), and matches the other platforms,
-# whose modes already name mechanisms rather than positions (``ambient``,
-# ``service-principal``, ``access-key``). It also leaves room: a second
-# non-local drive path would sit beside ``ssh``, where ``remote`` would
-# already be taken and ambiguous.
-#
-# ``host`` rather than ``vm_host``: the arm it sits in already says which
-# host this is, so the ``vm_`` prefix that disambiguated at the flat level
-# is noise once nested.
+# ``ssh`` names the transport. The enclosing placement arm supplies the
+# context for the unprefixed ``host`` field.
 class LimaSshPlacement(AgwModel):
     """Run limactl on another host over SSH.
 
@@ -141,48 +122,14 @@ class LimaSshPlacement(AgwModel):
     """
 
     mode: Literal["ssh"]
-    """Selects this arm."""
 
     host: NonEmptyStr = Field(examples=["me@gpu-box"])
-    """The SSH host running ``limactl`` (e.g. ``user@host``). Required in
-    this arm: an SSH-driven site with no host is not a site, which is
-    exactly what the flat ``vm_host`` could not say."""
+    """The SSH host running ``limactl`` (e.g. ``user@host``)."""
 
 
-#: Where a ``lima`` site's ``limactl`` runs, as a tagged union DEFAULTING
-#: to the local arm.
-#:
-#: An earlier revision made this required with no default, and that
-#: reasoning is in the history, so here is why it reversed (operator
-#: ruling): the defect the union fixed was never "absence selects a
-#: mechanism", it was that there was no way to DECLARE the choice at all,
-#: so a misspelled host key silently turned an ssh site local. The union
-#: fixes the second, and once an explicit form exists, a default is an
-#: ordinary default, carried in the emitted schema and in
-#: ``describe-kind`` like any other. Local is the right one because it is
-#: what the wrapped tool already does: ``limactl`` runs where it is
-#: invoked, so requiring an explicit placement would make this site
-#: stricter than the tool it wraps. The general pattern: ambient where
-#: the underlying tool has an ambient notion, required where it does not,
-#: which is why proxmox has no union at all rather than being an
-#: exception to one.
-#:
-#: The pair reads asymmetric (``local`` is a position, ``ssh`` is a
-#: transport) and that was decided knowingly: the symmetric spelling would
-#: be ``direct``/``ssh``, but ``local`` is immediately understood where
-#: ``direct`` is not, and obvious beats symmetric. Do not "fix" it.
-#:
-#: Not an enum beside an optional ``host``, and the reason is the
-#: DIAGNOSTIC rather than soundness: that shape can only state "``ssh``
-#: requires a host, ``local`` forbids one" in a ``model_validator``, and
-#: pydantic does not derive a validator's body into the schema it emits,
-#: so a mixed-arm config would draw no editor complaint and fail only at
-#: load. (A schema more
-#: permissive than the loader is sanctioned under-approximation, so that
-#: alternative would not have broken ``manifests/emit.py``'s contract; it
-#: would simply have spent the point of emitting schema at all.) The union
-#: puts the constraint where the editor checks it, and pydantic emits it
-#: directly as ``oneOf`` with a ``discriminator`` mapping.
+#: Where ``limactl`` runs. Distinct arms make SSH's required host visible to
+#: validation and schema emission. Local is the default because ``limactl``
+#: runs on the invoking machine unless told otherwise.
 LimaPlacement = Annotated[LimaLocalPlacement | LimaSshPlacement, Field(discriminator="mode")]
 
 
@@ -194,8 +141,7 @@ class LimaConfig(AgwModel):
 
     placement: LimaPlacement = LimaLocalPlacement(mode="local")
     """Where ``limactl`` runs: ``{mode: local}`` on this machine, or
-    ``{mode: ssh, host: ...}`` over SSH. Defaults to local, matching
-    where ``limactl`` runs when told nothing."""
+    ``{mode: ssh, host: ...}`` over SSH. Defaults to local."""
 
 
 class LimaPlatform(VMPlatform):
@@ -235,29 +181,12 @@ class LimaPlatform(VMPlatform):
 
     @classmethod
     def not_ready(cls, config: Mapping[str, object]) -> Readiness:
-        """A site placed ``local`` is pointless without a local
-        ``limactl``. This covers the bundled ``lima-local`` site and any
-        operator-declared local site alike; a host that later installs
-        Lima enables them on the next look. Remote sites need nothing
-        here.
+        """Require local ``limactl`` only for local placement.
 
-        Non-constructing (LLD c): reads ``config`` fields directly, never
-        builds an instance, so the readiness fold stays total over
-        unvalidated ``platform_config``.
-
-        Keyed on the tag saying ``local``, never on a GUESS about what
-        absence means. That is what makes the verdict self-standing
-        rather than trustworthy-by-luck. It used to key on a missing
-        ``vm_host``, which made a missing host and a MISSPELLED one
-        indistinguishable: both read as local, and this reported
-        ``limactl not installed``, naming a problem the operator did not
-        have while their host setting silently did not apply. A WRITTEN
-        ``placement`` that does not say ``local`` is not treated as
-        local, so an unreadable or malformed one yields ``ready`` here
-        and the validate pass reports the real error against
-        ``placement`` itself. An ABSENT ``placement`` is not a guess:
-        it resolves to the field's declared default, read off the model
-        so this cannot disagree with what validation resolves."""
+        Reads raw config without constructing the model so readiness stays
+        total. A malformed written placement is left to validation; an
+        omitted placement uses the model's declared default.
+        """
         from agentworks.resources.graph import Readiness
 
         if "placement" in config:

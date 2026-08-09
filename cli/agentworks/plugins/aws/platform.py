@@ -78,9 +78,8 @@ _DEBIAN_ARCH_SEGMENT = {"x86_64": "amd64", "arm64": "arm64"}
 _MAX_USER_DATA_BYTES = 16384
 
 
-# Why an arm with no fields but its tag exists at all: see azure's
-# ``AzureAmbientAuth``. It gives borrowing the host's identity a declared
-# form, and it is the union's default.
+# Ambient authentication is an explicit arm so every identity mechanism
+# has a declared shape.
 class AwsAmbientAuth(AgwModel):
     """Authenticate with boto3's ambient default credential chain.
 
@@ -89,13 +88,8 @@ class AwsAmbientAuth(AgwModel):
     """
 
     mode: Literal["ambient"]
-    """Selects this arm."""
 
 
-# A tagged arm rather than an optional block on the config: a future
-# profile or web-identity mode, each with fields of its own, is a new arm
-# beside these two rather than another nullable table whose presence has
-# to be cross-checked against the others.
 class AwsAccessKeyAuth(AgwModel):
     """Authenticate with an explicit IAM access key.
 
@@ -104,7 +98,6 @@ class AwsAccessKeyAuth(AgwModel):
     """
 
     mode: Literal["access-key"]
-    """Selects this arm."""
 
     access_key_id: NonEmptyStr
     """The access key id, plain config."""
@@ -113,48 +106,15 @@ class AwsAccessKeyAuth(AgwModel):
         NonEmptyStr,
         SecretRef(usage="the AWS secret access key", default_template="aws-secret-access-key"),
     ]
-    """The secret holding the secret access key. Never the value: the
-    field NAMES a secret in the framework's secret system, which is why
-    it is not spelled ``secret_access_key``. The default env-var
-    convention reads ``AW_SECRET_AWS_SECRET_ACCESS_KEY``."""
+    """The secret containing the secret access key. The default maps to
+    ``AW_SECRET_AWS_SECRET_ACCESS_KEY`` in the env-var backend."""
 
     assume_role_arn: NonEmptyStr | None = None
-    """A role to assume with the key, via STS. Optional: omitted, the key
-    is the identity; named, an auto-refreshing AssumeRole is layered over
-    it (see :func:`_assume_role_session`)."""
+    """An optional role to assume with the key through STS."""
 
 
-#: How an aws-ec2 site authenticates, as a tagged union DEFAULTING to the
-#: ambient arm.
-#:
-#: An earlier revision made this required with no default, and that
-#: reasoning is in the history, so here is why it reversed (operator
-#: ruling): the defect the union fixed was never "absence selects a
-#: mechanism", it was that there was no way to DECLARE the choice at all.
-#: The union fixes the second, and once an explicit form exists, a
-#: default is an ordinary default, carried in the emitted schema and in
-#: ``describe-kind`` like any other. Ambient is the right one because it
-#: is what the wrapped SDK already does: boto3's credential chain is
-#: ambient-first, so requiring explicit auth would make this site
-#: stricter than the tool it wraps, which is surprising in the other
-#: direction. The general pattern: ambient where the underlying tool has
-#: an ambient notion, required where it does not, which is why proxmox
-#: has no union at all rather than being an exception to one.
-#:
-#: The tag is a string ``Literal`` rather than a boolean for the same
-#: reason it is a union rather than an ``auth_mode`` field beside nullable
-#: blocks: each mode carries its OWN fields, and AWS has further modes
-#: worth naming later (a named shared-config profile, a web identity) that
-#: a boolean could not grow into. Pydantic emits this directly as
-#: ``oneOf`` with a ``discriminator`` mapping, so the loader and the
-#: emitted schema agree by construction, which a cross-field validator
-#: over nullable blocks could not achieve. Not because JSON Schema
-#: cannot state the constraint (it can, as ``oneOf`` over closed arms or
-#: as ``if``/``then`` on the tag), but because pydantic does not derive a
-#: validator's body into the schema it emits, so the emitted schema would
-#: go silent about it and accept mixed-arm configs the loader rejects.
-#: That is sanctioned under-approximation under ``manifests/emit.py``,
-#: not a breach of it; what it forfeits is the editor DIAGNOSTIC.
+#: Authentication mechanisms have distinct tagged shapes. Ambient is the
+#: default because it is boto3's standard credential behavior.
 AwsAuth = Annotated[AwsAmbientAuth | AwsAccessKeyAuth, Field(discriminator="mode")]
 
 
@@ -190,14 +150,13 @@ class AwsEC2Config(AgwModel):
 
     instance_types: Annotated[list[AwsInstanceType], Field(min_length=1)] | None = None
     """An override of the built-in Graviton catalog ``vm create`` picks
-    from. Need not be sorted: selection takes the smallest entry that
-    satisfies the request. Non-empty when present, because an empty
-    catalog is a site on which no instance can be created."""
+    from. Order does not matter; selection uses the smallest matching
+    entry. Must contain at least one entry."""
 
     auth: AwsAuth = AwsAmbientAuth(mode="ambient")
     """How this site authenticates to AWS: ``{mode: ambient}`` for boto3's
     default chain, or ``{mode: access-key, ...}`` for an explicit key.
-    Defaults to ambient, matching what boto3 does when told nothing."""
+    Defaults to ambient."""
 
 
 class _InstanceType(NamedTuple):

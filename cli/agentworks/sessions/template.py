@@ -47,16 +47,9 @@ class SessionTemplate(DeclaredResource):
     """Session template definition. Every field is optional and ``None``
     means "not declared here", never "off".
 
-    The workload the session runs is selected by one tagged
-    ``harness_integration`` table: its ``name`` names the capability and
-    its remaining keys are the config whose shape that capability declares
-    and the core validates. ``None`` means "not declared here", distinct
-    from a table with no config keys, so inheritance can tell a restating
-    child from a silent one (FRD R5). An undeclared harness_integration
-    resolves to the ``shell`` built-in (a plain login shell), preserving
-    the behavior from before harness integrations. The flat ``command`` /
-    ``resume_command`` / ``required_commands`` fields are ``shell``'s
-    config vocabulary and live inside the table (FRD R2/R6).
+    ``harness_integration.name`` selects the workload capability and its
+    remaining keys configure it. ``None`` inherits and ultimately defaults
+    to the ``shell`` integration.
     """
 
     inherits: list[
@@ -79,9 +72,7 @@ class SessionTemplate(DeclaredResource):
     env: EnvTable = Field(default_factory=dict)
     """Environment variables exported in this session, as a plaintext value
     or a ``{secret: <name>}`` reference per key. Merged
-    child-overrides-parent at resolution; an empty table adds nothing, so
-    there is no separate "unset" to distinguish (this matches the other
-    three template kinds, whose ``env`` has always defaulted empty)."""
+    child-overrides-parent at resolution; an empty table adds nothing."""
 
     def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         """The ``inherits`` edges as declared, plus the runtime needs of

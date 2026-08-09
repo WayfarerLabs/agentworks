@@ -58,8 +58,7 @@ class ShellConfig(AgwModel):
 
     required_commands: list[str] = Field(default_factory=list, examples=[["htop"]])
     """Commands that must exist on the session's target before it starts.
-    Inherited templates UNION this list rather than replacing it, so a
-    child adding one never silently drops the parent's."""
+    Inheritance combines parent and child entries."""
 
 
 def _as_str_list(value: object) -> list[str] | None:

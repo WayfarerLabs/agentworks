@@ -61,11 +61,8 @@ class GitCredentialConfig(DeclaredResource):
     provider's own configuration."""
 
     provider: CapabilityBlock
-    """The git-credential-provider fronting this credential: one table
-    whose ``name`` selects the provider and whose remaining keys are that
-    provider's own config (azdo's ``org``; github's ``repos`` / ``owner``;
-    the ``token`` acquisition choice, whose stored arm names a secret
-    defaulting to ``git-token-<name>``)."""
+    """The provider for this credential. ``name`` selects it and the
+    remaining keys configure it."""
 
     @model_validator(mode="before")
     @classmethod

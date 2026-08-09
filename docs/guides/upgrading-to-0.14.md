@@ -750,19 +750,18 @@ $ agw resource describe-kind vm-platform/azure-vm
   auth  (table, optional, default {mode: ambient})
     How this site authenticates to Azure: `{mode: ambient}` for the ambient credential
     chain, or `{mode: service-principal, ...}` for an explicit principal. Defaults to
-    ambient, matching what `DefaultAzureCredential` does when told nothing.
+    ambient.
     - ambient: Authenticate with the ambient chain: `az login`, `AZURE_*`, or a managed identity.
       mode  (one of: ambient, required)
-        Selects this arm.
     - service-principal: Authenticate as an explicit Entra ID service principal.
       mode  (one of: service-principal, required)
-        Selects this arm.
       tenant_id  (string, required, min length 1)
         The Entra ID tenant the principal lives in.
       client_id  (string, required, min length 1)
         The principal's application (client) id.
       secret  (string or null, optional, defaults to `azure-client-secret`, names a secret, min length 1)
-        The secret holding the principal's client secret. [...]
+        The secret containing the principal's client secret. The default maps to
+        `AW_SECRET_AZURE_CLIENT_SECRET` in the env-var backend.
 ```
 
 `agw resource sample vm-site` cannot do the same, because a document holds one arm: it prints lima's
@@ -807,9 +806,9 @@ Values are no longer coerced. A quoted number is a string, and a string is not a
 
 **Every quoted boolean meant `true`.** That is the whole class, not just the three named above:
 `key_dearmor`, `tmuxinator`, and `mise_activate` / `mise_allow_unlocked` / `mise_prune_on_reinit` /
-`git_force_safe_directory` on both template kinds, plus proxmox's `verify_ssl`. `describe-kind` says
-so on each of them. Writing the `false` that the line looks like it asked for silently INVERTS the
-behavior you have been running; writing `true` preserves it.
+`git_force_safe_directory` on both template kinds, plus proxmox's `verify_ssl`. Writing the `false`
+that the line looks like it asked for silently INVERTS the behavior you have been running; writing
+`true` preserves it.
 
 **`verify_ssl` is the one where that is a decision rather than a correction.** `true` preserves what
 you have actually been running: verification on, and passing, or the cluster would not have worked.

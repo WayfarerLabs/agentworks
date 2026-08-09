@@ -53,15 +53,12 @@ class GitHubConfig(TokenAcquiringConfig):
     """The provider this config is for."""
 
     repos: list[GitHubRepo] = Field(default_factory=list, examples=[["my-org/my-repo"]])
-    """The repositories a fine-grained PAT covers, as "owner/name". A
-    list even for one repository, because a fine-grained PAT may select
-    several. Empty (the default) is unscoped."""
+    """Specific repositories a fine-grained PAT covers, as ``owner/name``.
+    Empty means no repository-specific scope."""
 
     owner: GitHubName | None = Field(default=None, examples=["my-org"])
-    """The user or organization an owner-scoped PAT covers, including
-    repositories cloned ad hoc that no workspace declared. ``None`` is
-    the one field here with nothing to default to: there is no owner
-    that means "no owner scope"."""
+    """A user or organization whose repositories this credential covers.
+    Omit for no owner-wide scope."""
 
 
 def _parse_expiration(raw: str | None) -> date | None:

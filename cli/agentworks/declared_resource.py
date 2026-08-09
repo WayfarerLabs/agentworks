@@ -118,14 +118,9 @@ class EnvelopeMetadata(AgwModel):
     """
 
     name: SkipJsonSchema[str]
-    """What this resource is called: the second half of the `kind/name`
-    address every other resource and every command refers to it by, so
-    `/` is never allowed in one. The convention is lowercase alphanumeric
-    with hyphens or underscores, starting and ending with a letter or
-    digit; every built-in name follows it and it is what reads well
-    everywhere a name is displayed or typed. Not every kind REFUSES a
-    name outside that shape, so treat it as the convention to follow
-    rather than as a guard that will stop you."""
+    """The resource name used in ``kind/name`` references. ``/`` is not
+    allowed. Prefer lowercase letters and digits with internal hyphens or
+    underscores."""
 
     description: SkipJsonSchema[str | None] = None
     """One operator-facing line saying what this resource is for, shown by
@@ -259,22 +254,9 @@ class DeclaredResource(EnvelopeMetadata):
         the core's ``validate_capability_config``. The finalize validate
         pass (``Registry.finalize``) invokes it per present node.
 
-        Named ``validate_config`` rather than ``validate``, which is what
-        it was called while the rows were dataclasses: ``BaseModel`` already
-        has a (deprecated) ``validate`` classmethod meaning something else
-        entirely, so the old name would resolve on EVERY row rather than on
-        the three that define this, and the finalize pass's
-        ``getattr(resource, ...)`` lookup would call pydantic's with this
-        method's arguments.
-
-        The signature carries no enablement input, and that is deliberate:
-        what config is valid is the declared model's answer alone, so no
-        implementation of this method may take an environmental verdict into
-        account. An earlier signature threaded the enabled ``secret-backend``
-        name set here for ``SecretDecl`` to skip mappings to disabled
-        backends; that skip is retired (an operator must not be able to bank
-        invalid config that fails only once they enable the backend), and the
-        parameter went with it rather than lingering as an invitation.
+        The signature carries no enablement input: what config is valid is
+        the declared model's answer alone. Invalid configuration cannot be
+        banked behind a disabled capability.
 
         ``context`` is the same :class:`~agentworks.resources.graph.FinalizeContext`
         the build walk was handed, so an INHERITING resource validates the
