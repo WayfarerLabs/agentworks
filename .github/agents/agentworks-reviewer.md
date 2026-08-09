@@ -517,9 +517,9 @@ Look for:
   previously completed box that has been unchecked, reworded, moved, or deleted is a violation in
   its own right (the `sdd` skill permits correcting a wrongly-checked box only while that box has
   not yet merged to `main`, so say which case you believe you are looking at).
-- Ownership breaches: edits to another effort's SDD artifacts, or a child effort updating its
-  roadmap SDD's ledger instead of flagging the inconsistency. Cross-effort messages are new files
-  only, and never into a locked feature directory.
+- Ownership breaches: edits to another effort's SDD artifacts, or a child effort updating its saga
+  SDD's ledger instead of flagging the inconsistency. Cross-effort messages are new files only, and
+  never into a locked feature directory.
 - Changes under a feature directory whose `locked.md` is already on `main`, other than a `locked.md`
   update or a full wipe to the tombstone.
 - Content that belongs in a permanent home (`docs/arch/`, an ADR, a module README, a rule or skill)

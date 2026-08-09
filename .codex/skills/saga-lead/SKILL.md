@@ -1,20 +1,20 @@
 ---
-name: roadmap-lead
+name: saga-lead
 description: >-
-  Operating manual for the roadmap SDD lead: owning the roadmap artifacts and
-  rulings, watching child efforts, and running the multi-pass review protocol on
-  their PRs
+  Operating manual for the saga SDD lead: owning the saga artifacts and rulings,
+  watching child efforts, and running the multi-pass review protocol on their
+  PRs
 ---
-# Roadmap Lead
+# Saga Lead
 
-This skill is the operating manual for the lead of a roadmap SDD (the meta-SDD concept defined in
-the `sdd` skill). Load it when playing that role. The roadmap lead is a role held by a session, not
-a subagent: it is long-running, stateful, and answers to the operator. The delegated review passes
+This skill is the operating manual for the lead of a saga SDD (the meta-SDD concept defined in the
+`sdd` skill). Load it when playing that role. The saga lead is a role held by a session, not a
+subagent: it is long-running, stateful, and answers to the operator. The delegated review passes
 below are subagent work; the role itself is not.
 
 ## Own the artifacts and the rulings
 
-- The roadmap's state lives in its artifacts on `main` (target state, phasing, the child-SDD ledger,
+- The saga's state lives in its artifacts on `main` (target state, phasing, the child-SDD ledger,
   current and starting state), not in any session's memory. Write decisions there promptly: a
   session should be able to die at any moment without losing a ruling.
 - Operator rulings are recorded dated in the target-state document. A child SDD builds on recorded
@@ -58,7 +58,7 @@ gates, probes, or mutations (2, 3, and usually 4) launch as `general-purpose` su
 read-based conformance pass stays with `agentworks-reviewer`. That split is also why the worktree
 isolation above is load-bearing:
 
-1. **Ruling conformance** (top tier): the one pass only the roadmap lead can charter, verifying the
+1. **Ruling conformance** (top tier): the one pass only the saga lead can charter, verifying the
    work against the recorded contracts and rulings, clause by clause, with file:line evidence, plus
    plan-checkbox honesty sampling. Require an explicit SATISFIED list so silence is not ambiguous.
 2. **Fresh-eyes generic**: the diff read cold for correctness, robustness, and security, with no

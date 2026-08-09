@@ -3,12 +3,20 @@
 - Status: North star, accumulating settled rulings
 - Last updated: 2026-08-08
 
-This document describes where Agentworks is going across this roadmap effort, synthesized from the
+This document describes where Agentworks is going across this saga effort, synthesized from the
 perspectives in `inputs/`. It is the target of these waves, not a forever vision: when
-`current-state.md` agrees with this document and every child SDD is locked, the roadmap is done.
-Every phasing choice is tested against these destinations, and individual efforts must not paint
-over them. Settled operator rulings are recorded here with dates; a child SDD builds on these rather
-than reopening them.
+`current-state.md` agrees with this document and every child SDD is locked, the saga is done. Every
+phasing choice is tested against these destinations, and individual efforts must not paint over
+them. Settled operator rulings are recorded here with dates; a child SDD builds on these rather than
+reopening them.
+
+Vocabulary (operator ruling, 2026-08-08): this construct is a **saga**, replacing the earlier
+"roadmap" term ("program" was retired 2026-08-05). A saga is a grouping of related efforts that
+overlap enough to require coordination; the distributed-systems borrowing is deliberate, since
+children commit independently and completely, intermediate states stay visible on `main`, a lead
+orchestrates rather than locks, and the whole runs to its lock or is deliberately unwound.
+Historical text in immutable records (checked ledger boxes, locked SDDs, the frozen starting-state)
+keeps the old words.
 
 ## The seven destinations
 
@@ -127,7 +135,7 @@ consuming capability's domain, never the source or per-secret mapping, so creden
 as a git-credential variant. Consequently **git-credential joins the variant contract before the
 0.14.0 cut**: a one-arm union restructure (defaulting to the stored arm per the omission-history
 rule, with the scalar shorthand as the stored arm's spelling) so minting later lands as a purely
-additive arm.
+additive arm. Executed: PR #455, merged 2026-08-08.
 
 ### Capability descriptor (destination 3)
 
@@ -198,14 +206,13 @@ memory is a cache, the repository is the system of record, and distillation is t
 
 The miscellaneous built-in installers in core VM initialization (the package installers and similar
 setup steps; authoritative inventory owned by the child effort) move behind one or more system
-plugins before the 0.14.0 cut, as a child of this roadmap
-(`docs/sdd/2026-08-07-installer-plugins/`). The ruling deliberately accepts the reopened
-current-equals-target gap that a late target addition costs; the child's ledger entry and the 0.14.0
-release gate are the catch-up plan. The core keeps only what is essential to what a VM is. An
-existing config referencing a moved surface without the owning plugin enabled fails with a crisp
-disabled error naming the surface, the plugin, and the exact remediation, per the remediation
-posture below. This gives the internal plugin boundary first-party exercise ahead of wave 8's
-external promises.
+plugins before the 0.14.0 cut, as a child of this saga (`docs/sdd/2026-08-07-installer-plugins/`).
+The ruling deliberately accepts the reopened current-equals-target gap that a late target addition
+costs; the child's ledger entry and the 0.14.0 release gate are the catch-up plan. The core keeps
+only what is essential to what a VM is. An existing config referencing a moved surface without the
+owning plugin enabled fails with a crisp disabled error naming the surface, the plugin, and the
+exact remediation, per the remediation posture below. This gives the internal plugin boundary
+first-party exercise ahead of wave 8's external promises.
 
 ### Plugin namespace and name stability (operator ruling, 2026-08-07)
 
@@ -222,8 +229,8 @@ is reserved for surfaces that declare it, wave 3's synthesized sources being can
 
 ### Compatibility posture (all destinations)
 
-Breaking changes are acceptable across this roadmap provided each ships with a deprecation runway:
-warn in one release, reject in the next (the 0.13 to 0.14 pattern). The runway is a default, not an
+Breaking changes are acceptable across this saga provided each ships with a deprecation runway: warn
+in one release, reject in the next (the 0.13 to 0.14 pattern). The runway is a default, not an
 absolute: an operator ruling may waive the warn release where the affected population is known and
 near-zero, as with wave 2's settings-reference hard errors (2026-08-07) and the secret-sources
 direct-reference break (2026-08-08). Deprecations are dropped on their scheduled release rather than
@@ -248,7 +255,7 @@ a hard break with guide coverage.
 
 A recurring principle, now named (operator agreement, 2026-08-05), that child SDDs should test
 designs against: contributions declare rather than do, and access arrives as an anchored, typed
-projection rather than ambient authority. Instances already settled across this roadmap: the `me`
+projection rather than ambient authority. Instances already settled across this saga: the `me`
 anchored template projection, per-integration state namespacing, declared secret references resolved
 at the operation boundary, core performing tmux and PTY operations on integrations' behalf, and the
 universal event representation. The principle governs surfaces where enforcement is real; trusted
@@ -276,11 +283,11 @@ registry's cycle detector was deliberately iterative while a finalize-pass walke
 hand-rolled, unmemoized, and exponential on diamond inheritance). Bounded walks over code-shaped
 structures (a model class's own fields) may stay naturally recursive; the discipline applies where
 the input size or shape is the operator's to choose. The closeout wave checks this property across
-everything the roadmap touched.
+everything the saga touched.
 
 ## Explicitly out of scope
 
-These are not part of this roadmap's target state. They are recorded so their triggers are not lost,
+These are not part of this saga's target state. They are recorded so their triggers are not lost,
 and so no wave accidentally forecloses them:
 
 - **The living graph** (per-instance specs introducing post-finalize graph updates). A future SDD;
@@ -288,13 +295,13 @@ and so no wave accidentally forecloses them:
 - **The herdr rendering backend.** Gated on its spike per the 2026-07-30 ruling; the
   ephemeral-agents direction and observability's authoritative state reporting are the revisit
   triggers.
-- **The named-console-template selector SDD** (`2026-07-19`, drafted pre-roadmap) and the
+- **The named-console-template selector SDD** (`2026-07-19`, drafted pre-saga) and the
   companion-shell and resilient-attach wins unbundled from the herdr FRD. Standalone work that
-  proceeds independently of this roadmap.
+  proceeds independently of this saga.
 - **The agentworks.build website** (`docs/sdd/2026-08-07-website/`, seeded 2026-08-07 at operator
-  request as a standalone SDD, deliberately not a child: it consumes roadmap outputs rather than
-  gating any wave, and adding it late would reopen the current-equals-target gap). Relationship: the
-  site renders from the same authoritative sources as the guide and reference surfaces, never a
+  request as a standalone SDD, deliberately not a child: it consumes saga outputs rather than gating
+  any wave, and adding it late would reopen the current-equals-target gap). Relationship: the site
+  renders from the same authoritative sources as the guide and reference surfaces, never a
   hand-maintained second copy, and its growth path (web-rendered guide topics, schema-derived
   reference) consumes wave 2 and onboarding surfaces as they land on `main`. Launch timing may pair
   with the 0.14.0 cut as an operator call without structural coupling.

@@ -6,7 +6,7 @@
 
 ## Working rules
 
-- The lead owns this plan and never edits the roadmap ledger or another effort's artifacts.
+- The lead owns this plan and never edits the saga ledger or another effort's artifacts.
 - Every implementation step receives an `agentworks-dev` implementation pass and an
   `agentworks-reviewer` review before its checkbox is completed.
 - Run `./scripts/lint-files.sh --fix` and check its exit code before every commit.
@@ -218,6 +218,10 @@ blocks and the migration workflow only; the broader registry-inventory scope rem
 - [x] All focused and full gates pass; step reviewed by `agentworks-reviewer` and a fresh-eyes
       reviewer; valid findings resolved.
 - [x] Always-green ready-to-merge PR opened and roadmap-lead review requested.
+- [ ] Resolve the saga and installed-CLI review round: propagate failing JSON entrypoint status,
+      reject invalid and special database paths without blocking, share one verified database
+      snapshot across doctor groups, restore focused module sizes, reconcile final artifacts, and
+      rerun project, fresh-eyes, full, and PR gates before requesting re-review.
 
 Definition of done: R7 and AC4 hold across the named commands, with human and JSON renderers sharing
 one fact source.
@@ -243,7 +247,7 @@ one fact source.
 - [ ] Permanent installation and security documentation ships with the packages.
 - [ ] Packaging, generation, lint, and end-to-end gates pass; step reviewed by `agentworks-reviewer`
       and a fresh-eyes reviewer; valid findings resolved.
-- [ ] Always-green ready-to-merge PR opened and roadmap-lead review requested.
+- [ ] Always-green ready-to-merge PR opened and saga-lead review requested.
 
 Definition of done: R1, R11, R12, R16, AC1, AC3, AC7, AC8, and AC10 hold for both harnesses and the
 zero-plugin README path.
@@ -261,7 +265,7 @@ specific-resource depth that does not block the first release.
       switchboard edit, pinned by fixture-plugin tests.
 - [ ] Full registry integration gates pass; step reviewed by `agentworks-reviewer` and a fresh-eyes
       reviewer; valid findings resolved.
-- [ ] Always-green ready-to-merge PR opened and roadmap-lead review requested.
+- [ ] Always-green ready-to-merge PR opened and saga-lead review requested.
 
 Definition of done: R8 and AC5 project runtime registry and specific-resource facts without a
 hand-maintained switchboard.
@@ -283,7 +287,7 @@ hand-maintained switchboard.
       resolved; Copilot comments on ready PRs triaged.
 - [ ] `locked.md` created with final state and date, while recognizing the lock takes effect only
       after merge to `main`.
-- [ ] Final ready-to-merge PR reviewed by roadmap lead and handed off with commit and test evidence.
+- [ ] Final ready-to-merge PR reviewed by saga lead and handed off with commit and test evidence.
 
 Definition of done: every FRD requirement and acceptance criterion is evidenced, permanent docs are
 self-sufficient, and the effort is ready to merge and lock.

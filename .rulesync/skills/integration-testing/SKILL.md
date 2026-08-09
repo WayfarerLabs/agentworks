@@ -116,10 +116,10 @@ Not every PR needs the full pipeline at full depth; what it needs depends on wha
   not lint-enforced), plus SDD-artifact ownership checks (is the right lead/dev touching the right
   artifact) and cross-file consistency (a renamed term, a moved section) across the changed docs.
 - **Rulesync PRs.** The gates above already cover the drift check
-  (`scripts/rulesync-upgen.sh --check`), but a rulesync PR additionally needs the 4-target output
-  consistency verified by hand: the generated output under each committed target (copilot,
-  claudecode, codexcli, and whatever else is configured) actually matches what its source implies,
-  not just that the check script is satisfied.
+  (`scripts/rulesync-upgen.sh --check`), but a rulesync PR additionally needs per-target output
+  consistency verified by hand across every committed target configured in `rulesync.jsonc` (do not
+  hardcode the list; read it): the generated output under each target actually matches what its
+  source implies, not just that the check script is satisfied.
 - **Code PRs.** The full pipeline, with live validation weighted toward driving the real code for
   whatever is the correctness crux of the change: the specific behavior the PR claims to fix or add,
   exercised against a real backend, not just the surrounding surface.
@@ -142,8 +142,8 @@ tiered, multi-agent campaign instead of a single pass:
 4. **Synthesis on a top model.** The survivors get consolidated into one verdict: blockers,
    should-fixes, nits, and an explicit verified-sound section for what held under attack.
 
-This is the same discipline the roadmap-lead's multi-pass protocol runs for child-effort PRs, and
-that protocol is the reference implementation to follow when a PR warrants it: ruling and
+This is the same discipline the saga-lead's multi-pass protocol runs for child-effort PRs, and that
+protocol is the reference implementation to follow when a PR warrants it: ruling and
 contract-conformance (checked clause by clause against the recorded decisions, not against vibes),
 fresh-eyes (a genuinely cold read with no house priors, which is why it cannot be the
 `agentworks-reviewer` persona by definition and instead wants a general-purpose reader), test
