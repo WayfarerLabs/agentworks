@@ -245,9 +245,14 @@ class TemplateContractTests(RepositoryFixture):
     def test_extracted_content_cannot_expand_a_template_token(self) -> None:
         template = (self.root / "website/templates/index.html").read_text(encoding="utf-8")
         substitutions = site_builder.extract_content(self.root)
-        substitutions["HOME_IDENTITY"] = "&lt;script&gt;{{ATTACK}}&lt;/script&gt;"
-        with self.assertRaisesRegex(ValueError, "unexpanded token"):
-            site_builder.render_named_template("index.html", template, "/", substitutions)
+        for injection in (
+            "&lt;script&gt;{{ATTACK}}&lt;/script&gt;",
+            "{{HOME_PROBLEM}}",
+        ):
+            with self.subTest(injection=injection):
+                substitutions["HOME_IDENTITY"] = injection
+                with self.assertRaisesRegex(ValueError, "brace-like token syntax"):
+                    site_builder.render_named_template("index.html", template, "/", substitutions)
 
     def test_reviewed_destination_and_reporting_literals_cannot_drift(self) -> None:
         for name, old, new in (
@@ -289,6 +294,19 @@ class BuildAndInstallTests(RepositoryFixture):
         second = Path(self.temporary.name) / "second"
         site_builder.build_site(self.root, second, "/agentworks/")
         self.assertEqual(snapshot(second), before)
+
+    def test_unapproved_external_url_fails_before_output_changes(self) -> None:
+        output = self.build()
+        before = snapshot(output)
+        template = self.root / "website/templates/index.html"
+        source = template.read_text(encoding="utf-8")
+        template.write_text(
+            source.replace("</main>", '<a href="https://example.com/unapproved">Unapproved</a>\n</main>'),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ValueError, "unapproved external URL"):
+            site_builder.build_site(self.root, output, "/agentworks/")
+        self.assertEqual(snapshot(output), before)
 
     def test_output_inside_repository_is_rejected_without_source_writes(self) -> None:
         before = snapshot(self.root / "website")
@@ -574,6 +592,17 @@ class GeneratedDocumentTests(RepositoryFixture):
         lowered = css.lower()
         for fake_terminal in ("window-control", "crt", "green-on-black", "prompt-glyph"):
             self.assertNotIn(fake_terminal, lowered)
+
+    def test_home_identity_grid_contains_its_scoped_heading_at_desktop_width(self) -> None:
+        css = (self.output / "static/site.css").read_text(encoding="utf-8")
+        heading_rule = css.split(".identity-panel h1 {", 1)[1].split("}", 1)[0]
+        self.assertIn("max-width: 100%", heading_rule)
+        self.assertIn("font-size: clamp(2.7rem, 6vw, 4.75rem)", heading_rule)
+        default_identity = css.split(".identity-panel {", 1)[1].split("}", 1)[0]
+        self.assertNotIn("grid-template-columns", default_identity)
+        desktop = css.split("@media (min-width: 48rem)", 1)[1]
+        identity_rule = desktop.split(".identity-panel {", 1)[1].split("}", 1)[0]
+        self.assertIn("grid-template-columns: minmax(0, 1fr) minmax(0, 1fr)", identity_rule)
 
     def test_pinned_color_contrasts_meet_text_component_and_status_thresholds(self) -> None:
         expected = (
