@@ -103,15 +103,92 @@ class VMDetailEvent:
 
 
 @dataclass(frozen=True)
+class VMDetailFacts:
+    """Immutable safe scalar snapshot of the persisted VM row."""
+
+    name: str
+    site: str
+    template: str | None
+    admin_template: str | None
+    provisioning_status: str
+    initialization_status: str
+    tailscale_host: str | None
+    cpus: int | None
+    memory_gib: int | None
+    disk_gib: int | None
+    swap_gib: int | None
+    admin_username: str
+    hostname: str
+    created_at: str
+    last_seen_at: str | None
+    operator_stopped: bool
+
+    @classmethod
+    def from_row(cls, vm: VMRow) -> VMDetailFacts:
+        """Copy only contract-safe scalar values from a mutable database row."""
+        return cls(
+            name=vm.name,
+            site=vm.site,
+            template=vm.template,
+            admin_template=vm.admin_template,
+            provisioning_status=vm.provisioning_status,
+            initialization_status=vm.init_status,
+            tailscale_host=vm.tailscale_host,
+            cpus=vm.cpus,
+            memory_gib=vm.memory_gib,
+            disk_gib=vm.disk_gib,
+            swap_gib=vm.swap_gib,
+            admin_username=vm.admin_username,
+            hostname=vm.hostname,
+            created_at=vm.created_at,
+            last_seen_at=vm.last_seen_at,
+            operator_stopped=vm.operator_stopped,
+        )
+
+
+@dataclass(frozen=True)
+class VMLiveResources:
+    """Immutable safe scalar snapshot of a successful live resource read."""
+
+    cpus: str
+    load_average: str
+    memory_total: str
+    memory_used: str
+    memory_percent: str
+    swap_total: str
+    swap_used: str
+    swap_percent: str
+    disk_total: str
+    disk_used: str
+    disk_percent: str
+
+    @classmethod
+    def from_mapping(cls, resources: dict[str, str]) -> VMLiveResources:
+        return cls(
+            cpus=resources["cpus"],
+            load_average=resources["load_avg"],
+            memory_total=resources["mem_total"],
+            memory_used=resources["mem_used"],
+            memory_percent=resources["mem_pct"],
+            swap_total=resources["swap_total"],
+            swap_used=resources["swap_used"],
+            swap_percent=resources["swap_pct"],
+            disk_total=resources["disk_total"],
+            disk_used=resources["disk_used"],
+            disk_percent=resources["disk_pct"],
+        )
+
+
+@dataclass(frozen=True)
 class VMDescription:
-    vm: VMRow
+    vm: VMDetailFacts
     platform: str | None
     backend: str | None
     observed_status: str | None
     status_disposition: str | None
     system_slug: str | None
     system_slug_state: str
-    live_resources: dict[str, str] | None
+    live_resources: VMLiveResources | None
     agents: tuple[VMDetailAgent, ...]
     workspaces: tuple[VMDetailWorkspace, ...]
     events: tuple[VMDetailEvent, ...]
@@ -161,7 +238,7 @@ def vm_description_data(description: VMDescription) -> JsonObject:
             "admin_template": vm.admin_template,
             "admin_username": vm.admin_username,
             "provisioning_status": vm.provisioning_status,
-            "initialization_status": vm.init_status,
+            "initialization_status": vm.initialization_status,
             "tailscale_host": vm.tailscale_host,
             "last_seen_at": vm.last_seen_at,
             "provisioned_resources": {
@@ -173,17 +250,17 @@ def vm_description_data(description: VMDescription) -> JsonObject:
             "live_resources": None
             if live_resources is None
             else {
-                "cpus": live_resources["cpus"],
-                "load_average": live_resources["load_avg"],
-                "memory_total": live_resources["mem_total"],
-                "memory_used": live_resources["mem_used"],
-                "memory_percent": live_resources["mem_pct"],
-                "swap_total": live_resources["swap_total"],
-                "swap_used": live_resources["swap_used"],
-                "swap_percent": live_resources["swap_pct"],
-                "disk_total": live_resources["disk_total"],
-                "disk_used": live_resources["disk_used"],
-                "disk_percent": live_resources["disk_pct"],
+                "cpus": live_resources.cpus,
+                "load_average": live_resources.load_average,
+                "memory_total": live_resources.memory_total,
+                "memory_used": live_resources.memory_used,
+                "memory_percent": live_resources.memory_percent,
+                "swap_total": live_resources.swap_total,
+                "swap_used": live_resources.swap_used,
+                "swap_percent": live_resources.swap_percent,
+                "disk_total": live_resources.disk_total,
+                "disk_used": live_resources.disk_used,
+                "disk_percent": live_resources.disk_percent,
             },
             "agents": [
                 {
@@ -215,8 +292,7 @@ def vm_description_data(description: VMDescription) -> JsonObject:
             # must fail closed rather than expose a command or secret-bearing
             # diagnostic. The human renderer retains the legacy detail display.
             "events": [
-                {"created_at": event.created_at, "event": event.event, "detail": None}
-                for event in description.events
+                {"created_at": event.created_at, "event": event.event, "detail": None} for event in description.events
             ],
         },
         "issues": [{"source": issue.source, "code": issue.code} for issue in description.issues],
@@ -322,7 +398,7 @@ def vm_description(
     backend: str | None = None
     observed_status: str | None = None
     status_disposition: str | None = None
-    live_resources: dict[str, str] | None = None
+    live_resources: VMLiveResources | None = None
 
     registry = load_request_registry(config)
     try:
@@ -377,7 +453,9 @@ def vm_description(
     if vm.tailscale_host is not None and observed_status not in {"stopped", "deallocated"}:
         import agentworks.vms.manager as _mgr
 
-        live_resources = _mgr._query_live_resources(vm, config)
+        raw_live_resources = _mgr._query_live_resources(vm, config)
+        if raw_live_resources is not None:
+            live_resources = VMLiveResources.from_mapping(raw_live_resources)
 
     stored_slug = db.get_setting(SYSTEM_SLUG_KEY)
     if stored_slug is None:
@@ -420,7 +498,7 @@ def vm_description(
         for event in db.list_vm_events(name)
     )
     return VMDescription(
-        vm=vm,
+        vm=VMDetailFacts.from_row(vm),
         platform=platform_name,
         backend=backend,
         observed_status=observed_status,
@@ -473,7 +551,7 @@ def render_vm_description(description: VMDescription) -> None:
     output.info(f"Template:       {vm.template or '-'}")
     output.info(f"Admin User:     {vm.admin_username}")
     output.info(f"Provisioning:   {vm.provisioning_status}")
-    output.info(f"Initialization: {vm.init_status}")
+    output.info(f"Initialization: {vm.initialization_status}")
     output.info(f"Tailscale IP:   {vm.tailscale_host or '-'}")
 
     live = description.live_resources
@@ -483,26 +561,26 @@ def render_vm_description(description: VMDescription) -> None:
         output.detail(
             f"{'CPU':<16}"
             f"{str(vm.cpus) if vm.cpus else '-':<14}"
-            f"{live['cpus'] if live else '-':<14}"
-            f"{'load ' + live['load_avg'] if live else '-'}"
+            f"{live.cpus if live else '-':<14}"
+            f"{'load ' + live.load_average if live else '-'}"
         )
         output.detail(
             f"{'Memory':<16}"
             f"{str(vm.memory_gib) + 'G' if vm.memory_gib else '-':<14}"
-            f"{live['mem_total'] if live else '-':<14}"
-            f"{live['mem_used'] + ' (' + live['mem_pct'] + ')' if live else '-'}"
+            f"{live.memory_total if live else '-':<14}"
+            f"{live.memory_used + ' (' + live.memory_percent + ')' if live else '-'}"
         )
         output.detail(
             f"{'Swap':<16}"
             f"{str(vm.swap_gib) + 'G' if vm.swap_gib else '-':<14}"
-            f"{live['swap_total'] if live else '-':<14}"
-            f"{live['swap_used'] + ' (' + live['swap_pct'] + ')' if live else '-'}"
+            f"{live.swap_total if live else '-':<14}"
+            f"{live.swap_used + ' (' + live.swap_percent + ')' if live else '-'}"
         )
         output.detail(
             f"{'Disk':<16}"
             f"{str(vm.disk_gib) + 'G' if vm.disk_gib else '-':<14}"
-            f"{live['disk_total'] if live else '-':<14}"
-            f"{live['disk_used'] + ' (' + live['disk_pct'] + ')' if live else '-'}"
+            f"{live.disk_total if live else '-':<14}"
+            f"{live.disk_used + ' (' + live.disk_percent + ')' if live else '-'}"
         )
 
     if vm.last_seen_at:

@@ -77,6 +77,7 @@ def test_operational_json_usage_errors_have_empty_stdout_before_work(monkeypatch
 
     for argv in (
         ["vm", "list", "--output", "yaml"],
+        ["vm", "list", "--names-only", "--output", "json"],
         ["workspace", "list", "--names-only", "--output", "json"],
         ["agent", "list", "--names-only", "--output", "json"],
         ["session", "list", "--names-only", "--output", "json"],
@@ -99,9 +100,9 @@ def test_operational_describe_json_commands_are_deterministic_and_exclude_opaque
     from agentworks.sessions.manager._queries import SessionDescription
     from agentworks.sessions.multi_console.attach import ConsoleDescription, ConsoleMember, ConsoleShell
     from agentworks.vms import manager as vms
-    from agentworks.vms.manager.power import VMDescription, VMIssue
+    from agentworks.vms.manager.power import VMDescription, VMDetailFacts, VMIssue
     from agentworks.workspaces import manager as workspaces
-    from agentworks.workspaces.manager.create import WorkspaceDescription, WorkspaceSession
+    from agentworks.workspaces.manager.create import WorkspaceDescription, WorkspaceDetailFacts, WorkspaceSession
 
     marker = "secret-value platform-metadata socket-path boot-id harness-state"
     vm_row = VMRow(
@@ -131,7 +132,7 @@ def test_operational_describe_json_commands_are_deterministic_and_exclude_opaque
         vms,
         "vm_description",
         lambda *_args, **_kwargs: VMDescription(
-            vm=vm_row,
+            vm=VMDetailFacts.from_row(vm_row),
             platform=None,
             backend=None,
             observed_status="stopped",
@@ -149,7 +150,11 @@ def test_operational_describe_json_commands_are_deterministic_and_exclude_opaque
     monkeypatch.setattr(
         workspaces,
         "workspace_description",
-        lambda *_args, **_kwargs: WorkspaceDescription(workspace_row, (WorkspaceSession("s", "t", "admin", None),), ()),
+        lambda *_args, **_kwargs: WorkspaceDescription(
+            WorkspaceDetailFacts.from_row(workspace_row),
+            (WorkspaceSession("s", "t", "admin", None),),
+            (),
+        ),
     )
     monkeypatch.setattr(
         agents,
@@ -267,9 +272,9 @@ def test_operational_human_describe_commands_keep_literal_no_color_bytes(monkeyp
     from agentworks.sessions.manager._queries import SessionDescription
     from agentworks.sessions.multi_console.attach import ConsoleDescription
     from agentworks.vms import manager as vms
-    from agentworks.vms.manager.power import VMDescription, render_vm_description
+    from agentworks.vms.manager.power import VMDescription, VMDetailFacts, render_vm_description
     from agentworks.workspaces import manager as workspaces
-    from agentworks.workspaces.manager.create import WorkspaceDescription
+    from agentworks.workspaces.manager.create import WorkspaceDescription, WorkspaceDetailFacts
 
     vm_row = VMRow(
         "box",
@@ -297,11 +302,13 @@ def test_operational_human_describe_commands_keep_literal_no_color_bytes(monkeyp
         vms,
         "vm_description",
         lambda *_args, **_kwargs: VMDescription(
-            vm_row, None, None, None, None, None, "unset", None, (), (), (), (), ()
+            VMDetailFacts.from_row(vm_row), None, None, None, None, None, "unset", None, (), (), (), (), ()
         ),
     )
     monkeypatch.setattr(
-        workspaces, "workspace_description", lambda *_args, **_kwargs: WorkspaceDescription(ws_row, (), ())
+        workspaces,
+        "workspace_description",
+        lambda *_args, **_kwargs: WorkspaceDescription(WorkspaceDetailFacts.from_row(ws_row), (), ()),
     )
     monkeypatch.setattr(
         agents,
@@ -792,6 +799,7 @@ def test_unknown_name_json_uses_existing_stderr_error_route(monkeypatch, capsys:
     assert exit_info.value.code == 1
     assert captured.out == ""
     assert "Error: resource secret/missing does not exist" in captured.err
+    assert "\x1b" not in captured.err
 
 
 def test_config_failure_json_writes_no_stdout_before_service_work(
@@ -823,4 +831,5 @@ def test_config_failure_json_writes_no_stdout_before_service_work(
     assert exit_info.value.code == 1
     assert captured.out == ""
     assert "Configuration error: configuration is invalid" in captured.err
+    assert "\x1b" not in captured.err
     assert service_calls == 0

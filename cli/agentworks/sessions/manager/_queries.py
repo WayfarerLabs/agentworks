@@ -464,25 +464,15 @@ def list_sessions(
     no_status: bool = False,
     names_only: bool = False,
 ) -> None:
-    """List sessions with batched status checks (one SSH call per VM, parallel).
-
-    Status resolution is has-session-first; PID/boot_id are only used as a
-    follow-up when agent checks fail.
-
-    With ``names_only=True``, emit one session name per line and
-    skip both the SSH status batch and the table render. Used by
-    shell completion (see issue #147); the order matches the table's
-    workspace-grouped order so completion stays stable.
-    """
-    sessions = _mgr.filter_sessions(
-        db,
-        workspace_name=workspace_name,
-        vm_name=vm_name,
-        agent_name=agent_name,
-        admin_only=admin_only,
-    )
-
+    """Render the shared session listing, or the lightweight names path."""
     if names_only:
+        sessions = _mgr.filter_sessions(
+            db,
+            workspace_name=workspace_name,
+            vm_name=vm_name,
+            agent_name=agent_name,
+            admin_only=admin_only,
+        )
         # Empty / fully-filtered-out result prints nothing under
         # names-only; the friendly "No sessions found" line below is
         # for human readers only. Match the table's workspace-grouped
@@ -494,103 +484,17 @@ def list_sessions(
             for session in names_by_ws[ws_name]:
                 output.info(session.name)
         return
-
-    if not sessions:
-        output.info("No sessions found.")
-        return
-
-    # Auto-repair sessions with missing PIDs, then batch check.
-    # The status path SSHes to every involved VM; anchor each one (no-op
-    # on non-WSL2) so the probe doesn't lose them mid-check.
-    status_keepalive_vms: list[VMRow] = [] if no_status else _mgr._distinct_vms_for_sessions(db, sessions)
-
-    status_map: dict[str, SessionStatus] = {}
-    with _mgr._batch_vm_boundary(db, config, status_keepalive_vms):
-        if not no_status:
-            sessions = _mgr.ensure_pids_batch(sessions, db=db, config=config)
-            status_map = _mgr.batch_check_all_sessions(sessions, db=db, config=config)
-
-    # Resolve each session's concrete harness integration for the display column.
-    # build_registry and resolve_template are config-only (no SSH), so
-    # this is cheap; still, resolve each DISTINCT template at most once
-    # and guard both the registry build and each resolution so a bad
-    # registry or one bad template shows "-" rather than aborting the
-    # whole listing.
-    registry = _mgr._display_registry(config)
-    harness_integration_by_template: dict[str, str] = {}
-
-    def _harness_integration_for(template_name: str) -> str:
-        if template_name not in harness_integration_by_template:
-            harness_integration_by_template[template_name] = _mgr._display_harness_integration(registry, template_name)
-        return harness_integration_by_template[template_name]
-
-    # Build table rows grouped by workspace
-    by_workspace: dict[str, list[SessionRow]] = {}
-    for session in sessions:
-        by_workspace.setdefault(session.workspace_name, []).append(session)
-
-    rows: list[tuple[str, str, str, str, str, str, str]] = []
-    broken_names = []
-    unknown_names = []
-    for ws_name, ws_sessions in sorted(by_workspace.items()):
-        ws = db.get_workspace(ws_name)
-        vm_name = ws.vm_name if ws else "-"
-
-        for session in ws_sessions:
-            if no_status:
-                status = "-"
-            elif session.pid == PID_STOPPED:
-                status = "stopped"
-            elif session.pid is None or session.boot_id is None:
-                status = "unknown"
-            elif session.name in status_map:
-                s_status = status_map[session.name]
-                status = {
-                    SessionStatus.OK: "running",
-                    SessionStatus.STOPPED: "stopped",
-                    SessionStatus.BROKEN: "broken",
-                    SessionStatus.UNKNOWN: "unknown",
-                }[s_status]
-            else:
-                # No status available (VM unreachable or SSH failure during batch check)
-                status = "-"
-            mode_label = f"agent ({session.agent_name})" if session.agent_name else "admin"
-            rows.append(
-                (
-                    session.name,
-                    ws_name,
-                    vm_name,
-                    session.template,
-                    _harness_integration_for(session.template),
-                    mode_label,
-                    status,
-                )
-            )
-            if status == "broken":
-                broken_names.append(session.name)
-            elif status == "unknown":
-                unknown_names.append(session.name)
-
-    if not rows:
-        output.info("No sessions found.")
-        return
-
-    headers = ["NAME", "WORKSPACE", "VM", "TEMPLATE", "HARNESS INTEGRATION", "MODE", "STATUS"]
-    for line in output.render_table(headers, rows):
-        output.info(line)
-
-    if broken_names or unknown_names:
-        output.info("")
-        if broken_names:
-            output.warn(
-                f"{len(broken_names)} session(s) are broken (tmux unreachable): "
-                f"{', '.join(broken_names)}. Use resume/stop/delete --force."
-            )
-        if unknown_names:
-            output.warn(
-                f"{len(unknown_names)} session(s) have unknown status: "
-                f"{', '.join(unknown_names)}. Status could not be determined."
-            )
+    render_session_listing(
+        _mgr.session_listing(
+            db,
+            config,
+            workspace_name=workspace_name,
+            vm_name=vm_name,
+            agent_name=agent_name,
+            admin_only=admin_only,
+            no_status=no_status,
+        )
+    )
 
 
 def session_listing(

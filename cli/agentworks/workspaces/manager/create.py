@@ -25,10 +25,22 @@ _NAME_CELL_WIDTH = MAX_WORKSPACE_NAME_LENGTH
 
 
 @dataclass(frozen=True)
+class WorkspaceListRow:
+    name: str
+    vm_name: str
+    template: str | None
+    created_at: str
+
+    @classmethod
+    def from_row(cls, workspace: WorkspaceRow) -> WorkspaceListRow:
+        return cls(workspace.name, workspace.vm_name, workspace.template, workspace.created_at)
+
+
+@dataclass(frozen=True)
 class WorkspaceListing:
     """Ordered facts backing the workspace list renderers."""
 
-    workspaces: tuple[WorkspaceRow, ...]
+    workspaces: tuple[WorkspaceListRow, ...]
 
 
 @dataclass(frozen=True)
@@ -46,8 +58,27 @@ class WorkspaceAgent:
 
 
 @dataclass(frozen=True)
+class WorkspaceDetailFacts:
+    name: str
+    vm_name: str
+    template: str | None
+    path: str
+    created_at: str
+
+    @classmethod
+    def from_row(cls, workspace: WorkspaceRow) -> WorkspaceDetailFacts:
+        return cls(
+            workspace.name,
+            workspace.vm_name,
+            workspace.template,
+            workspace.workspace_path,
+            workspace.created_at,
+        )
+
+
+@dataclass(frozen=True)
 class WorkspaceDescription:
-    workspace: WorkspaceRow
+    workspace: WorkspaceDetailFacts
     sessions: tuple[WorkspaceSession, ...]
     agents: tuple[WorkspaceAgent, ...]
 
@@ -75,7 +106,7 @@ def workspace_description_data(description: WorkspaceDescription) -> JsonObject:
             "name": workspace.name,
             "vm_name": workspace.vm_name,
             "template": workspace.template,
-            "path": workspace.workspace_path,
+            "path": workspace.path,
             "created_at": workspace.created_at,
             "sessions": [
                 {
@@ -240,7 +271,7 @@ def workspace_description(db: Database, name: str) -> WorkspaceDescription:
         for agent in db.list_agents(vm_name=ws.vm_name)
         if db.has_any_grant(agent.name, name)
     )
-    return WorkspaceDescription(workspace=ws, sessions=sessions, agents=agents)
+    return WorkspaceDescription(workspace=WorkspaceDetailFacts.from_row(ws), sessions=sessions, agents=agents)
 
 
 def render_workspace_description(description: WorkspaceDescription) -> None:
@@ -249,7 +280,7 @@ def render_workspace_description(description: WorkspaceDescription) -> None:
     output.info(f"Name:       {ws.name}")
     output.info(f"VM:         {ws.vm_name}")
     output.info(f"Template:   {ws.template or 'default'}")
-    output.info(f"Path:       {ws.workspace_path}")
+    output.info(f"Path:       {ws.path}")
     output.info(f"Created:    {ws.created_at}")
 
     # Sessions
@@ -289,7 +320,9 @@ def workspace_listing(
 
     """
     validate_name_filters(db, vm_name=vm_name)
-    return WorkspaceListing(workspaces=tuple(db.list_workspaces(vm_name=vm_name)))
+    return WorkspaceListing(
+        workspaces=tuple(WorkspaceListRow.from_row(workspace) for workspace in db.list_workspaces(vm_name=vm_name))
+    )
 
 
 def render_workspace_listing(listing: WorkspaceListing, *, names_only: bool = False) -> None:

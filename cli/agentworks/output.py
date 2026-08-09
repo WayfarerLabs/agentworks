@@ -372,6 +372,7 @@ class _DefaultHandler:
 # the installed handler. See output-model-lld.md sec 1 for the rationale.
 _level: ContextVar[int] = ContextVar("_output_level", default=0)
 _presentation_suppressed: ContextVar[bool] = ContextVar("_presentation_suppressed", default=False)
+_presentation_suppression_depth: int = 0
 _handler: OutputHandler = _DefaultHandler()
 
 
@@ -387,11 +388,26 @@ def suppress_presentation() -> Iterator[None]:
     Prompts retain their handler path and interactivity; this only prevents
     service status, progress, and resolver narration from corrupting stdout.
     """
+    global _presentation_suppression_depth  # noqa: PLW0603
+
     token = _presentation_suppressed.set(True)
+    _presentation_suppression_depth += 1
     try:
         yield
     finally:
+        _presentation_suppression_depth -= 1
         _presentation_suppressed.reset(token)
+
+
+def presentation_suppressed() -> bool:
+    """Return whether ordinary presentation is suppressed for this request.
+
+    The per-flow context preserves nesting semantics, while the depth counter
+    carries the request-wide state into worker threads used by status
+    collection. CLI invocations are process-serial, so a request-wide counter
+    is the appropriate boundary for presentation owned by a single command.
+    """
+    return _presentation_suppressed.get() or _presentation_suppression_depth > 0
 
 
 @contextmanager
@@ -405,7 +421,7 @@ def section(title: str | None = None) -> Iterator[None]:
     raises, so a section can never strand the ambient level.
     """
     level = _current_level()
-    if title is not None and not _presentation_suppressed.get():
+    if title is not None and not presentation_suppressed():
         _handler.emit(Role.HEADER, title, level)
     token = _level.set(level + 1)
     try:
@@ -474,7 +490,7 @@ def truncate(text: str, width: int) -> str:
 
 def info(message: str) -> None:
     """Emit a top-level status message."""
-    if not _presentation_suppressed.get():
+    if not presentation_suppressed():
         _handler.emit(Role.BODY, message, _current_level())
 
 
@@ -487,13 +503,13 @@ def detail(message: str) -> None:
     in a :func:`section` block; a headerless ``section()`` pushes a level
     with no header line.
     """
-    if not _presentation_suppressed.get():
+    if not presentation_suppressed():
         _handler.emit(Role.DETAIL, message, _current_level())
 
 
 def warn(message: str) -> None:
     """Emit a non-fatal warning."""
-    if not _presentation_suppressed.get():
+    if not presentation_suppressed():
         _handler.emit(Role.WARNING, message, _current_level())
 
 
@@ -504,7 +520,7 @@ def result(message: str) -> None:
     closing line of a command stays flush-left even inside nested
     sections.
     """
-    if not _presentation_suppressed.get():
+    if not presentation_suppressed():
         _handler.emit(Role.RESULT, message, 0)
 
 
@@ -547,7 +563,7 @@ def prompt_secret(label: str, hint: str | None = None) -> str:
 
 def progress(label: str, total: int | None = None) -> Progress:
     """Start a tracked operation. Returns a Progress handle."""
-    if _presentation_suppressed.get():
+    if presentation_suppressed():
         return _SilentProgress()
     return _handler.progress(label, _current_level(), total)
 
@@ -572,6 +588,7 @@ def get_handler() -> OutputHandler:
 # ---------------------------------------------------------------------------
 
 _non_interactive: bool = False
+_machine_readable: bool = False
 
 
 def set_non_interactive(value: bool) -> None:
@@ -605,6 +622,17 @@ def non_interactive() -> bool:
     stdin; color depends only on the flag and the output stream.
     """
     return _non_interactive
+
+
+def set_machine_readable(value: bool) -> None:
+    """Record whether this CLI invocation selected machine-readable output."""
+    global _machine_readable  # noqa: PLW0603
+    _machine_readable = value
+
+
+def machine_readable() -> bool:
+    """Return whether this CLI invocation selected machine-readable output."""
+    return _machine_readable
 
 
 _suppress_deprecations: bool = False

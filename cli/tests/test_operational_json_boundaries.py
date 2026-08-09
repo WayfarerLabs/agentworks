@@ -1,0 +1,643 @@
+"""Actual-boundary JSON coverage for resolver and degraded VM behavior."""
+
+from __future__ import annotations
+
+import contextlib
+import json
+import threading
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, cast
+
+import pytest
+from typer.testing import CliRunner
+
+from agentworks.cli import app
+from agentworks.db import PID_STOPPED, SessionMode, SessionStatus, VMStatus
+from agentworks.resources.graph import Readiness
+from agentworks.secrets.resolve import ActiveBackend
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator, Sequence
+
+    from agentworks.config import Config
+    from agentworks.db import Database, SessionRow
+    from agentworks.resources.registry import Registry
+    from agentworks.secrets.base import MappingValue, SecretDecl
+
+
+@dataclass
+class _SkippedBackend:
+    """A backend that would attempt every secret but is deliberately offline."""
+
+    interactive: bool = False
+
+    def would_attempt(self, secret: SecretDecl, mapping: MappingValue | None) -> bool:
+        del secret, mapping
+        return True
+
+    def describe_lookup(self, secret: SecretDecl, mapping: MappingValue | None) -> str:
+        del secret, mapping
+        return "SKIPPED_IDENTIFIER"
+
+    def batch_get(self, wants: list[tuple[SecretDecl, MappingValue | None]]) -> dict[str, str]:
+        del wants
+        raise AssertionError("a not-ready backend must never execute")
+
+
+def _install_skipped_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks.secrets import resolve
+
+    real_active_backends = resolve.active_backends
+
+    def active_backends(config: Config, registry: Registry) -> list[ActiveBackend]:
+        return [
+            ActiveBackend(
+                capability=_SkippedBackend(),  # type: ignore[arg-type]
+                readiness=Readiness.blocked("backend offline"),
+                registered_name="skipped-store",
+            ),
+            *real_active_backends(config, registry),
+        ]
+
+    monkeypatch.setattr(resolve, "active_backends", active_backends)
+
+
+def _seed_vm(db: Database) -> None:
+    db.insert_vm("box", site="proxmox", hostname="box")
+    db.update_vm_tailscale("box", "100.64.0.9")
+    db.update_vm_platform_metadata("box", {"node": "pve1", "vmid": "101", "opaque": "PLATFORM_SECRET"})
+
+
+def _seed_session(db: Database) -> None:
+    _seed_vm(db)
+    db.insert_workspace("ws", "/srv/ws", "box", "ws-ws")
+    db.insert_session(
+        "session-a",
+        "ws",
+        "default",
+        SessionMode.ADMIN,
+        socket_path="/tmp/SECRET_SOCKET",
+        harness_integration_state={"SECRET_HARNESS_STATE": True},
+    )
+    db.update_session_pid("session-a", PID_STOPPED, boot_id="SECRET_BOOT_ID")
+
+
+def _wire_cli(monkeypatch: pytest.MonkeyPatch, db: Database, config: Config) -> None:
+    from agentworks.cli.commands import session, vm
+
+    monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: config)
+    monkeypatch.setattr(vm, "get_db", lambda: db)
+    monkeypatch.setattr(session, "get_db", lambda: db)
+
+
+def _platform_fast_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
+    from agentworks.vms import manager
+
+    monkeypatch.setattr(manager, "_is_tailscale_reachable", lambda _host: True)
+    monkeypatch.setattr(ProxmoxPlatform, "display_backend_name", lambda self, vm: "pve1/101")
+    monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, vm, ctx: VMStatus.RUNNING)
+    monkeypatch.setattr(manager, "_query_live_resources", lambda vm, config: None)
+
+
+def _resolution_spy(monkeypatch: pytest.MonkeyPatch) -> list[tuple[tuple[str, ...], tuple[str, ...], str, bool]]:
+    from agentworks.secrets import resolve
+
+    real_ordered = resolve._resolve_secrets_ordered
+    calls: list[tuple[tuple[str, ...], tuple[str, ...], str, bool]] = []
+
+    def ordered(
+        secrets: list[SecretDecl],
+        backends: Sequence[ActiveBackend],
+        *,
+        errors: dict[str, str] | None,
+        registry: Registry | None,
+        reporter: object,
+        interactive_available: bool,
+        exclude_interactive: bool = False,
+    ) -> dict[str, str]:
+        calls.append(
+            (
+                tuple(secret.name for secret in secrets),
+                tuple(backend.name for backend in backends),
+                reporter.__class__.__name__,
+                interactive_available,
+            )
+        )
+        return real_ordered(
+            secrets,
+            backends,
+            errors=errors,
+            registry=registry,
+            reporter=reporter,  # type: ignore[arg-type]
+            interactive_available=interactive_available,
+            exclude_interactive=exclude_interactive,
+        )
+
+    monkeypatch.setattr(resolve, "_resolve_secrets_ordered", ordered)
+    return calls
+
+
+def _assert_json_envelope_only(result: object, command: str) -> dict[str, object]:
+    stdout = result.stdout_bytes  # type: ignore[attr-defined]
+    assert stdout.endswith(b"\n") and not stdout.endswith(b"\n\n")
+    assert stdout.count(b"\n") == 1
+    document = cast("dict[str, object]", json.loads(stdout))
+    assert list(document) == ["schema_version", "command", "data"]
+    assert document["schema_version"] == 1
+    assert document["command"] == command
+    assert b"Resolved " not in stdout
+    assert b"skipping " not in stdout
+    return document
+
+
+def test_vm_describe_json_and_human_keep_resolver_semantics_with_quiet_reporting(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """VM describe changes only reporter presentation, not the ordered pass."""
+    config = make_config()
+    _seed_vm(db)
+    _wire_cli(monkeypatch, db, config)
+    _platform_fast_path(monkeypatch)
+    _install_skipped_backend(monkeypatch)
+    calls = _resolution_spy(monkeypatch)
+    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
+
+    human = CliRunner().invoke(app, ["vm", "describe", "box", "--output", "human"])
+    machine = CliRunner().invoke(app, ["vm", "describe", "box", "--output", "json"])
+
+    assert human.exit_code == machine.exit_code == 0, machine.output
+    assert human.stdout_bytes.startswith(b"Resolved proxmox-token via env-var (AW_SECRET_PROXMOX_TOKEN)\nName:")
+    assert human.stderr_bytes == (
+        b"Warning: secret proxmox-token: skipping skipped-store, not ready: backend offline\n"
+    )
+    document = _assert_json_envelope_only(machine, "vm.describe")
+    assert machine.stderr_bytes == b""
+    assert b"PLATFORM_SECRET" not in machine.stdout_bytes
+    assert document["data"]
+    assert calls == [
+        (
+            ("proxmox-token",),
+            ("skipped-store", "env-var", "prompt"),
+            "OutputResolutionReporter",
+            True,
+        ),
+        (
+            ("proxmox-token",),
+            ("skipped-store", "env-var", "prompt"),
+            "QuietResolutionReporter",
+            True,
+        ),
+    ]
+
+
+def test_session_describe_threads_reporter_through_the_real_gate_chain(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Typer reaches _prepare_vm, gated_vm_boundary, and gate_secret_resolver unchanged."""
+    from agentworks.orchestration import activation
+    from agentworks.sessions import manager as sessions
+    from agentworks.vms import manager as vms
+
+    config = make_config()
+    _seed_session(db)
+    _wire_cli(monkeypatch, db, config)
+    _platform_fast_path(monkeypatch)
+    _install_skipped_backend(monkeypatch)
+    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
+    monkeypatch.setattr(sessions, "_ensure_pid", lambda row, *, target, db: row)
+    monkeypatch.setattr(sessions, "check_session_status", lambda row, *, target: SessionStatus.STOPPED)
+
+    chain: list[tuple[str, str | None]] = []
+    real_prepare = sessions._prepare_vm
+    from agentworks.vms.manager import boundary as vm_boundary
+
+    real_boundary = vm_boundary.gated_vm_boundary
+    real_gate_resolver = activation.gate_secret_resolver
+
+    @contextlib.contextmanager
+    def prepare(*args: object, **kwargs: object) -> Iterator[object]:
+        reporter = kwargs.get("reporter")
+        chain.append(("_prepare_vm", reporter.__class__.__name__ if reporter is not None else None))
+        with real_prepare(*args, **kwargs) as value:  # type: ignore[arg-type]
+            yield value
+
+    @contextlib.contextmanager
+    def boundary(*args: object, **kwargs: object) -> Iterator[object]:
+        reporter = kwargs.get("reporter")
+        chain.append(("gated_vm_boundary", reporter.__class__.__name__ if reporter is not None else None))
+        with real_boundary(*args, **kwargs) as value:  # type: ignore[arg-type]
+            yield value
+
+    def gate_resolver(*args: object, **kwargs: object):  # noqa: ANN202
+        reporter = kwargs.get("reporter")
+        chain.append(("gate_secret_resolver", reporter.__class__.__name__ if reporter is not None else None))
+        return real_gate_resolver(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(sessions, "_prepare_vm", prepare)
+    monkeypatch.setattr("agentworks.sessions.manager._scope.gated_vm_boundary", boundary)
+    monkeypatch.setattr(activation, "gate_secret_resolver", gate_resolver)
+    monkeypatch.setattr(vms, "_is_tailscale_reachable", lambda _host: True)
+
+    human = CliRunner().invoke(app, ["session", "describe", "session-a", "--output", "human"])
+    machine = CliRunner().invoke(app, ["session", "describe", "session-a", "--output", "json"])
+
+    assert human.exit_code == machine.exit_code == 0, machine.output
+    assert human.stdout_bytes.startswith(b"Resolved proxmox-token via env-var (AW_SECRET_PROXMOX_TOKEN)\nName:")
+    assert human.stderr_bytes == (
+        b"Warning: secret proxmox-token: skipping skipped-store, not ready: backend offline\n"
+    )
+    _assert_json_envelope_only(machine, "session.describe")
+    assert machine.stderr_bytes == b""
+    assert chain == [
+        ("_prepare_vm", None),
+        ("gated_vm_boundary", None),
+        ("gate_secret_resolver", None),
+        ("_prepare_vm", "QuietResolutionReporter"),
+        ("gated_vm_boundary", "QuietResolutionReporter"),
+        ("gate_secret_resolver", "QuietResolutionReporter"),
+    ]
+    for excluded in (b"SECRET_HARNESS_STATE", b"SECRET_SOCKET", b"SECRET_BOOT_ID"):
+        assert excluded not in machine.stdout_bytes
+
+
+def test_session_list_status_and_late_repair_resolution_keep_reporter_parity(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The batch boundary and lazy rejoin-key pass both receive the CLI reporter."""
+    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
+    from agentworks.sessions import manager as sessions
+    from agentworks.vms import manager as vms
+
+    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "late-repair-value")
+    config = make_config()
+    _seed_session(db)
+    db.update_session_pid("session-a", None)
+    _wire_cli(monkeypatch, db, config)
+    _install_skipped_backend(monkeypatch)
+    calls = _resolution_spy(monkeypatch)
+    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
+    monkeypatch.setattr(vms, "_is_tailscale_reachable", lambda _host: False)
+    monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, row, ctx: VMStatus.STOPPED)
+    monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: None)
+    keys: list[str] = []
+
+    def reconnect(*_args: object, auth_key_source=None, **_kwargs: object) -> None:  # noqa: ANN001
+        assert auth_key_source is not None
+        keys.append(auth_key_source())
+
+    def repair(rows: list[SessionRow], *, db: Database, config: Config) -> list[SessionRow]:
+        del rows, config
+        db.update_session_pid("session-a", 9090, boot_id="LATE_REPAIR_BOOT_SECRET")
+        return db.list_sessions()
+
+    monkeypatch.setattr(vms, "_ensure_tailscale", reconnect)
+    monkeypatch.setattr(sessions, "ensure_pids_batch", repair)
+    monkeypatch.setattr(
+        sessions,
+        "batch_check_all_sessions",
+        lambda rows, *, db, config: {"session-a": SessionStatus.OK},
+    )
+
+    machine = CliRunner().invoke(app, ["session", "list", "--output", "json"])
+    repaired = db.get_session("session-a")
+
+    assert machine.exit_code == 0, machine.output
+    _assert_json_envelope_only(machine, "session.list")
+    assert machine.stderr_bytes == b""
+    assert repaired is not None and (repaired.pid, repaired.boot_id) == (9090, "LATE_REPAIR_BOOT_SECRET")
+    assert b"LATE_REPAIR_BOOT_SECRET" not in machine.stdout_bytes
+    assert keys == ["late-repair-value"]
+    assert calls == [
+        (
+            ("proxmox-token",),
+            ("skipped-store", "env-var", "prompt"),
+            "QuietResolutionReporter",
+            True,
+        ),
+        (
+            ("tailscale-auth-key",),
+            ("skipped-store", "env-var", "prompt"),
+            "QuietResolutionReporter",
+            True,
+        ),
+    ]
+
+    calls.clear()
+    keys.clear()
+    db.update_session_pid("session-a", None)
+    human = CliRunner().invoke(app, ["session", "list", "--output", "human"])
+    assert human.exit_code == 0, human.output
+    assert human.stdout_bytes.splitlines()[:3] == [
+        b"Resolved proxmox-token via env-var (AW_SECRET_PROXMOX_TOKEN)",
+        b"VM 'box' is stopped. Starting...",
+        b"Resolved tailscale-auth-key via env-var (AW_SECRET_TAILSCALE_AUTH_KEY)",
+    ]
+    assert human.stderr_bytes == (
+        b"Warning: secret proxmox-token: skipping skipped-store, not ready: backend offline\n"
+        b"Warning: secret tailscale-auth-key: skipping skipped-store, not ready: backend offline\n"
+    )
+    assert calls == [
+        (
+            ("proxmox-token",),
+            ("skipped-store", "env-var", "prompt"),
+            "OutputResolutionReporter",
+            True,
+        ),
+        (
+            ("tailscale-auth-key",),
+            ("skipped-store", "env-var", "prompt"),
+            "OutputResolutionReporter",
+            True,
+        ),
+    ]
+
+
+def test_session_json_suppresses_activation_output_around_the_envelope(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A quiet resolver must also keep activation presentation out of JSON stdout."""
+    from agentworks import output
+    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
+    from agentworks.sessions import manager as sessions
+    from agentworks.vms import manager as vms
+
+    config = make_config()
+    _seed_session(db)
+    _wire_cli(monkeypatch, db, config)
+    monkeypatch.setattr(vms, "_is_tailscale_reachable", lambda _host: False)
+    monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, row, ctx: VMStatus.STOPPED)
+    monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: output.info("ACTIVATION_OUTPUT_SENTINEL"))
+    monkeypatch.setattr(vms, "_ensure_tailscale", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sessions, "_ensure_pid", lambda row, *, target, db: row)
+    monkeypatch.setattr(sessions, "check_session_status", lambda row, *, target: SessionStatus.STOPPED)
+
+    result = CliRunner().invoke(app, ["session", "describe", "session-a", "--output", "json"])
+
+    assert result.exit_code == 0, result.output
+    _assert_json_envelope_only(result, "session.describe")
+    assert b"ACTIVATION_OUTPUT_SENTINEL" not in result.stdout_bytes
+
+
+def test_vm_event_detail_cannot_expose_secret_command_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stored event diagnostics are not a trusted JSON-safe channel."""
+    from agentworks.cli.commands import vm
+    from agentworks.db import VMRow
+    from agentworks.vms import manager
+    from agentworks.vms.manager.power import VMDescription, VMDetailEvent, VMDetailFacts
+
+    marker = "SECRET_TOKEN=do-not-expose command --password do-not-expose"
+    row = VMRow(
+        "box",
+        "site",
+        None,
+        None,
+        [],
+        "complete",
+        "complete",
+        None,
+        None,
+        None,
+        None,
+        None,
+        "admin",
+        "box",
+        "2026-01-01",
+        None,
+    )
+    description = VMDescription(
+        VMDetailFacts.from_row(row),
+        None,
+        None,
+        None,
+        None,
+        None,
+        "unset",
+        None,
+        (),
+        (),
+        (VMDetailEvent("2026-01-02", "failed", marker),),
+        (),
+        (),
+    )
+    monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: object())
+    monkeypatch.setattr(vm, "get_db", lambda: object())
+    monkeypatch.setattr(manager, "vm_description", lambda *_args, **_kwargs: description)
+
+    result = CliRunner().invoke(app, ["vm", "describe", "box", "--output", "json"])
+
+    assert result.exit_code == 0, result.output
+    assert marker.encode() not in result.stdout_bytes
+
+
+def test_vm_platform_status_issue_retains_successful_bounded_live_resources(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Independent live SSH facts survive a degraded platform-status read."""
+    from agentworks.errors import ExternalError
+    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
+    from agentworks.vms import manager
+
+    config = make_config()
+    _seed_vm(db)
+    _wire_cli(monkeypatch, db, config)
+    monkeypatch.setattr(ProxmoxPlatform, "display_backend_name", lambda self, vm: "pve1/101")
+    monkeypatch.setattr(
+        ProxmoxPlatform,
+        "status",
+        lambda self, vm, ctx: (_ for _ in ()).throw(ExternalError("platform status unavailable")),
+    )
+    live = {
+        "cpus": "8",
+        "load_avg": "0.1",
+        "mem_total": "32 GiB",
+        "mem_used": "4 GiB",
+        "mem_pct": "12%",
+        "swap_total": "0 B",
+        "swap_used": "0 B",
+        "swap_pct": "0%",
+        "disk_total": "256 GiB",
+        "disk_used": "64 GiB",
+        "disk_pct": "25%",
+    }
+    monkeypatch.setattr(manager, "_query_live_resources", lambda vm, config: live)
+
+    result = CliRunner().invoke(app, ["vm", "describe", "box", "--output", "json"])
+
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout_bytes)["data"]
+    assert data["issues"] == [{"source": "platform_status", "code": "unavailable"}]
+    assert data["vm"]["live_resources"] == {
+        "cpus": "8",
+        "load_average": "0.1",
+        "memory_total": "32 GiB",
+        "memory_used": "4 GiB",
+        "memory_percent": "12%",
+        "swap_total": "0 B",
+        "swap_used": "0 B",
+        "swap_percent": "0%",
+        "disk_total": "256 GiB",
+        "disk_used": "64 GiB",
+        "disk_percent": "25%",
+    }
+
+
+def test_falsey_custom_resolution_reporter_is_honored(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reporter selection uses None as the default sentinel, not truthiness."""
+    from agentworks.resources.graph import Readiness
+    from agentworks.secrets.base import SecretDecl
+    from agentworks.secrets.resolve import ResolutionReporter, resolve_secrets
+
+    events: list[tuple[str, str, str]] = []
+
+    class FalseyReporter:
+        def __bool__(self) -> bool:
+            return False
+
+        def skipped(self, secret: str, backend: str, reason: str | None) -> None:
+            events.append(("skipped", secret, backend))
+
+        def resolved(self, secret: str, backend: str, identifier: str | None) -> None:
+            events.append(("resolved", secret, backend))
+
+    class ResolvingBackend(_SkippedBackend):
+        def batch_get(self, wants: list[tuple[SecretDecl, MappingValue | None]]) -> dict[str, str]:
+            return {decl.name: "value" for decl, _mapping in wants}
+
+    backend = ActiveBackend(ResolvingBackend(), Readiness.ready(), "custom")  # type: ignore[arg-type]
+    reporter: ResolutionReporter = FalseyReporter()
+    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
+
+    assert resolve_secrets(
+        [SecretDecl(name="token", description="")],
+        [backend],
+        reporter=reporter,
+    ) == {"token": "value"}
+    assert events == [("resolved", "token", "custom")]
+
+
+def test_machine_presentation_suppression_keeps_prompts_interactive_on_stderr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every presentation role is quiet while machine prompts retain answers."""
+    from agentworks import output
+    from agentworks.cli._typer_output import TyperHandler
+    from agentworks.cli.commands import vm
+    from agentworks.vms import manager
+    from agentworks.vms.manager.power import VMDescription, VMDetailFacts
+
+    facts = VMDetailFacts(
+        "box",
+        "site",
+        None,
+        None,
+        "complete",
+        "complete",
+        None,
+        None,
+        None,
+        None,
+        None,
+        "admin",
+        "box",
+        "2026-01-01",
+        None,
+        False,
+    )
+    description = VMDescription(facts, None, None, None, None, None, "unset", None, (), (), (), (), ())
+    answers: list[str] = []
+
+    def presentation_op() -> None:
+        output.warn("REGISTRY_WARNING_SENTINEL")
+        with output.section("SECTION_SENTINEL"):
+            output.info("INFO_SENTINEL")
+            output.detail("DETAIL_SENTINEL")
+            progress = output.progress("PROGRESS_SENTINEL", total=2)
+            progress.update(1, "half")
+            progress.done("ready")
+            output.result("RESULT_SENTINEL")
+        thread = threading.Thread(target=output.info, args=("THREAD_PRESENTATION_SENTINEL",))
+        thread.start()
+        thread.join()
+        answers.append(output.prompt("PROMPT_SENTINEL"))
+
+    def collect(*_args: object, **_kwargs: object) -> VMDescription:
+        presentation_op()
+        return description
+
+    def describe(*_args: object, **_kwargs: object) -> None:
+        presentation_op()
+        output.info("HUMAN_COMPLETE")
+
+    monkeypatch.setattr(output, "_handler", TyperHandler())
+    monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: object())
+    monkeypatch.setattr(vm, "get_db", lambda: object())
+    monkeypatch.setattr(manager, "vm_description", collect)
+    monkeypatch.setattr(manager, "describe_vm", describe)
+
+    human = CliRunner().invoke(app, ["vm", "describe", "box", "--output", "human"], input="human-answer\n")
+    machine = CliRunner().invoke(app, ["vm", "describe", "box", "--output", "json"], input="json-answer\n")
+
+    assert human.exit_code == machine.exit_code == 0, machine.output
+    assert answers == ["human-answer", "json-answer"]
+    assert human.stderr_bytes == b"Warning: REGISTRY_WARNING_SENTINEL\n"
+    for marker in (
+        b"SECTION_SENTINEL",
+        b"INFO_SENTINEL",
+        b"DETAIL_SENTINEL",
+        b"PROGRESS_SENTINEL",
+        b"RESULT_SENTINEL",
+        b"THREAD_PRESENTATION_SENTINEL",
+        b"PROMPT_SENTINEL",
+        b"HUMAN_COMPLETE",
+    ):
+        assert marker in human.stdout_bytes
+    _assert_json_envelope_only(machine, "vm.describe")
+    for marker in (
+        b"REGISTRY_WARNING_SENTINEL",
+        b"SECTION_SENTINEL",
+        b"INFO_SENTINEL",
+        b"DETAIL_SENTINEL",
+        b"PROGRESS_SENTINEL",
+        b"RESULT_SENTINEL",
+        b"THREAD_PRESENTATION_SENTINEL",
+    ):
+        assert marker not in machine.stdout_bytes + machine.stderr_bytes
+    assert b"PROMPT_SENTINEL" in machine.stderr_bytes
+
+
+def test_vm_site_construction_error_is_exact_site_lookup_issue(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed live-node construction stays classified at the site boundary."""
+    from agentworks.errors import ConfigError
+    from agentworks.vms import manager
+
+    config = make_config()
+    _seed_vm(db)
+    _wire_cli(monkeypatch, db, config)
+    marker = "SITE_LOOKUP_DIAGNOSTIC_SENTINEL"
+    monkeypatch.setattr(
+        "agentworks.vms.sites.lookup_site",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(ConfigError(marker)),
+    )
+    monkeypatch.setattr(manager, "_query_live_resources", lambda *_args, **_kwargs: None)
+
+    result = CliRunner().invoke(app, ["vm", "describe", "box", "--output", "json"])
+
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout_bytes)["data"]
+    assert data["issues"] == [{"source": "site_lookup", "code": "unavailable"}]
+    assert marker.encode() not in result.stdout_bytes + result.stderr_bytes

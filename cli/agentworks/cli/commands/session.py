@@ -130,7 +130,7 @@ def session_list(
         raise typer.BadParameter("cannot be used with --output json", param_hint="--names-only")
 
     from agentworks.config import load_config
-    from agentworks.sessions.manager import list_sessions, render_session_listing, session_listing
+    from agentworks.sessions.manager import list_sessions, session_listing
 
     # Validate against the parsed filter, not the raw flag value, so inputs
     # that normalize to "no filter" (whitespace, lone commas) don't falsely
@@ -166,28 +166,15 @@ def session_list(
             get_binary_stream("stdout"),
         )
         return
-    if names_only:
-        list_sessions(
-            db,
-            config,
-            workspace_name=parse_csv_filter(workspace),
-            vm_name=parse_csv_filter(vm),
-            agent_name=parsed_agent,
-            admin_only=admin,
-            no_status=no_status,
-            names_only=True,
-        )
-        return
-    render_session_listing(
-        session_listing(
-            db,
-            config,
-            workspace_name=parse_csv_filter(workspace),
-            vm_name=parse_csv_filter(vm),
-            agent_name=parsed_agent,
-            admin_only=admin,
-            no_status=no_status,
-        )
+    list_sessions(
+        db,
+        config,
+        workspace_name=parse_csv_filter(workspace),
+        vm_name=parse_csv_filter(vm),
+        agent_name=parsed_agent,
+        admin_only=admin,
+        no_status=no_status,
+        names_only=names_only,
     )
 
 
