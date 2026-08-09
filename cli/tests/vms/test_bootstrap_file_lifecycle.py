@@ -3,15 +3,21 @@
 from __future__ import annotations
 
 import stat
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
 
 from agentworks.errors import ProvisioningError
 from agentworks.ssh import SSHError, SSHLogger, SSHResult
+from agentworks.transports.wsl2 import WSL2Transport
 from agentworks.vms.initializer import driver
+
+if TYPE_CHECKING:
+    from tests.conftest import CapturedOutput
 
 _AUTH_KEY = "tskey-bootstrap-file-sentinel"
 _SUCCESS_OUTPUT = "\n".join(
@@ -21,6 +27,21 @@ _SUCCESS_OUTPUT = "\n".join(
         "",
     )
 )
+
+
+def _assert_exception_graph_is_value_free(failure: BaseException) -> None:
+    pending = [failure]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        assert _AUTH_KEY not in repr(current)
+        if current.__cause__ is not None:
+            pending.append(current.__cause__)
+        if current.__context__ is not None:
+            pending.append(current.__context__)
 
 
 class _RecordingTransport:
@@ -86,14 +107,14 @@ def _call(
         lambda: SimpleNamespace(hex="a" * 32),
     )
     return driver._run_bootstrap_script(
-        logger if logger is not None else MagicMock(),
+        MagicMock(),
         SimpleNamespace(operator=SimpleNamespace(ssh_public_key=public_key)),
         SimpleNamespace(),
         "vm1",
         transport,  # type: ignore[arg-type]
         "agentworks",
         "wsl2--vm1",
-        MagicMock(),
+        logger if logger is not None else MagicMock(),
         tailscale_auth_key=_AUTH_KEY,
         script_swap=0,
     )
@@ -122,9 +143,10 @@ def test_success_uses_private_random_stages_and_removes_both(
     assert transport.commands[-1] == f"rm -f -- {guest_path} && test ! -e {guest_path}"
 
 
-def test_failure_output_is_redacted_from_durable_log_and_error(
+def test_structured_failure_output_is_redacted_from_console_log_and_error(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
 ) -> None:
     from agentworks import ssh
 
@@ -133,7 +155,15 @@ def test_failure_output_is_redacted_from_durable_log_and_error(
     transport = _RecordingTransport(
         execute_result=SSHResult(
             returncode=1,
-            stdout=f"bootstrap failed near {_AUTH_KEY}\n",
+            stdout="\n".join(
+                (
+                    f"##STEP## step {_AUTH_KEY}",
+                    f"##SUCCESS## success {_AUTH_KEY}",
+                    f"##WARN## warning {_AUTH_KEY}",
+                    f"##ERROR## error {_AUTH_KEY}",
+                    "",
+                )
+            ),
             stderr="",
         )
     )
@@ -144,7 +174,12 @@ def test_failure_output_is_redacted_from_durable_log_and_error(
 
     assert str(caught.value) == "Bootstrap script failed (exit 1)"
     assert _AUTH_KEY not in repr(caught.value)
-    assert _AUTH_KEY not in logger.path.read_text()
+    durable_log = logger.path.read_text()
+    console = repr(captured_output)
+    assert _AUTH_KEY not in durable_log
+    assert _AUTH_KEY not in console
+    assert durable_log.count("[REDACTED]") >= 4
+    assert console.count("[REDACTED]") >= 4
     _assert_no_residue(transport)
 
 
@@ -205,10 +240,12 @@ def test_copy_failure_removes_both_stages_and_preserves_error(
         SSHError("execution failed"),
         SSHError("command timed out"),
         KeyboardInterrupt("stop"),
+        SystemExit("exit"),
+        GeneratorExit("close"),
     ],
-    ids=("failure", "timeout", "interrupt"),
+    ids=("failure", "timeout", "interrupt", "system-exit", "generator-exit"),
 )
-def test_execute_unwind_removes_both_stages_and_preserves_error(
+def test_execute_unwind_removes_both_stages_and_preserves_safe_error(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     failure: BaseException,
@@ -218,8 +255,57 @@ def test_execute_unwind_removes_both_stages_and_preserves_error(
     with pytest.raises(type(failure)) as caught:
         _call(tmp_path, monkeypatch, transport)
 
-    assert caught.value is failure
+    if isinstance(failure, SSHError):
+        assert caught.value is not failure
+        assert str(caught.value) == "Bootstrap script execution failed"
+        assert caught.value.__cause__ is None
+        assert caught.value.__context__ is None
+    else:
+        assert caught.value is failure
     _assert_no_residue(transport)
+
+
+def test_real_wsl_timeout_drops_reflected_output_and_removes_both_stages(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    guest_path = "/tmp/agentworks-bootstrap-" + "a" * 32 + ".sh"
+    guest_files: dict[str, bytes] = {}
+
+    def _run(args: list[str], **kwargs: object) -> SimpleNamespace:
+        command = str(args[-1])
+        if "install -m 600" in command:
+            guest_files[guest_path] = b""
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if command == f"cat > {guest_path}":
+            content = kwargs["input"]
+            assert isinstance(content, bytes)
+            guest_files[guest_path] = content
+            return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+        if "setsid sudo" in command:
+            raise subprocess.TimeoutExpired(
+                cmd=args,
+                timeout=900,
+                output=f"reflected {_AUTH_KEY}",
+                stderr=f"rejected {_AUTH_KEY}",
+            )
+        if "rm -f --" in command:
+            guest_files.pop(guest_path, None)
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        raise AssertionError(f"unexpected subprocess command: {args}")
+
+    monkeypatch.setattr("agentworks.transports.wsl2.subprocess.run", _run)
+    monkeypatch.setattr("agentworks.vms.initializer.driver.tempfile.tempdir", str(tmp_path))
+
+    with pytest.raises(SSHError) as caught:
+        _call(tmp_path, monkeypatch, WSL2Transport("vm1"))
+
+    assert str(caught.value) == "Bootstrap script execution failed"
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    _assert_exception_graph_is_value_free(caught.value)
+    assert guest_files == {}
+    assert list(tmp_path.glob("agentworks-bootstrap-*.sh")) == []
 
 
 @pytest.mark.parametrize(
@@ -287,7 +373,10 @@ def test_guest_removal_failure_does_not_mask_primary(
     with pytest.raises(SSHError) as caught:
         _call(tmp_path, monkeypatch, transport)
 
-    assert caught.value is failure
+    assert caught.value is not failure
+    assert str(caught.value) == "Bootstrap script execution failed"
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
     assert transport.guest_files
     assert warnings == [
         "could not verify removal of the guest bootstrap staging file; primary failure unchanged; plaintext may remain"
@@ -310,13 +399,13 @@ def test_guest_removal_control_flow_does_not_mask_primary(
     warnings: list[str],
     cleanup_failure: BaseException,
 ) -> None:
-    primary = SSHError("execution failed")
+    primary = KeyboardInterrupt("execution interrupted")
     transport = _RecordingTransport(
         execute_failure=primary,
         cleanup_failure=cleanup_failure,
     )
 
-    with pytest.raises(SSHError) as caught:
+    with pytest.raises(KeyboardInterrupt) as caught:
         _call(tmp_path, monkeypatch, transport)
 
     assert caught.value is primary
@@ -330,7 +419,7 @@ def test_warning_failure_does_not_mask_primary(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    primary = SSHError("execution failed")
+    primary = KeyboardInterrupt("execution interrupted")
     warning_failure = RuntimeError("warning sink failed")
     transport = _RecordingTransport(
         execute_failure=primary,
@@ -343,7 +432,7 @@ def test_warning_failure_does_not_mask_primary(
 
     monkeypatch.setattr("agentworks.vms.initializer.driver.output.warn", _fail_warning)
 
-    with pytest.raises(SSHError) as caught:
+    with pytest.raises(KeyboardInterrupt) as caught:
         _call(tmp_path, monkeypatch, transport)
 
     assert caught.value is primary

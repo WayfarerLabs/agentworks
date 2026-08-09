@@ -503,11 +503,17 @@ def _run_bootstrap_script(
         #   2>&1         - merge stderr into captured stdout so apt-get noise
         #                  lands beside the structured step markers.
         output.detail("Running bootstrap script...")
-        result = exec_target.run(
-            f"setsid sudo -n /bin/bash {shlex.quote(remote_script)} </dev/null 2>&1",
-            check=False,
-            timeout=900,
-        )
+        execution_failed = False
+        try:
+            result = exec_target.run(
+                f"setsid sudo -n /bin/bash {shlex.quote(remote_script)} </dev/null 2>&1",
+                check=False,
+                timeout=900,
+            )
+        except SSHError:
+            execution_failed = True
+        if execution_failed:
+            raise SSHError("Bootstrap script execution failed") from None
     finally:
         active_failure = sys.exc_info()[1]
         cleanup_command = f"rm -f -- {shlex.quote(remote_script)} && test ! -e {shlex.quote(remote_script)}"
@@ -529,21 +535,30 @@ def _run_bootstrap_script(
     bootstrap = parse_bootstrap_output(result.stdout, result.returncode)
 
     # Feed results into logger and console
+    def _sanitize_bootstrap_field(value: str) -> str:
+        if not tailscale_auth_key:
+            return value
+        return value.replace(tailscale_auth_key, "[REDACTED]")
+
     for step in bootstrap.steps:
-        logger.step(step.name)
+        step_name = _sanitize_bootstrap_field(step.name)
+        logger.step(step_name)
         if step.success_msg:
-            output.detail(f"{step.name}: {step.success_msg}")
-            logger.output(step.success_msg)
+            success_msg = _sanitize_bootstrap_field(step.success_msg)
+            output.detail(f"{step_name}: {success_msg}")
+            logger.output(success_msg)
         for warning in step.warnings:
-            output.warn(warning)
-            logger.warning(warning)
+            safe_warning = _sanitize_bootstrap_field(warning)
+            output.warn(safe_warning)
+            logger.warning(safe_warning)
         if step.error:
-            output.warn(f"Error: {step.error}")
-            logger.log_error(step.error)
+            safe_error = _sanitize_bootstrap_field(step.error)
+            output.warn(f"Error: {safe_error}")
+            logger.log_error(safe_error)
 
     # Log full output for troubleshooting
     if result.stdout:
-        logger.output(result.stdout)
+        logger.output(_sanitize_bootstrap_field(result.stdout))
 
     if not bootstrap.ok:
         raise SSHError(f"Bootstrap script failed (exit {result.returncode})")

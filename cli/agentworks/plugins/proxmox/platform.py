@@ -488,9 +488,12 @@ class ProxmoxPlatform(VMPlatform):
             )
             if prepared is None or prepared.get("exitcode", -1) != 0:
                 raise ProvisioningError("could not create the private Proxmox bootstrap staging file")
+            write_failed = False
             try:
                 api.guest_agent_file_write(node, vmid, script_path, script)
             except ProxmoxAPIError:
+                write_failed = True
+            if write_failed:
                 raise ProxmoxAPIError("Proxmox guest-agent bootstrap file write failed") from None
 
             # Bash is invoked explicitly so the private script does not need

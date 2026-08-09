@@ -16,6 +16,21 @@ _PATH = "/tmp/agentworks-bootstrap-" + "b" * 32 + ".sh"
 _SUCCESS = object()
 
 
+def _assert_exception_graph_is_value_free(failure: BaseException) -> None:
+    pending = [failure]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        assert _AUTH_KEY not in repr(current)
+        if current.__cause__ is not None:
+            pending.append(current.__cause__)
+        if current.__context__ is not None:
+            pending.append(current.__context__)
+
+
 class _GuestAgent:
     def __init__(
         self,
@@ -122,7 +137,9 @@ def test_write_failure_is_safe_and_removes_private_stage(monkeypatch: pytest.Mon
 
     assert str(caught.value) == "Proxmox guest-agent bootstrap file write failed"
     assert api.files == {}
-    assert _AUTH_KEY not in repr(caught.value)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    _assert_exception_graph_is_value_free(caught.value)
 
 
 def test_failure_output_is_not_repeated_to_observable_error_text(
@@ -150,8 +167,10 @@ def test_failure_output_is_not_repeated_to_observable_error_text(
         ProxmoxAPIError("execution failed"),
         None,
         KeyboardInterrupt("stop"),
+        SystemExit("exit"),
+        GeneratorExit("close"),
     ],
-    ids=("failure", "timeout", "interrupt"),
+    ids=("failure", "timeout", "interrupt", "system-exit", "generator-exit"),
 )
 def test_execute_unwind_removes_stage(
     monkeypatch: pytest.MonkeyPatch,
