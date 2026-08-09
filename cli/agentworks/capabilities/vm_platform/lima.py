@@ -53,8 +53,10 @@ _REMOTE_TEMPLATE_PREFIX = "agentworks-lima-template."
 _REMOTE_TEMPLATE_RANDOM_LENGTH = 10
 
 # Lima template for Debian cloud VMs (values substituted at create time).
-# The provision block runs the full bootstrap script (user, packages, swap,
-# SSH key, Tailscale) as a system-level provisioner during limactl start.
+# The provision block runs the non-secret bootstrap script (user, packages,
+# swap, SSH key, and Tailscale installation) as a system-level provisioner
+# during limactl start. Lima retains this block in its instance YAML, so the
+# resolved Tailscale auth key crosses a separate post-start stdin boundary.
 LIMA_TEMPLATE = """\
 # Agentworks Debian VM template for Lima
 arch: default
@@ -99,6 +101,10 @@ provision:
     script: |
 {provision_script}
 """
+
+_TAILSCALE_JOIN_STDIN_COMMAND = "sudo -n /bin/bash -c " + shlex.quote(
+    'IFS= read -r TAILSCALE_AUTH_KEY && test -n "$TAILSCALE_AUTH_KEY" && tailscale up --auth-key "$TAILSCALE_AUTH_KEY"'
+)
 
 
 # Local and SSH placement use different transports, readiness rules, and
@@ -243,26 +249,41 @@ class LimaPlatform(VMPlatform):
         if self.is_remote:
             assert self._remote_host is not None
             target = SSHTarget(host=self._remote_host, user=None, login_shell=True)
-            result = ssh_run(target, command, check=check, input_text=input_text)
-            return result.stdout
+            result = None
+            try:
+                result = ssh_run(target, command, check=check, input_text=input_text)
+                return result.stdout
+            finally:
+                input_text = None
+                result = None
         else:
             import subprocess
 
-            proc = subprocess.run(
-                shlex.split(command),
-                input=input_text,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-            )
-            if check and proc.returncode != 0:
-                if input_text is not None:
-                    # A parser may echo template lines to stderr. Keep the
-                    # secret-bearing stdin out of this diagnostic boundary.
-                    raise SSHError(f"limactl stdin command failed (exit {proc.returncode}): {command}")
-                raise SSHError(f"limactl failed: {proc.stderr.strip()}")
-            return proc.stdout
+            proc = None
+            try:
+                proc = subprocess.run(
+                    shlex.split(command),
+                    input=input_text,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                )
+                if check and proc.returncode != 0:
+                    if input_text is not None:
+                        # A parser may echo template lines to stderr. Keep the
+                        # secret-bearing stdin and raw result out of this
+                        # diagnostic and its retained traceback frame.
+                        returncode = proc.returncode
+                        proc = None
+                        raise SSHError(f"limactl stdin command failed (exit {returncode}): {command}")
+                    raise SSHError(f"limactl failed: {proc.stderr.strip()}")
+                # Sensitive stdin commands do not expose their output either:
+                # an arbitrary program can reflect stdin to either stream.
+                return "" if input_text is not None else proc.stdout
+            finally:
+                input_text = None
+                proc = None
 
     def preflight(self, ctx: RunContext) -> None:
         """Local sites: ``limactl`` must be on PATH. Remote sites defer
@@ -330,14 +351,16 @@ class LimaPlatform(VMPlatform):
         if swap > 0:
             output.detail(f"Swap: {swap} GiB")
 
-        # Generate the full bootstrap script and embed in the Lima provision block.
-        # This handles user creation, system packages, swap, SSH key, and Tailscale.
+        # Lima persists its provision scripts in the instance YAML and can
+        # render them through `limactl list --json`. Embed only the non-secret
+        # bootstrap shape; the resolved Tailscale key crosses the post-start
+        # stdin boundary below and never enters this provider configuration.
         if request.tailscale_auth_key:
             provision_script = generate_bootstrap_script(
                 admin_username=request.admin_username,
                 ssh_public_key=request.ssh_public_key,
                 provisioning_packages=PROVISIONING_PACKAGES,
-                tailscale_auth_key=request.tailscale_auth_key,
+                tailscale_auth_key=None,
                 hostname=request.hostname,
                 swap=swap,
             )
@@ -366,60 +389,70 @@ class LimaPlatform(VMPlatform):
         # nothing, so no arm ever fires a cleanup call for an instance
         # that was never made.
         try:
+            if self.is_remote:
+                redactions = (request.tailscale_auth_key,) if request.tailscale_auth_key else ()
+                self._create_remote(instance_name, rendered, redactions=redactions)
+            else:
+                self._create_local(instance_name, rendered)
+
+            output.detail(f"Lima VM '{instance_name}' created.")
+
+            tailscale_ip = None
+            bootstrap_complete = False
+            if request.tailscale_auth_key:
+                output.detail("Joining Tailscale...")
+                self._join_tailscale_ephemerally(instance_name, request.tailscale_auth_key)
+                # The secret-bearing operation is complete. A later discovery
+                # failure must not select the Phase A bootstrap script, which
+                # would deliver the key a second time through a different
+                # boundary. Phase A can rediscover the IP without the key.
+                bootstrap_complete = True
+
+            # Some bootstrap steps (currently the Apple-vz SVE mask, see
+            # bootstrap_script) only take effect after a reboot, and rebooting
+            # mid-provision is unreliable (lima-vm/lima#4867). Such steps drop a
+            # restart sentinel; restart the instance from the host when we see it.
+            # The probe stays generic: the host cannot cheaply tell which guest
+            # shape it is, so a bare failure is phrased for what it does know.
             try:
-                if self.is_remote:
-                    redactions = (request.tailscale_auth_key,) if request.tailscale_auth_key else ()
-                    self._create_remote(instance_name, rendered, redactions=redactions)
-                else:
-                    self._create_local(instance_name, rendered)
+                restart_pending = self._restart_sentinel_present(instance_name)
+            except SSHError as e:
+                output.warn(f"could not check whether '{instance_name}' needs a restart to finish provisioning: {e}")
+                output.warn(
+                    f"if the VM misbehaves, 'limactl restart {instance_name}' reapplies any deferred bootstrap step."
+                )
+                restart_pending = False
+            if restart_pending:
+                output.detail(f"A bootstrap step needs a reboot; restarting '{instance_name}'...")
+                self._run_lima(f"limactl restart {instance_name}")
 
-                output.detail(f"Lima VM '{instance_name}' created.")
-
-                # Some bootstrap steps (currently the Apple-vz SVE mask, see
-                # bootstrap_script) only take effect after a reboot, and rebooting
-                # mid-provision is unreliable (lima-vm/lima#4867). Such steps drop a
-                # restart sentinel; restart the instance from the host when we see it.
-                # The probe stays generic: the host cannot cheaply tell which guest
-                # shape it is, so a bare failure is phrased for what it does know.
+            # If Tailscale was joined through the ephemeral boundary,
+            # extract the IP without retaining the key in provider state.
+            if request.tailscale_auth_key:
+                output.detail("Retrieving Tailscale IP...")
                 try:
-                    restart_pending = self._restart_sentinel_present(instance_name)
+                    ip_output = self._run_lima(f"limactl shell {instance_name} sudo tailscale ip -4")
+                    tailscale_ip = ip_output.strip()
+                    output.detail(f"Tailscale IP: {tailscale_ip}")
                 except SSHError as e:
-                    output.warn(
-                        f"could not check whether '{instance_name}' needs a restart to finish provisioning: {e}"
-                    )
-                    output.warn(
-                        f"if the VM misbehaves, 'limactl restart {instance_name}' "
-                        "reapplies any deferred bootstrap step."
-                    )
-                    restart_pending = False
-                if restart_pending:
-                    output.detail(f"A bootstrap step needs a reboot; restarting '{instance_name}'...")
-                    self._run_lima(f"limactl restart {instance_name}")
-
-                # If Tailscale was provisioned via the provision block, extract the IP
-                tailscale_ip = None
-                bootstrap_complete = False
-                if request.tailscale_auth_key:
-                    output.detail("Retrieving Tailscale IP...")
-                    try:
-                        ip_output = self._run_lima(f"limactl shell {instance_name} sudo tailscale ip -4")
-                        tailscale_ip = ip_output.strip()
-                        bootstrap_complete = True
-                        output.detail(f"Tailscale IP: {tailscale_ip}")
-                    except SSHError as e:
-                        output.warn(f"could not retrieve Tailscale IP: {e}")
-                        output.warn("Tailscale will be set up during Phase A bootstrap.")
-            except Exception:
-                # Lima's error convention holds: SSHError / StateError
-                # propagate unwrapped; the only new obligation is the
-                # teardown. _create_local has already surfaced the
-                # provision log by the time this runs, so nothing here
-                # reads from the instance after it is gone.
-                output.detail(f"Cleaning up the partial Lima instance '{instance_name}'...")
-                self._cleanup_partial_create(instance_name)
-                raise
+                    output.warn(f"could not retrieve Tailscale IP: {e}")
+                    output.warn("Tailscale is joined; Phase A will retry IP discovery without the auth key.")
         except KeyboardInterrupt:
             self._rollback_create_on_interrupt(instance_name)
+            raise
+        except BaseException:
+            # SystemExit and GeneratorExit carry the same orphan-prevention
+            # obligation as ordinary failures. Keep KeyboardInterrupt separate
+            # so a second Ctrl-C retains the established abandon semantics.
+            output.detail(f"Cleaning up the partial Lima instance '{instance_name}'...")
+            try:
+                self._cleanup_partial_create(instance_name)
+            except KeyboardInterrupt:
+                # Preserve the pre-existing behavior for a Ctrl-C that lands
+                # during an ordinary/nonordinary failure cleanup: retry under
+                # the interrupt-aware boundary, then propagate that interrupt.
+                self._rollback_create_on_interrupt(instance_name)
+                raise
             raise
 
         return ProvisionResult(
@@ -428,6 +461,25 @@ class LimaPlatform(VMPlatform):
             bootstrap_complete=bootstrap_complete,
             tailscale_ip=tailscale_ip,
         )
+
+    def _join_tailscale_ephemerally(self, instance_name: str, auth_key: str) -> None:
+        """Join without putting ``auth_key`` in Lima state or host argv.
+
+        Lima stores provision scripts in its instance YAML. The fixed command
+        reads exactly one key from stdin inside the guest, then invokes
+        Tailscale. Non-interactive Bash does not write history, and neither the
+        generated Lima config nor the host-side command contains the value.
+        The guest ``tailscale`` process necessarily receives its CLI auth-key
+        argument transiently; this boundary makes no guest-process-table claim.
+        """
+        key_input = f"{auth_key}\n"
+        try:
+            self._run_lima(
+                f"limactl shell {instance_name} {_TAILSCALE_JOIN_STDIN_COMMAND}",
+                input_text=key_input,
+            )
+        finally:
+            key_input = ""
 
     def _restart_sentinel_present(self, instance_name: str) -> bool:
         """True if a bootstrap step left the restart sentinel in the guest.
@@ -519,8 +571,10 @@ class LimaPlatform(VMPlatform):
     ) -> None:
         """Create and start a Lima VM on the site's placement host.
 
-        ``lima_yaml`` can embed bootstrap secrets. The caller supplies the
-        complete set before the incremental operation logger writes anything.
+        ``lima_yaml`` is the exact provider-persisted configuration and must
+        contain no resolved secret. ``redactions`` remains defense in depth
+        for provider output, but is not permission to submit a secret-bearing
+        template.
         """
         assert self._remote_host is not None
         target = SSHTarget(host=self._remote_host, user=None)

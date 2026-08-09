@@ -42,12 +42,38 @@ if TYPE_CHECKING:
 _REMOTE_TEMPLATE_DIR = "/tmp/agentworks-lima-template.A1b2C3d4E5"
 
 
+def _assert_secret_absent_from_agentworks_exception_graph(exc: BaseException, secret: str) -> None:
+    """Inspect every linked exception and retained sensitive-boundary frame."""
+    pending = [exc]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        assert secret not in repr(current)
+        traceback = current.__traceback__
+        while traceback is not None:
+            module = str(traceback.tb_frame.f_globals.get("__name__", ""))
+            function = traceback.tb_frame.f_code.co_name
+            if (module, function) in {
+                ("agentworks.ssh", "run"),
+                ("agentworks.capabilities.vm_platform.lima", "_run_lima"),
+            }:
+                assert secret not in repr(traceback.tb_frame.f_locals)
+            traceback = traceback.tb_next
+        if current.__cause__ is not None:
+            pending.append(current.__cause__)
+        if current.__context__ is not None:
+            pending.append(current.__context__)
+
+
 def _remote_ssh_success(command: str) -> SimpleNamespace:
     stdout = f"{_REMOTE_TEMPLATE_DIR}\n" if "mktemp -d" in command else ""
     return SimpleNamespace(returncode=0, stdout=stdout, stderr="", ok=True)
 
 
-def _request() -> ProvisionRequest:
+def _request(*, tailscale_auth_key: str | None = "tskey-test") -> ProvisionRequest:
     return ProvisionRequest(
         vm_name="myvm",
         hostname="lima--myvm",
@@ -55,7 +81,7 @@ def _request() -> ProvisionRequest:
         admin_username="agw",
         ssh_public_key="ssh-ed25519 AAAA test",
         ssh_private_key=Path("/dev/null"),
-        tailscale_auth_key="tskey-test",
+        tailscale_auth_key=tailscale_auth_key,
         # The vm-template layer's resolved defaults, which is the only
         # shape a platform ever sees (the hardware fields are required).
         cpus=4,
@@ -178,7 +204,48 @@ def test_local_lima_failure_omits_secret_bearing_stderr(monkeypatch: pytest.Monk
         LimaPlatform("lima", {})._create_local("myvm", f"embedded: {secret}")
 
     assert str(caught.value) == ("limactl stdin command failed (exit 1): limactl create --name myvm --tty=false -")
-    assert secret not in repr(caught.value)
+    _assert_secret_absent_from_agentworks_exception_graph(caught.value, secret)
+
+
+def test_remote_lima_failure_clears_sensitive_input_and_raw_results(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = "remote-lima-result-swordfish"
+    monkeypatch.setattr(
+        "agentworks.ssh.subprocess.run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args[0],
+            1,
+            stdout=f"reflected {secret}",
+            stderr=f"rejected {secret}",
+        ),
+    )
+
+    with pytest.raises(SSHError) as caught:
+        LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._run_lima(
+            "limactl shell myvm cat",
+            input_text=secret,
+        )
+
+    assert str(caught.value) == "SSH stdin command failed (exit 1): limactl shell myvm cat"
+    _assert_secret_absent_from_agentworks_exception_graph(caught.value, secret)
+
+
+def test_remote_lima_sensitive_interrupt_clears_frames_and_preserves_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = "remote-lima-interrupt-swordfish"
+    interrupt = KeyboardInterrupt("operator interrupt")
+    monkeypatch.setattr("agentworks.ssh.subprocess.run", lambda *args, **kwargs: (_ for _ in ()).throw(interrupt))
+
+    with pytest.raises(KeyboardInterrupt) as caught:
+        LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._run_lima(
+            "limactl shell myvm cat",
+            input_text=secret,
+        )
+
+    assert caught.value is interrupt
+    _assert_secret_absent_from_agentworks_exception_graph(caught.value, secret)
 
 
 def test_failure_mid_create_cleans_up_and_reraises(
@@ -237,6 +304,75 @@ def test_interrupt_during_post_start_steps_cleans_up_too(
 
     assert exc.value is interrupt
     assert _deletes(ran) == ["limactl delete --force myvm"]
+
+
+def test_interrupt_during_ephemeral_tailscale_join_cleans_up_and_does_not_render_key(
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    secret = "tskey-interrupt-sentinel"
+    interrupt = KeyboardInterrupt("first")
+    ran = _wire(monkeypatch, errors={"tailscale up --auth-key": interrupt})
+
+    with pytest.raises(KeyboardInterrupt) as caught:
+        LimaPlatform("lima", {"placement": {"mode": "local"}}).create(
+            _request(tailscale_auth_key=secret),
+            RunContext(),
+        )
+
+    assert caught.value is interrupt
+    assert _deletes(ran) == ["limactl delete --force myvm"]
+    assert secret not in repr(ran)
+    assert secret not in "\n".join([*captured_output.detail, *captured_output.warnings])
+
+
+@pytest.mark.parametrize(
+    "placement",
+    [
+        {"mode": "local"},
+        {"mode": "ssh", "host": "user@host"},
+    ],
+    ids=("local", "remote"),
+)
+@pytest.mark.parametrize("control_flow", [SystemExit(7), GeneratorExit()], ids=("system-exit", "generator-exit"))
+def test_nonordinary_exit_rolls_back_created_instance_and_preserves_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    control_flow: BaseException,
+    placement: dict[str, str],
+) -> None:
+    ran = _wire(monkeypatch, errors={"tailscale up --auth-key": control_flow})
+    if placement["mode"] == "ssh":
+        monkeypatch.setattr(
+            LimaPlatform,
+            "_create_remote",
+            lambda self, name, yaml, *, redactions: None,
+        )
+        _wire_remote_host(monkeypatch, [])
+
+    with pytest.raises(type(control_flow)) as caught:
+        LimaPlatform("lima", {"placement": placement}).create(_request(), RunContext())
+
+    assert caught.value is control_flow
+    assert _deletes(ran) == ["limactl delete --force myvm"]
+
+
+def test_ephemeral_tailscale_join_failure_cleans_up_without_key_in_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = "tskey-failure-sentinel"
+    failure = SSHError("fixed command failed")
+    ran = _wire(monkeypatch, errors={"tailscale up --auth-key": failure})
+
+    with pytest.raises(SSHError) as caught:
+        LimaPlatform("lima", {"placement": {"mode": "local"}}).create(
+            _request(tailscale_auth_key=secret),
+            RunContext(),
+        )
+
+    assert caught.value is failure
+    assert _deletes(ran) == ["limactl delete --force myvm"]
+    assert secret not in repr(caught.value)
+    assert secret not in repr(ran)
 
 
 def test_second_interrupt_abandons_cleanup_loudly(

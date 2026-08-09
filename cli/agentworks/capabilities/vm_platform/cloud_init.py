@@ -2,7 +2,10 @@
 
 Wraps a bootstrap script in a #cloud-config YAML that delivers and executes
 it via write_files + runcmd. This lets Azure VMs run the same bootstrap script
-that Lima uses via its provision block.
+that Lima uses via its provision block. Lima renders the script with its
+Tailscale join deferred because Lima persists provision scripts; cloud
+platforms may render it with the key for their provider-native secret-bearing
+bootstrap boundary.
 """
 
 from __future__ import annotations

@@ -234,9 +234,16 @@ fi
 
 # -- Step 7: Join Tailscale --
 echo "##STEP## Tailscale join"
-tailscale up --auth-key "$TAILSCALE_AUTH_KEY"
-TS_IP=$(tailscale ip -4)
-echo "##SUCCESS## tailscale-ip=$TS_IP"
+if [ -n "$TAILSCALE_AUTH_KEY" ]; then
+    tailscale up --auth-key "$TAILSCALE_AUTH_KEY"
+    TS_IP=$(tailscale ip -4)
+    echo "##SUCCESS## tailscale-ip=$TS_IP"
+else
+    # Lima persists provision scripts in its instance configuration. Its
+    # platform adapter therefore embeds this script without the resolved key
+    # and delivers the key over a separate post-start stdin boundary.
+    echo "##SUCCESS## Tailscale join deferred to platform"
+fi
 """
 
 
@@ -245,11 +252,16 @@ def generate_bootstrap_script(
     admin_username: str,
     ssh_public_key: str,
     provisioning_packages: list[str],
-    tailscale_auth_key: str,
+    tailscale_auth_key: str | None,
     hostname: str,
     swap: int,
 ) -> str:
     """Generate the Phase A bootstrap script with parameters baked in.
+
+    ``tailscale_auth_key=None`` leaves the join step deferred. This is the
+    Lima persistence-safe shape: Lima retains provision scripts in its
+    instance configuration, so its adapter delivers the resolved key through
+    a separate ephemeral boundary after the retained script has run.
 
     ``swap`` (GiB, 0 to disable) is required rather than defaulted: the
     vm-template layer resolves it and every caller has the resolved value
@@ -261,7 +273,7 @@ def generate_bootstrap_script(
         admin_username=shlex.quote(admin_username),
         ssh_public_key=shlex.quote(ssh_public_key),
         provisioning_packages=shlex.quote(" ".join(provisioning_packages)),
-        tailscale_auth_key=shlex.quote(tailscale_auth_key),
+        tailscale_auth_key=shlex.quote(tailscale_auth_key or ""),
         vm_hostname=shlex.quote(hostname),
         swap=swap,
         ssh_preserve_path=SSH_PRESERVE_KEYS_PATH,

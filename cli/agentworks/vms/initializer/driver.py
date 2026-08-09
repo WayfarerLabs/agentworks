@@ -329,10 +329,14 @@ def _phase_a_bootstrap(
     """
     db.update_vm_provisioning_status(vm_name, ProvisioningStatus.IN_PROGRESS)
 
-    if bootstrap_complete and tailscale_ip:
-        # Lima/Azure: platform already ran the full bootstrap.
-        # Just update DB and move on to SSH verification.
+    if bootstrap_complete:
+        # Lima/Azure: platform already ran the full bootstrap. Lima may have
+        # joined successfully but failed its best-effort IP probe; rediscover
+        # the IP without selecting the auth-key-bearing bootstrap script.
         logger.step("Bootstrap (platform)")
+        if not tailscale_ip:
+            logger.output("Tailscale joined; retrying IP discovery")
+            tailscale_ip = exec_target.run("sudo tailscale ip -4").stdout.strip()
         logger.output(f"Tailscale IP: {tailscale_ip}")
         db.update_vm_tailscale(vm_name, tailscale_ip)
         db.update_vm_provisioning_status(vm_name, ProvisioningStatus.COMPLETE)

@@ -509,10 +509,15 @@ and the operator-facing command banners that the rest of the codebase calls "pha
   `provision` block, Azure's and Proxmox's cloud-init user-data. The shared payload is
   `bootstrap_script.py` (admin user, packages, SSH key, swap, hostname, the Apple-vz SVE grub mask,
   Tailscale), delivered natively by Lima and via `cloud_init.py`'s `#cloud-config` wrapper by Azure.
-  WSL2 is the exception: with no cloud-init-like mechanism, it runs the same bootstrap script over
-  the provisioning transport during initialization instead, and structurally never joins Tailscale
-  at create time (its `create()` does not branch on `tailscale_auth_key` at all). **This stage runs
-  once, at create.**
+  Lima is a deliberate split delivery: its retained provision script installs Tailscale but contains
+  no resolved auth key, then `create()` sends the key through a fixed post-start guest command on
+  stdin. The value is absent from provider-retained configuration and host-side argv; the guest
+  `tailscale` process necessarily receives its `--auth-key` argument transiently. This is required
+  because Lima copies provision scripts into its instance YAML, which `limactl list --json` can
+  render. WSL2 is the exception: with no cloud-init-like mechanism, it runs the same bootstrap
+  script over the provisioning transport during initialization instead, and structurally never joins
+  Tailscale at create time (its `create()` does not branch on `tailscale_auth_key` at all). **This
+  stage runs once, at create.**
 - **Initialization** is `run_initialization` (`agentworks.vms.initializer`) plus VM hardening
   (`agentworks.vms.hardening`), run over a `Transport` against the created VM. It is
   platform-agnostic. **It is re-runnable and is exactly what `agw vm reinit` re-runs.** (The Phase A
@@ -521,6 +526,11 @@ and the operator-facing command banners that the rest of the codebase calls "pha
 
 `request.tailscale_auth_key` is the seam control: when present, the platform joins Tailscale during
 create-time bootstrap; when `None`, every platform defers the join to initialization.
+
+A platform-native configuration that the provider retains must never contain the resolved key.
+Transporting a template over stdin does not satisfy that rule when the provider copies the parsed
+template into durable instance state. The provider-faithful test is the submitted configuration, not
+Agentworks' temporary input path.
 
 The seam between the two stages is the source of the most important gotcha below.
 

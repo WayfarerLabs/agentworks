@@ -385,46 +385,91 @@ def run(
     else:
         args.append(command)
 
+    sensitive_input = input_text is not None
     last_err: Exception | None = None
-    for attempt in range(retries):
-        if attempt > 0 and on_retry is not None:
-            on_retry(attempt, retries)
-        try:
-            result = subprocess.run(
-                args,
-                input=input_text,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=timeout,
-            )
+    result: subprocess.CompletedProcess[str] | None = None
+    ssh_result: SSHResult | None = None
+    try:
+        for attempt in range(retries):
+            if attempt > 0 and on_retry is not None:
+                on_retry(attempt, retries)
+
+            # A prior attempt may have produced output before the next one
+            # times out or is interrupted. Never retain that raw result in a
+            # sensitive-input traceback frame.
+            result = None
+            ssh_result = None
+            sensitive_execution_failure = False
+            timed_out = False
+            try:
+                result = subprocess.run(
+                    args,
+                    input=input_text,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=timeout,
+                )
+            except subprocess.TimeoutExpired as err:
+                timed_out = True
+                if sensitive_input:
+                    # TimeoutExpired may retain partial stdout/stderr. Keep it
+                    # out of the eventual exception graph at this boundary.
+                    pass
+                else:
+                    last_err = err
+                if logger is not None:
+                    logger.log_timeout(command, attempt + 1, retries)
+            except Exception:
+                if not sensitive_input:
+                    raise
+                # Native subprocess failures may retain input or reflected
+                # output in their args and traceback. Translate only for the
+                # sensitive-input mode, after leaving the except suite, so the
+                # native exception is not linked as context.
+                sensitive_execution_failure = True
+
+            if sensitive_execution_failure:
+                raise SSHError(f"SSH stdin command could not be executed: {command}") from None
+            if timed_out:
+                continue
+
+            assert result is not None
             ssh_result = SSHResult(
                 returncode=result.returncode,
-                stdout="" if input_text is not None else result.stdout,
-                stderr="" if input_text is not None else result.stderr,
+                stdout="" if sensitive_input else result.stdout,
+                stderr="" if sensitive_input else result.stderr,
             )
             if logger is not None:
                 logger.log_command(command, ssh_result)
             if check and not ssh_result.ok:
-                if input_text is not None:
+                if sensitive_input:
                     # Remote stderr can reflect stdin for an arbitrary command.
-                    # Omit it at this sensitive-input boundary.
-                    raise SSHError(f"SSH stdin command failed (exit {result.returncode}): {command}")
+                    # Omit it and clear both result objects before raising.
+                    returncode = result.returncode
+                    result = None
+                    ssh_result = None
+                    raise SSHError(f"SSH stdin command failed (exit {returncode}): {command}") from None
                 raise SSHError(
                     f"SSH command failed (exit {result.returncode}): {command}\nstderr: {result.stderr.strip()}"
                 )
             return ssh_result
-        except subprocess.TimeoutExpired as err:
-            last_err = err
-            if logger is not None:
-                logger.log_timeout(command, attempt + 1, retries)
-            continue
 
-    msg = f"SSH command timed out after {retries} attempts ({timeout}s each): {command}"
-    if logger is not None:
-        logger.log_error(msg)
-    raise SSHError(msg) from last_err
+        msg = f"SSH command timed out after {retries} attempts ({timeout}s each): {command}"
+        if logger is not None:
+            logger.log_error(msg)
+        if sensitive_input:
+            raise SSHError(msg) from None
+        raise SSHError(msg) from last_err
+    finally:
+        # ``run`` is a shared sensitive-input boundary. This also executes for
+        # BaseException control flow, preserving the exact exception while
+        # removing secret-bearing values from this frame's retained locals.
+        input_text = None
+        result = None
+        ssh_result = None
+        last_err = None
 
 
 def _scp_base_args(target: SSHTarget) -> list[str]:
