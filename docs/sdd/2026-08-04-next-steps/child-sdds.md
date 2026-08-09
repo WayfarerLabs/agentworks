@@ -3,9 +3,9 @@
 - Status: Active ledger
 - Last updated: 2026-08-08
 
-This is the roadmap's tracking document, the analog of an ordinary SDD's `plan.md`. Completed
-checkboxes are immutable records, per the standard rule. The roadmap SDD locks when every entry here
-is locked.
+This is the saga's tracking document, the analog of an ordinary SDD's `plan.md`. Completed
+checkboxes are immutable records, per the standard rule. The saga SDD locks when every entry here is
+locked.
 
 ## Ledger
 
@@ -114,7 +114,11 @@ mechanism); tracked here because its outcome gates the 0.14.0 cut per `phasing.m
       before the cut; brief seeded on the task branch, 2026-08-08)
 - [x] Survey delivered and re-evaluated under the three-tier refinement (2026-08-08; dissolutions
       and restructures proposed per item)
-- [ ] Implementation merged (PR #455 in review)
+- [x] Implementation merged (PR #455, 2026-08-08): token union with stored-arm default and contract
+      v2, github repos/owner dissolved to scope union, install-command multi-test AND semantics, env
+      structural union with null-companion canonicalization shared by validation, extraction, and
+      fill, the EnvEntry construction shim removed by operator ruling, and the three-tier rule
+      codified in `cli/agentworks/capabilities/README.md`
 - [ ] Ships in 0.14.0 (gates the cut per `phasing.md` release mapping)
 
 ### Not yet spawned
@@ -128,22 +132,22 @@ Planned children, seeded when their prerequisites land (see `phasing.md`):
 - Wave 8: external plugin API
 - Closeout wave: comprehensive security, test-consolidation, and cleanup review (gates the lock)
 
-Not children of this roadmap (explicitly out of scope, see `target-state.md`): the
+Not children of this saga (explicitly out of scope, see `target-state.md`): the
 named-console-template selector SDD, the herdr effort, the companion-shell and resilient-attach
-wins, and the agentworks.build website (`docs/sdd/2026-08-07-website/`, seeded 2026-08-07; the
-roadmap lead seeds and reviews it like a child, but it does not gate the roadmap lock). They proceed
+wins, and the agentworks.build website (`docs/sdd/2026-08-07-website/`, seeded 2026-08-07; the saga
+lead seeds and reviews it like a child, but it does not gate the saga lock). They proceed
 standalone.
 
 ## Issue intake (2026-08-05)
 
-A sweep of the open issue tracker pulled the following issues into the roadmap. Each rolled-in issue
+A sweep of the open issue tracker pulled the following issues into the saga. Each rolled-in issue
 received a comment pointing back here so it is not worked out-of-band (posted 2026-08-05); issues
 not listed stay standalone.
 
 | Issue      | Lands in                                                                            |
 | ---------- | ----------------------------------------------------------------------------------- |
 | #76        | Wave 1 SDD closeouts (stale lockfile half only; the derive audit stays standalone)  |
-| #165       | Not rolled in: its own pre-roadmap SDD proceeds standalone (out of roadmap scope)   |
+| #165       | Not rolled in: its own pre-saga SDD proceeds standalone (out of saga scope)         |
 | #170       | Wave 2 rider (expires metadata belongs in the envelope/metadata modeling)           |
 | #205, #212 | Design track: instance-state store and per-instance specs; future living-graph SDD  |
 | #214       | Wave 2 (live samples, uniform validation; unknown keys go hard-error there)         |
@@ -164,7 +168,7 @@ open-ended research placeholder.
 ## Immediate next actions
 
 1. Done (2026-08-05): PR #316 merged; wave 0 complete.
-2. Done (2026-08-05): roadmap PR #400 and wave 1 seed #401 merged; harvested
+2. Done (2026-08-05): saga PR #400 and wave 1 seed #401 merged; harvested
    `feat/harness-transcripts-sdd` branch deleted.
 3. Done (2026-08-05): issue-intake comments posted.
 4. Done (2026-08-05): descriptor contract merged (PR #405).
@@ -173,7 +177,7 @@ open-ended research placeholder.
 6. Done (2026-08-05): wave 2 seed notes merged (PR #411) and effort lead launched.
 7. Done (2026-08-05): onboarding-and-discovery seeded (FRD, PR #413).
 8. Done (2026-08-06): onboarding seed merged (PR #413). Launch its effort lead when ready.
-9. Roadmap lead reviews wave 2 and onboarding PRs as they arrive.
+9. Saga lead reviews wave 2 and onboarding PRs as they arrive.
 10. Design track: scope participation contract in review (PR #407); then the instance-state store
     schema and the event vocabulary's first slice.
 11. Installer-plugins child seeded (PR #440, 2026-08-07). Launch its effort lead whenever; the R1

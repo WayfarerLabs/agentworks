@@ -85,16 +85,16 @@ the checked box has merged to `main`, in step with the lock-at-merge paragraph u
 so the plan being on `main` says nothing about whether any particular box has landed there yet.
 
 Mutability also follows ownership. An agent working an effort edits that effort's SDD artifacts and
-no other's: do not update another SDD's content (a roadmap SDD's ledger, a sibling effort's plan)
+no other's: do not update another SDD's content (a saga SDD's ledger, a sibling effort's plan)
 unless specifically instructed to, and treat such an instruction as the exception, not standard
 process. When work surfaces an inconsistency in another SDD (a stale claim, a checkbox that no
 longer matches reality, a statement your change invalidates), flag it to the operator rather than
 editing it yourself. If you also have a working communication channel to that SDD's owner (for a
-child SDD, the roadmap lead), flag it there too; until such channels exist, the operator is the
+child SDD, the saga lead), flag it there too; until such channels exist, the operator is the
 reliable route.
 
 One sanctioned channel does exist: new-file message passing. Adding a NEW file to another SDD's
-feature directory as a message is fine (a roadmap delivering seed notes into an adopted child's
+feature directory as a message is fine (a saga delivering seed notes into an adopted child's
 directory is the standing example); the restriction is on modifying another effort's existing
 artifacts. Name new message files `message-<YYYY>-<MM>-<DD>-<topic>.md`. The convention governs new
 messages only: message files delivered before it keep the names they already have, so there is no
@@ -282,59 +282,63 @@ toward preservation when the SDD still meaningfully informs current work. When i
 _not_ finding this SDD via a present-day file or grep search would be a loss; if the answer is no,
 delete.
 
-## Roadmap SDDs
+## Saga SDDs
 
-Most SDDs cover one development effort. A roadmap SDD is the meta case: an SDD that coordinates a
+Most SDDs cover one development effort. A saga SDD is the meta case: an SDD that coordinates a
 family of related efforts, generating and tracking ordinary child SDDs rather than shipping an
 implementation of its own. Use one when several efforts overlap enough that their ordering and
-shared contracts need a single owner.
+shared contracts need a single owner. The name is borrowed deliberately from the distributed-systems
+saga (operator ruling, 2026-08-08, replacing the earlier "roadmap" term, which collided with
+date-anchored planning vocabulary and over-promised timeline semantics): child efforts commit
+independently and completely, intermediate states are visible on `main` rather than isolated, a lead
+orchestrates instead of locking, and the whole either runs to its lock or is deliberately
+compensated by unwinding.
 
 The settled rules for the species:
 
-- Its artifacts are not the standard set. The working set, established by the first roadmap SDD: an
+- Its artifacts are not the standard set. The working set, established by the first saga SDD: an
   `inputs/` folder holding perspectives and other source material; `starting-state.md`, an immutable
-  snapshot of where the system stood at roadmap start, frozen once underway so the full journey
-  stays visible; `current-state.md`, a dated snapshot of where the system is, updated in place at
-  wave boundaries (git history is the append-only record); `target-state.md`, where the system is
-  going across this roadmap (not a forever vision) and the home of every settled design ruling;
-  `phasing.md`, ordering only (dependency structure, waves, release mapping); and `child-sdds.md`,
-  the inventory and checkbox tracker that plays plan.md's role, whose completed checkboxes are
-  immutable per the standard rule. A roadmap SDD has no frd.md, hla.md, or plan.md of its own; those
-  belong to the children. The roadmap locks when current state and target state agree and every
-  child is locked. These forms are still young; refine them here as they prove out.
-- A roadmap constrains only its own scope. Work outside the roadmap is not paused by it and can be
-  picked off whenever bandwidth allows; the roadmap's target-state should say explicitly what is out
-  of scope so that boundary stays crisp.
+  snapshot of where the system stood at saga start, frozen once underway so the full journey stays
+  visible; `current-state.md`, a dated snapshot of where the system is, updated in place at wave
+  boundaries (git history is the append-only record); `target-state.md`, where the system is going
+  across this saga (not a forever vision) and the home of every settled design ruling; `phasing.md`,
+  ordering only (dependency structure, waves, release mapping); and `child-sdds.md`, the inventory
+  and checkbox tracker that plays plan.md's role, whose completed checkboxes are immutable per the
+  standard rule. A saga SDD has no frd.md, hla.md, or plan.md of its own; those belong to the
+  children. The saga locks when current state and target state agree and every child is locked.
+  These forms are still young; refine them here as they prove out.
+- A saga constrains only its own scope. Work outside the saga is not paused by it and can be picked
+  off whenever bandwidth allows; the saga's target-state should say explicitly what is out of scope
+  so that boundary stays crisp.
 - It stays open until current state and target state agree and every child SDD is locked, then locks
   like any other SDD. Its ledger plays the role plan checkboxes play in an ordinary SDD, one level
   up.
 - `target-state.md` stays mutable while children are still running, but revising it late reopens the
   current-equals-target gap by definition: whatever the revision adds is by construction not yet
-  true of the current system, so the roadmap cannot lock until current state catches up to the
-  revised target. That is a real cost, not a formality. Revise the target deliberately, and prefer a
-  follow-on roadmap to a late expansion of this one.
+  true of the current system, so the saga cannot lock until current state catches up to the revised
+  target. That is a real cost, not a formality. Revise the target deliberately, and prefer a
+  follow-on saga to a late expansion of this one.
 - The settled design rulings `target-state.md` accumulates are exactly the load-bearing content
   [SDDs Are Not Permanent](#sdds-are-not-permanent) requires promoting into permanent homes
-  (`docs/arch/`, ADRs) before the roadmap locks and is eventually deleted. As the artifact's owner,
-  the roadmap lead owns those promotions.
-- Roadmap state lives on `main`: every change (a new child SDD, a status change, a design revision)
-  is a PR, and child SDDs reference their roadmap SDD so the coordination is discoverable from any
-  effort.
-- The roadmap lead seeds each child SDD with its FRD plus any constraints the roadmap has already
-  settled, and reviews the child's PRs. A separately launched effort lead owns the child's HLA,
-  plan, and implementation from the start, per the ordinary process. Seeding PRs are ready, not
-  draft: their content is limited by design, but they are intended to merge as-is (see PR Review).
-  Ownership of the seeded FRD transfers to the effort lead when the seeding PR merges: from then on
-  it is the child's artifact like the rest of its SDD, the effort lead revises it when it turns out
-  wrong (keeping the roadmap lead informed of material revisions), and the roadmap lead stops
-  editing it like any other child artifact. Settled roadmap constraints recorded in the FRD still
-  bind; the effort lead flags disagreement rather than reopening them unilaterally.
-- The roadmap's artifacts, ledger included, are the roadmap lead's to maintain. Child effort leads
-  do not update the roadmap SDD to mark their own progress; the roadmap lead tracks child status
-  from merged PRs. Child leads flag inconsistencies they notice to the operator instead (see
-  Artifact Mutability's ownership rule).
-- Terminology: roadmap SDD, roadmap lead, child SDD, effort lead. Not "program".
-- The `roadmap-lead` skill is the operating manual for the role itself: watching child efforts, the
+  (`docs/arch/`, ADRs) before the saga locks and is eventually deleted. As the artifact's owner, the
+  saga lead owns those promotions.
+- Saga state lives on `main`: every change (a new child SDD, a status change, a design revision) is
+  a PR, and child SDDs reference their saga SDD so the coordination is discoverable from any effort.
+- The saga lead seeds each child SDD with its FRD plus any constraints the saga has already settled,
+  and reviews the child's PRs. A separately launched effort lead owns the child's HLA, plan, and
+  implementation from the start, per the ordinary process. Seeding PRs are ready, not draft: their
+  content is limited by design, but they are intended to merge as-is (see PR Review). Ownership of
+  the seeded FRD transfers to the effort lead when the seeding PR merges: from then on it is the
+  child's artifact like the rest of its SDD, the effort lead revises it when it turns out wrong
+  (keeping the saga lead informed of material revisions), and the saga lead stops editing it like
+  any other child artifact. Settled saga constraints recorded in the FRD still bind; the effort lead
+  flags disagreement rather than reopening them unilaterally.
+- The saga's artifacts, ledger included, are the saga lead's to maintain. Child effort leads do not
+  update the saga SDD to mark their own progress; the saga lead tracks child status from merged PRs.
+  Child leads flag inconsistencies they notice to the operator instead (see Artifact Mutability's
+  ownership rule).
+- Terminology: saga SDD, saga lead, child SDD, effort lead. Not "program".
+- The `saga-lead` skill is the operating manual for the role itself: watching child efforts, the
   multi-pass review protocol for their PRs, and the lead's after-round duties. This section defines
   the artifact form; that skill defines how the lead runs it.
 
@@ -385,15 +389,15 @@ A branch is private state; `main` is the coordination plane. That is why message
 via `main`, and the same logic applies to the artifacts themselves: a sibling effort designing
 against your FRD, HLA, or plan can only see what has landed on `main`, and "read my feature branch"
 is not a coordination mechanism (branches rebase, drift, and can vanish, and nothing notifies a
-sibling when they do). So when another effort could build against your design (under an active
-roadmap, assume one can), merge SDD artifacts ahead of the implementation. Instances of the pattern:
-a roadmap child's seeding PR; the reviewed pre-implementation artifacts (once the draft review
-converges, promote and merge rather than letting the artifacts ride the feature branch to the end;
-for a roadmap child, the effort lead explicitly requests that draft review from the roadmap lead,
-whose ready-flip watch covers merge-intent PRs, and the review's convergence is what sanctions
-promotion); and material in-flight DESIGN revisions, which keep flowing to `main` promptly as small
-PRs rather than accumulating. After an early artifact merge, implementation simply continues on the
-same branch (or a fresh one) and opens its own PR; the branching flow above is otherwise unchanged.
+sibling when they do). So when another effort could build against your design (under an active saga,
+assume one can), merge SDD artifacts ahead of the implementation. Instances of the pattern: a saga
+child's seeding PR; the reviewed pre-implementation artifacts (once the draft review converges,
+promote and merge rather than letting the artifacts ride the feature branch to the end; for a saga
+child, the effort lead explicitly requests that draft review from the saga lead, whose ready-flip
+watch covers merge-intent PRs, and the review's convergence is what sanctions promotion); and
+material in-flight DESIGN revisions, which keep flowing to `main` promptly as small PRs rather than
+accumulating. After an early artifact merge, implementation simply continues on the same branch (or
+a fresh one) and opens its own PR; the branching flow above is otherwise unchanged.
 
 Two things never merge ahead of their work. Checkbox flips are completion claims, not design: a
 checked box merges with or after the work that makes it true (an early-merged box would be an

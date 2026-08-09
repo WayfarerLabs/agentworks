@@ -77,7 +77,7 @@ each, so wave 2 neither builds them early nor reinvents them later:
                              remediation-posture ruling, so this field's trigger can no longer fire
 ```
 
-**Amendment (roadmap ruling, 2026-08-07): map-keyed hosting becomes a descriptor field.** The wave 2
+**Amendment (saga ruling, 2026-08-07): map-keyed hosting becomes a descriptor field.** The wave 2
 closeout escalated that emission for map-keyed capability config (the `secret.backend_mappings`
 table) cannot be spliced without the descriptor recording where a map-keyed capability is hosted,
 and the trigger has fired (`onepassword` ships a fully modeled mapping that gets no completions or
@@ -154,7 +154,7 @@ internal extension framework; it does not create a public plugin promise, which 
 - `secret-backend` is the implementation kind; `secret-source` is the declarable configured instance
   kind (the vm-site analog), carrying the per-source config model, references, and readiness.
   Zero-config backends get synthesized sources under their current names per `target-state.md`.
-- Lifecycle layering (promoted from proposed to settled, roadmap ruling 2026-08-07, seeded as wave 3
+- Lifecycle layering (promoted from proposed to settled, saga ruling 2026-08-07, seeded as wave 3
   R6): sources resolve in active-chain order, and in the first version a source's config MUST NOT
   reference secrets. Enforcement is structural, at registration conformance: the source config model
   may carry no secret-reference-annotated fields, so the rule cannot be violated by any operator
