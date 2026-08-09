@@ -106,11 +106,13 @@ A comprehensive toolkit for managing agentic workloads: VMs, workspaces, agents,
 Create and manage an agentic fleet from your own workstation. **Durable agents** run as separate Linux users in **VMs** on infrastructure you choose and control. They retain their own tools, git credentials, and accumulated application state (a coding assistant's context and memory, interactive logins). **Disposable sessions** spin up against them for a single piece of work and are thrown away when done. One `agw` CLI drives all of it declaratively via an SSH-over-Tailscale control plane.
 ```
 
-`HOME_PROBLEM` selects the sole paragraph under `docs/why-agentworks.md` keypath
-`# Why Agentworks > ## The Problem Space` before its first child heading:
+`HOME_PROBLEM` selects the complete two-paragraph body under `docs/why-agentworks.md` keypath
+`# Why Agentworks > ## The Problem Space > ### Workload Management`:
 
 ```text
-Agentworks is an attempt to address several growing problems around agentic engineering with a single, coherent framework.
+Anyone who has had more than a few parallel agentic sessions has likely run into the problem of keeping track of which agents are doing what, which sessions are active, what tools and credentials are available in each session, how to coordinate work across multiple agents (possibly working in the same repository or worktree), how to keep them all running reliably (e.g. even when you close your laptop or lose your network connection), etc.
+
+These are real challenges that impose real limits on how many agentic workloads a single operator can reasonably manage at once. Most devs who have leaned into this space have developed some amount of custom tooling to help with this problem. Solving for this at the platform layer lets devs and their agents focus on shipping code instead of fiddling with infrastructure.
 ```
 
 `HOME_PRINCIPLES` selects the introductory paragraph and four-item list under `README.md` keypath
@@ -207,6 +209,12 @@ Inputs are decoded as strict UTF-8 after rejecting a byte-order mark. Convert CR
 for matching. Heading matching strips only leading/trailing ASCII whitespace around the ATX heading
 text; it does not case-fold or discard inline markup. A section ends at the next heading of equal or
 higher level. Duplicate matching keypaths are errors.
+
+ATX headings inside fenced code do not participate in keypaths. The scanner recognizes a fence
+opened by up to three leading spaces followed by at least three matching backticks or tildes,
+ignores every line through a closing fence that uses the same character and at least the opening
+length, and fails on an unclosed fence. A heading-shaped shell comment inside a valid fence is
+therefore content, not structure.
 
 Within a selected section, the closed block grammar is:
 
@@ -398,13 +406,26 @@ OUT/
   static/site.css
 ```
 
-The focused build keeps Phase 2's existing five-file tree. The full manifest is explicit in
-`build.py`; recursive source copying is forbidden. Render into a fresh sibling temporary directory,
-verify exact regular-file paths, reject symlinks, then replace only an absent output or an existing
-real directory whose entries are a subset of the selected manifest. Continue rejecting output at or
-beneath the repository root. No source write, output escape, inherited unknown file, timestamp,
-commit ID, environment-dependent prose, or nondeterministic ordering enters output bytes. For the
-same input bytes and arguments, every generated and copied file is byte-identical.
+The focused build extends Phase 2's artifact with the shared stylesheet and has this exact six-file
+tree: `404.html`, `assets/agw-rocket.svg`, `static/lander-game.js`, `static/lander-model.js`,
+`static/lander.css`, and `static/site.css`. The full manifest is explicit in `build.py`; recursive
+source copying is forbidden. Render into a fresh sibling temporary directory, verify exact
+regular-file paths, and reject symlinks and special entries before touching the destination. Replace
+only an absent output or an existing real directory whose entries are a subset of the selected
+manifest. Continue rejecting output at or beneath the repository root.
+
+Replacement uses a sibling backup as a commit protocol. When output exists, rename it to a fresh
+backup, rename the verified staging directory to output, verify the installed manifest, and only
+then delete the backup. If staging installation or installed-manifest verification fails, remove an
+incomplete new output if present and rename the untouched backup back to the original path before
+reporting the error. Failures before the first rename leave output untouched. Tests inject failure
+at each rename and verification boundary and assert exact restoration; cleanup failure after a
+successful install may leave only the sibling backup and must report its path without damaging the
+installed output.
+
+No source write, output escape, inherited unknown file, timestamp, commit ID, environment-dependent
+prose, or nondeterministic ordering enters output bytes. For the same input bytes and arguments,
+every generated and copied file is byte-identical.
 
 Every local URL in HTML is `SITE_BASE` plus a root-relative artifact path without a leading slash.
 Root navigation is exactly `SITE_BASE`; security navigation is `SITE_BASE + "security/"`. Canonical
@@ -416,10 +437,10 @@ verification resolves every local reference against the output manifest for both
 
 | Layer                              | Required automated or manual evidence                                                                                                                                                                                                                                                                                                                                     |
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Source selection                   | Every section 4 happy path; missing/duplicate/reordered headings; expected passage missing/duplicated/drifted; CRLF normalization; invalid UTF-8 and byte-order mark; unsupported Markdown; escaping of `<`, `>`, `&`, quotes, and code; source reordering outside a selected section does not fail.                                                                      |
+| Source selection                   | Every section 4 happy path; missing/duplicate/reordered headings; heading-shaped fenced-code canary and unclosed fence; expected passage missing/duplicated/drifted; CRLF normalization; invalid UTF-8 and byte-order mark; unsupported Markdown; escaping of `<`, `>`, `&`, quotes, and code; source reordering outside a selected section does not fail.                |
 | Reporting                          | Exact `gh-private` definition and selected reference; missing, duplicate, renamed, non-HTTPS, or changed URL fails; both generated reporting anchors use the parsed URL; permanent policy link is exact.                                                                                                                                                                  |
 | Template contract                  | Per-template closed token sets and counts; unknown, missing, duplicate, wrong-template, brace-like, and unexpanded tokens fail; extracted fragments are escaped and cannot create script, style, event-handler, or template markup.                                                                                                                                       |
-| Builder and manifest               | Full and focused CLI shapes; root and `/agentworks/` bases; invalid bases; clean deterministic builds; exact trees; safe replacement; unknown file/symlink refusal; output and staging remain outside the repository; simulated failure preserves existing output; no Git status residue.                                                                                 |
+| Builder and manifest               | Full and focused CLI shapes; root and `/agentworks/` bases; invalid bases; clean deterministic builds; exact trees; safe replacement; unknown file, symlink, and special-entry refusal; output and staging remain outside the repository; injected rename/verification failures restore exact existing output; no Git status residue.                                     |
 | Interim guards                     | Exact availability notice exists once in ordinary markup; `#onboarding` is nonempty; no `pre` in home, copy/clipboard selector or script, bootstrap token/comment, disabled control, `uv tool install`, `pipx install`, `git clone`, `agw config init`, or alternative release mode; home and security contain no script, while 404 contains only its same-origin module. |
 | DOM and links                      | HTML language, titles, descriptions, canonicals, skip links, landmarks, one `h1`, nested heading order, named navs, duplicate IDs, useful labels, exact URLs, secondary security link, reporting links, 404 fallback, and all local references at both bases. Run assertions against parsed generated HTML, not regex alone.                                              |
 | Runtime and privacy                | No remote CSS/font/image/script, analytics, form, cookie, storage, service worker, fetch, XHR, WebSocket, EventSource, beacon, or client routing. External anchors opened in a new context, if any, use `rel="noopener noreferrer"`; same-context links need no `target`.                                                                                                 |
