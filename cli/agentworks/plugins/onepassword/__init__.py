@@ -5,11 +5,9 @@ The first real migration out of the core (Phase 8): a capability-only
 plugin (no bundled manifests) that seats its ``OnePasswordBackend`` class
 into ``SECRET_BACKEND_REGISTRY`` and publishes a ``secret-backend`` row with a
 ``system-plugin`` origin. The row is present-but-disabled until an
-operator opts in with ``[plugins] system = ["onepassword"]``; while
-disabled it is excluded from the active backend chain and secret
-resolution, so a secret whose only mapping targets ``onepassword`` fails
-with the "enable plugin `onepassword`" hint (LLD b) rather than a generic
-unreachable message.
+operator opts in with ``[plugins] system = ["onepassword"]``. A configured
+source selecting the disabled backend folds not-ready and resolution never
+constructs its client.
 
 The plugin NAME is ``onepassword`` (matching the backend's registry name),
 not ``1password``: a leading digit is not a legal Python identifier, so

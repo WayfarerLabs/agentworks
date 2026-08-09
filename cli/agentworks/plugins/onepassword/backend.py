@@ -35,8 +35,7 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, NoReturn
 
-from pydantic import AfterValidator, BaseModel, Field, model_validator
-from pydantic import ValidationError as PydanticValidationError
+from pydantic import AfterValidator, BaseModel, Field
 
 from agentworks.capabilities.secret_backend.base import SecretBackend
 from agentworks.capabilities.secret_backend.client import (
@@ -49,20 +48,14 @@ from agentworks.capabilities.secret_backend.client import (
     SecretLookupRequest,
     SecretSourceClient,
 )
-from agentworks.errors import (
-    ConfigError,
-    ConnectivityError,
-    ExternalError,
-    SecretMappingError,
-)
-from agentworks.schema import AgwModel, AgwRootModel, NonEmptyStr, config_error_from
+from agentworks.errors import ConfigError
+from agentworks.schema import AgwModel, AgwRootModel, NonEmptyStr
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.resources.graph import Readiness
-    from agentworks.secrets.base import MappingValue, SecretDecl
 
 _OP_BINARY = "op"
 """The 1Password CLI executable, resolved on PATH."""
@@ -79,10 +72,9 @@ _OP_BINARY = "op"
 # halt). The not-found markers are deliberately NARROW and item/field-specific:
 # a broad marker like "no such" would also match a Go-style transport error
 # ("dial tcp: lookup ...: no such host") and mislabel connectivity as a hard
-# mapping error with a misleading vault/item/field hint. Anything not matched
-# by the signed-out or not-found markers falls through to ``ExternalError``
-# (which halts the chain and surfaces the raw stderr): the safer
-# classification.
+# mapping error with misleading remediation. Anything not matched by the
+# signed-out or not-found markers falls through to the fixed external failure
+# category. Raw stderr never leaves this boundary.
 _SIGNED_OUT_MARKERS = (
     "not currently signed in",
     "no account found",
@@ -96,23 +88,6 @@ _NOT_FOUND_MARKERS = (
     "no such field",
 )
 
-# The two accepted mapping forms, named in every validation error so an
-# operator on a rejected shape sees the path forward in one line.
-_FORMS_HINT = (
-    "use an 'op://vault/item/field' string, or a {account, reference} table when a specific account must be pinned"
-)
-
-
-@dataclass(frozen=True)
-class _OpResult:
-    """The outcome of one ``op`` invocation: the single subprocess seam's
-    return shape. Tests fake ``_run_op`` to return these without touching a
-    real ``op``."""
-
-    returncode: int
-    stdout: str
-    stderr: str
-
 
 @dataclass(frozen=True, slots=True)
 class _BoundedRead:
@@ -122,55 +97,8 @@ class _BoundedRead:
     failure: SecretClientFailureKind | None = None
     timed_out: bool = False
 
-
-@dataclass(frozen=True)
-class _OpRef:
-    """A resolved onepassword lookup: the native ``op://`` reference plus an
-    optional account selector. The account cannot be encoded in the
-    reference string, so the private pre-source resolver carries it alongside
-    for the read and its operator-facing identifier. ``account is None``
-    means op's default / ``OP_ACCOUNT`` account. Module-private."""
-
-    reference: str
-    account: str | None
-
-
-def _run_op(args: list[str]) -> _OpResult:
-    """Run the legacy compatibility path's 1Password CLI subprocess.
-
-    This is the private, unbounded pre-source resolver seam. Tests for that
-    compatibility behavior monkeypatch it; the final source client uses its
-    separate direct, bounded ``subprocess.run`` seam in :func:`_bounded_read`.
-
-    Raises ``FileNotFoundError`` if ``op`` is not on PATH; callers convert
-    that to a ``ConnectivityError`` via ``_op``.
-    """
-    proc = subprocess.run(  # noqa: S603 - explicit argv, no shell
-        [_OP_BINARY, *args],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    return _OpResult(proc.returncode, proc.stdout, proc.stderr)
-
-
-def _op(args: list[str]) -> _OpResult:
-    """Add legacy-path missing-binary translation around ``_run_op``.
-
-    Every private compatibility-path ``op`` call goes through this seam. The
-    final bounded client deliberately uses :func:`_bounded_read` instead.
-    """
-    try:
-        return _run_op(args)
-    except FileNotFoundError as exc:
-        raise ConnectivityError(
-            "the 1Password CLI ('op') was not found on PATH",
-            hint=(
-                "install the 1Password CLI v2 "
-                "(https://developer.1password.com/docs/cli/get-started/), "
-                "then run `op signin`"
-            ),
-        ) from exc
+    def __repr__(self) -> str:
+        return "_BoundedRead(value=<redacted>)"
 
 
 def _bounded_read(args: list[str], *, timeout: float) -> _BoundedRead:
@@ -180,39 +108,72 @@ def _bounded_read(args: list[str], *, timeout: float) -> _BoundedRead:
     timed_out = False
     value: str | None = None
     stderr = ""
+    signed_out = False
+    not_found = False
+    bounded: _BoundedRead | None = None
     try:
-        completed = subprocess.run(  # noqa: S603 - explicit argv, no shell
-            [_OP_BINARY, *args],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=timeout,
-        )
-    except subprocess.TimeoutExpired:
-        timed_out = True
-    except OSError:
-        failure = SecretClientFailureKind.CONNECTIVITY
+        try:
+            completed = subprocess.run(  # noqa: S603 - explicit argv, no shell
+                [_OP_BINARY, *args],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            timed_out = True
+        except OSError:
+            failure = SecretClientFailureKind.CONNECTIVITY
 
-    if completed is not None:
-        if completed.returncode == 0:
-            value = completed.stdout
-        else:
-            stderr = completed.stderr.lower()
-            if _matches(stderr, _SIGNED_OUT_MARKERS):
-                failure = SecretClientFailureKind.AUTHENTICATION
-            elif _matches(stderr, _NOT_FOUND_MARKERS):
-                failure = SecretClientFailureKind.HARD_MAPPING
+        if completed is not None:
+            if completed.returncode == 0:
+                value = completed.stdout
             else:
-                failure = SecretClientFailureKind.EXTERNAL
+                stderr = completed.stderr.lower()
+                for signed_out_marker in _SIGNED_OUT_MARKERS:
+                    if signed_out_marker in stderr:
+                        signed_out = True
+                        break
+                for not_found_marker in _NOT_FOUND_MARKERS:
+                    if not_found_marker in stderr:
+                        not_found = True
+                        break
+                if signed_out:
+                    failure = SecretClientFailureKind.AUTHENTICATION
+                elif not_found:
+                    failure = SecretClientFailureKind.HARD_MAPPING
+                else:
+                    failure = SecretClientFailureKind.EXTERNAL
 
-    # A typed client failure is raised by the caller only after this frame is
-    # gone. Native exceptions, CompletedProcess, stderr, and failure-path
-    # stdout therefore cannot survive in its traceback or exception graph.
-    completed = None
-    stderr = ""
-    if failure is not None or timed_out:
+        # A typed client failure is raised by the caller only after this frame
+        # is gone. Native exceptions, CompletedProcess, stderr, and
+        # failure-path stdout therefore cannot survive in its traceback or
+        # exception graph.
+        completed = None
+        stderr = ""
+        if failure is not None or timed_out:
+            value = None
+        # Never pass plaintext through the generated dataclass constructor:
+        # an interruption at function entry would retain its arguments before
+        # this surrounding cleanup fence could run.
+        bounded = _BoundedRead()
+        object.__setattr__(bounded, "value", value)
+        object.__setattr__(bounded, "failure", failure)
+        object.__setattr__(bounded, "timed_out", timed_out)
         value = None
-    return _BoundedRead(value=value, failure=failure, timed_out=timed_out)
+        args.clear()
+        return bounded
+    except BaseException:
+        completed = None
+        stderr = ""
+        value = None
+        bounded = None
+        failure = None
+        timed_out = False
+        signed_out = False
+        not_found = False
+        args.clear()
+        raise
 
 
 def _raise_client_failure(kind: SecretClientFailureKind) -> NoReturn:
@@ -222,24 +183,11 @@ def _raise_client_failure(kind: SecretClientFailureKind) -> NoReturn:
         SecretClientFailureKind.CONNECTIVITY: SecretClientRemediation.CHECK_CONNECTIVITY,
         SecretClientFailureKind.EXTERNAL: SecretClientRemediation.RETRY,
     }[kind]
-    raise SecretClientFailure(kind=kind, remediation=remediation)
+    raise SecretClientFailure(kind=kind, remediation=remediation) from None
 
 
 def _raise_client_timeout() -> NoReturn:
-    raise SecretClientTimeout
-
-
-def _matches(lowered_stderr: str, markers: tuple[str, ...]) -> bool:
-    return any(marker in lowered_stderr for marker in markers)
-
-
-def _signed_out_message(account: str | None) -> str:
-    """The ConnectivityError message for a signed-out ``op``, naming the
-    account when the mapping pinned one (the default account, ``None``, reads
-    as the generic phrasing)."""
-    if account is not None:
-        return f"not signed in to the 1Password CLI account {account}"
-    return "not signed in to the 1Password CLI"
+    raise SecretClientTimeout from None
 
 
 def _check_op_uri(uri: str) -> str:
@@ -267,39 +215,6 @@ def _check_op_uri(uri: str) -> str:
 
 OpUri = Annotated[NonEmptyStr, AfterValidator(_check_op_uri)]
 """A native 1Password reference, ``op://vault/item/field``."""
-
-
-class _LegacyOnePasswordAccountRef(AgwModel):
-    """The pinned-account mapping form: a reference plus the account to
-    read it from. To use op's default account, drop the table and give
-    the bare ``op://`` string."""
-
-    account: NonEmptyStr
-    """A 1Password account selector."""
-
-    reference: OpUri
-    """The ``op://vault/item/field`` reference to read."""
-
-
-class _LegacyOnePasswordMapping(AgwRootModel[OpUri | _LegacyOnePasswordAccountRef]):
-    """The private mapping accepted by the pre-source compatibility path.
-
-    A root model because one of the two forms is a bare string, which no
-    ``BaseModel`` can be. The before-validator keeps the shipped one-line
-    message for a value that is neither form: pydantic would otherwise
-    report one failure per arm, and "must be a string" is a poor answer
-    for someone who wrote a number.
-    """
-
-    @model_validator(mode="before")
-    @classmethod
-    def _one_of_the_two_forms(cls, value: object) -> object:
-        if not isinstance(value, str | dict):
-            raise ValueError(
-                f"the onepassword backend needs an 'op://vault/item/field' string "
-                f"or a {{account, reference}} table (got {type(value).__name__}). {_FORMS_HINT}"
-            )
-        return value
 
 
 class OnePasswordSourceConfig(AgwModel):
@@ -337,49 +252,66 @@ class _OnePasswordClient:
         mapping: BaseModel | None = None
         args: list[str] | None = None
         read: _BoundedRead | None = None
-        for index in range(len(requests)):
-            current = requests[index]
-            mapping = current.mapping
-            if not isinstance(mapping, OnePasswordMapping):
-                continue
-            args = ["read", "--no-newline"]
-            if self._config.account is not None:
-                args += ["--account", self._config.account]
-            args.append(mapping.root)
-            budget_remaining = remaining_time()
-            timeout = self._config.timeout if budget_remaining is None else min(self._config.timeout, budget_remaining)
-            budget_remaining = None
-            if timeout <= 0:
-                resolved.clear()
-                requests = ()
-                current = None
-                mapping = None
-                args.clear()
-                args = None
-                _raise_client_timeout()
-            read = _bounded_read(args, timeout=timeout)
-            if read.timed_out or read.failure is not None:
-                timed_out = read.timed_out
-                failure = read.failure
-                resolved.clear()
-                requests = ()
-                current = None
-                mapping = None
-                args.clear()
-                args = None
-                read = None
-                if timed_out:
+        try:
+            for index in range(len(requests)):
+                current = requests[index]
+                mapping = current.mapping
+                if not isinstance(mapping, OnePasswordMapping):
+                    continue
+                args = ["read", "--no-newline"]
+                if self._config.account is not None:
+                    args += ["--account", self._config.account]
+                args.append(mapping.root)
+                budget_remaining = remaining_time()
+                timeout = (
+                    self._config.timeout if budget_remaining is None else min(self._config.timeout, budget_remaining)
+                )
+                budget_remaining = None
+                if timeout <= 0:
+                    resolved.clear()
+                    requests = ()
+                    current = None
+                    mapping = None
+                    args.clear()
+                    args = None
                     _raise_client_timeout()
-                assert failure is not None
-                _raise_client_failure(failure)
-            assert read.value is not None
-            resolved[current.name] = read.value
-            read = None
+                read = _bounded_read(args, timeout=timeout)
+                if read.timed_out or read.failure is not None:
+                    timed_out = read.timed_out
+                    failure = read.failure
+                    resolved.clear()
+                    requests = ()
+                    current = None
+                    mapping = None
+                    args.clear()
+                    args = None
+                    read = None
+                    if timed_out:
+                        _raise_client_timeout()
+                    assert failure is not None
+                    _raise_client_failure(failure)
+                assert read.value is not None
+                resolved[current.name] = read.value
+                read = None
+                current = None
+                mapping = None
+                args.clear()
+                args = None
+            requests = ()
             current = None
             mapping = None
-            args.clear()
+            read = None
+            return resolved
+        except BaseException:
+            resolved.clear()
+            requests = ()
+            current = None
+            mapping = None
+            if args is not None:
+                args.clear()
             args = None
-        return resolved
+            read = None
+            raise
 
 
 class _OnePasswordContext(AbstractContextManager[SecretSourceClient]):
@@ -397,7 +329,7 @@ class OnePasswordBackend(SecretBackend):
     """Resolves secret values from 1Password via the ``op`` CLI.
 
     Mapping-required: ``would_attempt`` is True only for a secret that
-    carries a ``backend_mappings.onepassword`` entry; unmapped secrets
+    carries a mapping for the configured source name; unmapped secrets
     soft-skip (fall through to the next backend). There is no
     derive-from-name convention: 1Password addressing is
     vault/item/field, which cannot be inferred from a bare secret name.
@@ -405,22 +337,13 @@ class OnePasswordBackend(SecretBackend):
     Its final mapping is a bare ``op://`` string. A source's optional
     account selector lives in ``OnePasswordSourceConfig``.
 
-    The private pre-source compatibility resolver preserves today's miss and
-    failure behavior until the typed client cutover:
-
-    - A found value goes in the returned dict.
-    - A mapping that definitively resolves to "no such item/field" raises
-      ``SecretMappingError`` (HARD miss): halts the chain so a stale
-      mapping cannot silently fall through to a prompt.
-    - Not signed in / binary missing raises ``ConnectivityError``; any
-      other unexpected ``op`` failure raises ``ExternalError``. Both halt
-      the chain, which is intended.
+    Native failures are reduced to fixed provider categories before they
+    leave the subprocess boundary. Raw output never reaches the typed core.
     """
 
     contract_version: ClassVar[int] = 2
     config_model: ClassVar[type[AgwModel]] = OnePasswordSourceConfig
     mapping_model: ClassVar[type[AgwRootModel[Any]]] = OnePasswordMapping
-    _legacy_mapping_model: ClassVar[type[AgwRootModel[Any]]] = _LegacyOnePasswordMapping
     name: ClassVar[str] = "onepassword"
     description: ClassVar[str] = "resolves via the 1Password CLI (op read op://vault/item/field)"
     prose: ClassVar[TopicProse | None] = TopicProse(
@@ -428,18 +351,18 @@ class OnePasswordBackend(SecretBackend):
         overview="""
         Reads a secret's value through the `op` CLI. There is no naming convention to
         fall back on, so a secret is resolvable here only if it declares an explicit
-        `backend_mappings.onepassword` address: the `op://vault/item/field` reference
-        1Password's "Copy Secret Reference" produces (a `.../section/field` segment is
-        allowed too).
+        mapping under `backend_mappings.<source-name>`: the `op://vault/item/field`
+        reference 1Password's "Copy Secret Reference" produces (a
+        `.../section/field` segment is allowed too).
 
-        The string form reads through whichever account `op` is signed in to, or the one
-        `OP_ACCOUNT` names. During the direct-backend compatibility window, the table form
-        pins a specific account beside the same reference for a host signed in to several.
+        The mapping is always a scalar reference. Account selection and timeout belong to
+        the configured secret source so several named sources can use this backend with
+        different accounts or budgets.
 
-        Ships as the opt-in `onepassword` system plugin, and needs the `op` CLI on this
-        host; a mapping stays dormant until both are true. Resolution may trigger a
-        biometric or re-auth prompt, so inspection surfaces report it optimistically
-        rather than probing it.
+        Declare a `secret-source` that selects the opt-in `onepassword` system plugin,
+        then put that source name in the active chain. The backend needs the `op` CLI on
+        this host. Resolution may trigger a biometric or re-auth prompt, so inspection
+        surfaces report it optimistically rather than probing it.
         """,
     )
 
@@ -493,50 +416,6 @@ class OnePasswordBackend(SecretBackend):
         return _OnePasswordContext(config)
 
     @classmethod
-    def _legacy_resolved_ref(cls, secret: SecretDecl, mapping: MappingValue | None) -> _OpRef:
-        """The mapping as the lookup it addresses.
-
-        Re-validated here rather than trusted: ``would_attempt`` gates the
-        absent case out, so reaching this with anything but a well-formed
-        mapping means a hand-built decl bypassed the finalize validate
-        pass. Defense in depth, exactly as env-var's ``_resolved_name``
-        keeps its own check.
-
-        Framed through ``SecretDecl.mapping_owner`` and the error bridge,
-        so the text an operator reads here is the text the finalize pass
-        would have given for the same mapping. Two validations of one value
-        that disagree about how to describe its faults are worse than one,
-        and the operator has no way to know which pass they reached.
-        """
-        owner = secret.mapping_owner(cls.name)
-        if mapping is None:
-            raise ConfigError(
-                f"{owner.display}: the onepassword backend needs a backend_mappings.onepassword entry",
-                entity_kind=owner.kind,
-                entity_name=owner.name,
-                hint=_FORMS_HINT,
-            )
-        try:
-            root = _LegacyOnePasswordMapping.model_validate(mapping).root
-        except PydanticValidationError as exc:
-            # Through the bridge, like every other validation of a modeled
-            # surface. Reading ``errors()[0]`` instead reported whichever
-            # arm pydantic tried first, so every malformed table came back
-            # "Input should be a valid string": the one message this
-            # model's own before-validator exists to prevent, delivered by
-            # the one call site that skipped the shared translation.
-            raise config_error_from(
-                exc,
-                model_cls=_LegacyOnePasswordMapping,
-                owner=owner,
-                location=secret.error_location,
-                hint=_FORMS_HINT,
-            ) from exc
-        if isinstance(root, str):
-            return _OpRef(reference=root, account=None)
-        return _OpRef(reference=root.reference, account=root.account)
-
-    @classmethod
     def would_attempt(cls, secret_name: str, *, mapping_present: bool) -> bool:
         # Mapping-required: only mapped secrets are attempted. (The generic
         # ``False`` opt-out is stripped by the resolve loop before it gets
@@ -545,82 +424,7 @@ class OnePasswordBackend(SecretBackend):
 
     @classmethod
     def describe_lookup(cls, secret_name: str, mapping: BaseModel | None) -> str | None:
-        # The op:// reference, for the operator-facing "Resolved X via
-        # onepassword (...)" line. When an account is pinned it is prefixed
-        # account-FIRST ("<account>: <reference>"): the position conveys
-        # "account" without spending the word, and a long op:// reference
-        # then truncates before the account does in the list view. Never a
-        # value.
+        # The op:// reference is an operator-authored safe identifier, never a
+        # resolved value. Account selection belongs to the source and is not
+        # repeated in every per-secret identifier.
         return mapping.root if isinstance(mapping, OnePasswordMapping) else None
-
-    @classmethod
-    def _legacy_describe_lookup(cls, secret: SecretDecl, mapping: MappingValue | None) -> str | None:
-        if mapping is None:
-            return None
-        ref = cls._legacy_resolved_ref(secret, mapping)
-        return f"{ref.account}: {ref.reference}" if ref.account is not None else ref.reference
-
-    @classmethod
-    def _legacy_batch_get(
-        cls,
-        wants: list[tuple[SecretDecl, MappingValue | None]],
-    ) -> dict[str, str]:
-        # Self-safe on an empty batch: no work, no subprocess. (would_attempt
-        # gating already guarantees non-empty from the resolve loop; this
-        # makes a direct call cheap too.)
-        if not wants:
-            return {}
-        # No sign-in pre-check: `op read` is the only liveness probe (see the
-        # module docstring and the marker block; `op whoami` is unreliable
-        # under app integration). A signed-out state surfaces from the read
-        # itself, and the first such read halts the batch.
-        out: dict[str, str] = {}
-        for secret, mapping in wants:
-            ref = cls._legacy_resolved_ref(secret, mapping)
-            out[secret.name] = cls._legacy_read_one(secret, ref)
-        return out
-
-    @staticmethod
-    def _legacy_read_one(secret: SecretDecl, ref: _OpRef) -> str:
-        args = ["read", "--no-newline"]
-        if ref.account is not None:
-            args += ["--account", ref.account]
-        args.append(ref.reference)
-        result = _op(args)
-        if result.returncode == 0:
-            # ``--no-newline`` only suppresses the newline ``op`` appends to
-            # its OWN output; it does not touch the stored field value. A
-            # field whose value ends in ``\n`` still arrives with it. We do
-            # NOT rstrip that (unlike env-var, which defensively strips the
-            # \r\n copy-paste artifact): for a vault a trailing newline is
-            # arguably part of the value, so surfacing it (the resolve
-            # loop's control-character guard rejects it) is safer than
-            # silently mangling it. The asymmetry with env-var is
-            # deliberate; do not "fix" it into an rstrip.
-            return result.stdout
-        lowered = result.stderr.lower()
-        if _matches(lowered, _SIGNED_OUT_MARKERS):
-            # The read itself is the sign-in probe (no whoami gate). A bare
-            # op:// string uses op's default account, where a signed-out (or,
-            # with several accounts, ambiguous) state is fixed by naming an
-            # account; a pinned account just needs read access for it.
-            if ref.account is None:
-                hint = (
-                    "run `op signin` (or enable the 1Password app's CLI "
-                    "integration). If several accounts are signed in, set "
-                    "OP_ACCOUNT or pin the account per secret with a "
-                    "{account, reference} mapping."
-                )
-            else:
-                hint = "run `op signin` (or enable the 1Password app's CLI integration) and retry"
-            raise ConnectivityError(_signed_out_message(ref.account), hint=hint)
-        if _matches(lowered, _NOT_FOUND_MARKERS):
-            raise SecretMappingError(
-                f"secret {secret.name!r}: 1Password has no value at {ref.reference}",
-                hint=("check the vault, item, and field in backend_mappings.onepassword"),
-            )
-        # Unrecognized failure. op's flat exit status means we cannot safely
-        # call this a missing item, so surface it (halts the chain) rather
-        # than guessing it into a soft miss.
-        detail = result.stderr.strip() or f"op exited {result.returncode}"
-        raise ExternalError(f"secret {secret.name!r}: reading {ref.reference} from 1Password failed: {detail}")

@@ -23,7 +23,6 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from agentworks.resources.graph import Readiness
-    from agentworks.secrets.base import MappingValue, SecretDecl
 
 
 def env_var_name_for(secret_name: str) -> str:
@@ -57,13 +56,33 @@ class _EnvVarClient:
         remaining_time: RemainingTime,
     ) -> Mapping[str, str]:
         resolved: dict[str, str] = {}
-        for request in requests:
-            mapping = request.mapping
-            env_name = mapping.root if isinstance(mapping, EnvVarMapping) else env_var_name_for(request.name)
-            raw = os.environ.get(env_name)
-            if raw is not None:
-                resolved[request.name] = raw.rstrip("\r\n")
-        return resolved
+        request: SecretLookupRequest | None = None
+        mapping: BaseModel | None = None
+        env_name: str | None = None
+        raw: str | None = None
+        try:
+            for request in requests:
+                mapping = request.mapping
+                env_name = mapping.root if isinstance(mapping, EnvVarMapping) else env_var_name_for(request.name)
+                raw = os.environ.get(env_name)
+                if raw is not None:
+                    resolved[request.name] = raw.rstrip("\r\n")
+                raw = None
+
+            requests = ()
+            request = None
+            mapping = None
+            env_name = None
+            raw = None
+            return resolved
+        except BaseException:
+            resolved.clear()
+            requests = ()
+            request = None
+            mapping = None
+            env_name = None
+            raw = None
+            raise
 
 
 class _EnvVarContext(AbstractContextManager[SecretSourceClient]):
@@ -123,28 +142,3 @@ class EnvVarBackend(SecretBackend):
         remaining_time: RemainingTime,
     ) -> AbstractContextManager[SecretSourceClient]:
         return _EnvVarContext()
-
-    @classmethod
-    def _legacy_describe_lookup(cls, secret: SecretDecl, mapping: MappingValue | None) -> str | None:
-        if isinstance(mapping, str):
-            return mapping
-        if mapping is not None:
-            raise ConfigError(
-                f"secret {secret.name!r}: backend_mappings for the env-var backend must be "
-                "a non-empty string (an env var name) or false"
-            )
-        return env_var_name_for(secret.name)
-
-    @classmethod
-    def _legacy_batch_get(
-        cls,
-        wants: list[tuple[SecretDecl, MappingValue | None]],
-    ) -> dict[str, str]:
-        resolved: dict[str, str] = {}
-        for secret, mapping in wants:
-            env_name = cls._legacy_describe_lookup(secret, mapping)
-            assert env_name is not None
-            raw = os.environ.get(env_name)
-            if raw is not None:
-                resolved[secret.name] = raw.rstrip("\r\n")
-        return resolved

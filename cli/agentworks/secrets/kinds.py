@@ -34,6 +34,7 @@ if TYPE_CHECKING:
 
     from agentworks.db import Database, SessionRow, VMRow
     from agentworks.declared_resource import DeclaredResource
+    from agentworks.errors import ConfigError
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
 
@@ -58,8 +59,9 @@ class _SecretKind:
         title="Secrets",
         overview="""
         A secret is a NAME, not a value. Declaring one says a value by that name exists,
-        what it is for, and (optionally) what each backend calls it; the value itself is
-        produced by a secret-backend at command time and never stored by agentworks.
+        what it is for, and (optionally) what each configured source calls it; the value
+        itself is produced through that source at command time and never stored by
+        agentworks.
 
         Anything that needs a secret refers to it by name: an `env` table writes
         `{secret: npm-token}`, and a capability config field that names a secret (a git
@@ -68,9 +70,9 @@ class _SecretKind:
         it a description and a hint, which are the text an operator reads when they are
         asked to type the value in.
 
-        `backend_mappings` overrides what one backend calls this secret, or opts out of
-        that backend entirely with `false`. Run
-        `agw resource describe-kind secret-backend` to see which backends this host has.
+        Every `backend_mappings` key is a secret-source name. Its value overrides what
+        that source calls this secret, or `false` opts out of the source entirely. Run
+        `agw resource list --kind secret-source` to see the configured sources.
         """,
     )
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
@@ -229,6 +231,18 @@ class _SecretSourceKind:
         raise NoUnreferencedDefaultError(
             "the secret-source kind has miss_policy='error'; synthesize should never be dispatched"
         )
+
+    def missing_reference_error(
+        self,
+        *,
+        name: str,
+        registry: Registry,
+        referrer: ResourceReference,
+    ) -> ConfigError | None:
+        """Offer the domain-specific direct-backend migration diagnostic."""
+        from agentworks.secrets.sources import direct_backend_source_error
+
+        return direct_backend_source_error(name=name, registry=registry, referrer=referrer)
 
 
 KIND_REGISTRY[SECRET_SOURCE_KIND_NAME] = _SecretSourceKind()

@@ -170,15 +170,10 @@ def test_disabled_platform_node_folds_end_to_end_to_enable_its_unit() -> None:
     assert verdict.reason == "depends on vm-platform 'lima', which is disabled; enable its unit"
 
 
-def test_disabled_secret_backend_is_excluded_from_the_active_chain() -> None:
-    """R7 / LLD d: the enablement seam reaches secret resolution too. A
-    present-but-DISABLED ``secret-backend`` (onepassword injected disabled via a
-    stub enablement source) is dormant: ``active_backends`` excludes it from the
-    chain it builds, so resolution never attempts it, exactly as an
-    absent-from-chain backend is excluded, and WITHOUT a readiness warning (it
-    is an opt-out, not a can't-run-here). ``enablement_of`` reports it disabled
-    while its fold readiness stays a ready placeholder. This is the axis the
-    plugin source fills."""
+def test_disabled_secret_backend_makes_its_active_source_not_ready() -> None:
+    """A configured source backed by a disabled plugin stays in the typed chain
+    with a folded not-ready verdict, so resolution can skip it without ever
+    constructing the backend client."""
     from types import SimpleNamespace
     from typing import cast
 
@@ -187,13 +182,21 @@ def test_disabled_secret_backend_is_excluded_from_the_active_chain() -> None:
     from agentworks.config import Config
     from agentworks.plugins import publish_plugins
     from agentworks.secrets.resolve import active_backends
+    from agentworks.secrets.sources import SecretSourceDecl, publish_builtin_secret_sources
 
     registry = Registry.empty()
     publish_capability_rows(registry, descriptor_for("secret-backend"))
+    publish_builtin_secret_sources(registry)
     # onepassword ships as a system plugin now (its built-in row is gone), so
     # publish its capability row through the plugin path; the stub source below
     # then disables it, exactly as the plugin opt-in source would.
     publish_plugins(registry, cast("Config", SimpleNamespace(enabled_system_plugins=())))
+    registry.add(
+        "secret-source",
+        "onepassword",
+        SecretSourceDecl(name="onepassword", backend=CapabilityBlock.of("onepassword")),
+        Origin.operator_declared(file=Path("sources.yaml"), line=1),
+    )
     # ``publish_plugins`` also emits the claude and codex plugins' weak
     # install-command, example session-template, and example agent-template rows
     # and the azure plugin's weak az-cli install-command row; disable them too so
@@ -225,8 +228,9 @@ def test_disabled_secret_backend_is_excluded_from_the_active_chain() -> None:
     assert registry.graph.readiness_of("secret-backend", "onepassword").is_ready
 
     config = cast("Config", SimpleNamespace(secret_config_data=SimpleNamespace(backends=("onepassword", "prompt"))))
-    chain = [b.name for b in active_backends(config, registry)]
-    assert chain == ["prompt"]  # onepassword excluded (disabled), never built into an ActiveBackend
+    chain = active_backends(config, registry)
+    assert [source.name for source in chain] == ["onepassword", "prompt"]
+    assert not chain[0].readiness.is_ready  # retained so typed resolution can report why it was skipped
 
 
 @pytest.mark.parametrize("disable_onepassword", [True, False], ids=["disabled", "enabled"])
@@ -253,6 +257,7 @@ def test_r9_9_mapping_is_validated_whether_or_not_its_backend_is_enabled(disable
     from agentworks.config import Config
     from agentworks.plugins import publish_plugins
     from agentworks.secrets.base import SecretDecl
+    from agentworks.secrets.sources import SecretSourceDecl
 
     def _build(mapping: str) -> Registry:
         registry = Registry.empty()
@@ -260,9 +265,15 @@ def test_r9_9_mapping_is_validated_whether_or_not_its_backend_is_enabled(disable
         # onepassword's row now comes from the plugin path, not a built-in.
         publish_plugins(registry, cast("Config", SimpleNamespace(enabled_system_plugins=())))
         registry.add(
+            "secret-source",
+            "vault-op",
+            SecretSourceDecl(name="vault-op", backend=CapabilityBlock.of("onepassword")),
+            Origin.operator_declared(file=Path("sources.yaml"), line=1),
+        )
+        registry.add(
             "secret",
             "vaulted",
-            SecretDecl(name="vaulted", description="a vaulted key", backend_mappings={"onepassword": mapping}),
+            SecretDecl(name="vaulted", description="a vaulted key", backend_mappings={"vault-op": mapping}),
             Origin.operator_declared(file=Path("c.toml"), line=1),
         )
         # Always disable the claude and codex plugins' weak install-command,

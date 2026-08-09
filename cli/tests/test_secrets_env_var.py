@@ -1,146 +1,190 @@
-"""Tests for the env-var backend, exercised through the runtime
-``ActiveBackend`` wrapper -- how the resolution loop reaches a
-capability.
-"""
+"""Environment-variable source behavior through the typed core."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import inspect
+import os
+import sys
+from contextlib import contextmanager
+from typing import Any
 
-from agentworks.capabilities.secret_backend.env_var import EnvVarBackend
+import pytest
+
+from agentworks.capabilities.secret_backend.client import SecretLookupRequest
+from agentworks.capabilities.secret_backend.env_var import EnvVarBackend, EnvVarSourceConfig
 from agentworks.resources.graph import Readiness
-from agentworks.secrets import ActiveBackend, SecretDecl, env_var_name_for
+from agentworks.schema import CapabilityBlock
+from agentworks.secrets import SecretDecl, SecretSourceDecl
+from agentworks.secrets.resolve import (
+    ActiveSource,
+    CompletionPolicy,
+    InteractionPolicy,
+    ResolutionCategory,
+    ResolutionOutcome,
+    ResolutionPolicy,
+    resolve_batch,
+)
 
-if TYPE_CHECKING:
-    import pytest
+
+@contextmanager
+def _interrupt_return_line(function: Any) -> Any:
+    lines, first_line = inspect.getsourcelines(function)
+    matches = [
+        first_line + index for index, line in enumerate(lines) if line.rstrip("\n") == "            return resolved"
+    ]
+    assert len(matches) == 1
+    target_line = matches[0]
+    target_code = function.__code__
+
+    def trace(frame: Any, event: str, argument: object) -> Any:
+        del argument
+        if frame.f_code is target_code and event == "line" and frame.f_lineno == target_line:
+            sys.settrace(None)
+            raise KeyboardInterrupt
+        return trace
+
+    sys.settrace(trace)
+    try:
+        yield
+    finally:
+        sys.settrace(None)
 
 
-def _backend() -> ActiveBackend:
-    return ActiveBackend(
-        capability=EnvVarBackend,
+def _source() -> ActiveSource:
+    return ActiveSource(
+        source=SecretSourceDecl(name="env-var", backend=CapabilityBlock.of("env-var")),
+        backend_class=EnvVarBackend,
+        config=EnvVarSourceConfig(name="env-var"),
         readiness=Readiness.ready(),
-        registered_name="env-var",
     )
 
 
-def test_default_convention_uppercases_and_dashes_to_underscores() -> None:
-    assert env_var_name_for("github-token") == "AW_SECRET_GITHUB_TOKEN"
-    assert env_var_name_for("a") == "AW_SECRET_A"
-    assert env_var_name_for("azdo-ifc-pat") == "AW_SECRET_AZDO_IFC_PAT"
+def _resolve(decl: SecretDecl) -> tuple[dict[str, str], ResolutionOutcome]:
+    batch = resolve_batch(
+        [decl],
+        [_source()],
+        policy=ResolutionPolicy(
+            interaction=InteractionPolicy.REFUSE,
+            completion=CompletionPolicy.COMPLETE,
+        ),
+        interaction_broker=None,
+    )
+    return batch.complete_or_raise(), batch.outcomes[0]
 
 
-def test_default_convention_reads_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("AW_SECRET_GITHUB_TOKEN", "ghp_xxx")
-    decl = SecretDecl(name="github-token", description="GitHub PAT")
-    assert _backend().resolve([decl]) == {"github-token": "ghp_xxx"}
-
-
-def test_resolve_strips_trailing_newline(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Trailing newlines (the common ``op read`` / ``pbpaste`` artifact)
-    are stripped so the value cleanly transports through SSH SetEnv."""
-    monkeypatch.setenv("AW_SECRET_TOKEN", "ghp_xxx\n")
-    decl = SecretDecl(name="token", description="t")
-    assert _backend().resolve([decl]) == {"token": "ghp_xxx"}
-
-
-def test_resolve_strips_trailing_crlf(monkeypatch: pytest.MonkeyPatch) -> None:
-    """CRLF (Windows clipboard) trailing also stripped."""
-    monkeypatch.setenv("AW_SECRET_TOKEN", "ghp_xxx\r\n")
-    decl = SecretDecl(name="token", description="t")
-    assert _backend().resolve([decl]) == {"token": "ghp_xxx"}
-
-
-def test_resolve_preserves_internal_whitespace(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stripping is rstrip(newlines), not full strip(); internal spaces
-    and leading whitespace are preserved (some token formats use them)."""
-    monkeypatch.setenv("AW_SECRET_TOKEN", "  internal value  ")
-    decl = SecretDecl(name="token", description="t")
-    assert _backend().resolve([decl]) == {"token": "  internal value  "}
+def test_default_convention_reads_env_and_strips_trailing_crlf(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AW_SECRET_GITHUB_TOKEN", "ghp_xxx\r\n")
+    values, outcome = _resolve(SecretDecl(name="github-token", description="GitHub PAT"))
+    assert values == {"github-token": "ghp_xxx"}
+    assert outcome.category is ResolutionCategory.RESOLVED
+    assert outcome.identifier == "AW_SECRET_GITHUB_TOKEN"
 
 
 def test_override_uses_alternate_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("AW_SECRET_GITHUB_TOKEN", raising=False)
     monkeypatch.setenv("GITHUB_TOKEN", "from-existing-env")
-    decl = SecretDecl(
-        name="github-token",
-        description="GitHub PAT",
-        backend_mappings={"env-var": "GITHUB_TOKEN"},
+    values, outcome = _resolve(
+        SecretDecl(
+            name="github-token",
+            description="GitHub PAT",
+            backend_mappings={"env-var": "GITHUB_TOKEN"},
+        )
     )
-    assert _backend().resolve([decl]) == {"github-token": "from-existing-env"}
+    assert values == {"github-token": "from-existing-env"}
+    assert outcome.identifier == "GITHUB_TOKEN"
 
 
-def test_mapping_keyed_by_backend_name(
+def test_opt_out_is_per_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AW_SECRET_FORCED", "value")
+    decl = SecretDecl(name="forced", description="forced", backend_mappings={"env-var": False})
+    source = _source()
+    assert source.would_attempt(decl) is False
+    batch = resolve_batch(
+        [decl],
+        [source],
+        policy=ResolutionPolicy(InteractionPolicy.REFUSE, CompletionPolicy.COMPLETE),
+        interaction_broker=None,
+    )
+    assert batch.outcomes[0].category is not ResolutionCategory.RESOLVED
+
+
+def test_unset_env_is_soft_miss(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("AW_SECRET_MISSING", raising=False)
+    batch = resolve_batch(
+        [SecretDecl(name="missing", description="missing")],
+        [_source()],
+        policy=ResolutionPolicy(InteractionPolicy.REFUSE, CompletionPolicy.COMPLETE),
+        interaction_broker=None,
+    )
+    assert batch.outcomes[0].detail.value == "soft-miss"
+
+
+def test_internal_whitespace_is_preserved(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AW_SECRET_TOKEN", "  internal value  ")
+    values, _outcome = _resolve(SecretDecl(name="token", description="token"))
+    assert values == {"token": "  internal value  "}
+
+
+def test_keyboard_interrupt_clears_prior_env_value_from_traceback_locals(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Mappings key the backend name (post-collapse: the capability
-    name); an unrelated key is ignored and the default convention
-    applies."""
-    monkeypatch.setenv("AW_SECRET_TOKEN", "default-convention")
-    decl = SecretDecl(
-        name="token",
-        description="t",
-        backend_mappings={"some-other-backend": "OTHER_TOKEN"},
+    calls = 0
+
+    def get(name: str, default: str | None = None) -> str | None:
+        del name, default
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return "sentinel-prior-env-value"
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(os.environ, "get", get)
+    context = EnvVarBackend.create_client(
+        source_name="env-var",
+        config=EnvVarSourceConfig(name="env-var"),
+        interaction_broker=None,
+        remaining_time=lambda: None,
     )
-    assert _backend().resolve([decl]) == {"token": "default-convention"}
-
-
-def test_opt_out_is_per_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``backend_mappings.<name> = false`` opts out ONE backend; other
-    backends' entries are untouched."""
-    monkeypatch.setenv("AW_SECRET_FORCED", "value")
-    decl = SecretDecl(
-        name="forced",
-        description="Force prompt only",
-        backend_mappings={"env-var": False},
+    client = context.__enter__()
+    requests = (
+        SecretLookupRequest(name="first", mapping=None),
+        SecretLookupRequest(name="second", mapping=None),
     )
-    assert _backend().would_attempt(decl) is False
+    try:
+        with pytest.raises(KeyboardInterrupt) as caught:
+            client.resolve(requests, remaining_time=lambda: None)
+    finally:
+        context.__exit__(None, None, None)
+
+    local_text: list[str] = []
+    traceback = caught.value.__traceback__
+    while traceback is not None:
+        if traceback.tb_frame.f_globals.get("__name__", "").startswith("agentworks."):
+            local_text.extend(repr(value) for value in traceback.tb_frame.f_locals.values())
+        traceback = traceback.tb_next
+    assert "sentinel-prior-env-value" not in "\n".join(local_text)
 
 
-def test_resolve_omits_unset_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An unset env var is a soft miss: absent from the result."""
-    monkeypatch.setenv("AW_SECRET_FOO", "foo-val")
-    monkeypatch.delenv("AW_SECRET_BAR", raising=False)
-    out = _backend().resolve([SecretDecl(name="foo", description="F"), SecretDecl(name="bar", description="B")])
-    assert out == {"foo": "foo-val"}
-
-
-def test_would_attempt_true_when_default_convention_applies() -> None:
-    assert _backend().would_attempt(SecretDecl(name="x", description="X")) is True
-
-
-def test_would_attempt_is_config_only_not_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
-    """would_attempt returns True even when the env var isn't actually set --
-    it answers 'will I try?', not 'will I succeed?'."""
-    monkeypatch.delenv("AW_SECRET_X", raising=False)
-    assert _backend().would_attempt(SecretDecl(name="x", description="X")) is True
-
-
-def test_describe_lookup_returns_default_convention() -> None:
-    """Without an override, describe_lookup returns ``AW_SECRET_<UPPER>``."""
-    decl = SecretDecl(name="github-token", description="...")
-    assert _backend().describe_lookup(decl) == "AW_SECRET_GITHUB_TOKEN"
-
-
-def test_describe_lookup_returns_override() -> None:
-    """A ``backend_mappings.<name>`` string override wins over the default."""
-    decl = SecretDecl(
-        name="github-token",
-        description="...",
-        backend_mappings={"env-var": "GITHUB_TOKEN"},
+def test_exact_success_return_interrupt_clears_env_value_from_traceback_locals(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AW_SECRET_TOKEN", "sentinel-env-return-value")
+    context = EnvVarBackend.create_client(
+        source_name="env-var",
+        config=EnvVarSourceConfig(name="env-var"),
+        interaction_broker=None,
+        remaining_time=lambda: None,
     )
-    assert _backend().describe_lookup(decl) == "GITHUB_TOKEN"
+    client = context.__enter__()
+    try:
+        with pytest.raises(KeyboardInterrupt) as caught, _interrupt_return_line(type(client).resolve):
+            client.resolve((SecretLookupRequest(name="token", mapping=None),), remaining_time=lambda: None)
+    finally:
+        context.__exit__(None, None, None)
 
-
-def test_describe_lookup_returns_none_when_opted_out() -> None:
-    """``backend_mappings.<name> = False`` opts the backend out entirely,
-    so there's no identifier to describe."""
-    decl = SecretDecl(
-        name="forced",
-        description="...",
-        backend_mappings={"env-var": False},
-    )
-    assert _backend().describe_lookup(decl) is None
-
-
-def test_backend_is_not_interactive() -> None:
-    assert _backend().interactive is False
+    local_text: list[str] = []
+    traceback = caught.value.__traceback__
+    while traceback is not None:
+        if traceback.tb_frame.f_globals.get("__name__", "").startswith("agentworks."):
+            local_text.extend(repr(value) for value in traceback.tb_frame.f_locals.values())
+        traceback = traceback.tb_next
+    assert "sentinel-env-return-value" not in "\n".join(local_text)

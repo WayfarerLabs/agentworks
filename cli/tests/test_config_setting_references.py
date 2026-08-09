@@ -125,16 +125,12 @@ def test_declarable_kind_hint_points_at_the_sample_command(tmp_path: Path) -> No
     assert "agw resource sample vm-site" in (excinfo.value.hint or "")
 
 
-def test_capability_kind_hint_does_not_point_at_the_sample_command(tmp_path: Path) -> None:
-    """``secret-backend`` is a capability kind with no declarable form, so
-    ``agw resource sample secret-backend`` would send the operator to a
-    command that errors. The hint must say there is nothing to declare
-    instead of offering it."""
+def test_secret_source_hint_points_at_the_declarable_sample(tmp_path: Path) -> None:
+    """The active chain names declarable ``secret-source`` rows."""
     with pytest.raises(ConfigError) as excinfo:
         _build(tmp_path, _SETTING_TOML["[secret_config].backends"].format(name="no-such-row"))
     hint = excinfo.value.hint or ""
-    assert "agw resource sample" not in hint
-    assert "none to declare" in hint
+    assert "agw resource sample secret-source" in hint
 
 
 @pytest.mark.parametrize("setting", sorted(_SETTING_TOML))
@@ -170,17 +166,17 @@ def test_list_setting_yields_one_reference_per_name(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_a_disabled_backend_in_the_chain_is_not_dangling(tmp_path: Path) -> None:
-    """``onepassword`` publishes its row unconditionally and is DISABLED
-    until its plugin is opted in. Naming it in the chain is an opt-out that
-    leaves it dormant (it is skipped at resolution), not a dangling name."""
-    registry = _build(tmp_path, '[secret_config]\nbackends = ["env-var", "onepassword"]\n')
-    # The row is present (so the reference resolves) and disabled (so it is
-    # excluded from the active chain rather than errored on).
-    from agentworks.resources.graph import Enablement
+def test_same_name_declared_source_wins_before_direct_backend_remediation(tmp_path: Path) -> None:
+    """A real source named ``onepassword`` wins even while its backend plugin is disabled."""
+    from tests.conftest import ManifestDoc, write_manifests
 
-    assert registry.lookup("secret-backend", "onepassword") is not None
-    assert registry.graph.enablement_of("secret-backend", "onepassword") is Enablement.disabled
+    write_manifests(
+        tmp_path,
+        ManifestDoc("secret-source", "onepassword", {"backend": {"name": "onepassword"}}),
+    )
+    registry = _build(tmp_path, '[secret_config]\nbackends = ["env-var", "onepassword"]\n')
+    assert registry.lookup("secret-source", "onepassword") is not None
+    assert not registry.graph.readiness_of("secret-source", "onepassword").is_ready
 
 
 def test_a_not_ready_site_is_not_dangling(tmp_path: Path) -> None:
@@ -212,5 +208,5 @@ def test_a_misspelled_backend_reports_as_a_bad_name_not_an_unreachable_secret(tm
     with pytest.raises(ConfigError) as excinfo:
         _build(tmp_path, '[secret_config]\nbackends = ["envvar"]\n')
     message = str(excinfo.value)
-    assert "references unknown secret-backend 'envvar'" in message
+    assert "references unknown secret-source 'envvar'" in message
     assert "unreachable" not in message

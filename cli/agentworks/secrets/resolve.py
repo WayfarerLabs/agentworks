@@ -1,785 +1,1120 @@
-"""The secrets runtime: a loop over the active backends.
-
-Resolution is iterating the needed secrets over each active backend in
-chain order -- no resolver object, no cache, no memo (ADR 0016). A
-command resolves ONCE at its
-composition root and passes the values down; "prompt-once" is true by
-construction. Caching across CLI invocations would be a different
-feature with different security properties.
-"""
+"""Typed, source-first secret resolution with operation-bounded clients."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Protocol, cast
+import math
+import time
+import unicodedata
+from collections.abc import Mapping
+from contextlib import AbstractContextManager, suppress
+from dataclasses import dataclass
+from enum import StrEnum
+from typing import TYPE_CHECKING, Literal, Self, cast
 
 from agentworks import output
-from agentworks.errors import AgentworksError, ConfigError, ExternalError, SecretUnavailableError
+from agentworks.capabilities.secret_backend.client import (
+    InteractionBroker,
+    RemainingTime,
+    SecretClientFailure,
+    SecretClientFailureKind,
+    SecretClientTimeout,
+    SecretLookupRequest,
+    SecretSourceClient,
+)
+from agentworks.errors import AgentworksError, ConfigError, SecretUnavailableError, StateError, UserAbort
+from agentworks.schema import AgwModel, RefOwner
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
+    from types import TracebackType
+
+    from pydantic import BaseModel
 
     from agentworks.capabilities.secret_backend.base import SecretBackend
     from agentworks.config import Config
     from agentworks.resources.graph import Readiness
     from agentworks.resources.registry import Registry
     from agentworks.secrets.base import MappingValue, SecretDecl
+    from agentworks.secrets.sources import SecretSourceDecl
 
 
-@dataclass(frozen=True)
-class ActiveBackend:
-    """One chain entry at runtime: a registered capability, its stored
-    readiness verdict, plus the loop-side orchestration (mapping lookup and the
-    generic ``False`` opt-out). Not a resource, just a thin wrapper the
-    resolution loop and inspection surfaces share so the opt-out is enforced
-    structurally in one place (a ``False`` mapping never reaches the capability).
+@dataclass(frozen=True, slots=True)
+class ActiveSource:
+    """One configured source in the active precedence chain."""
 
-    ``registered_name`` is the config and registry-owned key used to select the
-    implementation. Resolution never asks provider code to restate its own
-    identity, so diagnostics and mapping lookup cannot be influenced by a
-    stateful or secret-bearing provider property.
-
-    ``readiness`` is the verdict the fold stored on the backend's graph node
-    (read by :func:`active_backends`, never recomputed, R11). Resolution gates
-    on it (R9.6): a not-ready backend is skipped with a warning.
-    """
-
-    capability: type[SecretBackend]
+    source: SecretSourceDecl
+    backend_class: type[SecretBackend]
+    config: AgwModel
     readiness: Readiness
-    registered_name: str
+
+    def __post_init__(self) -> None:
+        if self.source.backend.name != self.backend_class.name:
+            raise StateError(
+                f"secret-source/{self.source.name} selects {self.source.backend.name!r}, "
+                f"not {self.backend_class.name!r}"
+            )
+        if not isinstance(self.config, self.backend_class.config_model):
+            raise StateError(f"secret-source/{self.source.name} carries the wrong backend config model")
 
     @property
     def name(self) -> str:
-        return self.registered_name
+        return self.source.name
+
+    @property
+    def registered_name(self) -> str:
+        """Temporary spelling retained for the existing verification caller."""
+        return self.name
+
+    @property
+    def capability(self) -> type[SecretBackend]:
+        """Temporary spelling retained for existing inspection callers."""
+        return self.backend_class
 
     @property
     def interactive(self) -> bool:
-        """Whether resolution interacts with the operator (prompt).
-        Inspection previews must not call ``resolve`` on interactive
-        backends -- probing would BE the interaction."""
-        return self.capability.interactive
+        return self.backend_class.interactive
 
-    def mapping_for(self, secret: SecretDecl) -> MappingValue | None:
-        """This backend's entry in the secret's ``backend_mappings``.
-        ``None`` when absent (the backend's default convention applies,
-        if it has one)."""
-        return secret.backend_mappings.get(self.name)
+    def mapping_for(self, secret: SecretDecl) -> tuple[bool, MappingValue | None]:
+        """Return mapping presence separately from its JSON-native value."""
+        if self.name not in secret.backend_mappings:
+            return False, None
+        return True, secret.backend_mappings[self.name]
 
     def would_attempt(self, secret: SecretDecl) -> bool:
-        mapping = self.mapping_for(secret)
-        if mapping is False:
+        mapping_present, mapping = self.mapping_for(secret)
+        if mapping_present and mapping is False:
             return False
-        return self.capability.would_attempt(secret.name, mapping_present=mapping is not None)
+        failed = False
+        try:
+            result = self.backend_class.would_attempt(secret.name, mapping_present=mapping_present)
+        except Exception:
+            failed = True
+            result = False
+        if failed or type(result) is not bool:
+            raise _BackendProtocolError from None
+        return result
 
     def describe_lookup(self, secret: SecretDecl) -> str | None:
-        mapping = self.mapping_for(secret)
-        if mapping is False:
-            return None
-        return cast(
-            "str | None",
-            self.capability._legacy_describe_lookup(secret, mapping),  # type: ignore[attr-defined]
-        )
-
-    def resolve(self, secrets: list[SecretDecl]) -> dict[str, str]:
-        wants: list[tuple[SecretDecl, MappingValue | None]] = [
-            (s, mapping) for s in secrets if (mapping := self.mapping_for(s)) is not False
-        ]
-        if not wants:
-            return {}
-        return cast(
-            "dict[str, str]",
-            self.capability._legacy_batch_get(wants),  # type: ignore[attr-defined]
-        )
+        request, identifier = _lookup_projection(secret, self)
+        return None if request is None else identifier
 
 
-class _ResolutionReporter(Protocol):
-    """Receive value-free events from the ordered resolution loop."""
-
-    def skipped(self, secret: str, backend: str, reason: str | None) -> None: ...
-
-    def resolved(self, secret: str, backend: str, identifier: str | None) -> None: ...
+# Existing consumers migrate in Phase 7. This is a name-only boundary: the
+# runtime object is source-shaped and never interprets a backend name as a source.
+ActiveBackend = ActiveSource
 
 
-class _OutputResolutionReporter:
-    def skipped(self, secret: str, backend: str, reason: str | None) -> None:
-        output.warn(f"secret {secret}: skipping {backend}, not ready: {reason}")
-
-    def resolved(self, secret: str, backend: str, identifier: str | None) -> None:
-        suffix = f" ({identifier})" if identifier else ""
-        output.info(f"Resolved {secret} via {backend}{suffix}")
+class InteractionPolicy(StrEnum):
+    ALLOW = "allow"
+    REFUSE = "refuse"
 
 
-class _QuietResolutionReporter:
-    def skipped(self, secret: str, backend: str, reason: str | None) -> None:
-        del secret, backend, reason
-
-    def resolved(self, secret: str, backend: str, identifier: str | None) -> None:
-        del secret, backend, identifier
+class CompletionPolicy(StrEnum):
+    COMPLETE = "complete"
+    PARTIAL = "partial"
 
 
-def active_backends(config: Config, registry: Registry) -> list[ActiveBackend]:
-    """The active chain as runtime backends, in precedence order.
+@dataclass(frozen=True, slots=True)
+class ResolutionPolicy:
+    interaction: InteractionPolicy
+    completion: CompletionPolicy
 
-    Each layer in its natural role: the chain comes from CONFIG
-    (``[secret_config].backends``, a setting), and each opted-in name is
-    resolved to its ``secret-backend`` graph node, off which this reads the
-    backend IMPL and its stored readiness verdict (LLD d; no
-    ``SECRET_BACKEND_REGISTRY`` probe, R11).
 
-    The unknown-name ``ConfigError`` is a BACKSTOP, not the primary check.
-    On every registry built by ``bootstrap.build_registry`` the generic
-    settings-reference pass has already refused an unknown chain name with a
-    better-framed message, so this branch is unreachable there. It is kept
-    because this function is public and takes any registry: a caller that
-    assembles one by hand (``Registry.empty()`` + ``publish_to`` +
-    ``finalize``, which the tests and multi-source orchestration do) skips
-    that pass, and without this branch a typo would surface as a bare
-    ``KeyError`` out of ``impl_of``. A precise config error at the layer that
-    can still tell what went wrong beats a traceback, so it stays.
+class ResolutionCategory(StrEnum):
+    RESOLVED = "resolved"
+    UNAVAILABLE = "unavailable"
+    REFUSED_INTERACTION = "refused-interaction"
+    TIMEOUT = "timeout"
+    RESOLUTION_FAILURE = "resolution-failure"
 
-    The chain is filtered to ``present`` (a node exists) and ``enabled`` (its
-    opt-in axis, LLD d): a present-but-DISABLED opted-in backend is dormant,
-    excluded here exactly as an absent-from-chain backend is, so resolution
-    never attempts it. This is inert today (no disabled-backend producer ships,
-    R7) but is the enablement seam the plugin rebuild fills; a disabled node
-    folds to a ready placeholder, so this reads ``enablement_of``, not
-    ``readiness_of``. Readiness gates later, at resolution (R9.6).
-    """
-    from agentworks.resources.graph import Enablement
 
-    graph = registry.graph
-    backends: list[ActiveBackend] = []
-    for name in config.secret_config_data.backends:
+class ResolutionDetail(StrEnum):
+    RESOLVED = "resolved"
+    NO_ACTIVE_SOURCE = "no-active-source"
+    NO_ATTEMPTABLE_SOURCE = "no-attemptable-source"
+    SOURCE_NOT_READY = "source-not-ready"
+    SOFT_MISS = "soft-miss"
+    INTERACTION_REFUSED = "interaction-refused"
+    BATCH_DOOMED = "batch-doomed-before-interaction"
+    DEADLINE_EXCEEDED = "deadline-exceeded"
+    HARD_MAPPING = "hard-mapping"
+    AUTHENTICATION = "authentication"
+    CONNECTIVITY = "connectivity"
+    EXTERNAL = "external"
+    MALFORMED_VALUE = "malformed-value"
+    BACKEND_PROTOCOL = "backend-protocol"
+    UNEXPECTED = "unexpected"
+
+
+class ResolutionRemediation(StrEnum):
+    NONE = "none"
+    CONFIGURE_SOURCE = "configure-source"
+    ENABLE_SOURCE = "enable-source"
+    ALLOW_INTERACTION = "allow-interaction"
+    RESOLVE_BLOCKING_SECRETS = "resolve-blocking-secrets"
+    CHECK_MAPPING = "check-mapping"
+    SIGN_IN = "sign-in"
+    CHECK_CONNECTIVITY = "check-connectivity"
+    INCREASE_TIMEOUT = "increase-timeout"
+    REMOVE_CONTROL_CHARACTERS = "remove-control-characters"
+    RETRY = "retry"
+    REPORT_BACKEND = "report-backend"
+
+
+_OUTCOME_RULES: dict[
+    ResolutionDetail,
+    tuple[ResolutionCategory, ResolutionRemediation, bool, bool],
+] = {
+    ResolutionDetail.RESOLVED: (ResolutionCategory.RESOLVED, ResolutionRemediation.NONE, True, True),
+    ResolutionDetail.NO_ACTIVE_SOURCE: (
+        ResolutionCategory.UNAVAILABLE,
+        ResolutionRemediation.CONFIGURE_SOURCE,
+        False,
+        False,
+    ),
+    ResolutionDetail.NO_ATTEMPTABLE_SOURCE: (
+        ResolutionCategory.UNAVAILABLE,
+        ResolutionRemediation.CONFIGURE_SOURCE,
+        False,
+        False,
+    ),
+    ResolutionDetail.SOURCE_NOT_READY: (
+        ResolutionCategory.UNAVAILABLE,
+        ResolutionRemediation.ENABLE_SOURCE,
+        True,
+        True,
+    ),
+    ResolutionDetail.SOFT_MISS: (
+        ResolutionCategory.UNAVAILABLE,
+        ResolutionRemediation.CONFIGURE_SOURCE,
+        True,
+        True,
+    ),
+    ResolutionDetail.INTERACTION_REFUSED: (
+        ResolutionCategory.REFUSED_INTERACTION,
+        ResolutionRemediation.ALLOW_INTERACTION,
+        True,
+        True,
+    ),
+    ResolutionDetail.BATCH_DOOMED: (
+        ResolutionCategory.UNAVAILABLE,
+        ResolutionRemediation.RESOLVE_BLOCKING_SECRETS,
+        False,
+        False,
+    ),
+    ResolutionDetail.DEADLINE_EXCEEDED: (
+        ResolutionCategory.TIMEOUT,
+        ResolutionRemediation.INCREASE_TIMEOUT,
+        True,
+        True,
+    ),
+    ResolutionDetail.HARD_MAPPING: (
+        ResolutionCategory.RESOLUTION_FAILURE,
+        ResolutionRemediation.CHECK_MAPPING,
+        True,
+        True,
+    ),
+    ResolutionDetail.AUTHENTICATION: (
+        ResolutionCategory.RESOLUTION_FAILURE,
+        ResolutionRemediation.SIGN_IN,
+        True,
+        True,
+    ),
+    ResolutionDetail.CONNECTIVITY: (
+        ResolutionCategory.RESOLUTION_FAILURE,
+        ResolutionRemediation.CHECK_CONNECTIVITY,
+        True,
+        True,
+    ),
+    ResolutionDetail.EXTERNAL: (
+        ResolutionCategory.RESOLUTION_FAILURE,
+        ResolutionRemediation.RETRY,
+        True,
+        True,
+    ),
+    ResolutionDetail.MALFORMED_VALUE: (
+        ResolutionCategory.RESOLUTION_FAILURE,
+        ResolutionRemediation.REMOVE_CONTROL_CHARACTERS,
+        True,
+        True,
+    ),
+    ResolutionDetail.BACKEND_PROTOCOL: (
+        ResolutionCategory.RESOLUTION_FAILURE,
+        ResolutionRemediation.REPORT_BACKEND,
+        True,
+        False,
+    ),
+    ResolutionDetail.UNEXPECTED: (
+        ResolutionCategory.RESOLUTION_FAILURE,
+        ResolutionRemediation.REPORT_BACKEND,
+        True,
+        True,
+    ),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class ResolutionOutcome:
+    name: str
+    category: ResolutionCategory
+    detail: ResolutionDetail
+    remediation: ResolutionRemediation
+    source: str | None = None
+    identifier: str | None = None
+
+    def __post_init__(self) -> None:
+        category, remediation, source_required, identifier_allowed = _OUTCOME_RULES[self.detail]
+        if self.category is not category or self.remediation is not remediation:
+            raise ValueError("invalid resolution outcome category or remediation")
+        if (self.source is not None) is not source_required:
+            raise ValueError("invalid resolution outcome source")
+        if not identifier_allowed and self.identifier is not None:
+            raise ValueError("invalid resolution outcome identifier")
+
+
+class ResolutionBatch:
+    """A private value-bearing batch whose representation is always redacted."""
+
+    __slots__ = ("_outcomes", "_values")
+
+    def __init__(
+        self,
+        outcomes: Sequence[ResolutionOutcome],
+        values: Mapping[str, str],
+        *,
+        _token: object,
+    ) -> None:
         try:
-            impl = graph.impl_of("secret-backend", name)
-        except KeyError:
-            registered = sorted(entry.name for entry in registry.iter_kind("secret-backend"))
+            # Initialize both slots before doing any fallible copying so even
+            # an asynchronously interrupted instance remains safely redacted.
+            self._outcomes: tuple[ResolutionOutcome, ...] = ()
+            self._values: dict[str, str] = {}
+            copied_values: dict[str, str] = {}
+            name: object | None = None
+            value: object | None = None
+            if _token is not _BATCH_TOKEN:
+                raise TypeError("ResolutionBatch construction is internal")
+            copied_outcomes = tuple(outcomes)
+            names = tuple(outcome.name for outcome in copied_outcomes)
+            if len(names) != len(set(names)):
+                raise ValueError("resolution outcome names must be unique")
+            copied_values = dict(values)
+            for name, value in copied_values.items():
+                if type(name) is not str or type(value) is not str:
+                    raise TypeError("resolution values must be strings")
+                name = None
+                value = None
+            resolved_names = {o.name for o in copied_outcomes if o.category is ResolutionCategory.RESOLVED}
+            if set(copied_values) != resolved_names:
+                raise ValueError("resolution values must match resolved outcomes exactly")
+            self._outcomes = copied_outcomes
+            self._values = copied_values
+            copied_values = {}
+            values = {}
+            name = None
+            value = None
+            return None
+        except BaseException:
+            name = None
+            value = None
+            temporary = locals().get("copied_values")
+            if isinstance(temporary, dict):
+                temporary.clear()
+            assigned = getattr(self, "_values", None)
+            if isinstance(assigned, dict):
+                assigned.clear()
+            self._outcomes = ()
+            values = {}
+            temporary = None
+            assigned = None
+            raise
+
+    @property
+    def outcomes(self) -> tuple[ResolutionOutcome, ...]:
+        return self._outcomes
+
+    def complete_or_raise(self) -> dict[str, str]:
+        if all(outcome.category is ResolutionCategory.RESOLVED for outcome in self._outcomes):
+            return dict(self._values)
+        outcomes = self._outcomes
+        self._values.clear()
+        raise _compatibility_error(outcomes) from None
+
+    def __repr__(self) -> str:
+        outcomes = getattr(self, "_outcomes", ())
+        values = getattr(self, "_values", {})
+        return f"ResolutionBatch(outcomes={len(outcomes)}, resolved={len(values)}, values=<redacted>)"
+
+    __str__ = __repr__
+
+
+_BATCH_TOKEN = object()
+
+
+@dataclass(slots=True)
+class _Evidence:
+    refused: list[tuple[str, str | None]]
+    soft_missed: list[tuple[str, str | None]]
+    not_ready: list[tuple[str, str | None]]
+
+    @classmethod
+    def empty(cls) -> _Evidence:
+        return cls(refused=[], soft_missed=[], not_ready=[])
+
+
+class _MonotonicBudget:
+    __slots__ = ("_clock", "_deadline")
+
+    def __init__(self, deadline: float | None, clock: Callable[[], float]) -> None:
+        self._deadline = deadline
+        self._clock = clock
+
+    @classmethod
+    def start(cls, timeout: float | None, *, clock: Callable[[], float] = time.monotonic) -> Self:
+        now = clock()
+        return cls(None if timeout is None else now + timeout, clock)
+
+    def remaining(self) -> float | None:
+        return None if self._deadline is None else max(0.0, self._deadline - self._clock())
+
+
+_CLEANUP_WARNING = "secret source {source_name!r}: cleanup failed; primary result unchanged"
+
+
+def _warn_cleanup_failure(source_name: str) -> None:
+    with suppress(BaseException):
+        output.warn(_CLEANUP_WARNING.format(source_name=source_name))
+
+
+class _SourceContextDriver(AbstractContextManager[SecretSourceClient]):
+    def __init__(
+        self,
+        inner: AbstractContextManager[SecretSourceClient],
+        *,
+        source_name: str,
+        remaining_time: RemainingTime,
+    ) -> None:
+        self._inner = inner
+        self._source_name = source_name
+        self._remaining_time = remaining_time
+
+    def __enter__(self) -> SecretSourceClient:
+        return self._inner.__enter__()
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> Literal[False]:
+        started = self._remaining_time()
+        failed = False
+        try:
+            suppressed = self._inner.__exit__(exc_type, exc, traceback)
+            failed = bool(suppressed)
+        except BaseException:
+            failed = True
+        else:
+            finished = self._remaining_time()
+            if started is not None and started > 0.0 and finished == 0.0:
+                failed = True
+        if failed:
+            _warn_cleanup_failure(self._source_name)
+        return False
+
+
+class _OutputInteractionBroker:
+    __slots__ = ("_prompts",)
+
+    def __init__(self, secrets: Sequence[SecretDecl]) -> None:
+        self._prompts = {secret.name: (secret.description, secret.hint) for secret in secrets}
+
+    def request_secret(self, name: str, /) -> str:
+        prompt = self._prompts.get(name)
+        if prompt is None:
+            raise StateError(f"no prompt metadata is registered for secret {name!r}")
+        description, hint = prompt
+        return output.prompt_secret(f"Secret '{name}': {description}", hint=hint)
+
+    def __repr__(self) -> str:
+        return f"_OutputInteractionBroker(prompts={len(self._prompts)})"
+
+
+def active_sources(config: Config, registry: Registry) -> tuple[ActiveSource, ...]:
+    """Build the configured source chain from finalized source rows."""
+    from agentworks.capabilities.config import validate_capability_config
+    from agentworks.config.references import SettingReference
+    from agentworks.resources.graph import Enablement
+    from agentworks.secrets.sources import (
+        SecretSourceDecl,
+        direct_backend_source_error,
+        registry_source_backend_lookup,
+        source_backend_class,
+    )
+
+    lookup = registry_source_backend_lookup(registry)
+    active: list[ActiveSource] = []
+    for name in config.secret_config_data.backends:
+        selected = source_backend_class(lookup, name)
+        if selected is None:
+            error = direct_backend_source_error(
+                name=name,
+                registry=registry,
+                referrer=SettingReference(
+                    setting="[secret_config].backends",
+                    kind="secret-source",
+                    name=name,
+                ),
+            )
+            if error is not None:
+                raise error
+            registered = sorted(row.name for row in registry.iter_kind("secret-source"))
             raise ConfigError(
-                f"[secret_config].backends names unknown backend {name!r}",
-                hint=f"registered backends: {registered}",
+                f"[secret_config].backends names unknown secret-source {name!r}",
+                hint=f"declared secret sources: {registered}",
             ) from None
-        if graph.enablement_of("secret-backend", name) is Enablement.disabled:
-            # A disabled opted-in backend is dormant (never consulted), the same
-            # as a backend absent from the chain. Not a readiness skip, so no
-            # warning: it is an opt-out, not a can't-run-here.
+        source, backend_class = selected
+        if not isinstance(source, SecretSourceDecl):
+            raise StateError(f"secret-source/{name} is not a SecretSourceDecl")
+        if registry.graph.enablement_of("secret-source", name) is Enablement.disabled:
             continue
-        # ``impl`` is never ``None`` here: a published capability row with no
-        # registered impl already fails fast at ``build_graph`` (``_impl_for``
-        # raises ``StateError``), so post-finalize every present backend node
-        # carries its exact registered class. The cast reflects that invariant.
-        backends.append(
-            ActiveBackend(
-                capability=cast("type[SecretBackend]", impl),
-                readiness=graph.readiness_of("secret-backend", name),
-                registered_name=name,
+        validated = validate_capability_config(
+            kind="secret-backend",
+            config=source.backend.tagged,
+            owner=RefOwner(kind="secret-source", name=name),
+            location=source.error_location,
+        )
+        if validated is None or not isinstance(validated, AgwModel):
+            raise StateError(f"secret-source/{name} has no validated backend config")
+        active.append(
+            ActiveSource(
+                source=source,
+                backend_class=backend_class,
+                config=validated,
+                readiness=registry.graph.readiness_of("secret-source", name),
             )
         )
-    return backends
+    return tuple(active)
+
+
+def active_backends(config: Config, registry: Registry) -> list[ActiveSource]:
+    """Temporary caller-shape adapter for the source-first active chain."""
+    return list(active_sources(config, registry))
+
+
+def _identifier_safe(identifier: str) -> bool:
+    return all(unicodedata.category(char) not in {"Cc", "Cf"} for char in identifier)
+
+
+def _lookup_projection(
+    secret: SecretDecl,
+    source: ActiveSource,
+) -> tuple[SecretLookupRequest | None, str | None]:
+    from agentworks.capabilities.config import validate_capability_mapping
+
+    mapping_present, mapping = source.mapping_for(secret)
+    if mapping_present and mapping is False:
+        return None, None
+    if not source.would_attempt(secret):
+        return None, None
+    validated: BaseModel | None = None
+    if mapping_present:
+        try:
+            validated = validate_capability_mapping(
+                kind="secret-backend",
+                name=source.backend_class.name,
+                mapping=mapping,
+                owner=secret.mapping_owner(source.name),
+                location=secret.error_location,
+            )
+        except ConfigError:
+            raise StateError(
+                f"secret/{secret.name} mapping for source {source.name!r} disagrees with finalized validation"
+            ) from None
+        if validated is None:
+            raise StateError(f"secret-source/{source.name} mapping validation selected no backend model")
+    identifier_failed = False
+    try:
+        identifier = source.backend_class.describe_lookup(secret.name, validated)
+    except Exception:
+        identifier_failed = True
+        identifier = None
+    if identifier_failed:
+        raise _BackendProtocolError from None
+    if identifier is not None and (type(identifier) is not str or not _identifier_safe(identifier)):
+        raise _BackendProtocolError
+    return SecretLookupRequest(name=secret.name, mapping=validated), identifier
+
+
+class _BackendProtocolError(Exception):
+    __slots__ = ()
+
+
+def _outcome(
+    name: str,
+    detail: ResolutionDetail,
+    *,
+    source: str | None = None,
+    identifier: str | None = None,
+) -> ResolutionOutcome:
+    category, remediation, _source_required, _identifier_allowed = _OUTCOME_RULES[detail]
+    return ResolutionOutcome(
+        name=name,
+        category=category,
+        detail=detail,
+        remediation=remediation,
+        source=source,
+        identifier=identifier,
+    )
+
+
+def _collapse(name: str, evidence: _Evidence, *, sources_empty: bool) -> ResolutionOutcome:
+    if evidence.refused:
+        source, identifier = evidence.refused[0]
+        return _outcome(name, ResolutionDetail.INTERACTION_REFUSED, source=source, identifier=identifier)
+    if evidence.soft_missed:
+        source, identifier = evidence.soft_missed[0]
+        return _outcome(name, ResolutionDetail.SOFT_MISS, source=source, identifier=identifier)
+    if evidence.not_ready:
+        source, identifier = evidence.not_ready[0]
+        return _outcome(name, ResolutionDetail.SOURCE_NOT_READY, source=source, identifier=identifier)
+    return _outcome(
+        name,
+        ResolutionDetail.NO_ACTIVE_SOURCE if sources_empty else ResolutionDetail.NO_ATTEMPTABLE_SOURCE,
+    )
+
+
+def _remaining_attemptable(
+    secret: SecretDecl,
+    sources: Sequence[ActiveSource],
+    *,
+    policy: ResolutionPolicy,
+) -> tuple[bool, str | None]:
+    for source in sources:
+        if not source.readiness.is_ready:
+            continue
+        if source.interactive and policy.interaction is InteractionPolicy.REFUSE:
+            continue
+        try:
+            would_attempt = source.would_attempt(secret)
+        except _BackendProtocolError:
+            return False, source.name
+        if would_attempt:
+            return True, None
+    return False, None
+
+
+def _check_boundary(remaining_time: RemainingTime) -> None:
+    remaining = remaining_time()
+    if remaining is not None and remaining == 0.0:
+        raise SecretClientTimeout from None
+
+
+def _drive_source(
+    source: ActiveSource,
+    requests: tuple[SecretLookupRequest, ...],
+    *,
+    broker: InteractionBroker | None,
+    timeout: float | None,
+) -> object:
+    budget = _MonotonicBudget.start(
+        timeout,
+        clock=time.monotonic,
+    )
+    remaining = budget.remaining
+    context: AbstractContextManager[SecretSourceClient] | None = None
+    driver: _SourceContextDriver | None = None
+    client: SecretSourceClient | None = None
+    entered_client: SecretSourceClient | None = None
+    resolved: object | None = None
+    try:
+        _check_boundary(remaining)
+        context = source.backend_class.create_client(
+            source_name=source.name,
+            config=source.config,
+            interaction_broker=broker,
+            remaining_time=remaining,
+        )
+        _check_boundary(remaining)
+        driver = _SourceContextDriver(context, source_name=source.name, remaining_time=remaining)
+        with driver as entered_client:
+            client = entered_client
+            _check_boundary(remaining)
+            client.prepare(requests, remaining_time=remaining)
+            _check_boundary(remaining)
+            resolved = client.resolve(requests, remaining_time=remaining)
+            _check_boundary(remaining)
+
+        # Keep the post-context and return boundaries inside the same fence:
+        # an asynchronous interruption here must first release every provider
+        # object as well as a successfully returned value mapping.
+        client = None
+        entered_client = None
+        driver = None
+        context = None
+        requests = ()
+        broker = None
+        return resolved
+    except BaseException:
+        resolved = None
+        client = None
+        entered_client = None
+        driver = None
+        context = None
+        requests = ()
+        broker = None
+        raise
+
+
+def resolve_batch(
+    secrets: Sequence[SecretDecl],
+    sources: Sequence[ActiveSource],
+    *,
+    policy: ResolutionPolicy,
+    interaction_broker: InteractionBroker | None,
+) -> ResolutionBatch:
+    """Resolve one deduplicated batch through lazy, bounded source turns."""
+    deduped: list[SecretDecl] = []
+    seen: set[str] = set()
+    for secret in secrets:
+        if secret.name not in seen:
+            seen.add(secret.name)
+            deduped.append(secret)
+
+    outcomes: dict[str, ResolutionOutcome] = {}
+    values: dict[str, str] = {}
+    returned: object | None = None
+    returned_values: dict[str, str] | None = None
+    returned_detail: ResolutionDetail | None = None
+    raw_items: tuple[object, ...] | None = None
+    raw_item: object | None = None
+    raw_name: object | None = None
+    raw_value: object | None = None
+    value: str | None = None
+    batch: ResolutionBatch | None = None
+    evidence = {secret.name: _Evidence.empty() for secret in deduped}
+    try:
+        for index, source in enumerate(sources):
+            missing = [secret for secret in deduped if secret.name not in outcomes]
+            if not missing:
+                break
+            projected: list[tuple[SecretLookupRequest, str | None]] = []
+            for secret in missing:
+                try:
+                    request, identifier = _lookup_projection(secret, source)
+                except _BackendProtocolError:
+                    outcomes[secret.name] = _outcome(
+                        secret.name,
+                        ResolutionDetail.BACKEND_PROTOCOL,
+                        source=source.name,
+                    )
+                    continue
+                if request is not None:
+                    projected.append((request, identifier))
+            if not projected:
+                continue
+            if not source.readiness.is_ready:
+                for request, identifier in projected:
+                    evidence[request.name].not_ready.append((source.name, identifier))
+                continue
+            if source.interactive and policy.interaction is InteractionPolicy.REFUSE:
+                for request, identifier in projected:
+                    evidence[request.name].refused.append((source.name, identifier))
+                continue
+            if source.interactive and policy.completion is CompletionPolicy.COMPLETE:
+                still_missing = [secret for secret in deduped if secret.name not in outcomes]
+                terminal_exists = any(
+                    outcome.category is not ResolutionCategory.RESOLVED for outcome in outcomes.values()
+                )
+                if not terminal_exists:
+                    for secret in still_missing:
+                        attemptable, protocol_source = _remaining_attemptable(
+                            secret,
+                            sources[index:],
+                            policy=policy,
+                        )
+                        if protocol_source is not None:
+                            outcomes[secret.name] = _outcome(
+                                secret.name,
+                                ResolutionDetail.BACKEND_PROTOCOL,
+                                source=protocol_source,
+                            )
+                        elif not attemptable:
+                            outcomes[secret.name] = _collapse(
+                                secret.name,
+                                evidence[secret.name],
+                                sources_empty=not sources,
+                            )
+                    terminal_exists = any(secret.name in outcomes for secret in still_missing)
+                if terminal_exists:
+                    for secret in still_missing:
+                        if secret.name not in outcomes:
+                            outcomes[secret.name] = _outcome(secret.name, ResolutionDetail.BATCH_DOOMED)
+                    break
+            if source.backend_class.name == "prompt" and interaction_broker is None:
+                raise StateError("the prompt source requires an interaction broker")
+            requests = tuple(request for request, _identifier in projected)
+            identifiers = {request.name: identifier for request, identifier in projected}
+            broker = interaction_broker if source.backend_class.name == "prompt" else None
+            returned = None
+            failure_kind: SecretClientFailureKind | None = None
+            timed_out = False
+            unexpected = False
+            timeout_failed = False
+            try:
+                declared_timeout = source.backend_class.external_operation_timeout(source.config)
+            except Exception:
+                timeout_failed = True
+                declared_timeout = None
+            if timeout_failed:
+                for request in requests:
+                    outcomes[request.name] = _outcome(
+                        request.name,
+                        ResolutionDetail.UNEXPECTED,
+                        source=source.name,
+                        identifier=identifiers[request.name],
+                    )
+                continue
+            if declared_timeout is not None and (
+                type(declared_timeout) not in {int, float}
+                or not math.isfinite(declared_timeout)
+                or declared_timeout <= 0
+            ):
+                raise StateError(f"secret-source/{source.name} declared an invalid external-operation timeout")
+            timeout = None if declared_timeout is None else float(declared_timeout)
+            try:
+                returned = _drive_source(source, requests, broker=broker, timeout=timeout)
+            except UserAbort:
+                raise
+            except SecretClientTimeout:
+                timed_out = True
+            except SecretClientFailure as failure:
+                failure_kind = failure.kind
+            except Exception:
+                unexpected = True
+            if timed_out or failure_kind is not None or unexpected:
+                returned = None
+                if timed_out:
+                    detail = ResolutionDetail.DEADLINE_EXCEEDED
+                elif failure_kind is not None:
+                    detail = {
+                        SecretClientFailureKind.HARD_MAPPING: ResolutionDetail.HARD_MAPPING,
+                        SecretClientFailureKind.AUTHENTICATION: ResolutionDetail.AUTHENTICATION,
+                        SecretClientFailureKind.CONNECTIVITY: ResolutionDetail.CONNECTIVITY,
+                        SecretClientFailureKind.EXTERNAL: ResolutionDetail.EXTERNAL,
+                    }[failure_kind]
+                else:
+                    detail = ResolutionDetail.UNEXPECTED
+                for request in requests:
+                    outcomes[request.name] = _outcome(
+                        request.name,
+                        detail,
+                        source=source.name,
+                        identifier=identifiers[request.name],
+                    )
+                continue
+            # Snapshot the provider mapping in this already-protected frame.
+            # Passing it into a helper would expose the plaintext-bearing
+            # object in a callee frame before that helper could establish its
+            # own cleanup fence.
+            returned_values = {}
+            returned_detail = None
+            requested_names = frozenset(request.name for request in requests)
+            try:
+                if not isinstance(returned, Mapping):
+                    returned_detail = ResolutionDetail.BACKEND_PROTOCOL
+                else:
+                    raw_items = tuple(returned.items())
+                    for raw_item in raw_items:
+                        if type(raw_item) is not tuple or len(raw_item) != 2:
+                            returned_detail = ResolutionDetail.BACKEND_PROTOCOL
+                            break
+                        raw_name, raw_value = raw_item
+                        if type(raw_name) is not str or type(raw_value) is not str or raw_name not in requested_names:
+                            returned_detail = ResolutionDetail.BACKEND_PROTOCOL
+                            break
+                        returned_values[raw_name] = raw_value
+            except Exception:
+                returned_detail = ResolutionDetail.UNEXPECTED
+            returned = None
+            raw_items = None
+            raw_item = None
+            raw_name = None
+            raw_value = None
+            if returned_detail is not None:
+                returned_values.clear()
+                returned_values = None
+                for request in requests:
+                    outcomes[request.name] = _outcome(
+                        request.name,
+                        returned_detail,
+                        source=source.name,
+                    )
+                continue
+            assert returned_values is not None
+            for request in requests:
+                if request.name not in returned_values:
+                    evidence[request.name].soft_missed.append((source.name, identifiers[request.name]))
+                    continue
+                value = returned_values[request.name]
+                if "\n" in value or "\r" in value or "\0" in value:
+                    outcomes[request.name] = _outcome(
+                        request.name,
+                        ResolutionDetail.MALFORMED_VALUE,
+                        source=source.name,
+                        identifier=identifiers[request.name],
+                    )
+                    value = None
+                    continue
+                values[request.name] = value
+                outcomes[request.name] = _outcome(
+                    request.name,
+                    ResolutionDetail.RESOLVED,
+                    source=source.name,
+                    identifier=identifiers[request.name],
+                )
+                value = None
+            returned_values.clear()
+            returned_values = None
+
+        for secret in deduped:
+            if secret.name not in outcomes:
+                outcomes[secret.name] = _collapse(
+                    secret.name,
+                    evidence[secret.name],
+                    sources_empty=not sources,
+                )
+        ordered = tuple(outcomes[secret.name] for secret in deduped)
+        batch = ResolutionBatch(ordered, values, _token=_BATCH_TOKEN)
+        values.clear()
+        return batch
+    except BaseException:
+        returned = None
+        if returned_values is not None:
+            returned_values.clear()
+        returned_detail = None
+        raw_items = None
+        raw_item = None
+        raw_name = None
+        raw_value = None
+        value = None
+        values.clear()
+        if batch is not None:
+            batch._values.clear()
+        batch = None
+        raise
+
+
+def _compatibility_error(outcomes: Sequence[ResolutionOutcome]) -> SecretUnavailableError:
+    failed = [outcome for outcome in outcomes if outcome.category is not ResolutionCategory.RESOLVED]
+    names = [outcome.name for outcome in failed]
+    details = "; ".join(
+        f"{outcome.name}: {outcome.category.value}/{outcome.detail.value} ({outcome.remediation.value})"
+        for outcome in failed
+    )
+    return SecretUnavailableError(
+        f"no active secret source could resolve secret(s): {', '.join(names)}",
+        hint=details,
+    )
+
+
+def _inspection_projection(batch: ResolutionBatch) -> tuple[dict[str, str], tuple[ResolutionOutcome, ...]]:
+    values: dict[str, str] = {}
+    try:
+        values = dict(batch._values)
+        outcomes = batch.outcomes
+        return values, outcomes
+    except BaseException:
+        values.clear()
+        batch = cast("ResolutionBatch", None)
+        raise
+
+
+def _resolve_complete_for_legacy_callers(
+    secrets: Sequence[SecretDecl],
+    sources: Sequence[ActiveSource],
+    *,
+    interaction_broker: InteractionBroker | None,
+    interaction: InteractionPolicy,
+) -> tuple[dict[str, str], tuple[ResolutionOutcome, ...]]:
+    batch = resolve_batch(
+        secrets,
+        sources,
+        policy=ResolutionPolicy(interaction=interaction, completion=CompletionPolicy.COMPLETE),
+        interaction_broker=interaction_broker,
+    )
+    outcomes = batch.outcomes
+    return batch.complete_or_raise(), outcomes
+
+
+def resolve_secrets(
+    secrets: list[SecretDecl],
+    backends: Sequence[ActiveSource],
+    *,
+    errors: dict[str, str] | None = None,
+    registry: Registry | None = None,
+) -> dict[str, str]:
+    """Temporary dict/error adapter around the one typed source core."""
+    del registry
+    interaction = InteractionPolicy.ALLOW if output.is_interactive() else InteractionPolicy.REFUSE
+    broker = _OutputInteractionBroker(secrets) if interaction is InteractionPolicy.ALLOW else None
+    if errors is None:
+        values: dict[str, str] = {}
+        try:
+            values, outcomes = _resolve_complete_for_legacy_callers(
+                secrets,
+                backends,
+                interaction_broker=broker,
+                interaction=interaction,
+            )
+            for outcome in outcomes:
+                if outcome.category is ResolutionCategory.RESOLVED:
+                    suffix = f" ({outcome.identifier})" if outcome.identifier else ""
+                    output.info(f"Resolved {outcome.name} via {outcome.source}{suffix}")
+            return values
+        except BaseException:
+            values.clear()
+            raise
+    batch: ResolutionBatch | None = None
+    values = {}
+    try:
+        batch = resolve_batch(
+            secrets,
+            backends,
+            policy=ResolutionPolicy(interaction=interaction, completion=CompletionPolicy.PARTIAL),
+            interaction_broker=broker,
+        )
+        values, outcomes = _inspection_projection(batch)
+        for outcome in outcomes:
+            if outcome.category is not ResolutionCategory.RESOLVED:
+                errors[outcome.name] = (
+                    f"secret resolution {outcome.category.value}: {outcome.detail.value}; "
+                    f"remediation: {outcome.remediation.value}"
+                )
+        return values
+    except BaseException:
+        values.clear()
+        if batch is not None:
+            batch._values.clear()
+        batch = None
+        raise
+
+
+def resolve_secrets_quiet(
+    secrets: list[SecretDecl],
+    backends: Sequence[ActiveSource],
+    *,
+    registry: Registry | None = None,
+    interactive_available: bool,
+) -> dict[str, str]:
+    """Resolve named-secret verification without provider-authored rendering."""
+    del registry
+    interaction = InteractionPolicy.ALLOW if interactive_available else InteractionPolicy.REFUSE
+    broker = _OutputInteractionBroker(secrets) if interactive_available else None
+    batch = resolve_batch(
+        secrets,
+        backends,
+        policy=ResolutionPolicy(interaction=interaction, completion=CompletionPolicy.COMPLETE),
+        interaction_broker=broker,
+    )
+    if all(outcome.category is ResolutionCategory.RESOLVED for outcome in batch.outcomes):
+        return batch.complete_or_raise()
+    outcomes = batch.outcomes
+    batch._values.clear()
+    raise _verification_compatibility_error(outcomes) from None
+
+
+def _verification_compatibility_error(outcomes: Sequence[ResolutionOutcome]) -> AgentworksError:
+    """Map safe typed outcomes onto the existing verification error taxonomy."""
+    from agentworks.errors import ConnectivityError, ExternalError, SecretMappingError
+
+    failed = tuple(outcome for outcome in outcomes if outcome.category is not ResolutionCategory.RESOLVED)
+    first = failed[0]
+    if first.detail is ResolutionDetail.HARD_MAPPING:
+        error_type: type[SecretUnavailableError] = SecretMappingError
+    elif first.detail in {ResolutionDetail.AUTHENTICATION, ResolutionDetail.CONNECTIVITY}:
+        # Authentication was historically reported as connectivity because
+        # both mean the configured provider cannot be reached for this proof.
+        return ConnectivityError("secret verification failed", entity_kind="secret")
+    elif first.category in {ResolutionCategory.TIMEOUT, ResolutionCategory.RESOLUTION_FAILURE}:
+        return ExternalError("secret verification failed", entity_kind="secret")
+    else:
+        return _compatibility_error(outcomes)
+    return error_type("secret verification failed", entity_kind="secret")
+
+
+def validate_chain(config: Config, registry: Registry) -> None:
+    """Validate source-chain reachability for operator-declared secrets."""
+    from agentworks.resources.access import secret_decls
+
+    opted_in = set(config.secret_config_data.backends)
+    operator_decls = [
+        decl
+        for decl in secret_decls(registry).values()
+        if getattr(getattr(decl, "origin", None), "variant", None) == "operator-declared"
+    ]
+    unreachable = [
+        decl
+        for decl in operator_decls
+        if not ({ref.name for ref in registry.graph.edges_of("secret", decl.name)} & opted_in)
+    ]
+    if unreachable:
+        names = ", ".join(sorted(decl.name for decl in unreachable))
+        chain = ", ".join(config.secret_config_data.backends) or "(empty)"
+        raise ConfigError(
+            f"unreachable secret(s): {names}",
+            hint=(
+                f"active source chain: [{chain}]. Add an attemptable secret-source, "
+                "remove a false opt-out, or remove the unused declaration."
+            ),
+        )
 
 
 def disabled_plugin_backends(registry: Registry) -> dict[str, str]:
-    """Map each disabled system-plugin ``secret-backend`` name to its plugin
-    name (backend name -> plugin name).
-
-    Read for the resolve-failure hint (LLD b): a disabled plugin backend is
-    excluded from the active chain by :func:`active_backends`, so a secret whose
-    only ``backend_mappings`` target is one fails resolve. This map lets
-    :func:`_fail_unavailable` name the plugin to enable ("enable plugin
-    `<name>`") instead of emitting the generic unreachable message, keeping
-    R11.1's promise that every migration failure names the plugin.
-
-    Reads the SAME axis and origin the doctor roster reads (``enablement_of``
-    plus the ``system-plugin`` origin); it probes no impl and constructs
-    nothing. Empty when no secret-backend producer is disabled, so the failure
-    message is verbatim today's until a plugin backend (onepassword) is present
-    but not enabled.
-    """
+    """Retained inspection helper for disabled plugin backend rows."""
     from agentworks.resources.graph import Enablement
 
-    graph = registry.graph
     disabled: dict[str, str] = {}
     for name, row in registry.iter_kind_items("secret-backend"):
         origin = getattr(row, "origin", None)
         if origin is None or origin.variant != "system-plugin":
             continue
-        if graph.enablement_of("secret-backend", name) is Enablement.disabled:
+        if registry.graph.enablement_of("secret-backend", name) is Enablement.disabled:
             disabled[name] = cast("str", origin.plugin)
     return disabled
 
 
-def validate_chain(config: Config, registry: Registry) -> None:
-    """Secret-system reachability, run by ``build_registry`` right after
-    finalize: the chain's names must be ``secret-backend`` capability
-    resources, and every operator-declared secret must be reachable via the
-    chain (some opted-in backend would attempt it).
-
-    This is the reachability HALF of the old ``validate_chain``. Per-mapping
-    spec validation moved into the finalize ``validate`` pass (each secret's
-    own ``validate`` checks every present backend's mapping, R9.9); what stays
-    here is the eager post-finalize boundary check, now GRAPH-reading (LLD d):
-    a secret is reachable iff ``edges_of(secret) ∩ opted-in`` is non-empty.
-
-    Three preservation invariants (LLD d acceptance): the scope is
-    OPERATOR-DECLARED secrets only (an auto-declared row like the ever-present
-    tailscale-auth-key must not invalidate a deliberate ``backends = []``
-    opt-out; it surfaces at use time as ``SecretUnavailableError``), the keying
-    is WOULD-ATTEMPT and READINESS-BLIND (``edges_of`` is the frozen
-    would-attempt candidate set; a secret whose only opted-in backend is
-    not-ready is still reachable and fails only at resolution, exactly as
-    today), and the soft/hard miss halt semantics stay in ``resolve_secrets``.
-    """
-    from agentworks.resources.access import secret_decls
-
-    # The chain's NAMES are already settled: ``build_registry`` runs the
-    # generic settings-reference check immediately before this, so every name
-    # in ``backends`` resolves to a secret-backend row by the time we get
-    # here. This used to call ``active_backends`` purely for that side effect
-    # and throw the result away.
-    opted_in = set(config.secret_config_data.backends)
-
-    graph = registry.graph
-    all_decls = secret_decls(registry)
-    operator_decls = [
-        decl
-        for decl in all_decls.values()
-        if getattr(getattr(decl, "origin", None), "variant", None) == "operator-declared"
-    ]
-    unreachable = [
-        decl for decl in operator_decls if not ({ref.name for ref in graph.edges_of("secret", decl.name)} & opted_in)
-    ]
-    if unreachable:
-        names = ", ".join(sorted(d.name for d in unreachable))
-        chain_str = ", ".join(config.secret_config_data.backends) or "(empty)"
-        # Tight by construction: with the default chain (env-var,
-        # prompt), prompt attempts every secret, so nothing is
-        # unreachable. Reaching this error means the operator stripped
-        # prompt AND the remaining backends opt out (or backends = []).
-        raise ConfigError(
-            f"unreachable secret(s): {names}",
-            hint=(
-                f"active backend chain: [{chain_str}]. Each declared secret "
-                "needs at least one backend in the chain that would attempt "
-                "it. To fix: add 'prompt' (or another always-attempting backend) "
-                "to [secret_config].backends; drop a "
-                "`backend_mappings.<backend> = false` opt-out on the affected "
-                "secret(s); add `backend_mappings.<backend>` for a backend that "
-                "has no default convention (e.g. 1password); or remove the "
-                "unused secret declaration."
-            ),
-        )
-
-
-def _fail_unavailable(
-    missing: list[SecretDecl],
-    backends: Sequence[ActiveBackend | _VerificationBackend],
-    errors: dict[str, str] | None,
-    registry: Registry | None = None,
-) -> None:
-    """Attribute every unresolved secret to the backends that DID attempt
-    it, then fail per the active policy: raise the all-or-nothing
-    ``SecretUnavailableError`` (command path, ``errors is None``) or record
-    a per-secret failure line into ``errors`` (inspection path).
-
-    Shared by both callers in :func:`resolve_secrets`: the end-of-loop
-    fall-through and the before-interactive doom check (issue #202), so
-    both build the SAME per-secret attribution and message.
-
-    ``registry`` powers the additive, failure-path-only plugin hint (LLD b),
-    centralized here so EVERY resolution path (the ``Resolver``, the env-chain
-    ``resolve_for_command``, the activation gate, the batch rejoin, and the
-    inspection surfaces) gets it uniformly rather than each caller threading a
-    map. The disabled-plugin map is computed lazily (only on failure) via
-    :func:`disabled_plugin_backends`. For a still-missing secret any of whose
-    ``backend_mappings`` target a disabled plugin backend, the per-secret line
-    gains an "enable plugin `<name>`" clause per distinct disabled plugin it
-    maps to. A ``False`` opt-out entry is skipped (mirroring
-    ``SecretDecl.dependencies`` / ``validate``): a secret that explicitly opted
-    OUT of a disabled plugin backend is not told to enable it, since enabling it
-    would not help. A secret mapping no disabled plugin backend is unchanged, so
-    the generic message still covers the ordinary no-mapping / wrong-env-var
-    cases. ``registry`` defaulted to ``None`` (no hint), so callers that pass
-    only backends (tests) are unaffected.
-    """
-    disabled_backend_plugins = disabled_plugin_backends(registry) if registry is not None else {}
-    sorted_missing = sorted(missing, key=lambda d: d.name)
-    # Per-secret backend list: only backends that actually attempted
-    # (would_attempt == True) appear, so a secret with a backend
-    # opted out via backend_mappings doesn't get told it was tried.
-    per_secret: dict[str, str] = {}
-    for d in sorted_missing:
-        attempted = [b.name for b in backends if b.would_attempt(d)]
-        tried = ", ".join(attempted) if attempted else "(none; secret unreachable)"
-        line = f"{d.name}: tried {tried}"
-        # One clause per DISTINCT disabled plugin this secret's mappings target,
-        # so a secret whose only mapping is a disabled plugin backend names the
-        # plugin to enable rather than reading as generically unreachable. A
-        # ``False`` opt-out never counts: enabling a plugin the secret opted out
-        # of would not resolve it.
-        named: list[str] = []
-        for backend_name, mapping in d.backend_mappings.items():
-            if mapping is False:
-                continue
-            plugin = disabled_backend_plugins.get(backend_name)
-            if plugin is not None and plugin not in named:
-                named.append(plugin)
-        for plugin in named:
-            line += f"; enable plugin `{plugin}`"
-        per_secret[d.name] = line
-    if errors is None:
-        names = [d.name for d in sorted_missing]
-        # Always name a REAL secret in the example command: an
-        # `<name>` placeholder isn't paste-safe (angle brackets are
-        # shell redirection) and the first missing name is exactly
-        # what the operator wants to inspect.
-        raise SecretUnavailableError(
-            f"no active backend could resolve secret(s): {', '.join(names)}",
-            hint=(
-                "; ".join(per_secret.values()) + f". `agw secret describe {names[0]}` shows how each "
-                "backend looks a secret up (e.g. which environment "
-                "variable it reads)."
-            ),
-        )
-    for name, line in per_secret.items():
-        errors[name] = f"no active backend could resolve the secret ({line})"
-
-
-def resolve_secrets(
-    secrets: list[SecretDecl],
-    backends: list[ActiveBackend],
-    *,
-    errors: dict[str, str] | None = None,
-    registry: Registry | None = None,
-) -> dict[str, str]:
-    """Resolve every secret through the active backends, in chain order.
-
-    Each backend's ``resolve`` is called once with the still-missing,
-    would-attempt subset; the next backend sees only what remains. Soft
-    misses (a backend has no value) fall through naturally; hard
-    misses (``SecretMappingError`` from a persistent-store backend)
-    halt the chain so a misconfigured store doesn't quietly fall
-    through to a prompt.
-
-    ``errors`` selects the failure policy (one loop, both policies;
-    same shape as the config loaders' ``issues`` out-param):
-
-    - ``None`` (commands): all-or-nothing. Hard misses and
-      control-character values raise immediately; anything still
-      unresolved after every backend raises ``SecretUnavailableError``
-      with a per-secret list of the backends that attempted. To spare a
-      wasted prompt, that same failure is raised EARLY (issue #202),
-      before an interactive backend that would actually prompt this run
-      (``output.is_interactive()``), for any still-missing secret no
-      remaining backend would attempt; in ``--non-interactive`` mode the
-      prompt no-ops, so there is nothing to get ahead of and the
-      end-of-loop raise stands.
-    - a dict (inspection surfaces, e.g. ``env show --resolve``):
-      partial success. Per-secret failures land in ``errors`` keyed by
-      secret name, successfully-resolved values are RETURNED rather
-      than discarded (prompt answers are never re-asked), and a
-      backend-level exception is recorded against every secret that
-      backend was attempting (batch-level attribution) without
-      forwarding them to later backends, preserving the hard-miss
-      "don't mask a store misconfiguration with a prompt" semantics.
-
-    ``registry`` is forwarded to :func:`_fail_unavailable`, which uses it (only
-    on failure) to compute the plugin-aware "enable plugin `<name>`" hint for a
-    secret whose mapping targets a disabled plugin backend (LLD b). Every
-    resolution path passes the registry it already holds; defaulted to ``None``
-    (no hint), so callers that pass only backends (tests) are unaffected.
-    """
-    return _resolve_secrets_ordered(
-        secrets,
-        backends,
-        errors=errors,
-        registry=registry,
-        reporter=_OutputResolutionReporter(),
-        interactive_available=output.is_interactive(),
-    )
-
-
-def resolve_secrets_quiet(
-    secrets: list[SecretDecl],
-    backends: list[ActiveBackend],
-    *,
-    registry: Registry | None = None,
-    interactive_available: bool,
-) -> dict[str, str]:
-    """Resolve through the canonical ordered loop without progress output."""
-    allowed_secret_names = frozenset(secret.name for secret in secrets)
-    safe_backends = tuple(
-        _VerificationBackend.wrap(
-            backend,
-            allowed_secret_names=allowed_secret_names,
-            allow_interactive=interactive_available,
-        )
-        for backend in backends
-    )
-    return _resolve_secrets_ordered(
-        secrets,
-        safe_backends,
-        errors=None,
-        registry=registry,
-        reporter=_QuietResolutionReporter(),
-        interactive_available=interactive_available,
-        exclude_interactive=not interactive_available,
-    )
-
-
-def _safe_exception_attribute(exc: Exception, name: str) -> object | None:
-    """Read an optional exception field without trusting subclass setup."""
-    try:
-        return getattr(exc, name, None)
-    except Exception:
-        return None
-
-
-def _sanitize_verification_exception(
-    exc: Exception,
-    *,
-    allowed_secret_names: frozenset[str] = frozenset(),
-) -> AgentworksError:
-    """Replace provider-controlled exception state with safe typed framing."""
-    from agentworks.errors import (
-        AlreadyExistsError,
-        AuthorizationError,
-        BackupError,
-        BrokenStateError,
-        ConfigError,
-        ConnectivityError,
-        NotFoundError,
-        ProvisioningError,
-        SecretMappingError,
-        SecretUnavailableError,
-        StateError,
-        TokenRejectedError,
-        ValidationError,
-    )
-
-    safe_categories: dict[type[Exception], type[AgentworksError]] = {
-        TokenRejectedError: TokenRejectedError,
-        NotFoundError: NotFoundError,
-        AlreadyExistsError: AlreadyExistsError,
-        ValidationError: ValidationError,
-        StateError: StateError,
-        BrokenStateError: BrokenStateError,
-        AuthorizationError: AuthorizationError,
-        ConnectivityError: ConnectivityError,
-        SecretUnavailableError: SecretUnavailableError,
-        SecretMappingError: SecretMappingError,
-        ExternalError: ExternalError,
-        ProvisioningError: ProvisioningError,
-        BackupError: BackupError,
-        ConfigError: ConfigError,
-    }
-    category = safe_categories.get(type(exc), ExternalError)
-    if isinstance(exc, AgentworksError):
-        entity_kind = _safe_exception_attribute(exc, "entity_kind")
-        entity_name = _safe_exception_attribute(exc, "entity_name")
-        # Exception fields are backend-authored too. Preserve only the fixed
-        # kind and an exact name from the caller's already-known declaration
-        # set; malformed, surprising, or secret-bearing fields are discarded.
-        if entity_kind == "secret" and type(entity_name) is str and entity_name in allowed_secret_names:
-            return category("secret verification failed", entity_kind="secret", entity_name=entity_name)
-        if entity_kind == "secret":
-            return category("secret verification failed", entity_kind="secret")
-        return category("secret verification failed")
-    return ExternalError("secret verification failed")
-
-
-def _verification_backend_call[T](
-    operation: Callable[[], T],
-    *,
-    allowed_secret_names: frozenset[str],
-) -> T:
-    """Call provider code, sanitizing only the verification boundary."""
-    sanitized: AgentworksError | None = None
-    try:
-        return operation()
-    except Exception as exc:
-        sanitized = _sanitize_verification_exception(exc, allowed_secret_names=allowed_secret_names)
-
-    # Raising outside the provider exception handler prevents the fetched
-    # value and provider traceback from remaining as implicit context.
-    assert sanitized is not None
-    raise sanitized from None
-
-
-@dataclass(frozen=True)
-class _VerificationBackend:
-    """Sanitized, lazy backend snapshot for named-secret verification.
-
-    Provider-authored policy is read only when the ordered resolver reaches
-    this backend. Each property is then cached so a stateful provider cannot
-    change the decision between filtering and resolution.
-    """
-
-    backend: ActiveBackend
-    allowed_secret_names: frozenset[str]
-    name: str
-    allow_interactive: bool
-    _readiness: Readiness | None = field(default=None, init=False, repr=False)
-    _interactive: bool | None = field(default=None, init=False, repr=False)
-
-    @classmethod
-    def wrap(
-        cls,
-        backend: ActiveBackend,
-        *,
-        allowed_secret_names: frozenset[str],
-        allow_interactive: bool,
-    ) -> _VerificationBackend:
-        """Wrap a backend without evaluating provider-authored policy."""
-        return cls(
-            backend=backend,
-            allowed_secret_names=allowed_secret_names,
-            name=backend.registered_name,
-            allow_interactive=allow_interactive,
-        )
-
-    @property
-    def readiness(self) -> Readiness:
-        """Return one exact-type-validated, value-safe readiness snapshot."""
-        from agentworks.resources.graph import Readiness
-
-        cached = self._readiness
-        if cached is None:
-            readiness = _verification_backend_call(
-                lambda: self.backend.readiness,
-                allowed_secret_names=self.allowed_secret_names,
-            )
-            if (
-                type(readiness) is not Readiness
-                or (readiness.reason is not None and type(readiness.reason) is not str)
-                or type(readiness.is_available) is not bool
-            ):
-                raise ExternalError("secret verification failed")
-            # Quiet verification never reports provider-authored readiness
-            # prose. Copy only its decision axes so later property access is
-            # guaranteed first-party and cannot expose provider state.
-            safe_readiness = Readiness(
-                reason=None if readiness.reason is None else "backend unavailable",
-                is_available=readiness.is_available,
-            )
-            object.__setattr__(self, "_readiness", safe_readiness)
-            cached = safe_readiness
-        return cached
-
-    @property
-    def interactive(self) -> bool:
-        """Return the provider policy after one sanitized, cached read."""
-        cached = self._interactive
-        if cached is None:
-            interactive = _verification_backend_call(
-                lambda: self.backend.interactive,
-                allowed_secret_names=self.allowed_secret_names,
-            )
-            if type(interactive) is not bool:
-                raise ExternalError("secret verification failed")
-            object.__setattr__(self, "_interactive", interactive)
-            cached = interactive
-        return cached
-
-    def would_attempt(self, secret: SecretDecl) -> bool:
-        # Failure attribution revisits every backend after the ordered loop.
-        # Keep a backend excluded by verification policy fully inert there too.
-        if not self.allow_interactive and self.interactive:
-            return False
-        attempted = _verification_backend_call(
-            lambda: self.backend.would_attempt(secret),
-            allowed_secret_names=self.allowed_secret_names,
-        )
-        if type(attempted) is not bool:
-            raise ExternalError("secret verification failed")
-        return attempted
-
-    def describe_lookup(self, secret: SecretDecl) -> None:
-        # Quiet verification has no progress surface, so it does not invoke
-        # this provider-authored diagnostic hook at all.
-        del secret
-
-    def resolve(self, secrets: list[SecretDecl]) -> dict[str, str]:
-        resolved = _verification_backend_call(
-            lambda: self.backend.resolve(secrets),
-            allowed_secret_names=self.allowed_secret_names,
-        )
-        expected = {secret.name for secret in secrets}
-        if (
-            type(resolved) is not dict
-            or any(type(name) is not str or type(value) is not str for name, value in resolved.items())
-            or not set(resolved).issubset(expected)
-        ):
-            raise ExternalError("secret verification failed")
-        return resolved
-
-
-def _resolve_secrets_ordered(
-    secrets: list[SecretDecl],
-    backends: Sequence[ActiveBackend | _VerificationBackend],
-    *,
-    errors: dict[str, str] | None,
-    registry: Registry | None,
-    reporter: _ResolutionReporter,
-    interactive_available: bool,
-    exclude_interactive: bool = False,
-) -> dict[str, str]:
-    """Shared value-resolution algorithm with caller-selected reporting."""
-    resolved: dict[str, str] = {}
-    deduped: list[SecretDecl] = []
-    seen: set[str] = set()
-    for s in secrets:
-        if s.name not in seen:
-            seen.add(s.name)
-            deduped.append(s)
-
-    missing = deduped
-    for index, backend in enumerate(backends):
-        if not missing:
-            break
-        # Named-secret verification defaults to a strict non-interactive
-        # policy. Evaluate that policy only when ordered resolution reaches
-        # this backend, then skip before readiness or provider execution.
-        if exclude_interactive and backend.interactive:
-            continue
-        # R9.6: a not-ready opted-in backend is SKIPPED WITH A WARNING (never
-        # silent) and the chain falls through to the next candidate. Delta vs
-        # today: a mapped-but-unavailable store (e.g. onepassword with no `op`)
-        # used to raise ConnectivityError and halt; now it warns and falls
-        # through. One warning per still-missing secret this backend would
-        # attempt.
-        if not backend.readiness.is_ready:
-            for s in missing:
-                if backend.would_attempt(s):
-                    reporter.skipped(s.name, backend.name, backend.readiness.reason)
-            continue
-        # Fail before an interactive backend prompts (issue #202). Once
-        # the non-interactive backends ahead of it have run, their soft
-        # misses are known, so any still-missing secret that NO remaining
-        # backend (this one and every later one) would even attempt is
-        # already doomed. Raising it HERE, before the prompt fires,
-        # spares the operator a prompt for one secret that a different,
-        # already-unresolvable secret would abort the command over
-        # anyway. The attribution and raise reuse the end-of-loop
-        # implementation, so the two failure sites are identical.
-        #
-        # Readiness-aware (R9.6, in lockstep with the skip above): a NOT-READY
-        # remaining backend will be skipped, so it does not count as attempting;
-        # ``remaining`` is filtered to ready backends before the would_attempt
-        # test, so the predictor never spares a prompt for a secret a skipped
-        # backend "would" have taken.
-        #
-        # Command path only: the inspection path (errors is not None)
-        # never runs interactive backends, and in --non-interactive mode
-        # the prompt backend no-ops, so there is no prompt to get ahead
-        # of and the end-of-loop raise stands.
-        if errors is None and backend.interactive and interactive_available:
-            remaining = [b for b in backends[index:] if b.readiness.is_ready]
-            doomed = [s for s in missing if not any(b.would_attempt(s) for b in remaining)]
-            if doomed:
-                _fail_unavailable(doomed, backends, errors, registry)
-        attemptable = [s for s in missing if backend.would_attempt(s)]
-        if not attemptable:
-            continue
-        try:
-            got = backend.resolve(attemptable)
-        except AgentworksError as exc:
-            if errors is None:
-                raise
-            # Batch-level attribution: the backend's exception doesn't
-            # say which mapping tripped it, so every secret this backend
-            # was attempting is marked failed and withheld from later
-            # backends (mirrors the hard-miss halt for these secrets).
-            for s in attemptable:
-                errors[s.name] = str(exc)
-            missing = [s for s in missing if s.name not in errors]
-            continue
-        # Surface which backend + identifier won so operators can tell
-        # env-var-from-shell apart from a fall-through to prompt. For
-        # backends without a static identifier (prompt) the
-        # parenthetical is omitted. Never includes the resolved value.
-        decl_by_name = {s.name: s for s in attemptable}
-        for name in sorted(got):
-            ident = backend.describe_lookup(decl_by_name[name])
-            reporter.resolved(name, backend.name, ident)
-        for name, value in got.items():
-            # ADR 0014: embedded newlines would corrupt SSH
-            # `-o SetEnv=KEY=VALUE` arguments. The env-var backend
-            # already strips trailing newlines (the common copy-paste
-            # artifact); anything still containing one is a malformed
-            # secret value and a hard error worth surfacing now rather
-            # than as an opaque SSH-side rejection. NULs are rejected
-            # for the same reason: OpenSSH's argv handling would
-            # silently truncate the SetEnv arg at the first NUL.
-            if "\n" in value or "\r" in value or "\0" in value:
-                message = (
-                    f"secret {name!r}: resolved value contains a "
-                    f"control character (newline, carriage return, "
-                    f"or NUL); cannot transport via SSH SetEnv. Fix "
-                    f"the value at the source (e.g. strip trailing "
-                    f"newlines from the env var or vault entry)."
-                )
-                if errors is None:
-                    raise ConfigError(message)
-                errors[name] = message
-                continue
-            resolved[name] = value
-        missing = [s for s in missing if s.name not in got]
-
-    if missing:
-        _fail_unavailable(missing, backends, errors, registry)
-    return resolved
-
-
 def preview_resolution(
     secret: SecretDecl,
-    backends: list[ActiveBackend],
+    backends: Sequence[ActiveSource],
     *,
     interactive_available: bool,
 ) -> str | None:
-    """The name of the first backend that would resolve ``secret``, or
-    ``None`` if nothing in the chain would.
-
-    Walks the chain in precedence order. ``would_attempt`` gates each
-    backend; a NOT-READY backend is skipped (in lockstep with the
-    resolution loop's readiness skip, R9.6/R9.7: it never resolves here, so
-    the predictor never names a backend resolution will skip); an interactive
-    backend (prompt) is reported without probing (probing would BE the operator
-    interaction); every other ready backend must actually produce a value to be
-    reported. Readiness is the offline layer UNDER interactive-optimism: a ready
-    ``prompt`` is still previewed optimistically on ``would_attempt`` alone.
-
-    ``interactive_available`` is the caller's policy for whether an
-    interactive backend counts as resolving (issue #202): the preflight
-    prediction passes ``output.is_interactive()`` so a prompt-only secret
-    reads as unresolvable under ``--non-interactive`` / no TTY (matching
-    resolve-time reality, where the prompt backend no-ops); the pure
-    inspection surfaces (``describe``, ``doctor``) pass ``True`` to keep
-    their optimistic, config-shape preview. When it is ``False`` the walk
-    CONTINUES past the interactive backend to any later non-interactive
-    one rather than stopping.
-
-    Used by ``agw doctor`` and the describe view's resolution preview.
-    """
-    for backend in backends:
-        if not backend.would_attempt(secret):
-            continue
-        if not backend.readiness.is_ready:
-            # Not-ready: resolution will skip this backend with a warning
-            # (R9.6), so it never resolves the secret here either. Skipping it
-            # keeps the predictor honest (no "would resolve via onepassword" for
-            # a backend a real run would skip) without probing an unusable tool.
-            continue
-        if backend.interactive:
-            if interactive_available:
-                return backend.name
+    """Return the first source that would resolve without prompting here."""
+    for source in backends:
+        if not source.readiness.is_ready:
             continue
         try:
-            resolved = backend.resolve([secret])
-        except AgentworksError:
-            # A probe failure (store hard-miss, connectivity) must not
-            # abort an inspection surface (doctor, describe); the
-            # backend simply doesn't preview as resolving. The real
-            # resolve path keeps its hard-miss halt semantics.
+            request, _identifier = _lookup_projection(secret, source)
+        except _BackendProtocolError:
             continue
-        if secret.name in resolved:
-            return backend.name
+        if request is None:
+            continue
+        if source.interactive:
+            if interactive_available:
+                return source.name
+            continue
+        batch = resolve_batch(
+            [secret],
+            [source],
+            policy=ResolutionPolicy(
+                interaction=InteractionPolicy.REFUSE,
+                completion=CompletionPolicy.PARTIAL,
+            ),
+            interaction_broker=None,
+        )
+        outcome = batch.outcomes[0]
+        if outcome.category is ResolutionCategory.RESOLVED:
+            batch._values.clear()
+            return source.name
     return None

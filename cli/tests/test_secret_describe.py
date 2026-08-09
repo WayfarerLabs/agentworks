@@ -333,12 +333,13 @@ def test_not_ready_backend_annotated_and_skipped_in_preview(tmp_path: Path, monk
         backends = ["onepassword", "prompt"]
         """,
         manifests=[
+            ManifestDoc("secret-source", "onepassword", {"backend": {"name": "onepassword"}}),
             ManifestDoc(
                 "secret",
                 "api-key",
                 {"backend_mappings": {"onepassword": "op://Vault/api/field"}},
                 description="API key",
-            )
+            ),
         ],
     )
     config = load_config(cfg, warn_issues=False)
@@ -371,12 +372,13 @@ def test_render_shows_not_ready_annotation_and_skip(
         backends = ["onepassword", "prompt"]
         """,
         manifests=[
+            ManifestDoc("secret-source", "onepassword", {"backend": {"name": "onepassword"}}),
             ManifestDoc(
                 "secret",
                 "api-key",
                 {"backend_mappings": {"onepassword": "op://Vault/api/field"}},
                 description="API key",
-            )
+            ),
         ],
     )
     config = load_config(cfg, warn_issues=False)
@@ -407,12 +409,13 @@ def test_interactive_optimism_preview_unchanged_under_readiness(tmp_path: Path, 
         backends = ["onepassword", "prompt"]
         """,
         manifests=[
+            ManifestDoc("secret-source", "onepassword", {"backend": {"name": "onepassword"}}),
             ManifestDoc(
                 "secret",
                 "api-key",
                 {"backend_mappings": {"onepassword": "op://Vault/api/field"}},
                 description="API key",
-            )
+            ),
         ],
     )
     config = load_config(cfg, warn_issues=False)
@@ -440,6 +443,7 @@ def test_resolution_preview_not_available_when_no_backend_attempts(tmp_path: Pat
     from agentworks.capabilities.publish import publish_capability_rows
     from agentworks.resources import Origin, Registry
     from agentworks.secrets.base import SecretDecl
+    from agentworks.secrets.sources import publish_builtin_secret_sources
 
     cfg = _write_cfg(tmp_path, settings=_ENV_ONLY)
     config = load_config(cfg, warn_issues=False)
@@ -456,6 +460,7 @@ def test_resolution_preview_not_available_when_no_backend_attempts(tmp_path: Pat
 
     publish_all_platforms(registry)
     publish_capability_rows(registry, descriptor_for("secret-backend"))
+    publish_builtin_secret_sources(registry)
     decl = SecretDecl(
         name="api-key",
         description="API key",

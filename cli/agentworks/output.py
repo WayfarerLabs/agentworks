@@ -337,18 +337,28 @@ class _DefaultHandler:
     def prompt_secret(self, label: str, level: int, hint: str | None = None) -> str:
         import getpass
 
+        value = ""
+        aborted = False
         try:
-            if hint:
-                # Hint renders one level deeper than the label so today's
-                # 2-space indent is preserved at level 0.
-                print(f"{_pad(level + 1)}{hint}", file=sys.stderr)
-            while True:
-                value = getpass.getpass(f"{_pad(level)}{label}: ")
-                if value.strip():
-                    return value
-                print("(empty, try again)", file=sys.stderr)
-        except (EOFError, KeyboardInterrupt):
-            raise UserAbort("interrupted") from None
+            try:
+                if hint:
+                    # Hint renders one level deeper than the label so today's
+                    # 2-space indent is preserved at level 0.
+                    print(f"{_pad(level + 1)}{hint}", file=sys.stderr)
+                while True:
+                    value = getpass.getpass(f"{_pad(level)}{label}: ")
+                    if value.strip():
+                        break
+                    print("(empty, try again)", file=sys.stderr)
+            except (EOFError, KeyboardInterrupt):
+                aborted = True
+            if aborted:
+                raise UserAbort("interrupted") from None
+            return value
+        except BaseException:
+            value = ""
+            aborted = False
+            raise
 
     def progress(self, label: str, level: int, total: int | None = None) -> Progress:
         print(f"{_pad(level + 1)}{label}...")

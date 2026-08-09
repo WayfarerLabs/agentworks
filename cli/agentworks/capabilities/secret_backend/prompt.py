@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, NoReturn
 
 from pydantic import BaseModel, model_validator
 
-from agentworks import output
 from agentworks.capabilities.secret_backend.base import SecretBackend
 from agentworks.capabilities.secret_backend.client import (
     InteractionBroker,
@@ -27,7 +26,6 @@ if TYPE_CHECKING:
     from pydantic_core import CoreSchema
 
     from agentworks.resources.graph import Readiness
-    from agentworks.secrets.base import MappingValue, SecretDecl
 
 
 class PromptSourceConfig(AgwModel):
@@ -75,7 +73,16 @@ class _PromptClient:
     ) -> Mapping[str, str]:
         if self._broker is None:
             raise StateError("the prompt source client requires an interaction broker")
-        return {request.name: self._broker.request_secret(request.name) for request in requests}
+        resolved: dict[str, str] = {}
+        try:
+            for request in requests:
+                resolved[request.name] = self._broker.request_secret(request.name)
+            requests = ()
+            return resolved
+        except BaseException:
+            resolved.clear()
+            requests = ()
+            raise
 
 
 class _PromptContext(AbstractContextManager[SecretSourceClient]):
@@ -131,21 +138,3 @@ class PromptBackend(SecretBackend):
         remaining_time: RemainingTime,
     ) -> AbstractContextManager[SecretSourceClient]:
         return _PromptContext(interaction_broker)
-
-    @classmethod
-    def _legacy_describe_lookup(cls, secret: SecretDecl, mapping: MappingValue | None) -> None:
-        return None
-
-    @classmethod
-    def _legacy_batch_get(
-        cls,
-        wants: list[tuple[SecretDecl, MappingValue | None]],
-    ) -> dict[str, str]:
-        if not output.is_interactive():
-            return {}
-        return {secret.name: cls._legacy_prompt_one(secret) for secret, _ in wants}
-
-    @staticmethod
-    def _legacy_prompt_one(secret: SecretDecl) -> str:
-        label = f"Secret '{secret.name}': {secret.description}"
-        return output.prompt_secret(label, hint=secret.hint)

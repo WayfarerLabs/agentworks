@@ -243,8 +243,8 @@ class DeclaredResource(EnvelopeMetadata):
         edge-extraction method the finalize build walk calls per present row.
 
         The builder threads a :class:`~agentworks.resources.graph.FinalizeContext`
-        (the available-backend list a ``secret`` reads to emit its
-        ``secret -> secret-backend`` edges, and the published rows an
+        (the source rows and backend classes a ``secret`` reads to emit its
+        ``secret -> secret-source`` edges, and the published rows an
         inheriting resource resolves its chain over); every other resource
         ignores it. Total and non-throwing, like the capability
         ``dependencies`` it composes. Base behavior: no edges.
@@ -270,8 +270,8 @@ class DeclaredResource(EnvelopeMetadata):
         The signature carries no enablement input, and that is deliberate:
         what config is valid is the declared model's answer alone, so no
         implementation of this method may take an environmental verdict into
-        account. An earlier signature threaded the enabled ``secret-backend``
-        name set here for ``SecretDecl`` to skip mappings to disabled
+        account. An earlier signature threaded enabled backend names here for
+        ``SecretDecl`` to skip mappings whose sources selected disabled
         backends; that skip is retired (an operator must not be able to bank
         invalid config that fails only once they enable the backend), and the
         parameter went with it rather than lingering as an invitation.

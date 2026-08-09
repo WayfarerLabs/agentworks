@@ -8,12 +8,13 @@ secrets domain.
 
 from __future__ import annotations
 
+import json
 from enum import Enum
 from typing import TYPE_CHECKING, ClassVar, Protocol, cast
 
 from agentworks.capabilities.secret_backend.base import SecretBackend
 from agentworks.declared_resource import DeclaredResource
-from agentworks.errors import StateError
+from agentworks.errors import ConfigError, StateError
 from agentworks.naming import MAX_FREEFORM_NAME_LENGTH
 from agentworks.origin import Origin
 from agentworks.schema import CapabilityBlock, RefOwner
@@ -204,6 +205,24 @@ def registry_source_backend_lookup(registry: Registry) -> SourceBackendLookup:
     return _RegistrySourceBackendLookup(registry)
 
 
+class _FinalizeSourceBackendLookup:
+    """Retrieval-only adapter over the framework finalize projection."""
+
+    def __init__(self, context: FinalizeContext) -> None:
+        self._context = context
+
+    def source_row(self, name: str) -> object | None:
+        return self._context.rows_of(SECRET_SOURCE_KIND_NAME).get(name)
+
+    def backend_class(self, name: str) -> type | None:
+        return self._context.capability_class("secret-backend", name)
+
+
+def finalize_source_backend_lookup(context: FinalizeContext) -> SourceBackendLookup:
+    """Return the source selector adapter for a finalize context."""
+    return _FinalizeSourceBackendLookup(context)
+
+
 class SourceProvenance(Enum):
     """How a source row relates to the two synthesized defaults."""
 
@@ -240,3 +259,68 @@ def publish_builtin_secret_sources(registry: Registry) -> None:
             SecretSourceDecl(name=name, backend=CapabilityBlock.of(name)),
             origin,
         )
+
+
+def direct_backend_source_error(
+    *,
+    name: str,
+    registry: Registry,
+    referrer: SettingReference | ResourceReference,
+) -> ConfigError | None:
+    """Return the exact 0.14 remediation for a direct backend reference."""
+    try:
+        registry.lookup("secret-backend", name)
+    except KeyError:
+        return None
+
+    if hasattr(referrer, "setting"):
+        path = cast("SettingReference", referrer).setting
+        message = f"{path} references unknown secret-source {name!r}"
+    else:
+        resource_ref = referrer
+        secret_name = resource_ref.declarer[1]
+        path = f"secret/{secret_name}.backend_mappings.{name}"
+        message = f"{path} references unknown secret-source {name!r}"
+
+    hint = (
+        f"{name!r} is a secret-backend implementation, not a configured secret-source. "
+        "In 0.14, declare a source under ~/.config/agentworks/resources/ (any filename):\n\n"
+        "apiVersion: agentworks/v1\n"
+        "kind: secret-source\n"
+        "metadata:\n"
+        "  name: <source-name>\n"
+        "spec:\n"
+        "  backend:\n"
+        f"    name: {name}\n\n"
+        f"Then replace {name!r} in {path} with '<source-name>'."
+    )
+    if not hasattr(referrer, "setting") and name == "onepassword":
+        secret_name = referrer.declarer[1]
+        try:
+            secret = registry.lookup("secret", secret_name)
+        except KeyError:
+            secret = None
+        mapping = getattr(secret, "backend_mappings", {}).get(name)
+        if isinstance(mapping, dict):
+            account = mapping.get("account")
+            reference = mapping.get("reference")
+            if isinstance(account, str) and account and isinstance(reference, str) and reference:
+                hint += (
+                    "\n\nMove the existing account to the source and make the mapping scalar:\n\n"
+                    "spec:\n"
+                    "  backend:\n"
+                    "    name: onepassword\n"
+                    f"    account: {json.dumps(account)}\n"
+                    "---\n"
+                    "spec:\n"
+                    "  backend_mappings:\n"
+                    f"    <source-name>: {json.dumps(reference)}\n\n"
+                    "The source timeout defaults to 30 seconds and may be set with "
+                    "spec.backend.timeout."
+                )
+    return ConfigError(message, hint=hint)
+
+
+if TYPE_CHECKING:
+    from agentworks.config.references import SettingReference
+    from agentworks.resources.reference import ResourceReference

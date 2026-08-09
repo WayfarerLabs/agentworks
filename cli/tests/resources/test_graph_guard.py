@@ -565,8 +565,8 @@ def test_readiness_projections_read_readiness_of() -> None:
     # The two named banned-pattern-2 sites carry zero registry reads.
     assert find_registry_reads(_read("vms/kinds.py")) == []
     assert find_registry_reads(_read("secrets/resolve.py")) == []
-    # Secret resolution reaches a backend's code off the graph, not the registry.
-    assert "impl_of" in _read("secrets/resolve.py")
+    # Source selection reaches a backend's code off the graph, not a code registry.
+    assert "impl_of" in _read("secrets/sources.py")
 
 
 def test_vms_sites_exempt_reads_are_function_scoped() -> None:

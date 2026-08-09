@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from enum import Enum, IntEnum, StrEnum
 from pathlib import Path
 from textwrap import dedent
@@ -24,6 +24,7 @@ from agentworks.errors import ConfigError, StateError
 from agentworks.manifests import ManifestSet, load_manifests
 from agentworks.origin import Origin
 from agentworks.plugins import Plugin, seated_plugin
+from agentworks.resources.registry import Registry
 from agentworks.schema import AgwRootModel, CapabilityBlock, NonEmptyStr, RefOwner, SecretRef
 from agentworks.secrets.base import SecretDecl
 from agentworks.secrets.sources import (
@@ -602,8 +603,7 @@ def test_descriptor_derived_mapping_key_collector_is_ordered_and_value_blind() -
     ]
 
 
-def test_mapping_key_collector_remains_dormant_during_registry_finalize(tmp_path: Path) -> None:
-    """Phase 4 declares the collector but does not activate Phase 5 misses."""
+def test_mapping_key_collector_rejects_unknown_source_even_for_false(tmp_path: Path) -> None:
     resources = tmp_path / "resources"
     resources.mkdir()
     (resources / "secret.yaml").write_text(
@@ -621,13 +621,181 @@ def test_mapping_key_collector_remains_dormant_during_registry_finalize(tmp_path
         )
     )
 
-    registry = build_registry(_config(tmp_path), load_manifests(resources))
-    secret = registry.lookup("secret", "fixture")
-    assert isinstance(secret, SecretDecl)
-    assert secret.backend_mappings == {"not-a-source": False}
+    with pytest.raises(ConfigError, match="references unknown secret-source 'not-a-source'"):
+        build_registry(_config(tmp_path), load_manifests(resources))
 
 
-def test_current_onepassword_table_mapping_still_loads_during_phase_four(tmp_path: Path) -> None:
+@pytest.mark.parametrize("mapping", [False, "address"])
+def test_unknown_source_uses_identical_source_key_framing(tmp_path: Path, mapping: object) -> None:
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    rendered = "false" if mapping is False else "address"
+    (resources / "secret.yaml").write_text(
+        dedent(
+            f"""\
+            apiVersion: agentworks/v1
+            kind: secret
+            metadata:
+              name: fixture
+              description: fixture
+            spec:
+              backend_mappings:
+                not-a-source: {rendered}
+            """
+        )
+    )
+    with pytest.raises(ConfigError) as caught:
+        build_registry(_config(tmp_path), load_manifests(resources))
+    assert str(caught.value).count("references unknown secret-source 'not-a-source'") == 1
+
+
+@dataclass(frozen=True)
+class _OrdinaryReferenceEmitter:
+    name: str
+    target_kind: str
+    target_name: str
+    origin: object = None
+
+    def dependencies(self, context: object) -> list[object]:
+        del context
+        from agentworks.resources.reference import ResourceReference
+
+        return [
+            ResourceReference(
+                name=self.target_name,
+                kind=self.target_kind,
+                usage="an ordinary fixture reference",
+                source=("apt-package", self.name),
+            )
+        ]
+
+
+@pytest.mark.parametrize("mapping_first", [False, True])
+def test_source_key_miss_schedule_preserves_cross_row_first_target_order(
+    tmp_path: Path,
+    mapping_first: bool,
+) -> None:
+    registry = Registry.empty()
+    origin = Origin.operator_declared(file=tmp_path / "resources.yaml", line=1)
+    secret = SecretDecl(
+        name="mapping-host",
+        description="mapping host",
+        backend_mappings={"mapping-missing": "address"},
+    )
+    emitter = _OrdinaryReferenceEmitter(
+        name="ordinary-host",
+        target_kind="secret-source",
+        target_name="ordinary-missing",
+    )
+    rows = (
+        (("secret", "mapping-host", secret), ("apt-package", "ordinary-host", emitter))
+        if mapping_first
+        else (("apt-package", "ordinary-host", emitter), ("secret", "mapping-host", secret))
+    )
+    for kind, name, row in rows:
+        registry.add(kind, name, row, origin)
+
+    expected = "mapping-missing" if mapping_first else "ordinary-missing"
+    with pytest.raises(ConfigError, match=expected):
+        registry.finalize()
+
+
+def test_same_target_mapping_validation_and_candidate_emit_one_diagnostic(tmp_path: Path) -> None:
+    registry = Registry.empty()
+    registry.add(
+        "secret",
+        "mapping-host",
+        SecretDecl(
+            name="mapping-host",
+            description="mapping host",
+            backend_mappings={"same-missing": "address"},
+        ),
+        Origin.operator_declared(file=tmp_path / "resources.yaml", line=1),
+    )
+
+    with pytest.raises(ConfigError) as caught:
+        registry.finalize()
+    assert str(caught.value).count("references unknown secret-source 'same-missing'") == 1
+
+
+def test_mapping_key_collection_runs_for_later_materialized_host(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.capabilities.publish import publish_capability_rows
+    from agentworks.resources.kind import KIND_REGISTRY
+    from agentworks.resources.reference import ResourceReference
+
+    secret_kind = KIND_REGISTRY["secret"]
+
+    def synthesize(self: object, references: list[ResourceReference]) -> SecretDecl:
+        del self
+        first = references[0]
+        return SecretDecl(
+            name=first.name,
+            description="",
+            backend_mappings={"string-mapping": "address"},
+            origin=Origin.auto_declared(source=first.declarer),
+        )
+
+    monkeypatch.setattr(type(secret_kind), "synthesize", synthesize)
+    registry = Registry.empty()
+    origin = Origin.operator_declared(file=tmp_path / "resources.yaml", line=1)
+    registry.add(
+        "apt-package",
+        "late-host-referrer",
+        _OrdinaryReferenceEmitter(
+            name="late-host-referrer",
+            target_kind="secret",
+            target_name="late-host",
+        ),
+        origin,
+    )
+    plugin = Plugin(name="materialized-map-host", capabilities={"secret-backend": (_StringBackend,)})
+    with seated_plugin(plugin):
+        publish_capability_rows(registry, descriptor_for("secret-backend"))
+        with pytest.raises(ConfigError) as caught:
+            registry.finalize()
+
+    message = str(caught.value)
+    assert "references unknown secret-source 'string-mapping'" in message
+    assert "(a source for resolving this secret)" in message
+    assert message.count("string-mapping") == 1
+
+
+def test_known_false_source_validates_but_emits_no_candidate_edge(tmp_path: Path) -> None:
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    (resources / "secret.yaml").write_text(
+        dedent(
+            """\
+            apiVersion: agentworks/v1
+            kind: secret
+            metadata:
+              name: fixture
+              description: fixture
+            spec:
+              backend_mappings:
+                env-var: false
+            """
+        )
+    )
+    manifests = load_manifests(resources)
+    registry = Registry.empty()
+    from agentworks.capabilities.publish import publish_capability_rows
+    from agentworks.secrets.sources import publish_builtin_secret_sources
+
+    publish_capability_rows(registry, descriptor_for("secret-backend"))
+    publish_builtin_secret_sources(registry)
+    entry = manifests.entries[0]
+    registry.add("secret", "fixture", entry.resource, Origin.auto_declared(source=("test", "fixture")))
+    registry.finalize()
+    targets = {(ref.kind, ref.name) for ref in registry.graph.edges_of("secret", "fixture")}
+    assert ("secret-source", "env-var") not in targets
+    assert ("secret-source", "prompt") in targets
+
+
+def test_direct_onepassword_table_mapping_gets_exact_source_rewrite(tmp_path: Path) -> None:
     resources = tmp_path / "resources"
     resources.mkdir()
     (resources / "secret.yaml").write_text(
@@ -647,10 +815,10 @@ def test_current_onepassword_table_mapping_still_loads_during_phase_four(tmp_pat
         )
     )
 
-    registry = build_registry(_config(tmp_path), load_manifests(resources))
-    secret = registry.lookup("secret", "fixture")
-    assert isinstance(secret, SecretDecl)
-    assert secret.backend_mappings["onepassword"] == {
-        "account": "work.example.com",
-        "reference": "op://Work/Fixture/password",
-    }
+    with pytest.raises(ConfigError) as caught:
+        build_registry(_config(tmp_path), load_manifests(resources))
+    assert "secret/fixture.backend_mappings.onepassword references unknown secret-source 'onepassword'" in str(
+        caught.value
+    )
+    assert 'account: "work.example.com"' in (caught.value.hint or "")
+    assert '<source-name>: "op://Work/Fixture/password"' in (caught.value.hint or "")

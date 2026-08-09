@@ -45,7 +45,6 @@ from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
-    from agentworks.capabilities.secret_backend.base import SecretBackend
     from agentworks.resources.reference import ReferenceEntry, RefRelationship, ResourceReference
 
 
@@ -338,9 +337,9 @@ class FinalizeContext:
     finalize rather than a consumer reaching into a live registry, which is
     why the R11 guard whitelists the builder's own call (LLD b):
 
-    - ``available_backends``: the present ``secret-backend`` nodes (name +
-      exact implementation class), which a ``secret`` reads to decide (via each backend's pure
-      ``would_attempt``) which ``secret -> secret-backend`` edges to emit.
+    - ``capability_classes``: immutable class projections for every
+      class-by-name capability kind. Consuming resources select through this
+      generic seam instead of receiving a kind-specific tuple.
     - ``rows``: every published resource, by kind and name, which an
       INHERITING resource reads to resolve its own ``inherits`` chain
       before emitting edges (FR17: a resource's runtime dependencies come
@@ -354,13 +353,23 @@ class FinalizeContext:
     honest one.
     """
 
-    available_backends: tuple[tuple[str, type[SecretBackend]], ...] = ()
+    capability_classes: Mapping[str, Mapping[str, type]] = MappingProxyType({})
     # The builder's live row map, read-only by contract (hence the
     # ``Mapping`` annotation): the rows do not change between the build
     # walk and the late-materialization walk that shares this context, and
     # the resources it holds are heterogeneous by kind, which is what the
     # ``Any`` value type says honestly.
     rows: Mapping[str, Mapping[str, Any]] = MappingProxyType({})
+
+    def capability_class(self, kind: str, name: str) -> type | None:
+        """Return a projected capability class, or ``None`` for a name miss."""
+        from agentworks.capabilities.descriptor import RegistryPolicy, descriptor_for
+        from agentworks.errors import StateError
+
+        descriptor = descriptor_for(kind)
+        if descriptor.registry_policy is not RegistryPolicy.CLASS_BY_NAME:
+            raise StateError(f"capability kind {kind!r} does not project implementation classes")
+        return self.capability_classes.get(kind, {}).get(name)
 
     def rows_of(self, kind: str) -> Mapping[str, Any]:
         """Every published resource of ``kind``, by name; empty when the
@@ -413,11 +422,19 @@ def build_context(resources: Mapping[str, Mapping[str, object]]) -> FinalizeCont
     late (reserved defaults are seeded in pass 0), so the two views agree
     either way; carrying the live map means they cannot stop agreeing.
     """
-    backends = tuple(
-        (name, cast("type[SecretBackend]", _impl_for("secret-backend", name)))
-        for name in resources.get("secret-backend", {})
+    from agentworks.capabilities.descriptor import RegistryPolicy, capability_descriptors
+
+    projected: dict[str, Mapping[str, type]] = {}
+    for descriptor in capability_descriptors():
+        if descriptor.registry_policy is not RegistryPolicy.CLASS_BY_NAME:
+            continue
+        projected[descriptor.kind] = MappingProxyType(
+            {name: cast("type", _impl_for(descriptor.kind, name)) for name in resources.get(descriptor.kind, {})}
+        )
+    return FinalizeContext(
+        capability_classes=MappingProxyType(projected),
+        rows=resources,
     )
-    return FinalizeContext(available_backends=backends, rows=resources)
 
 
 def build_graph(

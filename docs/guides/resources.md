@@ -11,8 +11,8 @@ opt-in plugins, the manifest validation that tightened) is in
 ## The split: config vs resources
 
 `~/.config/agentworks/config.toml` is for **settings**: your identity (SSH keys), paths, CLI
-defaults, and the secret backend chain (`[secret_config].backends`). Settings configure your
-install; they are not named, referenceable entities.
+defaults, and the secret source chain (`[secret_config].backends`). Settings configure your install;
+they are not named, referenceable entities.
 
 **Resources** are the named things everything else refers to: a `secret` called `npm-token`, a
 `vm-template` called `dev`, a `git-credential` called `github`. Every resource lives in the resource
@@ -489,81 +489,90 @@ disabled is not-ready with an "enable plugin `<name>`" hint and is refused at us
 as a config mistake.
 
 **Which plugins you need follows from what your resources reference.** Enable `onepassword` if a
-secret maps the `onepassword` backend; `proxmox` if a `vm-site` uses the `proxmox` platform; `azure`
-if you use the `azure-vm` platform, the `azdo` (Azure DevOps) git-credential provider, or the
-`az-cli` install-command; and `claude` if a `session-template` uses the `claude-code` integration or
-a template installs the `claude` CLI. Until you do, a resource that references one is not-ready (or
-refused at use) with an "enable plugin `<name>`" hint, never a silent failure. The default local
-path (the `lima` / `wsl2` platforms, the `shell` harness integration, the `env-var` / `prompt`
-secret backends, and the `github` git-credential provider) needs no `[plugins]` entry at all.
-`agw doctor` lists every installed plugin and whether it is enabled.
+declared secret source selects the `onepassword` backend; `proxmox` if a `vm-site` uses the
+`proxmox` platform; `azure` if you use the `azure-vm` platform, the `azdo` (Azure DevOps)
+git-credential provider, or the `az-cli` install-command; and `claude` if a `session-template` uses
+the `claude-code` integration or a template installs the `claude` CLI. Until you do, a resource that
+references one is not-ready (or refused at use) with an "enable plugin `<name>`" hint, never a
+silent failure. The default local path (the `lima` / `wsl2` platforms, the `shell` harness
+integration, the `env-var` / `prompt` secret backends, and the `github` git-credential provider)
+needs no `[plugins]` entry at all. `agw doctor` lists every installed plugin and whether it is
+enabled.
 
-## Secrets: backends and the chain
+## Secrets: configured sources and implementation backends
 
-Two layers, one rule each:
+Three pieces have separate jobs:
 
-- A **secret backend** is a capability resource: a read-only `secret-backend` row whose
-  implementation is registered code. You cannot declare one (the app, and plugins, register them),
-  but they list and describe like every other resource. `agw resource describe-kind secret-backend`
-  lists the backends this build has, and naming one
-  (`agw resource describe-kind secret-backend/onepassword`) documents the address it expects and
-  what it needs on this host. Per-secret behavior (identifier overrides, structured store
-  addressing, and opt-outs) lives in each secret's `backend_mappings.<backend>`. A backend that
-  arrives with a system plugin is present but disabled until you name that plugin in
-  `[plugins].system`, so a secret mapped only to it stays inert, and fails resolve with an "enable
-  plugin `<name>`" hint if it is the sole path. For `onepassword` specifically, the address is
-  either a bare `op://vault/item/field` string or a `{ account, reference }` table when a specific
-  account must be pinned, and `op` has to be able to read at command time: either the 1Password
-  app's CLI integration is enabled, or you have run `op signin`.
-- The **chain** is a setting: `[secret_config].backends` in `config.toml` lists the active backends
-  in precedence order (default `["env-var", "prompt"]`). Registered backends absent from the chain
-  are dormant.
+- A **secret backend** is registered code in a read-only `secret-backend` capability row.
+  `agw resource describe-kind secret-backend/onepassword` documents that implementation's source
+  config and mapping model.
+- A **secret source** is a declarable `secret-source` resource. Its `spec.backend` selects and
+  configures one backend implementation. Agentworks synthesizes `env-var` and `prompt`; additional
+  sources are ordinary YAML resources.
+- `[secret_config].backends` keeps its established setting name, but its entries are source names in
+  precedence order. Each `backend_mappings` key is also a source name. The default remains
+  `["env-var", "prompt"]`.
+
+For example, a configured 1Password source owns its account and timeout:
+
+```yaml
+apiVersion: agentworks/v1
+kind: secret-source
+metadata:
+  name: work-op
+spec:
+  backend:
+    name: onepassword
+    account: work.example.com
+    timeout: 30
+```
+
+Enable the `onepassword` plugin, add `work-op` to the chain, and map a secret with
+`work-op: op://vault/item/field`. The mapping is always scalar. Direct backend names break in 0.14;
+the error gives the exact source declaration and reference rewrite, with no compatibility row or
+legacy parser.
 
 ### The words the surfaces use
 
-A backend, for a given secret, sits on a few independent axes. The surfaces keep them straight, and
-so should you when reading them:
+A source and its backend sit on a few independent axes. The surfaces keep them straight, and so
+should you when reading them:
 
-- **present**: a node exists for it (a built-in; later, an installed plugin). Absent means a typo or
-  an uninstalled unit.
+- **present**: a source row exists. An unknown chain or mapping name is a configuration error.
 - **enabled / disabled**: the opt-in axis (turned on or off). "enabled" and "disabled" mean this and
   only this; they never describe host readiness. A system plugin's contributions are disabled until
   the operator opts in via `[plugins].system` (for example the `onepassword` backend is disabled by
   default); the core backends (`env-var`, `prompt`) are always enabled.
-- **ready / not-ready**: whether the backend can run on THIS host right now, checked offline (e.g.
-  `onepassword` is not-ready when the `op` CLI is not on `PATH`). Readiness is not resolvability: a
-  ready backend may still have no value for a given secret.
-- **opted-in**: named in `[secret_config].backends` (the chain: selection plus order). Only opted-in
-  backends are columns in `agw secret list`.
-- **would-attempt**: for THIS secret, the backend has a mapping (or is mapping-optional). A pure
-  function of the secret and its `backend_mappings`, independent of readiness. `won't attempt` is a
-  `false` opt-out, or a mapping-required backend (like `onepassword`) with no mapping.
+- **ready / not-ready**: whether the configured source can run on this host. A source selecting
+  `onepassword` is not-ready when `op` is absent. Readiness is not resolvability.
+- **active**: named in `[secret_config].backends`. Only active sources are columns in
+  `agw secret list`.
+- **would-attempt**: for this secret, the selected backend has a mapping or is mapping-optional. A
+  pure function of the secret and its `backend_mappings`, independent of readiness. `won't attempt`
+  is a `false` opt-out, or a mapping-required backend (like `onepassword`) with no mapping.
 
-Resolution is a pass over the chain in precedence order: the first backend that produces a value
+Resolution is a pass over the chain in precedence order: the first source that produces a value
 wins. You are never prompted for the same secret twice in one command, and all prompting happens up
 front, before the command starts changing anything. The walk considers a candidate only when it is
-**present, enabled, ready, opted-in, and would-attempt** the secret.
+**present, enabled, ready, active, and would-attempt** the secret.
 
-A **not-ready** opted-in backend is **skipped with a warning** and the chain falls through to the
-next candidate (so a configured `onepassword` with no `op` installed no longer halts resolution; it
-warns and the next backend, e.g. `prompt`, takes over). The anti-masking halt is kept only for a
-_ready_ store's hard miss (available, but definitively no value), so a misconfigured store never
-falls silently through to a prompt. A secret no active backend can resolve fails at preflight with a
-hint, before any prompt and before anything changes.
+A **not-ready** active source is skipped and the chain falls through to the next candidate. The
+anti-masking halt is kept only for a _ready_ store's hard miss (available, but definitively no
+value), so a misconfigured store never falls silently through to a prompt. A secret no active source
+can resolve fails at preflight with a hint, before any prompt and before anything changes.
 
 Readiness is offline and honest; it sits UNDER the optimistic interactivity preview. A `prompt` (or
 a biometric `op`) is still previewed optimistically on would-attempt alone: the inspection surfaces
 never probe an interaction to answer readiness.
 
-`agw secret list` shows, per opted-in backend column, the lookup identifier / `would attempt` /
+`agw secret list` shows, per active source column, the lookup identifier / `would attempt` /
 `not ready: <reason>` / `won't attempt`; `agw secret describe <name>` shows one secret in full
 (mappings flagged not-ready where they apply, and a resolution preview that skips not-ready
-backends); `agw doctor` has a **Secret backends** group (one readiness row per backend) plus one row
-per secret with the runtime outcome.
+sources); `agw doctor` has a **Secret backends** group (one readiness row per implementation) plus
+one row per secret with the runtime outcome.
 
 Use `agw secret verify <name>` when you need proof rather than a preview. It performs one real
-resolution pass without printing or retaining the value. Interactive backends are excluded by
-default. Add `--allow-interactive` only when you consent to a prompt, biometric check, or backend
+resolution pass without printing or retaining the value. Interactive sources are refused by default.
+Add `--allow-interactive` only when you consent to a prompt, biometric check, or backend
 authentication; that opt-in is incompatible with the global `--non-interactive` flag.
 
 ## Inspecting the whole picture

@@ -174,19 +174,28 @@ class TyperHandler:
             raise UserAbort("interrupted") from None
 
     def prompt_secret(self, label: str, level: int, hint: str | None = None) -> str:
+        value = ""
+        aborted = False
         try:
-            if hint:
-                # Hint renders one level deeper than the label so today's
-                # 2-space indent is preserved at level 0.
-                typer.echo(f"{_pad(level + 1)}{hint}", err=True)
-            while True:
-                value = str(click.prompt(f"{_pad(level)}{label}", err=True, default="", hide_input=True))
-                if value.strip():
-                    break
-                typer.echo("(empty, try again)", err=True)
+            try:
+                if hint:
+                    # Hint renders one level deeper than the label so today's
+                    # 2-space indent is preserved at level 0.
+                    typer.echo(f"{_pad(level + 1)}{hint}", err=True)
+                while True:
+                    value = str(click.prompt(f"{_pad(level)}{label}", err=True, default="", hide_input=True))
+                    if value.strip():
+                        break
+                    typer.echo("(empty, try again)", err=True)
+            except (click.exceptions.Abort, typer.Abort):
+                aborted = True
+            if aborted:
+                raise UserAbort("interrupted") from None
             return value
-        except (click.exceptions.Abort, typer.Abort):
-            raise UserAbort("interrupted") from None
+        except BaseException:
+            value = ""
+            aborted = False
+            raise
 
     def progress(self, label: str, level: int, total: int | None = None) -> Progress:
         typer.echo(f"{_pad(level + 1)}{label}...")

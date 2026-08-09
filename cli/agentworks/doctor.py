@@ -684,24 +684,26 @@ def _check_secrets(config: Config, registry: Registry) -> HealthGroup:
     predict the next command). Auto-declared rows carry an ``(auto)``
     marker.
 
-    - OK: at least one active backend in the chain would resolve the
+    - OK: at least one active source in the chain would resolve the
       secret at runtime (the message says which -- "would resolve via
       prompt" is the heads-up that a prompt is coming).
-    - WARN: no active backend would resolve it (config is valid but
+    - WARN: no active source would resolve it (config is valid but
       there's no path to a value -- e.g. env-var has no matching env
-      var set and prompt is opted out, or the only attempting backend is
+      var set and prompt is opted out, or the only attempting source is
       not-ready on this host so resolution would skip it, R9.6).
-    - FAIL: the secret's ``backend_mappings`` references an unknown
-      backend name. Config error; nothing to resolve against. FAIL
-      takes precedence over OK / WARN so the operator fixes the typo
-      before we tell them about resolution.
 
-    Backend-applicability detail (per-backend soft-skip reasons,
+    Source-applicability detail (per-source soft-skip reasons,
     inactive mappings) lives in ``agw secret list``; unused declarations
     surface in ``agw secret describe``'s ``Referenced by:`` section.
     Doctor stays one row per secret so the summary line stays scannable.
+
+    Unknown mapping source names never reach this group: Registry finalize
+    rejects them first, and doctor reports that failure in Configuration.
+    Preview is value-free at the rendering boundary, not operation-free: it
+    may probe a ready non-interactive source and immediately discard the
+    returned value. Interactive sources remain optimistic and are not opened.
     """
-    from agentworks.resources.access import kind_dict, secret_decls
+    from agentworks.resources.access import secret_decls
 
     g = HealthGroup("Secrets")
 
@@ -710,9 +712,6 @@ def _check_secrets(config: Config, registry: Registry) -> HealthGroup:
         g.info("Declared secrets", "none")
         return g
 
-    # The registry always carries the built-in env-var / prompt backend
-    # rows, so this set covers built-ins and manifest declarations both.
-    known_backends = set(kind_dict(registry, "secret-backend").keys())
     from agentworks.secrets.resolve import active_backends, preview_resolution
 
     backends = active_backends(config, registry)
@@ -720,17 +719,9 @@ def _check_secrets(config: Config, registry: Registry) -> HealthGroup:
     for name, decl in sorted(secrets.items()):
         auto = getattr(decl.origin, "variant", None) == "auto-declared"
         label = f"Secret {name!r} (auto)" if auto else f"Secret {name!r}"
-        invalid = sorted(backend for backend in decl.backend_mappings if backend not in known_backends)
-        if invalid:
-            noun = "backend" if len(invalid) == 1 else "backends"
-            g.fail(
-                label,
-                f"references unknown {noun}: {', '.join(invalid)}",
-            )
-            continue
-
-        # Doctor is a pure inspection sweep, so its preview stays
-        # optimistic about interactive availability
+        # Doctor's value-free preview may probe ready non-interactive sources
+        # and immediately discards their values. It stays optimistic about
+        # interactive availability
         # (``interactive_available=True``): it reports the secret's
         # configured capability, not whether this doctor run has a TTY.
         # Preflight prediction is the caller that gates on the run's mode
@@ -741,16 +732,21 @@ def _check_secrets(config: Config, registry: Registry) -> HealthGroup:
         else:
             # Readiness-aware (R9.6, in lockstep with the resolution skip): a
             # secret whose only attempting backend is not-ready is at-risk, and
-            # the reason is the not-ready backend, not "no backend attempts it."
-            skipped = [
-                f"{b.name} ({b.readiness.reason})"
-                for b in backends
-                if b.would_attempt(decl) and not b.readiness.is_ready
-            ]
+            # the reason is the not-ready source, not "no source attempts it."
+            skipped: list[str] = []
+            for source in backends:
+                if source.readiness.is_ready:
+                    continue
+                try:
+                    attemptable = source.would_attempt(decl)
+                except Exception:
+                    attemptable = False
+                if attemptable:
+                    skipped.append(f"{source.name} ({source.readiness.reason})")
             if skipped:
-                g.warn(label, f"no ready backend would resolve it; not ready: {'; '.join(skipped)}")
+                g.warn(label, f"no ready source would resolve it; not ready: {'; '.join(skipped)}")
             else:
-                g.warn(label, "not available in any active backend")
+                g.warn(label, "not available in any active source")
 
     return g
 

@@ -256,15 +256,24 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             ActionId("remove-retired-sections"),
             "Every manifest validates individually and all authentication, placement, and secret-reference "
             "choices have been reviewed.",
-            (ActionInput("CONFIG_PATH", "The config.toml file selected for final cutover.", True),),
+            (
+                ActionInput("CONFIG_PATH", "The config.toml file selected for final cutover.", True),
+                ActionInput(
+                    "RESOURCES_PATH",
+                    "The active resource manifest directory where any required secret-source is declared.",
+                    True,
+                ),
+            ),
             ConsentBoundary.MUTATE_AGENTWORKS,
             None,
-            "CONFIG_PATH has no retired resource sections, and desired secret backends are activated "
-            "through [secret_config].backends.",
+            "CONFIG_PATH has no retired resource sections, every desired non-default secret backend has an "
+            "operator-declared secret-source, and [secret_config].backends names sources in precedence order.",
             None,
             "Restore or retain the untouched config and accept its hard retired-section error.",
             "In one edit, remove every retired resource section and every [secret_backends.*] declaration "
-            "from CONFIG_PATH, then update [secret_config].backends with the desired backend names.",
+            "from CONFIG_PATH. Keep implied env-var and prompt names as-is. Declare a secret-source for each "
+            "desired non-default backend, move backend config to its tagged spec.backend block, update every "
+            "secret mapping key to the source name, and update [secret_config].backends with source names.",
         ),
         GuideAction(
             ActionId("compare-operator-inventory"),

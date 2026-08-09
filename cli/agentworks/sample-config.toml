@@ -12,7 +12,7 @@
 # resources is a hard error at load now (they were previously deprecated
 # with a warning); the resources guide walks through rewriting them. This
 # file is the permanent home for SETTINGS: operator identity, paths,
-# defaults, enabled plugins, and the secret backend chain.
+# defaults, enabled plugins, and the secret source chain.
 #
 # Comment convention: examples are written as `#key = "value"` (no space
 # after `#`), so you can uncomment a line in place by deleting one `#`.
@@ -22,7 +22,7 @@
 # Naming conventions:
 #   - Framework keys (section names, field names) use snake_case:
 #     [secret_config], ssh_public_key, runup_git_credentials.
-#   - Operator-typed identifiers (site names, backend names, secret names)
+#   - Operator-typed identifiers (site names, source names, secret names)
 #     use kebab-case: `site = "lima-local"`, `backends = ["env-var",
 #     "prompt"]`. The validator is permissive so legacy names continue to
 #     load, but new names should follow kebab.
@@ -68,7 +68,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # implementations (VM platforms, harness integrations, git-credential providers, secret
 # backends) and optional resource manifests that ship with agentworks but are
 # separable and opt-in. This is a primary opt-in you set early, since other
-# settings and resources (the secret backend chain, git credentials, vm-sites,
+# settings and resources (the secret source chain, git credentials, vm-sites,
 # session templates) reference the plugins enabled here. List the plugins you
 # want enabled by name.
 # A plugin NOT listed here still publishes its capability rows AND its bundled
@@ -108,56 +108,40 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #
 # A pluggable, named-secret system. In a resource manifest, anywhere an env
 # value can be a string it can also be `{ secret: <name> }`, referencing a
-# declared secret. Backends produce the value at command time; agentworks
-# never persists secret values to disk.
+# declared secret. The chain's configured sources produce the value at command
+# time; agentworks never persists secret values to disk.
 #
-# Use `agw secret list` to see how each active backend would look up each
+# Use `agw secret list` to see how each active source would look up each
 # declared secret. Use `agw secret describe <name>` for a full view including
-# which env entries reference the secret. `agw doctor` reports one row per
-# secret with the runtime resolution outcome (ok / warn / fail).
+# which env entries reference the secret. `agw doctor` reports one ok/warn row
+# per registry secret; invalid source names fail Registry construction first.
 
-# The backend CHAIN below is a setting and lives here. Backends are activated
-# by listing them in `[secret_config].backends` in precedence order. The
-# built-in backends ship with agentworks:
+# The source CHAIN below is a setting and lives here. It lists configured
+# `secret-source` resource names in precedence order. Agentworks synthesizes
+# two simple sources, so the default works without any resource manifests:
 #   env-var     : reads from process env. Default convention is
 #                 AW_SECRET_<UPPER_SNAKE_CASE>, so secret "npm-token" reads
 #                 from AW_SECRET_NPM_TOKEN unless the secret's declaration
 #                 overrides it (`backend_mappings.env-var`).
-#   onepassword : ships as the opt-in `onepassword` system plugin (enable it in
-#                 [plugins] above); while disabled it is dormant (dropped from
-#                 the chain). Once enabled it reads via the 1Password CLI
-#                 (`op read op://...`). Requires a per-secret
-#                 `backend_mappings.onepassword` address (see
-#                 `agw resource sample secret`); unmapped secrets are skipped.
-#                 `op` must be able to read at command time (the 1Password
-#                 app's CLI integration enabled, or `op signin`); a mapping
-#                 that points at a missing item is a hard error, not a
-#                 fall-through.
-#                 If `op` is not installed the backend is NOT-READY on this
-#                 host: resolution skips it with a warning and falls through to
-#                 the next backend in the chain (`agw secret list` /
-#                 `agw doctor` show its readiness).
 #   prompt      : interactive prompt. Always applies; you are never asked for
 #                 the same secret twice in one command, and all prompting
 #                 happens before the command starts changing anything.
-# Backends are registered code capabilities; their names are the valid chain
-# entries here. `agw resource describe-kind secret-backend` lists the ones this
-# build has (it reads no config, so it answers while you are still editing
-# this file), and naming one documents the per-secret mapping it expects.
+# Additional sources are YAML resources. For 1Password, enable its plugin and
+# declare a source such as `work-op` with `spec.backend.name: onepassword`.
+# Put `account` and the positive `timeout` (default 30 seconds) in that backend
+# block. Each secret then maps `work-op` to one scalar `op://...` reference.
+# `agw resource sample secret-source` prints the manifest shape;
+# `agw resource describe-kind secret-backend/onepassword` documents its config
+# and mapping model.
 
 #[secret_config]
-#backends = ["env-var", "onepassword", "prompt"]    # example chain; the default is ["env-var", "prompt"].
-# Naming `onepassword` here also requires enabling its plugin
-# (`[plugins] system = ["onepassword"]` above); until then it is dropped from
-# the chain as disabled.
-# This is the opt-in chain: only listed backends are consulted, in this
-# precedence order (the first backend that produces a value wins). Declared
-# backends absent from this list are dormant. A backend that is not-ready on
-# this host (e.g. onepassword with no `op` installed) is skipped with a warning
-# and the chain falls through to the next one. An explicit empty list
-# `backends = []` disables resolution entirely. A name that matches no backend
-# at all is an error, the same as an unknown `defaults.site`: it is a typo, not
-# an opt-out.
+#backends = ["env-var", "work-op", "prompt"]    # example; default is ["env-var", "prompt"].
+# Only listed sources are consulted, in this precedence order; the first source
+# that produces a value wins. A not-ready source (for example `work-op` with no
+# `op` installed) is skipped and the chain falls through. `backends = []`
+# disables resolution. Every name must be a declared secret-source. A direct
+# backend name is a 0.14 configuration error with the exact source declaration
+# and mapping rewrite needed to fix it.
 
 # =============================================================================
 # Sessions

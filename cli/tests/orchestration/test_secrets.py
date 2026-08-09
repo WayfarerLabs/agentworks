@@ -8,8 +8,9 @@ Prediction fakes are backend-shaped duck types, same as
 
 from __future__ import annotations
 
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 import pytest
 
@@ -21,8 +22,11 @@ from agentworks.orchestration.secrets import (
     secret_declarations,
     secret_union,
 )
+from agentworks.resources.graph import Readiness
 from agentworks.resources.reference import ResourceReference, SecretReference
+from agentworks.schema import AgwModel, AgwRootModel, CapabilityBlock
 from agentworks.secrets.base import SecretDecl
+from agentworks.secrets.sources import SecretSourceDecl
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -30,7 +34,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.resources.registry import Registry
-    from agentworks.secrets.resolve import ActiveBackend
+    from agentworks.secrets.resolve import ActiveSource
 
 
 @dataclass
@@ -111,7 +115,7 @@ def test_unknown_name_falls_back_to_a_bare_declaration() -> None:
 
 
 class _FakeBackend:
-    """An ActiveBackend-shaped stub controllable per-test."""
+    """State captured by a final ActiveSource-shaped prediction fixture."""
 
     def __init__(
         self,
@@ -120,8 +124,6 @@ class _FakeBackend:
         interactive: bool = False,
         not_ready_reason: str | None = None,
     ) -> None:
-        from agentworks.resources.graph import Readiness
-
         self.name = name
         self.interactive = interactive
         self._values = values or {}
@@ -130,23 +132,93 @@ class _FakeBackend:
         # skips a not-ready backend (R9.6). Ready by default.
         self.readiness = Readiness.ready() if not_ready_reason is None else Readiness.blocked(not_ready_reason)
 
-    def would_attempt(self, secret: SecretDecl) -> bool:
-        return secret.backend_mappings.get(self.name) is not False
 
-    def describe_lookup(self, secret: SecretDecl) -> str | None:
-        return f"<{self.name}>"
+class _PredictionConfig(AgwModel):
+    name: Literal["prediction"]
 
-    def resolve(self, secrets: list[SecretDecl]) -> dict[str, str]:
-        self.resolve_calls.append([s.name for s in secrets])
-        return {s.name: self._values[s.name] for s in secrets if s.name in self._values}
+
+class _PredictionMapping(AgwRootModel[str]):
+    pass
+
+
+class _PredictionClient:
+    def __init__(self, state: _FakeBackend) -> None:
+        self._state = state
+
+    def prepare(self, requests: tuple[object, ...], *, remaining_time: object) -> None:
+        return None
+
+    def resolve(self, requests: tuple[object, ...], *, remaining_time: object) -> dict[str, str]:
+        names = [cast("Any", request).name for request in requests]
+        self._state.resolve_calls.append(names)
+        return {name: self._state._values[name] for name in names if name in self._state._values}
+
+
+class _PredictionContext(AbstractContextManager[Any]):
+    def __init__(self, state: _FakeBackend) -> None:
+        self._state = state
+
+    def __enter__(self) -> _PredictionClient:
+        return _PredictionClient(self._state)
+
+    def __exit__(self, *args: object) -> None:
+        return None
 
 
 def _decl(name: str, **kw: object) -> SecretDecl:
     return SecretDecl(name=name, description="", **kw)  # type: ignore[arg-type]
 
 
-def _chain(*backends: _FakeBackend) -> list[ActiveBackend]:
-    return cast("list[ActiveBackend]", list(backends))
+def _chain(*backends: _FakeBackend) -> list[ActiveSource]:
+    from agentworks.capabilities.secret_backend import SecretBackend
+    from agentworks.capabilities.secret_backend.client import InteractionBroker, RemainingTime, SecretSourceClient
+    from agentworks.secrets.resolve import ActiveSource
+
+    out: list[ActiveSource] = []
+    for state in backends:
+
+        class _PredictionBackend(SecretBackend):
+            _state: ClassVar[_FakeBackend] = state
+            contract_version: ClassVar[int] = 2
+            config_model: ClassVar[type[AgwModel]] = _PredictionConfig
+            mapping_model: ClassVar[type[AgwRootModel[Any]]] = _PredictionMapping
+            name: ClassVar[str] = "prediction"
+            description: ClassVar[str] = "prediction fixture"
+            prose = None
+            interactive: ClassVar[bool] = state.interactive
+
+            @classmethod
+            def backend_readiness(cls) -> Readiness:
+                return Readiness.ready()
+
+            @classmethod
+            def would_attempt(cls, secret_name: str, *, mapping_present: bool) -> bool:
+                return True
+
+            @classmethod
+            def describe_lookup(cls, secret_name: str, mapping: object) -> str:
+                return f"<{cls._state.name}>"
+
+            @classmethod
+            def create_client(
+                cls,
+                *,
+                source_name: str,
+                config: AgwModel,
+                interaction_broker: InteractionBroker | None,
+                remaining_time: RemainingTime,
+            ) -> AbstractContextManager[SecretSourceClient]:
+                return cast("AbstractContextManager[SecretSourceClient]", _PredictionContext(cls._state))
+
+        out.append(
+            ActiveSource(
+                source=SecretSourceDecl(name=state.name, backend=CapabilityBlock.of("prediction")),
+                backend_class=_PredictionBackend,
+                config=_PredictionConfig(name="prediction"),
+                readiness=state.readiness,
+            )
+        )
+    return out
 
 
 def test_prediction_reports_the_first_producing_backend() -> None:

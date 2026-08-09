@@ -68,11 +68,11 @@ class RefOwner:
     narrower vocabulary than ``kind/name``.
 
     A secret's ``backend_mappings`` value is the standing case: the secret
-    alone is ambiguous when it maps several backends, and a root model's
+    alone is ambiguous when it maps several sources, and a root model's
     errors carry no field path of their own, so the owner frames as
-    ``secret/npm-token.backend_mappings.onepassword`` (see
-    ``SecretDecl._mapping_owner``). Everything else leaves it unset and
-    gets ``kind/name``."""
+    ``secret/npm-token.backend_mappings.work-op`` (see
+    ``SecretDecl.mapping_owner``). Everything else leaves it unset and gets
+    ``kind/name``."""
 
     @property
     def display(self) -> str:

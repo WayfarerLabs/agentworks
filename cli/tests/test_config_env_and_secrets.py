@@ -335,41 +335,42 @@ def test_env_referencing_undeclared_secret_does_not_error(
 
 
 def test_secret_declared_with_all_mapping_forms(tmp_path: Path) -> None:
-    """All three backend_mappings value shapes (string, inline table, false) parse
-    onto SecretDecl. The chain uses prompt-only so even token-c (which opts out
-    of env-var) and token-b (which maps a backend outside the chain) stay
-    reachable through the prompt backend.
+    """Scalar mappings and framework ``false`` are keyed by source names.
 
-    token-b's inline table is a WELL-FORMED onepassword mapping (the pinned
-    ``{account, reference}`` form), and it has to be: the finalize validate pass
-    checks every declared mapping against its backend's model whether or not
-    that backend is opted in or enabled, so a placeholder table would fail the
-    build here rather than parsing."""
+    OnePassword account selection belongs to the declared source while its
+    per-secret mapping is the final scalar ``op://`` reference.
+    """
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
         settings="""
+        [plugins]
+        system = ["onepassword"]
+
         [secret_config]
         backends = ["prompt"]
         """,
         manifests=[
+            ManifestDoc(
+                "secret-source",
+                "team-op",
+                {"backend": {"name": "onepassword", "account": "acme"}},
+            ),
             ManifestDoc(
                 "secret", "token-a", {"backend_mappings": {"env-var": "OVERRIDE_NAME"}}, description="string mapping"
             ),
             ManifestDoc(
                 "secret",
                 "token-b",
-                {"backend_mappings": {"onepassword": {"account": "acme", "reference": "op://Shared/Tok/key"}}},
-                description="structured mapping for a backend outside the chain",
+                {"backend_mappings": {"team-op": "op://Shared/Tok/key"}},
+                description="scalar mapping for a source outside the chain",
             ),
             ManifestDoc("secret", "token-c", {"backend_mappings": {"env-var": False}}, description="opt-out mapping"),
         ],
     )
     registry = _load(cfg_file)
     assert registry.lookup("secret", "token-a").backend_mappings == {"env-var": "OVERRIDE_NAME"}
-    assert registry.lookup("secret", "token-b").backend_mappings == {
-        "onepassword": {"account": "acme", "reference": "op://Shared/Tok/key"}
-    }
+    assert registry.lookup("secret", "token-b").backend_mappings == {"team-op": "op://Shared/Tok/key"}
     assert registry.lookup("secret", "token-c").backend_mappings == {"env-var": False}
 
 
@@ -529,20 +530,25 @@ def test_reachability_keying_is_would_attempt_readiness_blind(tmp_path: Path, mo
         system = ["onepassword"]
 
         [secret_config]
-        backends = ["onepassword"]
+        backends = ["team-op"]
         """,
         manifests=[
             ManifestDoc(
+                "secret-source",
+                "team-op",
+                {"backend": {"name": "onepassword"}},
+            ),
+            ManifestDoc(
                 "secret",
                 "vaulted",
-                {"backend_mappings": {"onepassword": "op://Work/item/field"}},
+                {"backend_mappings": {"team-op": "op://Work/item/field"}},
                 description="only resolvable via onepassword",
-            )
+            ),
         ],
     )
     cfg = load_config(cfg_file, warn_issues=False)
     registry = build_registry(cfg)  # no raise: not-ready does not make it unreachable
-    assert registry.graph.readiness_of("secret-backend", "onepassword").reason == "op CLI not installed"
+    assert registry.graph.readiness_of("secret-source", "team-op").reason == "op CLI not installed"
     assert any(name == "vaulted" for name, _ in registry.iter_kind_items("secret"))
 
 
@@ -573,11 +579,10 @@ def test_unreachable_secret_error_message_and_hint(tmp_path: Path) -> None:
     assert "unreachable secret" in str(exc.value)
     # Remediation lives in the hint, not the message.
     assert exc.value.hint is not None
-    assert "active backend chain" in exc.value.hint
+    assert "active source chain" in exc.value.hint
     assert "env-var" in exc.value.hint
     # The hint mentions the three remediation paths.
-    assert "prompt" in exc.value.hint
-    assert "backend_mappings" in exc.value.hint
+    assert "attemptable secret-source" in exc.value.hint
     assert "remove" in exc.value.hint
 
 

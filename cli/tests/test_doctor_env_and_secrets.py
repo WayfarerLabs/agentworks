@@ -109,6 +109,35 @@ def test_secret_resolves_via_env_var_when_set(
     ), msgs
 
 
+def test_doctor_accepts_mapping_keyed_by_differently_named_declared_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ALT_SHARED_TOKEN", "from-operator-env")
+    cfg = _write_config(
+        tmp_path,
+        settings="""
+        [secret_config]
+        backends = ["work-env"]
+        """,
+        manifests=[
+            ManifestDoc("secret-source", "work-env", {"backend": {"name": "env-var"}}),
+            ManifestDoc(
+                "secret",
+                "shared",
+                {"backend_mappings": {"work-env": "ALT_SHARED_TOKEN"}},
+                description="Shared API token",
+            ),
+        ],
+    )
+    config = load_config(cfg, warn_issues=False)
+    group = _check_secrets(config, build_registry(config))
+
+    shared = next(check for check in group.checks if check.name == "Secret 'shared'")
+    assert shared.status is Status.OK
+    assert shared.message == "would resolve via work-env"
+
+
 def test_secret_resolves_via_prompt_when_env_var_unset(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -238,11 +267,16 @@ def test_check_secrets_flags_a_not_ready_only_backend(tmp_path: Path, monkeypatc
         admin_env={"TOKEN": {"secret": "op-only"}},
         manifests=[
             ManifestDoc(
+                "secret-source",
+                "onepassword",
+                {"backend": {"name": "onepassword"}},
+            ),
+            ManifestDoc(
                 "secret",
                 "op-only",
                 {"backend_mappings": {"onepassword": "op://Vault/item/field", "env-var": False}},
                 description="resolves only via onepassword",
-            )
+            ),
         ],
     )
     config = load_config(cfg, warn_issues=False)
@@ -281,9 +315,8 @@ def test_r9_3_manifest_malformed_block_surfaces_under_resource_registry(
 
 
 def test_mapping_to_undeclared_kind_hard_errors_at_build(tmp_path: Path) -> None:
-    """R9.11: a ``backend_mappings`` entry naming a backend that is not a
-    registered ``secret-backend`` capability is a DANGLING ``secret ->
-    secret-backend`` edge, which the ``secret-backend`` kind's ``"error"``
+    """A ``backend_mappings`` entry naming an undeclared source is a dangling
+    ``secret -> secret-source`` validation edge, which the source kind's ``error``
     miss policy turns into a hard ``build_registry`` failure (where the old
     tolerant ``_check_secrets`` pinpointed it as one per-secret FAIL row).
 
@@ -303,12 +336,12 @@ def test_mapping_to_undeclared_kind_hard_errors_at_build(tmp_path: Path) -> None
         ],
     )
     config = load_config(cfg, warn_issues=False)
-    with pytest.raises(ConfigError, match="unknown secret-backend 'bogusvault'"):
+    with pytest.raises(ConfigError, match="unknown secret-source 'bogusvault'"):
         build_registry(config)
 
 
 def test_mapping_to_multiple_undeclared_kinds_hard_errors_at_build(tmp_path: Path) -> None:
-    """R9.11: with two unknown-backend mappings, the first dangling edge the
+    """With two unknown-source mappings, the first dangling edge the
     resolve pass reaches hard-errors at ``build_registry`` (naming that
     backend); the build never gets far enough to enumerate both, unlike the
     old tolerant per-secret doctor row that listed them sorted."""
@@ -329,7 +362,7 @@ def test_mapping_to_multiple_undeclared_kinds_hard_errors_at_build(tmp_path: Pat
         ],
     )
     config = load_config(cfg, warn_issues=False)
-    with pytest.raises(ConfigError, match="unknown secret-backend '(alpha-vault|zeta-vault)'"):
+    with pytest.raises(ConfigError, match="unknown secret-source '(alpha-vault|zeta-vault)'"):
         build_registry(config)
 
 

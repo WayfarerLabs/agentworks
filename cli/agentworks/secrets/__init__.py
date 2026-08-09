@@ -25,7 +25,9 @@ from agentworks.secrets.orchestration import (
 )
 from agentworks.secrets.resolve import (
     ActiveBackend,
+    ActiveSource,
     active_backends,
+    active_sources,
     resolve_secrets,
     validate_chain,
 )
@@ -47,11 +49,13 @@ guide_contributions = _load_guide_contributions
 
 __all__ = [
     "ActiveBackend",
+    "ActiveSource",
     "SecretConfig",
     "SecretDecl",
     "SecretSourceDecl",
     "SecretTarget",
     "active_backends",
+    "active_sources",
     "compute_needed_secrets",
     "env_var_name_for",
     "guide_contributions",

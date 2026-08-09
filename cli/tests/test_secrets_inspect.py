@@ -355,6 +355,7 @@ def _readiness_grid_config(tmp_path: Path) -> Path:
             "C": {"secret": "unmapped-op"},
         },
         manifests=[
+            ManifestDoc("secret-source", "onepassword", {"backend": {"name": "onepassword"}}),
             ManifestDoc(
                 "secret",
                 "mapped-op",

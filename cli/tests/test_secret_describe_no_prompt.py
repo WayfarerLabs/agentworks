@@ -54,7 +54,7 @@ def test_describe_secret_never_resolves_through_interactive_backends(
     ssh_keys: tuple[Path, Path],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Monkeypatch the prompt provider's ``batch_get`` to fail loudly if
+    """Monkeypatch the prompt client's factory to fail loudly if
     anything calls it during describe. The resolution PREVIEW may probe
     non-interactive backends (env-var); an interactive backend must be
     reported on ``would_attempt`` alone -- probing it would BE the
@@ -72,7 +72,7 @@ def test_describe_secret_never_resolves_through_interactive_backends(
     from agentworks.capabilities.secret_backend import SECRET_BACKEND_REGISTRY
 
     registry = build_registry(config)
-    monkeypatch.setattr(SECRET_BACKEND_REGISTRY["prompt"], "_legacy_batch_get", _fail_batch_get)
+    monkeypatch.setattr(SECRET_BACKEND_REGISTRY["prompt"], "create_client", _fail_batch_get)
 
     # Should complete without invoking the prompt provider.
     describe_secret(config, registry, "api-key")
