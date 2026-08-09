@@ -3,9 +3,9 @@
 - Status: Active ledger
 - Last updated: 2026-08-08
 
-This is the roadmap's tracking document, the analog of an ordinary SDD's `plan.md`. Completed
-checkboxes are immutable records, per the standard rule. The roadmap SDD locks when every entry here
-is locked.
+This is the saga's tracking document, the analog of an ordinary SDD's `plan.md`. Completed
+checkboxes are immutable records, per the standard rule. The saga SDD locks when every entry here is
+locked.
 
 ## Ledger
 
@@ -58,7 +58,8 @@ is locked.
 - [x] Facet returns as a plain noun (2026-08-06, operator ruling): the level a capability is driven
       at (vm, user, workspace, session), pairing methods and config; core owns the scope-to-facet
       mapping; the retired machinery meaning stays dead
-- [ ] Reviewed and merged to `main`
+- [x] Reviewed and merged to `main` (PR #407, 2026-08-06; staleness caught by integration review
+      2026-08-08, reconciled in this round)
 
 ### Onboarding and discovery (destination 1): 2026-08-05-onboarding-and-discovery
 
@@ -99,8 +100,9 @@ is locked.
       plugins before the 0.14.0 cut, with a first-class disabled-error experience
 - [x] Seeded (FRD, PR #440, 2026-08-07; launchable whenever, with the moves consuming wave 2's
       descriptor registration and the guide topics consuming onboarding's first slice)
-- [ ] FRD merged to `main`
-- [ ] Picked up by an effort lead (inventory-first, phased artifact review)
+- [x] FRD merged to `main` (PR #440, 2026-08-08; ownership transferred to the effort lead)
+- [x] Picked up by an effort lead (inventory-first: R1 inventory draft PR #451 in phased artifact
+      review, three saga-lead findings pending as of 2026-08-08)
 - [ ] Implementation complete (moves, disabled errors, guide topics, upgrade-guide step)
 - [ ] Ships in 0.14.0 (gates the cut per `phasing.md` release mapping)
 - [ ] Locked
@@ -114,7 +116,11 @@ mechanism); tracked here because its outcome gates the 0.14.0 cut per `phasing.m
       before the cut; brief seeded on the task branch, 2026-08-08)
 - [x] Survey delivered and re-evaluated under the three-tier refinement (2026-08-08; dissolutions
       and restructures proposed per item)
-- [ ] Implementation merged (PR #455 in review)
+- [x] Implementation merged (PR #455, 2026-08-08): token union with stored-arm default and contract
+      v2, github repos/owner dissolved to scope union, install-command multi-test AND semantics, env
+      structural union with null-companion canonicalization shared by validation, extraction, and
+      fill, the EnvEntry construction shim removed by operator ruling, and the three-tier rule
+      codified in `cli/agentworks/capabilities/README.md`
 - [ ] Ships in 0.14.0 (gates the cut per `phasing.md` release mapping)
 
 ### Not yet spawned
@@ -128,22 +134,22 @@ Planned children, seeded when their prerequisites land (see `phasing.md`):
 - Wave 8: external plugin API
 - Closeout wave: comprehensive security, test-consolidation, and cleanup review (gates the lock)
 
-Not children of this roadmap (explicitly out of scope, see `target-state.md`): the
+Not children of this saga (explicitly out of scope, see `target-state.md`): the
 named-console-template selector SDD, the herdr effort, the companion-shell and resilient-attach
-wins, and the agentworks.build website (`docs/sdd/2026-08-07-website/`, seeded 2026-08-07; the
-roadmap lead seeds and reviews it like a child, but it does not gate the roadmap lock). They proceed
+wins, and the agentworks.build website (`docs/sdd/2026-08-07-website/`, seeded 2026-08-07; the saga
+lead seeds and reviews it like a child, but it does not gate the saga lock). They proceed
 standalone.
 
 ## Issue intake (2026-08-05)
 
-A sweep of the open issue tracker pulled the following issues into the roadmap. Each rolled-in issue
+A sweep of the open issue tracker pulled the following issues into the saga. Each rolled-in issue
 received a comment pointing back here so it is not worked out-of-band (posted 2026-08-05); issues
 not listed stay standalone.
 
 | Issue      | Lands in                                                                            |
 | ---------- | ----------------------------------------------------------------------------------- |
 | #76        | Wave 1 SDD closeouts (stale lockfile half only; the derive audit stays standalone)  |
-| #165       | Not rolled in: its own pre-roadmap SDD proceeds standalone (out of roadmap scope)   |
+| #165       | Not rolled in: its own pre-saga SDD proceeds standalone (out of saga scope)         |
 | #170       | Wave 2 rider (expires metadata belongs in the envelope/metadata modeling)           |
 | #205, #212 | Design track: instance-state store and per-instance specs; future living-graph SDD  |
 | #214       | Wave 2 (live samples, uniform validation; unknown keys go hard-error there)         |
@@ -164,7 +170,7 @@ open-ended research placeholder.
 ## Immediate next actions
 
 1. Done (2026-08-05): PR #316 merged; wave 0 complete.
-2. Done (2026-08-05): roadmap PR #400 and wave 1 seed #401 merged; harvested
+2. Done (2026-08-05): saga PR #400 and wave 1 seed #401 merged; harvested
    `feat/harness-transcripts-sdd` branch deleted.
 3. Done (2026-08-05): issue-intake comments posted.
 4. Done (2026-08-05): descriptor contract merged (PR #405).
@@ -173,12 +179,13 @@ open-ended research placeholder.
 6. Done (2026-08-05): wave 2 seed notes merged (PR #411) and effort lead launched.
 7. Done (2026-08-05): onboarding-and-discovery seeded (FRD, PR #413).
 8. Done (2026-08-06): onboarding seed merged (PR #413). Launch its effort lead when ready.
-9. Roadmap lead reviews wave 2 and onboarding PRs as they arrive.
-10. Design track: scope participation contract in review (PR #407); then the instance-state store
-    schema and the event vocabulary's first slice.
-11. Installer-plugins child seeded (PR #440, 2026-08-07). Launch its effort lead whenever; the R1
-    inventory can start immediately.
-12. Pre-0.14 gates in flight (2026-08-08): the installer-plugins child (FRD PR #440 pending merge,
-    R1 inventory PR #451 in phased review), the git-credential restructure (PR #455 in review), the
-    wave 3 breaking slice (design PR #453 converged), and the onboarding README bootstrap (later
-    onboarding phase). The cut waits for all four.
+9. Saga lead reviews wave 2 and onboarding PRs as they arrive.
+10. Done (2026-08-06): scope participation contract merged (PR #407). Next design-track items: the
+    instance-state store schema and the event vocabulary's first slice.
+11. Done (2026-08-08): installer-plugins FRD merged (PR #440); its effort lead is active (R1
+    inventory PR #451 in phased review).
+12. Pre-0.14 gates in flight (2026-08-08, post-#455): the installer-plugins implementation (R1
+    inventory PR #451 in phased review), the wave 3 breaking slice (design PR #453 converged,
+    awaiting merge and implementation), and the onboarding README bootstrap (later onboarding
+    phase). The git-credential restructure gate is satisfied (PR #455, merged 2026-08-08). The cut
+    waits for the three open gates.

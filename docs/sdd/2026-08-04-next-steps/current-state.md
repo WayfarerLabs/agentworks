@@ -1,6 +1,6 @@
 # Current State
 
-- Snapshot date: 2026-08-08, post-onboarding-phase-1 (update at wave boundaries)
+- Snapshot date: 2026-08-08, post-variant-rework (update at wave boundaries)
 - Baseline: Agentworks 0.13.0 plus the phase 1 TOML sunset (PR #316), the 0.14 expired-compat
   removals (PR #406), declarative-schema phase 2 through the descriptor (PR #414), and the
   onboarding guide first slice (PR #428); the 0.14.0 release itself is pending per the `phasing.md`
@@ -25,7 +25,7 @@ remediation-posture ruling; the operator path is precise hard errors plus
 `[secret_config].backends`) are shape-checked at load and resolved once at the composition boundary
 as hard errors. The config deprecation channel is kept deliberately as the warn-window carrier.
 `capabilities/facets.py` was removed pending its wave 4 consumer; the `config_for(facet)` contract
-stays settled in the docs and this roadmap's contracts.
+stays settled in the docs and this saga's contracts.
 
 The vm-platform mode contract landed post-lock (PR #444, 2026-08-08, recorded on that SDD's
 lockfile): azure and aws carry an `auth` union (`ambient` or their credential arm), lima carries
@@ -35,6 +35,15 @@ edges as the written spelling. Written old shapes hard-error with the exact rewr
 never wrote the retired blocks cross without edits. The variant-modeling rule (one arm per
 required-field shape; the discriminator tracks shape, not concept) lives permanently in
 `cli/agentworks/capabilities/README.md`.
+
+The variant rework landed the same day (PR #455, 2026-08-08): git-credential token acquisition is a
+defaulted one-arm discriminated union (provider contract v2, `token: null` retired with the exact
+rewrite), env entries are a selector-free structural union whose legacy null-companion spellings
+canonicalize at one shared selector consumed by validation, extraction, and fill, github `repos` and
+`owner` combine as a scope union, and install commands accept multiple test predicates with all-pass
+semantics (zero declared tests always runs). The three-tier rule and its companion tests live
+permanently in `cli/agentworks/capabilities/README.md`, backed by the structural-union and
+scalar-shorthand machinery in `agentworks/schema/`.
 
 ## Guide and onboarding
 
@@ -72,10 +81,10 @@ and the manifest surface has no warn-window channel (the standing consequence re
 - The secret-source direction still goes with the grain: the backend/source split is specified in
   `target-state.md`, and the descriptor contract records the open readiness-shape choice for the
   `secret-source` kind as wave 3's call, which the descriptor must record once made.
-- The map-keyed `backend_mappings` escalation from the wave 2 closeout is ruled (roadmap,
-  2026-08-07, recorded in `capability-descriptor-contract.md`): the descriptor gains a field
-  recording where a map-keyed capability is hosted, schema emission as first consumer, landing with
-  wave 3 (its seed's R8); the `onepassword` trigger has fired.
+- The map-keyed `backend_mappings` escalation from the wave 2 closeout is ruled (saga, 2026-08-07,
+  recorded in `capability-descriptor-contract.md`): the descriptor gains a field recording where a
+  map-keyed capability is hosted, schema emission as first consumer, landing with wave 3 (its seed's
+  R8); the `onepassword` trigger has fired.
 
 ## Session runtime (observability groundwork)
 
@@ -93,13 +102,13 @@ and the manifest surface has no warn-window channel (the standing consequence re
 - The Claude integration only probes for its transcript file's existence to decide
   resume-versus-launch; nothing reads transcript content yet.
 
-## Open SDD ledger (pre-roadmap efforts)
+## Open SDD ledger (pre-saga efforts)
 
-Cleared by wave 1 (PR #406): all five pre-roadmap SDDs are locked (`2026-08-03-harness-integration`,
+Cleared by wave 1 (PR #406): all five pre-saga SDDs are locked (`2026-08-03-harness-integration`,
 `2026-08-04-session-resume`, `2026-03-29-proxmox-provider`, `2026-05-03-session-enhancements`, and
 `2026-03-26-mise-integration` with its plan reconciled against evidence). The
 `2026-07-29-harness-transcripts` draft is harvested into `inputs/harness-transcripts-harvest.md` and
-its branch is deleted. Remaining unmerged drafts on remote branches, both out of roadmap scope:
+its branch is deleted. Remaining unmerged drafts on remote branches, both out of saga scope:
 `2026-07-29-herdr-integration` (spike-gated) and `2026-07-19-named-console-template-selector`
 (ready, standalone).
 

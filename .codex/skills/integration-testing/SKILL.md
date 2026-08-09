@@ -140,8 +140,8 @@ tiered, multi-agent campaign instead of a single pass:
 4. **Synthesis on a top model.** The survivors get consolidated into one verdict: blockers,
    should-fixes, nits, and an explicit verified-sound section for what held under attack.
 
-This is the same discipline the roadmap-lead's multi-pass protocol runs for child-effort PRs, and
-that protocol is the reference implementation to follow when a PR warrants it: ruling and
+This is the same discipline the saga-lead's multi-pass protocol runs for child-effort PRs, and that
+protocol is the reference implementation to follow when a PR warrants it: ruling and
 contract-conformance (checked clause by clause against the recorded decisions, not against vibes),
 fresh-eyes (a genuinely cold read with no house priors, which is why it cannot be the
 `agentworks-reviewer` persona by definition and instead wants a general-purpose reader), test
