@@ -10,6 +10,10 @@ python3 -m http.server --directory /tmp/agentworks-site-demo 8000
 Use this package-free checklist against the built 404 artifact. Record each execution so a future
 reader can distinguish verified behavior from an expectation that has not been run.
 
+Phase 4B changed the shared header and footer and added `/manifesto/`. Automated source, generated
+document, and model checks pass, but no browser execution has been recorded for that source. All
+shared-shell rows and any 404 row that names the new breadcrumb route-home action are pending.
+
 ## Local demo
 
 Build and serve from the repository root:
@@ -102,9 +106,9 @@ new run records the refined source.
 
 ## Static recovery and initial presentation
 
-- [x] With JavaScript disabled, the page shows one 404 heading, explanatory text, a working
-      `Return to agentworks.build` link, the lander, lunar surface, landing zone, and dark
-      operations center.
+- [ ] With JavaScript disabled, the page shows one 404 heading, explanatory text, a working linked
+      `Agentworks` breadcrumb home crumb, the lander, lunar surface, landing zone, and dark
+      operations center. There is no body-level home link.
 - [x] With JavaScript disabled, no start target or control instructions are exposed visually or to
       the accessibility tree. The document has header, main, and footer landmarks in that order.
 - [x] With JavaScript enabled and normal motion, each reload gives one subtle three-pulse plume cue
@@ -118,23 +122,23 @@ new run records the refined source.
 
 ## Focus and keyboard
 
-- [x] Tab reaches the home link and named start button in logical document order. No Tab key is
-      intercepted and focus is never trapped.
+- [ ] Tab reaches the breadcrumb home crumb, GitHub, PyPI, footer links, and named start button in
+      logical document order. No Tab key is intercepted and focus is never trapped.
 - [x] Activating the start button by keyboard or ordinary click starts without thrust, reveals the
       single control paragraph, hides the start button, and moves focus to the game without
       scrolling.
 - [x] Pressing unmodified Space on the document body or scene starts, immediately commands thrust,
       and does not scroll. Holding that same physical Space key continues thrust after focus moves;
       releasing it ends thrust.
-- [x] Modified Space, repeated preflight Space, and Space targeted at the home link or another
-      interactive or editable element retain ordinary browser behavior and do not start.
+- [ ] Modified Space, repeated preflight Space, and Space targeted at the breadcrumb home crumb or
+      another interactive or editable element retain ordinary browser behavior and do not start.
 - [x] During flight, Space and Up provide equal thrust. Left and H increase the right plume and turn
       left. Right and L increase the left plume and turn right. Holding both aliases and releasing
       only one leaves the other active.
 - [x] Active control keys suppress browser scrolling only while the game shell is active. Shift does
       not change flight mappings. Control, Alt, and Meta combinations retain browser behavior.
-- [x] Escape on the active shell exits, cuts thrust, hides controls, restores settled preflight, and
-      focuses the start button without scrolling. Escape on the home link or outside the shell keeps
+- [ ] Escape on the active shell exits, cuts thrust, hides controls, restores settled preflight, and
+      focuses the start button without scrolling. Escape on a shell link or outside the shell keeps
       browser behavior.
 - [x] After success or failure, R restarts with fresh fuel, a dark operations center, a closed bay,
       no agent, and shell focus. R has no mission effect in other states.
@@ -194,9 +198,9 @@ new run records the refined source.
 
 ## Responsive acceptance
 
-- [x] At 320 CSS pixels wide, the page has no horizontal overflow, clipped controls, obscured home
-      link, or start target smaller than the pinned full-silhouette bounds.
-- [x] At 400 percent zoom, all error content, home navigation, controls, focus outlines, scene, and
+- [ ] At 320 CSS pixels wide, the page has no horizontal overflow, clipped controls, obscured
+      breadcrumb, or start target smaller than the pinned full-silhouette bounds.
+- [ ] At 400 percent zoom, all error content, home navigation, controls, focus outlines, scene, and
       status remain reachable without two-dimensional page scrolling.
 - [x] In touch landscape, the scene fits its container, the active shell alone suppresses touch
       actions, and browser navigation and zoom remain available outside it.
@@ -205,25 +209,25 @@ new run records the refined source.
 
 ## Shared shell acceptance
 
-- [ ] The compact home page shows the AGW rocket at two to three times the small-header scale,
-      followed by the repository-sourced identity, onboarding availability, and one link each for
-      GitHub, PyPI, longer rationale, and security. It renders no problem or principles section, and
-      its header and footer repeat none of those four destinations.
+- [ ] Home shows the AGW rocket at two to three times the small-header scale, repository-sourced
+      identity, and onboarding availability. It has no small header mark. Home, Manifesto, Security,
+      and 404 each show one GitHub and one PyPI icon-and-text link in the header and one Manifesto
+      and one Security link in the footer, with no body duplicate.
 - [ ] In current Chromium, Firefox, and WebKit at 320 CSS pixels, 400 percent zoom, touch landscape,
-      and wide desktop, home, security, and 404 have no page overflow, clipped text or navigation,
-      overlap, or fixed-height content loss. Record browser versions, viewport, date, and result
-      before public release.
-- [ ] With JavaScript disabled, home and security retain all content and links, while 404 retains
-      its message, named scene, and home link. No surface depends on terminal familiarity.
-- [ ] Keyboard-only traversal reaches the visible skip links, security and 404 linked brands,
-      navigation, home destination links, 404 home link, and lander start control in source order
-      with a visible focus outline.
+      and wide desktop, Home, Manifesto, Security, and 404 have no page overflow, clipped text or
+      navigation, overlap, or fixed-height content loss. Record browser versions, viewport, date,
+      and result before public release.
+- [ ] With JavaScript disabled, Home, Manifesto, and Security retain all content and links, while
+      404 retains its message, named scene, and breadcrumb route-home action. No surface depends on
+      terminal familiarity.
+- [ ] Keyboard-only traversal reaches each visible skip link, breadcrumb home crumb, GitHub, PyPI,
+      footer links, and the 404 lander start control in source order with a visible focus outline.
 - [ ] A screen reader reports each page title, header, main, footer, one `h1`, nested section
-      headings, named navigation, sourced links, and 404 status/focus behavior. Initial game
-      controls remain hidden.
-- [ ] With reduced motion enabled, home and security remain motion-free and the 404 follows the
-      existing no-cue, direct-success contract. Human touch checks confirm page scroll outside the
-      active scene and tap, hold, and drag behavior inside it.
+      headings, breadcrumb current state, named navigation, visible CTA labels without decorative
+      icon noise, sourced links, and 404 status/focus behavior. Initial game controls remain hidden.
+- [ ] With reduced motion enabled, Home, Manifesto, and Security remain motion-free and 404 follows
+      the existing no-cue, direct-success contract. Human touch checks confirm page scroll outside
+      the active scene and tap, hold, and drag behavior inside it.
 - [ ] In a clean context, a visitor identifies what Agentworks is, sees that guided onboarding is
-      not yet published, and can choose the repository, PyPI package, rationale, or security path
-      without explanation. Record timing and any intervention.
+      not yet published, and can choose GitHub, PyPI, Manifesto, or Security without explanation.
+      Record timing and any intervention.

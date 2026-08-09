@@ -7,13 +7,13 @@ combines semantic templates, local CSS and JavaScript, the AGW rocket asset, and
 from permanent repository documentation. Generated output stays outside the repository and can be
 published by any static host.
 
-The current release is intentionally useful without guided onboarding. It offers the product
-identity, permanent project links, security deep dive, and custom 404. The compact home page renders
-the repository-sourced identity and states that guided onboarding is not yet published. It does not
-render the longer problem statement or principles, which remain maintained in
-`docs/why-agentworks.md` behind one rationale link. The page contains no substitute command or copy
-control. A later change will replace the notice with the canonical onboarding source after that
-source is available on `main`.
+The current release is intentionally useful without guided onboarding. The compact Home page renders
+the repository-sourced identity and states that guided onboarding is not yet published. A generated
+Manifesto presents the complete long-form argument from `docs/why-agentworks.md`, while a separate
+Security page provides practical depth and reporting routes. The shared header places the GitHub and
+PyPI destinations once per page; the shared footer places the Manifesto and Security destinations
+once per page. Home contains no substitute command or copy control. A later change will replace the
+notice with the canonical onboarding source after that source is available on `main`.
 
 ## Local build and test
 
@@ -30,9 +30,9 @@ python3 website/build.py \
 python3 -m http.server --directory /tmp/agentworks-site 8000
 ```
 
-Then open `http://localhost:8000/`, `http://localhost:8000/security/`, and
-`http://localhost:8000/404.html`. A project-Pages build uses the same source and command with
-`--site-base /agentworks/`.
+Then open `http://localhost:8000/`, `http://localhost:8000/manifesto/`,
+`http://localhost:8000/security/`, and `http://localhost:8000/404.html`. A project-Pages build uses
+the same source and command with `--site-base /agentworks/`.
 
 The focused 404 seam remains available for game work:
 
@@ -76,6 +76,7 @@ Generated output is not maintained or edited. The complete output contains exact
 404.html
 index.html
 assets/agw-rocket.svg
+manifesto/index.html
 security/index.html
 static/lander-game.js
 static/lander-model.js
@@ -108,27 +109,43 @@ The builder reads three permanent repository inputs:
 
 - `README.md` owns the concise product identity rendered on the landing page. Its short design
   summary remains repository documentation, not additional landing-page content.
-- `docs/why-agentworks.md` owns the longer problem-and-principles rationale linked once from the
-  landing page. It also owns the threat model, isolation boundaries, limitations, operator posture,
-  and credential/secret explanation rendered on the security page.
+- `docs/why-agentworks.md` owns the complete introduction, Problem Space, and Key Principles
+  rendered on the Manifesto page. It also owns the threat model, isolation boundaries, limitations,
+  operator posture, and credential/secret explanation rendered on the Security page.
 - `SECURITY.md` owns private vulnerability reporting and the reporting URL.
 
-Passages are selected by complete heading keypaths and exact normalized blocks, then escaped and
-rendered through a closed Markdown subset. Missing or duplicate headings, content drift, unsupported
-markup, invalid links, and reporting-link drift fail the build before output changes. This is
-intentional. Update the permanent source and its website contract together when a selected claim
-changes; do not paste a second version into a template.
+Home and Security passages are selected by complete heading keypaths and exact normalized blocks.
+The Manifesto contract pins the complete normalized Why document with a reviewed SHA-256 and exact
+ordered heading tree, then renders every introduction, Problem Space, and Key Principles block. All
+repository content is escaped and rendered through a closed Markdown subset. Missing or duplicate
+headings, content drift, unsupported markup, invalid links, and reporting-link drift fail the build
+before output changes. This is intentional. Update the permanent source and its website contract
+together when a selected claim changes; do not paste a second version into a template.
+
+The Manifesto maps only these source-relative links:
+
+- `../README.md` to the stable GitHub README blob URL;
+- `guides/idempotency.md` to the stable GitHub idempotency guide blob URL;
+- `../cli/README.md#environment-variables-and-secrets` to the stable GitHub CLI README fragment.
+
+Allowed absolute source links are preserved. Any other relative link or an unapproved generated URL
+fails closed.
 
 Templates own only headings, navigation, destination labels, presentation-neutral connective text,
 and the bounded interim availability notice. `website/` does not own product behavior, security
 claims, vulnerability contact details, or installation instructions. The selected SVG and lander
 implementation are permanent assets and must not be regenerated from design-history files.
 
-The landing template exposes exactly one anchor each for the repository, PyPI package, longer
-rationale, and security deep dive, each under its reviewed visible label. Its header and footer do
-not repeat those destinations. The security anchor alone carries the `security-link` class that
-gives it secondary visual treatment. Build artifacts are disposable projections of the templates and
-permanent sources; maintain the sources, not a generated `index.html` or `security/index.html`.
+Home, Manifesto, Security, and 404 use the same breadcrumb-led header and traditional footer. The
+header has exactly one linked `Agentworks` home crumb, a hidden visual separator, a non-linked
+current-page item, and one icon-and-text link each for GitHub and PyPI. Home omits the small header
+mark because its large hero follows; every other page has exactly one decorative small mark
+immediately before the breadcrumb. The footer has exact ownership text plus one Manifesto and one
+Security link. Those local and external destinations are not repeated in the body. On 404, the
+linked home crumb is the sole visible route-home action.
+
+Build artifacts are disposable projections of the templates and permanent sources; maintain the
+sources, not generated HTML.
 
 ## Release stages
 
@@ -137,8 +154,9 @@ builder, and publishing path. There is no runtime release mode.
 
 The interim artifact must contain the ordinary-text availability notice exactly once and must not
 contain a bootstrap region, installation command, copy control, copy script, dormant onboarding
-token, disabled control, or empty placeholder. Home and security have no JavaScript. The custom 404
-alone loads its same-origin game module, and its error content and home link work without scripts.
+token, disabled control, or empty placeholder. Home, Manifesto, and Security have no JavaScript. The
+custom 404 alone loads its same-origin game module; its error content and breadcrumb home route work
+without scripts.
 
 Once the canonical onboarding contract lands on `main`, a separately reviewed integration will
 delete the notice, add the canonical content as a required input, and prove byte identity with the

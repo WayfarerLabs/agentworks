@@ -275,20 +275,19 @@ class StaticDocumentTests(unittest.TestCase):
         self.assertEqual(tags.count("footer"), 1)
         self.assertEqual(tags.count("h1"), 1)
         self.assertIn("Page not found", self.template)
-        self.assertIn("Return to agentworks.build", self.template)
-        home_tag, home = self.element("home-link")
-        self.assertEqual(home_tag, "a")
-        self.assertEqual(home["href"], "{{SITE_BASE}}")
-        self.assertNotIn("hidden", home)
+        self.assertNotIn("Return to agentworks.build", self.template)
+        home_links = [attributes for tag, attributes in self.document.tags if attributes.get("href") == "{{SITE_BASE}}"]
+        self.assertEqual(len(home_links), 1)
         self.assertNotIn("hidden", self.element("not-found-message")[1])
-        self.assertIn("<p>Agentworks</p>", self.template)
+        self.assertIn("Product of Wayfarer Labs, LLC", self.template)
         self.assertNotIn("Build systems that let agents do the work.", self.template)
 
-    def test_preflight_controls_are_hidden_but_scene_and_home_are_not(self) -> None:
+    def test_preflight_controls_are_hidden_but_scene_and_breadcrumb_are_not(self) -> None:
         self.assertIn("hidden", self.element("lander-start")[1])
         self.assertIn("hidden", self.element("lander-controls")[1])
         self.assertNotIn("hidden", self.element("lander-scene")[1])
-        self.assertNotIn("hidden", self.element("home-link")[1])
+        home = next(attributes for tag, attributes in self.document.tags if attributes.get("href") == "{{SITE_BASE}}")
+        self.assertNotIn("hidden", home)
         controls = " ".join(self.document.text_by_id["lander-controls"].split())
         self.assertEqual(
             controls,

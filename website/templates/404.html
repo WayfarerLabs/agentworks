@@ -17,14 +17,17 @@
     <body>
         <a class="skip-link" href="#main-content">Skip to main content</a>
         <header class="site-header">
-            <a class="brand" href="{{SITE_BASE}}">
-                <img src="{{SITE_BASE}}assets/agw-rocket.svg" alt="Agentworks home" />
-                <span aria-hidden="true">Agentworks</span>
-            </a>
-            <nav aria-label="Primary">
-                <a href="{{SITE_BASE}}">Home</a>
-                <a href="https://github.com/WayfarerLabs/agentworks">GitHub</a>
-                <a href="https://pypi.org/project/agentworks-cli/">PyPI</a>
+            <div class="header-identity">
+                <img class="header-mark" src="{{SITE_BASE}}assets/agw-rocket.svg" alt="" />
+                <nav class="breadcrumbs" aria-label="Breadcrumb">
+                    <a href="{{SITE_BASE}}">Agentworks</a>
+                    <span class="breadcrumb-separator" aria-hidden="true">/</span>
+                    <span aria-current="page">404</span>
+                </nav>
+            </div>
+            <nav class="service-links" aria-label="External">
+                <a href="https://github.com/WayfarerLabs/agentworks"><svg class="service-icon" aria-hidden="true" focusable="false" viewBox="0 0 16 16"><path d="M8 .7a7.5 7.5 0 0 0-2.4 14.6v-2c-1.8.4-2.2-.8-2.2-.8-.3-.8-.8-1-1-1.1-.7-.5.1-.5.1-.5.8.1 1.2.8 1.2.8.7 1.2 1.8.9 2.2.7.1-.5.3-.9.5-1.1-1.5-.2-3-.7-3-3.3 0-.7.2-1.3.7-1.8-.1-.2-.3-.9.1-1.8 0 0 .6-.2 2.1.7A7 7 0 0 1 8 4.1a7 7 0 0 1 1.9.3c1.5-.9 2.1-.7 2.1-.7.4.9.2 1.6.1 1.8.5.5.7 1.1.7 1.8 0 2.6-1.6 3.1-3 3.3.3.2.5.6.5 1.2v3.5A7.5 7.5 0 0 0 8 .7Z" /></svg><span>GitHub</span></a>
+                <a href="https://pypi.org/project/agentworks-cli/"><svg class="service-icon" aria-hidden="true" focusable="false" viewBox="0 0 16 16"><path d="M7.8 1.1c-3.4 0-3.2 1.5-3.2 1.5v1.5h3.3v.5H3.3S1 4.3 1 8s2 3.6 2 3.6h1.2V9.9s-.1-2 2-2h3.3s1.9 0 1.9-1.8V3s.3-1.9-3.6-1.9Zm-1.8 1a.6.6 0 1 1 0 1.2.6.6 0 0 1 0-1.2Zm2.2 12.8c3.4 0 3.2-1.5 3.2-1.5v-1.5H8.1v-.5h4.6S15 11.7 15 8s-2-3.6-2-3.6h-1.2v1.7s.1 2-2 2H6.5s-1.9 0-1.9 1.8V13s-.3 1.9 3.6 1.9Zm1.8-1a.6.6 0 1 1 0-1.2.6.6 0 0 1 0 1.2Z" /></svg><span>PyPI</span></a>
             </nav>
         </header>
         <main id="main-content">
@@ -34,7 +37,6 @@
                 <p id="not-found-message">
                     This route has not been deployed. The lunar surface below is still operational.
                 </p>
-                <a id="home-link" href="{{SITE_BASE}}">Return to agentworks.build</a>
             </div>
 
             <section id="lander-game" aria-label="Lunar deployment scene">
@@ -109,8 +111,12 @@
                 <p id="lander-status" role="status" aria-live="polite" aria-atomic="true"></p>
             </section>
         </main>
-        <footer>
-            <p>Agentworks</p>
+        <footer class="site-footer">
+            <p>Product of Wayfarer Labs, LLC</p>
+            <nav aria-label="Footer">
+                <a href="{{SITE_BASE}}manifesto/">Agentworks Manifesto</a>
+                <a href="{{SITE_BASE}}security/">We take security seriously</a>
+            </nav>
         </footer>
     </body>
 </html>

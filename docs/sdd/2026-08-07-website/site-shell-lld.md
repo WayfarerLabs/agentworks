@@ -1,487 +1,196 @@
-# LLD: Interim Website Shell
+# LLD: Static Website Shell and Manifesto
 
-<!-- cspell:ignore autolinks blockquotes canonicalization keypath keypaths -->
-<!-- cspell:ignore navs nonblank scroller TUI -->
+<!-- cspell:ignore canonicalization keypath keypaths nonblank sdds TUI -->
 
-- Status: Landing refinement implemented; review and release acceptance in progress
+- Status: Phase 4B implemented; release acceptance remains pending
 - Date: 2026-08-09
-- FRD: `frd.md`, specifically R10, R11, R13, and R14
+- FRD: `frd.md`, specifically R10, R11, and R13-R16
 - HLA: `hla.md`, specifically D1-D5, D8, and D10
-- Source baseline: `origin/main` at `7f54658cf4d33c54016f05e4903bdc0726cb945f`; the three permanent
-  content inputs below are byte-identical at this worktree's HEAD
+- Source baseline: `1a52d4250bc0c7ff7edf29beeb1ba8067beeb2e5`
 
 ## 1. Scope and release invariant
 
-This LLD pins the home and security shells that extend the accepted Phase 2 404 artifact into the
-useful interim release, including Phase 4A's compact landing refinement. It covers only merged
-repository content, page structure, shared visual language, deterministic building, and interim
-verification. Deployment workflow and DNS mechanics remain Phase 5 and Phase 6 work.
+The checked-in `website/` tree produces the complete static shell for Home, Manifesto, Security,
+and 404. The phase changes navigation and adds the generated Manifesto without changing deployment,
+DNS, onboarding, or the bounded 404 game. Home and Security remain script-free. Manifesto is also
+script-free. The 404 remains useful without JavaScript and progressively enhances only its game.
 
-The release has no onboarding implementation. The home page contains one populated, ordinary-text
-availability region at the location the canonical bootstrap will later occupy. There is no bootstrap
-text, installation command, `pre` region, copy control, copy script, empty placeholder, feature
-flag, preview mode, or branch-only input. Phase 7 must design the later replacement from the
-then-current contract on `main`; this LLD does not predict it.
+The release still has no guided onboarding implementation. Home contains the one reviewed ordinary
+text availability notice, with no command, copy control, empty placeholder, or runtime release mode.
+A later onboarding phase replaces that notice through its own canonical contract.
 
-## 2. Permanent files, URLs, and ownership
+## 2. Permanent files, routes, and output
 
-Phase 4 extends the existing `website/` tree without renaming the accepted lander files.
+| Source                             | Responsibility                                                              |
+| ---------------------------------- | --------------------------------------------------------------------------- |
+| `website/templates/index.html`     | Compact repository-sourced identity and interim onboarding notice           |
+| `website/templates/manifesto.html` | Presentation shell for the generated long-form argument                     |
+| `website/templates/security.html`  | Repository-sourced security depth and reporting routes                      |
+| `website/templates/404.html`       | Useful error surface and progressively enhanced lander                      |
+| `website/assets/agw-rocket.svg`    | Selected self-contained brand mark                                          |
+| `website/static/site.css`          | Shared tokens, shell, document presentation, focus, and reflow              |
+| `website/static/lander.css`        | 404 scene and mission presentation                                          |
+| `website/static/lander-model.js`   | Pure deterministic lander model                                             |
+| `website/static/lander-game.js`    | 404-only game controller                                                    |
+| `website/build.py`                 | Closed inputs, rendering, validation, manifest, and atomic installation     |
+| `website/tests/`                   | Source, template, generated-document, builder, workflow, and game contracts |
+| `website/README.md`                | Permanent build, content-ownership, publishing, and recovery runbook        |
 
-| File                                        | Responsibility                                                    |
-| ------------------------------------------- | ----------------------------------------------------------------- |
-| `website/templates/index.html`              | Compact home handoff and populated interim onboarding region      |
-| `website/templates/security.html`           | Semantic security deep dive                                       |
-| `website/templates/404.html`                | Existing useful error and lander template, plus shared site CSS   |
-| `website/assets/agw-rocket.svg`             | Existing selected, font-independent brand asset                   |
-| `website/static/site.css`                   | Shared tokens, typography, landmarks, panels, links, and reflow   |
-| `website/static/lander.css`                 | Lander scene and mission states that are not shared page styling  |
-| `website/static/lander-model.js`            | Existing pure lander model                                        |
-| `website/static/lander-game.js`             | Existing 404-only progressive enhancement                         |
-| `website/build.py`                          | Explicit manifest, source extraction, rendering, and safe staging |
-| `website/tests/test_site_build.py`          | Shell content, unique links, builder, DOM, and release contracts  |
-| `website/tests/test_lander_404.py`          | Existing focused 404 source and build contracts                   |
-| `website/tests/lander-model.test.mjs`       | Existing deterministic game coverage                              |
-| `website/tests/lander-browser-checklist.md` | Existing browser acceptance, extended with shared-shell rows      |
-| `website/README.md`                         | Permanent local, publishing, DNS, rollback, and ownership runbook |
-
-The public mappings are exact:
-
-| Artifact path           | Custom-domain URL                                | Project-Pages path       |
-| ----------------------- | ------------------------------------------------ | ------------------------ |
-| `index.html`            | `https://agentworks.build/`                      | `/agentworks/`           |
-| `security/index.html`   | `https://agentworks.build/security/`             | `/agentworks/security/`  |
-| `404.html`              | `https://agentworks.build/404.html`              | `/agentworks/404.html`   |
-| `assets/agw-rocket.svg` | `https://agentworks.build/assets/agw-rocket.svg` | `/agentworks/assets/...` |
-| `static/*`              | `https://agentworks.build/static/*`              | `/agentworks/static/*`   |
-
-The home and security canonical links are always `https://agentworks.build/` and
-`https://agentworks.build/security/`. Local navigation and assets use the validated site base.
-External destinations are fixed to:
-
-- repository: `https://github.com/WayfarerLabs/agentworks`;
-- package: `https://pypi.org/project/agentworks-cli/`;
-- rationale: `https://github.com/WayfarerLabs/agentworks/blob/main/docs/why-agentworks.md`;
-- security policy: `https://github.com/WayfarerLabs/agentworks/security/policy`.
-
-No generated file is checked in or maintained. The artifact is a disposable projection of the
-templates and permanent repository sources. It contains no `CNAME`; the Pages repository setting is
-the custom-domain authority.
-
-## 3. Content classes and exact site-owned text
-
-Product and security claims come only from section 4's permanent inputs. Templates may own
-navigation, headings, and presentation-neutral connective labels. These two interim strings are
-exact and are each present once on the home page:
+The complete generated artifact is exactly:
 
 ```text
-Guided onboarding is not yet published. You can still explore the repository, PyPI package, rationale, and security model.
+404.html
+index.html
+assets/agw-rocket.svg
+manifesto/index.html
+security/index.html
+static/lander-game.js
+static/lander-model.js
+static/lander.css
+static/site.css
 ```
+
+The supported public paths are `/`, `/manifesto/`, `/security/`, and `/404.html`. At the GitHub
+Pages project base, the same paths are rooted beneath `/agentworks/`. Canonical metadata always uses
+the custom-domain URLs at `https://agentworks.build`. The focused 404 artifact remains the accepted
+local game seam and keeps its smaller explicit manifest.
+
+## 3. Shared header contract
+
+Every page has one `header` after the skip link. Its first region is the page identity:
+
+1. Manifesto, Security, and 404 have exactly one decorative small rocket with empty alternative
+   text. It is the first child of `.header-identity`, immediately followed by the breadcrumb.
+2. Home has no `.header-mark`; its large semantic hero mark follows in `main`.
+3. The breadcrumb is a `nav` named `Breadcrumb`. It has a linked `Agentworks` home crumb, one `/`
+   separator hidden with `aria-hidden="true"`, and one non-anchor current item with
+   `aria-current="page"`.
+4. Current-item text is exactly `Home`, `Manifesto`, `Security`, or `404`.
+
+The second region is one `nav` named `External`. It contains exactly one repository link labeled
+`GitHub` and one package link labeled `PyPI`. Each anchor contains one inline local SVG followed by
+visible label text. The SVG has `aria-hidden="true"` and `focusable="false"`; the text remains the
+accessible name if CSS or the icon is unavailable. No remote icon asset or package is used.
+
+The 404 breadcrumb's linked `Agentworks` crumb is its sole visible route-home action. The error body
+contains no second home link. The controller has no dependency on that removed element, so scene,
+focus, keyboard, pointer, reduced-motion, no-JavaScript, and recovery behavior remain unchanged.
+
+## 4. Shared footer contract
+
+Every page has one `.site-footer` after `main`. Its left side is exactly:
 
 ```text
-We take security seriously.
+Product of Wayfarer Labs, LLC
 ```
 
-The first string is the complete text of `#onboarding-availability`. The second is the only home
-link text for the security deep dive and links to `{{SITE_BASE}}security/`. It is a normal secondary
-link, not a banner, warning, modal, prerequisite, or dominant action.
+Its right side is one `nav` named `Footer` containing exactly:
 
-Other exact destination labels are `View the GitHub repository`, `View the PyPI package`,
-`Read why Agentworks is built this way`, `Read the repository security policy`,
-`GitHub private vulnerability reporting`, and `Return to agentworks.build`. Labels and section
-headings make no new behavior, security, or installation claim.
+- `Agentworks Manifesto` to `{{SITE_BASE}}manifesto/`;
+- `We take security seriously` to `{{SITE_BASE}}security/`.
 
-The four home destinations bind exact href values to normalized visible labels:
+The Manifesto and Security destinations occur nowhere else as anchors on a page. The repository and
+package destinations occur nowhere else as anchors on a page. The linked home crumb is also unique.
+The header and footer use wrapping flex layouts in source order, with no menu or hidden navigation.
 
-| Href                                         | Visible label                           | Exact class     |
-| -------------------------------------------- | --------------------------------------- | --------------- |
-| `https://github.com/WayfarerLabs/agentworks` | `View the GitHub repository`            | none            |
-| `https://pypi.org/project/agentworks-cli/`   | `View the PyPI package`                 | none            |
-| the rationale URL from section 2             | `Read why Agentworks is built this way` | none            |
-| `{{SITE_BASE}}security/`                     | `We take security seriously.`           | `security-link` |
+## 5. Manifesto source contract
 
-Template validation parses each anchor, collapses visible-label whitespace, and validates the pair.
-Possessing all four href values and all four labels independently is insufficient; swapping labels
-is a contract failure. The `security-link` class belongs exactly and only to the security
-destination so that moving or duplicating it cannot transfer the visually secondary treatment. The
-accessible skip link remains the sole anchor outside this mapping.
+`docs/why-agentworks.md` remains the only long-form prose source and retains its repository title.
+The presentation title, document title, `h1`, and canonical route are `Agentworks Manifesto`. The
+template owns only that presentation shell and connective labels.
 
-## 4. Current-main content contracts
+The builder reads the complete normalized UTF-8 source. Its contract pins:
 
-The builder's manifest names exactly `README.md`, `docs/why-agentworks.md`, and `SECURITY.md` as
-content inputs. A selector is a full ATX heading keypath plus an exact expected normalized block or
-contiguous block sequence. Heading levels and text are part of the keypath; matching by paragraph
-position is forbidden.
+- a reviewed SHA-256 of the complete source;
+- the exact ordered heading tree from `# Why Agentworks` through all Problem Space and Key
+  Principles subsections;
+- one top-level source heading, which the presentation `h1` replaces;
+- only the existing closed Markdown blocks: ATX headings, paragraphs, unordered lists, strong and
+  emphasized text, code spans, and links.
 
-### 4.1 Home identity and longer rationale
+The generated article includes the complete introduction, the complete Problem Space and every
+subsection, and the complete Key Principles and every subsection. The source hash makes a prose,
+link, or whitespace change fail closed until the reviewed contract is updated. Heading changes,
+missing or additional sections, unsupported Markdown, invalid links, invalid UTF-8, and unclosed
+fences also fail before any output replacement. Rendered prose is never maintained in a template or
+Python string.
 
-`HOME_IDENTITY` selects this exact two-paragraph sequence under `README.md` keypath `# Agentworks`:
+Source-relative links use this exact allowlist:
 
-```text
-A comprehensive toolkit for managing agentic workloads: VMs, workspaces, agents, sessions, harnesses, secrets/config, and the supporting systems that glue them together. Built around the conviction that autonomy, security, and control are not mutually exclusive: a good platform makes it possible and straightforward to have it all.
+| Source destination                                   | Generated destination                                                                                  |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `../README.md`                                       | `https://github.com/WayfarerLabs/agentworks/blob/main/README.md`                                       |
+| `guides/idempotency.md`                              | `https://github.com/WayfarerLabs/agentworks/blob/main/docs/guides/idempotency.md`                      |
+| `../cli/README.md#environment-variables-and-secrets` | `https://github.com/WayfarerLabs/agentworks/blob/main/cli/README.md#environment-variables-and-secrets` |
 
-Create and manage an agentic fleet from your own workstation. **Durable agents** run as separate Linux users in **VMs** on infrastructure you choose and control. They retain their own tools, git credentials, and accumulated application state (a coding assistant's context and memory, interactive logins). **Disposable sessions** spin up against them for a single piece of work and are thrown away when done. One `agw` CLI drives all of it declaratively via an SSH-over-Tailscale control plane.
+The existing absolute issue link is preserved. Any other relative link or unapproved generated
+absolute URL fails. Tests prove all three mappings and prove no source-relative `href` survives.
+
+## 6. Existing repository content contracts
+
+The builder still reads exactly three permanent content inputs: `README.md`,
+`docs/why-agentworks.md`, and `SECURITY.md`. README owns the concise Home identity. The Why document
+owns the complete Manifesto plus selected security passages. SECURITY owns private reporting prose
+and its reference URL.
+
+Home and Security selections continue to use complete heading keypaths plus exact normalized block
+sequences. Their output is escaped and rendered through the same inline and block renderer used by
+the Manifesto. Templates may not move content tokens outside their reviewed metadata or sourced
+containers. All templates use a closed token vocabulary and reject unknown, missing, duplicated, or
+brace-like tokens.
+
+## 7. Builder and replacement safety
+
+The CLI requires `--repo-root`, `--output`, and `--site-base`; `--only 404` selects the focused game
+seam. Site bases accept only ASCII slash-bounded same-origin paths such as `/` and `/agentworks/`.
+Output must be outside the repository.
+
+The builder validates sources, templates, shell destinations, labels, landmark locations, current
+state, icons, logo counts, ownership text, and local references in memory. It renders the complete
+explicit manifest to a sibling staging directory, verifies exact regular files and directories, and
+atomically installs only after validation. Existing output is accepted only when every entry is
+builder-owned. A failed install restores the prior output.
+
+The same inputs and arguments produce byte-identical output. Artifacts contain no timestamps,
+environment prose, or generated `CNAME`, and successful builds leave the repository clean.
+
+## 8. Accessibility, reflow, and presentation
+
+All pages retain one visible-on-focus skip link, one `h1`, logical heading order, and `header`,
+`main`, and `footer` landmarks. Native links preserve keyboard behavior and accessible names. Focus
+outlines remain visible. Decorative header marks use empty alternative text; service icons and the
+breadcrumb separator are explicitly hidden from the accessibility tree.
+
+The local system-font visual language keeps the accepted neutral palette, mono accents, crisp
+boundaries, and compact labels. It does not introduce a fake terminal, remote font, remote asset,
+client routing, or essential motion. Header and footer regions wrap rather than overflow. Body and
+content dimensions use `min-width: 0`, bounded widths, fluid spacing and type, and anywhere link
+wrapping to preserve one-dimensional reflow at 320 CSS pixels and the 400-percent zoom equivalent.
+
+## 9. Verification matrix
+
+| Contract                      | Automated evidence                                                                                                             |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Source completeness and drift | Hash, heading-tree, UTF-8, fence, block, and link-map failure tests                                                            |
+| Template closure              | Token vocabulary, placement, duplicate-attribute, destination, label, icon, breadcrumb, logo, and ownership tests              |
+| Generated semantics           | Four-page metadata, canonicals, landmarks, headings, skip links, shell, no-duplicate links, scripts, and local-reference tests |
+| Exact artifacts               | Full and focused manifest tests at `/` and `/agentworks/`                                                                      |
+| Determinism and safety        | Repeated byte snapshots, hostile output trees, rollback injection, path and symlink tests                                      |
+| 404 preservation              | Python source/build tests plus Node model/controller contracts                                                                 |
+| Browser acceptance            | `website/tests/lander-browser-checklist.md` pending four-page manual run                                                       |
+
+Before handoff, run:
+
+```bash
+python3 -m unittest discover -s website/tests -p 'test_*.py'
+node --test website/tests/lander-model.test.mjs
+python3 website/build.py --repo-root . --output /tmp/agentworks-site-root --site-base /
+python3 website/build.py --repo-root . --output /tmp/agentworks-site-project --site-base /agentworks/
+./scripts/lint-files.sh
+./scripts/check-locked-sdds.sh
+./scripts/rulesync-upgen.sh --check
+git diff --check
 ```
 
-This is the landing page's only rendered product passage. The home metadata description is derived
-from its first paragraph. The longer problem statement and principles remain maintained in
-`docs/why-agentworks.md`; the landing page links that permanent document exactly once as its deeper
-rationale destination and does not extract or render those passages. Changes confined to that
-long-form rationale therefore do not change generated home bytes.
-
-### 4.2 Security passages
-
-`SECURITY_THREATS` selects the opening paragraph and four-item list under `docs/why-agentworks.md`
-keypath `# Why Agentworks > ## The Problem Space > ### Security`:
-
-```text
-Agentic engineering is inherently risky. These risks come from multiple directions, including:
-
-- **Honest mistakes** - An agent can simply make a mistake that results in data loss, corruption, or unintended side effects. It's very easy to find stories of Claude wiping out entire directories or otherwise causing havoc.
-- **Prompt injection** - Agents that are exposed to the outside world (e.g. by downloading untrusted web content) can potentially be manipulated into doing things outside of their operator's intent or control.
-- **Supply chain attacks** - Agents may download and run compromised software or dependencies from external sources, which could introduce malicious code into the environment, at build time, runtime, or both.
-- **Rogue agents** - The agent itself could behave maliciously due to a compromise of the model, the provider, or emergent behavior.
-```
-
-`SECURITY_BOUNDARIES` selects these two adjacent paragraphs later in that same section:
-
-```text
-All of these suggest similar solutions, though. You need strong guardrails (isolation, permissions, etc.) to ensure that _when_ things go sideways, the blast radius is contained and the operator retains control.
-
-Being precise about what those guardrails do is as important as having them. Agentworks builds its isolation from VM boundaries plus standard Linux users, groups, and filesystem permissions. That separates agents' credentials and state from one another and bounds what a mistaken or compromised agent can reach. Two things it deliberately does not do: it is not a kernel-level sandbox (agents on one VM share a kernel, so a local privilege escalation is a path between them), and it does not yet constrain outbound network access, so an agent that reads untrusted content can still reach the network with whatever it can read (tracked in [#224](https://github.com/WayfarerLabs/agentworks/issues/224)).
-```
-
-`SECURITY_POSTURE` selects the complete three-paragraph body under `docs/why-agentworks.md` keypath
-`# Why Agentworks > ## Key Principles > ### Composable Isolation`:
-
-```text
-This model provides several isolation mechanisms, which operators can compose to achieve their desired security posture. While the system is optimized around the full isolation model (VMs, agents, and workspaces), this is by no means required. Operators are free to use any subset that makes sense for their security and operational requirements.
-
-Composition runs the other way too. Because agents are Linux users and workspaces are Linux groups, granting _partial_ access costs no more than withholding it, which makes graduated privilege between cooperating agents a practical everyday pattern rather than a special case. A research agent can be created with workspace access and nothing else, gather material, and leave artifacts behind for a more privileged agent to act on, so the privileged agent never crawls untrusted content itself. Models built on container-per-agent isolation can express the separation, but pay for the sharing in volumes, networking, or an orchestrator; here both halves are ordinary filesystem permissions.
-
-A handoff like that narrows exposure rather than eliminating it. Whatever the low-privilege agent writes is still attacker-influenced input to whoever reads it next, so those artifacts are best treated as data to be evaluated, not as instructions to be followed.
-```
-
-`SECURITY_SECRETS` selects the second paragraph under `docs/why-agentworks.md` keypath
-`# Why Agentworks > ## Key Principles > ### Declarative Configuration and Templates`:
-
-```text
-Environment variables and secrets are first-class in the configuration: env tables can be declared at vm, workspace, admin, agent, or session scope and merge in a defined precedence order. Secret references (`{ secret: name }`) resolve through a configurable backend chain (`env-var` reads from an `AW_SECRET_*` env var; `prompt` asks interactively at run time). Use `agw env show` to inspect the merged result for any context. See [cli/README.md](../cli/README.md#environment-variables-and-secrets) for the shape, and `agw resource describe-kind secret` for the full reference.
-```
-
-The renderer rewrites that one repository-relative link to
-`https://github.com/WayfarerLabs/agentworks/blob/main/cli/README.md#environment-variables-and-secrets`.
-No other relative link is accepted in extracted content.
-
-`SECURITY_REPORTING` selects the first two paragraphs and following flat list under `SECURITY.md`
-keypath `# Security Policy > ## Reporting a Vulnerability`:
-
-```text
-If you believe you have found a security vulnerability in Agentworks, please report it privately rather than opening a public issue.
-
-Use GitHub's [private vulnerability reporting][gh-private] on this repository, or email the maintainer directly. Please include:
-
-- A description of the issue and the impact you believe it has.
-- Steps to reproduce (or a proof-of-concept, if applicable).
-- The version, commit, or branch you observed it on.
-- Any relevant configuration (sanitized of secrets).
-```
-
-The generated page follows the selected source with the exact external link label
-`GitHub private vulnerability reporting` and the exact permanent-policy link from section 2.
-
-### 4.3 Reporting-link contract
-
-`SECURITY.md` must contain exactly one reference definition named `gh-private`, and after whitespace
-canonicalization its URL must be exactly:
-
-```text
-https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing-information-about-vulnerabilities/privately-reporting-a-security-vulnerability
-```
-
-The selected reporting paragraph must contain exactly one
-`[private vulnerability reporting][gh-private]` reference. The generated inline anchor and the
-explicit `GitHub private vulnerability reporting` anchor both use the parsed reference URL. Missing,
-duplicate, renamed, or changed definitions and label/definition drift are build errors. The builder
-does not synthesize an email address or a repository advisory URL that the source does not provide.
-
-## 5. Extraction, normalization, rendering, and errors
-
-Inputs are decoded as strict UTF-8 after rejecting a byte-order mark. Convert CRLF and bare CR to LF
-for matching. Heading matching strips only leading/trailing ASCII whitespace around the ATX heading
-text; it does not case-fold or discard inline markup. A section ends at the next heading of equal or
-higher level. Duplicate matching keypaths are errors.
-
-ATX headings inside fenced code do not participate in keypaths. The scanner recognizes a fence
-opened by up to three leading spaces followed by at least three matching backticks or tildes,
-ignores every line through a closing fence that uses the same character and at least the opening
-length, and fails on an unclosed fence. A heading-shaped shell comment inside a valid fence is
-therefore content, not structure.
-
-Within a selected section, the closed block grammar is:
-
-- paragraph: consecutive nonblank, non-heading, non-list lines joined with one ASCII space;
-- flat unordered list: hyphen-plus-space items whose indented continuation lines join with one ASCII
-  space;
-- blank line: exactly one separator between normalized blocks.
-
-Strip trailing ASCII spaces per line and surrounding blank lines. Do not normalize punctuation,
-Unicode, inline-code contents, or internal word spacing. Expected text in section 4 is already in
-this normalized form. A selected sequence must occur exactly once and match whole normalized blocks,
-not a substring. Text is rendered from the matched source blocks, never from the expected constant.
-
-The closed inline grammar accepts plain text, `**strong**`, `_emphasis_`, backtick code spans,
-inline HTTPS links, and the one reporting reference link. HTML, images, nested lists, blockquotes,
-ordered lists, fenced code, autolinks, malformed or nested inline constructs, non-HTTPS extracted
-links, and source reference definitions inside selected blocks are unsupported. Escape all plain
-text, code text, attributes, and link labels with the standard library before emitting the fixed
-`p`, `ul`, `li`, `strong`, `em`, `code`, and `a` elements. Extracted HTML is never evaluated.
-
-Every contract failure occurs before staging or replacing output. The error is a single line that
-starts `error:`, names the contract ID, source relative path, and heading keypath, and identifies
-one of: missing/unreadable input, invalid UTF-8 or byte-order mark, missing/duplicate heading,
-missing or duplicate expected block sequence, unsupported block or inline Markdown, invalid link,
-missing or duplicate reference definition, reporting-link drift, or rendering invariant failure.
-Template, base, manifest, staging, and output-ownership errors retain the same fail-closed behavior.
-Every failure before the installed-manifest commit point leaves an existing output tree
-byte-for-byte unchanged. Backup cleanup occurs after that point and follows section 9's warning
-contract.
-
-## 6. Closed template vocabulary
-
-Tokens use the existing `{{UPPER_SNAKE_CASE}}` spelling. Each content token occurs exactly once in
-its owning template; `SITE_BASE` occurs only in URL attributes and at least once per template. The
-builder rejects a missing required use, a duplicate content-token use, a token in an unapproved
-template, brace-like unknown text, or any token left after rendering.
-
-| Template        | Complete allowed vocabulary                                    |
-| --------------- | -------------------------------------------------------------- |
-| `index.html`    | `SITE_BASE`, `HOME_META_DESCRIPTION`, `HOME_IDENTITY`          |
-| `security.html` | `SITE_BASE`, `SECURITY_META_DESCRIPTION`, `SECURITY_THREATS`,  |
-|                 | `SECURITY_BOUNDARIES`, `SECURITY_POSTURE`, `SECURITY_SECRETS`, |
-|                 | `SECURITY_REPORTING`                                           |
-| `404.html`      | `SITE_BASE`                                                    |
-
-The interim notice, headings, metadata, and destination labels are literal reviewed template text,
-not general-purpose substitutions. There is deliberately no `BOOTSTRAP`, `ONBOARDING`, `COPY`,
-conditional, include, loop, or arbitrary-key token.
-
-## 7. Semantic documents and future insertion point
-
-All pages have `lang="en"`, UTF-8 and viewport metadata, one descriptive title, one meta
-description, one canonical link, a visible skip link, `header`, `main`, and `footer`, and exactly
-one `h1`. Home uses title `Agentworks`, its canonical URL from section 2, and a plain-text,
-attribute-escaped `HOME_META_DESCRIPTION` derived from only the first paragraph of `HOME_IDENTITY`.
-Security uses title `Security | Agentworks`, its canonical URL from section 2, and
-`SECURITY_META_DESCRIPTION` derived from the opening paragraph of `SECURITY_THREATS`. Metadata
-transformation removes accepted inline Markdown delimiters while preserving their decoded text,
-joins source lines with the section 5 paragraph rule, and performs no truncation or rewriting. These
-metadata tokens are alternate renderings of the same selected source blocks, not independently owned
-claims.
-
-Each document also carries this exact meta-delivered content security policy:
-
-```text
-default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'
-```
-
-Inline style permission is limited to CSS because the accepted 404 controller writes dynamic lander
-custom properties; scripts remain same-origin and connections remain disabled. Security and 404
-retain the linked AGW header image with the accessible name `Agentworks home`; their small navs
-contain ordinary anchors and no menu control. Home instead uses a text-only header so the selected
-mark appears once as the prominent content image and the four product destinations are not repeated.
-
-The 404 keeps title `Page not found | Agentworks`, uses meta description
-`The requested Agentworks page was not found.`, and has canonical URL
-`https://agentworks.build/404.html`.
-
-The home outline and source placement are exact:
-
-```text
-header: text-only project label; no anchor
-main
-  section.identity-panel[aria-labelledby=home-heading]
-    img.hero-mark: selected AGW rocket; accessible name "AGW rocket mark"
-    h1#home-heading: Agentworks
-    HOME_IDENTITY
-  section#onboarding[aria-labelledby=onboarding-heading]
-    h2#onboarding-heading: Guided onboarding
-    p#onboarding-availability: exact interim notice
-  nav[aria-label="Explore Agentworks"]
-    exactly one anchor each for repository, package, rationale, and secondary exact security link
-footer: text-only repository identity; no anchor
-```
-
-The skip link is the only additional home-page anchor. Each four-destination URL occurs exactly once
-in source and generated markup with its bound section 3 label. No header, footer, alternate label,
-image link, or repeated call to action targets one of them. There is no `#problem` or `#principles`
-section and no corresponding home template token.
-
-`section#onboarding` is the future bootstrap insertion point. It is useful and nonempty now. The
-later integration keeps the section and heading relationship, deletes `p#onboarding-availability`,
-and supplies the reviewed canonical subtree. No hidden node, comment, token, CSS selector named for
-bootstrap, fixed height, or reserved copy-control location exists in the interim artifact.
-
-The security outline is exact:
-
-```text
-header: linked brand; Home, GitHub, and PyPI navigation
-main
-  h1: Security at Agentworks
-  section#threat-model > h2: Threat model; SECURITY_THREATS
-  section#boundaries > h2: Boundaries and current limitations; SECURITY_BOUNDARIES
-  section#operator-posture > h2: Operator posture; SECURITY_POSTURE
-  section#credentials > h2: Credentials and secrets; SECURITY_SECRETS
-  section#reporting > h2: Report a vulnerability; SECURITY_REPORTING and reporting links
-footer: Return to agentworks.build
-```
-
-The 404 retains `brand-and-lander-lld.md` section 4's outline, hooks, fallback, names, and focus
-contract. Adding shared CSS and metadata must not reorder or nest its error and game landmarks.
-
-## 8. Responsive workbench visual system
-
-`site.css` owns the shared single light theme. Exact color tokens are:
-
-| Token           | Value     | Use                                                         |
-| --------------- | --------- | ----------------------------------------------------------- |
-| `--canvas`      | `#f5f2e8` | Page and scene sky                                          |
-| `--panel`       | `#ebe7dc` | Bounded content regions                                     |
-| `--ink`         | `#292b30` | Body text and recognizable underlined links                 |
-| `--ink-muted`   | `#4b4e55` | Secondary text, borders on canvas                           |
-| `--line-subtle` | `#8a867c` | Non-text dividers and decorative details only               |
-| `--accent`      | `#d94a1e` | Focus, rules, and non-text emphasis, never normal-size text |
-| `--hot`         | `#ffe09a` | Existing plume core on graphite only                        |
-| `--status`      | `#7de2c5` | Existing powered NOC indicators on `#20232a` only           |
-
-Pinned computed contrasts include ink/canvas `12.646:1`, muted/canvas `7.440:1`, subtle/canvas
-`3.243:1`, accent/canvas `3.789:1`, ink/panel `11.464:1`, hot/ink `11.049:1`, and status/NOC
-`10.153:1`. Necessary boundaries and the three-pixel focus outline meet 3:1; all normal text meets
-4.5:1. Links remain ink-colored, underlined, and distinguishable without color.
-
-Body copy uses `system-ui, sans-serif`. Status labels, eyebrow text, compact nav details, and inline
-code use `ui-monospace, "Cascadia Code", "Liberation Mono", Menlo, monospace`. The layout has no
-window controls, prompt glyphs, CRT treatment, green-on-black palette, decorative command text, or
-keyboard-only affordance. Terminal influence comes only from crisp one-pixel panels, short uppercase
-labels with `0.08em` tracking, aligned metadata, compact density, and monospace accents.
-
-The content frame is `width: min(100%, 60rem)` with `margin-inline: auto` and page padding
-`clamp(1rem, 4vw, 3rem)`. Paragraph measure is at most `68ch`. At `min-width: 48rem`, the identity
-and exploration regions may use a two-column grid with a minimum track of zero; every other content
-flow remains readable in source order. Below 48rem all regions are one column. Panels use fluid
-padding `clamp(1rem, 3vw, 2rem)` and spacing, never fixed heights.
-
-The small security/404 brand image keeps its `1.6rem` by `2.4rem` presentation box. The landing hero
-uses `width: clamp(3.2rem, 12vw, 4.8rem)` and `height: clamp(4.8rem, 18vw, 7.2rem)`, exactly two to
-three times that original box across supported widths. `object-fit: contain` preserves the selected
-asset. The hero precedes its `h1` in the identity panel and neither is fixed-positioned. Home alone
-uses compact main spacing of `gap: clamp(1.5rem, 4vw, 2.75rem)` and
-`padding-block: clamp(1.5rem, 5vw, 3.5rem)`; security and 404 retain their accepted density.
-
-Global `box-sizing: border-box`, `min-width: 0` on grid/flex children, wrapping nav,
-`overflow-wrap: anywhere` for literal URLs, responsive SVGs, and no fixed content width prevent
-page-level horizontal scrolling at 320 CSS pixels and 400 percent zoom. The lander keeps its pinned
-25:16 scene and 44 CSS pixel start target. No horizontal content scroller is introduced. Motion
-remains limited to the accepted 404 and is suppressed per its reduced-motion contract; home and
-security are motion-free.
-
-## 9. Builder CLI, output, and site-base transition
-
-The full build command is:
-
-```text
-python3 website/build.py --repo-root ROOT --output OUT --site-base BASE
-```
-
-The accepted focused seam remains:
-
-```text
-python3 website/build.py --only 404 --repo-root ROOT --output OUT --site-base BASE
-```
-
-All three paths are required. `--only` has the sole allowed value `404`; omitting it means the full
-site. The existing slash-bounded ASCII site-base grammar remains unchanged. `/` is used for local
-and custom-domain builds. `/agentworks/` is used at the default project Pages URL. In the Pages
-workflow, the current `configure-pages` base-path output is normalized to this grammar and passed to
-the same CLI, so attaching the custom domain changes the deployment input to `/` without a source
-template, release flag, or alternate artifact path. An empty, absolute, URL-like, or unbounded base
-fails.
-
-The full output tree is exactly:
-
-```text
-OUT/
-  404.html
-  index.html
-  assets/agw-rocket.svg
-  security/index.html
-  static/lander-game.js
-  static/lander-model.js
-  static/lander.css
-  static/site.css
-```
-
-The focused build extends Phase 2's artifact with the shared stylesheet and has this exact six-file
-tree: `404.html`, `assets/agw-rocket.svg`, `static/lander-game.js`, `static/lander-model.js`,
-`static/lander.css`, and `static/site.css`. The full manifest is explicit in `build.py`; recursive
-source copying is forbidden. Render into a fresh sibling temporary directory, verify exact
-regular-file paths, and reject symlinks and special entries before touching the destination. Replace
-only an absent output or an existing real directory whose entries are a subset of the selected
-manifest. Continue rejecting output at or beneath the repository root.
-
-Replacement uses a sibling backup as a commit protocol. When output exists, rename it to a fresh
-backup, rename the verified staging directory to output, verify the installed manifest, and only
-then delete the backup. If staging installation or installed-manifest verification fails, remove an
-incomplete new output if present and rename the untouched backup back to the original path before
-reporting the error. Failures before the first rename leave output untouched. Tests inject failure
-at each rename and verification boundary and assert exact restoration. Installed-manifest
-verification is the commit point. Backup cleanup failure after that point leaves the installed
-output valid, exits successfully, and emits one `warning:` line naming the retained sibling backup;
-it is not recast as a failed build.
-
-No source write, output escape, inherited unknown file, timestamp, commit ID, environment-dependent
-prose, or nondeterministic ordering enters output bytes. For the same input bytes and arguments,
-every generated and copied file is byte-identical.
-
-Every cross-document local URL in HTML is `SITE_BASE` plus a root-relative artifact path without a
-leading slash. Root navigation is exactly `SITE_BASE`; security navigation is
-`SITE_BASE + "security/"`. Each skip link is the same-document fragment `#main-content`, so the 404
-served for an arbitrary missing URL does not reload through `/404.html`; the builder verifies that
-the fragment resolves in its owning document. Canonical and approved external anchors are absolute
-HTTPS URLs and are not base-prefixed. Full build verification resolves every cross-document local
-reference against the output manifest for both `/` and `/agentworks/`.
-
-## 10. Interim verification matrix
-
-| Layer                              | Required automated or manual evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Source selection                   | Every section 4 happy path; identity-backed home metadata; no home problem/principles contract; long-rationale changes leave home bytes unchanged; missing/duplicate/reordered headings; heading-shaped fenced-code canary and unclosed fence; expected passage missing/duplicated/drifted; CRLF normalization; invalid UTF-8 and byte-order mark; unsupported Markdown; escaping of `<`, `>`, `&`, quotes, and code; source reordering outside a selected section does not fail.          |
-| Reporting                          | Exact `gh-private` definition and selected reference; missing, duplicate, renamed, non-HTTPS, or changed URL fails; both generated reporting anchors use the parsed URL; permanent policy link is exact.                                                                                                                                                                                                                                                                                   |
-| Template contract                  | Per-template closed token sets and counts; exact home href/normalized-visible-label mappings and a swapped-label canary; `security-link` bound only to the security destination with moved/duplicate-class canaries; home destination URLs exactly once each; unknown, missing, duplicate, wrong-template, brace-like, and unexpanded tokens fail; extracted fragments are escaped and cannot create script, style, event-handler, or template markup.                                     |
-| Builder and manifest               | Full and focused CLI shapes; root and `/agentworks/` bases; invalid bases; clean deterministic builds; exact trees; safe replacement; unknown file, symlink, and special-entry refusal; output and staging remain outside the repository; injected rename/verification failures restore exact existing output; no Git status residue.                                                                                                                                                      |
-| Interim guards                     | Exact availability notice exists once in ordinary markup; `#onboarding` is nonempty; no `pre` in home, copy/clipboard selector or script, bootstrap token/comment, disabled control, `uv tool install`, `pipx install`, `git clone`, `agw config init`, or alternative release mode; home and security contain no script, while 404 contains only its same-origin module.                                                                                                                  |
-| DOM and links                      | HTML language, titles, descriptions, canonicals, skip links, landmarks, one `h1`, nested heading order, named navs, duplicate IDs, useful labels, exact URLs, home hero, absent problem/principles sections, one home anchor per repository/package/rationale/security destination, no repeated header/footer destinations, secondary security link, reporting links, 404 fallback, and all local references at both bases. Run assertions against parsed generated HTML, not regex alone. |
-| Runtime and privacy                | No remote CSS/font/image/script, analytics, form, cookie, storage, service worker, fetch, XHR, WebSocket, EventSource, beacon, or client routing. External anchors opened in a new context, if any, use `rel="noopener noreferrer"`; same-context links need no `target`.                                                                                                                                                                                                                  |
-| CSS and accessibility              | Token values and computed contrast; three-pixel visible focus; underline independent of color; source/logical tab order; two-to-three-times responsive home hero; 44 CSS pixel lander target; no required motion; reduced-motion 404 behavior; terminal/TUI cues present without fake-terminal signatures.                                                                                                                                                                                 |
-| Responsive manual                  | Chromium, Firefox, and WebKit at 320 CSS pixels, 400 percent zoom, touch landscape, and wide desktop: no page overflow, clipped text/nav, overlap, fixed-height loss, covered home link, or terminal-familiarity dependency.                                                                                                                                                                                                                                                               |
-| Assistive and clean-context manual | Screen-reader landmarks, headings, links, 404 status/focus, and hidden game controls. A newcomer identifies the product and interim availability and chooses repository, package, rationale, or security without explanation; record timing and intervention.                                                                                                                                                                                                                              |
-
-Run existing Node and Python lander suites unchanged, the new standard-library shell suite, and
-`./scripts/lint-files.sh --fix`. The final check builds to a fresh temporary directory and confirms
-the repository status contains no generated artifact.
-
-## 11. Traceability and handoff
-
-| Requirement or decision                                | Pinned by                                       |
-| ------------------------------------------------------ | ----------------------------------------------- |
-| R10, C5, D10: honest removable interim state           | Sections 1, 3, 7, 9, and 10                     |
-| R11, D1/D3: sourced security depth and reporting       | Sections 2-7 and 10                             |
-| R13, D5: restrained terminal/TUI-derived language      | Section 8 and the CSS/manual rows in section 10 |
-| AC9/AC14: no substitute onboarding and useful choices  | Sections 3, 7, and 10                           |
-| AC11: stable optional security path and sourced claims | Sections 2-7 and 10                             |
-| AC13: semantic, responsive, recognizable shared shell  | Sections 7, 8, and 10                           |
-| R14/AC15: compact home, unique links, dominant hero    | Sections 2-4, 6-8, and 10                       |
-
-Phase 4A refines this interim contract without changing the security or 404 routes. Phase 7 must
-re-read merged onboarding sources and write its own integration LLD before removing the notice.
-Permanent source, tests, and runbook must stand on their own and must not link back to this
-temporary SDD.
+The manual browser checklist remains a release gate because unit tests do not prove physical touch
+feel, spoken screen-reader quality, or engine-specific reflow.

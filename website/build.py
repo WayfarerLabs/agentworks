@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import html
 import os
 import re
@@ -31,7 +32,29 @@ INTERIM_NOTICE: Final = (
 
 REPOSITORY_URL: Final = "https://github.com/WayfarerLabs/agentworks"
 RATIONALE_URL: Final = f"{REPOSITORY_URL}/blob/main/docs/why-agentworks.md"
+README_SOURCE_URL: Final = f"{REPOSITORY_URL}/blob/main/README.md"
+IDEMPOTENCY_URL: Final = f"{REPOSITORY_URL}/blob/main/docs/guides/idempotency.md"
 CLI_SECRETS_URL: Final = f"{REPOSITORY_URL}/blob/main/cli/README.md#environment-variables-and-secrets"
+PYPI_URL: Final = "https://pypi.org/project/agentworks-cli/"
+MANIFESTO_SOURCE_SHA256: Final = "dba90181c0c3fca415d965ac4eb3933525044ffe560ec1ef2561be83e875d207"
+MANIFESTO_HEADINGS: Final = (
+    (1, "Why Agentworks"),
+    (2, "The Problem Space"),
+    (3, "Security"),
+    (3, "Workload Management"),
+    (3, "Consistency"),
+    (3, "Control"),
+    (2, "Key Principles"),
+    (3, "Opinionated Consistency"),
+    (3, "Composable Isolation"),
+    (3, "Ephemerality"),
+    (3, "Declarative Configuration and Templates"),
+)
+SOURCE_RELATIVE_URLS: Final = {
+    "../README.md": README_SOURCE_URL,
+    "guides/idempotency.md": IDEMPOTENCY_URL,
+    "../cli/README.md#environment-variables-and-secrets": CLI_SECRETS_URL,
+}
 REPORTING_URL: Final = (
     "https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing-"
     "information-about-vulnerabilities/privately-reporting-a-security-vulnerability"
@@ -39,29 +62,44 @@ REPORTING_URL: Final = (
 APPROVED_EXTERNAL_URLS: Final = frozenset(
     {
         "https://agentworks.build/",
+        "https://agentworks.build/manifesto/",
         "https://agentworks.build/security/",
         "https://agentworks.build/404.html",
         REPOSITORY_URL,
-        "https://pypi.org/project/agentworks-cli/",
+        PYPI_URL,
         RATIONALE_URL,
+        README_SOURCE_URL,
+        IDEMPOTENCY_URL,
         f"{REPOSITORY_URL}/security/policy",
         f"{REPOSITORY_URL}/issues/224",
         CLI_SECRETS_URL,
         REPORTING_URL,
     }
 )
-LANDING_DESTINATION_LABELS: Final = {
-    REPOSITORY_URL: "View the GitHub repository",
-    "https://pypi.org/project/agentworks-cli/": "View the PyPI package",
-    RATIONALE_URL: "Read why Agentworks is built this way",
-    f"{SITE_BASE_TOKEN}security/": "We take security seriously.",
+SHELL_DESTINATION_LABELS: Final = {
+    REPOSITORY_URL: "GitHub",
+    PYPI_URL: "PyPI",
+    f"{SITE_BASE_TOKEN}manifesto/": "Agentworks Manifesto",
+    f"{SITE_BASE_TOKEN}security/": "We take security seriously",
 }
-SECURITY_LINK_CLASS: Final = "security-link"
+CURRENT_PAGE_LABELS: Final = {
+    "index.html": "Home",
+    "manifesto.html": "Manifesto",
+    "security.html": "Security",
+    "404.html": "404",
+}
+TEMPLATE_METADATA: Final = {
+    "index.html": ("Agentworks", "https://agentworks.build/"),
+    "manifesto.html": ("Agentworks Manifesto", "https://agentworks.build/manifesto/"),
+    "security.html": ("Security | Agentworks", "https://agentworks.build/security/"),
+    "404.html": ("Page not found | Agentworks", "https://agentworks.build/404.html"),
+}
 
 FULL_MANIFEST: Final = frozenset(
     {
         Path("404.html"),
         Path("index.html"),
+        Path("manifesto/index.html"),
         Path("assets/agw-rocket.svg"),
         Path("security/index.html"),
         Path("static/lander-game.js"),
@@ -112,6 +150,14 @@ class ContentContract(NamedTuple):
     @property
     def keypath_text(self) -> str:
         return " > ".join(f"{'#' * level} {text}" for level, text in self.keypath)
+
+
+MANIFESTO_CONTRACT: Final = ContentContract(
+    "MANIFESTO",
+    Path("docs/why-agentworks.md"),
+    ((1, "Why Agentworks"),),
+    (),
+)
 
 
 def paragraph(value: str) -> Block:
@@ -260,6 +306,11 @@ TEMPLATE_TOKENS: Final = {
         "{{HOME_META_DESCRIPTION}}",
         "{{HOME_IDENTITY}}",
     },
+    "manifesto.html": {
+        SITE_BASE_TOKEN,
+        "{{MANIFESTO_META_DESCRIPTION}}",
+        "{{MANIFESTO_CONTENT}}",
+    },
     "security.html": {
         SITE_BASE_TOKEN,
         "{{SECURITY_META_DESCRIPTION}}",
@@ -274,17 +325,9 @@ TEMPLATE_TOKENS: Final = {
 TEMPLATE_REQUIRED_LITERALS: Final = {
     "index.html": {
         "Guided onboarding is not yet published. You can still explore the repository, PyPI package,",
-        "View the GitHub repository",
-        "View the PyPI package",
-        "Read why Agentworks is built this way",
-        "We take security seriously.",
-        f'href="{REPOSITORY_URL}"',
-        'href="https://pypi.org/project/agentworks-cli/"',
-        f'href="{RATIONALE_URL}"',
     },
+    "manifesto.html": {"Agentworks Manifesto"},
     "security.html": {
-        f'href="{REPOSITORY_URL}"',
-        'href="https://pypi.org/project/agentworks-cli/"',
         f'href="{REPORTING_URL}"',
         f'href="{REPOSITORY_URL}/security/policy"',
     },
@@ -294,6 +337,10 @@ CONTENT_TOKEN_PLACEMENTS: Final = {
     "index.html": {
         "{{HOME_META_DESCRIPTION}}": ("meta", "description"),
         "{{HOME_IDENTITY}}": ("section-class", "identity-panel"),
+    },
+    "manifesto.html": {
+        "{{MANIFESTO_META_DESCRIPTION}}": ("meta", "description"),
+        "{{MANIFESTO_CONTENT}}": ("article-class", "manifesto-content sourced-content"),
     },
     "security.html": {
         "{{SECURITY_META_DESCRIPTION}}": ("meta", "description"),
@@ -517,8 +564,8 @@ def _render_inline(value: str, contract: ContentContract, references: dict[str, 
                 if destination != "gh-private" or destination not in references:
                     raise ContractError(contract, "invalid link")
                 destination = references[destination]
-            elif destination == "../cli/README.md#environment-variables-and-secrets":
-                destination = CLI_SECRETS_URL
+            elif destination in SOURCE_RELATIVE_URLS:
+                destination = SOURCE_RELATIVE_URLS[destination]
             elif not destination.startswith("https://"):
                 raise ContractError(contract, "invalid link")
             result.append(f'<a href="{html.escape(destination, quote=True)}">{escaped}</a>')
@@ -537,6 +584,48 @@ def _render_blocks(blocks: tuple[Block, ...], contract: ContentContract, referen
         else:
             raise ContractError(contract, "unsupported block or inline Markdown")
     return "\n".join(rendered)
+
+
+def _heading_id(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+
+
+def _render_manifesto(source: str) -> tuple[str, str]:
+    lines = source.split("\n")
+    fenced = _fenced_line_indexes(source, MANIFESTO_CONTRACT)
+    headings: list[tuple[int, str, int]] = []
+    for index, line in enumerate(lines):
+        if index in fenced:
+            continue
+        match = HEADING_PATTERN.match(line)
+        if match:
+            headings.append((len(match.group(1)), match.group(2).strip(" \t"), index))
+    if tuple((level, text) for level, text, _ in headings) != MANIFESTO_HEADINGS:
+        raise ContractError(MANIFESTO_CONTRACT, "heading structure drift")
+    if hashlib.sha256(source.encode()).hexdigest() != MANIFESTO_SOURCE_SHA256:
+        raise ContractError(MANIFESTO_CONTRACT, "content drift")
+
+    rendered: list[str] = []
+    first_body = headings[0][2] + 1
+    for position, (level, heading, line_index) in enumerate(headings):
+        next_index = headings[position + 1][2] if position + 1 < len(headings) else len(lines)
+        if level > 1:
+            rendered.append(f'<h{level} id="{_heading_id(heading)}">{html.escape(heading)}</h{level}>')
+        body_start = first_body if position == 0 else line_index + 1
+        blocks = tuple(_normalized_blocks(lines[body_start:next_index]))
+        rendered_blocks = _render_blocks(blocks, MANIFESTO_CONTRACT, {})
+        if rendered_blocks:
+            rendered.append(rendered_blocks)
+
+    output = "\n".join(rendered)
+    for source_relative in SOURCE_RELATIVE_URLS:
+        if f'href="{html.escape(source_relative, quote=True)}"' in output:
+            raise ContractError(MANIFESTO_CONTRACT, "unexpanded source-relative link")
+    intro_blocks = tuple(_normalized_blocks(lines[first_body : headings[1][2]]))
+    if not intro_blocks or intro_blocks[0].kind != "paragraph":
+        raise ContractError(MANIFESTO_CONTRACT, "missing introduction")
+    description = html.escape(_plain_inline(str(intro_blocks[0].value), MANIFESTO_CONTRACT, {}), quote=True)
+    return output, description
 
 
 def _plain_inline(value: str, contract: ContentContract, references: dict[str, str]) -> str:
@@ -579,6 +668,8 @@ def extract_content(repo_root: Path) -> dict[str, str]:
     rendered["SECURITY_META_DESCRIPTION"] = html.escape(
         _plain_inline(str(security_threat_blocks[0].value), security_threats, references), quote=True
     )
+    manifesto_source = sources[Path("docs/why-agentworks.md")]
+    rendered["MANIFESTO_CONTENT"], rendered["MANIFESTO_META_DESCRIPTION"] = _render_manifesto(manifesto_source)
     return rendered
 
 
@@ -661,6 +752,150 @@ class _TemplatePlacementParser(HTMLParser):
                 self.exact_text_placements.add(token)
 
 
+class _ShellParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.stack: list[tuple[str, dict[str, str | None], int]] = []
+        self.elements: list[
+            tuple[str, dict[str, str | None], tuple[tuple[str, dict[str, str | None]], ...], list[str]]
+        ] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = _attribute_map(tag, attrs)
+        ancestors = tuple((name, values) for name, values, _ in self.stack)
+        self.elements.append((tag, attributes, ancestors, []))
+        self.stack.append((tag, attributes, len(self.elements) - 1))
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = _attribute_map(tag, attrs)
+        ancestors = tuple((name, values) for name, values, _ in self.stack)
+        self.elements.append((tag, attributes, ancestors, []))
+
+    def handle_endtag(self, tag: str) -> None:
+        for index in range(len(self.stack) - 1, -1, -1):
+            if self.stack[index][0] == tag:
+                del self.stack[index:]
+                return
+
+    def handle_data(self, data: str) -> None:
+        for _, _, element_index in self.stack:
+            self.elements[element_index][3].append(data)
+
+
+def _normalized_text(parts: list[str]) -> str:
+    return " ".join("".join(parts).split())
+
+
+def _has_ancestor(
+    ancestors: tuple[tuple[str, dict[str, str | None]], ...], tag: str, **attributes: str
+) -> bool:
+    return any(name == tag and all(values.get(key) == value for key, value in attributes.items()) for name, values in ancestors)
+
+
+def _validate_shared_shell(name: str, template: str) -> None:
+    parser = _ShellParser()
+    parser.feed(template)
+    elements = parser.elements
+    anchors = [element for element in elements if element[0] == "a"]
+
+    expected_title, expected_canonical = TEMPLATE_METADATA[name]
+    titles = [element for element in elements if element[0] == "title" and _has_ancestor(element[2], "head")]
+    canonicals = [
+        element for element in elements if element[0] == "link" and element[1].get("rel") == "canonical"
+    ]
+    if len(titles) != 1 or _normalized_text(titles[0][3]) != expected_title:
+        raise ValueError(f"{name}: document title must be {expected_title!r}")
+    if len(canonicals) != 1 or canonicals[0][1].get("href") != expected_canonical:
+        raise ValueError(f"{name}: canonical URL must be {expected_canonical}")
+
+    skip_links = [element for element in anchors if element[1].get("href") == "#main-content"]
+    if (
+        len(skip_links) != 1
+        or skip_links[0][1].get("class") != "skip-link"
+        or _normalized_text(skip_links[0][3]) != "Skip to main content"
+    ):
+        raise ValueError(f"{name}: exactly one reviewed skip link is required")
+
+    expected_destinations = dict(SHELL_DESTINATION_LABELS)
+    expected_destinations[SITE_BASE_TOKEN] = "Agentworks"
+    for destination, label in expected_destinations.items():
+        matching = [element for element in anchors if element[1].get("href") == destination]
+        if len(matching) != 1 or _normalized_text(matching[0][3]) != label:
+            raise ValueError(f"{name}: destination {destination} must occur once with label {label!r}")
+
+    home_anchor = next(element for element in anchors if element[1].get("href") == SITE_BASE_TOKEN)
+    if not _has_ancestor(home_anchor[2], "header") or not _has_ancestor(
+        home_anchor[2], "nav", **{"aria-label": "Breadcrumb"}
+    ):
+        raise ValueError(f"{name}: Agentworks home crumb must be in the header breadcrumb")
+
+    for destination in (REPOSITORY_URL, PYPI_URL):
+        anchor = next(element for element in anchors if element[1].get("href") == destination)
+        if not _has_ancestor(anchor[2], "header") or not _has_ancestor(anchor[2], "nav", **{"aria-label": "External"}):
+            raise ValueError(f"{name}: service destination must be in the header External navigation")
+        icons = [
+            element
+            for element in elements
+            if element[0] == "svg"
+            and _has_ancestor(element[2], "a", href=destination)
+            and element[1].get("class") == "service-icon"
+        ]
+        if len(icons) != 1 or icons[0][1].get("aria-hidden") != "true" or icons[0][1].get("focusable") != "false":
+            raise ValueError(f"{name}: service destination requires one hidden decorative icon")
+
+    for destination in (f"{SITE_BASE_TOKEN}manifesto/", f"{SITE_BASE_TOKEN}security/"):
+        anchor = next(element for element in anchors if element[1].get("href") == destination)
+        if not _has_ancestor(anchor[2], "footer") or not _has_ancestor(anchor[2], "nav", **{"aria-label": "Footer"}):
+            raise ValueError(f"{name}: local depth destination must be in the footer navigation")
+
+    current = [element for element in elements if element[1].get("aria-current") == "page"]
+    if (
+        len(current) != 1
+        or current[0][0] == "a"
+        or _normalized_text(current[0][3]) != CURRENT_PAGE_LABELS[name]
+        or not _has_ancestor(current[0][2], "nav", **{"aria-label": "Breadcrumb"})
+    ):
+        raise ValueError(f"{name}: breadcrumb current-page state is invalid")
+    separators = [
+        element
+        for element in elements
+        if element[1].get("class") == "breadcrumb-separator"
+        and _has_ancestor(element[2], "nav", **{"aria-label": "Breadcrumb"})
+    ]
+    if len(separators) != 1 or separators[0][1].get("aria-hidden") != "true":
+        raise ValueError(f"{name}: breadcrumb requires one hidden visual separator")
+
+    header_marks = [element for element in elements if element[0] == "img" and element[1].get("class") == "header-mark"]
+    expected_marks = 0 if name == "index.html" else 1
+    if len(header_marks) != expected_marks:
+        raise ValueError(f"{name}: expected {expected_marks} small header mark(s)")
+    if header_marks and (
+        header_marks[0][1].get("alt") != ""
+        or not _has_ancestor(header_marks[0][2], "header")
+        or not _has_ancestor(header_marks[0][2], "div", **{"class": "header-identity"})
+    ):
+        raise ValueError(f"{name}: small header mark must be decorative and adjacent to the breadcrumb")
+    if header_marks:
+        mark_index = elements.index(header_marks[0])
+        next_element = elements[mark_index + 1] if mark_index + 1 < len(elements) else None
+        if (
+            next_element is None
+            or next_element[0] != "nav"
+            or next_element[1].get("class") != "breadcrumbs"
+            or next_element[2] != header_marks[0][2]
+        ):
+            raise ValueError(f"{name}: small header mark must be immediately left of the breadcrumb")
+
+    footer_paragraphs = [
+        element for element in elements if element[0] == "p" and _has_ancestor(element[2], "footer")
+    ]
+    ownership = [element for element in footer_paragraphs if _normalized_text(element[3]) == "Product of Wayfarer Labs, LLC"]
+    if len(ownership) != 1:
+        raise ValueError(f"{name}: footer ownership text is missing or duplicated")
+    if template.count("Product of Wayfarer Labs, LLC") != 1:
+        raise ValueError(f"{name}: footer ownership text must occur exactly once in the document")
+
+
 def _validate_content_token_placements(name: str, template: str) -> _TemplatePlacementParser:
     parser = _TemplatePlacementParser()
     parser.feed(template)
@@ -678,9 +913,14 @@ def _validate_content_token_placements(name: str, template: str) -> _TemplatePla
             ):
                 raise ValueError(f"{name}: metadata token {token} must be the exact description content attribute")
             continue
-        if kind != "text" or location != "div" or token not in parser.exact_text_placements:
+        allowed_locations = {"div"} if placement_kind != "article-class" else {"article"}
+        if kind != "text" or location not in allowed_locations or token not in parser.exact_text_placements:
             raise ValueError(f"{name}: block token {token} must be text in its sourced-content container")
         container = ancestors[-1][1]
+        if placement_kind == "article-class":
+            if container.get("class") != placement_value:
+                raise ValueError(f"{name}: block token {token} must be in the reviewed manifesto article")
+            continue
         if container.get("class") != "sourced-content":
             raise ValueError(f"{name}: block token {token} must be in an exact sourced-content container")
         section = next((attrs for tag, attrs in reversed(ancestors[:-1]) if tag == "section"), None)
@@ -706,24 +946,6 @@ def _validate_interim_template(name: str, parser: _TemplatePlacementParser) -> N
         raise ValueError("index.html: onboarding section must reference onboarding-heading")
     if parser.onboarding_headings != 1 or not onboarding_text:
         raise ValueError("index.html: onboarding must contain its nonempty reviewed heading and notice")
-    anchor_hrefs = [href for href, _, _ in parser.anchors]
-    if any(anchor_hrefs.count(destination) != 1 for destination in LANDING_DESTINATION_LABELS):
-        raise ValueError("index.html: each repository, package, rationale, and security destination is required once")
-    anchor_labels = {href: " ".join("".join(parts).split()) for href, _, parts in parser.anchors}
-    for destination, expected_label in LANDING_DESTINATION_LABELS.items():
-        if anchor_labels[destination] != expected_label:
-            raise ValueError(f"index.html: destination {destination} must use reviewed label {expected_label!r}")
-    security_destination = f"{SITE_BASE_TOKEN}security/"
-    security_attributes = next(attributes for href, attributes, _ in parser.anchors if href == security_destination)
-    class_owners = [
-        href
-        for href, attributes, _ in parser.anchors
-        if SECURITY_LINK_CLASS in str(attributes.get("class") or "").split()
-    ]
-    if security_attributes.get("class") != SECURITY_LINK_CLASS or class_owners != [security_destination]:
-        raise ValueError("index.html: security-link class must appear exactly on the security destination")
-    if len(anchor_hrefs) != 5 or anchor_hrefs.count("#main-content") != 1:
-        raise ValueError("index.html: landing anchors must be one skip link plus the four reviewed destinations")
 
 
 def _validate_template(name: str, template: str) -> None:
@@ -748,6 +970,7 @@ def _validate_template(name: str, template: str) -> None:
         raise ValueError(f"{name}: template is missing required reviewed literals: {missing_literals}")
     parser = _validate_content_token_placements(name, template)
     _validate_interim_template(name, parser)
+    _validate_shared_shell(name, template)
 
 
 def render_named_template(name: str, template: str, site_base: str, substitutions: dict[str, str]) -> str:
@@ -821,6 +1044,12 @@ def _validate_local_references(rendered: dict[Path, bytes], manifest: frozenset[
             elif target.endswith("/"):
                 target += "index.html"
             if Path(target) not in manifest:
+                if manifest == FOCUSED_MANIFEST and Path(target) in {
+                    Path("index.html"),
+                    Path("manifesto/index.html"),
+                    Path("security/index.html"),
+                }:
+                    continue
                 raise ValueError(f"{path}: local reference is absent from manifest: {reference}")
 
 
@@ -841,11 +1070,14 @@ def _render_artifact(repo_root: Path, site_base: str, focused: bool) -> tuple[di
     website = repo_root / "website"
     manifest = FOCUSED_MANIFEST if focused else FULL_MANIFEST
     substitutions = {} if focused else extract_content(repo_root)
-    template_names = ("404.html",) if focused else ("404.html", "index.html", "security.html")
+    template_names = ("404.html",) if focused else ("404.html", "index.html", "manifesto.html", "security.html")
     rendered: dict[Path, bytes] = {}
     for name in template_names:
         template = _read_utf8(website / "templates" / name)
-        destination = Path("security/index.html") if name == "security.html" else Path(name)
+        destination = {
+            "manifesto.html": Path("manifesto/index.html"),
+            "security.html": Path("security/index.html"),
+        }.get(name, Path(name))
         rendered[destination] = render_named_template(name, template, site_base, substitutions).encode()
     copies = {
         Path("assets/agw-rocket.svg"): website / "assets/agw-rocket.svg",
