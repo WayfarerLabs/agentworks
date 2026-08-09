@@ -139,6 +139,12 @@ README. Do not anticipate that interface or parse a branch-only wrapper.
 These one-time repository and organization settings require an operator with the relevant GitHub
 permissions. Record non-secret evidence when each action is completed.
 
+Pre-merge setting evidence, recorded 2026-08-09: repository Pages reports `build_type: workflow`,
+the default URL `https://wayfarerlabs.github.io/agentworks/`, HTTPS enforcement enabled, and no
+custom domain. The `github-pages` environment uses custom deployment-branch policies rather than all
+protected branches and has exactly one policy: branch `main`. No site deployment is expected until
+the publishing workflow first runs from a merged `main` commit.
+
 1. Set GitHub Pages to use GitHub Actions as its publishing source.
 2. Protect the `github-pages` environment so only the default branch can deploy.
 3. Merge the complete publishing workflow and verify the expected commit at the default Pages URL

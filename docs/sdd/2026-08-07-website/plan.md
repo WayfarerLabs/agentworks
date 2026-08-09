@@ -87,6 +87,10 @@ Operator evidence:
   accessibility-tree contracts, lifecycle, requests, storage, and clean-context comprehension with
   no product defect. Firefox, WebKit, spoken screen-reader quality, and physical touch/motion remain
   explicit pre-release checks because those surfaces are unavailable locally.
+- 2026-08-09: with operator approval, repository Pages is enabled with GitHub Actions as its source
+  at the default project URL and HTTPS enforcement on. The automatically created `github-pages`
+  environment uses custom deployment-branch policies and has exactly one policy, branch `main`; no
+  deployment occurs before the publishing workflow runs from a merged `main` commit.
 - 2026-08-09: as a narrow expansion from the original one-page scope, the operator adds a visually
   secondary `We take security seriously.` path to a dedicated security deep dive; the home page
   stays concise and non-preachy. The operator also requires the eventual onboarding disclosure to
@@ -214,7 +218,7 @@ review-clean, deterministic interim artifact that is ready to publish but makes 
 - [x] Ensure pull requests exercise the build without deploying or acquiring Pages write/OIDC
       permissions; verify the uploaded artifact contains only intended files and identifies the
       source commit.
-- [ ] Before merge, obtain operator approval to enable GitHub Actions as this repository's Pages
+- [x] Before merge, obtain operator approval to enable GitHub Actions as this repository's Pages
       source and restrict the `github-pages` environment to `main`; record the non-secret setting
       evidence in `website/README.md` and PR #439.
 - [x] Run workflow syntax checks, focused site tests, full repository CI-equivalent gates,
