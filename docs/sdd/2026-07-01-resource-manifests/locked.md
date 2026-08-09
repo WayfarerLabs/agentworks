@@ -313,9 +313,10 @@ per the post-lock exception so searches landing on these artifacts find the corr
 - **The TOML decode path is gone.** The declarative-schema phase 1 TOML sunset (PR #316) removed the
   frontend this SDD's loader parity was built against, and phase 2 (PR #414) moved schema authority
   to registration-time models, superseding this SDD's validation model.
-- **The combined `EnvEntry` model is retired** by the variant-modeling rework (PR #455, in review at
-  this writing): env entries are a structural plaintext-or-secret union, and the
-  `EnvEntry(secret=name)` construction `runtime-model-lld.md` line 152 describes no longer exists.
+- **The combined `EnvEntry` model is being retired** by the variant-modeling rework (PR #455,
+  approved and in final review at this writing): env entries become a structural plaintext-or-secret
+  union, and once that merges the `EnvEntry(secret=name)` construction `runtime-model-lld.md` line
+  152 describes will no longer exist.
 - **The secret provider/backend material predates the wave 3 secret-sources rework** (design
   converged on PR #453), which replaces the resolution model this SDD settled.
 
