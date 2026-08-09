@@ -238,14 +238,14 @@ the new command.
 
 ### Phase 9: acceptance, permanent records, and closeout
 
-- [ ] Re-run the source-only, simple-case, and no-leak global definitions against the full suite;
+- [x] Re-run the source-only, simple-case, and no-leak global definitions against the full suite;
       mutation-check the descriptor-derived map-host guard and retired-path guards.
-- [ ] Update remaining permanent capability/secrets docs and changelog/release-note surfaces for the
+- [x] Update remaining permanent capability/secrets docs and changelog/release-note surfaces for the
       exact behavior at HEAD. Add guide topic prose through the universal contract if present;
       otherwise record the approved deferral in this effort's `locked.md`, notify the onboarding
       lead/operator through the sanctioned cross-effort channel for Phase 4, and do not edit the
       onboarding SDD or add a temporary adapter.
-- [ ] Exercise the real CLI in an isolated configuration: implied env-var resolution, prompt
+- [x] Exercise the real CLI in an isolated configuration: implied env-var resolution, prompt
       refusal, `secret verify`, unknown direct `onepassword` remediation, and a declared OnePassword
       source without printing any secret value.
 - [ ] Run Green on every supported Python version through CI. Complete `agentworks-reviewer`,
