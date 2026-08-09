@@ -557,10 +557,10 @@ wins. You are never prompted for the same secret twice in one command, and all p
 front, before the command starts changing anything. The walk considers a candidate only when it is
 **present, enabled, ready, active, and would-attempt** the secret.
 
-A **not-ready** active source is **skipped with a warning**, and resolution continues with the
-next candidate. A _ready_ store's hard miss stops the chain so a bad mapping cannot fall through to
-a prompt. A secret no active source can resolve fails at preflight with a hint, before any prompt
-or mutation.
+A **not-ready** active source is **skipped with a warning**, and resolution continues with the next
+candidate. A _ready_ store's hard miss stops the chain so a bad mapping cannot fall through to a
+prompt. A secret no active source can resolve fails at preflight with a hint, before any prompt or
+mutation.
 
 Readiness is offline and honest; it sits UNDER the optimistic interactivity preview. A `prompt` (or
 a biometric `op`) is still previewed optimistically on would-attempt alone: the inspection surfaces

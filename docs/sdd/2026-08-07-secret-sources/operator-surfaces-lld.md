@@ -2,7 +2,7 @@
 
 <!-- cspell:ignore isatty ljust onepassword proxmox repr unresolvable -->
 
-- Status: Draft for Phase 6 review
+- Status: Reviewed and implemented
 - Scope: Phase 6 operator-surface contract, consumed by implementation Phases 7 and 8
 - Governing artifacts: [FRD](./frd.md), [HLA](./hla.md),
   [migration strategy](./migration-strategy.md), [source contract](./source-contract-lld.md), and

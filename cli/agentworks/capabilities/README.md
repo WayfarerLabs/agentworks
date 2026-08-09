@@ -715,8 +715,8 @@ deliberate specialization of the shared base, documented in
   [`git_credential/README.md`](git_credential/README.md) (sourcing and provisioning git credentials:
   the provider contract, the github and azdo providers, the credential-helper path), and
   [`secret_backend/README.md`](secret_backend/README.md) (source configuration, backend mappings,
-  bounded clients, and provider-failure translation). These guides
-  provide the kind-specific details needed for implementation and for tracing shipped behavior.
+  bounded clients, and provider-failure translation). These guides provide the kind-specific details
+  needed for implementation and for tracing shipped behavior.
 - **The orchestration layer** ([`../orchestration/README.md`](../orchestration/README.md)) is the
   companion on the framework side: how commands walk the node graph that holds capability instances,
   resolve their secrets once, order preflight and runup, and unwind on failure. It supplies the

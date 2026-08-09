@@ -1,9 +1,9 @@
 # HLA: Secret Sources
 
-- Status: Draft for pre-implementation review
+- Status: Implemented; post-ready fixes in progress
 - FRD: `docs/sdd/2026-08-07-secret-sources/frd.md`
 - Prior art: `docs/sdd/2026-08-07-secret-sources/prior-art-research.md`
-- Roadmap contract: `docs/sdd/2026-08-04-next-steps/capability-descriptor-contract.md`
+- Saga contract: `docs/sdd/2026-08-04-next-steps/capability-descriptor-contract.md`
 
 ## Architectural summary
 
@@ -163,8 +163,8 @@ The mapping contract also declares a JSON-native input domain. The common confor
 Python-only wire annotations (for example dates, bytes, sets, tuples, enums, custom classes, or
 non-string mapping keys), including nested occurrences, while allowing JSON primitives, string-keyed
 objects, arrays, literals, `Any`/`object`, and model composition. Validators may still reject any or
-every value—the prompt mapping intentionally does—so this guarantees the wire type vocabulary, not
-that a model is satisfiable.
+every value (the prompt mapping intentionally does), so this guarantees the wire type vocabulary,
+not that a model is satisfiable.
 
 Runtime validation is exact: resolve the mapping key to a `secret-source`, read that source's
 backend class, and validate the value against that class's `mapping_model`. Extraction follows the

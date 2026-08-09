@@ -1,17 +1,17 @@
 # FRD: Secret Sources (Wave 3)
 
-- Status: Seed, ready for an effort lead
+- Status: Implemented; post-ready fixes in progress
 - Date: 2026-08-07
-- Seeded by: the roadmap lead. This is the roadmap's wave 3 child
-  (`docs/sdd/2026-08-04-next-steps/`), unblocked by wave 2's landing (PR #414): the per-source
-  config model wants the schema machinery, and the descriptor carries the interim exception this
-  wave removes. The effort lead owns the HLA and plan; the roadmap lead reviews PRs. Per the sdd
-  skill, this FRD becomes the effort lead's on merge of this seeding PR.
+- Seeded by: the saga lead. This is the saga's wave 3 child (`docs/sdd/2026-08-04-next-steps/`),
+  unblocked by wave 2's landing (PR #414): the per-source config model wants the schema machinery,
+  and the descriptor carries the interim exception this wave removes. The effort lead owns the HLA
+  and plan; the saga lead reviews PRs. Per the sdd skill, this FRD becomes the effort lead's on
+  merge of this seeding PR.
 
 ## Purpose
 
-Secrets get the two-level model the roadmap settled: a `secret-backend` is the implementation kind
-(the `vm-platform` analog), and a `secret-source` is a declarable configured instance of one (the
+Secrets get the two-level model the saga settled: a `secret-backend` is the implementation kind (the
+`vm-platform` analog), and a `secret-source` is a declarable configured instance of one (the
 `vm-site` analog), exposing key-value secrets through that backend with per-source config. This ends
 the constructed-singleton special case, makes multi-account and multi-vault setups declarable, and
 evolves the resolution API from boolean-shaped answers to typed outcomes. The code already names
@@ -102,8 +102,8 @@ parameters (scopes, repos, permissions) are creation specifications in the crede
 lookup addresses in the secret's; the per-secret mapping stays addressing, never specification. This
 wave inherits the ruling as a scope guard: do not grow the source abstraction toward
 domain-parameterized value creation. The git-credential one-arm union restructure lands separately
-before the 0.14.0 cut (tracked in the roadmap's release mapping) so minting later arrives as a
-purely additive arm.
+before the 0.14.0 cut (tracked in the saga's release mapping) so minting later arrives as a purely
+additive arm.
 
 ## Open questions for the effort lead
 

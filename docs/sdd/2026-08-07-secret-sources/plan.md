@@ -1,6 +1,6 @@
 # Plan: Secret Sources
 
-- Status: Locked
+- Status: Active: post-ready review fixes
 - FRD: [frd.md](./frd.md)
 - Architecture: [hla.md](./hla.md)
 - Migration: [migration-strategy.md](./migration-strategy.md)
@@ -259,3 +259,22 @@ the new command.
 **Definition of done:** every FRD acceptance criterion is demonstrated, permanent documentation is
 truthful without this SDD, the feature directory locks with the final code, and no migration bridge
 remains.
+
+### Phase 10: post-ready integration and security review fixes
+
+- [ ] Integrate current `main`, consume the saga rename message, resolve every merge conflict while
+      preserving both contracts, and update current artifact status and terminology.
+- [ ] Replace persisted Lima Tailscale-key delivery with an ephemeral boundary, pin prompt-broker
+      scoping, reject retired module identities, and preserve disabled-plugin remediation through
+      source outcomes.
+- [ ] Publish the interaction broker deliberately, complete source vocabulary/readiness teaching,
+      split the oversized Phase 7 enforcement suite, and mark literal caller pins for the planned
+      post-0.14 consolidation pass.
+- [ ] Run focused mutations, Green, provider-faithful persistence checks, live remote-Lima
+      validation with independent cleanup, all supported-version CI, and full re-review.
+- [ ] Re-truth `locked.md` for the final implementation and residuals, then leave PR #453 ready and
+      mergeable with no valid finding unresolved.
+
+**Definition of done:** no resolved credential is persisted by Lima, every reviewed security
+boundary is non-vacuously enforced, current `main` is integrated, and the final lock describes the
+tested merge candidate.

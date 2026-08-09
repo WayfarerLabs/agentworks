@@ -89,9 +89,9 @@ implementation PR. There is no additional remote planning or phase branch.
 Release PR #402 (`chore(main): release 0.14.0`) was already open before Secret Sources reached its
 final feature commits, so its generated notes do not yet include this intentional break. Do not edit
 or push that release branch from this effort. After #453 merges, the release record must refresh
-from the `BREAKING CHANGE:` footer before 0.14.0 is published. The roadmap owner has also recorded
-in PR discussion that the breaking-content ledger needs the same next-round update; this feature
-does not edit the roadmap SDD.
+from the `BREAKING CHANGE:` footer before 0.14.0 is published. The saga owner has also recorded in
+PR discussion that the breaking-content ledger needs the same next-round update; this feature does
+not edit the saga SDD.
 
 ## Honest residual work
 
