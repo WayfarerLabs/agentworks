@@ -126,13 +126,16 @@ def test_migration_actions_make_inventory_backups_and_verification_distinct() ->
     assert "config.toml declares resources" in validation.expected_state
     assert "config.toml is settings only now" in validation.expected_state
     assert "names the retained sections" in validation.expected_state
-    assert "may exit 1 for that expected Config failure" in validation.expected_state
-    assert "parse its one document even when it also exits 1" in validation.expected_state
+    assert "Both the human command and JSON verification must exit 1" in validation.expected_state
+    assert "parse its one document" in validation.expected_state
     assert "data.groups contains the Configuration group" in validation.expected_state
+    assert "Config file with status ok" in validation.expected_state
+    assert "Config with status fail" in validation.expected_state
     assert "no check named Manifest or Resource registry" in validation.expected_state
     assert "with status warn or fail" in validation.expected_state
     assert "cannot distinguish the expected Config failure" in validation.expected_state
-    assert "prove structure, not precise diagnostic detail" in validation.expected_state
+    assert "only corroborates that stable structural state" in validation.expected_state
+    assert "do not prove precise diagnostic detail" in validation.expected_state
 
     comparison = by_id["compare-operator-inventory"]
     assert comparison.consent is ConsentBoundary.EXAMINE_WORKSTATION
@@ -288,9 +291,14 @@ def test_migration_teaching_covers_cutover_validation_backends_and_auth_choices(
         "`config.toml` is settings only now",
         "name the retained sections",
         "`Resource registry` rows for precise diagnostics",
+        "Both this human command and the JSON verification",
+        "must exit `1` for the retained-section checkpoint",
+        "`Config file` with status `ok`",
+        "`Config` with status `fail`",
         "no check named `Manifest` or `Resource registry`",
         "cannot distinguish the expected retained-section Config failure",
-        "prove report structure, not precise diagnostic detail",
+        "only corroborates that stable structural state",
+        "do not prove precise diagnostic detail",
         "`[secret_backends.*]`",
         "`[secret_config].backends`",
         "Inspect every pre-existing and TOML-derived site manifest",

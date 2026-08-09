@@ -223,12 +223,14 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             "Run the human report first. Its Configuration-group Config failure must be the expected migration "
             "hard error: it says config.toml declares resources, says config.toml is settings only now, and "
             "names the retained sections. Use its Manifest and Resource registry rows for precise diagnostics. "
-            "The human command may exit 1 for that expected Config failure. Run the JSON verification even after "
-            "that exit 1, and parse its one document even when it also exits 1. Before recording VERIFIED, "
-            "require schema_version is the integer 1, command is exactly doctor, data is an object, data.groups "
-            "contains the Configuration group, and that group has no check named Manifest or Resource registry "
-            "with status warn or fail. Machine-safe JSON cannot distinguish the expected Config failure from "
-            "another config failure; its message and hint fields prove structure, not precise diagnostic detail.",
+            "Both the human command and JSON verification must exit 1 for this retained-section checkpoint. Run "
+            "the JSON verification even after the human exit 1, and parse its one document. Before recording "
+            "VERIFIED, require schema_version is the integer 1, command is exactly doctor, data is an object, "
+            "data.groups contains the Configuration group, that group contains Config file with status ok and "
+            "Config with status fail, and it has no check named Manifest or Resource registry with status warn or "
+            "fail. Machine-safe JSON cannot distinguish the expected Config failure from another config failure; "
+            "it only corroborates that stable structural state. Its message and hint fields do not prove precise "
+            "diagnostic detail.",
             ("agw", "doctor", "--output", "json"),
             "Leave the edit unverified, keep every retired TOML section, and block cutover.",
         ),
