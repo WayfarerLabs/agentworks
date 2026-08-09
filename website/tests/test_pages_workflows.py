@@ -126,6 +126,23 @@ def literal_script(job: str, step_name: str) -> str:
     return "\n".join(script).rstrip("\n")
 
 
+def root_mapping(source: str) -> dict[str, str]:
+    entries: dict[str, str] = {}
+    for line in source.splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if line[0].isspace():
+            continue
+        match = re.fullmatch(r"([A-Za-z0-9_-]+):(?: (.*))?", line)
+        if match is None or "#" in (match.group(2) or ""):
+            raise AssertionError(f"invalid top-level workflow entry: {line}")
+        key, value = match.group(1), match.group(2) or ""
+        if key in entries:
+            raise AssertionError(f"duplicate top-level workflow key: {key}")
+        entries[key] = value
+    return entries
+
+
 def simple_mapping(source: str, heading: str, indent: int) -> dict[str, str]:
     selected = block(source, heading, indent).splitlines()[1:]
     entries: dict[str, str] = {}
@@ -198,6 +215,10 @@ class WorkflowContractTests(unittest.TestCase):
         return {mapping["name"]: step for mapping, step in zip(mappings, steps, strict=True)}
 
     def assert_ci_closed_shape(self, source: str) -> None:
+        self.assertEqual(
+            root_mapping(source),
+            {"name": "CI", "on": "", "permissions": "", "jobs": ""},
+        )
         self.assertEqual(simple_mapping(source, "on:", 0), {"pull_request": "", "push": ""})
         self.assertEqual(simple_mapping(block(source, "push:", 2), "push:", 2), {"branches": "[main]"})
         self.assertEqual(simple_mapping(source, "permissions:", 0), {"contents": "read"})
@@ -271,6 +292,16 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertNotIn("actions/deploy-pages", source)
 
     def assert_pages_closed_shape(self, source: str) -> None:
+        self.assertEqual(
+            root_mapping(source),
+            {
+                "name": "Deploy website to Pages",
+                "on": "",
+                "permissions": "",
+                "concurrency": "",
+                "jobs": "",
+            },
+        )
         self.assertEqual(simple_mapping(source, "on:", 0), {"push": ""})
         self.assertEqual(simple_mapping(block(source, "push:", 2), "push:", 2), {"branches": "[main]"})
         self.assertEqual(simple_mapping(source, "permissions:", 0), {"contents": "read"})
@@ -624,6 +655,31 @@ class WorkflowContractTests(unittest.TestCase):
 
     def test_closed_shapes_reject_control_permission_comment_and_step_bypasses(self) -> None:
         pages_mutations = (
+            self.pages.replace(
+                "\njobs:\n",
+                "\ndefaults:\n  run:\n    shell: bash {0}\n\njobs:\n",
+                1,
+            ),
+            self.pages.replace(
+                "\njobs:\n",
+                "\ndefaults:\n  run:\n    working-directory: /tmp\n\njobs:\n",
+                1,
+            ),
+            self.pages.replace(
+                "\njobs:\n",
+                "\nenv:\n  BASH_ENV: /tmp/neutralize-checks\n\njobs:\n",
+                1,
+            ),
+            self.pages.replace(
+                "name: Deploy website to Pages\n",
+                "name: Deploy website to Pages\nname: Shadow Pages workflow\n",
+                1,
+            ),
+            self.pages.replace(
+                "name: Deploy website to Pages\n",
+                'name: Deploy website to Pages\n"defaults": {}\n',
+                1,
+            ),
             self.pages.replace("  build:\n", "  build:\n    if: false\n", 1),
             self.pages.replace(
                 "      - name: Upload exact Pages artifact\n",
@@ -684,6 +740,23 @@ class WorkflowContractTests(unittest.TestCase):
                 self.assert_pages_closed_shape(changed)
 
         ci_mutations = (
+            self.ci.replace(
+                "\njobs:\n",
+                "\ndefaults:\n  run:\n    shell: bash {0}\n\njobs:\n",
+                1,
+            ),
+            self.ci.replace(
+                "\njobs:\n",
+                "\ndefaults:\n  run:\n    working-directory: /tmp\n\njobs:\n",
+                1,
+            ),
+            self.ci.replace(
+                "\njobs:\n",
+                "\nenv:\n  BASH_ENV: /tmp/neutralize-checks\n\njobs:\n",
+                1,
+            ),
+            self.ci.replace("name: CI\n", "name: CI\nname: Shadow CI\n", 1),
+            self.ci.replace("name: CI\n", 'name: CI\n"defaults": {}\n', 1),
             self.ci.replace("  website:\n", "  website:\n    if: false\n", 1),
             self.ci.replace(
                 "      - name: Python website tests\n",
