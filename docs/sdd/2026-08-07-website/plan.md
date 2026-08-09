@@ -1,6 +1,6 @@
 # Plan: The agentworks.build Website
 
-- Status: Ready for design-PR merge
+- Status: Implementation authorized; PR held for the complete site
 - Date: 2026-08-07
 - Last revised: 2026-08-08
 - FRD: `frd.md`
@@ -9,25 +9,23 @@
 
 ## Delivery shape
 
-This effort uses three pull requests because production acceptance cannot honestly precede the merge
-that first installs the deployment workflow:
-
-1. a draft pre-implementation review for the FRD, HLA, plan, and prior-art research, promoted and
-   merged once review converges so the onboarding effort can see the website's shared-source need;
-2. one implementation PR containing the selected brand assets, custom 404 deployment game,
-   deterministic main site, CI, and automatic Pages deployment, merged as a complete default-host
-   slice;
-3. one small go-live/closeout PR containing production acceptance evidence, final truthful checkbox
-   flips, and `locked.md` after the implementation merge has deployed and DNS is live.
+This effort uses one long-lived website PR plus a closeout PR. On 2026-08-08, the operator rejected
+merging design artifacts separately from a site that is ready to go live. PR #439 therefore remains
+draft and accumulates the reviewed design, selected brand assets, local custom-404 demo,
+deterministic main site, CI, and automatic Pages deployment. It merges only as a complete
+default-host slice. A small go-live/closeout PR then records production acceptance evidence, final
+truthful checkbox flips, and `locked.md` after the implementation merge has deployed and DNS is
+live.
 
 `locked.md` never merges before production acceptance. Every earlier merged slice is complete and
 operable on its own terms; the custom-domain slice follows only because its external verification
 requires the publishing workflow to exist on `main`.
 
 Main-page content integration is gated on the onboarding-and-discovery effort's canonical README
-bootstrap source landing on `main`. Brand, 404, and game design can proceed while that contract is
-pending because they consume no onboarding content, but they deploy only in the complete website
-implementation PR. No website code binds to the onboarding feature branch.
+bootstrap source landing on `main`. Brand, 404, and game design and a local-only demo can proceed
+while that contract is pending because they consume no onboarding content. They remain unmerged and
+not deployed until the complete website is ready. No website code binds to the onboarding feature
+branch.
 
 ## Phase 0: design convergence and coordination
 
@@ -47,7 +45,8 @@ implementation PR. No website code binds to the onboarding feature branch.
       pickup, and dated operator evidence.
 - [x] The revised FRD, HLA, plan, prior-art research, brand direction, and SVG concepts receive a
       fresh `agentworks-reviewer` pass; all valid findings are resolved and re-reviewed.
-- [ ] Design PR promoted and merged to `main`; implementation branch starts from the merged design.
+- [x] Operator directs PR #439 to remain an unmerged draft until the complete site is ready; local
+      demo implementation branches from its review-clean design head.
 
 Operator evidence:
 
@@ -58,9 +57,12 @@ Operator evidence:
   hint-free preflight 404, Space/arrow/vi keyboard play, tap/hold/drag mobile play, and successful
   agent deployment into a visibly powered NOC followed by lander departure as first-slice
   requirements.
+- 2026-08-08: the operator rejects a separate design-artifact merge. PR #439 stays draft until the
+  complete site is ready, while the game becomes available as a local demo without public
+  deployment.
 
 Definition of done: requirements and architecture are review-clean, operator-significant choices are
-settled, and other efforts can rely on the website's content-consumer contract from `main`.
+settled, and PR #439 truthfully carries the reviewed contract that implementation follows.
 
 ## Phase 1: brand and lunar-deployment LLD
 
@@ -79,27 +81,29 @@ introducing a framework, remote asset, hidden critical content, or onboarding de
 ## Phase 2: selected assets and custom 404
 
 - [ ] Delegate implementation to an `agentworks-dev` subagent with ownership of the selected
-      permanent SVG assets, 404 HTML/CSS/JavaScript, focused game tests, and the relevant builder
-      copy step. The subagent is not alone in the codebase and must preserve concurrent changes.
+      permanent SVG assets, 404 HTML/CSS/JavaScript, the narrow 404-only builder seam, focused game
+      tests, and package-free manual browser checklist. The subagent is not alone in the codebase
+      and must preserve concurrent changes.
 - [ ] Promote the selected original twin-plume geometry into a self-contained permanent SVG under
       `website/`; do not make permanent code depend on numbered SDD concepts.
 - [ ] Build a useful semantic no-JavaScript 404 with a visible path home and no preflight visual
-      control hints.
+      control hints. The standard-library builder must render it with a validated root site base for
+      the local operator demo; no deployment workflow or public host is added in this phase.
 - [ ] Implement the under-five-second plume cue, reduced-motion static state, deliberate Space or
       activation start, arrow/vi keyboard controls, tap/hold/drag pointer controls, and scoped event
       suppression and cleanup.
 - [ ] Implement deterministic bounded-step flight, collective and differential plume response,
       landing/crash/restart/exit states, G-bay agent deployment, persistent-per-run NOC power-up,
       lander departure, and the exact success status.
-- [ ] Add deterministic unit/state tests and browser tests for input equivalence, physics vectors,
-      landing thresholds, hidden-until-start controls, lifecycle pause, reduced motion, pointer
-      capture cleanup, powered-NOC reset boundaries, no-JavaScript fallback, and responsive scene
-      bounds.
+- [ ] Add deterministic unit/state tests, source-contract tests, and a package-free manual browser
+      checklist for input equivalence, physics vectors, landing thresholds, hidden-until-start
+      controls, lifecycle pause, reduced motion, pointer capture cleanup, powered-NOC reset
+      boundaries, no-JavaScript fallback, and responsive scene bounds.
 - [ ] `agentworks-reviewer` and a fresh-eyes reviewer inspect the slice; valid findings return to
       the implementing subagent and are resolved before re-review.
 
-Definition of done: the brand and 404 game are review-clean, locally demonstrable, and ready to ride
-inside the complete implementation PR, but are not deployed or merged as a partial website.
+Definition of done: the brand and 404 game are review-clean and locally demonstrable from PR #439,
+but are not deployed or merged as a partial website.
 
 ## Phase 3: merged-contract pickup and site LLD
 
@@ -110,7 +114,7 @@ inside the complete implementation PR, but are not deployed or merged as a parti
 - [ ] Delegate `site-lld.md` to an `agentworks-dev` subagent. It pins exact source paths and
       extraction errors, generated product paragraphs, site-owned non-claim labels, site files,
       placeholder vocabulary, DOM outline, responsive layout, visual tokens, copy states, builder
-      CLI, output tree, and test matrix.
+      CLI, output tree, project-base to custom-domain-base go-live transition, and test matrix.
 - [ ] Lead reviews the LLD against the FRD/HLA and updates the lead-owned artifacts if
       implementation detail exposes an upstream gap.
 - [ ] `agentworks-reviewer` reviews the LLD; all valid findings are resolved and re-reviewed.
@@ -124,7 +128,9 @@ with no branch-only dependency or unresolved visual/content contract.
       website tests, and generated-output ignore entries. The subagent is not alone in the codebase
       and must preserve concurrent changes.
 - [ ] Build the one-page source and deterministic standard-library builder per the LLD; generated
-      files are written only below an explicit output directory and remain uncommitted.
+      files are written only below an explicit output directory and remain uncommitted. Extend the
+      Phase 2 builder seam rather than introducing a second rendering path, and pin the Pages
+      project-base to custom-domain-base transition before deployment.
 - [ ] Consume the merged canonical bootstrap source and enforce byte identity across source, README,
       and decoded built HTML, including newline and fence-edge cases.
 - [ ] Generate every problem/principle passage from uniquely selected permanent-doc paragraphs using

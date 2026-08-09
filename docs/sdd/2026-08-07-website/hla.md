@@ -1,6 +1,6 @@
 # HLA: The agentworks.build Website
 
-- Status: Ready for design-PR merge
+- Status: Design converged; implementation authorized
 - Date: 2026-08-07
 - Last revised: 2026-08-08
 - FRD: `frd.md`
@@ -43,10 +43,13 @@ own design when its authoritative contracts have landed.
 
 The checked-in source consists of main-page and 404 HTML templates, local CSS, focused
 progressive-enhancement JavaScript, SVG assets, and a standard-library Python builder under
-`website/`. There is no separate build-metadata abstraction. The builder's explicit input list is
-the build manifest. It uses the supported Python runtime already present in this repository and only
-the standard library. It does not introduce Node package metadata, a JavaScript framework, Jekyll,
-or a general template language.
+`website/`. The 404 template references stable same-origin groups in the selected SVG rather than
+duplicating its paths. The builder substitutes a validated site base into the 404's home and local
+asset URLs, allowing the same source to run at the local/custom-domain root and at the pre-DNS
+GitHub Pages project path. There is no separate build-metadata abstraction. The builder's explicit
+input list is the build manifest. It uses the supported Python runtime already present in this
+repository and only the standard library. It does not introduce Node package metadata, a JavaScript
+framework, Jekyll, or a general template language.
 
 The builder accepts an explicit repository root and output directory, writes only beneath the output
 directory, and produces deterministic bytes for the same inputs. It starts from an empty
