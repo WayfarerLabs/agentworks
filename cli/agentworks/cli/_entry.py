@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from io import StringIO
 from typing import TYPE_CHECKING
 
 import click
@@ -37,7 +38,6 @@ _MACHINE_OUTPUT_PATHS = frozenset(
         ("doctor",),
     }
 )
-_ROOT_BOOLEAN_OPTIONS = frozenset({"--non-interactive", "--debug", "--no-deprecations"})
 
 
 def _plain_native_usage_for_machine_request(arguments: Sequence[str]) -> bool:
@@ -50,7 +50,7 @@ def _plain_native_usage_for_machine_request(arguments: Sequence[str]) -> bool:
     """
     before_passthrough = list(arguments[: arguments.index("--")]) if "--" in arguments else list(arguments)
     remaining = before_passthrough.copy()
-    while remaining and remaining[0] in _ROOT_BOOLEAN_OPTIONS:
+    while remaining and remaining[0].startswith("-"):
         remaining.pop(0)
     if not remaining:
         return False
@@ -92,7 +92,7 @@ def _main_in_request() -> None:
         UserAbort,
         ValidationError,
     )
-    from agentworks.output import error, set_handler
+    from agentworks.output import error, machine_readable, machine_stderr_text, set_handler
 
     set_handler(TyperHandler())
 
@@ -115,14 +115,16 @@ def _main_in_request() -> None:
             try:
                 _cli.app(color=False, standalone_mode=False)
             except typer_click.ClickException as exception:
-                exception.show()
+                rendered = StringIO()
+                exception.show(file=rendered)
+                typer.echo(machine_stderr_text(rendered.getvalue(), force=True), nl=False, err=True)
                 raise SystemExit(exception.exit_code) from None
         else:
             _cli.app()
     except ConfigError as e:
         # Config errors get their own label since the user is looking at the
         # wrong file, not at a runtime state problem.
-        typer.echo(f"Configuration error: {e}", err=True)
+        typer.echo(machine_stderr_text(f"Configuration error: {e}"), err=True)
         echo_hint(e)
         raise SystemExit(1) from None
     except UserAbort:
@@ -150,13 +152,17 @@ def _main_in_request() -> None:
         log_path = record_unhandled_error(e)
         if log_path is not None:
             typer.echo(
-                f"(full traceback written to {format_host_path(log_path)}; "
-                "rerun with --debug or AGW_DEBUG=1 to print on stderr)",
+                machine_stderr_text(
+                    f"(full traceback written to {format_host_path(log_path)}; "
+                    "rerun with --debug or AGW_DEBUG=1 to print on stderr)"
+                ),
                 err=True,
             )
         else:
             typer.echo(
-                "(could not write traceback to log; rerun with --debug or AGW_DEBUG=1 to print on stderr)",
+                machine_stderr_text(
+                    "(could not write traceback to log; rerun with --debug or AGW_DEBUG=1 to print on stderr)"
+                ),
                 err=True,
             )
         raise SystemExit(1) from None
@@ -186,7 +192,12 @@ def _main_in_request() -> None:
         # cover unknown-option / missing-argument errors from typer-native
         # params; typer renders those itself as its boxed panel and they never
         # reach this clause.
-        e.show()
+        if machine_readable():
+            rendered = StringIO()
+            e.show(file=rendered)
+            typer.echo(machine_stderr_text(rendered.getvalue()), nl=False, err=True)
+        else:
+            e.show()
         raise SystemExit(e.exit_code) from None
     except (click.exceptions.Exit, typer.Exit) as e:
         # Defensive: no known path delivers an Exit here. Typer vendors its own
@@ -232,13 +243,17 @@ def _main_in_request() -> None:
         error(f"{type(e).__name__}: {e}")
         if log_path is not None:
             typer.echo(
-                f"(full traceback written to {format_host_path(log_path)}; "
-                "rerun with --debug or AGW_DEBUG=1 to print on stderr)",
+                machine_stderr_text(
+                    f"(full traceback written to {format_host_path(log_path)}; "
+                    "rerun with --debug or AGW_DEBUG=1 to print on stderr)"
+                ),
                 err=True,
             )
         else:
             typer.echo(
-                "(could not write traceback to log; rerun with --debug or AGW_DEBUG=1 to print on stderr)",
+                machine_stderr_text(
+                    "(could not write traceback to log; rerun with --debug or AGW_DEBUG=1 to print on stderr)"
+                ),
                 err=True,
             )
         raise SystemExit(1) from None

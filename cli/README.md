@@ -373,8 +373,11 @@ agw doctor --output json
 workspace, agent, session, and console lists or resource kinds. An unknown output format and this
 conflict are usage errors before config, registry, database, network, or service work. For the
 ordinary covered commands, domain and configuration errors write no JSON to stdout; they retain the
-normal stderr message and nonzero exit status. Doctor is the exception: it converts checkable
-failures into its complete report, emits that JSON document, then exits 1.
+normal stderr message and nonzero exit status. For a JSON request, untrusted stderr payloads from
+prompts, exceptions, hints, and native Click/Typer usage have C0 controls (other than ordinary line
+feeds and tabs), DEL, and C1 controls removed; human-mode transcripts are unchanged. Doctor is the
+exception: it converts checkable failures into its complete report, emits that JSON document, then
+exits 1.
 
 JSON v1 is additive. New optional fields may be added while preserving existing meanings and types.
 Removing a field, changing a type, changing a value's meaning, changing collection order, or
@@ -1442,7 +1445,9 @@ Completions include dynamic VM, vm-site, workspace, session, and template name l
 ## State
 
 All state is stored in `~/.config/agentworks/agentworks.db` (SQLite). Schema migrations are
-forward-only and run automatically.
+forward-only and run automatically when a normal Agentworks command opens state. `agw doctor`
+inspects schema and current contents through read-only database handles; it reports a pending
+migration without applying it or changing the database journal mode.
 
 ## Environment Variables
 

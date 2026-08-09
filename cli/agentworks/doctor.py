@@ -327,7 +327,7 @@ def _check_system() -> HealthGroup:
                 "pending database migration (see the Database group)",
             )
             return g
-        db = Database()
+        db = Database(read_only=True)
         try:
             slug = db.get_setting(SYSTEM_SLUG_KEY)
         finally:
@@ -553,7 +553,7 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
                 "re-run doctor after migrating for the full report",
             )
             return g
-        db = Database()
+        db = Database(read_only=True)
         try:
             for vm in db.list_vms():
                 if vm.site in not_ready:
@@ -927,8 +927,11 @@ def _check_database() -> HealthGroup:
             g.ok("Database", "does not exist yet (will be created on first use)")
         elif current == latest:
             g.ok("Schema", f"up to date (version {current})")
-            db = Database()
-            _report_db_contents(g, db)
+            db = Database(read_only=True)
+            try:
+                _report_db_contents(g, db)
+            finally:
+                db.close()
         elif current < latest:
             g.warn(
                 "Schema",

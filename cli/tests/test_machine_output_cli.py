@@ -100,6 +100,7 @@ def test_operational_describe_json_commands_are_deterministic_and_exclude_opaque
     from agentworks.sessions.manager._queries import SessionDescription
     from agentworks.sessions.multi_console.attach import ConsoleDescription, ConsoleMember, ConsoleShell
     from agentworks.vms import manager as vms
+    from agentworks.vms.manager.boundary import VMInspectionIssueSource
     from agentworks.vms.manager.power import VMDescription, VMDetailFacts, VMIssue
     from agentworks.workspaces import manager as workspaces
     from agentworks.workspaces.manager.create import WorkspaceDescription, WorkspaceDetailFacts, WorkspaceSession
@@ -143,7 +144,7 @@ def test_operational_describe_json_commands_are_deterministic_and_exclude_opaque
             agents=(),
             workspaces=(),
             events=(),
-            issues=(VMIssue("secret_resolution"),),
+            issues=(VMIssue(VMInspectionIssueSource.SECRET_RESOLUTION),),
             diagnostics=(),
         ),
     )

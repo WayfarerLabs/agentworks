@@ -211,8 +211,9 @@ def test_doctor_system_group(db: Database, monkeypatch: pytest.MonkeyPatch, tmp_
 
         # _check_system opens and closes its own handle; hand it a
         # fresh one each call so the fixture's connection stays open.
-        def __new__(cls) -> Database:  # type: ignore[misc]
-            return _Database(path)
+        def __new__(cls, *, read_only: bool = False) -> Database:  # type: ignore[misc]
+            assert read_only
+            return _Database(path, read_only=True)
 
     monkeypatch.setattr("agentworks.db.Database", _DbFactory)
 
@@ -262,8 +263,9 @@ def test_doctor_vm_sites_group(db: Database, monkeypatch: pytest.MonkeyPatch, tm
         def check_schema(path: object = None) -> tuple[bool, int, int]:
             return (True, 27, 27)
 
-        def __new__(cls) -> Database:  # type: ignore[misc]
-            return db
+        def __new__(cls, *, read_only: bool = False) -> Database:  # type: ignore[misc]
+            assert read_only
+            return type(db)(tmp_path / "test.db", read_only=True)
 
     monkeypatch.setattr("agentworks.db.Database", _DbFactory)
     # Deterministic bundled-site preflights: lima/wsl2 check their local
@@ -336,8 +338,9 @@ def test_doctor_vm_sites_not_ready_and_preflight_rows(
         def check_schema(path: object = None) -> tuple[bool, int, int]:
             return (True, 27, 27)
 
-        def __new__(cls) -> Database:  # type: ignore[misc]
-            return db
+        def __new__(cls, *, read_only: bool = False) -> Database:  # type: ignore[misc]
+            assert read_only
+            return type(db)(tmp_path / "test.db", read_only=True)
 
     monkeypatch.setattr("agentworks.db.Database", _DbFactory)
 
@@ -397,8 +400,9 @@ def test_doctor_warns_on_references_to_not_ready_sites(
         def check_schema(path: object = None) -> tuple[bool, int, int]:
             return (True, 27, 27)
 
-        def __new__(cls) -> Database:  # type: ignore[misc]
-            return db
+        def __new__(cls, *, read_only: bool = False) -> Database:  # type: ignore[misc]
+            assert read_only
+            return type(db)(tmp_path / "test.db", read_only=True)
 
     monkeypatch.setattr("agentworks.db.Database", _DbFactory)
 

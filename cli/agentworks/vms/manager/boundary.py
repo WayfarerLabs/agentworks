@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from agentworks.capabilities.base import RunContext
@@ -12,11 +13,20 @@ from agentworks.errors import AgentworksError
 from ._helpers import _vm_scope
 
 
+class VMInspectionIssueSource(StrEnum):
+    """Closed failure stages that JSON v1 may disclose for VM inspection."""
+
+    SITE_LOOKUP = "site_lookup"
+    PREFLIGHT = "preflight"
+    SECRET_RESOLUTION = "secret_resolution"
+    PLATFORM_STATUS = "platform_status"
+
+
 @dataclass(frozen=True)
 class InspectionBoundaryFailure(Exception):
     """One typed VM inspection boundary failure with its exact stage."""
 
-    source: str
+    source: VMInspectionIssueSource
     diagnostic: AgentworksError
 
 
@@ -175,7 +185,7 @@ def _live_vm_boundary(
         vm_node = live_vm_node(db, config, registry, vm)
     except AgentworksError as exc:
         if inspection_stages:
-            raise InspectionBoundaryFailure(source="site_lookup", diagnostic=exc) from None
+            raise InspectionBoundaryFailure(source=VMInspectionIssueSource.SITE_LOOKUP, diagnostic=exc) from None
         raise
     nodes = walk(vm_node)
     for secret_name in secret_union(nodes):
@@ -185,12 +195,12 @@ def _live_vm_boundary(
         preflight_all(nodes, RunContext(config=config, operation_scope=scope), registry=registry)
     except AgentworksError as exc:
         if inspection_stages:
-            raise InspectionBoundaryFailure(source="preflight", diagnostic=exc) from None
+            raise InspectionBoundaryFailure(source=VMInspectionIssueSource.PREFLIGHT, diagnostic=exc) from None
         raise
     try:
         resolver.resolve()
     except AgentworksError as exc:
         if inspection_stages:
-            raise InspectionBoundaryFailure(source="secret_resolution", diagnostic=exc) from None
+            raise InspectionBoundaryFailure(source=VMInspectionIssueSource.SECRET_RESOLUTION, diagnostic=exc) from None
         raise
     return vm_node, _platform_ops_ctx(config, scope, vm_node, resolver)

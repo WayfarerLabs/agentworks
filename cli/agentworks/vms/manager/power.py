@@ -27,7 +27,12 @@ from ._helpers import (
     _require_vm,
     _vm_scope,
 )
-from .boundary import InspectionBoundaryFailure, _live_vm_boundary, _platform_ops_ctx
+from .boundary import (
+    InspectionBoundaryFailure,
+    VMInspectionIssueSource,
+    _live_vm_boundary,
+    _platform_ops_ctx,
+)
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -61,10 +66,16 @@ class VMListing:
     vms: tuple[VMListRow, ...]
 
 
+class VMIssueCode(StrEnum):
+    """Closed JSON v1 outcome vocabulary for a VM inspection issue."""
+
+    UNAVAILABLE = "unavailable"
+
+
 @dataclass(frozen=True)
 class VMIssue:
-    source: str
-    code: str = "unavailable"
+    source: VMInspectionIssueSource
+    code: VMIssueCode = VMIssueCode.UNAVAILABLE
 
 
 @dataclass(frozen=True)
@@ -326,8 +337,15 @@ def vm_description_data(description: VMDescription) -> JsonObject:
                 for event in description.events
             ],
         },
-        "issues": [{"source": issue.source, "code": issue.code} for issue in description.issues],
+        "issues": [_project_vm_issue(issue) for issue in description.issues],
     }
+
+
+def _project_vm_issue(issue: VMIssue) -> JsonObject:
+    """Project only the closed issue vocabulary, failing shut on bad facts."""
+    if not isinstance(issue.source, VMInspectionIssueSource) or not isinstance(issue.code, VMIssueCode):
+        raise AssertionError("VM issues require closed source and code values")
+    return {"source": issue.source.value, "code": issue.code.value}
 
 
 # NOTE on ``_ensure_tailscale`` (start_vm), ``_tailscale_logout``
@@ -442,7 +460,7 @@ def vm_description(
     except UserAbort:
         raise
     except AgentworksError as exc:
-        issue = VMIssue(source="site_lookup")
+        issue = VMIssue(source=VMInspectionIssueSource.SITE_LOOKUP)
         issues.append(issue)
         diagnostics.append(VMDiagnostic(issue=issue, error=exc))
     else:
@@ -472,7 +490,7 @@ def vm_description(
             except UserAbort:
                 raise
             except AgentworksError as exc:
-                issue = VMIssue(source="platform_status")
+                issue = VMIssue(source=VMInspectionIssueSource.PLATFORM_STATUS)
                 issues.append(issue)
                 diagnostics.append(VMDiagnostic(issue=issue, error=exc))
             else:

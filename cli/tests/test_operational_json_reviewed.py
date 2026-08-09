@@ -51,13 +51,49 @@ def _invoke_main_tty(monkeypatch: pytest.MonkeyPatch, arguments: list[str]) -> t
     return result
 
 
+def _assert_terminal_safe(rendered: bytes) -> None:
+    """Allow ordinary line framing and tabs, but no terminal controls."""
+    text = rendered.decode()
+    assert not any(ord(character) < 32 and character not in "\n\t" for character in text)
+    assert not any(0x7F <= ord(character) <= 0x9F for character in text)
+
+
+def _stub_full_doctor_environment(
+    monkeypatch: pytest.MonkeyPatch,
+    config: object,
+) -> None:
+    """Keep run_checks real while replacing host/config-dependent probes."""
+    from agentworks import doctor
+    from agentworks.resources import Registry
+
+    def group(name: str) -> doctor.HealthGroup:
+        result = doctor.HealthGroup(name)
+        result.ok("Reviewed fixture")
+        return result
+
+    config_group = group("Configuration")
+    registry = Registry.empty()
+    monkeypatch.setattr(doctor, "_check_config", lambda **_kwargs: (config_group, config, registry))
+    for function_name, group_name in (
+        ("_check_python", "Python"),
+        ("_check_required_tools", "Required tools"),
+        ("_check_tailscale", "Tailscale"),
+        ("_check_plugins", "System plugins"),
+        ("_check_vm_platforms", "VM platforms"),
+        ("_check_secret_backends", "Secret backends"),
+        ("_check_secrets", "Secrets"),
+        ("_check_completions", "Completions"),
+    ):
+        monkeypatch.setattr(doctor, function_name, lambda *_args, _name=group_name, **_kwargs: group(_name))
+
+
 def test_doctor_stale_schema_is_inspection_only_in_human_and_json(
     tmp_path: Path,
+    make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Doctor reports migration consent without opening the migrating DB."""
+    """The real full report guards every DB read until migration consent."""
     import agentworks.db as db_module
-    from agentworks import doctor
     from agentworks.db import LATEST_VERSION, Database
 
     db_path = tmp_path / "stale.db"
@@ -71,11 +107,15 @@ def test_doctor_stale_schema_is_inspection_only_in_human_and_json(
     assert Database.check_schema(db_path) == (True, stale_version, LATEST_VERSION)
 
     monkeypatch.setattr(db_module, "DB_PATH", db_path)
+    _stub_full_doctor_environment(monkeypatch, make_config())
+    constructor_modes: list[bool] = []
+    original_init = Database.__init__
 
-    def database_only_report(**_kwargs: object) -> doctor.HealthReport:
-        return doctor.HealthReport(groups=[doctor._check_database()])
+    def recording_init(self: Database, *args: object, **kwargs: object) -> None:
+        constructor_modes.append(cast("bool", kwargs.get("read_only", False)))
+        original_init(self, *args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(doctor, "run_checks", database_only_report)
+    monkeypatch.setattr(Database, "__init__", recording_init)
     before = db_path.read_bytes()
 
     human = CliRunner().invoke(app, ["doctor", "--output", "human"])
@@ -91,9 +131,73 @@ def test_doctor_stale_schema_is_inspection_only_in_human_and_json(
     document = cast("dict[str, object]", json.loads(machine.stdout_bytes))
     data = cast("dict[str, object]", document["data"])
     groups = cast("list[dict[str, object]]", data["groups"])
-    assert groups[0]["checks"] == [{"name": "Schema", "status": "warn", "message": None, "hint": None}]
+    by_name = {cast("str", group["name"]): group for group in groups}
+    system_checks = cast("list[dict[str, object]]", by_name["System"]["checks"])
+    site_checks = cast("list[dict[str, object]]", by_name["VM sites"]["checks"])
+    database_checks = cast("list[dict[str, object]]", by_name["Database"]["checks"])
+    assert system_checks == [{"name": "System slug", "status": "info", "message": None, "hint": None}]
+    assert site_checks == [{"name": "VM sites", "status": "info", "message": None, "hint": None}]
+    assert database_checks == [{"name": "Schema", "status": "warn", "message": None, "hint": None}]
+    assert b"System slug: pending database migration" in human.stdout_bytes
+    assert b"VM sites: pending database migration" in human.stdout_bytes
     assert db_path.read_bytes() == after_human == before
     assert Database.check_schema(db_path) == (True, stale_version, LATEST_VERSION)
+    assert constructor_modes == []
+
+
+def test_doctor_current_schema_reads_full_contents_without_changing_database(
+    tmp_path: Path,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Current-schema human and JSON doctor use closed read-only handles."""
+    import agentworks.db as db_module
+    from agentworks.db import Database
+
+    db_path = tmp_path / "current.db"
+    database = Database(db_path)
+    database.close()
+    connection = sqlite3.connect(db_path)
+    assert connection.execute("PRAGMA journal_mode = DELETE").fetchone() == ("delete",)
+    connection.close()
+    before_schema = Database.check_schema(db_path)
+    before = db_path.read_bytes()
+    sidecars = [Path(f"{db_path}-wal"), Path(f"{db_path}-shm")]
+    assert not any(path.exists() for path in sidecars)
+
+    monkeypatch.setattr(db_module, "DB_PATH", db_path)
+    _stub_full_doctor_environment(monkeypatch, make_config())
+    constructor_modes: list[bool] = []
+    original_init = Database.__init__
+
+    def recording_init(self: Database, *args: object, **kwargs: object) -> None:
+        constructor_modes.append(cast("bool", kwargs.get("read_only", False)))
+        original_init(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Database, "__init__", recording_init)
+
+    human = CliRunner().invoke(app, ["doctor", "--output", "human"])
+    machine = CliRunner().invoke(app, ["doctor", "--output", "json"])
+
+    assert human.exit_code == machine.exit_code == 0
+    assert b"Contents: 0 VMs, 0 workspaces" in human.stdout_bytes
+    document = cast("dict[str, object]", json.loads(machine.stdout_bytes))
+    data = cast("dict[str, object]", document["data"])
+    groups = cast("list[dict[str, object]]", data["groups"])
+    database_group = next(group for group in groups if group["name"] == "Database")
+    assert database_group["checks"] == [
+        {"name": "Schema", "status": "ok", "message": None, "hint": None},
+        {"name": "Contents", "status": "ok", "message": None, "hint": None},
+    ]
+    assert constructor_modes == [True, True, True, True, True, True]
+    assert db_path.read_bytes() == before
+    assert Database.check_schema(db_path) == before_schema
+    connection = sqlite3.connect(db_path)
+    try:
+        assert connection.execute("PRAGMA journal_mode").fetchone() == ("delete",)
+    finally:
+        connection.close()
+    assert not any(path.exists() for path in sidecars)
 
 
 def test_vm_event_enum_covers_every_literal_producer() -> None:
@@ -246,8 +350,37 @@ def test_preparse_detector_is_closed_and_ignores_passthrough() -> None:
     assert len(_MACHINE_OUTPUT_PATHS) == 16
     assert _plain_native_usage_for_machine_request(["doctor", "--output=json"])
     assert _plain_native_usage_for_machine_request(["--debug", "session", "list", "--output", "json"])
+    assert _plain_native_usage_for_machine_request(["--bogus", "vm", "list", "--output", "json"])
+    assert _plain_native_usage_for_machine_request(["--debug=malformed", "vm", "list", "--output=json"])
     assert not _plain_native_usage_for_machine_request(["vm", "create", "box", "--output", "json"])
+    assert not _plain_native_usage_for_machine_request(["--bogus", "vm", "create", "box", "--output=json"])
     assert not _plain_native_usage_for_machine_request(["vm", "exec", "box", "--", "--output", "json"])
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["--bogus", "vm", "list", "--output", "json"],
+        ["--debug=malformed", "vm", "list", "--output=json"],
+        ["--bogus-\x1b[31m\x7f", "vm", "list", "--output=json"],
+        ["vm", "list", "--output", "json", "--bad-\x1b[31m\x85"],
+        ["vm", "describe", "box\x1b[31m", "extra", "--output=json"],
+    ],
+)
+def test_supported_json_native_usage_sanitizes_untrusted_argv(
+    arguments: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Native Click/Typer errors cannot replay terminal bytes from argv."""
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("TERM", "xterm-256color")
+
+    code, stdout, stderr = _invoke_main_tty(monkeypatch, arguments)
+
+    assert code == 2
+    assert stdout == b""
+    assert stderr
+    _assert_terminal_safe(stderr)
 
 
 def test_unsupported_mutation_and_passthrough_do_not_select_machine_mode(
@@ -291,6 +424,66 @@ def test_covered_json_config_failure_is_plain_on_a_tty(monkeypatch: pytest.Monke
     assert stderr == b"Configuration error: reviewed config failure\n  Hint: review the config\n"
 
 
+def test_machine_config_and_domain_errors_sanitize_untrusted_terminal_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every machine error boundary strips controls while human mode is untouched."""
+    from agentworks.cli.commands import vm
+    from agentworks.errors import ConfigError, StateError
+    from agentworks.vms import manager
+
+    config_message = "bad\x1b[31m config\x00\x7f\x85"
+    config_hint = "fix\x1b[2J this\x07\x9f"
+
+    def fail_config(**_kwargs: object) -> object:
+        raise ConfigError(config_message, hint=config_hint)
+
+    monkeypatch.setattr("agentworks.config.load_config", fail_config)
+    code, stdout, stderr = _invoke_main_tty(monkeypatch, ["vm", "describe", "box", "--output=json"])
+    assert code == 1 and stdout == b""
+    _assert_terminal_safe(stderr)
+    assert stderr == b"Configuration error: bad[31m config\n  Hint: fix[2J this\n"
+
+    monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: object())
+    monkeypatch.setattr(vm, "get_db", lambda: object())
+
+    def fail_domain(*_args: object, **_kwargs: object) -> object:
+        raise StateError("domain\x1b[35m failed\x00\x7f\x85", hint="retry\x1b[2J now\x07\x9f")
+
+    monkeypatch.setattr(manager, "vm_description", fail_domain)
+    code, stdout, stderr = _invoke_main_tty(monkeypatch, ["vm", "describe", "box", "--output=json"])
+    assert code == 1 and stdout == b""
+    _assert_terminal_safe(stderr)
+    assert stderr == b"Error: domain[35m failed\n  Hint: retry[2J now\n"
+
+
+def test_prompt_sanitization_is_machine_only_and_preserves_human_text() -> None:
+    """The shared prompt boundary leaves the legacy human transcript alone."""
+    from agentworks import output
+    from agentworks.machine_output import OutputFormat, select_request_output
+
+    label = "label\x1b[31m\x00\x7f\x85"
+    hint = "hint\x1b[2J\x07\x9f"
+    handler = MagicMock()
+    handler.prompt_secret.return_value = "resolved"
+    previous = output.get_handler()
+    output.set_handler(handler)
+    try:
+        with output.request_output_state():
+            select_request_output(OutputFormat.HUMAN)
+            assert output.prompt_secret(label, hint) == "resolved"
+        with output.request_output_state():
+            select_request_output(OutputFormat.JSON)
+            assert output.prompt_secret(label, hint) == "resolved"
+    finally:
+        output.set_handler(previous)
+
+    assert handler.prompt_secret.call_args_list == [
+        call(label, 0, hint),
+        call("label[31m", 0, "hint[2J"),
+    ]
+
+
 @pytest.mark.parametrize("stage", ["walk", "secret_union"])
 def test_vm_residual_graph_failure_propagates_without_preflight_issue(
     stage: str,
@@ -323,6 +516,63 @@ def test_vm_residual_graph_failure_propagates_without_preflight_issue(
     assert b"\x1b[" not in stderr
 
 
+@pytest.mark.parametrize("stage", ["preflight", "secret_resolution"])
+def test_vm_inspection_exact_stage_failures_use_closed_issue_source(
+    stage: str,
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Real boundary failures cannot be mislabeled by a neighboring stage."""
+    from agentworks.cli.commands import vm
+    from agentworks.errors import StateError
+    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
+    from agentworks.secrets.resolver import Resolver
+    from agentworks.vms import manager as vms
+
+    config = make_config()
+    db.insert_vm("box", site="proxmox", hostname="box")
+    monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "resolved-for-stage-test")
+    monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: config)
+    monkeypatch.setattr(vm, "get_db", lambda: db)
+    monkeypatch.setattr(vms, "_query_live_resources", lambda *_args: None)
+    marker = f"EXACT_{stage.upper()}_FAILURE"
+
+    def fail_stage(*_args: object, **_kwargs: object) -> None:
+        raise StateError(marker)
+
+    if stage == "preflight":
+        monkeypatch.setattr(ProxmoxPlatform, "preflight", fail_stage)
+    else:
+        monkeypatch.setattr(ProxmoxPlatform, "preflight", lambda self, ctx: None)
+        monkeypatch.setattr(Resolver, "resolve", fail_stage)
+
+    result = CliRunner().invoke(app, ["vm", "describe", "box", "--output", "json"])
+
+    assert result.exit_code == 0, result.output
+    assert result.stderr_bytes == b""
+    document = cast("dict[str, object]", json.loads(result.stdout_bytes))
+    data = cast("dict[str, object]", document["data"])
+    assert data["issues"] == [{"source": stage, "code": "unavailable"}]
+    assert marker.encode() not in result.stdout_bytes
+
+
+def test_vm_issue_projection_rejects_free_form_source_and_code() -> None:
+    """A bad internal fact fails closed instead of echoing free-form text."""
+    from agentworks.vms.manager.boundary import VMInspectionIssueSource
+    from agentworks.vms.manager.power import VMIssue, VMIssueCode, _project_vm_issue
+
+    with pytest.raises(AssertionError, match="closed source and code"):
+        _project_vm_issue(VMIssue(cast("VMInspectionIssueSource", "preflight")))
+    with pytest.raises(AssertionError, match="closed source and code"):
+        _project_vm_issue(
+            VMIssue(
+                VMInspectionIssueSource.PREFLIGHT,
+                cast("VMIssueCode", "backend-authored-code"),
+            )
+        )
+
+
 @pytest.mark.parametrize("surface", ["vm", "session"])
 def test_json_boundaries_use_real_hidden_prompt_backend(
     surface: str,
@@ -345,8 +595,8 @@ def test_json_boundaries_use_real_hidden_prompt_backend(
             ManifestDoc(
                 kind="secret",
                 name="proxmox-token",
-                description="Reviewed Proxmox token",
-                spec={"hint": "enter the reviewed hidden value", "backend_mappings": {"env-var": False}},
+                description="Reviewed\x1b[31m Prox\x00 token\x7f\x85",
+                spec={"hint": "enter\x1b[2J the\x07 hidden value\x9f", "backend_mappings": {"env-var": False}},
             )
         ]
     )
@@ -399,6 +649,7 @@ def test_json_boundaries_use_real_hidden_prompt_backend(
     else:
         vm_data = cast("dict[str, object]", data["vm"])
         assert vm_data["observed_status"] == "running"
-    assert b"Secret 'proxmox-token': Reviewed Proxmox token" in result.stderr_bytes
-    assert b"enter the reviewed hidden value" in result.stderr_bytes
+    _assert_terminal_safe(result.stderr_bytes)
+    assert b"Secret 'proxmox-token': Reviewed[31m Prox token" in result.stderr_bytes
+    assert b"enter[2J the hidden value" in result.stderr_bytes
     assert b"PROMPT_ANSWER_SENTINEL" not in result.stdout_bytes + result.stderr_bytes

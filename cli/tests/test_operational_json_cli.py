@@ -202,6 +202,7 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
     from agentworks.sessions.manager._queries import SessionDescription
     from agentworks.sessions.multi_console.attach import ConsoleDescription, ConsoleMember, ConsoleShell
     from agentworks.vms import manager as vms
+    from agentworks.vms.manager.boundary import VMInspectionIssueSource
     from agentworks.vms.manager.power import (
         VMDescription,
         VMDetailAgent,
@@ -278,9 +279,7 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
             VMDetailEvent("2026-01-04", "provisioning_started", None),
             VMDetailEvent("2026-01-05", "init_complete", "ok"),
         ),
-        issues=tuple(
-            VMIssue(source) for source in ("site_lookup", "preflight", "secret_resolution", "platform_status")
-        ),
+        issues=tuple(VMIssue(VMInspectionIssueSource(source)) for source in VMInspectionIssueSource),
         diagnostics=(),
     )
     workspace_description = WorkspaceDescription(

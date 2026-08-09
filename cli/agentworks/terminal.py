@@ -54,6 +54,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import re
 import sys
 from typing import TYPE_CHECKING, Any
 
@@ -64,6 +65,15 @@ if TYPE_CHECKING:
     # are (console input handle, console input mode). Both are opaque to
     # everything but the platform pair that produced them.
     LineDiscipline = list[Any] | tuple[Any, int]
+
+
+_TERMINAL_CONTROL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+def sanitize_terminal_output(value: str) -> str:
+    """Remove terminal controls while preserving ordinary line feeds and tabs."""
+    return _TERMINAL_CONTROL_RE.sub("", value)
+
 
 # DECRST reset disabling every common xterm mouse-reporting mode: 1000
 # (X11), 1002 (button-event), 1003 (any-motion), 1006 (SGR, the
