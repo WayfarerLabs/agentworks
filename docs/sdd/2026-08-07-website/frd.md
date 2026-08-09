@@ -81,6 +81,14 @@ and none of it is in scope now.
   efficient use of space should communicate `simple but powerful`. It must not become a fake
   terminal, green-on-black pastiche, command-line prerequisite, or excuse to weaken reflow,
   readability, pointer use, or accessibility.
+- R14. The landing page is a deliberately compact single-page product handoff, not a rendered
+  manifesto. It shows the selected rocket mark as a dominant hero element at two to three times its
+  original header scale, gives only the concise product identity and onboarding availability, and
+  offers one link each to the repository, package, deeper rationale, and security deep dive. A
+  destination must not be repeated in the landing page's header, body, and footer. Visitors who want
+  the longer problem statement or principles follow the single deeper-rationale link to their
+  permanent repository source. The dedicated security page and host-required 404 remain separate
+  optional/error surfaces rather than being folded into the landing page.
 
 ## Settled constraints (inherited; do not reopen)
 
@@ -158,6 +166,10 @@ merged and settled on `main`. The first slice must not build toward them specula
   understand what the project is, recognize that guided onboarding is not yet published, and choose
   the repository, package, rationale, or security path without explanation. This is the interim
   usefulness bar; it does not claim AC4's completed onboarding handoff.
+- AC15. The landing page contains exactly one navigable anchor for each of the GitHub repository,
+  PyPI package, deeper rationale, and security destinations; it contains no rendered problem-space
+  or principles section. The selected rocket is a prominent hero element without displacing the page
+  identity, availability notice, or four destinations at 320 CSS pixels or 400 percent zoom.
 
 ## Settled implementation rulings
 

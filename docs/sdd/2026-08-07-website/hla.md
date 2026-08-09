@@ -34,19 +34,23 @@ GitHub Pages serves `agentworks.build` over HTTPS; `www.agentworks.build` redire
 
 ## Decisions
 
-### D1. Two focused pages, not a documentation site
+### D1. One compact landing page plus optional security depth
 
 The completed home page has this information order:
 
-1. a compact identity and problem statement;
+1. the selected AGW rocket as a prominent hero with a compact product identity;
 2. the agent-addressed bootstrap as the dominant action;
-3. a concise explanation of the operating model and principles;
-4. direct GitHub, PyPI, deeper rationale, and security links.
+3. one direct link each to GitHub, PyPI, deeper rationale, and security.
 
 The interim release preserves that structure but replaces item 2 with a concise, ordinary-text
 notice that guided onboarding is not yet published. It does not render an empty bootstrap region,
 disabled copy button, speculative command, wait-list form, countdown, or generic "coming soon"
 marketing panel. The notice is removed when the real bootstrap replaces it.
+
+The landing page does not render the longer problem statement or principles. Those passages remain
+in their permanent repository document behind the single deeper-rationale link. Each of the four
+landing-page destinations appears exactly once; the header and footer do not repeat body
+destinations under different labels.
 
 The home page gives the security posture one calm, visually secondary link labeled
 `We take security seriously.` That link opens a dedicated static security page with this order:
@@ -57,10 +61,11 @@ The home page gives the security posture one calm, visually secondary link label
 4. practical operator posture and the private vulnerability-reporting path.
 
 The security page is optional depth, not a modal, warning gate, prerequisite, or long security pitch
-on the home page. Pages have in-page navigation only if their final length makes it useful. A custom
-`404.html` is an error surface, not a content page or client-side route. There is no blog,
-documentation hierarchy, release feed, search, or client-side routing. Growth-path content gets its
-own design when its authoritative contracts have landed.
+on the home page. It and the host-required 404 are the only separate pages in the first slice; the
+primary product experience stays on the compact landing page. Pages have in-page navigation only if
+their final length makes it useful. A custom `404.html` is an error surface, not a content page or
+client-side route. There is no blog, documentation hierarchy, release feed, search, or client-side
+routing. Growth-path content gets its own design when its authoritative contracts have landed.
 
 ### D2. Plain web technologies with a narrow build step
 
@@ -143,7 +148,9 @@ The first slice uses system fonts, a small local color/token layer, and the sele
 rocket mark. The mark stacks custom symmetric A, G, and W geometry into a rocket silhouette; the G
 has four equal corner radii, with only its opening and inward stroke breaking O-like symmetry. The
 ordinary mark is neutral graphite. Its original twin-flame treatment uses compact pale-yellow hot
-cores within orange and deeper orange-red plumes. The final checked-in SVG is self-contained,
+cores within orange and deeper orange-red plumes. On the landing page the mark is a dominant hero
+element at two to three times the original small-header presentation, while the security and 404
+contexts may retain sizes appropriate to their jobs. The final checked-in SVG is self-contained,
 font-independent, semantic where displayed as content, and reusable without this SDD.
 
 The presentation should feel like a capable workbench rather than a generic SaaS landing page:

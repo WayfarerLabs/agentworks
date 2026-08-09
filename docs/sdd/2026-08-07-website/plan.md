@@ -97,6 +97,12 @@ Operator evidence:
   identify the intended workstation, the agent's necessary full local file/command access, and the
   recommendation for a strict, observable harness posture. Across the site, terminal/TUI cues should
   communicate `simple but powerful` without turning the site into a fake terminal.
+- 2026-08-09: after reviewing the local interim shell, the operator directs a tighter landing page:
+  remove the rendered manifesto/problem-and-principles sections, expose each repository, package,
+  rationale, and security destination exactly once, and enlarge the selected rocket by roughly two
+  to three times. The dedicated security deep dive and host-required 404 remain separate optional
+  surfaces; "single page" governs the primary product experience rather than eliminating those
+  previously accepted routes.
 
 Definition of done: requirements and architecture are review-clean, operator-significant choices are
 settled, and PR #439 truthfully carries the reviewed contract that implementation follows.
@@ -201,6 +207,25 @@ sources, with an explicit removable notice and no branch-only or speculative onb
 
 Definition of done: R4-R11, R13, C1-C5, and the local portions of AC5-AC11/AC13-AC14 hold in a
 review-clean, deterministic interim artifact that is ready to publish but makes no onboarding claim.
+
+## Phase 4A: operator landing-page refinement
+
+- [ ] Revise `site-shell-lld.md` to pin the compact landing outline, unique-destination link
+      contract, dominant hero-logo treatment, and unchanged optional security/404 routes.
+- [ ] Remove rendered problem/principles content from the landing page while preserving the
+      permanent source as the single deeper-rationale destination and keeping concise product
+      identity sourced from the repository.
+- [ ] Present the selected AGW rocket as the landing hero at roughly two to three times its original
+      header scale; retain reflow, focus, contrast, and 400-percent-zoom behavior.
+- [ ] Ensure GitHub, PyPI, rationale, and security each have exactly one landing-page anchor, with
+      no repeated header/footer destinations or alternate labels that imply different content.
+- [ ] Update permanent website documentation and focused tests for the revised page/content
+      contract; rebuild the served preview for operator review.
+- [ ] Run focused gates, then obtain `agentworks-reviewer` and fresh-eyes approval; resolve every
+      valid finding before considering the refinement complete.
+
+Definition of done: R14 and AC15 hold without weakening the previously accepted onboarding,
+security, 404, source-ownership, responsive, accessibility, or deterministic-build contracts.
 
 ## Phase 5: CI and default Pages deployment
 
