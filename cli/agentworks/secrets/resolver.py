@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from agentworks.resources.registry import Registry
     from agentworks.secrets.base import SecretDecl
     from agentworks.secrets.orchestration import SecretTarget
+    from agentworks.secrets.resolve import ResolutionReporter
 
 
 class Resolver:
@@ -50,10 +51,17 @@ class Resolver:
       ordering exists to prevent).
     """
 
-    def __init__(self, config: Config, registry: Registry) -> None:
+    def __init__(
+        self,
+        config: Config,
+        registry: Registry,
+        *,
+        reporter: ResolutionReporter | None = None,
+    ) -> None:
         self._config = config
         self._registry = registry
         self._decls: dict[str, SecretDecl] = {}
+        self._reporter = reporter
         self._seeded: dict[str, str] = {}
         self._values: dict[str, str] | None = None
 
@@ -176,6 +184,7 @@ class Resolver:
                 missing,
                 active_backends(self._config, self._registry),
                 registry=self._registry,
+                reporter=self._reporter,
             ),
         }
 

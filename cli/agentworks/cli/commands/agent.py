@@ -8,6 +8,7 @@ import typer
 
 from agentworks.cli._app import app
 from agentworks.cli._helpers import get_db, parse_csv_filter, prompt_vm
+from agentworks.machine_output import OutputFormat
 
 agent_app = typer.Typer(
     name="agent",
@@ -55,21 +56,58 @@ def agent_list(
             "Used by shell completion; the order matches the table's row order.",
         ),
     ] = False,
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option("--output", help="Output format: human or json. Default: human."),
+    ] = OutputFormat.HUMAN,
 ) -> None:
     """List agents. --vm accepts comma-separated values for OR-within-filter."""
-    from agentworks.agents.manager import list_agents
+    if names_only and output_format is OutputFormat.JSON:
+        raise typer.BadParameter("cannot be used with --output json", param_hint="--names-only")
 
-    list_agents(get_db(), vm_name=parse_csv_filter(vm), names_only=names_only)
+    from agentworks.agents.manager import agent_listing, list_agents, render_agent_listing
+
+    if names_only:
+        list_agents(get_db(), vm_name=parse_csv_filter(vm), names_only=True)
+        return
+
+    listing = agent_listing(get_db(), vm_name=parse_csv_filter(vm))
+    if output_format is OutputFormat.JSON:
+        from click import get_binary_stream
+
+        from agentworks.agents.manager.inspect import agent_listing_data
+        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+
+        write_json_envelope(MachineOutputCommand.AGENT_LIST, agent_listing_data(listing), get_binary_stream("stdout"))
+        return
+    render_agent_listing(listing, names_only=names_only)
 
 
 @agent_app.command("describe")
 def agent_describe(
     name: Annotated[str, typer.Argument(help="Agent name")],
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option("--output", help="Output format: human or json. Default: human."),
+    ] = OutputFormat.HUMAN,
 ) -> None:
     """Show detailed information about an agent."""
-    from agentworks.agents.manager import describe_agent
+    from agentworks.agents.manager import agent_description, render_agent_description
 
-    describe_agent(get_db(), name=name)
+    description = agent_description(get_db(), name=name)
+    if output_format is OutputFormat.JSON:
+        from click import get_binary_stream
+
+        from agentworks.agents.manager.inspect import agent_description_data
+        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+
+        write_json_envelope(
+            MachineOutputCommand.AGENT_DESCRIBE,
+            agent_description_data(description),
+            get_binary_stream("stdout"),
+        )
+        return
+    render_agent_description(description)
 
 
 @agent_app.command("reinit")

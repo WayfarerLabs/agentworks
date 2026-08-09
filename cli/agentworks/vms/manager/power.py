@@ -7,6 +7,7 @@ the Tailscale rejoin/logout helpers in ``tailscale.py``.
 from __future__ import annotations
 
 import contextlib
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks import output
@@ -25,17 +26,278 @@ from ._helpers import (
     _require_vm,
     _vm_scope,
 )
-from .boundary import _live_vm_boundary, _platform_ops_ctx
+from .boundary import InspectionBoundaryFailure, _live_vm_boundary, _platform_ops_ctx
 
 if TYPE_CHECKING:
     from agentworks.config import Config
-    from agentworks.db import Database
+    from agentworks.db import Database, VMRow
+    from agentworks.machine_output import JsonObject
+    from agentworks.secrets.resolve import ResolutionReporter
     from agentworks.vms.nodes import LiveVMNode
 
 # NAME-column truncation cap for ``vm list``, derived from the VM-name cap so
 # the two cannot drift: a valid name (<= MAX_VM_NAME_LENGTH) never truncates,
 # and the column stays aligned even against an over-cap legacy row.
 _NAME_CELL_WIDTH = MAX_VM_NAME_LENGTH
+
+
+@dataclass(frozen=True)
+class VMListRow:
+    name: str
+    site: str
+    template: str | None
+    provisioning_status: str
+    initialization_status: str
+    workspace_count: int
+    agent_count: int
+    session_count: int
+    tailscale_host: str | None
+    created_at: str
+
+
+@dataclass(frozen=True)
+class VMListing:
+    vms: tuple[VMListRow, ...]
+
+
+@dataclass(frozen=True)
+class VMIssue:
+    source: str
+    code: str = "unavailable"
+
+
+@dataclass(frozen=True)
+class VMDiagnostic:
+    issue: VMIssue
+    error: AgentworksError
+
+
+@dataclass(frozen=True)
+class VMDetailAgent:
+    name: str
+    linux_user: str
+    grant_all: bool
+    grant_count: int
+
+
+@dataclass(frozen=True)
+class VMDetailSession:
+    name: str
+    template: str
+    mode: str
+    agent_name: str | None
+
+
+@dataclass(frozen=True)
+class VMDetailWorkspace:
+    name: str
+    path: str
+    sessions: tuple[VMDetailSession, ...]
+
+
+@dataclass(frozen=True)
+class VMDetailEvent:
+    created_at: str
+    event: str
+    detail: str | None
+
+
+@dataclass(frozen=True)
+class VMDetailFacts:
+    """Immutable safe scalar snapshot of the persisted VM row."""
+
+    name: str
+    site: str
+    template: str | None
+    admin_template: str | None
+    provisioning_status: str
+    initialization_status: str
+    tailscale_host: str | None
+    cpus: int | None
+    memory_gib: int | None
+    disk_gib: int | None
+    swap_gib: int | None
+    admin_username: str
+    hostname: str
+    created_at: str
+    last_seen_at: str | None
+    operator_stopped: bool
+
+    @classmethod
+    def from_row(cls, vm: VMRow) -> VMDetailFacts:
+        """Copy only contract-safe scalar values from a mutable database row."""
+        return cls(
+            name=vm.name,
+            site=vm.site,
+            template=vm.template,
+            admin_template=vm.admin_template,
+            provisioning_status=vm.provisioning_status,
+            initialization_status=vm.init_status,
+            tailscale_host=vm.tailscale_host,
+            cpus=vm.cpus,
+            memory_gib=vm.memory_gib,
+            disk_gib=vm.disk_gib,
+            swap_gib=vm.swap_gib,
+            admin_username=vm.admin_username,
+            hostname=vm.hostname,
+            created_at=vm.created_at,
+            last_seen_at=vm.last_seen_at,
+            operator_stopped=vm.operator_stopped,
+        )
+
+
+@dataclass(frozen=True)
+class VMLiveResources:
+    """Immutable safe scalar snapshot of a successful live resource read."""
+
+    cpus: str
+    load_average: str
+    memory_total: str
+    memory_used: str
+    memory_percent: str
+    swap_total: str
+    swap_used: str
+    swap_percent: str
+    disk_total: str
+    disk_used: str
+    disk_percent: str
+
+    @classmethod
+    def from_mapping(cls, resources: dict[str, str]) -> VMLiveResources:
+        return cls(
+            cpus=resources["cpus"],
+            load_average=resources["load_avg"],
+            memory_total=resources["mem_total"],
+            memory_used=resources["mem_used"],
+            memory_percent=resources["mem_pct"],
+            swap_total=resources["swap_total"],
+            swap_used=resources["swap_used"],
+            swap_percent=resources["swap_pct"],
+            disk_total=resources["disk_total"],
+            disk_used=resources["disk_used"],
+            disk_percent=resources["disk_pct"],
+        )
+
+
+@dataclass(frozen=True)
+class VMDescription:
+    vm: VMDetailFacts
+    platform: str | None
+    backend: str | None
+    observed_status: str | None
+    status_disposition: str | None
+    system_slug: str | None
+    system_slug_state: str
+    live_resources: VMLiveResources | None
+    agents: tuple[VMDetailAgent, ...]
+    workspaces: tuple[VMDetailWorkspace, ...]
+    events: tuple[VMDetailEvent, ...]
+    issues: tuple[VMIssue, ...]
+    diagnostics: tuple[VMDiagnostic, ...]
+
+
+def vm_listing_data(listing: VMListing) -> JsonObject:
+    """Project VM list facts into the closed JSON v1 shape."""
+    return {
+        "vms": [
+            {
+                "name": vm.name,
+                "site": vm.site,
+                "template": vm.template,
+                "provisioning_status": vm.provisioning_status,
+                "initialization_status": vm.initialization_status,
+                "workspace_count": vm.workspace_count,
+                "agent_count": vm.agent_count,
+                "session_count": vm.session_count,
+                "tailscale_host": vm.tailscale_host,
+                "created_at": vm.created_at,
+            }
+            for vm in listing.vms
+        ],
+    }
+
+
+def vm_description_data(description: VMDescription) -> JsonObject:
+    """Project VM detail facts into the closed JSON v1 shape."""
+    vm = description.vm
+    live_resources = description.live_resources
+    return {
+        "vm": {
+            "name": vm.name,
+            "created_at": vm.created_at,
+            "site": vm.site,
+            "platform": description.platform,
+            "backend": description.backend,
+            "observed_status": description.observed_status,
+            "status_disposition": description.status_disposition,
+            "operator_stopped": vm.operator_stopped,
+            "hostname": vm.hostname,
+            "system_slug": description.system_slug,
+            "system_slug_state": description.system_slug_state,
+            "template": vm.template,
+            "admin_template": vm.admin_template,
+            "admin_username": vm.admin_username,
+            "provisioning_status": vm.provisioning_status,
+            "initialization_status": vm.initialization_status,
+            "tailscale_host": vm.tailscale_host,
+            "last_seen_at": vm.last_seen_at,
+            "provisioned_resources": {
+                "cpus": vm.cpus,
+                "memory_gib": vm.memory_gib,
+                "disk_gib": vm.disk_gib,
+                "swap_gib": vm.swap_gib,
+            },
+            "live_resources": None
+            if live_resources is None
+            else {
+                "cpus": live_resources.cpus,
+                "load_average": live_resources.load_average,
+                "memory_total": live_resources.memory_total,
+                "memory_used": live_resources.memory_used,
+                "memory_percent": live_resources.memory_percent,
+                "swap_total": live_resources.swap_total,
+                "swap_used": live_resources.swap_used,
+                "swap_percent": live_resources.swap_percent,
+                "disk_total": live_resources.disk_total,
+                "disk_used": live_resources.disk_used,
+                "disk_percent": live_resources.disk_percent,
+            },
+            "agents": [
+                {
+                    "name": agent.name,
+                    "linux_user": agent.linux_user,
+                    "grant_all": agent.grant_all,
+                    "grant_count": agent.grant_count,
+                }
+                for agent in description.agents
+            ],
+            "workspaces": [
+                {
+                    "name": workspace.name,
+                    "path": workspace.path,
+                    "sessions": [
+                        {
+                            "name": session.name,
+                            "template": session.template,
+                            "mode": session.mode,
+                            "agent_name": session.agent_name,
+                        }
+                        for session in workspace.sessions
+                    ],
+                }
+                for workspace in description.workspaces
+            ],
+            # Event details are historical free text, including messages written
+            # by older failure paths. They have no closed safe contract, so JSON
+            # must fail closed rather than expose a command or secret-bearing
+            # diagnostic. The human renderer retains the legacy detail display.
+            "events": [
+                {"created_at": event.created_at, "event": event.event, "detail": None} for event in description.events
+            ],
+        },
+        "issues": [{"source": issue.source, "code": issue.code} for issue in description.issues],
+    }
+
 
 # NOTE on ``_ensure_tailscale`` (start_vm), ``_tailscale_logout``
 # (delete_vm), and ``_query_live_resources`` (describe_vm): all three are
@@ -50,13 +312,34 @@ _NAME_CELL_WIDTH = MAX_VM_NAME_LENGTH
 # at call time instead.
 
 
-def list_vms(db: Database, *, names_only: bool = False) -> None:
-    """List all VMs with their init and runtime status.
+def vm_listing(db: Database) -> VMListing:
+    """Collect ordered VM list facts without presentation."""
+    return VMListing(
+        vms=tuple(
+            VMListRow(
+                name=vm.name,
+                site=vm.site,
+                template=vm.template,
+                provisioning_status=vm.provisioning_status,
+                initialization_status=vm.init_status,
+                workspace_count=db.count_workspaces_on_vm(vm.name),
+                agent_count=db.count_agents_on_vm(vm.name),
+                session_count=db.count_sessions_on_vm(vm.name),
+                tailscale_host=vm.tailscale_host,
+                created_at=vm.created_at,
+            )
+            for vm in db.list_vms()
+        )
+    )
+
+
+def render_vm_listing(listing: VMListing, *, names_only: bool = False) -> None:
+    """Render VM list facts with the legacy human layout.
 
     With ``names_only=True``, emit one VM name per line and skip the
     table render. Used by shell completion (see issue #147).
     """
-    vms = db.list_vms()
+    vms = listing.vms
 
     if names_only:
         # Names-only short-circuits BEFORE the empty check so an
@@ -83,82 +366,167 @@ def list_vms(db: Database, *, names_only: bool = False) -> None:
     output.info(header)
     output.info("-" * len(header))
     for vm, name in zip(vms, names, strict=True):
-        ws = db.count_workspaces_on_vm(vm.name)
-        ag = db.count_agents_on_vm(vm.name)
-        se = db.count_sessions_on_vm(vm.name)
-        counts = f"{ws}/{ag}/{se}"
+        counts = f"{vm.workspace_count}/{vm.agent_count}/{vm.session_count}"
         output.info(
             f"{name:<{name_w}} {vm.site:<12} {vm.template or '-':<12} "
-            f"{vm.provisioning_status:<12} {vm.init_status:<12} "
+            f"{vm.provisioning_status:<12} {vm.initialization_status:<12} "
             f"{counts:<10} {vm.tailscale_host or '-':<20} {vm.created_at}"
         )
 
 
-def describe_vm(db: Database, config: Config, name: str) -> None:
-    """Show detailed information about a VM.
+def list_vms(db: Database, *, names_only: bool = False) -> None:
+    """List all VMs with their init and runtime status."""
+    render_vm_listing(vm_listing(db), names_only=names_only)
 
-    Orchestrated, composition only (:func:`_live_vm_boundary`): the
-    graph derives from the VM's row and the backend reads drive
-    through the node's held platform. NO activation gate ever opens:
-    describe reads state (one status probe is its op) and inspecting
-    a stopped VM must render "(manual)" / "(idle)", never start it.
-    """
+
+def vm_description(
+    db: Database,
+    config: Config,
+    name: str,
+    *,
+    reporter: ResolutionReporter | None = None,
+) -> VMDescription:
+    """Collect safe VM detail facts, degrading bounded live reads to issues."""
     import agentworks.vms.manager as _mgr
-
-    vm = _require_vm(db, name)
-
-    # Compose through the site so the platform (the site's capability)
-    # and the backend-side identity render polymorphically. Describe is
-    # an inspection command and a stranded row is exactly the one an
-    # operator wants to look at, so a stranded site degrades to a
-    # warning (with the manifest hint) rather than erroring: the row's
-    # own fields still render.
     from agentworks.bootstrap import load_request_registry
     from agentworks.vms.sites import lookup_site
 
+    vm = _require_vm(db, name)
+    issues: list[VMIssue] = []
+    diagnostics: list[VMDiagnostic] = []
+    platform_name: str | None = None
+    backend: str | None = None
+    observed_status: str | None = None
+    status_disposition: str | None = None
+    live_resources: VMLiveResources | None = None
+
     registry = load_request_registry(config)
-    site_platform = "-"
-    backend_label = "-"
-    status_label = "-"
-    observed: VMStatus | None = None
     try:
         site_decl = lookup_site(vm.site, registry)
-        # Known as soon as the declaration resolves: keep it alive even
-        # if the boundary below degrades.
-        site_platform = site_decl.platform.name
-        vm_node, ops_ctx = _live_vm_boundary(db, config, vm, registry=registry)
-        platform = vm_node.site.platform
+        platform_name = site_decl.platform.name
     except UserAbort:
-        # Ctrl-C at the boundary's secret prompt aborts describe too;
-        # a half-report would read as the command having succeeded.
         raise
-    except AgentworksError as e:
-        # Inspection degrades on ANY typed build/preflight/resolve
-        # failure (a stranded site's ConfigError, a missing tool's
-        # ConnectivityError, an unresolvable secret): describe is the
-        # command an operator reaches for on exactly such a row, so the
-        # row's own fields must still render.
-        output.warn(f"{e}" + (f"\n{e.hint}" if e.hint else ""))
+    except AgentworksError as exc:
+        issue = VMIssue(source="site_lookup")
+        issues.append(issue)
+        diagnostics.append(VMDiagnostic(issue=issue, error=exc))
     else:
-        # The backend reads degrade under the same discipline as the
-        # boundary above: a live backend flake (API hiccup, SSH timeout)
-        # must not crash the report: a flaky backend is exactly when
-        # an operator reaches for describe, and the row's static fields
-        # still render with '-' placeholders.
         try:
-            backend_label = platform.display_backend_name(vm)
-            # Live observed status, paired with operator intent: a
-            # manual stop reads differently from an idle timeout.
-            observed = platform.status(vm, ops_ctx)
-            status_label = observed.value
-            if observed in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
-                status_label += " (manual)" if vm.operator_stopped else " (idle)"
+            vm_node, ops_ctx = _live_vm_boundary(
+                db,
+                config,
+                vm,
+                registry=registry,
+                reporter=reporter,
+                inspection_stages=True,
+            )
         except UserAbort:
             raise
-        except AgentworksError as e:
-            output.warn(f"{e}" + (f"\n{e.hint}" if e.hint else ""))
+        except InspectionBoundaryFailure as exc:
+            issue = VMIssue(source=exc.source)
+            issues.append(issue)
+            diagnostics.append(VMDiagnostic(issue=issue, error=exc.diagnostic))
+        except AgentworksError as exc:
+            issue = VMIssue(source="preflight")
+            issues.append(issue)
+            diagnostics.append(VMDiagnostic(issue=issue, error=exc))
+        else:
+            platform = vm_node.site.platform
+            try:
+                backend = platform.display_backend_name(vm)
+                observed = platform.status(vm, ops_ctx)
+                observed_status = observed.value
+                if observed in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
+                    status_disposition = "manual" if vm.operator_stopped else "idle"
+            except UserAbort:
+                raise
+            except AgentworksError as exc:
+                issue = VMIssue(source="platform_status")
+                issues.append(issue)
+                diagnostics.append(VMDiagnostic(issue=issue, error=exc))
+            else:
+                pass
 
-    # VM details
+    # A platform-status diagnostic does not make the bounded resource helper
+    # unsafe. Preserve the legacy best-effort facts unless the observation
+    # definitively says the host is stopped.
+    if vm.tailscale_host is not None and observed_status not in {"stopped", "deallocated"}:
+        import agentworks.vms.manager as _mgr
+
+        raw_live_resources = _mgr._query_live_resources(vm, config)
+        if raw_live_resources is not None:
+            live_resources = VMLiveResources.from_mapping(raw_live_resources)
+
+    stored_slug = db.get_setting(SYSTEM_SLUG_KEY)
+    if stored_slug is None:
+        system_slug = None
+        system_slug_state = "unset"
+    elif stored_slug == "":
+        system_slug = None
+        system_slug_state = "declined"
+    else:
+        system_slug = stored_slug
+        system_slug_state = "set"
+
+    agents = tuple(
+        VMDetailAgent(
+            name=agent.name,
+            linux_user=agent.linux_user,
+            grant_all=agent.grant_all,
+            grant_count=db.count_agent_grants(agent.name),
+        )
+        for agent in db.list_agents(vm_name=name)
+    )
+    workspaces = tuple(
+        VMDetailWorkspace(
+            name=workspace.name,
+            path=workspace.workspace_path,
+            sessions=tuple(
+                VMDetailSession(
+                    name=session.name,
+                    template=session.template,
+                    mode=session.mode,
+                    agent_name=session.agent_name,
+                )
+                for session in db.list_sessions(workspace_name=workspace.name)
+            ),
+        )
+        for workspace in db.list_workspaces(vm_name=name)
+    )
+    events = tuple(
+        VMDetailEvent(created_at=event.created_at, event=event.event, detail=event.detail)
+        for event in db.list_vm_events(name)
+    )
+    return VMDescription(
+        vm=VMDetailFacts.from_row(vm),
+        platform=platform_name,
+        backend=backend,
+        observed_status=observed_status,
+        status_disposition=status_disposition,
+        system_slug=system_slug,
+        system_slug_state=system_slug_state,
+        live_resources=live_resources,
+        agents=agents,
+        workspaces=workspaces,
+        events=events,
+        issues=tuple(issues),
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def render_vm_description(description: VMDescription) -> None:
+    """Render VM detail facts with the legacy human layout."""
+    vm = description.vm
+    for diagnostic in description.diagnostics:
+        error = diagnostic.error
+        output.warn(f"{error}" + (f"\n{error.hint}" if error.hint else ""))
+
+    site_platform = description.platform or "-"
+    backend_label = description.backend or "-"
+    status_label = description.observed_status or "-"
+    if description.status_disposition is not None:
+        status_label += f" ({description.status_disposition})"
+
     output.info(f"Name:           {vm.name}")
     output.info(f"Created:        {vm.created_at}")
     output.info(f"Site:           {vm.site}")
@@ -172,9 +540,8 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
     # its hostname and backend names carry no prefix. A blank answer is
     # a VALID one: declined ("(none)") renders distinctly from
     # never-asked ("-").
-    stored_slug = db.get_setting(SYSTEM_SLUG_KEY)
-    slug = stored_slug or None
-    slug_label = slug or ("(none)" if stored_slug == "" else "-")
+    slug = description.system_slug
+    slug_label = slug or ("(none)" if description.system_slug_state == "declined" else "-")
     # Exact hostname comparison (the slug is immutable and the hostname is
     # recorded as {slug}-{name}); a prefix test could false-negative on
     # a pre-slug VM whose name happens to start with the slug.
@@ -184,80 +551,65 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
     output.info(f"Template:       {vm.template or '-'}")
     output.info(f"Admin User:     {vm.admin_username}")
     output.info(f"Provisioning:   {vm.provisioning_status}")
-    output.info(f"Initialization: {vm.init_status}")
+    output.info(f"Initialization: {vm.initialization_status}")
     output.info(f"Tailscale IP:   {vm.tailscale_host or '-'}")
 
-    # Resources table: Initial / Current / Used (Used%). The live read
-    # SSHes to the VM, so skip it when the status probe above OBSERVED
-    # the VM stopped: connecting to a dead host would burn the
-    # transport's connect timeout (times its retries) just to print the
-    # '-' placeholders. A degraded/UNKNOWN status still tries: the VM
-    # may well be up, and the read has its own error handling.
-    live = None
-    if vm.tailscale_host is not None and observed not in (
-        VMStatus.STOPPED,
-        VMStatus.DEALLOCATED,
-    ):
-        live = _mgr._query_live_resources(vm, config)
+    live = description.live_resources
 
     if vm.cpus is not None or live is not None:
         output.info(f"\n{'Resources':<16}{'Provisioned':<14}{'Current':<14}{'Used'}")
         output.detail(
             f"{'CPU':<16}"
             f"{str(vm.cpus) if vm.cpus else '-':<14}"
-            f"{live['cpus'] if live else '-':<14}"
-            f"{'load ' + live['load_avg'] if live else '-'}"
+            f"{live.cpus if live else '-':<14}"
+            f"{'load ' + live.load_average if live else '-'}"
         )
         output.detail(
             f"{'Memory':<16}"
             f"{str(vm.memory_gib) + 'G' if vm.memory_gib else '-':<14}"
-            f"{live['mem_total'] if live else '-':<14}"
-            f"{live['mem_used'] + ' (' + live['mem_pct'] + ')' if live else '-'}"
+            f"{live.memory_total if live else '-':<14}"
+            f"{live.memory_used + ' (' + live.memory_percent + ')' if live else '-'}"
         )
         output.detail(
             f"{'Swap':<16}"
             f"{str(vm.swap_gib) + 'G' if vm.swap_gib else '-':<14}"
-            f"{live['swap_total'] if live else '-':<14}"
-            f"{live['swap_used'] + ' (' + live['swap_pct'] + ')' if live else '-'}"
+            f"{live.swap_total if live else '-':<14}"
+            f"{live.swap_used + ' (' + live.swap_percent + ')' if live else '-'}"
         )
         output.detail(
             f"{'Disk':<16}"
             f"{str(vm.disk_gib) + 'G' if vm.disk_gib else '-':<14}"
-            f"{live['disk_total'] if live else '-':<14}"
-            f"{live['disk_used'] + ' (' + live['disk_pct'] + ')' if live else '-'}"
+            f"{live.disk_total if live else '-':<14}"
+            f"{live.disk_used + ' (' + live.disk_percent + ')' if live else '-'}"
         )
 
     if vm.last_seen_at:
         output.info(f"Last Seen:      {vm.last_seen_at}")
 
     # Agents on this VM
-    agents = db.list_agents(vm_name=name)
-    output.info(f"\nAgents ({len(agents)}):")
-    if agents:
-        for agent in agents:
-            grant_count = db.count_agent_grants(agent.name)
+    output.info(f"\nAgents ({len(description.agents)}):")
+    if description.agents:
+        for agent in description.agents:
+            grant_count = agent.grant_count
             grant_label = "all" if agent.grant_all else str(grant_count)
             output.detail(f"{agent.name}  (user: {agent.linux_user}, grants: {grant_label})")
     else:
         output.detail("(none)")
 
     # Workspaces with sessions
-    workspaces = db.list_workspaces(vm_name=name)
-    output.info(f"\nWorkspaces ({len(workspaces)}):")
-    if workspaces:
-        for ws in workspaces:
-            output.detail(f"{ws.name}  ({ws.workspace_path})")
-
-            sessions = db.list_sessions(workspace_name=ws.name)
+    output.info(f"\nWorkspaces ({len(description.workspaces)}):")
+    if description.workspaces:
+        for ws in description.workspaces:
+            output.detail(f"{ws.name}  ({ws.path})")
             # Headerless sections carry the per-workspace session listing's
             # indentation (was detail(indent=2)/detail(indent=3)): the
             # "Sessions" line sits one level under the workspace, each
             # session one level under that.
             with output.section():
-                if sessions:
-                    output.detail(f"Sessions ({len(sessions)}):")
+                if ws.sessions:
+                    output.detail(f"Sessions ({len(ws.sessions)}):")
                     with output.section():
-                        for s in sessions:
+                        for s in ws.sessions:
                             mode_label = f"agent:{s.agent_name}" if s.agent_name else "admin"
                             output.detail(f"{s.name}  [{s.template}]  {mode_label}")
                 else:
@@ -266,14 +618,18 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
         output.detail("(none)")
 
     # Events
-    events = db.list_vm_events(name)
-    output.info(f"\nEvents ({len(events)}):")
-    if events:
-        for event in events:
+    output.info(f"\nEvents ({len(description.events)}):")
+    if description.events:
+        for event in description.events:
             evt_detail = f"  {event.detail}" if event.detail else ""
             output.detail(f"{event.created_at}  {event.event}{evt_detail}")
     else:
         output.detail("(none)")
+
+
+def describe_vm(db: Database, config: Config, name: str) -> None:
+    """Show VM details through the shared inspection fact record."""
+    render_vm_description(vm_description(db, config, name))
 
 
 def start_vm(db: Database, config: Config, name: str) -> None:

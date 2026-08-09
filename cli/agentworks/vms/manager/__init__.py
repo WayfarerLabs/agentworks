@@ -49,7 +49,17 @@ from ._helpers import (
 from .boundary import _live_vm_boundary, gated_vm_boundary
 from .exec import add_git_credential, exec_vm, shell_vm
 from .lifecycle import create_vm, reinit_vm
-from .power import delete_vm, describe_vm, list_vms, rekey_vm, start_vm, stop_vm
+from .power import (
+    delete_vm,
+    describe_vm,
+    list_vms,
+    rekey_vm,
+    render_vm_listing,
+    start_vm,
+    stop_vm,
+    vm_description,
+    vm_listing,
+)
 from .tailscale import (
     _ensure_tailscale,
     _is_tailscale_reachable,
@@ -93,6 +103,7 @@ __all__ = [
     "reinit_vm",
     "rejoin_tailscale",
     "rekey_vm",
+    "render_vm_listing",
     "run_initialization",
     "shell_vm",
     "start_vm",
@@ -101,4 +112,6 @@ __all__ = [
     "verify_vm_connection",
     "verify_tailscale_available",
     "VMConnectionVerification",
+    "vm_description",
+    "vm_listing",
 ]

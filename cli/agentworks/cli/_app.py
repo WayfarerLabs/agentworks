@@ -124,6 +124,12 @@ def _global_options(
 
     output.set_non_interactive(non_interactive)
     output.set_suppress_deprecations(no_deprecations)
+    output.set_machine_readable(
+        "--output=json" in sys.argv
+        or any(
+            argument == "--output" and value == "json" for argument, value in zip(sys.argv, sys.argv[1:], strict=False)
+        )
+    )
     begin_request_warning_scope()
     # Authoritative: Click has parsed, so `debug` is the real flag. Recompute
     # the canonical state (flag OR ambient AGW_DEBUG), then mirror it to the

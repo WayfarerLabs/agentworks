@@ -193,19 +193,19 @@ blocks and the migration workflow only; the broader registry-inventory scope rem
 - [x] `machine-output-lld.md` inventories every covered list/describe service, pins JSON v1 schemas,
       enum spellings, ordering, nullability, error behavior, and human-output compatibility
       fixtures.
-- [ ] Shared `--output human|json` option and v1 envelope serializer implemented without changing
+- [x] Shared `--output human|json` option and v1 envelope serializer implemented without changing
       the global output handler or implying support on mutation commands.
-- [ ] Resource list, kinds, and instance describe serialize their existing service fact records;
+- [x] Resource list, kinds, and instance describe serialize their existing service fact records;
       human output remains byte-compatible.
-- [ ] VM, workspace, agent, session, console, and secret list/describe paths return fact records and
+- [x] VM, workspace, agent, session, console, and secret list/describe paths return fact records and
       gain JSON v1 while preserving human output and read-only behavior.
-- [ ] Doctor gains JSON v1 from `HealthReport`, emits a complete failing report, and preserves its
+- [x] Doctor gains JSON v1 from `HealthReport`, emits a complete failing report, and preserves its
       current exit status semantics.
-- [ ] Guide action records direct the agent to consume covered list, describe, and doctor JSON at
+- [x] Guide action records direct the agent to consume covered list, describe, and doctor JSON at
       applicable verification steps; an end-to-end fixture parses and asserts each v1 document.
-- [ ] `--names-only` and JSON mutual exclusion, deterministic output, no ANSI bytes, stderr error
+- [x] `--names-only` and JSON mutual exclusion, deterministic output, no ANSI bytes, stderr error
       routing, and schema-version compatibility covered by CLI tests.
-- [ ] JSON v1 documented as a permanent contract with examples and compatibility rules; command docs
+- [x] JSON v1 documented as a permanent contract with examples and compatibility rules; command docs
       and completions updated in the same commits.
 - [ ] All focused and full gates pass; step reviewed by `agentworks-reviewer` and a fresh-eyes
       reviewer; valid findings resolved.

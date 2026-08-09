@@ -9,6 +9,7 @@ import typer
 
 from agentworks.cli._app import app
 from agentworks.cli._helpers import get_db
+from agentworks.machine_output import OutputFormat
 
 vm_app = typer.Typer(
     name="vm",
@@ -78,11 +79,35 @@ def vm_list(
             "Used by shell completion; the order matches the table's row order.",
         ),
     ] = False,
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option("--output", help="Output format: human or json. Default: human."),
+    ] = OutputFormat.HUMAN,
 ) -> None:
     """List VMs."""
-    from agentworks.vms.manager import list_vms
+    if names_only and output_format is OutputFormat.JSON:
+        raise typer.BadParameter("cannot be used with --output json", param_hint="--names-only")
 
-    list_vms(get_db(), names_only=names_only)
+    from agentworks.vms.manager import list_vms, render_vm_listing, vm_listing
+
+    if names_only:
+        list_vms(get_db(), names_only=True)
+        return
+
+    listing = vm_listing(get_db())
+    if output_format is OutputFormat.JSON:
+        from click import get_binary_stream
+
+        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+        from agentworks.vms.manager.power import vm_listing_data
+
+        write_json_envelope(
+            MachineOutputCommand.VM_LIST,
+            vm_listing_data(listing),
+            get_binary_stream("stdout"),
+        )
+        return
+    render_vm_listing(listing, names_only=names_only)
 
 
 @vm_app.command("backup")
@@ -99,12 +124,33 @@ def vm_backup(
 @vm_app.command("describe")
 def vm_describe(
     name: Annotated[str, typer.Argument(help="VM name")],
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option("--output", help="Output format: human or json. Default: human."),
+    ] = OutputFormat.HUMAN,
 ) -> None:
     """Show detailed information about a VM."""
     from agentworks.config import load_config
-    from agentworks.vms.manager import describe_vm
+    from agentworks.vms.manager import describe_vm, vm_description
 
-    describe_vm(get_db(), load_config(), name)
+    config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
+    if output_format is OutputFormat.JSON:
+        from click import get_binary_stream
+
+        from agentworks import output
+        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+        from agentworks.secrets.resolve import QuietResolutionReporter
+        from agentworks.vms.manager.power import vm_description_data
+
+        with output.suppress_presentation():
+            description = vm_description(get_db(), config, name, reporter=QuietResolutionReporter())
+        write_json_envelope(
+            MachineOutputCommand.VM_DESCRIBE,
+            vm_description_data(description),
+            get_binary_stream("stdout"),
+        )
+        return
+    describe_vm(get_db(), config, name)
 
 
 @vm_app.command("verify-connection")

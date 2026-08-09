@@ -108,6 +108,18 @@ from ._queries import (
 from ._queries import (
     list_sessions as list_sessions,
 )
+from ._queries import (
+    render_session_description as render_session_description,
+)
+from ._queries import (
+    render_session_listing as render_session_listing,
+)
+from ._queries import (
+    session_description as session_description,
+)
+from ._queries import (
+    session_listing as session_listing,
+)
 from ._scope import (
     _batch_vm_boundary as _batch_vm_boundary,
 )
@@ -165,6 +177,9 @@ __all__ = [
     "delete_session",
     "attach_session",
     "session_logs",
+    "session_description",
+    "session_listing",
+    "render_session_description",
     "check_session_status",
     "batch_check_status",
     "batch_check_all_sessions",
