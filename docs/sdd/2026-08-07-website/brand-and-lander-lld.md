@@ -2,18 +2,19 @@
 
 <!-- cspell:ignore focusout keyup pointerdown unitless -->
 
-- Status: Approved for implementation
+- Status: Phase 4C amendment approved for implementation
 - Date: 2026-08-08
-- FRD: `frd.md`, specifically R6-R9
+- FRD: `frd.md`, specifically R6-R9 and R15-R18
 - HLA: `hla.md`, specifically D5 and D7
 - Selected geometry: `logo-concept-10-twin-flame.svg`
 
 ## 1. Scope
 
-This LLD pins the selected asset and 404 game, excluding main-page, deployment, and DNS design. Use
-plain HTML, CSS, SVG, and JavaScript. A **run** spans START to restart, exit, or reload; **commanded
-thrust** is the post-input/fuel engine value shared by physics/plumes; **mission time** excludes
-hidden time. The semantic 404 and breadcrumb home link remain independent of the game subtree.
+This LLD pins the selected asset and shared Lander/404 game, excluding main-page, deployment, and
+DNS design. Use plain HTML, CSS, SVG, and JavaScript. A **run** spans START to restart, exit, or
+reload; **commanded thrust** is the post-input/fuel engine value shared by physics/plumes; **mission
+time** excludes hidden time. The semantic 404 and breadcrumb home link remain independent of the
+game subtree; the dedicated Lander shell presents that same subtree deliberately.
 
 ## 2. Permanent files and ownership
 
@@ -22,7 +23,9 @@ Implementation uses these permanent names:
 | File                                        | Responsibility                                                  |
 | ------------------------------------------- | --------------------------------------------------------------- |
 | `website/assets/agw-rocket.svg`             | Sole source for the selected A, G, W, and twin-plume paths      |
-| `website/templates/404.html`                | Semantic 404 template with the closed site-base placeholder     |
+| `website/templates/404.html`                | Semantic 404 shell with the shared game placeholder             |
+| `website/templates/lander.html`             | Dedicated Lander shell with the shared game placeholder         |
+| `website/templates/lander-game.html`        | Sole source for the complete reusable game subtree              |
 | `website/build.py`                          | Standard-library base validation, rendering, and asset copying  |
 | `website/static/lander.css`                 | Scene layout, state selectors, focus, cue, and SVG presentation |
 | `website/static/lander-model.js`            | Pure state, scheduler, physics, collision, and plume functions  |
@@ -33,12 +36,12 @@ Implementation uses these permanent names:
 
 `lander-game.js` alone imports the model and owns the frame and pointer; no scheduler is duplicated.
 The production build-time seam is `website/build.py --repo-root ROOT --output OUT --site-base BASE`.
-It renders the complete linked nine-file site; game work serves `/404.html` from that artifact.
-`BASE` is a slash-bounded URL path; `/` and `/agentworks/` pass. A closed ASCII segment grammar
-rejects encoding, whitespace, controls, HTML delimiters, URL components, backslashes, `//`, and dot
-segments. Output beneath the repository is rejected before staging. The sole token `{{SITE_BASE}}`
-prefixes home and local asset URLs; missing uses or tokens fail. The builder has no partial-output
-mode.
+It renders the complete linked ten-file site; game work serves `/lander/` from that artifact and
+fallback acceptance also exercises `/404.html`. `BASE` is a slash-bounded URL path; `/` and
+`/agentworks/` pass. A closed ASCII segment grammar rejects encoding, whitespace, controls, HTML
+delimiters, URL components, backslashes, `//`, and dot segments. Output beneath the repository is
+rejected before staging. The sole token `{{SITE_BASE}}` prefixes home and local asset URLs; missing
+uses or tokens fail. The builder has no partial-output mode.
 
 ## 3. AGW SVG contract
 
@@ -83,14 +86,13 @@ by its pose. Plumes are visual only and do not enlarge the hull.
 Pure `transformLocalPoint(pose,lx,ly)` returns `worldX=x+lx*cos(a)+ly*sin(a)` and
 `worldY=y-lx*sin(a)+ly*cos(a)` for clockwise degrees; feet, hull, render, and G opening use it.
 
-## 4. Static 404 and DOM contract
+## 4. Static Lander/404 and DOM contract
 
-The template renders the shared `header`, `main`, and `footer` landmarks. The header breadcrumb is
-the sole visible route-home action, and `main` has these stable hooks:
+The Lander and 404 shells each render the shared `header`, `main`, and `footer` landmarks. The 404
+header breadcrumb is its sole visible route-home action. One reviewed `lander-game.html` fragment
+owns the following stable subtree and is rendered byte-equivalently into both shells:
 
 ```text
-<h1>Page not found</h1>
-<p id="not-found-message">...</p>
 <section id="lander-game" aria-label="Lunar deployment scene">
   <div id="lander-scene-shell">
     <svg id="lander-scene" viewBox="0 0 1000 640" ...>...</svg>
@@ -100,6 +102,11 @@ the sole visible route-home action, and `main` has these stable hooks:
   <p id="lander-status" role="status" aria-live="polite" aria-atomic="true"></p>
 </section>
 ```
+
+Each `main` begins with a `.page-heading` containing only its reviewed `h1`: `Lunar deployment` on
+the dedicated route and `Page not found` on 404. The 404 then retains
+`<p id="not-found-message">...</p>` before the shared subtree. Both use `.detail-main` and the
+game-specific compact gap, with no eyebrow, error-code, provenance, or other pre-title label.
 
 `#lander-controls` is the only control copy, stays hidden until START, and then reads exactly:
 `Thrust: Space or Up. Turn: Left/H or Right/L. Escape exits. R restarts after success or failure.`
@@ -120,9 +127,10 @@ Before activation the SVG is a named image whose description mentions the lander
 dark NOC, but no controls. While the shell is an application, the SVG is `aria-hidden`; status
 conveys changes and no SVG descendant is separately exposed.
 
-With JavaScript unavailable, the start button and controls remain hidden. The static named scene,
-404 heading, explanatory text, and breadcrumb home anchor remain visible and usable. No CSS selector
-depends on a JavaScript-added class to show the error content or breadcrumb.
+With JavaScript unavailable, the start button and controls remain hidden. The static named scene and
+each page heading remain visible and usable; 404 also retains its explanatory text and breadcrumb
+home anchor. No CSS selector depends on a JavaScript-added class to show shell content or the
+breadcrumb.
 
 ## 5. Responsive scene geometry
 
@@ -464,19 +472,20 @@ all schedules.
 Log manual rows in the checklist with date, browser/version, viewport, motion setting, and outcome.
 The exact root-base demo is
 `python3 website/build.py --repo-root . --output /tmp/agentworks-site-demo --site-base /`, then
-`python3 -m http.server --directory /tmp/agentworks-site-demo 8000`. Open `/404.html` for game work.
-The output is the complete nine-file artifact: `index.html`, `manifesto/index.html`,
-`security/index.html`, `404.html`, `assets/agw-rocket.svg`, `static/site.css`, `static/lander.css`,
-`static/lander-model.js`, and `static/lander-game.js`.
+`python3 -m http.server --directory /tmp/agentworks-site-demo 8000`. Open `/lander/` for game work
+and `/404.html` for fallback acceptance. The output is the complete ten-file artifact: `index.html`,
+`manifesto/index.html`, `security/index.html`, `lander/index.html`, `404.html`,
+`assets/agw-rocket.svg`, `static/site.css`, `static/lander.css`, `static/lander-model.js`, and
+`static/lander-game.js`.
 
-| Layer                                                               | Required coverage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `node --test website/tests/lander-model.test.mjs`                   | One pure scheduler; state/event matrix; Space held through START; keyboard/pointer mixing; vectors; fuel; transformed geometry; landing/playable bounds; NOC/surface/bound ties and independent clamps; frame/input ties, catch-up/stall; plume/sequence; one-shot cue/EXIT; reset; exact status                                                                                                                                                                                                                                                            |
-| `python -m unittest discover -s website/tests -p 'test_*.py'`       | Builder rejects invalid bases, renders root/project bases to the exact output set, enforces the closed placeholder vocabulary, and checks template/rendered no-JS semantics, external SVG IDs, CSS units, antenna contrast `3.788:1`, and forbidden `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `navigator.sendBeacon`, `document.cookie`, `Cache`/`CacheStorage`/`caches`, `ServiceWorker`/`navigator.serviceWorker`, `location.href`/`assign`/`replace`, `history.pushState`/`replaceState`, `localStorage`, `sessionStorage`, and `indexedDB` |
-| Manual Chromium and Firefox acceptance; Safari or WebKit at go-live | No-JS recovery; one-shot cue; Space hold-through-start; native start/focus; shell-only Escape/home independence; keys; full pointer/stall teardown; safe/failure/success/reset; hidden time; request log labels initial same-origin document/module/CSS/SVG loads and proves zero game-initiated requests                                                                                                                                                                                                                                                   |
-| Manual responsive acceptance                                        | 320 CSS pixels, 400 percent zoom, touch landscape, and wide viewport: no page overflow, clipped controls, covered breadcrumb home link, or start target below the pinned full-silhouette bounds                                                                                                                                                                                                                                                                                                                                                             |
-| Standard-library accessibility assertions                           | Landmarks, heading order, duplicate IDs, names, hidden state, live region, focusable elements, and fixed-token 4.5:1 text and 3:1 necessary-graphic contrast                                                                                                                                                                                                                                                                                                                                                                                                |
-| Manual keyboard and screen-reader acceptance                        | Logical tab/focus, no trap or intercepted Tab, restart/Escape focus, static description, start name, revealed controls, restrained intermediate announcements, failure and exact success, silent decorative SVG                                                                                                                                                                                                                                                                                                                                             |
+| Layer                                                               | Required coverage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `node --test website/tests/lander-model.test.mjs`                   | One pure scheduler; state/event matrix; Space held through START; keyboard/pointer mixing; vectors; fuel; transformed geometry; landing/playable bounds; NOC/surface/bound ties and independent clamps; frame/input ties, catch-up/stall; plume/sequence; one-shot cue/EXIT; reset; exact status                                                                                                                                                                                                                                                                                          |
+| `python -m unittest discover -s website/tests -p 'test_*.py'`       | Builder rejects invalid bases, renders root/project bases to the exact output set, enforces the shared Lander/404 subtree and closed placeholder vocabulary, and checks template/rendered no-JS semantics, external SVG IDs, CSS units, antenna contrast `3.788:1`, and forbidden `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `navigator.sendBeacon`, `document.cookie`, `Cache`/`CacheStorage`/`caches`, `ServiceWorker`/`navigator.serviceWorker`, `location.href`/`assign`/`replace`, `history.pushState`/`replaceState`, `localStorage`, `sessionStorage`, and `indexedDB` |
+| Manual Chromium and Firefox acceptance; Safari or WebKit at go-live | No-JS recovery; one-shot cue; Space hold-through-start; native start/focus; shell-only Escape/home independence; keys; full pointer/stall teardown; safe/failure/success/reset; hidden time; request log labels initial same-origin document/module/CSS/SVG loads and proves zero game-initiated requests                                                                                                                                                                                                                                                                                 |
+| Manual responsive acceptance                                        | 320 CSS pixels, 400 percent zoom, touch landscape, and wide viewport: no page overflow, clipped controls, covered breadcrumb home link, or start target below the pinned full-silhouette bounds                                                                                                                                                                                                                                                                                                                                                                                           |
+| Standard-library accessibility assertions                           | Landmarks, heading order, duplicate IDs, names, hidden state, live region, focusable elements, and fixed-token 4.5:1 text and 3:1 necessary-graphic contrast                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Manual keyboard and screen-reader acceptance                        | Logical tab/focus, no trap or intercepted Tab, restart/Escape focus, static description, start name, revealed controls, restrained intermediate announcements, failure and exact success, silent decorative SVG                                                                                                                                                                                                                                                                                                                                                                           |
 
 Reduced-motion acceptance additionally proves no cue, agent travel, sequential power animation, CSS
 transition, or departure, while playable physics and the complete success result remain.
@@ -486,13 +495,14 @@ transition, or departure, while playable physics and the complete success result
 | Requirement or decision                                                               | Pinned by                      |
 | ------------------------------------------------------------------------------------- | ------------------------------ |
 | R6, D5: custom graphite AGW and original twin layered plumes                          | Sections 2, 3, 6, and 11.1     |
-| R7, D7: useful static 404, hidden reveal, Space and activation start                  | Sections 4, 6, and 10.1        |
+| R7, D7: shared static Lander/404 game, hidden reveal, Space and activation start      | Sections 4, 6, and 10.1        |
 | R8, D7: keyboard/pointer thrust, physics, landing, deployment, powered NOC, departure | Sections 5 and 7-11            |
 | R9, D5/D7: no-JS recovery, no nonessential motion, pause/exit, ephemeral state        | Sections 4, 6, 8.4, 12, and 14 |
 | AC5: semantic fallback, home path, and hidden preflight controls                      | Sections 4, 6, and 14          |
 | AC6: focus, keyboard/pointer controls, and independent plumes                         | Sections 4, 10, 11.1, and 14   |
 | AC7: safe/failure states, deployment, persistent-run NOC, and exact status            | Sections 7, 9, 11.2, and 14    |
 | AC8: deterministic schedules, lifecycle, motion, accessibility, and narrow screens    | Sections 8.4, 10, and 14       |
+| AC19: one byte-equivalent shared game subtree on Lander and 404                       | Sections 2, 4, and 14          |
 
 Implementation must treat this LLD as temporary design input. Permanent source and tests stand on
 their own and do not link back to this SDD path.

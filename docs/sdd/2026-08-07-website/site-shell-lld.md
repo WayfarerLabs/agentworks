@@ -2,18 +2,19 @@
 
 <!-- cspell:ignore canonicalization keypath keypaths nonblank sdds TUI -->
 
-- Status: Phase 4B implemented; release acceptance remains pending
+- Status: Phase 4C approved for implementation; release acceptance remains pending
 - Date: 2026-08-09
-- FRD: `frd.md`, specifically R10, R11, and R13-R17
-- HLA: `hla.md`, specifically D1-D5, D8, and D10
-- Source baseline: `1a52d4250bc0c7ff7edf29beeb1ba8067beeb2e5`
+- FRD: `frd.md`, specifically R7-R11 and R13-R18
+- HLA: `hla.md`, specifically D1-D5, D7, D8, and D10
+- Source baseline: `95d42370`
 
 ## 1. Scope and release invariant
 
 The checked-in `website/` tree produces the complete static shell for Home, Manifesto, Security,
-and 404. The phase changes navigation and adds the generated Manifesto without changing deployment,
-DNS, onboarding, or the bounded 404 game. Home and Security remain script-free. Manifesto is also
-script-free. The 404 remains useful without JavaScript and progressively enhances only its game.
+Lander, and 404. Phase 4C adds a deliberate game route and a footer easter-egg link without changing
+deployment, DNS, onboarding, or game mechanics. Home, Manifesto, and Security remain script-free.
+Lander and 404 remain useful without JavaScript and progressively enhance only their one shared game
+subtree.
 
 The release still has no guided onboarding implementation. Home contains the one reviewed ordinary
 text availability notice, with no command, copy control, empty placeholder, or runtime release mode.
@@ -21,20 +22,22 @@ A later onboarding phase replaces that notice through its own canonical contract
 
 ## 2. Permanent files, routes, and output
 
-| Source                             | Responsibility                                                              |
-| ---------------------------------- | --------------------------------------------------------------------------- |
-| `website/templates/index.html`     | Compact repository-sourced identity and interim onboarding notice           |
-| `website/templates/manifesto.html` | Presentation shell for the generated long-form argument                     |
-| `website/templates/security.html`  | Repository-sourced security depth and reporting routes                      |
-| `website/templates/404.html`       | Useful error surface and progressively enhanced lander                      |
-| `website/assets/agw-rocket.svg`    | Selected self-contained brand mark                                          |
-| `website/static/site.css`          | Shared tokens, shell, document presentation, focus, and reflow              |
-| `website/static/lander.css`        | 404 scene and mission presentation                                          |
-| `website/static/lander-model.js`   | Pure deterministic lander model                                             |
-| `website/static/lander-game.js`    | 404-only game controller                                                    |
-| `website/build.py`                 | Closed inputs, rendering, validation, manifest, and atomic installation     |
-| `website/tests/`                   | Source, template, generated-document, builder, workflow, and game contracts |
-| `website/README.md`                | Permanent build, content-ownership, publishing, and recovery runbook        |
+| Source                               | Responsibility                                                              |
+| ------------------------------------ | --------------------------------------------------------------------------- |
+| `website/templates/index.html`       | Compact repository-sourced identity and interim onboarding notice           |
+| `website/templates/manifesto.html`   | Presentation shell for the generated long-form argument                     |
+| `website/templates/security.html`    | Repository-sourced security depth and reporting routes                      |
+| `website/templates/lander.html`      | Dedicated semantic shell for the shared lunar deployment game               |
+| `website/templates/404.html`         | Useful error surface and progressively enhanced lander                      |
+| `website/templates/lander-game.html` | Sole template source for the reusable game subtree                          |
+| `website/assets/agw-rocket.svg`      | Selected self-contained brand mark                                          |
+| `website/static/site.css`            | Shared tokens, shell, document presentation, focus, and reflow              |
+| `website/static/lander.css`          | Shared Lander/404 scene and mission presentation                            |
+| `website/static/lander-model.js`     | Pure deterministic lander model                                             |
+| `website/static/lander-game.js`      | Page-agnostic game controller                                               |
+| `website/build.py`                   | Closed inputs, rendering, validation, manifest, and atomic installation     |
+| `website/tests/`                     | Source, template, generated-document, builder, workflow, and game contracts |
+| `website/README.md`                  | Permanent build, content-ownership, publishing, and recovery runbook        |
 
 The complete generated artifact is exactly:
 
@@ -43,6 +46,7 @@ The complete generated artifact is exactly:
 index.html
 assets/agw-rocket.svg
 manifesto/index.html
+lander/index.html
 security/index.html
 static/lander-game.js
 static/lander-model.js
@@ -50,22 +54,36 @@ static/lander.css
 static/site.css
 ```
 
-The supported public paths are `/`, `/manifesto/`, `/security/`, and `/404.html`. At the GitHub
-Pages project base, the same paths are rooted beneath `/agentworks/`. Canonical metadata always uses
-the custom-domain URLs at `https://agentworks.build`. Game development and demos serve `/404.html`
-from this same complete linked artifact.
+The supported public paths are `/`, `/manifesto/`, `/security/`, `/lander/`, and `/404.html`. At the
+GitHub Pages project base, the same paths are rooted beneath `/agentworks/`. Canonical metadata
+always uses the custom-domain URLs at `https://agentworks.build`. Game development and demos serve
+`/lander/` from this same complete linked artifact; fallback acceptance also exercises `/404.html`.
+
+The Lander metadata contract is exact:
+
+- document title: `Lunar deployment | Agentworks`;
+- `h1`: `Lunar deployment`;
+- description: `Fly the Agentworks lunar deployment mission and deliver an agent to the NOC.`;
+- canonical URL: `https://agentworks.build/lander/`;
+- Content Security Policy: byte-identical to 404's restrictive policy:
+  `default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self';`
+  `connect-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'`.
+
+Template and generated-document mutation tests pin every value and reject a missing, duplicated,
+relaxed, reordered, or route-mismatched metadata field.
 
 ## 3. Shared header contract
 
 Every page has one `header` after the skip link. Its first region is the page identity:
 
-1. Manifesto, Security, and 404 have exactly one decorative small rocket with empty alternative
-   text. It is the first child of `.header-identity`, immediately followed by the breadcrumb.
+1. Manifesto, Security, Lander, and 404 have exactly one decorative small header rocket with empty
+   alternative text. It is the first child of `.header-identity`, immediately followed by the
+   breadcrumb.
 2. Home has no `.header-mark`; its large semantic hero mark follows in `main`.
 3. The breadcrumb is a `nav` named `Breadcrumb`. It has a linked `Agentworks` home crumb, one `/`
    separator hidden with `aria-hidden="true"`, and one non-anchor current item with
    `aria-current="page"`.
-4. Current-item text is exactly `Home`, `Manifesto`, `Security`, or `404`.
+4. Current-item text is exactly `Home`, `Manifesto`, `Security`, `Lander`, or `404`.
 
 The second region is one `nav` named `External`. It contains exactly one repository link labeled
 `GitHub` and one package link labeled `PyPI`. Each anchor contains one inline local SVG followed by
@@ -88,11 +106,22 @@ Product of Wayfarer Labs, LLC
 Its right side is one `nav` named `Footer` containing exactly:
 
 - `Agentworks Manifesto` to `{{SITE_BASE}}manifesto/`;
-- `We take security seriously` to `{{SITE_BASE}}security/`.
+- `We take security seriously` to `{{SITE_BASE}}security/`;
+- an icon-only `.footer-game-link` to `{{SITE_BASE}}lander/#lander-game`, with the accessible name
+  `Play Lunar Lander` and one `.footer-game-mark` image using the selected rocket, empty alternative
+  text, and no duplicate visible label.
 
-The Manifesto and Security destinations occur nowhere else as anchors on a page. The repository and
-package destinations occur nowhere else as anchors on a page. The linked home crumb is also unique.
-The header and footer use wrapping flex layouts in source order, with no menu or hidden navigation.
+The Manifesto, Security, and Lander destinations occur nowhere else as anchors on a page. The
+repository and package destinations occur nowhere else as anchors on a page. The linked home crumb
+is also unique. The footer rocket is its final right-side item and remains visibly at the lower
+right in ordinary document flow; it is not fixed to the viewport. The header and footer use wrapping
+flex layouts in source order, with no menu or hidden navigation.
+
+The deliberately small visible footer mark sits inside an interactive area of at least 24 by 24 CSS
+pixels at every viewport. Padding may provide that area without enlarging the mark. The link uses
+the shared three-pixel focus outline and two-pixel offset without clipping. Automated CSS and
+template assertions pin its minimum target dimensions and accessible name; manual narrow-width,
+zoom, pointer, and keyboard acceptance verifies computed size, focus visibility, and no overlap.
 
 ## 5. Manifesto source contract
 
@@ -165,6 +194,24 @@ computed styles.
 The same inputs and arguments produce byte-identical output. Artifacts contain no timestamps,
 environment prose, or generated `CNAME`, and successful builds leave the repository clean.
 
+### 7.1 Shared Lander fragment and detail headings
+
+`website/templates/lander-game.html` owns the complete `<section id="lander-game">` subtree. It uses
+only its closed `{{SITE_BASE}}` token. The builder validates and renders that trusted fragment, then
+inserts its exact bytes through one `{{LANDER_GAME}}` placement in both `lander.html` and
+`404.html`. The outer shells may differ; the game subtree may not. The fragment is a source input,
+not an emitted route. Generated-document tests parse both pages and prove their `#lander-game`
+subtrees are byte-equivalent, and mutation tests reject a missing, duplicate, moved, or
+independently edited placement.
+
+Both game shells load the same `site.css`, `lander.css`, and `lander-game.js`. Each document
+contains only one game subtree, so the controller's stable IDs remain unique without route-specific
+logic. Lander uses the document title `Lunar deployment | Agentworks` and the `h1`
+`Lunar deployment`; 404 retains its established metadata and the `h1` `Page not found`. Each `main`
+uses the shared `.detail-main` inset and a game-specific compact gap. Its `.page-heading` is the
+first child and contains only the reviewed `h1`. The 404 explanatory paragraph follows the heading,
+and neither shell includes an eyebrow, error code, provenance, or other pre-title label.
+
 ## 8. Accessibility, reflow, and presentation
 
 All pages retain one visible-on-focus skip link, one `h1`, logical heading order, and `header`,
@@ -177,10 +224,10 @@ boundaries, and compact labels. It does not introduce a fake terminal, remote fo
 client routing, or essential motion. Header and footer regions wrap rather than overflow. Body and
 content dimensions use `min-width: 0`, bounded widths, fluid spacing and type, and anywhere link
 wrapping to preserve one-dimensional reflow at 320 CSS pixels and the 400-percent zoom equivalent.
-Manifesto and Security begin with their `h1` and no repository-provenance eyebrow. Their shared
-detail-main inset is `clamp(0.75rem, 2vw, 1.25rem)` below the header; the page heading adds no
-second top inset. Canonical-source provenance remains a build contract rather than visitor-facing
-chrome.
+Manifesto, Security, Lander, and 404 begin with their `h1` and no eyebrow, error-code, or
+repository-provenance label. Their shared detail-main inset is `clamp(0.75rem, 2vw, 1.25rem)` below
+the header; the page heading adds no second top inset. Canonical-source provenance remains a build
+contract rather than visitor-facing chrome.
 
 ## 9. Verification matrix
 
@@ -188,11 +235,11 @@ chrome.
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | Source completeness and drift | Hash, heading-tree, UTF-8, fence, block, and link-map failure tests                                                            |
 | Template closure              | Token vocabulary, exact shell tree, hidden CTA, icon, breadcrumb, image, route-duplicate, and ownership mutation tests         |
-| Generated semantics           | Four-page metadata, canonicals, landmarks, headings, skip links, shell, no-duplicate links, scripts, and local-reference tests |
-| Exact artifacts               | The complete nine-file manifest at `/` and `/agentworks/`; no partial API or CLI option                                        |
+| Generated semantics           | Five-page metadata, canonicals, landmarks, headings, skip links, shell, no-duplicate links, scripts, and local-reference tests |
+| Exact artifacts               | The complete ten-file manifest at `/` and `/agentworks/`; no partial API or CLI option                                         |
 | Determinism and safety        | Repeated byte snapshots, hostile output trees, rollback injection, path and symlink tests                                      |
-| 404 preservation              | Python source/build tests plus Node model/controller contracts                                                                 |
-| Browser acceptance            | `website/tests/lander-browser-checklist.md` pending four-page manual run                                                       |
+| Lander/404 preservation       | Shared-subtree identity, Python source/build tests, and Node model/controller contracts                                        |
+| Browser acceptance            | `website/tests/lander-browser-checklist.md` pending five-page manual run                                                       |
 
 Before handoff, run:
 

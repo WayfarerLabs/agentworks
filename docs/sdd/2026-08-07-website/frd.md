@@ -42,10 +42,12 @@ and none of it is in scope now.
   neutral graphite, with the original twin layered flame treatment. The mark remains legible as AGW
   and as a rocket without relying on an installed font.
 - R7. A custom 404 page remains a useful error page with a clear path home and progressively
-  enhances into a hidden lunar deployment game. Before activation it shows the hovering AGW lander
-  without visual control hints; only a brief, subtle twin-plume cue suggests that it is interactive.
-  Space starts the game. A deliberate tap or activation on the lander is the touch and assistive
-  technology equivalent.
+  enhances into a hidden lunar deployment game. The same game is also available deliberately at
+  `/lander/`; both routes render one shared game subtree and use the same CSS, controller, model,
+  state, controls, and accessibility behavior rather than maintaining parallel implementations.
+  Before activation each shows the hovering AGW lander without visual control hints; only a brief,
+  subtle twin-plume cue suggests that it is interactive. Space starts the game. A deliberate tap or
+  activation on the lander is the touch and assistive technology equivalent.
 - R8. During flight, Space or Up fires both engines; Left or `h` increases right-engine thrust to
   turn left; Right or `l` increases left-engine thrust to turn right. The visible twin plumes track
   collective and differential thrust. On touch, a tap produces a short collective-thrust pulse,
@@ -53,9 +55,10 @@ and none of it is in scope now.
   safe landing left of a small dark NOC cluster deploys a small agent from the G opening. The agent
   enters the NOC, which powers up and remains visibly active while the lander departs. The sequence
   concludes with the exact status `Agent deployed. Mission continues.`
-- R9. The 404 content and route home work without JavaScript. The game has no audio, telemetry,
-  network request, storage, or critical content; it pauses when inactive, can be exited, and honors
-  reduced motion for all nonessential animation. Powered-NOC state lasts only for the current run.
+- R9. The 404 content and route home and the dedicated Lander page work without JavaScript. The game
+  has no audio, telemetry, network request, storage, or critical content; it pauses when inactive,
+  can be exited, and honors reduced motion for all nonessential animation. Powered-NOC state lasts
+  only for the current run.
 - R10. Before the onboarding effort's canonical bootstrap source lands, an **interim public
   release** may serve the complete site shell, repository-sourced problem and principle content,
   selected brand, permanent links, custom 404, deployment pipeline, and custom domain. It states
@@ -87,21 +90,24 @@ and none of it is in scope now.
   offers one link each to the repository, package, deeper rationale, and security deep dive. A
   destination must not be repeated in the landing page's header, body, and footer. Visitors who want
   the longer problem statement or principles follow the single Manifesto link to a page generated
-  from their permanent repository source. The dedicated Manifesto, security, and host-required 404
-  pages remain separate optional/error surfaces rather than being folded into the landing page.
+  from their permanent repository source. The dedicated Manifesto, security, Lander, and
+  host-required 404 pages remain separate optional/play/error surfaces rather than being folded into
+  the landing page.
 - R15. Navigation follows familiar page conventions without reintroducing duplicate destinations.
-  Home, Manifesto, Security, and 404 use the same responsive header structure: a breadcrumb at the
-  upper left and one GitHub and one PyPI call to action at the upper right. Each external call to
-  action pairs its visible text with a local decorative service icon and remains understandable
-  without the icon. The breadcrumb contains one `Agentworks` link to the home route, a visual
-  separator, and a non-linked current-page label (`Home`, `Manifesto`, `Security`, or `404`) marked
-  as current. The home header omits the small rocket because the large mark immediately follows as
-  the hero; every other page places the small rocket immediately left of its breadcrumb. On the 404,
-  the breadcrumb's `Agentworks` link is the sole visible route-home action. A shared traditional
-  footer places the exact text `Product of Wayfarer Labs, LLC` at the left and one
-  `Agentworks Manifesto` and one `We take security seriously` link at the right. These placements
-  supersede the Phase 4A combined exploration panel while preserving one link per external,
-  manifesto, and security destination.
+  Home, Manifesto, Security, Lander, and 404 use the same responsive header structure: a breadcrumb
+  at the upper left and one GitHub and one PyPI call to action at the upper right. Each external
+  call to action pairs its visible text with a local decorative service icon and remains
+  understandable without the icon. The breadcrumb contains one `Agentworks` link to the home route,
+  a visual separator, and a non-linked current-page label (`Home`, `Manifesto`, `Security`,
+  `Lander`, or `404`) marked as current. The home header omits the small rocket because the large
+  mark immediately follows as the hero; every other page places the small rocket immediately left of
+  its breadcrumb. On the 404, the breadcrumb's `Agentworks` link is the sole visible route-home
+  action. A shared traditional footer places the exact text `Product of Wayfarer Labs, LLC` at the
+  left and one `Agentworks Manifesto` link, one `We take security seriously` link, and one small
+  icon-only AGW rocket link to `/lander/#lander-game` at the right. The rocket link is the final
+  footer item, has an accessible name independent of the image, and is the sole Lander destination
+  on each page. These placements supersede the Phase 4A combined exploration panel while preserving
+  one link per external, manifesto, security, and Lander destination.
 - R16. The footer's `Agentworks Manifesto` link opens a semantic static page at `/manifesto/`, not
   the repository document. The page renders the long-form argument from the canonical
   `docs/why-agentworks.md` source at build time, including its problem-space and key-principles
@@ -113,8 +119,13 @@ and none of it is in scope now.
 - R17. The builder emits only the complete linked site artifact. The earlier `--only 404` partial
   demo mode is retired because the accepted 404 now shares navigation with Home, Manifesto, and
   Security; emitting only `404.html` would make its sole recovery action and footer links dead. Game
-  development and demos use `/404.html` from the same complete local build that production uses. No
+  development and demos use `/lander/` from the same complete local build that production uses,
+  while `/404.html` remains the host fallback and renders the identical shared game subtree. No
   validator exception may permit an emitted local link to resolve outside the selected manifest.
+- R18. Manifesto, Security, Lander, and 404 start with their `h1` after only the shared compact
+  detail-page inset. They show no eyebrow, error-code, repository-provenance, or other pre-title
+  label. The 404 retains its useful explanatory copy below the title; removing the redundant `404`
+  label does not weaken document metadata, breadcrumb state, HTTP fallback behavior, or recovery.
 
 ## Settled constraints (inherited; do not reopen)
 
@@ -154,12 +165,14 @@ merged and settled on `main`. The first slice must not build toward them specula
   discipline.
 - AC4. An operator who has never heard of Agentworks can land, understand what it is, and hand their
   agent the bootstrap block in under a minute.
-- AC5. A missing URL serves a semantic 404 with a visible home link before scripts run; no control
-  instructions are visually disclosed until deliberate activation starts the game.
-- AC6. Space starts the game from the initial 404 state when focus is not inside another control.
-  Starting moves focus to the game scene. Arrow and vi controls produce the specified collective and
-  differential thrust; tap, hold, and horizontal drag provide equivalent touch control; and visible
-  plume length reflects the commanded engine thrust.
+- AC5. A missing URL serves a semantic 404 with a visible home link before scripts run. Its content
+  begins with `Page not found` after the compact shared inset, with no redundant error-code or other
+  pre-title label; no control instructions are visually disclosed until deliberate activation starts
+  the game.
+- AC6. Space starts the game from the initial state on either 404 or `/lander/` when focus is not
+  inside another control. Starting moves focus to the game scene. Arrow and vi controls produce the
+  specified collective and differential thrust; tap, hold, and horizontal drag provide equivalent
+  touch control; and visible plume length reflects the commanded engine thrust.
 - AC7. A safe, upright touchdown left of the NOC completes the agent exit, NOC power-up, and lander
   departure sequence; the powered NOC remains visibly changed for the rest of the run; and the exact
   success status is exposed. An unsafe touchdown has a distinct non-destructive failure state and
@@ -184,10 +197,11 @@ merged and settled on `main`. The first slice must not build toward them specula
   workstation-account file/command access, separately explicit elevation, and strict-posture
   recommendation. The interim release does not invent or imply that disclosure while the upstream
   contract is absent.
-- AC13. The landing, Manifesto, security, and 404 surfaces share a restrained terminal/TUI-derived
-  visual system at desktop and narrow widths. Text remains real semantic content, ordinary links and
-  controls remain recognizable, and the design meets the existing contrast, focus, zoom, reflow,
-  reduced-motion, keyboard, and touch requirements without depending on terminal familiarity.
+- AC13. The landing, Manifesto, security, Lander, and 404 surfaces share a restrained
+  terminal/TUI-derived visual system at desktop and narrow widths. Text remains real semantic
+  content, ordinary links and controls remain recognizable, and the design meets the existing
+  contrast, focus, zoom, reflow, reduced-motion, keyboard, and touch requirements without depending
+  on terminal familiarity.
 - AC14. In a clean-context interim-release check, a visitor with no prior Agentworks knowledge can
   understand what the project is, recognize that guided onboarding is not yet published, and choose
   the repository, package, rationale, or security path without explanation. This is the interim
@@ -196,29 +210,35 @@ merged and settled on `main`. The first slice must not build toward them specula
   PyPI package, deeper rationale, and security destinations; it contains no rendered problem-space
   or principles section. The selected rocket is a prominent hero element without displacing the page
   identity, availability notice, or four destinations at 320 CSS pixels or 400 percent zoom.
-- AC16. Generated Home, Manifesto, Security, and 404 documents expose the shared responsive header
-  and footer landmarks with the exact per-page breadcrumb current item. Home has no small header
-  mark; every other page has exactly one small header mark, and 404 has no separate body home link.
-  GitHub and PyPI occur once per page in the header with visible text and hidden decorative icons.
-  Manifesto and Security occur once per page in the footer, beside the exact Wayfarer Labs ownership
-  text. Link purposes, keyboard focus, accessible names, source order, narrow-screen wrapping, and
-  400-percent zoom stay useful with images or CSS unavailable.
+- AC16. Generated Home, Manifesto, Security, Lander, and 404 documents expose the shared responsive
+  header and footer landmarks with the exact per-page breadcrumb current item. Home has no small
+  header mark; every other page has exactly one small header mark, and 404 has no separate body home
+  link. GitHub and PyPI occur once per page in the header with visible text and hidden decorative
+  icons. Manifesto, Security, and the icon-only Lander destination occur once per page in the
+  footer, beside the exact Wayfarer Labs ownership text. The footer rocket remains operable and
+  named when its image is unavailable. Link purposes, keyboard focus, accessible names, source
+  order, narrow-screen wrapping, and 400-percent zoom stay useful with images or CSS unavailable.
 - AC17. `/manifesto/` renders the canonical `docs/why-agentworks.md` long-form introduction, problem
   space, and key principles as semantic headings, paragraphs, and lists. Its generated content and
   mapped links are verified against the permanent source, contain no unexpanded source-relative URL,
   and remain useful without CSS or JavaScript. Changing a selected canonical passage without
   updating its reviewed build contract fails closed.
 - AC18. The builder CLI has no focused or partial-output option, its complete artifact contains
-  every local destination exposed by Home, Manifesto, Security, or 404, and validation rejects every
-  absent local reference. Automated game checks build the complete artifact and exercise its
-  `/404.html`; documented local preview commands do the same.
+  every local destination exposed by Home, Manifesto, Security, Lander, or 404, and validation
+  rejects every absent local reference. Automated game checks build the complete artifact and
+  exercise `/lander/` plus the host fallback `/404.html`; documented local preview commands use the
+  dedicated route.
+- AC19. Generated `/lander/` and `/404.html` contain byte-equivalent `#lander-game` subtrees after
+  site-base rendering. One reviewed template fragment owns that subtree, and mutation tests reject
+  duplicate, missing, moved, or independently edited game markup. Both routes pass the same no-JS,
+  focus, input, motion, lifecycle, and zero-runtime-request acceptance.
 
 ## Settled implementation rulings
 
 - GitHub Pages hosts the site, with an operator-coordinated GoDaddy DNS cutover.
 - A standard-library Python builder produces the static artifact, and CI runs the README identity
   check.
-- The first slice is a landing page, one security deep-dive page, and the host-required custom 404
-  error surface.
+- The first slice is a landing page, Manifesto, security deep-dive, dedicated Lander page, and the
+  host-required custom 404 error surface.
 - The first public release intentionally omits onboarding rather than blocking the rest of the site;
   canonical onboarding follows as a separately reviewed additive release.

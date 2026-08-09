@@ -29,7 +29,7 @@ as a fake terminal, green-screen theme, or command-prompt collage.
 
 ## Interactive behavior
 
-The custom 404 page treats the mark as a lunar deployment vehicle.
+The dedicated Lander page and custom 404 treat the mark as the same lunar deployment vehicle.
 
 - Before activation, the lander has no visual game instructions. The twin plumes provide a brief,
   subtle cue and then settle. Reduced-motion presentation is static.
@@ -45,10 +45,12 @@ The custom 404 page treats the mark as a lunar deployment vehicle.
   active for the rest of the run while the lander departs. The experience concludes with
   `Agent deployed. Mission continues.`
 
-The 404 remains a useful static error page with a normal home link in every state. The game deploys
-only with a complete, publicly accepted site release; the interim non-onboarding release qualifies
-when its shell, pipeline, and acceptance gates are complete. The powered NOC is session-local game
-state; reload or restart begins a fresh mission without cookies or browser storage.
+The 404 remains a useful static error page with a normal home link in every state. `/lander/`
+provides the deliberate play surface through the small footer rocket, while both routes render one
+shared game subtree and implementation. The game deploys only with a complete, publicly accepted
+site release; the interim non-onboarding release qualifies when its shell, pipeline, and acceptance
+gates are complete. The powered NOC is session-local game state; reload or restart begins a fresh
+mission without cookies or browser storage.
 
 ## Promotion rule
 

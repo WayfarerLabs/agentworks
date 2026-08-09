@@ -62,26 +62,30 @@ The home page gives the security posture one calm, visually secondary link label
 4. practical operator posture and the private vulnerability-reporting path.
 
 The Manifesto and security pages are optional depth, not modals, warning gates, prerequisites, or
-long pitches on the home page. They and the host-required 404 are the only separate pages in the
-first slice; the primary product experience stays on the compact landing page. Pages have in-page
-navigation only if their final length makes it useful. A custom `404.html` is an error surface, not
-a content page or client-side route. There is no blog, documentation hierarchy, release feed,
-search, or client-side routing. Growth-path content gets its own design when its authoritative
-contracts have landed.
+long pitches on the home page. A dedicated `/lander/` page exposes the same bounded game used by the
+host-required 404 without turning the error route into a navigation destination. These are the only
+separate pages in the first slice; the primary product experience stays on the compact landing page.
+Pages have in-page navigation only if their final length makes it useful. A custom `404.html` is an
+error surface, not a content page or client-side route. There is no blog, documentation hierarchy,
+release feed, search, or client-side routing. Growth-path content gets its own design when its
+authoritative contracts have landed.
 
-Home, Manifesto, Security, and 404 share one landmark shape. A breadcrumb sits at the upper left:
-one linked `Agentworks` home crumb, a visual separator hidden from the accessibility tree, and a
-non-linked current item marked with `aria-current="page"`. The current item is `Home`, `Manifesto`,
-`Security`, or `404` as appropriate. Every page except Home places the small selected rocket
-immediately before the breadcrumb. The 404's linked `Agentworks` crumb replaces the body-level
-return-home action. One GitHub and one PyPI call to action sit at the upper right with visible
-labels and local decorative icons hidden from the accessibility tree. The home hero remains the only
-logo on Home.
+Home, Manifesto, Security, Lander, and 404 share one landmark shape. A breadcrumb sits at the upper
+left: one linked `Agentworks` home crumb, a visual separator hidden from the accessibility tree, and
+a non-linked current item marked with `aria-current="page"`. The current item is `Home`,
+`Manifesto`, `Security`, `Lander`, or `404` as appropriate. Every page except Home places the small
+selected rocket immediately before the breadcrumb. The 404's linked `Agentworks` crumb replaces the
+body-level return-home action. One GitHub and one PyPI call to action sit at the upper right with
+visible labels and local decorative icons hidden from the accessibility tree. Home alone omits the
+small header mark because its large hero follows immediately in `main`.
 
-The shared footer contains `Product of Wayfarer Labs, LLC` at the left and the only manifesto and
-security links at the right, labeled `Agentworks Manifesto` and `We take security seriously`. The
-header and footer wrap in source order rather than collapsing behind a menu. This is consistent
-navigation across a tiny static site, not a new navigation system.
+The shared footer contains `Product of Wayfarer Labs, LLC` at the left. Its right side contains the
+only manifesto and security text links, labeled `Agentworks Manifesto` and
+`We take security seriously`, followed by a small AGW rocket link to `/lander/#lander-game`. That
+final icon-only link is accessibly named `Play Lunar Lander`; its image has empty alternative text
+so the accessible name is not duplicated. The header and footer wrap in source order rather than
+collapsing behind a menu. This is consistent navigation across a tiny static site, not a new
+navigation system.
 
 ### D1A. The Manifesto is a generated site page
 
@@ -96,15 +100,16 @@ rename mechanism.
 
 ### D2. Plain web technologies with a narrow build step
 
-The checked-in source consists of home, Manifesto, security, and 404 HTML templates, local CSS,
-focused progressive-enhancement JavaScript, SVG assets, and a standard-library Python builder under
-`website/`. The 404 template references stable same-origin groups in the selected SVG rather than
-duplicating its paths. The builder substitutes a validated site base into the 404's home and local
-asset URLs, allowing the same source to run at the local/custom-domain root and at the pre-DNS
-GitHub Pages project path. There is no separate build-metadata abstraction. The builder's explicit
-input list is the build manifest. It uses the supported Python runtime already present in this
-repository and only the standard library. It does not introduce Node package metadata, a JavaScript
-framework, Jekyll, or a general template language.
+The checked-in source consists of home, Manifesto, security, Lander, and 404 HTML shells, one shared
+lander-game template fragment, local CSS, focused progressive-enhancement JavaScript, SVG assets,
+and a standard-library Python builder under `website/`. The shared fragment references stable
+same-origin groups in the selected SVG rather than duplicating its paths. The builder renders that
+fragment with the validated site base and inserts the exact result into both Lander and 404 shells.
+It substitutes the same base into home and local asset URLs, allowing the source to run at the
+local/custom-domain root and at the pre-DNS GitHub Pages project path. There is no separate
+build-metadata abstraction. The builder's explicit input list is the build manifest. It uses the
+supported Python runtime already present in this repository and only the standard library. It does
+not introduce Node package metadata, a JavaScript framework, Jekyll, or a general template language.
 
 The builder accepts an explicit repository root and output directory, writes only beneath the output
 directory, and produces deterministic bytes for the same inputs. It starts from an empty
@@ -112,8 +117,9 @@ caller-provided output directory in CI. Generated artifacts are ignored by Git a
 
 The builder has one output shape: the complete linked site. The former focused `--only 404` seam is
 removed now that 404 uses the shared navigation shell; a partial artifact would contain dead local
-links and would no longer be an honest page. Local game work serves `/404.html` from the complete
-artifact. Manifest validation has no missing-local-reference exception.
+links and would no longer be an honest page. Local game work serves `/lander/` from the complete
+artifact, and fallback acceptance also exercises `/404.html`. Manifest validation has no
+missing-local-reference exception.
 
 The template vocabulary is closed to named placeholders owned by the builder. Shared text is HTML
 escaped before insertion. There is no evaluation of source content as a template, Markdown, Python,
@@ -182,8 +188,9 @@ has four equal corner radii, with only its opening and inward stroke breaking O-
 ordinary mark is neutral graphite. Its original twin-flame treatment uses compact pale-yellow hot
 cores within orange and deeper orange-red plumes. On the landing page the mark is a dominant hero
 element at two to three times the original small-header presentation, while the Manifesto, security,
-and 404 contexts retain the shared compact size. The final checked-in SVG is self-contained,
-font-independent, semantic where displayed as content, and reusable without this SDD.
+Lander, and 404 header contexts retain the shared compact size. The final checked-in SVG is
+self-contained, font-independent, semantic where displayed as content, and reusable without this
+SDD.
 
 The presentation should feel like a capable workbench rather than a generic SaaS landing page:
 simple but powerful, with strong typography, restrained color, visible structure, and efficient
@@ -194,8 +201,8 @@ interaction. The interim notice occupies the future bootstrap region without mim
 after integration, the bootstrap becomes the visual center without requiring a layout redesign. No
 remote font, icon library, or existing architecture diagram is introduced.
 
-The shell LLD pins final tokens and layouts across the home, Manifesto, security, and 404 surfaces
-with these invariants:
+The shell LLD pins final tokens and layouts across the home, Manifesto, security, Lander, and 404
+surfaces with these invariants:
 
 - useful at 320 CSS pixels and at 400 percent zoom without page-level horizontal scrolling;
 - WCAG 2.2 AA text, component, focus, and interaction contrast;
@@ -213,20 +220,22 @@ success or failure in an `aria-live` status region without moving focus. If the 
 the button is absent or explains that manual selection remains available. No clipboard content is
 read.
 
-### D7. The custom 404 hides a bounded deployment game
+### D7. One bounded deployment game renders on Lander and 404
 
 The built artifact includes a semantic `404.html` that identifies the missing page and exposes a
-normal link home without CSS or JavaScript. The selected twin-plume mark hovers over a minimal lunar
+normal link home without CSS or JavaScript, plus a deliberate `/lander/` play surface. One reviewed
+template fragment owns the complete `#lander-game` subtree and is rendered into both shells; the
+controller and model remain page-agnostic. The selected twin-plume mark hovers over a minimal lunar
 surface. No visual instructions, score, or game chrome appear initially. On arrival, the plumes run
 a subtle cue for less than five seconds and settle; `prefers-reduced-motion: reduce` suppresses that
 cue entirely. This bounded cue preserves the surprise without requiring a pre-game pause control.
 
-An unmodified, non-repeated Space key starts the game from the initial 404 state when its event
-target is the document body or lander scene, never when focus is on the home link or another
-interactive/editable element. The lander is also an operable, accessibly named start control without
-visible instruction text. Activating it provides the pointer and assistive-technology path. The
-accepted preflight Space event is consumed so it cannot also scroll the page. Starting moves focus
-to the game scene and reveals concise controls and status.
+An unmodified, non-repeated Space key starts the game from the initial state on either shell when
+its event target is the document body or lander scene, never when focus is on the home link or
+another interactive/editable element. The lander is also an operable, accessibly named start control
+without visible instruction text. Activating it provides the pointer and assistive-technology path.
+The accepted preflight Space event is consumed so it cannot also scroll the page. Starting moves
+focus to the game scene and reveals concise controls and status.
 
 While active, Space or Up commands equal thrust; Left or `h` increases the right engine to turn
 left; Right or `l` increases the left engine to turn right. Apart from the accepted preflight Space
@@ -238,6 +247,11 @@ little travel receives a pinned minimum impulse so a tap is useful; holding sust
 Dragging left biases the right engine, and dragging right biases the left. `touch-action` and scroll
 suppression apply only inside the active game scene. Escape exits to the settled initial state, and
 `r` restarts a completed or failed mission.
+
+The 404 body begins directly with `Page not found` after the compact detail-page inset. It has no
+error-code, eyebrow, provenance, or other pre-title label; its explanatory copy remains below the
+title. The dedicated page similarly begins with `Lunar deployment`. Both titles and their shared
+game remain semantic and useful before JavaScript runs.
 
 The game is a small DOM/SVG state machine, not canvas and not a general engine. A timestamp-driven
 animation loop integrates a fixed-step two-dimensional model with bounded catch-up: gravity,
@@ -343,11 +357,12 @@ interim availability notice ---------------+
 docs/why-agentworks.md security selectors --+--> security page
 SECURITY.md reporting contract -------------+
 
-404 template + logo/game assets ----------------> 404 page
+shared game fragment + logo/game assets --+-----> Lander page
+                                           +-----> 404 page
 
-home + security + 404 --> deterministic builder --> PR/CI
-                                              |
-                                              +--> GitHub Pages --> agentworks.build
+home + Manifesto + security + Lander + 404 --> deterministic builder --> PR/CI
+                                                                       |
+                                                                       +--> GitHub Pages --> agentworks.build
 
 After onboarding Phase 3 merges:
 
@@ -361,8 +376,8 @@ canonical bootstrap + README fenced block
 The detailed filenames belong in the shell and onboarding-integration LLDs, but responsibilities are
 fixed here:
 
-- `website/`: home, Manifesto, security, and 404 source; final SVG assets; focused CSS/JavaScript;
-  builder; tests; and permanent operator/developer runbook.
+- `website/`: home, Manifesto, security, Lander, and 404 source; final SVG assets; focused
+  CSS/JavaScript; builder; tests; and permanent operator/developer runbook.
 - `.github/workflows/`: Pages build/deploy workflow and the existing CI integration.
 - `.gitignore`: generated site artifact exclusion.
 - repository README and onboarding canonical source: inputs only after onboarding integration, not
@@ -446,8 +461,9 @@ recommendation.
 - **Upstream content drift after integration:** build fails before artifact upload and names the
   missing or mismatched contract. The owner updates the website integration against the merged
   source; it never substitutes local copy.
-- **JavaScript unavailable or game failure:** the semantic 404 message and ordinary home link remain
-  available. The lander is nonessential and never owns navigation or recovery.
+- **JavaScript unavailable or game failure:** the dedicated Lander page retains its static named
+  scene, while the semantic 404 message and ordinary home link remain available. The game is
+  nonessential and never owns navigation or recovery.
 - **Bad site merge:** the Pages environment exposes deployment history. Fix forward or redeploy the
   last known-good artifact according to the runbook.
 - **DNS or certificate delay:** the Pages deployment history, status, and captured pre-attachment

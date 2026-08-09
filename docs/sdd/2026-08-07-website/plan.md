@@ -13,20 +13,20 @@ This effort now uses two complete website releases, a small interim acceptance-e
 final closeout PR. The operator's 2026-08-08 direction still governs incomplete design/demo work:
 the existing website PR (number 439) remains draft and does not merge merely to publish artifacts or
 the game. The 2026-08-09 direction defines a new complete first release: that PR may become ready
-and merge when the useful interim home and security pages, selected brand, accepted custom 404, CI,
-automatic Pages deployment, runbook, and default-host acceptance are all complete. The custom-domain
-activation then publishes that honest interim release at `agentworks.build`, and the small evidence
-PR records the observed result.
+and merge when the useful interim Home, Manifesto, Security, dedicated Lander, selected brand,
+accepted custom 404, shared footer/game contracts, CI, automatic Pages deployment, runbook, and
+default-host acceptance are all complete. The custom-domain activation then publishes that honest
+interim release at `agentworks.build`, and the small evidence PR records the observed result.
 
 After onboarding Phase 3 lands on `main`, a separately reviewed integration PR replaces the bounded
 availability notice with the canonical README bootstrap and copy enhancement. It does not redesign
 the page, fork the content, or create another deployment path. A final closeout PR records complete
 production acceptance, final truthful checkbox flips, and `locked.md`.
 
-`locked.md` never merges before AC1-AC14 and the final production requirements are accepted. Every
-earlier merge is independently useful and operable: the interim release does not claim onboarding
-exists, and the onboarding release consumes only the eventual canonical contract from `main`. No
-website code binds to the onboarding feature branch.
+`locked.md` never merges before AC1-AC19 and R1-R18 are accepted in production. Every earlier merge
+is independently useful and operable: the interim release does not claim onboarding exists, and the
+onboarding release consumes only the eventual canonical contract from `main`. No website code binds
+to the onboarding feature branch.
 
 ## Phase 0: design convergence and coordination
 
@@ -269,6 +269,32 @@ Definition of done: R15-R17 and AC16-AC18 hold, the revised navigation is conven
 predictable, the Manifesto is canonical-source generated, and the site's tiny information
 architecture has no duplicate destination or hidden menu.
 
+## Phase 4C: dedicated Lander route and footer easter egg
+
+- [x] Amend the FRD, HLA, `site-shell-lld.md`, and `brand-and-lander-lld.md` to pin the dedicated
+      `/lander/` surface, shared game fragment, site-wide footer rocket link, and compact 404 title.
+- [ ] Add a semantic `/lander/` shell and render one validated `#lander-game` template fragment into
+      both it and `404.html`; keep one controller/model/CSS implementation and preserve all game
+      mechanics, IDs, no-JavaScript behavior, and lifecycle boundaries.
+- [ ] Add the final icon-only AGW rocket link to every footer, targeting `/lander/#lander-game`;
+      give it an independent accessible name, retain one Lander destination per page, and keep it at
+      the lower right in wrapping document flow, with a visible-focus target of at least 24 by 24
+      CSS pixels without enlarging the mark.
+- [ ] Remove the redundant 404 error-code eyebrow and apply the same compact detail-page
+      header-to-title inset used by Manifesto and Security while retaining the useful explanatory
+      copy below `Page not found`.
+- [ ] Extend the exact template, image, route, fragment, manifest, metadata, CSP, heading,
+      local-link, deterministic-build, and no-JavaScript contracts for five pages and ten emitted
+      files.
+- [ ] Update permanent website build/demo documentation to use `/lander/` while continuing to test
+      the actual `/404.html` fallback; run the complete focused and repository gates.
+- [ ] Obtain `agentworks-reviewer` and fresh-eyes approval for the implementation and resolve every
+      valid finding before considering the refinement complete.
+
+Definition of done: R7-R9, R15-R18, and AC5-AC8/AC13/AC16/AC18-AC19 hold. `/lander/` and `/404.html`
+render the exact same reviewed game subtree, the footer rocket is the only deliberate game
+destination, and the 404 begins directly with its title after a compact natural gap.
+
 ## Phase 5: CI and default Pages deployment
 
 - [x] Delegate workflow implementation to an `agentworks-dev` subagent with ownership of the Pages
@@ -326,9 +352,15 @@ interim artifact is merged and live at the default Pages URL without a manual pu
 - [ ] Verify the secondary home-page security link and stable deep-dive URL, sourced threat,
       boundary, and limitation content, private reporting path, no-JavaScript behavior, and
       non-preachy hierarchy.
-- [ ] Verify the production custom 404, route-home fallback, original twin-plume mark, hidden game,
-      keyboard/vi and touch controls, independent plume response, deployment sequence, exact success
-      status, reset boundaries, lifecycle pause, and reduced-motion presentation.
+- [ ] Verify the production footer rocket on all five pages is the final lower-right footer item,
+      has one `/lander/#lander-game` destination, an independent accessible name, at least a 24 by
+      24 CSS-pixel target, visible focus, and no narrow-width or zoom overlap.
+- [ ] Verify the production `/lander/` metadata/CSP, compact heading, static no-JavaScript scene,
+      original twin-plume mark, hidden preflight, keyboard/vi and touch controls, independent plume
+      response, deployment sequence, exact success status, reset boundaries, lifecycle pause, and
+      reduced-motion presentation.
+- [ ] Verify the production custom 404 compact title, explanatory copy, route-home fallback, and
+      byte-equivalent shared game subtree preserve the same game and no-JavaScript contracts.
 - [ ] Run interim accessibility acceptance: keyboard-only flow, visible focus, landmarks/headings,
       320 CSS pixel reflow, 400 percent zoom, contrast evidence, reduced motion, and recognizable
       controls independent of terminal familiarity.
@@ -339,8 +371,9 @@ interim artifact is merged and live at the default Pages URL without a manual pu
       `website/README.md` and this feature directory on the existing evidence branch; mark its draft
       PR ready, obtain review, and merge it. Do not create `locked.md` or claim AC3/AC4.
 
-Definition of done: AC1, AC2, AC5-AC11, and AC13-AC14's interim conditions hold at
-`https://agentworks.build`; the public site is useful and honest while onboarding remains pending.
+Definition of done: R3-R11 and R13-R18 plus AC1, AC2, AC5-AC11, and AC13-AC19's interim conditions
+hold at `https://agentworks.build`; the public site is useful and honest while onboarding remains
+pending.
 
 ## Phase 7: merged onboarding pickup and integration LLD
 
@@ -382,8 +415,11 @@ with no branch-only dependency or duplicated bootstrap.
       review, resolve all valid findings, and hand the reviewed PR to the operator for merge.
 - [ ] Verify the matching commit deploys automatically to production and that the interim notice is
       absent.
+- [ ] Reverify the five-page shared shell, footer Lander link and target size, exact `/lander/`
+      metadata/CSP, byte-equivalent Lander/404 game subtree, and compact 404 title after onboarding
+      integration.
 
-Definition of done: R1-R3, R12, AC2, AC3, and AC12 hold in production through the existing site and
+Definition of done: R1-R18, AC2-AC3, and AC5-AC19 hold in production through the existing site and
 pipeline, with the temporary notice removed rather than retained as configuration.
 
 ## Phase 9: complete acceptance and closeout
@@ -397,8 +433,8 @@ pipeline, with the temporary notice removed rather than retained as configuratio
 - [ ] Run complete accessibility acceptance: keyboard-only flow, visible focus, landmarks/headings,
       copy status, 320 CSS pixel reflow, 400 percent zoom, contrast evidence, reduced motion, screen
       reader, and touch behavior.
-- [ ] Reverify the production custom 404/game contract and confirm the onboarding change did not
-      disturb it.
+- [ ] Reverify the production `/lander/`, footer rocket, shared Lander/404 game subtree, and custom
+      404 contracts and confirm the onboarding change did not disturb them.
 - [ ] Reverify the home/security information architecture, non-preachy security path, sourced
       security claims, and shared terminal/TUI-derived visual system after onboarding integration.
 - [ ] Record dated acceptance evidence without secrets or account tokens and promote every
@@ -407,7 +443,7 @@ pipeline, with the temporary notice removed rather than retained as configuratio
       run final gates, obtain the required closeout review, and hand the ready PR to the operator
       for merge.
 
-Definition of done: AC1-AC14 hold at `https://agentworks.build`, R1-R13 and C1-C5 are production
+Definition of done: AC1-AC19 hold at `https://agentworks.build`, R1-R18 and C1-C5 are production
 facts, the deployment is operable without this SDD, all plan boxes are truthful, and the effort is
 locked.
 
