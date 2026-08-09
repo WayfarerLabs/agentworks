@@ -17,10 +17,17 @@ from typing import Final, NamedTuple
 
 SITE_BASE_TOKEN: Final = "{{SITE_BASE}}"
 SITE_BASE_PATTERN = re.compile(r"/(?:[A-Za-z0-9][A-Za-z0-9._~-]*/)*\Z", re.ASCII)
+OUTPUT_NAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._~-]*\Z", re.ASCII)
 TOKEN_PATTERN = re.compile(r"{{[A-Z][A-Z0-9_]*}}")
 HEADING_PATTERN = re.compile(r"^(#{1,6})[ \t]+(.*?)(?:[ \t]+#+[ \t]*)?$")
 FENCE_PATTERN = re.compile(r"^[ ]{0,3}(`{3,}|~{3,})(?:[^`~]*)$")
 REFERENCE_PATTERN = re.compile(r"^[ ]{0,3}\[([^]]+)\]:[ \t]*(\S*)[ \t]*$")
+REMOTE_URL_PATTERN = re.compile(r"(?i)(?:https?:)?//")
+
+INTERIM_NOTICE: Final = (
+    "Guided onboarding is not yet published. You can still explore the repository, PyPI package, "
+    "rationale, and security model."
+)
 
 REPOSITORY_URL: Final = "https://github.com/WayfarerLabs/agentworks"
 RATIONALE_URL: Final = f"{REPOSITORY_URL}/blob/main/docs/why-agentworks.md"
@@ -321,6 +328,23 @@ TEMPLATE_REQUIRED_LITERALS: Final = {
     },
     "404.html": REQUIRED_TEMPLATE_REFERENCES,
 }
+CONTENT_TOKEN_PLACEMENTS: Final = {
+    "index.html": {
+        "{{HOME_META_DESCRIPTION}}": ("meta", "description"),
+        "{{HOME_IDENTITY}}": ("section-class", "identity-panel"),
+        "{{HOME_PROBLEM}}": ("section-id", "problem"),
+        "{{HOME_PRINCIPLES}}": ("section-id", "principles"),
+    },
+    "security.html": {
+        "{{SECURITY_META_DESCRIPTION}}": ("meta", "description"),
+        "{{SECURITY_THREATS}}": ("section-id", "threat-model"),
+        "{{SECURITY_BOUNDARIES}}": ("section-id", "boundaries"),
+        "{{SECURITY_POSTURE}}": ("section-id", "operator-posture"),
+        "{{SECURITY_SECRETS}}": ("section-id", "credentials"),
+        "{{SECURITY_REPORTING}}": ("section-id", "reporting"),
+    },
+    "404.html": {},
+}
 
 
 class ContractError(ValueError):
@@ -359,27 +383,38 @@ def _read_utf8(path: Path, contract: ContentContract | None = None) -> str:
         raise ValueError(f"{path}: invalid UTF-8 or byte-order mark") from error
 
 
-def _section_ranges(source: str, contract: ContentContract) -> list[tuple[int, int]]:
-    headings: list[tuple[int, str, int]] = []
+def _fenced_line_indexes(source: str, contract: ContentContract) -> set[int]:
+    fenced: set[int] = set()
     fence_character = ""
     fence_length = 0
     lines = source.split("\n")
     for index, line in enumerate(lines):
         if fence_character:
+            fenced.add(index)
             closing = re.compile(rf"^[ ]{{0,3}}{re.escape(fence_character)}{{{fence_length},}}[ \t]*$")
             if closing.match(line):
                 fence_character, fence_length = "", 0
             continue
         fence = FENCE_PATTERN.match(line)
         if fence:
+            fenced.add(index)
             marker = fence.group(1)
             fence_character, fence_length = marker[0], len(marker)
+    if fence_character:
+        raise ContractError(contract, "unsupported block or inline Markdown: unclosed fence")
+    return fenced
+
+
+def _section_ranges(source: str, contract: ContentContract) -> list[tuple[int, int]]:
+    headings: list[tuple[int, str, int]] = []
+    lines = source.split("\n")
+    fenced = _fenced_line_indexes(source, contract)
+    for index, line in enumerate(lines):
+        if index in fenced:
             continue
         heading = HEADING_PATTERN.match(line)
         if heading:
             headings.append((len(heading.group(1)), heading.group(2).strip(" \t"), index))
-    if fence_character:
-        raise ContractError(contract, "unsupported block or inline Markdown: unclosed fence")
 
     matches: list[tuple[int, int]] = []
     stack: list[tuple[int, str]] = []
@@ -455,14 +490,17 @@ def _extract(contract: ContentContract, source: str) -> tuple[Block, ...]:
 def _reference_url(source: str, reporting: ContentContract) -> str:
     definitions: list[tuple[str, str]] = []
     lines = source.split("\n")
+    fenced = _fenced_line_indexes(source, reporting)
     for index, line in enumerate(lines):
+        if index in fenced:
+            continue
         match = REFERENCE_PATTERN.match(line)
         if match is None:
             continue
         destination = match.group(2)
         if not destination and index + 1 < len(lines):
             continuation = lines[index + 1]
-            if re.match(r"^[ \t]+\S", continuation):
+            if index + 1 not in fenced and re.match(r"^[ ]{1,3}\S", continuation):
                 destination = continuation.strip(" \t")
         definitions.append((match.group(1), destination))
     matching = [url for label, url in definitions if label == "gh-private"]
@@ -584,6 +622,113 @@ def extract_content(repo_root: Path) -> dict[str, str]:
     return rendered
 
 
+class _TemplatePlacementParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.stack: list[tuple[str, dict[str, str | None]]] = []
+        self.placements: dict[str, list[tuple[str, str, tuple[tuple[str, dict[str, str | None]], ...]]]] = {}
+        self.exact_text_placements: set[str] = set()
+        self.description_content_tokens: set[str] = set()
+        self.document_text: list[str] = []
+        self.onboarding_text: list[str] = []
+        self.onboarding_sections: list[dict[str, str | None]] = []
+        self.onboarding_headings = 0
+
+    def _record_attributes(self, tag: str, attributes: dict[str, str | None]) -> None:
+        for attribute, value in attributes.items():
+            if value is None:
+                continue
+            for token in TOKEN_PATTERN.findall(value):
+                self.placements.setdefault(token, []).append(("attribute", f"{tag}:{attribute}", tuple(self.stack)))
+                if (
+                    tag == "meta"
+                    and attribute == "content"
+                    and attributes.get("name") == "description"
+                    and value == token
+                ):
+                    self.description_content_tokens.add(token)
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        self._record_attributes(tag, attributes)
+        self.stack.append((tag, attributes))
+        if tag == "section" and attributes.get("id") == "onboarding":
+            self.onboarding_sections.append(attributes)
+        if (
+            tag == "h2"
+            and attributes.get("id") == "onboarding-heading"
+            and any(ancestor == "section" and values.get("id") == "onboarding" for ancestor, values in self.stack[:-1])
+        ):
+            self.onboarding_headings += 1
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self._record_attributes(tag, dict(attrs))
+
+    def handle_endtag(self, tag: str) -> None:
+        for index in range(len(self.stack) - 1, -1, -1):
+            if self.stack[index][0] == tag:
+                del self.stack[index:]
+                break
+
+    def handle_data(self, data: str) -> None:
+        self.document_text.append(data)
+        in_onboarding = any(tag == "section" and attrs.get("id") == "onboarding" for tag, attrs in self.stack)
+        if in_onboarding:
+            self.onboarding_text.append(data)
+        for token in TOKEN_PATTERN.findall(data):
+            location = self.stack[-1][0] if self.stack else "document"
+            self.placements.setdefault(token, []).append(("text", location, tuple(self.stack)))
+            if data.strip() == token:
+                self.exact_text_placements.add(token)
+
+
+def _validate_content_token_placements(name: str, template: str) -> _TemplatePlacementParser:
+    parser = _TemplatePlacementParser()
+    parser.feed(template)
+    for token, (placement_kind, placement_value) in CONTENT_TOKEN_PLACEMENTS[name].items():
+        placements = parser.placements.get(token, [])
+        if len(placements) != 1:
+            raise ValueError(f"{name}: content token {token} must have exactly one parsed placement")
+        kind, location, ancestors = placements[0]
+        if placement_kind == "meta":
+            if (
+                kind != "attribute"
+                or location != "meta:content"
+                or placement_value != "description"
+                or token not in parser.description_content_tokens
+            ):
+                raise ValueError(f"{name}: metadata token {token} must be the exact description content attribute")
+            continue
+        if kind != "text" or location != "div" or token not in parser.exact_text_placements:
+            raise ValueError(f"{name}: block token {token} must be text in its sourced-content container")
+        container = ancestors[-1][1]
+        if container.get("class") != "sourced-content":
+            raise ValueError(f"{name}: block token {token} must be in an exact sourced-content container")
+        section = next((attrs for tag, attrs in reversed(ancestors[:-1]) if tag == "section"), None)
+        if (
+            section is None
+            or (placement_kind == "section-id" and section.get("id") != placement_value)
+            or (placement_kind == "section-class" and section.get("class") != placement_value)
+        ):
+            raise ValueError(f"{name}: block token {token} is in the wrong reviewed section")
+    return parser
+
+
+def _validate_interim_template(name: str, parser: _TemplatePlacementParser) -> None:
+    if name != "index.html":
+        return
+    document_text = " ".join("".join(parser.document_text).split())
+    onboarding_text = " ".join("".join(parser.onboarding_text).split())
+    if document_text.count(INTERIM_NOTICE) != 1 or onboarding_text.count(INTERIM_NOTICE) != 1:
+        raise ValueError("index.html: interim availability notice must occur exactly once inside onboarding")
+    if len(parser.onboarding_sections) != 1:
+        raise ValueError("index.html: exactly one onboarding section is required")
+    if parser.onboarding_sections[0].get("aria-labelledby") != "onboarding-heading":
+        raise ValueError("index.html: onboarding section must reference onboarding-heading")
+    if parser.onboarding_headings != 1 or not onboarding_text:
+        raise ValueError("index.html: onboarding must contain its nonempty reviewed heading and notice")
+
+
 def _validate_template(name: str, template: str) -> None:
     allowed = TEMPLATE_TOKENS[name]
     tokens = TOKEN_PATTERN.findall(template)
@@ -604,6 +749,8 @@ def _validate_template(name: str, template: str) -> None:
     missing_literals = sorted(literal for literal in TEMPLATE_REQUIRED_LITERALS[name] if literal not in template)
     if missing_literals:
         raise ValueError(f"{name}: template is missing required reviewed literals: {missing_literals}")
+    parser = _validate_content_token_placements(name, template)
+    _validate_interim_template(name, parser)
 
 
 def render_named_template(name: str, template: str, site_base: str, substitutions: dict[str, str]) -> str:
@@ -637,9 +784,12 @@ class _ReferenceParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
         self.references: list[str] = []
+        self.ids: set[str] = set()
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attributes = dict(attrs)
+        if attributes.get("id"):
+            self.ids.add(str(attributes["id"]))
         for name in ("href", "src"):
             if attributes.get(name):
                 self.references.append(str(attributes[name]))
@@ -652,6 +802,11 @@ def _validate_local_references(rendered: dict[Path, bytes], manifest: frozenset[
         parser = _ReferenceParser()
         parser.feed(content.decode("utf-8"))
         for reference in parser.references:
+            if reference.startswith("#"):
+                fragment = reference[1:]
+                if not fragment or fragment not in parser.ids:
+                    raise ValueError(f"{path}: same-document fragment is absent: {reference}")
+                continue
             if reference.startswith("https://"):
                 if reference not in APPROVED_EXTERNAL_URLS:
                     raise ValueError(f"{path}: unapproved external URL: {reference}")
@@ -667,6 +822,18 @@ def _validate_local_references(rendered: dict[Path, bytes], manifest: frozenset[
                 target += "index.html"
             if Path(target) not in manifest:
                 raise ValueError(f"{path}: local reference is absent from manifest: {reference}")
+
+
+def _validate_runtime_asset(path: Path, source: str) -> None:
+    if path.suffix == ".css":
+        if re.search(r"(?i)@import\b", source):
+            raise ValueError(f"{path}: CSS imports are forbidden")
+        if re.search(r"(?i)url\s*\(", source):
+            raise ValueError(f"{path}: CSS url() references are forbidden")
+        if REMOTE_URL_PATTERN.search(source):
+            raise ValueError(f"{path}: remote CSS URLs are forbidden")
+    elif path.suffix == ".js" and REMOTE_URL_PATTERN.search(source):
+        raise ValueError(f"{path}: remote JavaScript URLs are forbidden")
 
 
 def _render_artifact(repo_root: Path, site_base: str, focused: bool) -> tuple[dict[Path, bytes], frozenset[Path]]:
@@ -687,17 +854,23 @@ def _render_artifact(repo_root: Path, site_base: str, focused: bool) -> tuple[di
         Path("static/site.css"): website / "static/site.css",
     }
     for destination, source in copies.items():
-        rendered[destination] = _read_utf8(source).encode()
+        content = _read_utf8(source)
+        _validate_runtime_asset(destination, content)
+        rendered[destination] = content.encode()
     if set(rendered) != manifest:
         raise RuntimeError("rendering invariant failure: artifact does not match selected manifest")
     _validate_local_references(rendered, manifest, site_base)
     return rendered, manifest
 
 
-def validate_output_location(repo_root: Path, output: Path) -> None:
-    """Reject build output within the source repository before any write occurs."""
-    if output.resolve().is_relative_to(repo_root.resolve()):
+def validate_output_location(repo_root: Path, output: Path) -> Path:
+    """Return a safe destination without dereferencing its requested final component."""
+    if ".." in output.parts or OUTPUT_NAME_PATTERN.fullmatch(output.name) is None:
+        raise ValueError("output must end in a safe named directory without dot traversal")
+    destination = output.parent.resolve() / output.name
+    if destination.is_relative_to(repo_root.resolve()):
         raise ValueError("output cannot be the repository or any of its descendants")
+    return destination
 
 
 def _manifest_directories(manifest: frozenset[Path]) -> set[Path]:
@@ -766,9 +939,8 @@ def _install_staging(staging: Path, output: Path, manifest: frozenset[Path]) -> 
 def build_site(repo_root: Path, output: Path, site_base: str, *, focused: bool = False) -> None:
     """Build and atomically install the full site or focused 404 artifact."""
     root = repo_root.resolve()
-    destination = output.resolve()
     base = validate_site_base(site_base)
-    validate_output_location(root, destination)
+    destination = validate_output_location(root, output)
     rendered, manifest = _render_artifact(root, base, focused)
     _validate_existing_output(destination, manifest)
 
