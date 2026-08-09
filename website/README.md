@@ -126,7 +126,8 @@ implementation are permanent assets and must not be regenerated from design-hist
 
 The landing template exposes exactly one anchor each for the repository, PyPI package, longer
 rationale, and security deep dive, each under its reviewed visible label. Its header and footer do
-not repeat those destinations. Build artifacts are disposable projections of the templates and
+not repeat those destinations. The security anchor alone carries the `security-link` class that
+gives it secondary visual treatment. Build artifacts are disposable projections of the templates and
 permanent sources; maintain the sources, not a generated `index.html` or `security/index.html`.
 
 ## Release stages

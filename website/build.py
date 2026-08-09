@@ -56,6 +56,7 @@ LANDING_DESTINATION_LABELS: Final = {
     RATIONALE_URL: "Read why Agentworks is built this way",
     f"{SITE_BASE_TOKEN}security/": "We take security seriously.",
 }
+SECURITY_LINK_CLASS: Final = "security-link"
 
 FULL_MANIFEST: Final = frozenset(
     {
@@ -599,7 +600,7 @@ class _TemplatePlacementParser(HTMLParser):
         self.onboarding_text: list[str] = []
         self.onboarding_sections: list[dict[str, str | None]] = []
         self.onboarding_headings = 0
-        self.anchors: list[tuple[str, list[str]]] = []
+        self.anchors: list[tuple[str, dict[str, str | None], list[str]]] = []
         self.active_anchor_indexes: list[int] = []
 
     def _record_attributes(self, tag: str, attributes: dict[str, str | None]) -> None:
@@ -620,7 +621,7 @@ class _TemplatePlacementParser(HTMLParser):
         attributes = _attribute_map(tag, attrs)
         self._record_attributes(tag, attributes)
         if tag == "a" and attributes.get("href") is not None:
-            self.anchors.append((str(attributes["href"]), []))
+            self.anchors.append((str(attributes["href"]), attributes, []))
             self.active_anchor_indexes.append(len(self.anchors) - 1)
         self.stack.append((tag, attributes))
         if tag == "section" and attributes.get("id") == "onboarding":
@@ -636,7 +637,7 @@ class _TemplatePlacementParser(HTMLParser):
         attributes = _attribute_map(tag, attrs)
         self._record_attributes(tag, attributes)
         if tag == "a" and attributes.get("href") is not None:
-            self.anchors.append((str(attributes["href"]), []))
+            self.anchors.append((str(attributes["href"]), attributes, []))
 
     def handle_endtag(self, tag: str) -> None:
         if tag == "a" and self.active_anchor_indexes:
@@ -649,7 +650,7 @@ class _TemplatePlacementParser(HTMLParser):
     def handle_data(self, data: str) -> None:
         self.document_text.append(data)
         for anchor_index in self.active_anchor_indexes:
-            self.anchors[anchor_index][1].append(data)
+            self.anchors[anchor_index][2].append(data)
         in_onboarding = any(tag == "section" and attrs.get("id") == "onboarding" for tag, attrs in self.stack)
         if in_onboarding:
             self.onboarding_text.append(data)
@@ -705,13 +706,22 @@ def _validate_interim_template(name: str, parser: _TemplatePlacementParser) -> N
         raise ValueError("index.html: onboarding section must reference onboarding-heading")
     if parser.onboarding_headings != 1 or not onboarding_text:
         raise ValueError("index.html: onboarding must contain its nonempty reviewed heading and notice")
-    anchor_hrefs = [href for href, _ in parser.anchors]
+    anchor_hrefs = [href for href, _, _ in parser.anchors]
     if any(anchor_hrefs.count(destination) != 1 for destination in LANDING_DESTINATION_LABELS):
         raise ValueError("index.html: each repository, package, rationale, and security destination is required once")
-    anchor_labels = {href: " ".join("".join(parts).split()) for href, parts in parser.anchors}
+    anchor_labels = {href: " ".join("".join(parts).split()) for href, _, parts in parser.anchors}
     for destination, expected_label in LANDING_DESTINATION_LABELS.items():
         if anchor_labels[destination] != expected_label:
             raise ValueError(f"index.html: destination {destination} must use reviewed label {expected_label!r}")
+    security_destination = f"{SITE_BASE_TOKEN}security/"
+    security_attributes = next(attributes for href, attributes, _ in parser.anchors if href == security_destination)
+    class_owners = [
+        href
+        for href, attributes, _ in parser.anchors
+        if SECURITY_LINK_CLASS in str(attributes.get("class") or "").split()
+    ]
+    if security_attributes.get("class") != SECURITY_LINK_CLASS or class_owners != [security_destination]:
+        raise ValueError("index.html: security-link class must appear exactly on the security destination")
     if len(anchor_hrefs) != 5 or anchor_hrefs.count("#main-content") != 1:
         raise ValueError("index.html: landing anchors must be one skip link plus the four reviewed destinations")
 

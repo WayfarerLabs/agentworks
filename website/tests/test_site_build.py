@@ -354,6 +354,21 @@ class TemplateContractTests(RepositoryFixture):
         with self.assertRaisesRegex(ValueError, "destination .* reviewed label"):
             site_builder._validate_template("index.html", swapped)
 
+    def test_security_link_class_is_bound_only_to_the_security_destination(self) -> None:
+        template = (self.root / "website/templates/index.html").read_text(encoding="utf-8")
+        github = '<a href="https://github.com/WayfarerLabs/agentworks">'
+        security = '<a class="security-link" href="{{SITE_BASE}}security/">'
+        github_with_security_class = '<a class="security-link" href="https://github.com/WayfarerLabs/agentworks">'
+        without_security_class = template.replace(security, '<a href="{{SITE_BASE}}security/">', 1)
+        variants = {
+            "missing": without_security_class,
+            "moved": without_security_class.replace(github, github_with_security_class, 1),
+            "duplicated": template.replace(github, github_with_security_class, 1),
+        }
+        for case, changed in variants.items():
+            with self.subTest(case=case), self.assertRaisesRegex(ValueError, "security-link class"):
+                site_builder._validate_template("index.html", changed)
+
     def test_duplicate_attributes_cannot_bypass_template_contracts(self) -> None:
         template = (self.root / "website/templates/index.html").read_text(encoding="utf-8")
         variants = (
@@ -762,7 +777,7 @@ class GeneratedDocumentTests(RepositoryFixture):
             self.assertEqual(hrefs.count(destination), 1)
         parsed_home = site_builder._TemplatePlacementParser()
         parsed_home.feed(self.pages["home"])
-        rendered_pairs = {href: " ".join("".join(parts).split()) for href, parts in parsed_home.anchors}
+        rendered_pairs = {href: " ".join("".join(parts).split()) for href, _, parts in parsed_home.anchors}
         expected_pairs = {
             href.replace(site_builder.SITE_BASE_TOKEN, "/"): label
             for href, label in site_builder.LANDING_DESTINATION_LABELS.items()
@@ -790,7 +805,12 @@ class GeneratedDocumentTests(RepositoryFixture):
             ]
         )
         self.assertEqual(self.pages["home"].count("We take security seriously."), 1)
-        self.assertTrue(any(link.get("class") == "security-link" for link in links))
+        security_link = next(link for link in links if link.get("href") == "/security/")
+        self.assertEqual(security_link.get("class"), site_builder.SECURITY_LINK_CLASS)
+        for link in links:
+            if link is security_link:
+                continue
+            self.assertNotIn(site_builder.SECURITY_LINK_CLASS, str(link.get("class") or "").split())
         hero = [image for image in document.tags("img") if image.get("class") == "hero-mark"]
         self.assertEqual(len(hero), 1)
         self.assertEqual(hero[0].get("src"), "/assets/agw-rocket.svg")
