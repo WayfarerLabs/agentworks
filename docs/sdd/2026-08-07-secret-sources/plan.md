@@ -116,23 +116,23 @@ package; the descriptor has no constructed-instance exception.
 
 ### Phase 4: declarable sources and schemas
 
-- [ ] Add `SecretSourceDecl` and its resource kind to discovery, manifest decoding, samples,
+- [x] Add `SecretSourceDecl` and its resource kind to discovery, manifest decoding, samples,
       schema-set membership, reference metadata, kind-name completion, and describe-kind.
-- [ ] Add the domain publisher for `env-var` and `prompt` before operator manifests, using normal
+- [x] Add the domain publisher for `env-var` and `prompt` before operator manifests, using normal
       built-in origins and `builtin_override="allow"`; tests pin discovery and operator override
       provenance.
-- [ ] Extend shared spec projection and emission to consume `mapping_host`: property names reference
+- [x] Extend shared spec projection and emission to consume `mapping_host`: property names reference
       `secret-source`, every value uses the union of registered mapping models and the host's
       declared opt-out arm, and fixture-plugin tests prove the mechanism is descriptor-derived
       rather than secret-specific.
-- [ ] Broaden the raw secret mapping carrier to all JSON-compatible values while reserving `false`
+- [x] Broaden the raw secret mapping carrier to all JSON-compatible values while reserving `false`
       as opt-out; tests prove scalar, mapping, collection, and `true` plugin mapping models reach
       exact backend-specific narrowing.
-- [ ] Add source validation and extraction helpers that use the same backend selector without yet
+- [x] Add source validation and extraction helpers that use the same backend selector without yet
       repointing production settings, graph, or runtime consumers. Add the descriptor-derived
       map-key existence helper, constrained to `USES` references targeting error-policy kinds, but
       do not invoke it from Registry finalize in this phase.
-- [ ] Keep the feature PR draft: this additive phase is a review checkpoint on the feature branch,
+- [x] Keep the feature PR draft: this additive phase is a review checkpoint on the feature branch,
       not a separately mergeable product. Run Green and phase review.
 
 **Definition of done:** the final source model, built-in publication, and descriptor-derived schema
