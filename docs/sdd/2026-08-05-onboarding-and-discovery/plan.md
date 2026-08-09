@@ -222,6 +222,10 @@ blocks and the migration workflow only; the broader registry-inventory scope rem
       reject invalid and special database paths without blocking, share one verified database
       snapshot across doctor groups, restore focused module sizes, reconcile final artifacts, and
       rerun project, fresh-eyes, full, and PR gates before requesting re-review.
+- [ ] Resolve the native-Windows and malformed-schema re-review round: represent unavailable secure
+      database inspection as a first-class non-failing doctor outcome, reject non-integer schema
+      versions through a complete path-free report, clean the accepted inspection seams, and rerun
+      project, fresh-eyes, full, and PR gates before requesting re-review.
 
 Definition of done: R7 and AC4 hold across the named commands, with human and JSON renderers sharing
 one fact source.
@@ -230,9 +234,13 @@ one fact source.
 
 - [ ] `bootstrap-packaging-lld.md` pins the canonical source, generated Claude Code and Codex
       layouts, marketplace metadata, install commands, security-setting links, minimum CLI version,
-      regeneration guard, and clean-environment probe matrix.
+      regeneration guard, README derivation or equivalence check, and clean-environment probe
+      matrix.
 - [ ] Canonical thin bootstrap contains installation, the complete R12 disclosure, strict harness
-      posture, and `agw guide concept-onboarding --agent`, with no duplicated teaching content.
+      posture, and `agw guide concept-onboarding --agent`, with no duplicated teaching content. The
+      disclosure names the intended workstation, full file inspection and command execution under
+      the harness account, separate explicit privilege elevation, and the strictest practical
+      approval and visibility posture that preserves the required workstation access.
 - [ ] Generator emits committed Claude Code and Codex plugin/marketplace wrappers from that source;
       CI requires regeneration to produce no diff.
 - [ ] Repository README Getting Started leads with the R16 agent-addressed fenced block generated
@@ -243,7 +251,8 @@ one fact source.
       non-interactive fixture runs, exercising consent boundaries, refusal handling, rerun no-op
       behavior, post-upgrade newly available capability reporting, and JSON v1 consumption.
 - [ ] Every bootstrap fixture asserts the R12 disclosure is emitted before its first setup command,
-      probe, verification command, or other action.
+      probe, verification command, or other action, and pins every workstation-access and privilege
+      boundary from the canonical source.
 - [ ] Permanent installation and security documentation ships with the packages.
 - [ ] Packaging, generation, lint, and end-to-end gates pass; step reviewed by `agentworks-reviewer`
       and a fresh-eyes reviewer; valid findings resolved.

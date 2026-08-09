@@ -93,10 +93,14 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
   is prior art); otherwise a CI guard verifies equivalence. The guard's scope is the bootstraps
   only.
 - **R12 (security disclosure).** Before setup proceeds, onboarding MUST state plainly that an agent
-  managing Agentworks gains access to everything Agentworks can reach: every managed resource and
-  secret reference, and anything accessible over SSH from the operator's machine. It MUST recommend
-  a strict harness security posture, especially once Agentworks is in real use, and point at the
-  relevant settings rather than leaving the recommendation abstract.
+  managing Agentworks runs on the machine the operator intends to use as their workstation and needs
+  full file inspection and command execution access with the permissions of the workstation account
+  running the harness. That access does not implicitly grant root; privilege elevation is separate
+  and explicit. The agent also gains access to everything Agentworks can reach: every managed
+  resource and secret reference, and anything accessible over SSH from the workstation. Onboarding
+  MUST recommend the strictest practical harness security posture for operator approval and
+  visibility while preserving that required workstation access, especially once Agentworks is in
+  real use, and point at the relevant settings rather than leaving the recommendation abstract.
 - **R13 (the guide command).** The CLI MUST provide `agw guide [topic ...]`, serving skill-shaped
   markdown for agents and humans alike. With no topic it gives a top-level overview and lists the
   available topics. Topics MUST cover at least: resource kinds (`agw guide vm-template`, including
