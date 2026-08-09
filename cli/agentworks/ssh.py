@@ -32,6 +32,7 @@ from agentworks.path_rendering import format_host_path
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from types import TracebackType
     from typing import NoReturn
 
 
@@ -73,34 +74,76 @@ class SSHResult:
 _EMPTY_SSH_RESULT = SSHResult(returncode=0, stdout="", stderr="")
 
 
+class _SensitiveExceptionGraphCleanup:
+    """Mutable owner for exception links and tracebacks while detaching them."""
+
+    def __init__(self) -> None:
+        self.pending: list[BaseException] = []
+        self.current: BaseException | None = None
+        self.tracebacks: list[TracebackType | None] = []
+        self.seen: set[int] = set()
+
+    def detach(self) -> None:
+        """Detach every graph edge without binding a traceback to this frame."""
+        import traceback
+
+        while self.current is not None or self.pending:
+            if self.current is None:
+                self.current = self.pending.pop()
+            if id(self.current) in self.seen:
+                self.current = None
+                continue
+
+            if self.current.__cause__ is not None:
+                self.pending.append(self.current.__cause__)
+            if self.current.__context__ is not None:
+                self.pending.append(self.current.__context__)
+            if isinstance(self.current, BaseExceptionGroup):
+                self.pending.extend(self.current.exceptions)
+
+            # The traceback moves directly into the mutable owner. If this
+            # sequence is interrupted, the enclosing finally scrubs the owner
+            # before any retained helper frame can expose downstream locals.
+            self.tracebacks.append(self.current.__traceback__)
+            self.current.__traceback__ = None
+            self.current.__cause__ = None
+            self.current.__context__ = None
+            self.seen.add(id(self.current))
+            self.current = None
+
+            while self.tracebacks:
+                if self.tracebacks[-1] is not None:
+                    with contextlib.suppress(BaseException):
+                        traceback.clear_frames(self.tracebacks[-1])
+                self.tracebacks.pop()
+
+    def scrub(self) -> None:
+        """Finish detaching and release every carrier-held graph reference."""
+        if self.current is not None:
+            self.pending.append(self.current)
+            self.current = None
+        try:
+            self.detach()
+        finally:
+            self.current = None
+            self.pending.clear()
+            self.tracebacks.clear()
+            self.seen.clear()
+
+
 def _strip_sensitive_exception_graph(failure: BaseException) -> None:
     """Detach downstream frames and links that may retain sensitive input."""
-    import traceback
-
-    pending = [failure]
-    seen: set[int] = set()
-    while pending:
-        current = pending.pop()
-        if id(current) in seen:
-            continue
-        seen.add(id(current))
-
-        cause = current.__cause__
-        context = current.__context__
-        if cause is not None:
-            pending.append(cause)
-        if context is not None:
-            pending.append(context)
-        if isinstance(current, BaseExceptionGroup):
-            pending.extend(current.exceptions)
-
-        native_traceback = current.__traceback__
-        current.__traceback__ = None
-        current.__cause__ = None
-        current.__context__ = None
-        if native_traceback is not None:
-            with contextlib.suppress(BaseException):
-                traceback.clear_frames(native_traceback)
+    cleanup = _SensitiveExceptionGraphCleanup()
+    cleanup.pending.append(failure)
+    try:
+        cleanup.detach()
+    except BaseException as interruption:
+        cleanup.scrub()
+        interruption.__cause__ = None
+        interruption.__context__ = None
+        raise interruption from None
+    finally:
+        cleanup.scrub()
 
 
 def _reraise_stripped_sensitive_exception(failure: BaseException) -> NoReturn:
@@ -227,18 +270,11 @@ class SSHLogger:
         """
         return format_host_path(self.path)
 
-    def _sanitize(self, text: str) -> str:
-        sanitized = ""
-        secret = ""
-        try:
-            sanitized = text
-            for secret in self._redact:
-                sanitized = sanitized.replace(secret, "[REDACTED]")
-            return sanitized
-        finally:
-            text = ""
-            secret = ""
-            sanitized = ""
+    def _sanitize(self, pending: _PendingLogText) -> None:
+        """Sanitize through the caller-owned mutable transfer carrier."""
+        pending.sanitized = pending.raw
+        for index in range(len(self._redact)):
+            pending.sanitized = pending.sanitized.replace(self._redact[index], "[REDACTED]")
 
     def step(self, name: str) -> None:
         """Log the start of a named step."""
@@ -435,13 +471,15 @@ class SSHLogger:
     def _write_pending(self, pending: _PendingLogText) -> None:
         try:
             try:
-                pending.sanitized = self._sanitize(pending.raw)
+                self._sanitize(pending)
             finally:
                 pending.raw = ""
             self._write_sanitized(pending.sanitized)
         except BaseException:
             self.discard_redactions()
             raise
+        finally:
+            pending.scrub()
 
     def _write_sanitized(self, text: str) -> None:
         # Every byte that reaches the file handler passes through this choke

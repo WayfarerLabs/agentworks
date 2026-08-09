@@ -39,6 +39,8 @@ from agentworks.ssh import run as ssh_run
 from agentworks.topics import TopicProse
 from agentworks.transports import LimaTransport, RemoteLimaTransport, SSHTransport
 
+from .failure_reporting import detail_without_masking_primary, warn_without_masking_primary
+
 if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.vm_platform.bootstrap_script import BootstrapResult
@@ -58,22 +60,6 @@ _REMOTE_TEMPLATE_CLEANUP_ATTEMPTS = 3
 _REMOTE_TEMPLATE_ROOT = "/tmp"
 _REMOTE_TEMPLATE_PREFIX = "agentworks-lima-template."
 _REMOTE_TEMPLATE_RANDOM_LENGTH = 10
-
-
-def _warn_without_masking_primary(message: str, primary_failure: BaseException | None) -> None:
-    try:
-        output.warn(message)
-    except BaseException:
-        if primary_failure is None:
-            raise
-
-
-def _detail_without_masking_primary(message: str, primary_failure: BaseException | None) -> None:
-    try:
-        output.detail(message)
-    except BaseException:
-        if primary_failure is None:
-            raise
 
 
 class _RemoteCreateSensitiveState:
@@ -517,7 +503,7 @@ class LimaPlatform(VMPlatform):
             # so a second Ctrl-C retains the established abandon semantics.
             primary_failure = sys.exception()
             assert primary_failure is not None
-            _detail_without_masking_primary(
+            detail_without_masking_primary(
                 f"Cleaning up the partial Lima instance '{instance_name}'...",
                 primary_failure,
             )
@@ -868,8 +854,8 @@ class LimaPlatform(VMPlatform):
                 raise
             try:
                 failure_message = f"could not clean up the partial Lima instance '{instance_name}': {cleanup_failure}"
-                _warn_without_masking_primary(failure_message, primary_failure)
-                _warn_without_masking_primary(self._manual_removal_hint(instance_name), primary_failure)
+                warn_without_masking_primary(failure_message, primary_failure)
+                warn_without_masking_primary(self._manual_removal_hint(instance_name), primary_failure)
             except BaseException:
                 if primary_failure is None:
                     raise
@@ -885,7 +871,7 @@ class LimaPlatform(VMPlatform):
         which then reaches ``create_vm``, whose unwind deletes the DB
         row it no longer needs."""
         primary_failure = sys.exception()
-        _warn_without_masking_primary(
+        warn_without_masking_primary(
             f"Interrupted: cleaning up the partial Lima instance '{instance_name}', "
             "please wait (Ctrl-C again to abandon it)...",
             primary_failure,
@@ -893,7 +879,7 @@ class LimaPlatform(VMPlatform):
         try:
             self._cleanup_partial_create(instance_name)
         except KeyboardInterrupt:
-            _warn_without_masking_primary(
+            warn_without_masking_primary(
                 f"Cleanup abandoned: the Lima instance '{instance_name}' may remain; "
                 + self._manual_removal_hint(instance_name),
                 primary_failure,

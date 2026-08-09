@@ -17,7 +17,6 @@ owns only the per-phase step sequences and status/event bookkeeping.
 
 from __future__ import annotations
 
-import contextlib
 import shlex
 from collections.abc import Callable
 from typing import TYPE_CHECKING
@@ -30,6 +29,12 @@ from agentworks.ssh import SSHError, SSHLogger
 from agentworks.transports import SSHTransport, Transport
 
 from .credentials import _configure_git_credentials
+from .failure_cleanup import (
+    BootstrapSecretCleanup,
+    close_logger_after_failure,
+    secure_failed_vm_after_failure,
+    warn_after_failure,
+)
 from .mise import (
     MISE_ACTIVATE_LINES,
     _fetch_mise_lockfile,
@@ -68,27 +73,6 @@ if TYPE_CHECKING:
     from agentworks.vms.templates import ResolvedVMTemplate
 
 
-class _BootstrapSecretCleanup:
-    def __init__(self) -> None:
-        self.git_tokens: dict[str, str] | None = None
-        self.logger: SSHLogger | None = None
-
-    def scrub_failure(self) -> None:
-        if self.git_tokens is not None:
-            self.git_tokens.clear()
-        if self.logger is not None:
-            self.logger.discard_redactions()
-
-
-def _close_logger_after_failure(logger: SSHLogger) -> None:
-    """Best-effort close that cannot replace an active primary failure."""
-    try:
-        logger.close()
-    except BaseException:
-        with contextlib.suppress(BaseException):
-            output.warn("could not close the VM operation log after failure")
-
-
 def bootstrap_vm(
     db: Database,
     config: Config,
@@ -106,9 +90,9 @@ def bootstrap_vm(
     tailscale_ip: str | None = None,
     on_tailscale_ready: Callable[[], None] | None = None,
 ) -> tuple[Transport, SSHLogger, str]:
-    cleanup: _BootstrapSecretCleanup | None = None
+    cleanup: BootstrapSecretCleanup | None = None
     try:
-        cleanup = _BootstrapSecretCleanup()
+        cleanup = BootstrapSecretCleanup()
         cleanup.git_tokens = git_tokens
         return _bootstrap_vm(
             db,
@@ -150,7 +134,7 @@ def _bootstrap_vm(
     bootstrap_complete: bool = False,
     tailscale_ip: str | None = None,
     on_tailscale_ready: Callable[[], None] | None = None,
-    _secret_cleanup: _BootstrapSecretCleanup,
+    _secret_cleanup: BootstrapSecretCleanup,
 ) -> tuple[Transport, SSHLogger, str]:
     """Run Phase A (provisioning bootstrap + connectivity) on a fresh VM.
 
@@ -252,12 +236,9 @@ def _bootstrap_vm(
         # the operator can still reach the VM via `vm shell --platform`
         # (a fresh transient allow) or the platform's serial console
         # (not NSG-gated).
-        try:
-            platform.secure_failed_vm(vm_row, ctx)
-        except Exception as secure_error:
-            output.warn(f"could not secure the failed VM: {secure_error}")
-        _close_logger_after_failure(logger)
-        output.warn(f"Log: {logger.display_path}")
+        secure_failed_vm_after_failure(platform, vm_row, ctx, interrupted=False)
+        close_logger_after_failure(logger)
+        warn_after_failure(f"Log: {logger.display_path}")
         raise
     except BaseException:
         # An operator interrupt (KeyboardInterrupt) or another
@@ -271,11 +252,8 @@ def _bootstrap_vm(
         # an Exception, so the arm above secures it); this arm exists
         # for what genuinely escapes ``except Exception``. The hook
         # failure warns and never masks the interrupt.
-        try:
-            platform.secure_failed_vm(vm_row, ctx)
-        except Exception as secure_error:
-            output.warn(f"could not secure the interrupted VM: {secure_error}")
-        _close_logger_after_failure(logger)
+        secure_failed_vm_after_failure(platform, vm_row, ctx, interrupted=True)
+        close_logger_after_failure(logger)
         raise
 
     # Tailscale is up; the platform hook closes provisioning access
@@ -361,10 +339,10 @@ def run_initialization(
     except Exception as e:
         db.update_vm_init_status(vm_name, InitStatus.FAILED)
         db.insert_vm_event(vm_name, "init_failed", str(e))
-        _close_logger_after_failure(logger)
+        close_logger_after_failure(logger)
         raise
     except BaseException:
-        _close_logger_after_failure(logger)
+        close_logger_after_failure(logger)
         raise
 
     if logger.has_warnings:

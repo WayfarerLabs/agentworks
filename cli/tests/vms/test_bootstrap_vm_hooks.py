@@ -40,7 +40,7 @@ class _SpyPlatform:
 
     def __init__(self) -> None:
         self.secured: list[str] = []
-        self.secure_error: Exception | None = None
+        self.secure_error: BaseException | None = None
 
     def secure_failed_vm(self, vm: object, ctx: object) -> None:
         if self.secure_error is not None:
@@ -229,6 +229,50 @@ def test_interrupt_hook_failure_does_not_mask_the_interrupt(
         _call_bootstrap(db, platform, lambda: None)
 
     assert any("could not secure the interrupted VM" in w for w in captured_output.warnings)
+
+
+@pytest.mark.parametrize(
+    ("primary", "hook_failure", "warning_failure"),
+    [
+        (RuntimeError("primary"), RuntimeError("hook"), RuntimeError("warn")),
+        (KeyboardInterrupt("primary"), KeyboardInterrupt("hook"), KeyboardInterrupt("warn")),
+        (SystemExit(41), SystemExit(42), SystemExit(43)),
+        (GeneratorExit(), GeneratorExit(), GeneratorExit()),
+    ],
+    ids=("exception", "keyboard-interrupt", "system-exit", "generator-exit"),
+)
+def test_secure_hook_and_every_failure_warning_preserve_exact_primary(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    _hermetic_driver: None,
+    primary: BaseException,
+    hook_failure: BaseException,
+    warning_failure: BaseException,
+) -> None:
+    db.insert_vm("hookvm", site="stub", hostname="hookvm")
+    warning_calls: list[str] = []
+
+    def fail_phase(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise primary
+
+    def fail_warning(message: str) -> None:
+        warning_calls.append(message)
+        raise warning_failure
+
+    platform = _SpyPlatform()
+    platform.secure_error = hook_failure
+    monkeypatch.setattr(driver, "_phase_a_bootstrap", fail_phase)
+    monkeypatch.setattr("agentworks.vms.initializer.failure_cleanup.output.warn", fail_warning)
+
+    with pytest.raises(type(primary)) as caught:
+        _call_bootstrap(db, platform, lambda: None)
+
+    assert caught.value is primary
+    state = "failed" if isinstance(primary, Exception) else "interrupted"
+    assert warning_calls[0] == f"could not secure the {state} VM"
+    if isinstance(primary, Exception):
+        assert warning_calls[1].startswith("Log: ")
 
 
 @pytest.mark.parametrize(

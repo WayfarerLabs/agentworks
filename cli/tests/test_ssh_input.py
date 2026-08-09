@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import inspect
 import subprocess
+import sys
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from agentworks.ssh import SSHError, SSHTarget, run
+
+if TYPE_CHECKING:
+    from types import FrameType
 
 
 def _assert_agentworks_tracebacks_scrubbed(exc: BaseException, secret: str) -> set[str]:
@@ -221,6 +227,62 @@ def test_ssh_run_non_sensitive_native_error_keeps_identity_and_traceback() -> No
 
     assert caught.value is native_failure
     assert "native_run" in _complete_frame_functions(caught.value)
+
+
+def test_exception_graph_detach_interrupt_scrubs_mutable_owner_and_preserves_identity() -> None:
+    from agentworks import ssh
+
+    secret = "detach-owner-interrupt-sentinel"
+    native_failure = OSError("native failure")
+    interruption = GeneratorExit()
+    detach_line = next(
+        line_number
+        for line_number, line in enumerate(
+            inspect.getsourcelines(ssh._SensitiveExceptionGraphCleanup.detach)[0],  # noqa: SLF001
+            start=inspect.getsourcelines(ssh._SensitiveExceptionGraphCleanup.detach)[1],  # noqa: SLF001
+        )
+        if "self.current.__cause__ = None" in line
+    )
+
+    def native_run() -> None:
+        retained_input = secret
+        assert retained_input == secret
+        raise native_failure
+
+    def interrupt_after_detach(frame: FrameType, event: str, arg: object) -> object | None:
+        del arg
+        if event == "line" and frame.f_code.co_name == "detach" and frame.f_lineno == detach_line:
+            sys.settrace(None)
+            raise interruption
+        return interrupt_after_detach
+
+    try:
+        native_run()
+    except OSError as failure:
+        sys.settrace(interrupt_after_detach)
+        try:
+            with pytest.raises(GeneratorExit) as caught:
+                ssh._strip_sensitive_exception_graph(failure)  # noqa: SLF001
+        finally:
+            sys.settrace(None)
+
+    assert caught.value is interruption
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    assert "native_run" not in _complete_frame_functions(caught.value)
+    traceback = caught.value.__traceback__
+    found_detach = False
+    while traceback is not None:
+        if traceback.tb_frame.f_code.co_name == "detach":
+            found_detach = True
+            cleanup = traceback.tb_frame.f_locals["self"]
+            assert cleanup.pending == []
+            assert cleanup.current is None
+            assert cleanup.tracebacks == []
+            assert cleanup.seen == set()
+            assert secret not in repr(traceback.tb_frame.f_locals)
+        traceback = traceback.tb_next
+    assert found_detach
 
 
 def test_ssh_run_sensitive_timeout_drops_partial_output_and_native_exception() -> None:

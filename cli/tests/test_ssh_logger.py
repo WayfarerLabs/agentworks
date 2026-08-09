@@ -9,6 +9,8 @@ the per-op log. That keeps operation-level errors out of the shared
 
 from __future__ import annotations
 
+import inspect
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -18,6 +20,7 @@ from agentworks.ssh import SSHLogger, SSHResult
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from types import FrameType
     from typing import Any, SupportsIndex
 
 
@@ -335,6 +338,57 @@ def test_sanitize_mid_replacement_interrupt_clears_input_and_result_locals(
             assert secret not in repr(traceback.tb_frame.f_locals)
             if traceback.tb_frame.f_code.co_name == "_sanitize":
                 found_sanitize = True
-                assert traceback.tb_frame.f_locals["sanitized"] == ""
+                assert traceback.tb_frame.f_locals["pending"] is pending
         traceback = traceback.tb_next
     assert found_sanitize
+
+
+def test_first_raw_clear_interrupt_leaves_only_scrubbed_mutable_owner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks import ssh
+
+    secret = "sanitize-first-cleanup-sentinel"
+    interruption = GeneratorExit()
+    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
+    logger = SSHLogger("vm1", "test-op", redactions=(secret,))
+    pending = ssh._PendingLogText()  # noqa: SLF001
+    pending.raw = secret
+    write_pending_line = next(
+        line_number
+        for line_number, line in enumerate(
+            inspect.getsourcelines(SSHLogger._write_pending)[0],
+            start=inspect.getsourcelines(SSHLogger._write_pending)[1],
+        )
+        if 'pending.raw = ""' in line
+    )
+
+    def interrupt_first_clear(frame: FrameType, event: str, arg: object) -> object | None:
+        del arg
+        if event == "line" and frame.f_code.co_name == "_write_pending" and frame.f_lineno == write_pending_line:
+            sys.settrace(None)
+            raise interruption
+        return interrupt_first_clear
+
+    sys.settrace(interrupt_first_clear)
+    try:
+        with pytest.raises(GeneratorExit) as caught:
+            logger._write_pending(pending)  # noqa: SLF001
+    finally:
+        sys.settrace(None)
+
+    assert caught.value is interruption
+    assert pending.raw == ""
+    assert pending.sanitized == ""
+    assert logger._redact == ()  # noqa: SLF001
+    traceback = caught.value.__traceback__
+    found_write_pending = False
+    while traceback is not None:
+        if traceback.tb_frame.f_globals.get("__name__") == "agentworks.ssh":
+            assert secret not in repr(traceback.tb_frame.f_locals)
+            if traceback.tb_frame.f_code.co_name == "_write_pending":
+                found_write_pending = True
+                assert traceback.tb_frame.f_locals["pending"] is pending
+        traceback = traceback.tb_next
+    assert found_write_pending
