@@ -1,7 +1,8 @@
 # Plan: The agentworks.build Website
 
-- Status: Draft for pre-implementation review
+- Status: Ready for design-PR merge
 - Date: 2026-08-07
+- Last revised: 2026-08-08
 - FRD: `frd.md`
 - HLA: `hla.md`
 - Research: `prior-art-research.md`
@@ -13,8 +14,9 @@ that first installs the deployment workflow:
 
 1. a draft pre-implementation review for the FRD, HLA, plan, and prior-art research, promoted and
    merged once review converges so the onboarding effort can see the website's shared-source need;
-2. one implementation PR containing the deterministic site, CI, and automatic Pages deployment,
-   merged as a complete default-host slice;
+2. one implementation PR containing the selected brand assets, custom 404 deployment game,
+   deterministic main site, CI, and automatic Pages deployment, merged as a complete default-host
+   slice;
 3. one small go-live/closeout PR containing production acceptance evidence, final truthful checkbox
    flips, and `locked.md` after the implementation merge has deployed and DNS is live.
 
@@ -22,8 +24,10 @@ that first installs the deployment workflow:
 operable on its own terms; the custom-domain slice follows only because its external verification
 requires the publishing workflow to exist on `main`.
 
-Implementation is gated on the onboarding-and-discovery effort's canonical README bootstrap source
-landing on `main`. Design and review proceed now; no website code binds to its feature branch.
+Main-page content integration is gated on the onboarding-and-discovery effort's canonical README
+bootstrap source landing on `main`. Brand, 404, and game design can proceed while that contract is
+pending because they consume no onboarding content, but they deploy only in the complete website
+implementation PR. No website code binds to the onboarding feature branch.
 
 ## Phase 0: design convergence and coordination
 
@@ -31,16 +35,73 @@ landing on `main`. Design and review proceed now; no website code binds to its f
       pass repository file-quality checks.
 - [x] Draft design PR opened for pre-implementation review and explicitly sent to the roadmap lead,
       because the roadmap lead seeded this standalone effort and reviews its PRs.
-- [x] `agentworks-reviewer` reviews the artifacts against the FRD, project principles, SDD process,
-      and roadmap constraints; all valid findings are resolved and re-reviewed.
+- [x] A pre-PR internal `agentworks-reviewer` pass reviewed the initial artifacts against the FRD,
+      project principles, SDD process, and roadmap constraints; its valid findings were resolved
+      before the draft PR opened.
 - [x] Hosting choice, one-page scope, no-analytics posture, canonical apex, and external GoDaddy
       setup are accepted by the operator or revised in the owned artifacts.
+- [x] Operator selects the symmetric custom AGW mark with the original twin layered plumes and the
+      hidden lunar-deployment 404 direction.
+- [x] Roadmap-lead findings are resolved: content-anchored passage selection, deploy-trigger
+      completeness, review-box wording, content-class count, named build inputs, README fence
+      pickup, and dated operator evidence.
+- [x] The revised FRD, HLA, plan, prior-art research, brand direction, and SVG concepts receive a
+      fresh `agentworks-reviewer` pass; all valid findings are resolved and re-reviewed.
 - [ ] Design PR promoted and merged to `main`; implementation branch starts from the merged design.
+
+Operator evidence:
+
+- 2026-08-07: GitHub Pages, one-page scope, no analytics, canonical apex, operator-approved GoDaddy
+  cutover, and WCAG 2.2 AA acceptance remain first-slice rulings. Scriptable evidence is preferred;
+  the screen-reader pass remains manual.
+- 2026-08-08: the operator selects the custom symmetric AGW rocket with the original twin plumes, a
+  hint-free preflight 404, Space/arrow/vi keyboard play, tap/hold/drag mobile play, and successful
+  agent deployment into a visibly powered NOC followed by lander departure as first-slice
+  requirements.
 
 Definition of done: requirements and architecture are review-clean, operator-significant choices are
 settled, and other efforts can rely on the website's content-consumer contract from `main`.
 
-## Phase 1: merged-contract pickup and site LLD
+## Phase 1: brand and lunar-deployment LLD
+
+- [ ] Delegate `brand-and-lander-lld.md` to an `agentworks-dev` subagent. It pins final asset names,
+      reusable SVG groups, responsive scene geometry, state machine, physics constants, landing
+      envelope, deterministic stepping, plume scaling, keyboard and pointer mappings, lifecycle
+      cleanup, reduced-motion behavior, NOC/landing geometry, deployment and departure sequence,
+      accessible status, and test vectors.
+- [ ] Lead reviews the LLD against R6-R9 and D5/D7, resolving any conflict between the hidden
+      reveal, useful static 404, mobile controls, and WCAG 2.2 AA.
+- [ ] `agentworks-reviewer` reviews the LLD; all valid findings are resolved and re-reviewed.
+
+Definition of done: the selected mark and bounded game are specified at implementable detail without
+introducing a framework, remote asset, hidden critical content, or onboarding dependency.
+
+## Phase 2: selected assets and custom 404
+
+- [ ] Delegate implementation to an `agentworks-dev` subagent with ownership of the selected
+      permanent SVG assets, 404 HTML/CSS/JavaScript, focused game tests, and the relevant builder
+      copy step. The subagent is not alone in the codebase and must preserve concurrent changes.
+- [ ] Promote the selected original twin-plume geometry into a self-contained permanent SVG under
+      `website/`; do not make permanent code depend on numbered SDD concepts.
+- [ ] Build a useful semantic no-JavaScript 404 with a visible path home and no preflight visual
+      control hints.
+- [ ] Implement the under-five-second plume cue, reduced-motion static state, deliberate Space or
+      activation start, arrow/vi keyboard controls, tap/hold/drag pointer controls, and scoped event
+      suppression and cleanup.
+- [ ] Implement deterministic bounded-step flight, collective and differential plume response,
+      landing/crash/restart/exit states, G-bay agent deployment, persistent-per-run NOC power-up,
+      lander departure, and the exact success status.
+- [ ] Add deterministic unit/state tests and browser tests for input equivalence, physics vectors,
+      landing thresholds, hidden-until-start controls, lifecycle pause, reduced motion, pointer
+      capture cleanup, powered-NOC reset boundaries, no-JavaScript fallback, and responsive scene
+      bounds.
+- [ ] `agentworks-reviewer` and a fresh-eyes reviewer inspect the slice; valid findings return to
+      the implementing subagent and are resolved before re-review.
+
+Definition of done: the brand and 404 game are review-clean, locally demonstrable, and ready to ride
+inside the complete implementation PR, but are not deployed or merged as a partial website.
+
+## Phase 3: merged-contract pickup and site LLD
 
 - [ ] Check the website feature directory on `origin/main` for late messages before starting.
 - [ ] Confirm onboarding Phase 3 is merged to `main`; inspect its canonical bootstrap source,
@@ -57,7 +118,7 @@ settled, and other efforts can rely on the website's content-consumer contract f
 Definition of done: every implementation seam is pinned to merged code at file and symbol level,
 with no branch-only dependency or unresolved visual/content contract.
 
-## Phase 2: deterministic site and content contracts
+## Phase 4: deterministic site and content contracts
 
 - [ ] Delegate implementation to an `agentworks-dev` subagent with ownership of `website/`, focused
       website tests, and generated-output ignore entries. The subagent is not alone in the codebase
@@ -70,7 +131,7 @@ with no branch-only dependency or unresolved visual/content contract.
       the closed normalization contract; fail on missing/duplicate headings, paragraph drift, or
       unsupported Markdown. Keep site-owned connective copy free of product claims.
 - [ ] Implement semantic document structure, metadata, GitHub/PyPI/rationale/security links, local
-      responsive CSS, and asset-free presentation.
+      responsive CSS, and the selected AGW visual system.
 - [ ] Implement progressive copy behavior with accessible success/failure feedback and a fully
       usable no-JavaScript path.
 - [ ] Add deterministic, malformed-input, escaping, no-placeholder, no-external-runtime,
@@ -87,7 +148,7 @@ with no branch-only dependency or unresolved visual/content contract.
 Definition of done: R1, R2, R4, R5, C1-C3, AC3, and the build-time portion of R3 hold locally with a
 review-clean deterministic artifact.
 
-## Phase 3: CI and GitHub Pages deployment
+## Phase 5: CI and GitHub Pages deployment
 
 - [ ] Delegate workflow implementation to an `agentworks-dev` subagent with ownership of the Pages
       workflow and the website job in existing CI. It must preserve existing workflow conventions
@@ -98,6 +159,8 @@ review-clean deterministic artifact.
       cannot omit it.
 - [ ] Add the Pages workflow: build and upload from a clean checkout, deploy on `main`, least
       permissions, `github-pages` environment, and safe concurrency.
+- [ ] Keep the publishing workflow free of path filters so changes to authoritative inputs outside
+      `website/` always rebuild and verify the deployed artifact.
 - [ ] Ensure pull requests exercise the build without deploying or acquiring Pages write/OIDC
       permissions.
 - [ ] Before merge, obtain operator approval to enable GitHub Actions as this repository's Pages
@@ -119,7 +182,7 @@ Definition of done: R3 and AC2 are implemented as a least-privilege, review-clea
 pipeline, the implementation is merged and live at the default Pages URL, and custom-domain
 activation is ready to begin.
 
-## Phase 4: acceptance, domain activation, and closeout
+## Phase 6: acceptance, domain activation, and closeout
 
 - [ ] Start the go-live branch from `main`, confirm the implementation commit is deployed at the
       default Pages URL, and open a small closeout PR once evidence and artifacts are ready.
@@ -140,6 +203,13 @@ activation is ready to begin.
       before-state and intended delta.
 - [ ] Verify production HTTPS, certificate hostname, apex canonical metadata, `www` redirect, GitHub
       and PyPI links, no runtime third-party requests, and byte-identical copied bootstrap.
+- [ ] Verify an unknown production path returns the semantic custom 404 and keeps its home link
+      usable without JavaScript.
+- [ ] Verify the selected original twin-plume mark and the hidden game in production: bounded idle
+      cue, no preflight instruction text, Space/arrow/vi behavior, tap/hold/drag behavior on a
+      narrow touch viewport, independent plume response, safe and unsafe contact, agent entry,
+      persistent- per-run NOC power-up, lander departure, exact success status, restart/exit reset,
+      no storage or runtime request, background pause, and reduced-motion presentation.
 - [ ] Run human acceptance from a clean context: a newcomer understands the product and hands the
       block to an agent in under one minute. Record timing and any unexplained intervention.
 - [ ] Run accessibility acceptance: keyboard-only flow, visible focus, landmarks/headings, copy
@@ -155,8 +225,9 @@ activation is ready to begin.
       run final gates, obtain the required closeout review, and hand the ready PR to the operator
       for merge.
 
-Definition of done: AC1-AC4 hold at `https://agentworks.build`, R1-R5 are production facts, the
-deployment is operable without this SDD, all plan boxes are truthful, and the effort is locked.
+Definition of done: AC1-AC8 hold at `https://agentworks.build`, R1-R9 and C1-C4 are production
+facts, the deployment is operable without this SDD, all plan boxes are truthful, and the effort is
+locked.
 
 ## Escalation triggers
 

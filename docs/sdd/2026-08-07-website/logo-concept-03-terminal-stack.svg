@@ -1,0 +1,30 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 240 400"
+  role="img"
+  aria-labelledby="title description"
+>
+  <title id="title">Agentworks terminal-stack AGW rocket monogram</title>
+  <desc id="description">
+    Heavy monoline letters A, G, and W interlock into a rounded rocket silhouette. The A forms the
+    nosecone, the G forms the fuselage, and the W separates into two engines.
+  </desc>
+
+  <g
+    fill="none"
+    stroke="currentColor"
+    stroke-width="34"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <path data-letter="W" d="M43 283 78 379l42-96 42 96 35-96" />
+
+    <path
+      data-letter="G"
+      d="M185 158c-17-18-38-27-65-27H97c-31 0-48 19-48 50v45c0 32 18 49 49 49h83v-61h-56"
+      stroke-linecap="square"
+    />
+
+    <path data-letter="A" d="m46 142 74-124 74 124M83 104h74" stroke-linecap="square" />
+  </g>
+</svg>

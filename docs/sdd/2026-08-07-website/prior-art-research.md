@@ -1,7 +1,8 @@
 # Prior Art Research: The agentworks.build Website
 
 - Date: 2026-08-07
-- Scope: first-slice hosting, deployment, content sharing, accessibility, and browser behavior
+- Scope: first-slice hosting, deployment, content sharing, accessibility, branding, and browser
+  behavior
 
 ## Executive summary
 
@@ -12,12 +13,18 @@ lives beside GitHub Actions. GitHub Pages can publish a custom Actions artifact,
 `www` custom domain, provision HTTPS, and redirect between the two domain forms. This avoids a cloud
 account, infrastructure state, a new package ecosystem, or moving DNS away from GoDaddy.
 
-The site should use semantic HTML, local CSS, system fonts, and only a small progressive-enhancement
-script for the copy button. The bootstrap remains selectable without JavaScript. The build consumes
-the onboarding effort's canonical bootstrap source after that source lands on `main`, and tooling
-proves that the built page, canonical source, and README fenced block are byte-identical. Other
-product claims are generated from uniquely selected permanent-doc paragraphs; site-owned labels and
-instructions make no product claims.
+The site should use semantic HTML, local CSS, system fonts, and two focused progressive-enhancement
+scripts: one for the copy button and one for the bounded 404 game. The bootstrap remains selectable
+without JavaScript. The build consumes the onboarding effort's canonical bootstrap source after that
+source lands on `main`, and tooling proves that the built page, canonical source, and README fenced
+block are byte-identical. Other product claims are generated from uniquely selected permanent-doc
+paragraphs; site-owned labels and instructions make no product claims.
+
+GitHub Pages also supports a custom `404.html`, which gives the selected AGW rocket a bounded place
+for a progressively enhanced lunar deployment game. DOM/SVG rendering, Pointer Events, and a
+timestamp-driven animation loop cover keyboard and mobile input without a framework or canvas. The
+automatic plume cue stops before five seconds and is removed under reduced motion; the game begins
+only after deliberate activation.
 
 ## Findings
 
@@ -106,10 +113,47 @@ merged canonical source. The website build reads that source directly, while a s
 test extracts the README block and decoded HTML code text and compares both byte for byte. The site
 does not parse rendered README HTML or copy prose from the onboarding branch.
 
-Problem and principle passages are always generated from uniquely selected paragraphs in permanent
-repository docs through a closed normalization transform. Site-owned copy is limited to labels and
-instructions that make no product claim. The page links to the permanent, fuller explanation in
-`docs/why-agentworks.md` on GitHub.
+Problem and principle passages are matched under unique headings by exact expected text rather than
+paragraph position, then generated through a closed normalization transform. Unrelated structural
+editing therefore does not break the site build, while actual claim drift still fails closed.
+Site-owned copy is limited to labels and instructions that make no product claim. The page links to
+the permanent, fuller explanation in `docs/why-agentworks.md` on GitHub.
+
+### F6. A custom 404 can carry the Easter egg without weakening error recovery
+
+GitHub Pages serves a checked-in `404.html` for nonexistent paths. The document can therefore retain
+ordinary semantic error text and a home link while a local script progressively enhances a separate
+SVG scene. If script execution or game initialization fails, navigation recovery is unaffected.
+
+`requestAnimationFrame()` supplies a repaint-aligned timestamp and is one-shot. MDN explicitly warns
+that animation progress must use that timestamp rather than assuming a refresh rate, and notes that
+callbacks normally pause in hidden tabs. The design still resets its accumulator on visibility
+changes so hidden time can never become a large physics step.
+
+Pointer Events provide one hardware-agnostic input stream for mouse, pen, and touch. Pointer capture
+keeps a press-and-drag gesture coherent, while `touch-action` limits viewport suppression to the
+active game scene. The page outside the scene retains ordinary scrolling and zoom behavior.
+
+Design tie-in: render the game with inspectable DOM/SVG, use a bounded fixed-step integrator driven
+by animation timestamps, verify equivalent results across representative frame schedules, discard
+excess wall time after a large stall, pause on page lifecycle changes, and map keyboard and pointer
+actions into the same two engine-thrust commands. No game engine or runtime dependency is justified.
+
+### F7. The motion cue and plume colors can be restrained and evidence-based
+
+WCAG 2.2 requires a stop, pause, or hide mechanism for automatic motion that lasts more than five
+seconds beside other content. Showing such a control would reveal the Easter egg, so the automatic
+plume cue instead runs briefly and settles. `prefers-reduced-motion` removes it entirely. The active
+game is initiated deliberately, makes motion essential to the activity, and retains an immediate
+exit.
+
+NASA plume visualizations use white for higher-temperature regions and red for cooler regions, and
+NASA engine diagnostics describe visible orange and yellow exhaust emission. The selected logo is
+illustrative rather than a propellant simulation, but nesting a pale-yellow core inside orange and
+deeper orange-red edges follows the defensible hot-center, cooler-edge progression.
+
+Design tie-in: use three flat flame layers, no glow or flashing, and scale each engine's layers as a
+unit so collective and differential thrust remain legible without visual noise.
 
 ## Refuted or rejected claims
 
@@ -147,3 +191,10 @@ instructions that make no product claim. The page links to the permanent, fuller
 | [Amazon S3 website endpoints](https://docs.aws.amazon.com/AmazonS3/latest/userguide/WebsiteEndpoints.html)                                                                 | S3 website endpoint lacks HTTPS; CloudFront or Amplify needed | Primary alternative-platform documentation |
 | [WCAG 2.2](https://www.w3.org/TR/WCAG22/)                                                                                                                                  | Current accessibility recommendation and AA criteria          | Normative web standard                     |
 | [MDN Clipboard `writeText`](https://developer.mozilla.org/en-US/docs/Web/API/Clipboard/writeText)                                                                          | HTTPS and activation requirements, browser maturity           | High-quality implementation reference      |
+| [GitHub Pages custom 404](https://docs.github.com/en/pages/getting-started-with-github-pages/creating-a-custom-404-page-for-your-github-pages-site)                        | `404.html` support for nonexistent paths                      | Primary platform documentation             |
+| [MDN `requestAnimationFrame`](https://developer.mozilla.org/en-US/docs/Web/API/Window/requestAnimationFrame)                                                               | Timestamp use, one-shot scheduling, hidden-tab behavior       | High-quality implementation reference      |
+| [W3C Pointer Events](https://www.w3.org/TR/pointerevents3/)                                                                                                                | Unified pointer input, capture, and `touch-action`            | Web standard                               |
+| [W3C WCAG 2.2 pause, stop, hide](https://www.w3.org/WAI/WCAG22/Understanding/pause-stop-hide.html)                                                                         | Boundaries for automatic motion beside content                | Normative-guidance companion               |
+| [MDN reduced motion](https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/At-rules/%40media/prefers-reduced-motion)                                                  | User preference for suppressing nonessential animation        | High-quality implementation reference      |
+| [NASA Artemis plume simulation](https://www.nasa.gov/image-article/simulating-nasas-rocket-launch-artemis-moon-missions/)                                                  | White-to-red visualization of hotter-to-cooler plume regions  | Primary scientific-agency explanation      |
+| [NASA Stennis engine-exhaust diagnostics](https://www.nasa.gov/centers-and-facilities/stennis/stennis-flashback-diagnostic-test-facility/)                                 | Visible orange and yellow plume emissions                     | Primary scientific-agency explanation      |
