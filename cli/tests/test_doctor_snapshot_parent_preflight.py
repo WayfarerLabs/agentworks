@@ -136,6 +136,92 @@ def test_installed_doctor_accepts_database_under_missing_parent(tmp_path: Path) 
     assert not missing_parent.exists()
 
 
+def _dangling_parent_database_path(home: Path, link_position: str) -> tuple[Path, Path]:
+    missing_target = home / "operator-private-missing-parent"
+    config_parent = home / ".config"
+    if link_position == "parent":
+        config_parent.mkdir()
+        database_parent = config_parent / "agentworks"
+        database_parent.symlink_to(missing_target, target_is_directory=True)
+    else:
+        config_parent.symlink_to(missing_target, target_is_directory=True)
+        database_parent = config_parent / "agentworks"
+    return database_parent / "agentworks.db", missing_target
+
+
+@pytest.mark.parametrize("link_position", ["parent", "component"])
+def test_snapshot_rejects_dangling_parent_symlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    link_position: str,
+) -> None:
+    """An existing unresolved parent component is invalid, not absent state."""
+    import agentworks.db.inspection as inspection_module
+    from agentworks.db import Database
+    from agentworks.errors import StateError
+
+    requested_path, missing_target = _dangling_parent_database_path(tmp_path, link_position)
+    requested_entry_access: list[Path] = []
+    source_entry_access: list[str] = []
+
+    def unexpected_requested_entry(path: Path) -> bool:
+        requested_entry_access.append(path)
+        return False
+
+    def unexpected_source_entry(name: str, directory_fd: int) -> int:
+        source_entry_access.append(name)
+        raise AssertionError(f"source entry opened through fd {directory_fd}")
+
+    monkeypatch.setattr(inspection_module, "_requested_entry_exists", unexpected_requested_entry)
+    monkeypatch.setattr(inspection_module, "_open_source", unexpected_source_entry)
+
+    started = monotonic()
+    with pytest.raises(StateError) as raised, Database.inspection_snapshot(requested_path):
+        pytest.fail("a dangling parent component must not yield a snapshot")
+
+    assert monotonic() - started < 1
+    assert str(raised.value) == "state database inspection snapshot could not be created"
+    assert str(requested_path) not in str(raised.value)
+    assert str(missing_target) not in str(raised.value)
+    assert "operator-private" not in str(raised.value)
+    assert requested_entry_access == []
+    assert source_entry_access == []
+
+
+@pytest.mark.parametrize("link_position", ["parent", "component"])
+def test_installed_doctor_rejects_dangling_parent_symlink(
+    tmp_path: Path,
+    link_position: str,
+) -> None:
+    """Installed human and JSON doctor fail safely for dangling parents."""
+    requested_path, missing_target = _dangling_parent_database_path(tmp_path, link_position)
+
+    machine = _run_healthy_installed_doctor(tmp_path, machine=True)
+    human = _run_healthy_installed_doctor(tmp_path, machine=False)
+
+    assert machine.returncode == 1
+    assert machine.stderr == b""
+    assert machine.stdout.count(b"\n") == 1
+    document = cast("dict[str, object]", json.loads(machine.stdout))
+    data = cast("dict[str, object]", document["data"])
+    counts = cast("dict[str, int]", data["counts"])
+    assert counts["unavailable"] == 0
+    assert counts["fail"] == 1
+    rendered = json.dumps(document)
+    assert "database check failed" in rendered
+    assert human.returncode == 1
+    assert human.stderr == b""
+    human_text = human.stdout.decode()
+    assert "[unavailable]" not in human_text
+    assert human_text.count("[FAIL]") == 1
+    assert "0 unavailable" in human_text
+    assert "1 fail" in human_text
+    combined = rendered + human_text
+    assert str(requested_path) not in combined
+    assert str(missing_target) not in combined
+    assert "operator-private" not in combined
+
+
 @pytest.mark.parametrize("database_state", ["absent", "active"])
 @pytest.mark.parametrize("error_number", [errno.ENOSYS, errno.EOPNOTSUPP])
 def test_preflight_probes_resolved_requested_parent_before_source_access(

@@ -248,10 +248,11 @@ directory-only, and directory-relative open support report secure database inspe
 failures, and an otherwise healthy report exits 0. An invalid source or malformed schema version
 remains a failure and makes doctor exit 1. The initial live protocol probe uses the nearest existing
 requested-parent ancestor, so a fresh install whose state directory does not yet exist remains
-healthy and absent. If the final database entry exists, Agentworks resolves its link metadata and
-preflights the resolved target parent before opening the database, WAL, or SHM. Each preflight and
-source acquisition walks from a filesystem anchor with directory-only, no-follow relative opens. No
-path check followed by an unsafe open is substituted.
+healthy and absent. An existing parent or component symlink that cannot resolve is invalid state,
+not a missing directory. If the final database entry exists, Agentworks resolves its link metadata
+and preflights the resolved target parent before opening the database, WAL, or SHM. Each preflight
+and source acquisition walks from a filesystem anchor with directory-only, no-follow relative opens.
+No path check followed by an unsafe open is substituted.
 
 #### Errors and compatibility
 

@@ -340,3 +340,20 @@ Fresh-install and resolved-target correction validation passed:
 - full mypy: 626 source files clean;
 - Rulesync generated-output check and locked-SDD validation: clean;
 - mandatory file lint: clean.
+
+## Dangling parent classification correction
+
+The final classification correction distinguishes a genuinely missing directory chain from an
+existing parent or component symlink that cannot resolve. After strict resolution reports a missing
+entry, each lexical candidate is classified with lstat before the search climbs. Only an absent
+candidate permits the search to continue; an existing unresolved symlink takes the fixed, path-free
+invalid-state failure. Multi-level missing parents remain healthy, absent, and uncreated.
+
+Dangling parent classification validation passed:
+
+- focused adversarial snapshot boundary suite: 51 passed;
+- wider doctor and machine-output slice: 133 passed;
+- Ruff check and format check: 626 files clean;
+- full mypy: 626 source files clean;
+- Rulesync generated-output check and locked-SDD validation: clean;
+- mandatory file lint: clean.

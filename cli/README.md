@@ -489,11 +489,12 @@ for secure descriptor-first inspection, the System, applicable VM sites, and Dat
 `[unavailable]`. The VM sites row applies when configuration and the registry load; otherwise its
 existing informational skip remains. That state is neither a warning nor a failure, so it does not
 by itself change the exit status. Invalid database entries and malformed schema versions still fail
-closed and make doctor exit nonzero. A missing state directory is treated as healthy, absent state
-and is not created by doctor. For an existing final database symlink, doctor resolves the link
-metadata and preflights the resolved target parent before acquiring database or sidecar content. See
-the [doctor JSON contract](command-reference.md#doctor-json-schema) for the matching
-machine-readable status and count shape.
+closed and make doctor exit nonzero. A genuinely missing state directory is treated as healthy,
+absent state and is not created by doctor; an existing dangling parent or component symlink remains
+invalid state. For an existing final database symlink, doctor resolves the link metadata and
+preflights the resolved target parent before acquiring database or sidecar content. See the
+[doctor JSON contract](command-reference.md#doctor-json-schema) for the matching machine-readable
+status and count shape.
 
 ## Environment Variables
 

@@ -168,6 +168,17 @@ def _rooted_lexical_requested_path(requested_path: Path) -> Path:
     return rooted_path
 
 
+def _lexical_entry_is_absent(path: Path) -> bool:
+    """Classify one entry without following its final component."""
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return True
+    except OSError:
+        raise _UnsupportedSnapshotEntry from None
+    return False
+
+
 def _nearest_existing_resolved_parent(rooted_path: Path) -> Path:
     """Resolve the closest existing ancestor of the requested parent."""
     candidate = rooted_path.parent
@@ -175,6 +186,8 @@ def _nearest_existing_resolved_parent(rooted_path: Path) -> Path:
         try:
             return candidate.resolve(strict=True)
         except FileNotFoundError:
+            if not _lexical_entry_is_absent(candidate):
+                raise _UnsupportedSnapshotEntry from None
             parent = candidate.parent
             if parent == candidate:
                 raise _UnsupportedSnapshotEntry from None
