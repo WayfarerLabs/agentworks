@@ -1,12 +1,12 @@
 # FRD: The agentworks.build Website
 
-- Status: Staged-release revision proposed; pending roadmap-lead review
+- Status: Staged interim release approved; implementation in progress
 - Date: 2026-08-07
 - Last revised: 2026-08-09
-- Seeded by: the roadmap lead, at operator request. This is a standalone effort, deliberately NOT a
-  child of the 2026-08-04-next-steps roadmap (see that roadmap's `target-state.md` out-of-scope
-  section for the recorded relationship). It follows the ordinary SDD process: the effort lead owns
-  the HLA and plan; the roadmap lead reviews PRs.
+- Seeded by: the saga lead, at operator request. This is a standalone effort, deliberately NOT a
+  child of the 2026-08-04-next-steps saga (see that saga's `target-state.md` out-of-scope section
+  for the recorded relationship). It follows the ordinary SDD process: the effort lead owns the HLA
+  and plan; the saga lead reviews PRs.
 
 ## Purpose
 

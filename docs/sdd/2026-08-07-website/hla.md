@@ -1,6 +1,6 @@
 # HLA: The agentworks.build Website
 
-- Status: Staged-release design proposed; pending roadmap-lead review
+- Status: Staged interim release approved; implementation in progress
 - Date: 2026-08-07
 - Last revised: 2026-08-09
 - FRD: `frd.md`
@@ -100,9 +100,9 @@ The site has three content classes:
   reordering does not. Links point to permanent repository docs, never to this SDD.
 - **Site-owned connective content.** The website owns only presentation-neutral labels and
   instructions such as navigation, link introductions, the operator-approved security-link label,
-  the interim onboarding-availability notice, and—after integration—"Copy" and copy-status feedback.
-  It does not make claims about Agentworks behavior, guarantees, principles, installation, security
-  properties, or requirements.
+  the interim onboarding-availability notice and, after integration, "Copy" and copy-status
+  feedback. It does not make claims about Agentworks behavior, guarantees, principles, installation,
+  security properties, or requirements.
 
 The shell LLD pins the permanent paragraph text and its extraction contract against current `main`.
 The later onboarding-integration LLD pins the exact upstream bootstrap path, extraction contract,

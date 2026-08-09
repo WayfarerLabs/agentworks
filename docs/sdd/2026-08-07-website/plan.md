@@ -1,6 +1,6 @@
 # Plan: The agentworks.build Website
 
-- Status: Interim-release revision proposed; pending roadmap-lead review
+- Status: Staged interim release approved; implementation in progress
 - Date: 2026-08-07
 - Last revised: 2026-08-09
 - FRD: `frd.md`
@@ -51,7 +51,7 @@ website code binds to the onboarding feature branch.
 - [x] A fresh `agentworks-reviewer` reviews the staged-release, security, onboarding-disclosure,
       terminal/TUI, and interim-acceptance revisions; all valid findings are resolved and
       re-reviewed.
-- [ ] Roadmap lead reviews and blesses the staged interim release, dedicated security page, and
+- [x] Saga lead reviews and blesses the staged interim release, dedicated security page, and
       terminal/TUI visual direction before Phase 3 implementation begins.
 - [ ] After that blessing, deliver a single-file coordination message through `main` to the
       onboarding effort: its canonical disclosure must say the agent runs on the intended
@@ -73,9 +73,14 @@ Operator evidence:
   complete site is ready, while the game becomes available as a local demo without public
   deployment.
 - 2026-08-09: the operator proposes making the complete non-onboarding site public while onboarding
-  remains in development. Everything stable—site shell, repository-derived content, brand, custom
-  404, CI, hosting, and domain—may ship first; the site must omit rather than invent onboarding
-  text. This staged-release revision awaits roadmap-lead blessing before implementation proceeds.
+  remains in development. Everything stable, including the site shell, repository-derived content,
+  brand, custom 404, CI, hosting, and domain, may ship first; the site must omit rather than invent
+  onboarding text.
+- 2026-08-09: the saga lead blesses the staged interim release, dedicated security page, and
+  terminal/TUI visual direction. Phase 3 implementation is authorized.
+- 2026-08-09: coordination PR #464 delivers the required canonical workstation-access disclosure to
+  the onboarding effort as a single new message file. Its merge to `main` remains required before
+  onboarding integration, but it does not block the independent interim shell.
 - 2026-08-09: as a narrow expansion from the original one-page scope, the operator adds a visually
   secondary `We take security seriously.` path to a dedicated security deep dive; the home page
   stays concise and non-preachy. The operator also requires the eventual onboarding disclosure to
@@ -131,7 +136,7 @@ but are not deployed or merged as a partial website.
 
 ## Phase 3: interim shell LLD
 
-- [ ] Check the website feature directory on `origin/main` for late messages before starting.
+- [x] Check the website feature directory on `origin/main` for late messages before starting.
 - [ ] Delegate `site-shell-lld.md` to an `agentworks-dev` subagent. It pins exact current-`main`
       product/security source paths and selectors, extraction errors, the exact site-owned
       availability notice and security-link label, site files and URLs, closed template vocabulary,
@@ -211,8 +216,8 @@ review-clean, deterministic interim artifact that is ready to publish but makes 
 - [ ] `agentworks-reviewer` and a fresh-eyes reviewer inspect permissions, triggers, artifact
       boundaries, and failure modes; resolve valid findings and re-review.
 - [ ] Mark PR #439 ready only when the complete interim release is review-clean. Triage Copilot
-      comments, request the roadmap lead's standalone-effort review, resolve valid findings, and
-      hand the reviewed PR to the operator for merge.
+      comments, request the saga lead's standalone-effort review, resolve valid findings, and hand
+      the reviewed PR to the operator for merge.
 - [ ] After merge, verify the matching commit deploys automatically at the default Pages URL. Leave
       custom-domain, onboarding, and lock boxes unchecked.
 
@@ -296,7 +301,7 @@ with no branch-only dependency or duplicated bootstrap.
 - [ ] Run focused tests, full CI-equivalent gates, locked-SDD checks, and file-quality lint.
 - [ ] `agentworks-reviewer` and a fresh-eyes reviewer inspect content identity, accessibility,
       migration cleanliness, and scope; resolve valid findings and re-review.
-- [ ] Open the integration PR ready for review, triage Copilot comments, request the roadmap lead's
+- [ ] Open the integration PR ready for review, triage Copilot comments, request the saga lead's
       review, resolve all valid findings, and hand the reviewed PR to the operator for merge.
 - [ ] Verify the matching commit deploys automatically to production and that the interim notice is
       absent.
