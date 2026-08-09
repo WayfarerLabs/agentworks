@@ -2,9 +2,8 @@
 backend, shipped as a separable, opt-in plugin (R11, R11.1).
 
 The first real migration out of the core (Phase 8): a capability-only
-plugin (no bundled manifests) that seats its ``OnePasswordBackend`` into
-``SECRET_BACKEND_REGISTRY`` through the ``secret-backend`` adapter's
-instance path, and publishes a ``secret-backend`` row with a
+plugin (no bundled manifests) that seats its ``OnePasswordBackend`` class
+into ``SECRET_BACKEND_REGISTRY`` and publishes a ``secret-backend`` row with a
 ``system-plugin`` origin. The row is present-but-disabled until an
 operator opts in with ``[plugins] system = ["onepassword"]``; while
 disabled it is excluded from the active backend chain and secret

@@ -88,12 +88,12 @@ and any secret can map to the backend that matches its storage policy. This lets
 definition travel between an operator who keeps tokens in a vault and one who supplies them by
 environment variable. A backend resolves a mapping to its value (or reports it absent so the next
 backend in the chain gets a turn), describes the lookup for inspection without ever exposing the
-value, and never logs it; Agentworks handles where each secret applies and injects it there. Unlike
-the other kinds, `secret-backend` is a capability in spirit today: it is a real capability kind but
-has not yet moved into `capabilities/` or adopted the shared capability base (tracked in
-[#374](https://github.com/WayfarerLabs/agentworks/issues/374)). See
-[`../secrets/README.md`](../secrets/README.md) for what a backend must provide and the shipped
-options.
+value, and never logs it; Agentworks handles where each secret applies and injects it there.
+`secret-backend` is a nominal `Capability` subclass registered and published by exact class
+identity. Its ordinary `preflight` and `runup` hooks are fixed no-ops because source resolution runs
+before that lifecycle; operation-scoped clients own bounded provider work instead. See
+[`secret_backend/README.md`](secret_backend/README.md) for the author contract and
+[`../secrets/README.md`](../secrets/README.md) for resolution behavior and the shipped options.
 
 ### Git Credential Provider
 
@@ -136,10 +136,12 @@ The preceding sections describe the operator-facing model. The remaining section
 implementation vocabulary, lifecycle contract, base class, and code layout for engineers who
 implement or extend capabilities.
 
-One orientation note before the details. A capability instance is the unit this contract governs,
-but it is not the thing the framework walks: the consuming resource that holds an instance is a
-graph node, and the framework drives those nodes, resolves their secrets, and orders their
-readiness. That machinery is the orchestration layer
+One orientation note before the details. For consuming-side capabilities, a capability instance is
+the unit this lifecycle governs, but it is not the thing the framework walks: the consuming resource
+that holds an instance is a graph node, and the framework drives those nodes, resolves their
+secrets, and orders their readiness. Secret backends use the provider-side specialization described
+below: the graph carries the registered class and an attempted source turn owns a bounded client
+rather than a `Capability` instance. The graph machinery is the orchestration layer
 ([ADR 0019](../../../docs/adrs/0019-orchestration-layer-command-plans-over-node-graphs.md)),
 documented in [`../orchestration/README.md`](../orchestration/README.md). This guide stays on the
 implementation side of that boundary and points across it wherever the framework's behavior makes a
@@ -183,16 +185,19 @@ capability with rich ops, like a credential provider that mints tokens):
   lifecycle, and holds a private harness-integration instance. It has its own readiness concerns
   _and_ composes its instances'.
 
-The rule this produces, and the one to hold onto: **the base capability class is instance-scoped,
-not resource-scoped.** Capability implementations extend it; the consuming resources, decls and
-sessions alike, do not. The readiness verbs and ops live on the instance.
+The rule this produces for consuming-side implementations, and the one to hold onto: **a constructed
+capability object is instance-scoped, not resource-scoped.** Capability implementations extend the
+base; the consuming resources, decls and sessions alike, do not. Their readiness verbs and ops live
+on the instance. `SecretBackend` derives from the same nominal base but fixes those instance hooks
+to no-ops and puts provider work on its source-bound client.
 
-A capability instance satisfies the readiness verbs (`preflight` and `runup`) but is not itself a
-graph node: the consuming resource that holds it is the node, and that node composes its held
-instances' readiness (a thin wrapper forwards the instance's directly, a rich node also adds its own
-checks) and folds their declared secrets into its own. The full node-graph and driver model, why an
-instance is held-and-composed rather than walked, how the fan-in and the secret folding work, is the
-orchestration layer; see [`../orchestration/README.md`](../orchestration/README.md).
+A consuming-side capability instance satisfies the readiness verbs (`preflight` and `runup`) but is
+not itself a graph node: the consuming resource that holds it is the node, and that node composes
+its held instances' readiness (a thin wrapper forwards the instance's directly, a rich node also
+adds its own checks) and folds their declared secrets into its own. The full node-graph and driver
+model, why an instance is held-and-composed rather than walked, how the fan-in and the secret
+folding work, is the orchestration layer; see
+[`../orchestration/README.md`](../orchestration/README.md).
 
 #### Multiplicity
 
@@ -204,12 +209,12 @@ batches all their declared secrets together. No current resource needs that rich
 
 ### The Lifecycle
 
-A capability instance moves through five stages. Each has a sharply different contract; the value of
-the whole model is in keeping them from bleeding into each other. The _order_ is part of the
-contract: invalid config dies at construct, cheap fatal readiness dies at preflight, secret
-prompting waits for preflight to pass (so the operator is never asked for a secret to feed an op
-that a bad mapping or a missing tool was going to sink anyway), and authenticated readiness (runup)
-runs only once the secrets it needs are in hand.
+A consuming-side capability instance moves through five stages. Each has a sharply different
+contract; the value of the whole model is in keeping them from bleeding into each other. The _order_
+is part of the contract: invalid config dies at construct, cheap fatal readiness dies at preflight,
+secret prompting waits for preflight to pass (so the operator is never asked for a secret to feed an
+op that a bad mapping or a missing tool was going to sink anyway), and authenticated readiness
+(runup) runs only once the secrets it needs are in hand.
 
 The two readiness stages take their names from flight: **preflight** is the walk-around inspection
 at the ramp (early, cheap, before any commitment); **runup** is the engine run-up at the hold-short
@@ -557,7 +562,7 @@ what it needs to know about a kind rather than asking code. `CapabilityKindDescr
 (`capabilities/descriptor.py`) is one frozen record per kind, and `capability_descriptors()` is the
 single enumeration of the four. Each capability package contributes its own record beside its kind
 strategy (`vm_platform/kinds.py`, `harness_integration/kinds.py`, `git_credential/kinds.py`,
-`secrets/kinds.py`), so nothing central knows a kind's internals.
+`capabilities/secret_backend/kinds.py`), so nothing central knows a kind's internals.
 
 The table exists because the alternative was a switchboard. Seven sites used to enumerate the four
 kinds independently (the plugin adapter table, the graph's kind set, its readiness dispatch, the
@@ -573,26 +578,27 @@ implementation of it:
   a hard cutover: bumping the number refuses every implementation still on the old one until each is
   migrated. Supporting two at once would need a supported-range field and a compatibility rule,
   which is a decision to make when a real migration needs it, not before.
-- **`config_schema`** (a `ConfigContract`), what a config model offered for this kind must BE: the
-  base it extends (`AgwModel` where the config is mapping-shaped, `AgwRootModel` where it is not,
-  because a secret backend's per-secret mapping may be a bare string), and the discriminator field
-  for a kind whose config is dispatched by a tagged union. **The kind states the contract;
-  implementations declare the models.** That is what makes a per-facet declaration a capability's
-  own business rather than a framework change.
+- **`config_schema`** (a `ConfigContract`), what a config model offered for this kind must BE: its
+  base, discriminator, input domain, and forbidden reference kinds. A descriptor may separately
+  declare **`mapping_schema`** and **`mapping_host`** for a map-key-selected consuming surface.
+  Secret backends use tagged `AgwModel` source config plus an untagged, JSON-native `AgwRootModel`
+  per-secret mapping. **The kind states the contracts; implementations declare the models.**
 - **`implementation_contract`, `required_operations`, `required_attributes`**, what an
-  implementation must satisfy. Not uniform in shape: three kinds declare an ABC and are checked
-  nominally, while `SecretBackend` is a `Protocol` whose members include properties, so it is
-  checked structurally and the attribute and operation sets ARE its enforcement.
+  implementation must satisfy. All four kinds declare nominal bases, and every registered
+  implementation must derive from its kind's contract.
 - **`registry`, `registry_policy`, `entry_factory`, `readiness`, `publisher_source`**, how the
   kind's implementations are stored, published as read-only rows, and asked whether this host
   supports them.
 - **`manifest_section`** (a `HostSurface`), which declarable kind's spec selects this capability and
-  under which field. `None` for `secret-backend`, whose `backend_mappings` map key already names it.
+  under which field. It remains `None` for `secret-backend` until declarable secret sources land;
+  its existing per-secret `backend_mappings` surface is described separately by `mapping_host`.
 
-The kind list is fixed by the core and the descriptors are frozen: a plugin contributes
-IMPLEMENTATIONS of existing kinds, never a kind. Domain operations stay domain-owned, too. Nothing
-here touches `VMPlatform.create` or `SecretBackend.batch_get`; the descriptor wires a kind into the
-framework without absorbing what makes the kind itself.
+Every registry policy is `CLASS_BY_NAME`: adapters, graph nodes, and published rows preserve the
+exact registered class and registration never constructs it. The kind list is fixed by the core and
+the descriptors are frozen: a plugin contributes IMPLEMENTATIONS of existing kinds, never a kind.
+Domain operations stay domain-owned, too. Nothing here touches `VMPlatform.create` or
+`SecretBackend.create_client`; the descriptor wires a kind into the framework without absorbing what
+makes the kind itself.
 
 #### Registration-Time Conformance
 
@@ -604,13 +610,12 @@ domain operations, the config model against `config_schema`, and the contract ve
 [`../plugins/README.md`](../plugins/README.md#contract-conformance) enumerates the checks; this is
 the one place they are listed.
 
-The check is **structural and never constructs the implementation**, so it says the same thing for
-every kind regardless of how that kind's registry stores things. It replaced an
-`isinstance(impl, type)` gate and a `cast`, under which a class that merely looked plausible seated
-fine and failed later, far from the mistake. `register_plugin` runs it in its validation pass before
-any registry is mutated, so a non-conforming implementation is a typed error naming the plugin and
-seating stays all-or-nothing. Built-in implementations are held to the same contract by the
-descriptor table's own self-test.
+The check is **nominal and never constructs the implementation**, so it says the same thing for
+every class registry. It replaced an `isinstance(impl, type)` gate and a `cast`, under which a class
+that merely looked plausible seated fine and failed later, far from the mistake. `register_plugin`
+runs it in its validation pass before any registry is mutated, so a non-conforming implementation is
+a typed error naming the plugin and seating stays all-or-nothing. Built-in implementations are held
+to the same contract by the descriptor table's own self-test.
 
 ### Modeling a Config That Has Variants
 
@@ -747,42 +752,25 @@ rather than folding each capability into its consuming domain, where the layerin
 capability-imports-domain violation would go unseen. It is also the natural home for the base class
 and this guide and, in a plugin world, the canonical answer to "what does the system support."
 
-The tree fills in incrementally, as each capability adopts the base and moves in under its own
-change, not in one sweep. `vm-platform` (`capabilities/vm_platform/`) and `git-credential-provider`
-(`capabilities/git_credential/`) live here; the `git-credential-provider`'s consuming resource
-(`GitCredentialConfig`) and the materials assembly that writes credentials to a VM stay in the
-`git_credentials/` domain, exactly the split this layer is for. The already-merged `secret-backend`
-capability still moves in under its own change. That is expected, not half-done.
+Each capability kind now lives under `capabilities/`: `vm_platform/`, `git_credential/`,
+`harness_integration/`, and `secret_backend/`. Consuming resources and domain assembly remain in
+their domains. For example, `GitCredentialConfig` and the materials assembly that writes credentials
+to a VM stay in `git_credentials/`; only the provider contract and implementations live in the
+capability layer.
 
-### Open Questions
+### Provider-side capability shape
 
-The model is proven on two consuming-side capabilities (`vm-platform`, `git-credential-provider`).
-The `secret-backend` capability (already merged, adopting the base under its own change) stresses it
-in ways worth recording before that change, because it is a different animal:
+Secret backends exercise the provider-side variant of the model. The registry stores a backend
+class, never a process-global backend object. One source configuration and each per-secret mapping
+are separate declared models, while an operation creates a source-bound client context only for an
+attempted source turn. The class supplies offline readiness and lookup description; the bounded
+client supplies provider work and cleanup.
 
-- **Shared multiplicity: many consuming resources, one instance.** vm-platform and git-credential
-  are per-consuming-resource: one instance per site, per credential. A secret-backend is the
-  inverse: one instance built from _global_ backend config, **shared across every secret that maps
-  to it**. The consuming resource (a secret) supplies only a per-secret _mapping_ (the env-var name,
-  the 1Password item ref), not the backend's config. So readiness deduplicates per backend (check
-  1Password once for twenty secrets), and the "consuming resource supplies the config" story flips.
-  The Multiplicity section covers the one-resource-many-instances case; this
-  many-resources-one-instance shape is not yet modeled.
-
-- **Provider-side vs consuming-side base.** The `Capability` base is shaped for the _consuming_
-  side: declare the secrets its config names, then read them back from the context at runup. A
-  backend has no declared secrets; it is the thing that _serves_ them. Its contract is different:
-  preflight checks installation and configuration, runup checks reachability and authentication, and
-  the op resolves a value. Adopting it will likely reveal that today's base is really the
-  _consuming-capability_ base, and a backend needs a sibling base or a deliberately looser one.
-
-- **Where its runup lands.** A backend's op _is_ resolution, so "runup right before its op" puts its
-  runup at the resolve-pass boundary: authenticate/reach the vault once, before serving any value,
-  upstream of every consuming capability's (post-resolve) runup. That is consistent with the general
-  rule, not an exception; it is noted only because a backend is the first capability whose op
-  precedes the resolve boundary rather than following it. (Most backends have a trivial runup
-  anyway: env-var and prompt are knowable offline, so they are preflight-only; only the network/auth
-  ones like 1Password carry a real one.)
+Because secret resolution precedes ordinary capability lifecycle, `SecretBackend.preflight` and
+`runup` are final no-ops rather than provider hooks. Authentication, connectivity, and external work
+belong to the operation-scoped client under the source turn's remaining-time budget. This is a
+deliberate specialization of the shared base, documented in
+[`secret_backend/README.md`](secret_backend/README.md), not an unresolved sibling-base question.
 
 ### Related
 

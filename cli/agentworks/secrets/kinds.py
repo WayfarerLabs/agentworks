@@ -1,13 +1,8 @@
-"""Framework strategies for the ``"secret"`` and ``"secret-backend"``
-kinds, plus the ``SECRET_KIND_NAME`` identifier, the
-``SecretBackendEntry`` capability row, and the secret-backend kind's
-``CapabilityKindDescriptor``.
+"""Framework strategy for the declarable ``secret`` resource kind.
 
-Both live in the ``secrets`` domain package next to the code that
-implements secrets and backends; ``agentworks.resources.kinds.__init__``
-imports this module so the kinds self-register into ``KIND_REGISTRY`` at
-load. ``SecretDecl`` (the declarable row) already lives in
-``agentworks.secrets.base`` -- imported from there as today.
+``SecretDecl`` lives in :mod:`agentworks.secrets.base`; the capability-owned
+``secret-backend`` strategy lives beside its implementation contract under
+:mod:`agentworks.capabilities.secret_backend.kinds`.
 
 ``SecretKind`` uses the ``auto-declare`` miss policy with no name
 restriction -- any name a ``SecretReference`` references is
@@ -16,24 +11,13 @@ auto-synthesized when not operator-declared. The synthesized
 that auto-declared secrets should be promoted to explicit
 ``[secrets.<name>]`` blocks so they can carry a description.
 
-``SecretBackendKind`` is a read-only capability kind. Backends are code
-capabilities (``agentworks.secrets.backends``); the registry rows exist
-so the ``[secret_config].backends`` chain and per-secret
-``backend_mappings`` validate through the framework's uniform miss
-policy and the backends are visible in ``agw resource list``. Not
-manifest-declarable (ADR 0016).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal
 
-from agentworks.capabilities.descriptor import (
-    CapabilityKindDescriptor,
-    ConfigContract,
-    RegistryPolicy,
-)
 from agentworks.origin import Origin
 from agentworks.resources.kind import (
     KIND_REGISTRY,
@@ -41,8 +25,6 @@ from agentworks.resources.kind import (
     NoUnreferencedDefaultError,
 )
 from agentworks.resources.walk import collect_secrets_for
-from agentworks.schema import AgwRootModel
-from agentworks.secrets.backends import SecretBackend
 from agentworks.secrets.base import SecretDecl
 from agentworks.topics import TopicProse
 
@@ -51,7 +33,6 @@ if TYPE_CHECKING:
 
     from agentworks.db import Database, SessionRow, VMRow
     from agentworks.declared_resource import DeclaredResource
-    from agentworks.resources.graph import Readiness
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
 
@@ -61,24 +42,6 @@ SECRET_KIND_NAME = "secret"
 that need to render or compare against the kind name import this rather
 than re-typing the literal -- a hypothetical rename then flows through
 every site by construction."""
-
-
-@dataclass(frozen=True)
-class SecretBackendEntry:
-    """The capability resource for one registered secret backend.
-
-    The actual capability (the ``SecretBackend`` API) lives in
-    ``agentworks.secrets.backends.SECRET_BACKEND_REGISTRY``; this row is
-    what the chain and mapping names resolve against in the framework.
-    ``description`` comes from the capability, for inspection surfaces.
-
-    Inbound references live on the dependency graph
-    (``Registry.graph.dependents_of``), not on this row.
-    """
-
-    name: str
-    description: str = ""
-    origin: Origin | None = None
 
 
 @dataclass(frozen=True)
@@ -233,99 +196,4 @@ class _SecretKind:
         return names
 
 
-@dataclass(frozen=True)
-class _SecretBackendKind:
-    """Implementation of ``ResourceKind`` for ``"secret-backend"``."""
-
-    kind: str = "secret-backend"
-    description: str = "Capability for resolving secret values"
-    prose: TopicProse = TopicProse(
-        title="Secret backends",
-        overview="""
-        A secret-backend produces a secret's VALUE at command time. Backends are tried
-        in order, and the first one that has a value for the secret wins, so a host can
-        read most secrets from a vault and fall back to prompting for the rest.
-
-        A backend is code, not config: it registers itself, and a secret opts one in or
-        out through `backend_mappings.<backend>` in the secret's own document. What that
-        mapping may hold differs per backend (an env var name, an `op://` reference),
-        which is why each backend documents its own.
-        """,
-    )
-    miss_policy: Literal["auto-declare", "error"] = "error"
-    auto_declare_names: frozenset[str] | None = None
-    category: Literal["declarable", "capability"] = "capability"
-    builtin_override: Literal["allow", "reserved"] = "reserved"
-
-    def synthesize(self, references: Sequence[ResourceReference]) -> SecretBackendEntry:
-        raise NoUnreferencedDefaultError(
-            "the secret-backend kind has miss_policy='error'; synthesize should never be dispatched"
-        )
-
-
 KIND_REGISTRY[SECRET_KIND_NAME] = _SecretKind()
-KIND_REGISTRY["secret-backend"] = _SecretBackendKind()
-
-
-def _backend_registry() -> dict[str, Any]:
-    from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
-
-    return SECRET_BACKEND_REGISTRY
-
-
-def _backend_entry(name: str, impl: Any, origin: Origin | None) -> SecretBackendEntry:
-    return SecretBackendEntry(name=name, description=impl.description, origin=origin)
-
-
-def _backend_readiness(name: str, impl: Any) -> Readiness:
-    """Ask the backend INSTANCE (this is the one kind whose registry holds
-    one). Config-independent by contract: a backend's host tool is present
-    or not, irrespective of any per-secret mapping."""
-    return cast("Readiness", impl.not_ready())
-
-
-SECRET_BACKEND_DESCRIPTOR = CapabilityKindDescriptor(
-    kind="secret-backend",
-    contract_version=1,
-    implementation_contract=SecretBackend,
-    # The interim exception, and the only place it is recorded: this kind's
-    # registry holds a constructed instance rather than the class. It flips
-    # to CLASS_BY_NAME once the graph stamping and the resolve loop stop
-    # consuming constructed backends.
-    registry_policy=RegistryPolicy.CONSTRUCTED_SINGLETON,
-    registry=_backend_registry,
-    required_operations=frozenset(
-        {
-            "not_ready",
-            "would_attempt",
-            "describe_lookup",
-            "batch_get",
-        },
-    ),
-    # A Protocol declares these but cannot supply them, and the framework
-    # reads both without constructing (the resolve loop reads ``interactive``
-    # on every chain pass; the core reads ``config_model`` to validate a
-    # mapping), so their presence is checked rather than assumed.
-    required_attributes=frozenset({"interactive", "config_model"}),
-    entry_factory=_backend_entry,
-    kind_strategy=KIND_REGISTRY["secret-backend"],
-    readiness=_backend_readiness,
-    # The publisher label is the PACKAGE, not the module that used to
-    # hold this kind's publisher (``secrets/backends.py``, fronted by
-    # ``secrets/__init__.py``): the built-in rows have always carried
-    # ``"agentworks.secrets"`` and operators read it as provenance.
-    publisher_source="agentworks.secrets",
-    # No host surface: no declarable kind selects a backend. The per-secret
-    # ``backend_mappings`` map key already names the capability, so there is
-    # no naming/config sibling pair to fold.
-    manifest_section=None,
-    # The one kind whose config is NOT mapping-shaped: a per-secret mapping
-    # may be a bare string (env-var's is an env var name) or a
-    # string-or-table union (onepassword's), neither of which a
-    # ``BaseModel`` can be. And no discriminator: ``backend_mappings``'s map
-    # key already names the backend, so a tag inside the value would say the
-    # same thing twice and could disagree.
-    config_schema=ConfigContract(base=AgwRootModel, discriminator=None),
-)
-"""The secret-backend record in the capability-kind descriptor table
-(``agentworks.capabilities.descriptor``)."""

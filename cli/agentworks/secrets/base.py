@@ -1,7 +1,7 @@
 """Core types for the agentworks secret system.
 
 Secrets are declarations (``SecretDecl``); values come from the
-registered backend capabilities (``agentworks.secrets.backends``)
+registered backend capabilities (``agentworks.capabilities.secret_backend``)
 through the resolution loop (ADR 0016, YAML resource manifests and the
 config/resource/capability split). See
 ``docs/adrs/0013-cli-side-secret-injection.md`` for why values never
@@ -135,7 +135,7 @@ class SecretDecl(DeclaredResource):
             mapping = self.backend_mappings.get(backend_name)
             if mapping is False:
                 continue
-            if backend.would_attempt(self, mapping):
+            if backend.would_attempt(self.name, mapping_present=mapping is not None):
                 emit(backend_name)
         # (a2) whatever each declared mapping itself NAMES. Every shipped
         # backend's mapping is an external identifier (an env var name, an
@@ -144,17 +144,16 @@ class SecretDecl(DeclaredResource):
         # not the one kind whose config references are structurally
         # underivable: the core reads them off the backend's declared model,
         # exactly as it does for the other three kinds.
-        from agentworks.capabilities.config import capability_config_references
+        from agentworks.secrets._backend_compat import mapping_references
 
         for backend_name, mapping in self.backend_mappings.items():
             if mapping is False:
                 continue
             refs.extend(
                 sourced_references(
-                    capability_config_references(
-                        kind="secret-backend",
+                    mapping_references(
                         name=backend_name,
-                        config=mapping,
+                        mapping=mapping,
                         owner=self.mapping_owner(backend_name),
                     ),
                     source,
@@ -208,15 +207,14 @@ class SecretDecl(DeclaredResource):
           right vocabulary for "no such backend". Naming it a second time as
           a config error would be one problem told twice.
         """
-        from agentworks.capabilities.config import validate_capability_config
+        from agentworks.secrets._backend_compat import validate_mapping
 
         for backend_name, mapping in self.backend_mappings.items():
             if mapping is False:
                 continue
-            validate_capability_config(
-                kind="secret-backend",
+            validate_mapping(
                 name=backend_name,
-                config=mapping,
+                mapping=mapping,
                 owner=self.mapping_owner(backend_name),
                 location=self.error_location,
             )

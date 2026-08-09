@@ -7,16 +7,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from agentworks.capabilities.secret_backend.env_var import EnvVarBackend
 from agentworks.resources.graph import Readiness
 from agentworks.secrets import ActiveBackend, SecretDecl, env_var_name_for
-from agentworks.secrets.env_var import EnvVarBackend
 
 if TYPE_CHECKING:
     import pytest
 
 
 def _backend() -> ActiveBackend:
-    return ActiveBackend(capability=EnvVarBackend(), readiness=Readiness.ready())
+    return ActiveBackend(capability=EnvVarBackend, readiness=Readiness.ready())
 
 
 def test_default_convention_uppercases_and_dashes_to_underscores() -> None:

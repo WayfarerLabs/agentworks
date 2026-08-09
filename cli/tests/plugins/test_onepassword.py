@@ -9,6 +9,7 @@ the liveness probe), so the fake dispatches on the ``read`` argv.
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from textwrap import dedent
 from typing import TYPE_CHECKING, Any
@@ -19,7 +20,13 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 from agentworks.bootstrap import build_registry
-from agentworks.capabilities.config import validate_capability_config
+from agentworks.capabilities.secret_backend import (
+    SecretClientFailure,
+    SecretClientFailureKind,
+    SecretClientRemediation,
+    SecretClientTimeout,
+    SecretLookupRequest,
+)
 from agentworks.config import load_config
 from agentworks.errors import (
     ConfigError,
@@ -28,10 +35,17 @@ from agentworks.errors import (
     SecretMappingError,
 )
 from agentworks.plugins.onepassword import backend as op_mod
-from agentworks.plugins.onepassword.backend import _FORMS_HINT, OnePasswordBackend, _OpResult
+from agentworks.plugins.onepassword.backend import (
+    _FORMS_HINT,
+    OnePasswordBackend,
+    OnePasswordMapping,
+    OnePasswordSourceConfig,
+    _OpResult,
+)
 from agentworks.resources.graph import Readiness
 from agentworks.schema import RefOwner
 from agentworks.secrets import active_backends, resolve_secrets
+from agentworks.secrets._backend_compat import validate_mapping
 from agentworks.secrets.base import SecretDecl
 from agentworks.secrets.resolve import ActiveBackend, preview_resolution
 from tests.conftest import ManifestDoc, write_manifests
@@ -74,7 +88,7 @@ def _fake_op(
 
 
 def _backend_chain() -> list[ActiveBackend]:
-    return [ActiveBackend(capability=OnePasswordBackend(), readiness=Readiness.ready())]
+    return [ActiveBackend(capability=OnePasswordBackend, readiness=Readiness.ready())]
 
 
 # -- would_attempt -----------------------------------------------------------
@@ -96,12 +110,12 @@ def test_bare_string_resolves_without_account_flag(
 ) -> None:
     runner = _fake_op(values={"op://Work/npm/token": "secret-value"})
     _install_runner(monkeypatch, runner)
-    backend = OnePasswordBackend()
+    backend = OnePasswordBackend
 
     uri = "op://Work/npm/token"
     secret = _decl("s-str", backend_mappings={"onepassword": uri})
-    assert backend.describe_lookup(secret, secret.backend_mappings["onepassword"]) == uri
-    got = backend.batch_get([(secret, secret.backend_mappings["onepassword"])])
+    assert backend._legacy_describe_lookup(secret, secret.backend_mappings["onepassword"]) == uri
+    got = backend._legacy_batch_get([(secret, secret.backend_mappings["onepassword"])])
     assert got == {"s-str": "secret-value"}
     # The bare string uses op's default account: no --account flag anywhere.
     assert all("--account" not in c for c in runner.calls)
@@ -117,11 +131,11 @@ def test_table_form_resolves_with_account_flag(
     uri = "op://Work/npm/token"
     runner = _fake_op(values={uri: "secret-value"})
     _install_runner(monkeypatch, runner)
-    backend = OnePasswordBackend()
+    backend = OnePasswordBackend
 
     mapping = {"account": "my.1password.com", "reference": uri}
     secret = _decl("s-tbl", backend_mappings={"onepassword": mapping})
-    got = backend.batch_get([(secret, secret.backend_mappings["onepassword"])])
+    got = backend._legacy_batch_get([(secret, secret.backend_mappings["onepassword"])])
     assert got == {"s-tbl": "secret-value"}
     read_calls = [c for c in runner.calls if c[0] == "read"]
     assert read_calls == [["read", "--no-newline", "--account", "my.1password.com", uri]]
@@ -135,16 +149,16 @@ def test_section_bearing_reference_validates_and_resolves(
     uri = "op://Work/npm/section/token"
     runner = _fake_op(values={uri: "sectioned-value"})
     _install_runner(monkeypatch, runner)
-    backend = OnePasswordBackend()
+    backend = OnePasswordBackend
 
     _validate(uri)
     secret = _decl("s-sec", backend_mappings={"onepassword": uri})
-    got = backend.batch_get([(secret, secret.backend_mappings["onepassword"])])
+    got = backend._legacy_batch_get([(secret, secret.backend_mappings["onepassword"])])
     assert got == {"s-sec": "sectioned-value"}
 
 
 def test_describe_lookup_includes_account_when_set() -> None:
-    backend = OnePasswordBackend()
+    backend = OnePasswordBackend
     uri = "op://Work/npm/token"
     with_account = _decl(
         "s-acct",
@@ -153,15 +167,237 @@ def test_describe_lookup_includes_account_when_set() -> None:
     bare = _decl("s-bare", backend_mappings={"onepassword": uri})
     # Account-first: "<account>: <reference>" (position conveys "account").
     assert (
-        backend.describe_lookup(with_account, with_account.backend_mappings["onepassword"])
+        backend._legacy_describe_lookup(with_account, with_account.backend_mappings["onepassword"])
         == f"my.1password.com: {uri}"
     )
-    assert backend.describe_lookup(bare, bare.backend_mappings["onepassword"]) == uri
+    assert backend._legacy_describe_lookup(bare, bare.backend_mappings["onepassword"]) == uri
 
 
 def test_describe_lookup_none_when_unmapped() -> None:
-    backend = OnePasswordBackend()
-    assert backend.describe_lookup(_decl("s"), None) is None
+    backend = OnePasswordBackend
+    assert backend._legacy_describe_lookup(_decl("s"), None) is None
+
+
+# -- Final bounded client contract ------------------------------------------
+
+
+def _final_request(name: str, reference: str) -> SecretLookupRequest:
+    return SecretLookupRequest(name=name, mapping=OnePasswordMapping.model_validate(reference))
+
+
+def _resolve_with_final_client(
+    requests: tuple[SecretLookupRequest, ...],
+    *,
+    remaining_time: Any,
+    timeout: float = 30.0,
+    account: str | None = None,
+) -> dict[str, str]:
+    config = OnePasswordSourceConfig(name="onepassword", timeout=timeout, account=account)
+    context = OnePasswordBackend.create_client(
+        source_name="vault",
+        config=config,
+        interaction_broker=None,
+        remaining_time=remaining_time,
+    )
+    with context as client:
+        return dict(client.resolve(requests, remaining_time=remaining_time))
+
+
+@pytest.mark.parametrize(
+    ("remaining", "configured", "expected"),
+    [(4.5, 30.0, 4.5), (90.0, 12.0, 12.0), (None, 8.0, 8.0)],
+    ids=("live-budget", "configured-cap", "configured-fallback"),
+)
+def test_final_client_passes_the_bounded_remainder_to_exact_op_read(
+    monkeypatch: pytest.MonkeyPatch,
+    remaining: float | None,
+    configured: float,
+    expected: float,
+) -> None:
+    calls: list[tuple[list[str], float]] = []
+
+    def run(argv: list[str], **kwargs: Any) -> Any:
+        calls.append((argv, kwargs["timeout"]))
+        return subprocess.CompletedProcess(argv, 0, stdout="value", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    request = _final_request("token", "op://Work/npm/token")
+
+    assert _resolve_with_final_client(
+        (request,),
+        remaining_time=lambda: remaining,
+        timeout=configured,
+        account="my.1password.com",
+    ) == {"token": "value"}
+    assert calls == [
+        (
+            ["op", "read", "--no-newline", "--account", "my.1password.com", "op://Work/npm/token"],
+            expected,
+        )
+    ]
+
+
+def test_final_client_does_not_spawn_when_the_budget_is_exhausted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    def run(argv: list[str], **kwargs: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        raise AssertionError("the subprocess must not start")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    with pytest.raises(SecretClientTimeout) as excinfo:
+        _resolve_with_final_client(
+            (_final_request("token", "op://Work/npm/token"),),
+            remaining_time=lambda: 0.0,
+        )
+    assert calls == 0
+    assert excinfo.value.__cause__ is None
+    assert excinfo.value.__context__ is None
+
+
+def test_final_client_translates_native_timeout_without_chaining(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def run(argv: list[str], **kwargs: Any) -> Any:
+        raise subprocess.TimeoutExpired(
+            argv,
+            kwargs["timeout"],
+            output="native-timeout-output",
+            stderr="native-timeout-stderr",
+        )
+
+    monkeypatch.setattr(subprocess, "run", run)
+    with pytest.raises(SecretClientTimeout) as excinfo:
+        _resolve_with_final_client(
+            (_final_request("token", "op://Work/npm/token"),),
+            remaining_time=lambda: 2.0,
+        )
+    assert excinfo.value.__cause__ is None
+    assert excinfo.value.__context__ is None
+
+
+@pytest.mark.parametrize(
+    ("stderr", "expected_kind", "expected_remediation"),
+    [
+        (
+            "account is not signed in",
+            SecretClientFailureKind.AUTHENTICATION,
+            SecretClientRemediation.SIGN_IN,
+        ),
+        (
+            '"token" isn\'t a field in the item',
+            SecretClientFailureKind.HARD_MAPPING,
+            SecretClientRemediation.CHECK_MAPPING,
+        ),
+        (
+            "provider returned an unclassified failure",
+            SecretClientFailureKind.EXTERNAL,
+            SecretClientRemediation.RETRY,
+        ),
+    ],
+    ids=("authentication", "hard-mapping", "external"),
+)
+def test_final_client_translates_nonzero_results_to_value_free_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    stderr: str,
+    expected_kind: SecretClientFailureKind,
+    expected_remediation: SecretClientRemediation,
+) -> None:
+    def run(argv: list[str], **kwargs: Any) -> Any:
+        return subprocess.CompletedProcess(
+            argv,
+            1,
+            stdout="failure-path-value",
+            stderr=stderr,
+        )
+
+    monkeypatch.setattr(subprocess, "run", run)
+    with pytest.raises(SecretClientFailure) as excinfo:
+        _resolve_with_final_client(
+            (_final_request("token", "op://Work/npm/token"),),
+            remaining_time=lambda: 3.0,
+        )
+    assert excinfo.value.kind is expected_kind
+    assert excinfo.value.remediation is expected_remediation
+    assert excinfo.value.__cause__ is None
+    assert excinfo.value.__context__ is None
+    assert "failure-path-value" not in repr(excinfo.value)
+    assert stderr not in repr(excinfo.value)
+
+
+def test_final_client_translates_missing_binary_to_connectivity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def run(argv: list[str], **kwargs: Any) -> Any:
+        raise FileNotFoundError("native-connectivity-detail")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    with pytest.raises(SecretClientFailure) as excinfo:
+        _resolve_with_final_client(
+            (_final_request("token", "op://Work/npm/token"),),
+            remaining_time=lambda: 3.0,
+        )
+    assert excinfo.value.kind is SecretClientFailureKind.CONNECTIVITY
+    assert excinfo.value.remediation is SecretClientRemediation.CHECK_CONNECTIVITY
+    assert excinfo.value.__cause__ is None
+    assert excinfo.value.__context__ is None
+
+
+def _provider_traceback_locals(error: BaseException) -> list[dict[str, object]]:
+    frames: list[dict[str, object]] = []
+    traceback = error.__traceback__
+    while traceback is not None:
+        if Path(traceback.tb_frame.f_code.co_filename) == Path(op_mod.__file__):
+            frames.append(dict(traceback.tb_frame.f_locals))
+        traceback = traceback.tb_next
+    return frames
+
+
+def test_final_client_clears_partial_values_native_results_and_references(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    value_sentinel = "resolved-value-must-be-cleared"
+    reference_sentinel = "op://Work/native-reference-must-be-cleared/field"
+    stdout_sentinel = "failure-stdout-must-be-cleared"
+    stderr_sentinel = "failure-stderr-must-be-cleared"
+    calls = 0
+
+    def run(argv: list[str], **kwargs: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return subprocess.CompletedProcess(argv, 0, stdout=value_sentinel, stderr="")
+        return subprocess.CompletedProcess(
+            argv,
+            1,
+            stdout=stdout_sentinel,
+            stderr=stderr_sentinel,
+        )
+
+    monkeypatch.setattr(subprocess, "run", run)
+    requests = (
+        _final_request("first", "op://Work/first/value"),
+        _final_request("second", reference_sentinel),
+    )
+    with pytest.raises(SecretClientFailure) as excinfo:
+        _resolve_with_final_client(requests, remaining_time=lambda: 5.0)
+
+    assert excinfo.value.kind is SecretClientFailureKind.EXTERNAL
+    assert excinfo.value.__cause__ is None
+    assert excinfo.value.__context__ is None
+    locals_by_frame = _provider_traceback_locals(excinfo.value)
+    assert locals_by_frame
+    retained = repr(locals_by_frame)
+    for sentinel in (value_sentinel, reference_sentinel, stdout_sentinel, stderr_sentinel):
+        assert sentinel not in retained
+    assert not any(
+        isinstance(value, (subprocess.CompletedProcess, OSError))
+        for frame in locals_by_frame
+        for value in frame.values()
+    )
 
 
 # -- Mapping validation ------------------------------------------------------
@@ -172,11 +408,11 @@ def test_describe_lookup_none_when_unmapped() -> None:
 
 
 def _validate(mapping: object) -> None:
-    validate_capability_config(
-        kind="secret-backend",
+    validate_mapping(
         name="onepassword",
-        config=mapping,  # type: ignore[arg-type]
+        mapping=mapping,
         owner=RefOwner(kind="secret", name="s", label="secret/s.backend_mappings.onepassword"),
+        location=None,
     )
 
 
@@ -270,7 +506,7 @@ def test_a_bad_mapping_reads_the_same_way_wherever_it_is_caught(mapping: Any, ex
     present, which is how the framing fix shipped over a batch that still
     read wrong.
 
-    **Where it says it.** ``_resolved_ref`` re-validates defensively, and
+    **Where it says it.** The private compatibility resolver re-validates defensively, and
     what IT reports has to be what the operator would have been told at
     load. It used to read ``exc.errors()[0]["msg"]``, whichever arm
     pydantic tried first, from the single ``model_validate`` in the
@@ -283,19 +519,19 @@ def test_a_bad_mapping_reads_the_same_way_wherever_it_is_caught(mapping: Any, ex
         _validate(mapping)
     secret = _decl("s", backend_mappings={"onepassword": mapping})
     with pytest.raises(ConfigError) as revalidated:
-        OnePasswordBackend().describe_lookup(secret, secret.backend_mappings["onepassword"])
+        OnePasswordBackend._legacy_describe_lookup(secret, secret.backend_mappings["onepassword"])
 
     assert str(at_load.value) == expected
     assert str(revalidated.value) == expected
 
 
 def test_an_absent_mapping_is_framed_like_a_malformed_one() -> None:
-    """The other exit from ``_resolved_ref``. Same owner framing, and the
+    """The absent-mapping exit from the compatibility resolver. Same owner framing, and the
     two accepted forms ride the ConfigError's ``hint`` rather than being
     parenthesized into the message, which is where every other framed
     config error puts its way forward."""
     with pytest.raises(ConfigError) as exc:
-        OnePasswordBackend()._resolved_ref(_decl("s"), None)
+        OnePasswordBackend._legacy_resolved_ref(_decl("s"), None)
     assert "secret/s.backend_mappings.onepassword" in str(exc.value)
     assert exc.value.hint == _FORMS_HINT
 
@@ -395,10 +631,10 @@ def test_batch_get_absent_item_raises_secret_mapping_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _install_runner(monkeypatch, _fake_op(values={}))  # every read is not-found
-    backend = OnePasswordBackend()
+    backend = OnePasswordBackend
     secret = _decl("gone", backend_mappings={"onepassword": "op://Work/gone/token"})
     with pytest.raises(SecretMappingError, match="op://Work/gone/token"):
-        backend.batch_get([(secret, secret.backend_mappings["onepassword"])])
+        backend._legacy_batch_get([(secret, secret.backend_mappings["onepassword"])])
 
 
 def test_hard_miss_halts_chain_before_prompt(
@@ -413,17 +649,20 @@ def test_hard_miss_halts_chain_before_prompt(
         name = "later"
         interactive = False
 
-        def would_attempt(self, secret: Any, mapping: Any) -> bool:
+        @classmethod
+        def would_attempt(cls, secret_name: str, *, mapping_present: bool) -> bool:
             return True
 
-        def describe_lookup(self, secret: Any, mapping: Any) -> str | None:
+        @classmethod
+        def _legacy_describe_lookup(cls, secret: Any, mapping: Any) -> str | None:
             return None
 
-        def batch_get(self, wants: list[tuple[Any, Any]]) -> dict[str, str]:
+        @classmethod
+        def _legacy_batch_get(cls, wants: list[tuple[Any, Any]]) -> dict[str, str]:
             raise AssertionError("later backend must not run after a hard miss")
 
-    op_chain = ActiveBackend(capability=OnePasswordBackend(), readiness=Readiness.ready())
-    later = ActiveBackend(capability=_ExplodingBackend(), readiness=Readiness.ready())  # type: ignore[arg-type]
+    op_chain = ActiveBackend(capability=OnePasswordBackend, readiness=Readiness.ready())
+    later = ActiveBackend(capability=_ExplodingBackend, readiness=Readiness.ready())  # type: ignore[arg-type]
     secret = _decl("gone", backend_mappings={"onepassword": "op://Work/gone/token"})
     with pytest.raises(SecretMappingError):
         resolve_secrets([secret], [op_chain, later])
@@ -444,10 +683,10 @@ def test_signed_out_read_default_account_raises_connectivity_error(
     the generic message and a hint pointing at OP_ACCOUNT / the table form."""
     uri = "op://Work/npm/token"
     _install_runner(monkeypatch, _signed_out_read(uri))
-    backend = OnePasswordBackend()
+    backend = OnePasswordBackend
     secret = _decl("npm", backend_mappings={"onepassword": uri})
     with pytest.raises(ConnectivityError) as excinfo:
-        backend.batch_get([(secret, secret.backend_mappings["onepassword"])])
+        backend._legacy_batch_get([(secret, secret.backend_mappings["onepassword"])])
     err = excinfo.value
     assert str(err) == "not signed in to the 1Password CLI"
     assert "OP_ACCOUNT" in (err.hint or "")
@@ -461,13 +700,13 @@ def test_signed_out_read_pinned_account_names_it(
     signed-out `op read` raises ConnectivityError naming that account."""
     uri = "op://Work/npm/token"
     _install_runner(monkeypatch, _signed_out_read(uri))
-    backend = OnePasswordBackend()
+    backend = OnePasswordBackend
     secret = _decl(
         "npm",
         backend_mappings={"onepassword": {"account": "my.1password.com", "reference": uri}},
     )
     with pytest.raises(ConnectivityError, match="my.1password.com"):
-        backend.batch_get([(secret, secret.backend_mappings["onepassword"])])
+        backend._legacy_batch_get([(secret, secret.backend_mappings["onepassword"])])
 
 
 def test_signed_out_read_halts_before_later_reads(
@@ -482,11 +721,11 @@ def test_signed_out_read_halts_before_later_reads(
         read_errors={first: (1, "[ERROR] account is not signed in.")},
     )
     _install_runner(monkeypatch, runner)
-    backend = OnePasswordBackend()
+    backend = OnePasswordBackend
     a = _decl("a", backend_mappings={"onepassword": first})
     b = _decl("b", backend_mappings={"onepassword": second})
     with pytest.raises(ConnectivityError):
-        backend.batch_get(
+        backend._legacy_batch_get(
             [
                 (a, a.backend_mappings["onepassword"]),
                 (b, b.backend_mappings["onepassword"]),
@@ -505,7 +744,7 @@ def test_batch_get_empty_wants_does_not_run_op(
         raise AssertionError("empty batch must not run op")
 
     _install_runner(monkeypatch, exploding)
-    assert OnePasswordBackend().batch_get([]) == {}
+    assert OnePasswordBackend._legacy_batch_get([]) == {}
 
 
 def test_batch_get_missing_binary_raises_connectivity_error(
@@ -515,10 +754,10 @@ def test_batch_get_missing_binary_raises_connectivity_error(
         raise FileNotFoundError("op")
 
     _install_runner(monkeypatch, boom)
-    backend = OnePasswordBackend()
+    backend = OnePasswordBackend
     secret = _decl("npm", backend_mappings={"onepassword": "op://Work/npm/token"})
     with pytest.raises(ConnectivityError, match="not found on PATH"):
-        backend.batch_get([(secret, secret.backend_mappings["onepassword"])])
+        backend._legacy_batch_get([(secret, secret.backend_mappings["onepassword"])])
 
 
 def test_batch_get_unexpected_failure_raises_external_error(
@@ -528,10 +767,10 @@ def test_batch_get_unexpected_failure_raises_external_error(
         monkeypatch,
         _fake_op(read_errors={"op://Work/npm/token": (1, "unexpected server error 503")}),
     )
-    backend = OnePasswordBackend()
+    backend = OnePasswordBackend
     secret = _decl("npm", backend_mappings={"onepassword": "op://Work/npm/token"})
     with pytest.raises(ExternalError, match="server error 503"):
-        backend.batch_get([(secret, secret.backend_mappings["onepassword"])])
+        backend._legacy_batch_get([(secret, secret.backend_mappings["onepassword"])])
 
 
 # -- interactive optimism (preview never probes) -----------------------------
@@ -566,7 +805,7 @@ def test_preview_returns_none_for_unmapped_secret(
 
 
 # That the backend ships as the ``onepassword`` system plugin and that its
-# adapter seats the instance into the code registry at import are both
+# adapter seats the class into the code registry at import are both
 # preconditions of the row test below (an unseated backend publishes no row
 # to look up, and a row cannot carry ``origin.plugin == "onepassword"``
 # without the plugin), so neither needs a membership assertion of its own.

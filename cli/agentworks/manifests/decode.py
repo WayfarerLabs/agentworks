@@ -220,6 +220,8 @@ def _reject_legacy_shape(surface: HostSurface, spec: Mapping[str, object], locat
     good enough answer.
     """
     field, config_field = surface.naming_field, surface.config_field
+    if config_field is None:
+        return
     value = spec.get(field)
     if not isinstance(value, str):
         if config_field in spec:
@@ -270,7 +272,11 @@ def decode_document(doc: Document, issues: list[str]) -> Any:
     spec = dict(doc.spec)
     _reject_spec_metadata(doc, spec)
     descriptor = _hosting_descriptors().get(doc.kind)
-    if descriptor is not None and descriptor.manifest_section is not None:
+    if (
+        descriptor is not None
+        and descriptor.manifest_section is not None
+        and descriptor.manifest_section.config_field is not None
+    ):
         _reject_legacy_shape(descriptor.manifest_section, spec, doc.location)
     model = _model_for(doc.kind)
 

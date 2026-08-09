@@ -25,9 +25,8 @@ site selection, and secret resolution all read it here rather than recomputing.
 The contract in brief: the graph is frozen after ``finalize`` and every query
 is a pure read of ``_nodes`` (no recomputation). Nodes are keyed by
 ``(kind, name)`` with exactly one node per published resource, including
-capability rows, which carry their implementation in ``impl`` (a class for
-vm-platform / harness-integration / git-credential-provider, an instance for
-secret-backend) so consumers reach a capability's code off the graph rather
+capability rows, which carry their exact implementation class in ``impl`` for
+every capability kind, so consumers reach a capability's code off the graph rather
 than the live registry. ``readiness_of`` / ``enablement_of`` return stored
 verdicts; ``edges_of`` / ``dependents_of`` are the two edge directions;
 ``runtime_reachable_from`` and ``composed_from`` are the two transitive
@@ -46,8 +45,8 @@ from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
+    from agentworks.capabilities.secret_backend.base import SecretBackend
     from agentworks.resources.reference import ReferenceEntry, RefRelationship, ResourceReference
-    from agentworks.secrets.backends import SecretBackend
 
 
 class Enablement(Enum):
@@ -154,8 +153,8 @@ class DependencyState:
 
     ``readiness`` is ``None`` iff the dep is disabled (readiness is computed
     only for enabled nodes; enablement is the axis that answers for a disabled
-    node). ``impl`` is the dependency's capability implementation (a class for
-    vm-platform/harness-integration/git-credential-provider, an instance for secret-backend,
+    node). ``impl`` is the dependency's capability implementation class
+    (for every capability kind),
     ``None`` for a non-capability dep), carried so the depending node can run a
     config-dependent capability check WITHOUT reaching into a live registry
     (the impl came from the graph, so this stays guard-clean, R11). See LLD c.
@@ -179,9 +178,8 @@ class _Node:
     which carry target kind/name, usage, and source). ``inbound`` is the
     ``ReferenceEntry`` list of who points at this node, derived from the same
     edge walk and moved off the resource dataclass (caller inventory E).
-    ``impl`` is the capability implementation for capability nodes (a class for
-    vm-platform/harness-integration/git-credential-provider, an instance for
-    secret-backend), ``None`` otherwise.
+    ``impl`` is the exact capability implementation class for capability nodes,
+    ``None`` otherwise.
     """
 
     key: tuple[str, str]
@@ -286,9 +284,8 @@ class DependencyGraph:
         return ordered
 
     def impl_of(self, kind: str, name: str) -> object | None:
-        """The capability implementation stamped on this node (a class for
-        vm-platform/harness-integration/git-credential-provider, an instance for
-        secret-backend), or ``None`` for a non-capability node. The sanctioned
+        """The exact capability implementation class stamped on this node, or
+        ``None`` for a non-capability node. The sanctioned
         way for a consumer (secret resolution, LLD d) to reach a capability's
         code off the graph rather than probing the live registry (R11). Raises
         ``KeyError`` on an unknown key."""
@@ -337,7 +334,7 @@ class FinalizeContext:
     why the R11 guard whitelists the builder's own call (LLD b):
 
     - ``available_backends``: the present ``secret-backend`` nodes (name +
-      impl), which a ``secret`` reads to decide (via each backend's pure
+      exact implementation class), which a ``secret`` reads to decide (via each backend's pure
       ``would_attempt``) which ``secret -> secret-backend`` edges to emit.
     - ``rows``: every published resource, by kind and name, which an
       INHERITING resource reads to resolve its own ``inherits`` chain
@@ -352,7 +349,7 @@ class FinalizeContext:
     honest one.
     """
 
-    available_backends: tuple[tuple[str, SecretBackend], ...] = ()
+    available_backends: tuple[tuple[str, type[SecretBackend]], ...] = ()
     # The builder's live row map, read-only by contract (hence the
     # ``Mapping`` annotation): the rows do not change between the build
     # walk and the late-materialization walk that shares this context, and
@@ -412,7 +409,8 @@ def build_context(resources: Mapping[str, Mapping[str, object]]) -> FinalizeCont
     either way; carrying the live map means they cannot stop agreeing.
     """
     backends = tuple(
-        (name, cast("SecretBackend", _impl_for("secret-backend", name))) for name in resources.get("secret-backend", {})
+        (name, cast("type[SecretBackend]", _impl_for("secret-backend", name)))
+        for name in resources.get("secret-backend", {})
     )
     return FinalizeContext(available_backends=backends, rows=resources)
 
@@ -600,7 +598,7 @@ def _capability_node_readiness(kind: str, name: str) -> Readiness:
     rather than from an if-chain here. Each ``readiness`` callable lives
     beside the capability it interrogates: ``vm-platform`` wraps
     ``unsupported_reason`` into the host-support sentence, ``secret-backend``
-    asks the backend instance, and ``harness-integration`` /
+    asks the backend class, and ``harness-integration`` /
     ``git-credential-provider`` have no host-support concept and are always
     ready. The fold's job is to know WHEN to ask, not WHAT the answer is.
 
@@ -654,9 +652,7 @@ def _impl_for(kind: str, name: str) -> object | None:
     to stamp it onto each capability node here. This is the sanctioned
     builder-reads-registry path, distinct from (and not to be confused with) a
     *consumer* probing the live registry at op time, which the guard bans. The
-    impl is heterogeneous by design (a class for platform/harness-integration/provider, an
-    instance for secret-backend); the node just stores whatever the kind's
-    registry holds.
+    impl is the exact class stored in the kind's registry.
 
     A kind with no descriptor is not a capability kind, which is what makes the
     ``None`` return total: the table IS the capability-kind enumeration.

@@ -22,7 +22,7 @@ import pytest
 
 import agentworks
 import agentworks.plugins as plugins_pkg
-from agentworks.capabilities.descriptor import capability_descriptors
+from agentworks.capabilities.descriptor import RegistryPolicy, capability_descriptors
 from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.errors import StateError
 from agentworks.origin import Origin
@@ -45,7 +45,6 @@ from agentworks.schema import AgwModel, AgwRootModel
 from tests.plugins._fixtures import (
     ConformingSecretBackend,
     ConformingVMPlatform,
-    FixtureBackend,
     FixtureHarnessIntegration,
     FixtureVMPlatform,
     conforming_impl,
@@ -56,8 +55,8 @@ from tests.plugins._fixtures import (
 def _snapshot_registries() -> dict[str, dict[str, object]]:
     from agentworks.capabilities.git_credential import GIT_CREDENTIAL_PROVIDER_REGISTRY
     from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
+    from agentworks.capabilities.secret_backend import SECRET_BACKEND_REGISTRY
     from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
-    from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
 
     return {
         "vm-platform": dict(VM_PLATFORM_REGISTRY),
@@ -109,10 +108,7 @@ def test_rejects_unknown_capability_kind() -> None:
 
 
 def test_rejects_instance_instead_of_class_the_secret_backend_trap() -> None:
-    # The natural trap: passing EnvVarBackend() rather than EnvVarBackend.
-    # The cast models an author who typed the instance; register_plugin
-    # catches it as a typed error, not a later AttributeError.
-    trap = cast("type", FixtureBackend())
+    trap = cast("type", object())
     plugin = Plugin(name="p", capabilities={"secret-backend": (trap,)})
     with pytest.raises(PluginError, match="is not a class"):
         register_plugin(plugin)
@@ -185,11 +181,7 @@ class _PlatformWithoutADescription(ConformingVMPlatform):
 
 
 class _BackendMissingItsOperations:
-    """Structurally NOT a ``SecretBackend``. The Protocol kind cannot be
-    checked nominally (``issubclass`` against a Protocol with property
-    members raises ``TypeError``), so member presence IS its conformance
-    check. Carries ``interactive`` so this case isolates the missing
-    OPERATIONS, leaving the missing-attribute case to the next class."""
+    """A structural lookalike that does not derive from ``SecretBackend``."""
 
     contract_version = 1
     name = "barely-a-backend"
@@ -199,15 +191,7 @@ class _BackendMissingItsOperations:
 
 
 class _BackendWithoutInteractive:
-    """Every operation implemented, but not the ``interactive`` member the
-    resolve loop reads on every chain pass. Nominally unenforceable (the
-    contract is a Protocol) and not an operation, so without the descriptor's
-    ``required_attributes`` this would seat and then raise ``AttributeError``
-    deep in resolution.
-
-    Spelled out rather than derived from ``ConformingSecretBackend``: the
-    defect is an ABSENT member, and a subclass cannot un-inherit one.
-    """
+    """Another lookalike, proving plausible members do not replace nominality."""
 
     contract_version = 1
     name = "no-interactive-backend"
@@ -231,6 +215,46 @@ class _PlatformOnAnOldContract(ConformingVMPlatform):
     name = "old-contract-platform"
     description = "written against a contract this build no longer supports"
     contract_version = 0
+
+
+class _BackendWithInstanceReadiness(ConformingSecretBackend):
+    name = "instance-readiness-backend"
+    description = "mistakenly binds readiness to an instance"
+
+    def backend_readiness(self) -> Readiness:  # type: ignore[override]
+        return Readiness.ready()
+
+
+class _BackendWithInstanceTimeout(ConformingSecretBackend):
+    name = "instance-timeout-backend"
+    description = "mistakenly binds the external timeout to an instance"
+
+    def external_operation_timeout(self, config: AgwModel) -> float | None:  # type: ignore[override]
+        return None
+
+
+class _BackendWithWrongTimeoutReturn(ConformingSecretBackend):
+    name = "wrong-timeout-return-backend"
+    description = "mistakenly declares an integer-only timeout return"
+
+    @classmethod
+    def external_operation_timeout(cls, config: AgwModel) -> int:  # type: ignore[override]
+        return 1
+
+
+class _BackendWithZeroParameterFactory(ConformingSecretBackend):
+    name = "zero-parameter-factory-backend"
+    description = "mistakenly declares no classmethod binding parameter"
+
+    @classmethod
+    def create_client():  # type: ignore[misc, no-untyped-def, override]
+        raise NotImplementedError
+
+
+class _BackendWithNonBooleanInteractive(ConformingSecretBackend):
+    name = "non-boolean-interactive-backend"
+    description = "mistakenly uses an integer interaction flag"
+    interactive = 1  # type: ignore[assignment]
 
 
 class _NotAModel:
@@ -281,8 +305,8 @@ class _PlatformWithAMistaggedModel(ConformingVMPlatform):
         ("vm-platform", _NotAPlatform, "does not derive from VMPlatform"),
         ("vm-platform", _AbstractPlatform, "it is abstract"),
         ("vm-platform", _PlatformWithoutADescription, "'description' class attribute"),
-        ("secret-backend", _BackendMissingItsOperations, "does not implement the required"),
-        ("secret-backend", _BackendWithoutInteractive, "missing the required secret-backend attributes"),
+        ("secret-backend", _BackendMissingItsOperations, "does not derive from SecretBackend"),
+        ("secret-backend", _BackendWithoutInteractive, "does not derive from SecretBackend"),
         ("vm-platform", _PlatformOnAnOldContract, "declares contract_version 0"),
         ("vm-platform", _PlatformWithoutAConfigModel, "declares no config_model"),
         ("vm-platform", _PlatformWithoutAModel, "not a AgwModel subclass"),
@@ -332,6 +356,56 @@ def test_a_non_conforming_impl_is_refused_before_any_registry_write() -> None:
     assert _snapshot_registries() == before
 
 
+def test_a_mixed_valid_and_version_one_plugin_contribution_seats_nothing() -> None:
+    class VersionOneBackend(ConformingSecretBackend):
+        name = "version-one-backend"
+        description = "still implements contract version one"
+        contract_version = 1
+
+    plugin = Plugin(
+        name="mixed-version",
+        capabilities={
+            "vm-platform": (FixtureVMPlatform,),
+            "secret-backend": (VersionOneBackend,),
+        },
+    )
+    before = _snapshot_registries()
+    with pytest.raises(PluginError, match="declares contract_version 1"):
+        register_plugin(plugin)
+    assert _snapshot_registries() == before
+
+
+@pytest.mark.parametrize(
+    ("backend", "expected"),
+    [
+        (_BackendWithInstanceReadiness, "backend_readiness must be declared as @classmethod"),
+        (_BackendWithInstanceTimeout, "external_operation_timeout must be declared as @classmethod"),
+        (_BackendWithWrongTimeoutReturn, r"external_operation_timeout must return float \| None"),
+        (_BackendWithZeroParameterFactory, "create_client must declare a 'cls' binding parameter"),
+        (_BackendWithNonBooleanInteractive, "interactive class attribute is 1, not a bool"),
+    ],
+    ids=(
+        "instance-readiness-method",
+        "instance-timeout-method",
+        "timeout-return",
+        "zero-parameter-classmethod",
+        "malformed-interactive",
+    ),
+)
+def test_malformed_secret_backend_registration_is_atomic(backend: type, expected: str) -> None:
+    plugin = Plugin(
+        name="malformed-secret-backend",
+        capabilities={
+            "vm-platform": (FixtureVMPlatform,),
+            "secret-backend": (backend,),
+        },
+    )
+    before = _snapshot_registries()
+    with pytest.raises(PluginError, match=expected):
+        register_plugin(plugin)
+    assert _snapshot_registries() == before
+
+
 # -- Atomicity: a mid-descriptor collision seats NOTHING --------------------
 
 
@@ -353,10 +427,7 @@ def test_atomic_registration_seats_nothing_on_a_mid_descriptor_collision() -> No
     assert _snapshot_registries() == before
 
 
-def test_atomic_registration_survives_a_throwing_backend_constructor() -> None:
-    # The secret-backend impl constructs during the precheck (before any
-    # registry write), so a throwing __init__ leaves the earlier-planned
-    # vm-platform UNSEATED and raises a typed PluginError, not a raw error.
+def test_secret_backend_registration_never_calls_the_constructor() -> None:
     class ThrowingBackend(ConformingSecretBackend):
         name = "throwing-backend"
         description = "boom on construct"
@@ -371,10 +442,17 @@ def test_atomic_registration_survives_a_throwing_backend_constructor() -> None:
             "secret-backend": (ThrowingBackend,),  # constructor throws
         },
     )
-    before = _snapshot_registries()
-    with pytest.raises(PluginError, match="could not construct"):
-        register_plugin(plugin)
-    assert _snapshot_registries() == before
+    with seated_plugin(plugin):
+        assert capability_adapters()["secret-backend"].peek("throwing-backend") is ThrowingBackend
+
+
+def test_every_registry_policy_is_class_by_name_and_the_adapter_has_no_constructor_branch() -> None:
+    assert tuple(RegistryPolicy) == (RegistryPolicy.CLASS_BY_NAME,)
+    source = (Path(agentworks.__file__).parent / "plugins" / "adapters.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    adapter = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "_DescriptorAdapter")
+    prepare = next(node for node in adapter.body if isinstance(node, ast.FunctionDef) and node.name == "prepare")
+    assert not any(isinstance(node, ast.Call) for node in ast.walk(prepare))
 
 
 # -- Idempotency ------------------------------------------------------------

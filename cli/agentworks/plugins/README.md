@@ -33,10 +33,11 @@ Fields:
   writes in `[plugins].system` and the name the surfaces attribute rows to
   (`from plugin example-cloud`).
 - **`description`**: shown in the doctor roster.
-- **`capabilities`**: a mapping keyed by capability kind, each value a tuple of impl **classes**,
-  uniformly, even for `secret-backend` (whose registry holds instances; the class-vs-instance
-  reconciliation is the framework's job, not yours). Every impl exposes `name` and `description` as
-  class attributes; the impl's `name` is the registry key its published row carries.
+- **`capabilities`**: a mapping keyed by capability kind, each value a tuple of impl **classes**.
+  Every capability registry stores that exact class under its `name`; registration, graph
+  publication, and snapshot/restore never construct or substitute an instance. Every impl exposes
+  `name` and `description` as class attributes; the impl's `name` is the registry key its published
+  row carries.
 - **`manifests`** (optional): an importlib-resources package anchor whose `manifests/` subdirectory
   holds the plugin's bundled YAML resource manifests (the same envelope operators write; see
   `docs/guides/resources.md`). `None` when the plugin ships no manifests.
@@ -79,20 +80,24 @@ Every impl is checked against its kind's descriptor (`agentworks/capabilities/de
 anything is seated, so a class that merely looks plausible is refused at registration rather than
 failing far from the mistake. The checks:
 
-- **Contract**: derives from the kind's capability base. `secret-backend`'s contract is a `Protocol`
-  rather than a base class, so it cannot be checked nominally; the attribute and operation checks
-  below are its enforcement, which is what a Protocol's enforcement is anyway.
+- **Contract**: derives from the kind's nominal capability base. `secret-backend` implementations
+  subclass `SecretBackend`; a structural lookalike is rejected even when it exposes similarly named
+  members.
 - **Metadata**: `name` (non-empty, `/`-free) and `description`, readable as class attributes.
-- **Attributes**: the kind's other non-operation members are present (`secret-backend`'s
-  `interactive`, which the resolve loop reads on every chain pass). Empty for the three base-class
-  kinds, whose base supplies these to every subclass.
+- **Attributes**: the kind's other non-operation members are present. A `secret-backend` declares
+  `interactive` as exactly `bool`, plus separate `config_model` and `mapping_model` surfaces.
 - **Constructibility**: nothing would stop the class being constructed (no unimplemented
   `@abstractmethod`). Checked structurally; the impl is never constructed to find out.
-- **Operations**: the domain operations the framework depends on are present and callable.
-- **Config model**: the impl declares a `config_model` (see [Declaring config](#declaring-config)),
-  it extends the base its kind's contract names, it can be built, and for a kind dispatched by a
-  tagged union it tags itself with its own name. A model that could never be reached from a manifest
-  is refused where its author can see it rather than going quietly unaddressable.
+- **Operations**: the domain operations the framework depends on are present and callable. For a
+  `secret-backend`, registration also checks the exact classmethod binding, parameter shape,
+  resolved annotations, and return annotation of `backend_readiness`, `would_attempt`,
+  `describe_lookup`, `external_operation_timeout`, and `create_client`.
+- **Config models**: the impl declares every model surface its descriptor names (see
+  [Declaring config](#declaring-config)). Each extends its declared base and can be built; tagged
+  config models identify their implementation. A secret backend's source config cannot reference a
+  secret, and its per-secret mapping annotation tree must be JSON-native. A model that could never
+  be reached from a manifest is refused where its author can see it rather than going quietly
+  unaddressable.
 - **Contract version**: the impl's `contract_version` equals the version this build supports. Every
   impl of every kind spells it; nothing defaults it, so a version claim is always made rather than
   inherited. Exact equality, so a contract change is a hard cutover.
@@ -165,11 +170,12 @@ What the base and the markers buy you:
   its tag. "Accepts nothing" has to be something an author SAYS, not something they get by
   forgetting.
 
-Whether the model carries a `name` tag depends on how the kind is dispatched: `vm-platform`,
-`harness-integration`, and `git-credential-provider` are selected by a `name` key inside their
-tagged table, so their models tag themselves; `secret-backend` is selected by the map key its value
-sits under, so its mapping model carries no tag, and it extends `AgwRootModel` rather than
-`AgwModel` because a mapping may be a bare string. Conformance checks whichever applies.
+Whether the model carries a `name` tag depends on the surface. `vm-platform`, `harness-integration`,
+and `git-credential-provider` config models are selected by a `name` key inside their tagged table.
+A secret backend's source config is tagged the same way, while its per-secret mapping is selected by
+its outer map key, carries no tag, and extends `AgwRootModel` rather than `AgwModel` because a
+mapping may be a bare string. Conformance checks both backend models against their separate
+contracts.
 
 The capability model as a whole, including how a config is offered per facet and what the framework
 does with the declaration at each lifecycle stage, is
@@ -223,9 +229,8 @@ A plugin contributes implementations of existing capability kinds only:
 - **`git-credential-provider`**: how a git token is obtained and served.
 - **`secret-backend`**: where a secret's value is read from.
 
-Each impl subclasses the kind's capability base class (except `secret-backend`, whose contract is a
-`Protocol`, so its impls satisfy it structurally) and exposes `name` / `description` class
-attributes. Registration checks that conformance before seating anything; see
+Each impl subclasses the kind's nominal capability base class and exposes `name` / `description`
+class attributes. Registration checks that conformance before seating anything; see
 [Contract conformance](#contract-conformance). The published row is read-only and lists, describes,
 and is referenced like any other resource of that kind.
 

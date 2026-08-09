@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, cast
 
 import pytest
 
@@ -117,14 +117,15 @@ class _FixtureBackendMapping(AgwRootModel[Literal["good"]]):
 
 
 class _FixtureBackend(ConformingSecretBackend):
-    """A structural ``SecretBackend`` (Protocol, so a plain class)."""
+    """A nominal ``SecretBackend`` with a narrow mapping vocabulary."""
 
     name = "fixture-backend"
     description = "Fixture secret backend (test plugin)"
-    config_model: type[AgwRootModel[Any]] = _FixtureBackendMapping
+    mapping_model: ClassVar[type[AgwRootModel[Any]]] = _FixtureBackendMapping
 
-    def would_attempt(self, secret: SecretDecl, mapping: MappingValue | None) -> bool:
-        return mapping is not None
+    @classmethod
+    def would_attempt(cls, secret_name: str, *, mapping_present: bool) -> bool:
+        return mapping_present
 
 
 def _capable_plugin(name: str = PLUGIN) -> Plugin:
@@ -154,7 +155,7 @@ def _publish_builtin_backend(registry: Registry, name: str) -> None:
     ``secret_backends.publish_to``, which would also sweep the plugin-seated
     fixture backend in under a built-in origin (Phase 5's publisher split, not
     this phase's concern)."""
-    origin = Origin.built_in(source="agentworks.secrets.backends")
+    origin = Origin.built_in(source="agentworks.capabilities.secret_backend")
     row = capability_adapters()["secret-backend"].build_row(name, origin)
     registry.add("secret-backend", name, row, origin)
 

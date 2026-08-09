@@ -17,10 +17,10 @@ from agentworks import output
 from agentworks.errors import AgentworksError, ConfigError, SecretUnavailableError
 
 if TYPE_CHECKING:
+    from agentworks.capabilities.secret_backend.base import SecretBackend
     from agentworks.config import Config
     from agentworks.resources.graph import Readiness
     from agentworks.resources.registry import Registry
-    from agentworks.secrets.backends import SecretBackend
     from agentworks.secrets.base import MappingValue, SecretDecl
 
 
@@ -37,7 +37,7 @@ class ActiveBackend:
     on it (R9.6): a not-ready backend is skipped with a warning.
     """
 
-    capability: SecretBackend
+    capability: type[SecretBackend]
     readiness: Readiness
 
     @property
@@ -61,13 +61,16 @@ class ActiveBackend:
         mapping = self.mapping_for(secret)
         if mapping is False:
             return False
-        return self.capability.would_attempt(secret, mapping)
+        return self.capability.would_attempt(secret.name, mapping_present=mapping is not None)
 
     def describe_lookup(self, secret: SecretDecl) -> str | None:
         mapping = self.mapping_for(secret)
         if mapping is False:
             return None
-        return self.capability.describe_lookup(secret, mapping)
+        return cast(
+            "str | None",
+            self.capability._legacy_describe_lookup(secret, mapping),  # type: ignore[attr-defined]
+        )
 
     def resolve(self, secrets: list[SecretDecl]) -> dict[str, str]:
         wants: list[tuple[SecretDecl, MappingValue | None]] = [
@@ -75,7 +78,10 @@ class ActiveBackend:
         ]
         if not wants:
             return {}
-        return self.capability.batch_get(wants)
+        return cast(
+            "dict[str, str]",
+            self.capability._legacy_batch_get(wants),  # type: ignore[attr-defined]
+        )
 
 
 def active_backends(config: Config, registry: Registry) -> list[ActiveBackend]:
@@ -127,10 +133,10 @@ def active_backends(config: Config, registry: Registry) -> list[ActiveBackend]:
         # ``impl`` is never ``None`` here: a published capability row with no
         # registered impl already fails fast at ``build_graph`` (``_impl_for``
         # raises ``StateError``), so post-finalize every present backend node
-        # carries its instance. The cast reflects that invariant.
+        # carries its exact registered class. The cast reflects that invariant.
         backends.append(
             ActiveBackend(
-                capability=cast("SecretBackend", impl),
+                capability=cast("type[SecretBackend]", impl),
                 readiness=graph.readiness_of("secret-backend", name),
             )
         )

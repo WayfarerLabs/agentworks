@@ -67,12 +67,10 @@ class Plugin:
 
     - ``capabilities`` is keyed by capability kind (``"vm-platform"``,
       ``"harness-integration"``, ``"git-credential-provider"``, ``"secret-backend"``);
-      each value is a tuple of impl CLASSES, uniformly, even for
-      ``secret-backend`` (whose registry holds instances). The
-      class-vs-instance reconciliation is the adapter's job, not the
-      descriptor's: every impl exposes ``name`` / ``description`` as class
-      attributes, so identity is read off the class uniformly and only
-      seating differs per kind.
+      each value is a tuple of impl CLASSES, uniformly. Every capability
+      registry stores the exact class; adapters validate and seat it without
+      construction. Every impl exposes ``name`` / ``description`` as class
+      attributes, so identity is read and preserved uniformly.
     - ``manifests`` is the importlib-resources package anchor whose
       ``manifests/`` subdirectory holds the plugin's YAML (or ``None``).
       The surfaces layer resolves and loads it; this layer only stores it.

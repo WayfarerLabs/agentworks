@@ -11,9 +11,7 @@ which source label they stamped: exactly the three things a descriptor
 carries. :func:`publish_capability_rows` is the idiom, once.
 
 The kind's ``publisher_source`` is preserved per kind rather than derived
-from a module path, because the labels are operator-visible provenance
-(``secret-backend`` publishes as ``agentworks.secrets``, the package, not
-the ``backends`` module that used to front it).
+from a module path, because the labels are operator-visible provenance.
 """
 
 from __future__ import annotations

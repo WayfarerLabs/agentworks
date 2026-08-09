@@ -265,7 +265,7 @@ def _mask_env_var_backend_for(
         yield
         return
 
-    from agentworks.secrets.env_var import env_var_name_for
+    from agentworks.capabilities.secret_backend.env_var import env_var_name_for
 
     masked_names: list[str] = [env_var_name_for(decl.name)]
     mapping = decl.backend_mappings.get("env-var")

@@ -22,14 +22,13 @@ cache is keyed that way rather than invalidated.
 **What a caller passes as ``config`` is what the capability's own model
 validates**, and its shape follows the kind's dispatch:
 
-- a TAGGED kind (vm-platform, git-credential-provider,
-  harness-integration) is selected by a ``name`` key INSIDE its table, so
+- a TAGGED kind is selected by a ``name`` key INSIDE its table, so
   ``config`` is that whole table, tag included, exactly as the operator
   wrote it and exactly as the host row carries it
   (:class:`~agentworks.schema.CapabilityBlock`);
-- a MAP-KEYED kind (secret-backend) is selected by the key its value sits
-  under, so ``config`` is that value, which need not be a mapping at all
-  (env-var's is a bare string).
+- a MAP-KEYED config kind would be selected by the key its value sits under.
+  No current capability config uses that dispatch; a secret backend's
+  separately declared per-secret mapping is not its source config.
 
 So a TAGGED kind needs no ``name`` argument at all: the tag inside the
 table is what selects the implementation, and reading it here rather than
@@ -80,7 +79,7 @@ def selected_name(kind: str, config: object, name: str | None) -> str | None:
     implementation, which is what the dangling capability edge already
     reports (R9.2).
 
-    For a MAP-KEYED kind (secret-backend) the config carries no tag and
+    For a MAP-KEYED config kind the config carries no tag and
     the outer map key is the only source, so ``name`` is required; its
     absence is a framework bug, not an operator mistake.
     """
@@ -363,12 +362,10 @@ def offered_model(impl: type) -> type[BaseModel]:
     whose methods run at several levels arrive as an ordinary
     registration.
 
-    Two shapes, because the four kinds' implementation contracts are not
-    uniform, which is the same code fact registration conformance already
-    branches on. The three ABC kinds inherit ``Capability.config_for``;
-    the Protocol kind declares only ``config_model``, because a per-secret
-    backend mapping is not a level a capability is driven at and never
-    will be.
+    Every capability implementation is nominal and inherits
+    ``Capability.config_for``. The fallback remains a defensive boundary
+    for a malformed internal caller, not an alternate implementation
+    contract.
     """
     resolve = getattr(impl, "config_for", None)
     if callable(resolve):
@@ -424,13 +421,8 @@ def _build_union(
 
 
 def impl_class(seated: object) -> type:
-    """What a registry holds, as the CLASS that carries the declaration.
-
-    One kind's registry holds a constructed instance rather than the class
-    (secret-backend, the descriptor-carried interim exception), and the
-    declaration is class-level either way.
-    """
-    return seated if isinstance(seated, type) else type(seated)
+    """What every capability registry stores: the implementation class."""
+    return cast("type", seated)
 
 
 def _class_name(kind: str) -> str:

@@ -35,6 +35,8 @@ from agentworks.schema import UNSET
 from agentworks.topics import prose_of, summary_of
 
 if TYPE_CHECKING:
+    from pydantic import BaseModel
+
     from agentworks.capabilities.descriptor import CapabilityKindDescriptor
 
 __all__ = [
@@ -183,11 +185,9 @@ def implementation_reference(kind: str, name: str) -> SchemaReference:
     a platform whose plugin is not enabled documents itself exactly as an
     enabled one does.
     """
-    from agentworks.capabilities.config import offered_model
-
     descriptor = _descriptor_for(kind)
     impl = _implementation(descriptor, name)
-    model = offered_model(impl)
+    model = _implementation_documentation_model(kind, name, impl)
     entries = field_tree(model)
     root = root_entry(model, entries)
     return SchemaReference(
@@ -303,6 +303,25 @@ def _implementation(descriptor: CapabilityKindDescriptor, name: str) -> type:
             hint=f"registered: {known}",
         )
     return impl
+
+
+def _implementation_documentation_model(kind: str, name: str, impl: type) -> type[BaseModel]:
+    """The model the currently shipped operator reference documents.
+
+    Secret sources do not exist at the Phase 3 boundary, so exposing their
+    source config here would create an unusable operator surface. Keep the
+    existing per-secret mapping reference through the feature branch's
+    private compatibility adapter until the atomic source cutover.
+    """
+    if kind == "secret-backend":
+        from agentworks.secrets._backend_compat import mapping_model
+
+        model = mapping_model(name)
+        if model is not None:
+            return model
+    from agentworks.capabilities.config import offered_model
+
+    return offered_model(impl)
 
 
 def _descriptor_for(kind: str) -> CapabilityKindDescriptor:

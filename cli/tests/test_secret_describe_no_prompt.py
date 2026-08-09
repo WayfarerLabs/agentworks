@@ -69,10 +69,10 @@ def test_describe_secret_never_resolves_through_interactive_backends(
             "backends must be previewed via would_attempt alone (FRD R10)"
         )
 
-    from agentworks.secrets import SECRET_BACKEND_REGISTRY
+    from agentworks.capabilities.secret_backend import SECRET_BACKEND_REGISTRY
 
     registry = build_registry(config)
-    monkeypatch.setattr(SECRET_BACKEND_REGISTRY["prompt"], "batch_get", _fail_batch_get)
+    monkeypatch.setattr(SECRET_BACKEND_REGISTRY["prompt"], "_legacy_batch_get", _fail_batch_get)
 
     # Should complete without invoking the prompt provider.
     describe_secret(config, registry, "api-key")

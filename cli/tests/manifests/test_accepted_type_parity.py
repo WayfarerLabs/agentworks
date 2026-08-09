@@ -335,9 +335,9 @@ def test_the_shipped_surface_is_actually_being_walked() -> None:
     the ones the defect and its siblings live in."""
     subjects = _subjects()
     from agentworks.env.entry import EnvEntry
-    from agentworks.plugins.onepassword.backend import OnePasswordAccountRef
+    from agentworks.plugins.onepassword.backend import OnePasswordSourceConfig
 
     assert EnvEntry in subjects
-    assert OnePasswordAccountRef in subjects
+    assert OnePasswordSourceConfig in subjects
     assert _fixture_models.StringOrTableRoot in subjects
     assert len(subjects) > 50, f"only {len(subjects)} models walked, which is fewer than this app ships"

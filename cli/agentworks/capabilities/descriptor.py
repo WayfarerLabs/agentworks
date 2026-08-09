@@ -14,7 +14,8 @@ Two structural rules make the table safe to consume from anywhere:
 - **Per-package contribution.** Each capability package builds its own record
   beside its kind strategy (``capabilities/vm_platform/kinds.py``,
   ``capabilities/harness_integration/kinds.py``,
-  ``capabilities/git_credential/kinds.py``, ``secrets/kinds.py``), the way
+  ``capabilities/git_credential/kinds.py``,
+  ``capabilities/secret_backend/kinds.py``), the way
   each package used to carry its own publisher. Nothing here knows a
   kind's internals.
 - **Lazy collection, for cycle safety.** :func:`capability_descriptors`
@@ -54,23 +55,24 @@ if TYPE_CHECKING:
     from agentworks.origin import Origin
     from agentworks.resources.graph import Readiness
     from agentworks.resources.kind import ResourceKind
+    from agentworks.schema import ResourceRef
 
 
 class RegistryPolicy(Enum):
     """What a capability kind's code registry stores under each name."""
 
     CLASS_BY_NAME = "class-by-name"
-    """The impl CLASS itself (vm-platform, harness-integration,
-    git-credential-provider)."""
+    """The implementation class itself."""
 
-    CONSTRUCTED_SINGLETON = "constructed-singleton"
-    """One constructed INSTANCE, built at seating time. The interim
-    exception, carried by ``secret-backend`` alone: the graph stamping and
-    the resolve loop consume constructed backends today, so ending it means
-    choosing a construction point and touching the resolve machinery. That
-    is a change of its own; until it happens this field is where the
-    asymmetry lives, so nothing else has to special-case
-    ``secret-backend``."""
+
+class ModelInputDomain(Enum):
+    """The values a declared model may accept at its raw input boundary."""
+
+    PYTHON = "python"
+    """The ordinary Pydantic input vocabulary, constrained by the model."""
+
+    JSON_NATIVE = "json-native"
+    """Only values representable by Agentworks' JSON-native manifest carrier."""
 
 
 @dataclass(frozen=True)
@@ -94,7 +96,13 @@ class ConfigContract:
     config is dispatched by a DISCRIMINATED UNION (``"name"``: a vm-site
     writes ``platform: {name: lima, ...}``). ``None`` for a kind dispatched
     by a MAP KEY, whose models carry no tag because the key already is one
-    (``secret-backend``, keyed by ``backend_mappings``)."""
+    map key rather than a tag inside the value."""
+
+    input_domain: ModelInputDomain = ModelInputDomain.PYTHON
+    """The annotation vocabulary the model may expose at its input boundary."""
+
+    forbidden_reference_kinds: frozenset[str] = frozenset()
+    """Reference-marker kinds this config layer is not allowed to contain."""
 
 
 @dataclass(frozen=True)
@@ -121,15 +129,32 @@ class HostSurface:
     naming_field: str
     """The spec field naming the capability (``"platform"``)."""
 
-    config_field: str
+    config_field: str | None
     """The RETIRED sibling field that used to hold the capability's config
     blob (``"platform_config"``).
 
     There is no such field any more: the row carries one tagged block, so
     this exists for exactly one reader, ``decode._reject_legacy_shape``,
     which names the retired field in the error that tells an operator how
-    to rewrite the 0.14 shape. It goes when that guard does, and the
-    guard's own docstring says when."""
+    to rewrite the 0.14 shape. ``None`` means the host never had a retired
+    sibling field."""
+
+
+@dataclass(frozen=True)
+class MappingHost:
+    """Where a capability's map-key-selected model is hosted."""
+
+    host_kind: str
+    """The declarable resource kind carrying the mapping field."""
+
+    field_name: str
+    """The host row field whose keys select configured implementations."""
+
+    key_reference: ResourceRef
+    """What each authored mapping key references."""
+
+    false_opt_out: bool
+    """Whether singleton ``False`` is framework-owned opt-out vocabulary."""
 
 
 @dataclass(frozen=True)
@@ -138,7 +163,7 @@ class CapabilityKindDescriptor:
 
     Core-owned and frozen: plugins contribute IMPLEMENTATIONS of existing
     kinds, never new kinds. Domain operations stay domain-owned: nothing
-    here touches ``VMPlatform.create``, ``SecretBackend.batch_get``, or
+    here touches ``VMPlatform.create``, ``SecretBackend.create_client``, or
     credential fill. The descriptor wires a kind into the framework; it does
     not absorb what makes the kind itself.
     """
@@ -156,16 +181,11 @@ class CapabilityKindDescriptor:
     rule, which is a decision to make when a real migration needs it."""
 
     implementation_contract: type
-    """The base class or protocol an impl must satisfy. NOT uniform in
-    shape: three kinds declare an ABC and are checked nominally, while
-    ``SecretBackend`` is a ``Protocol`` whose members include properties, so
-    it is checked structurally (``required_attributes`` plus
-    ``required_operations``) and this field is documentary for that kind. See
-    :func:`agentworks.capabilities.conformance.conformance_error`."""
+    """The nominal base class an implementation must derive from."""
 
     registry_policy: RegistryPolicy
-    """Whether the kind's registry stores classes or constructed
-    instances."""
+    """Whether the kind's registry stores classes. Every current kind is
+    class-by-name."""
 
     registry: Callable[[], dict[str, Any]]
     """Lazy accessor for the kind's live code registry. A callable, not the
@@ -174,19 +194,10 @@ class CapabilityKindDescriptor:
     snapshot restore) are mutating the real thing, by design."""
 
     required_operations: frozenset[str]
-    """The domain operations the framework depends on being present and
-    callable on an impl. For the ABC kinds this restates what
-    ``inspect.isabstract`` already enforces; for ``secret-backend`` (a
-    Protocol, with nothing to leave abstract) it IS the enforcement."""
+    """The domain operations the framework depends on being callable."""
 
     required_attributes: frozenset[str]
-    """The non-operation members the framework reads off an impl, beyond the
-    universal ``name`` / ``description``. EMPTY for the ABC kinds, whose base
-    class supplies every such member to any subclass. For ``secret-backend``
-    it carries ``interactive``, which the resolve loop reads on every chain
-    pass: a Protocol declares it but cannot supply it, so without this field
-    a backend omitting it seats cleanly and raises ``AttributeError`` deep in
-    resolution, which is the exact failure this module exists to end."""
+    """The kind-specific non-operation members consumers read off an impl."""
 
     entry_factory: Callable[[str, Any, Origin | None], Any]
     """Builds the kind's read-only resource row from ``(name, seated impl,
@@ -207,14 +218,11 @@ class CapabilityKindDescriptor:
     (vm-site) uses."""
 
     publisher_source: str
-    """The ``Origin.built_in`` source label the kind's built-in rows carry
-    (``"agentworks.secrets"`` for secret-backend, whose publisher fronts
-    ``secrets/backends.py``)."""
+    """The ``Origin.built_in`` source label the kind's built-in rows carry."""
 
     manifest_section: HostSurface | None
     """How the kind is selected in its host's manifest spec, or ``None``
-    when no declarable kind hosts it (``secret-backend``, whose
-    ``backend_mappings`` map key already names the capability)."""
+    when the host declaration has not landed."""
 
     config_schema: ConfigContract
     """What a config model offered for this kind must be.
@@ -224,6 +232,12 @@ class CapabilityKindDescriptor:
     every model that comes back has to satisfy this contract. A capability
     whose methods run at several levels with different config is then a
     per-capability declaration rather than a framework change."""
+
+    mapping_schema: ConfigContract | None = None
+    """The model contract for a map-key-selected consuming surface."""
+
+    mapping_host: MappingHost | None = None
+    """The declarable map field hosting :attr:`mapping_schema`."""
 
     # One field is deliberately NOT added yet, recorded with the trigger
     # that would create it so it is neither built early nor reinvented:
@@ -253,8 +267,8 @@ def capability_descriptors() -> tuple[CapabilityKindDescriptor, ...]:
     """
     from agentworks.capabilities.git_credential.kinds import GIT_CREDENTIAL_PROVIDER_DESCRIPTOR
     from agentworks.capabilities.harness_integration.kinds import HARNESS_INTEGRATION_DESCRIPTOR
+    from agentworks.capabilities.secret_backend.kinds import SECRET_BACKEND_DESCRIPTOR
     from agentworks.capabilities.vm_platform.kinds import VM_PLATFORM_DESCRIPTOR
-    from agentworks.secrets.kinds import SECRET_BACKEND_DESCRIPTOR
 
     return (
         VM_PLATFORM_DESCRIPTOR,
@@ -275,11 +289,6 @@ def descriptor_for_impl(impl: type) -> CapabilityKindDescriptor | None:
     this class satisfies is reading one fact rather than declaring a second
     one that could disagree.
 
-    Nominal, so it answers for the three ABC kinds and not for the Protocol
-    kind, whose implementations derive from nothing. That is the boundary
-    of what needs it: secret backends never construct through the shared
-    capability lifecycle, and every caller reaches them by kind and name.
-
     ``None`` rather than an error for a class of no kind, and that is not
     a tolerance: registration refuses any implementation that does not
     derive from its kind's contract, so the only classes reaching here
@@ -290,7 +299,7 @@ def descriptor_for_impl(impl: type) -> CapabilityKindDescriptor | None:
     """
     for descriptor in capability_descriptors():
         contract = descriptor.implementation_contract
-        if not getattr(contract, "_is_protocol", False) and issubclass(impl, contract):
+        if issubclass(impl, contract):
             return descriptor
     return None
 

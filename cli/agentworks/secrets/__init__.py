@@ -1,20 +1,17 @@
 """Secret declarations, backends, and the resolve loop.
 
-See ADR 0016 for the model: the ``[secret_config].backends`` chain
-(config) names registered backend capabilities
-(``SECRET_BACKEND_REGISTRY``), mirrored into the resource Registry as
-read-only ``secret-backend`` capability resources; the resolution loop
-consumes the ``SecretBackend`` API directly.
+The capability contract and registry live in
+``agentworks.capabilities.secret_backend``. This package owns declarations,
+resolution, inspection, and orchestration.
 """
 
 from __future__ import annotations
 
-from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
+from agentworks.capabilities.secret_backend.env_var import env_var_name_for
 from agentworks.secrets.base import (
     SecretConfig,
     SecretDecl,
 )
-from agentworks.secrets.env_var import env_var_name_for
 from agentworks.secrets.orchestration import (
     SecretTarget,
     compute_needed_secrets,
@@ -28,7 +25,6 @@ from agentworks.secrets.resolve import (
 )
 
 __all__ = [
-    "SECRET_BACKEND_REGISTRY",
     "ActiveBackend",
     "SecretConfig",
     "SecretDecl",

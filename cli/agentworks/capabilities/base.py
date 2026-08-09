@@ -319,8 +319,8 @@ class Capability(ABC):
     ``description`` are: a default would make the version claim inherited
     rather than made, and bumping this base alongside a descriptor would then
     silently re-certify every impl that had not actually been migrated. Each
-    implementation states its own, exactly as the ``SecretBackend`` Protocol
-    kind's impls must."""
+    implementation states its own, exactly as nominal ``SecretBackend``
+    implementations must."""
 
     config_model: ClassVar[type[BaseModel]]
     """The config this capability OFFERS, as a model.

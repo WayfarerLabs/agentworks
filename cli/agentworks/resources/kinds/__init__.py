@@ -25,6 +25,7 @@ import agentworks.agents.kinds  # noqa: F401
 import agentworks.apt  # noqa: F401
 import agentworks.capabilities.git_credential.kinds  # noqa: F401
 import agentworks.capabilities.harness_integration.kinds  # noqa: F401
+import agentworks.capabilities.secret_backend.kinds  # noqa: F401
 import agentworks.capabilities.vm_platform.kinds  # noqa: F401
 import agentworks.install_commands  # noqa: F401
 import agentworks.secrets.kinds  # noqa: F401

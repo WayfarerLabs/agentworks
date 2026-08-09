@@ -1,14 +1,11 @@
 """``register_plugin`` and the ``seated_plugin`` test helper (R2, R5, R6).
 
 ``register_plugin`` runs at import time (invoked by the installed index),
-once per shipped plugin. It validates the WHOLE descriptor, then prechecks
-every impl for a name collision AND prepares its registry payload (the
-fallible ``secret-backend`` construction included), then seats the prepared
-payloads. No capability registry is mutated until every impl across the
-whole descriptor is known seatable AND its payload is built, so the seat
-phase is pure dict writes that cannot fail partway: seating is
-all-or-nothing by construction (no rollback path, so a mid-descriptor
-failure leaving orphaned impls is unrepresentable).
+once per shipped plugin. It validates the WHOLE descriptor, prechecks every
+implementation for a name collision, then seats the implementation classes.
+No capability registry is mutated until validation and collision checking
+have completed for the full contribution, so seating is all-or-nothing by
+construction.
 
 This seating guard, NOT ``_check_collision``, is the enforcement point for
 every capability name-clash (built-in/plugin and plugin/plugin alike): a
@@ -56,9 +53,8 @@ def register_plugin(plugin: Plugin) -> None:
     """
     planned = _validate_descriptor(plugin)
     to_seat = _precheck_and_prepare(plugin, planned)
-    # Pass 3: seat all. Every payload was prepared (including the fallible
-    # secret-backend construction) during the precheck with no registry
-    # mutation, so this loop is pure dict writes that cannot fail partway.
+    # Pass 3: seat all. Preparation is a class pass-through, so this loop is
+    # pure dict writes that cannot fail partway.
     for adapter, name, payload in to_seat:
         adapter.seat(name, payload)
         _PLUGIN_SEATED[(adapter.kind, name)] = plugin.name
@@ -128,11 +124,10 @@ def _precheck_and_prepare(
     registry mutation. Returns the ``(adapter, name, payload)`` items that
     actually need seating (idempotent no-op matches are dropped).
 
-    A ``None`` occupant needs seating: its payload is prepared here (the
-    fallible ``secret-backend`` construction included), so pass 3 is a pure
-    write. An occupant THIS PLUGIN seated is an idempotent no-op, skipped
-    (not re-prepared, so it is never re-instantiated). Any other occupant
-    raises here, before any impl is seated.
+    A ``None`` occupant needs seating: its class payload is prepared here,
+    so pass 3 is a pure write. An occupant THIS PLUGIN seated is an
+    idempotent no-op. Any other occupant raises here, before any impl is
+    seated.
 
     Idempotency is a property of the SEATER, not of the class, and reading
     it off ``_PLUGIN_SEATED`` rather than off ``adapter.matches`` alone is
@@ -155,13 +150,7 @@ def _precheck_and_prepare(
                 f"system plugin {plugin.name!r} cannot seat {adapter.kind} {name!r}: "
                 f"{_occupant_origin(adapter.kind, name)}"
             )
-        try:
-            payload = adapter.prepare(impl)
-        except Exception as exc:  # noqa: BLE001 -- any impl constructor failure is a curation bug, re-typed here
-            raise PluginError(
-                f"system plugin {plugin.name!r} could not construct {adapter.kind} {name!r}: {exc}"
-            ) from exc
-        to_seat.append((adapter, name, payload))
+        to_seat.append((adapter, name, adapter.prepare(impl)))
     return to_seat
 
 

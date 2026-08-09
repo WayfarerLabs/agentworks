@@ -1,12 +1,10 @@
 # Secret Backends
 
-> `secret-backend` is a real capability kind, but it is a "capability in spirit" today: it has not
-> yet moved into `capabilities/` or adopted the shared capability base, so it is documented here,
-> next to its code in `secrets/`, on its own `SecretBackend` protocol. That migration is tracked in
-> [#374](https://github.com/WayfarerLabs/agentworks/issues/374); the capability model itself is in
-> [`../capabilities/README.md`](../capabilities/README.md). This guide covers the functional
-> contract a backend must honor. The deep implementation contract is deliberately omitted while the
-> shape is in flux and subject to change under that migration.
+> `secret-backend` is a nominal capability under
+> [`capabilities/secret_backend`](../capabilities/secret_backend/README.md). That package owns the
+> implementation contract, provider-facing client types, built-ins, and class registry. This guide
+> covers the resolution semantics a backend participates in: lookup behavior, precedence, safety,
+> and the operator-visible chain.
 
 ## What Is a Secret Backend?
 

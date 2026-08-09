@@ -16,12 +16,13 @@ from typing import Annotated, Any
 import pytest
 
 from agentworks.bootstrap import build_registry
-from agentworks.capabilities.config import capability_config_references
+from agentworks.capabilities.secret_backend import SECRET_BACKEND_REGISTRY
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
 from agentworks.plugins import Plugin, seated_plugin
 from agentworks.schema import AgwModel, AgwRootModel, NonEmptyStr, RefOwner, SecretRef
-from agentworks.secrets import SECRET_BACKEND_REGISTRY, active_backends, resolve_secrets
+from agentworks.secrets import active_backends, resolve_secrets
+from agentworks.secrets._backend_compat import mapping_references
 from agentworks.secrets.base import SecretDecl
 from tests.plugins._fixtures import ConformingSecretBackend
 
@@ -57,43 +58,39 @@ class MarkedMapping(AgwModel):
     vault_secret: Annotated[NonEmptyStr, SecretRef(usage="the vault's own credential")]
 
 
-class _TestOnlyBackend:
+class _TestOnlyBackend(ConformingSecretBackend):
     """A store-flavored capability registered only in tests: exercises
     the SecretBackend API end to end (structured mappings, soft-skip
     for unmapped secrets) without shipping artificial built-ins."""
 
     name = "test-only"
     description = "test-only store"
-    interactive = False
+    mapping_model = AgwRootModel[dict[str, object]]
+    batch_get_calls: list[list[str]] = []
 
-    def __init__(self) -> None:
-        self.batch_get_calls: list[list[str]] = []
-
-    def not_ready(self) -> Any:
-        from agentworks.resources.graph import Readiness
-
-        return Readiness.ready()
-
-    def would_attempt(self, secret: Any, mapping: Any) -> bool:
+    @classmethod
+    def would_attempt(cls, secret_name: str, *, mapping_present: bool) -> bool:
         # Store semantics: only attempts explicitly-mapped secrets
         # (soft-skip otherwise), unlike the always-attempt built-ins.
-        return mapping is not None
+        return mapping_present
 
-    def describe_lookup(self, secret: Any, mapping: Any) -> str | None:
+    @classmethod
+    def _legacy_describe_lookup(cls, secret: Any, mapping: Any) -> str | None:
         if isinstance(mapping, dict):
             return f"store://{mapping.get('vault')}/{mapping.get('item')}"
         return str(mapping) if mapping is not None else None
 
-    def batch_get(self, wants: list[tuple[Any, Any]]) -> dict[str, str]:
-        self.batch_get_calls.append([s.name for s, _ in wants])
+    @classmethod
+    def _legacy_batch_get(cls, wants: list[tuple[Any, Any]]) -> dict[str, str]:
+        cls.batch_get_calls.append([s.name for s, _ in wants])
         return {s.name: f"value-of-{s.name}" for s, m in wants if m is not None}
 
 
 @pytest.fixture
 def test_only_backend(monkeypatch: pytest.MonkeyPatch) -> Any:
-    backend = _TestOnlyBackend()
-    monkeypatch.setitem(SECRET_BACKEND_REGISTRY, "test-only", backend)  # type: ignore[misc]
-    return backend
+    _TestOnlyBackend.batch_get_calls = []
+    monkeypatch.setitem(SECRET_BACKEND_REGISTRY, "test-only", _TestOnlyBackend)
+    return _TestOnlyBackend
 
 
 @pytest.mark.parametrize(
@@ -101,7 +98,6 @@ def test_only_backend(monkeypatch: pytest.MonkeyPatch) -> Any:
     [
         pytest.param("env-var", "NPM_TOKEN", id="env-var"),
         pytest.param("onepassword", "op://Work/npm/token", id="onepassword-uri"),
-        pytest.param("onepassword", {"account": "acct", "reference": "op://Work/npm/token"}, id="onepassword-table"),
     ],
 )
 def test_a_shipped_mapping_implies_no_agentworks_resource(backend: str, mapping: object) -> None:
@@ -116,10 +112,9 @@ def test_a_shipped_mapping_implies_no_agentworks_resource(backend: str, mapping:
     never called looks exactly like an empty answer from one that was.
     """
     assert (
-        capability_config_references(
-            kind="secret-backend",
+        mapping_references(
             name=backend,
-            config=mapping,  # type: ignore[arg-type]
+            mapping=mapping,
             owner=RefOwner(kind="secret", name="npm-token"),
         )
         == ()
@@ -144,13 +139,12 @@ def test_extraction_over_a_backend_mapping_is_reached_at_all() -> None:
     class _MarkedBackend(ConformingSecretBackend):
         name = "marked-backend"
         description = "a fixture backend whose mapping names a secret"
-        config_model = AgwRootModel[MarkedMapping]
+        mapping_model = AgwRootModel[MarkedMapping]
 
     with seated_plugin(Plugin(name="marked", capabilities={"secret-backend": (_MarkedBackend,)})):
-        references = capability_config_references(
-            kind="secret-backend",
+        references = mapping_references(
             name="marked-backend",
-            config={"vault_secret": "shared-key"},
+            mapping={"vault_secret": "shared-key"},
             owner=RefOwner(kind="secret", name="npm-token"),
         )
 
@@ -324,15 +318,21 @@ def test_would_attempt_is_pure_of_secret_and_mapping() -> None:
     """``would_attempt`` must be a pure function of ``(secret, mapping)``
     with no host probing, so freezing it into edges at finalize is safe.
     env-var / prompt always attempt; onepassword attempts iff mapped."""
+    from agentworks.capabilities.secret_backend.env_var import EnvVarBackend
+    from agentworks.capabilities.secret_backend.prompt import PromptBackend
     from agentworks.plugins.onepassword.backend import OnePasswordBackend
-    from agentworks.secrets.env_var import EnvVarBackend
-    from agentworks.secrets.prompt import PromptBackend
 
     secret = SecretDecl(name="s1", description="s1")
-    assert EnvVarBackend().would_attempt(secret, None) is True
-    assert PromptBackend().would_attempt(secret, None) is True
-    assert OnePasswordBackend().would_attempt(secret, None) is False
-    assert OnePasswordBackend().would_attempt(secret, "op://Vault/Item/field") is True
+    assert EnvVarBackend.would_attempt(secret.name, mapping_present=False) is True
+    assert PromptBackend.would_attempt(secret.name, mapping_present=False) is True
+    assert OnePasswordBackend.would_attempt(secret.name, mapping_present=False) is False
+    assert OnePasswordBackend.would_attempt(secret.name, mapping_present=True) is True
+
+
+def test_prompt_mapping_advertises_the_empty_input_vocabulary() -> None:
+    from agentworks.capabilities.secret_backend.prompt import PromptMapping
+
+    assert PromptMapping.model_json_schema() == {"not": {}}
 
 
 def test_build_registry_is_pure(tmp_path: Path) -> None:

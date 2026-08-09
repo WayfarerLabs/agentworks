@@ -12,8 +12,8 @@ from __future__ import annotations
 from pathlib import Path
 from textwrap import dedent
 
+from agentworks.capabilities.secret_backend import SECRET_BACKEND_REGISTRY
 from agentworks.resources import KIND_REGISTRY
-from agentworks.secrets import SECRET_BACKEND_REGISTRY
 
 
 def _write_base(cfg_path: Path) -> None:

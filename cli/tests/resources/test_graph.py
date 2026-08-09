@@ -247,10 +247,10 @@ def test_dependents_of_reproduces_old_references_field(tmp_path: Path) -> None:
 
 def test_capability_impls_are_stamped_on_nodes(tmp_path: Path) -> None:
     """The builder populates capability nodes' impl off the code registry
-    (heterogeneous: classes for platform/harness-integration/provider, an instance for
-    secret-backend); declarable nodes carry ``None``."""
+    (the exact registered class for every capability kind); declarable
+    nodes carry ``None``."""
     from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
-    from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
+    from agentworks.capabilities.secret_backend import SECRET_BACKEND_REGISTRY
 
     cfg = _write_cfg(tmp_path, "")
     registry = build_registry(load_config(cfg, warn_issues=False))
