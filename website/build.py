@@ -17,12 +17,12 @@ from typing import Final, NamedTuple
 
 SITE_BASE_TOKEN: Final = "{{SITE_BASE}}"
 SITE_BASE_PATTERN = re.compile(r"/(?:[A-Za-z0-9][A-Za-z0-9._~-]*/)*\Z", re.ASCII)
-OUTPUT_NAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._~-]*\Z", re.ASCII)
 TOKEN_PATTERN = re.compile(r"{{[A-Z][A-Z0-9_]*}}")
 HEADING_PATTERN = re.compile(r"^(#{1,6})[ \t]+(.*?)(?:[ \t]+#+[ \t]*)?$")
 FENCE_PATTERN = re.compile(r"^[ ]{0,3}(`{3,}|~{3,})(?:[^`~]*)$")
 REFERENCE_PATTERN = re.compile(r"^[ ]{0,3}\[([^]]+)\]:[ \t]*(\S*)[ \t]*$")
-REMOTE_URL_PATTERN = re.compile(r"(?i)(?:https?:)?//")
+HTTP_URL_PATTERN = re.compile(r"(?i)https?://")
+QUOTED_PROTOCOL_RELATIVE_URL_PATTERN = re.compile(r"""["'`]//""")
 
 INTERIM_NOTICE: Final = (
     "Guided onboarding is not yet published. You can still explore the repository, PyPI package, "
@@ -830,10 +830,11 @@ def _validate_runtime_asset(path: Path, source: str) -> None:
             raise ValueError(f"{path}: CSS imports are forbidden")
         if re.search(r"(?i)url\s*\(", source):
             raise ValueError(f"{path}: CSS url() references are forbidden")
-        if REMOTE_URL_PATTERN.search(source):
+        if HTTP_URL_PATTERN.search(source) or QUOTED_PROTOCOL_RELATIVE_URL_PATTERN.search(source):
             raise ValueError(f"{path}: remote CSS URLs are forbidden")
-    elif path.suffix == ".js" and REMOTE_URL_PATTERN.search(source):
-        raise ValueError(f"{path}: remote JavaScript URLs are forbidden")
+    elif path.suffix == ".js":
+        if HTTP_URL_PATTERN.search(source) or QUOTED_PROTOCOL_RELATIVE_URL_PATTERN.search(source):
+            raise ValueError(f"{path}: remote JavaScript URLs are forbidden")
 
 
 def _render_artifact(repo_root: Path, site_base: str, focused: bool) -> tuple[dict[Path, bytes], frozenset[Path]]:
@@ -865,8 +866,8 @@ def _render_artifact(repo_root: Path, site_base: str, focused: bool) -> tuple[di
 
 def validate_output_location(repo_root: Path, output: Path) -> Path:
     """Return a safe destination without dereferencing its requested final component."""
-    if ".." in output.parts or OUTPUT_NAME_PATTERN.fullmatch(output.name) is None:
-        raise ValueError("output must end in a safe named directory without dot traversal")
+    if ".." in output.parts or output.name in {"", ".", ".."}:
+        raise ValueError("output must name a directory without dot traversal")
     destination = output.parent.resolve() / output.name
     if destination.is_relative_to(repo_root.resolve()):
         raise ValueError("output cannot be the repository or any of its descendants")

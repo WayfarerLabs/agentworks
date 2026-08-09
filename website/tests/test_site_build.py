@@ -385,15 +385,18 @@ class BuildAndInstallTests(RepositoryFixture):
                 site_builder.build_site(self.root, target, "/")
         self.assertEqual(snapshot(self.root / "website"), before)
 
-    def test_output_rejects_unsafe_name_and_dot_traversal(self) -> None:
-        targets = (
-            Path(self.temporary.name) / "unsafe name",
-            Path(self.temporary.name) / "parent" / ".." / "escaped",
-        )
-        for target in targets:
-            with self.subTest(target=target), self.assertRaisesRegex(ValueError, "safe named|dot traversal"):
-                site_builder.build_site(self.root, target, "/")
-            self.assertFalse(target.exists())
+    def test_output_accepts_ordinary_spaced_and_hidden_directory_names(self) -> None:
+        for name in ("site output", ".site-output"):
+            output = Path(self.temporary.name) / name
+            with self.subTest(name=name):
+                site_builder.build_site(self.root, output, "/")
+                self.assertEqual({Path(path) for path in snapshot(output)}, site_builder.FULL_MANIFEST)
+
+    def test_output_rejects_dot_traversal(self) -> None:
+        target = Path(self.temporary.name) / "parent" / ".." / "escaped"
+        with self.assertRaisesRegex(ValueError, "dot traversal"):
+            site_builder.build_site(self.root, target, "/")
+        self.assertFalse(target.exists())
 
     def test_output_rejects_parent_symlink_into_repository_when_supported(self) -> None:
         linked_parent = Path(self.temporary.name) / "linked-parent"
@@ -497,7 +500,7 @@ class BuildAndInstallTests(RepositoryFixture):
             ("website/static/site.css", '\n@import "theme.css";\n'),
             ("website/static/site.css", "\nbody { background: url('/local.png'); }\n"),
             ("website/static/site.css", "\n/* https://example.com/theme.css */\n"),
-            ("website/static/site.css", "\n/* //cdn.example.com/theme.css */\n"),
+            ("website/static/site.css", '\nbody { content: "//cdn.example.com/theme.css"; }\n'),
             ("website/static/lander-game.js", '\nconst remote = "https://example.com/game.js";\n'),
             ("website/static/lander-game.js", '\nconst remote = "//cdn.example.com/game.js";\n'),
         )
@@ -510,6 +513,12 @@ class BuildAndInstallTests(RepositoryFixture):
                     site_builder.build_site(self.root, output, "/")
                 self.assertEqual(snapshot(output), before)
                 path.write_text(original, encoding="utf-8")
+
+    def test_harmless_javascript_line_comment_is_allowed(self) -> None:
+        script = self.root / "website/static/lander-game.js"
+        script.write_text(script.read_text(encoding="utf-8") + "\n// harmless local note\n", encoding="utf-8")
+        output = self.build()
+        self.assertIn("// harmless local note", (output / "static/lander-game.js").read_text(encoding="utf-8"))
 
     def test_failure_before_and_during_each_swap_boundary_restores_exact_output(self) -> None:
         output = self.build()
