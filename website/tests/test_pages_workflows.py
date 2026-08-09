@@ -11,6 +11,30 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CI_PATH = REPO_ROOT / ".github/workflows/ci.yml"
 PAGES_PATH = REPO_ROOT / ".github/workflows/pages.yml"
 
+PYTHON_TEST_COMMAND = "python3 -m unittest discover -s website/tests -p 'test_*.py'"
+NODE_TEST_COMMAND = "node --test website/tests/lander-model.test.mjs"
+
+CI_DETERMINISTIC_BUILD_SCRIPT = '''\
+python3 website/build.py --repo-root . --output "${RUNNER_TEMP}/site-root-a" --site-base /
+python3 website/build.py --repo-root . --output "${RUNNER_TEMP}/site-root-b" --site-base /
+diff --recursive --no-dereference "${RUNNER_TEMP}/site-root-a" "${RUNNER_TEMP}/site-root-b"
+python3 website/build.py --repo-root . --output "${RUNNER_TEMP}/site-project-a" --site-base /agentworks/
+python3 website/build.py --repo-root . --output "${RUNNER_TEMP}/site-project-b" --site-base /agentworks/
+diff --recursive --no-dereference "${RUNNER_TEMP}/site-project-a" "${RUNNER_TEMP}/site-project-b"'''
+
+PAGES_DETERMINISTIC_BUILD_SCRIPT = '''\
+python3 website/build.py \\
+  --repo-root . \\
+  --output "${RUNNER_TEMP}/agentworks-site" \\
+  --site-base "$SITE_BASE"
+python3 website/build.py \\
+  --repo-root . \\
+  --output "${RUNNER_TEMP}/agentworks-site-repeat" \\
+  --site-base "$SITE_BASE"
+diff --recursive --no-dereference \\
+  "${RUNNER_TEMP}/agentworks-site" \\
+  "${RUNNER_TEMP}/agentworks-site-repeat"'''
+
 CI_SUCCESS_SCRIPT = '''\
 read -r -a results <<< "$REQUIRED_RESULTS"
 if [[ "${#results[@]}" -ne 6 ]]; then
@@ -209,6 +233,18 @@ class WorkflowContractTests(unittest.TestCase):
             step_mapping(website_steps["Set up Node.js"])["uses"],
             "actions/setup-node@v7",
         )
+        self.assertEqual(
+            step_mapping(website_steps["Python website tests"])["run"],
+            PYTHON_TEST_COMMAND,
+        )
+        self.assertEqual(
+            step_mapping(website_steps["Node website model tests"])["run"],
+            NODE_TEST_COMMAND,
+        )
+        self.assertEqual(
+            literal_script(website, "Verify deterministic full builds"),
+            CI_DETERMINISTIC_BUILD_SCRIPT,
+        )
 
         ci_success = block(source, "ci-success:", 2)
         self.assertEqual(
@@ -326,6 +362,18 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertEqual(
             literal_script(build, "Verify tested source state"),
             TESTED_SOURCE_SCRIPT,
+        )
+        self.assertEqual(
+            step_mapping(build_steps["Python website tests"])["run"],
+            PYTHON_TEST_COMMAND,
+        )
+        self.assertEqual(
+            step_mapping(build_steps["Node website model tests"])["run"],
+            NODE_TEST_COMMAND,
+        )
+        self.assertEqual(
+            literal_script(build, "Build deterministic Pages artifact"),
+            PAGES_DETERMINISTIC_BUILD_SCRIPT,
         )
         self.assertEqual(
             literal_script(build, "Verify upload source state"),
@@ -587,6 +635,21 @@ class WorkflowContractTests(unittest.TestCase):
                 "      - name: Python website tests\n        continue-on-error: true\n",
                 1,
             ),
+            self.pages.replace(
+                f"        run: {PYTHON_TEST_COMMAND}\n",
+                f'        run: echo "{PYTHON_TEST_COMMAND}"\n',
+                1,
+            ),
+            self.pages.replace(
+                f"        run: {NODE_TEST_COMMAND}\n",
+                f'        run: echo "{NODE_TEST_COMMAND}"\n',
+                1,
+            ),
+            self.pages.replace(
+                '            "${RUNNER_TEMP}/agentworks-site-repeat"\n',
+                '            "${RUNNER_TEMP}/agentworks-site-repeat" || true\n',
+                1,
+            ),
             self.pages.replace("      pages: read\n", "      pages: read # trusted\n", 1),
             self.pages.replace("      contents: read\n", "      contents: write\n", 1),
             self.pages.replace("      pages: read\n", "      pages: read\n      pages: write\n", 1),
@@ -625,6 +688,30 @@ class WorkflowContractTests(unittest.TestCase):
             self.ci.replace(
                 "      - name: Python website tests\n",
                 "      - name: Python website tests\n        continue-on-error: true\n",
+                1,
+            ),
+            self.ci.replace(
+                f"        run: {PYTHON_TEST_COMMAND}\n",
+                f'        run: echo "{PYTHON_TEST_COMMAND}"\n',
+                1,
+            ),
+            self.ci.replace(
+                f"        run: {NODE_TEST_COMMAND}\n",
+                f'        run: echo "{NODE_TEST_COMMAND}"\n',
+                1,
+            ),
+            self.ci.replace(
+                '          diff --recursive --no-dereference "${RUNNER_TEMP}/site-root-a" '
+                '"${RUNNER_TEMP}/site-root-b"\n',
+                '          diff --recursive --no-dereference "${RUNNER_TEMP}/site-root-a" '
+                '"${RUNNER_TEMP}/site-root-b" || true\n',
+                1,
+            ),
+            self.ci.replace(
+                '          diff --recursive --no-dereference "${RUNNER_TEMP}/site-project-a" '
+                '"${RUNNER_TEMP}/site-project-b"\n',
+                '          diff --recursive --no-dereference "${RUNNER_TEMP}/site-project-a" '
+                '"${RUNNER_TEMP}/site-project-b" || true\n',
                 1,
             ),
             self.ci.replace(
