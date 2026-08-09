@@ -197,19 +197,19 @@ mechanically provable.
 
 ### Phase 7: migrate operation and inspection consumers
 
-- [ ] Migrate the operation-scoped `Resolver`, orchestration union/scoping, gate seeding, and
+- [x] Migrate the operation-scoped `Resolver`, orchestration union/scoping, gate seeding, and
       command boundaries to `ResolutionBatch`; preserve one resolve boundary, late-registration
       errors, cached operation lifetime, and per-node secret scoping.
-- [ ] Replace preview's boolean answer and inspection's partial string errors with value-free typed
+- [x] Replace preview's boolean answer and inspection's partial string errors with value-free typed
       records. Describe remains side-effect-free and doctor remains non-probing and non-interactive.
-- [ ] Migrate the existing one-name `secret verify` service from its quiet dictionary wrapper and
+- [x] Migrate the existing one-name `secret verify` service from its quiet dictionary wrapper and
       parallel proof record to shared `ResolutionOutcome` rows. The pre-release one-name command may
       remain as the Phase 7 presentation checkpoint, but no legacy resolution adapter survives it.
-- [ ] Ordinary commands derive interaction permission from stdin TTY plus global
+- [x] Ordinary commands derive interaction permission from stdin TTY plus global
       `--non-interactive`; global refusal wins. Preserve fail-before-prompt semantics exactly.
-- [ ] Remove the dict-returning compatibility adapter, old `ActiveBackend` vocabulary, error
+- [x] Remove the dict-returning compatibility adapter, old `ActiveBackend` vocabulary, error
       out-parameter, and dead imports. Guard tests reject new consumers of the retired paths.
-- [ ] Run focused resolver/orchestration/doctor/inspection suites, Green, and phase review.
+- [x] Run focused resolver/orchestration/doctor/inspection suites, Green, and phase review.
 
 **Definition of done:** every internal consumer uses source-based typed results, and the temporary
 operation adapter is gone.
