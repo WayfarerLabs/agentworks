@@ -1,5 +1,5 @@
 {
   "version": "0.2",
   "import": ["../../../.cspell.json"],
-  "words": ["blocklist", "dpkg", "launchable", "remediations"]
+  "words": ["blocklist", "launchable", "remediations", "tenv"]
 }

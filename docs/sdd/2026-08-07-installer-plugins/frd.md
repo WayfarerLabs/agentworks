@@ -1,6 +1,6 @@
-# FRD: Installer Plugins (Core Slimming, Pre-0.14)
+# FRD: Installer Resource Plugins (Pre-0.14)
 
-- Status: Seed, ready for an effort lead
+- Status: Revised scope, independent artifact review clean, pending roadmap review
 - Date: 2026-08-07
 - Seeded by: the roadmap lead. This is a child of the 2026-08-04-next-steps roadmap (operator
   ruling, 2026-08-07: in roadmap scope, gates the 0.14.0 cut). It is launchable whenever: the R1
@@ -11,33 +11,34 @@
 
 ## Purpose
 
-Core VM initialization currently carries miscellaneous built-in installers and setup steps that are
-not fundamental to what a VM is. They belong behind one or more system plugins, so the core surface
-shrinks, the plugin boundary gets first-party exercise before wave 8 promises anything externally,
-and operators opt into what they actually use. Candidates observed in
-`cli/agentworks/vms/initializer/` include the package installers (apt sources and packages, snap)
-and the mise tooling step; the authoritative inventory of what moves versus what is genuinely core
-(credentials, SSH keys, workspace directories look core) is the effort lead's first deliverable.
+Core currently ships a catalog of optional named apt and install-command resources as built-in
+manifests. Those declarations belong behind mechanism-named system plugins so operators opt into the
+catalogs they actually use, the internal plugin boundary gets first-party exercise before wave 8,
+and a stable resource name never silently changes provider.
+
+This effort moves existing declared resource rows, not initializer execution. The generic apt and
+install-command executors remain core because they also run operator-declared resources. Snap, mise,
+dotfiles, tmuxinator, and Claude setup remain core. This boundary is an operator ruling from
+2026-08-08 that supersedes the seed's broader installer-candidate framing.
 
 ## Requirements
 
-- R1. Inventory: enumerate every initializer and setup step in core, classify each as core-essential
-  or plugin-bound, and record the rationale per item. The classification is reviewed before the
-  moves begin (phased artifact review per the sdd skill).
-- R2. Plugin-bound steps move behind system plugins named for their **mechanism** (`apt`, `snap`,
-  `mise` are the observed candidates), using the existing internal plugin framework (registration
-  conformance, atomic seating); the descriptor work from wave 2 is the registration substrate.
-  Grouping follows the shape test, never a curated theme: mechanisms are distinct when their
-  external dependency, config family, and failure modes differ, and the inventory may fold
-  mechanisms whose shapes genuinely coincide, recording the shape test's answer per grouping
-  (operator ruling, 2026-08-07).
+- R1. Inventory: enumerate every built-in apt and install-command resource row, assign each to its
+  destination plugin, and record the rationale. Also record the execution and setup surfaces that
+  remain core so the move cannot expand silently. The classification is reviewed before the moves
+  begin (phased artifact review per the sdd skill).
+- R2. The declared rows move into manifest-carrying system plugins named for their mechanism: `apt`
+  and `install-command`. They use the existing internal plugin framework and shared bundled manifest
+  loader. No new capability kind, initializer callback, execution seat, or raw config surface is
+  introduced.
 - R3. **The disabled experience is a first-class requirement.** An existing config that references a
   moved surface while the owning plugin is not enabled MUST fail with a crisp error that names the
-  moved surface, the plugin that now owns it, and the exact remediation (the config line to add).
-  This follows the remediation-posture ruling in the roadmap's `target-state.md`: precise errors
-  plus guide content, no automated migrator.
-- R4. Behavior parity when enabled: with the plugin enabled, initialization behaves as today,
-  idempotent reinit included, per `docs/guides/idempotency.md`.
+  moved surface, the plugin that now owns it, and an exact, valid TOML replacement snippet that
+  preserves every plugin already enabled. This follows the remediation-posture ruling in the
+  roadmap's `target-state.md`: precise errors plus guide content, no automated migrator.
+- R4. Behavior parity when enabled: with the owning plugin enabled, the unchanged core executor
+  consumes the moved row exactly as it does today, idempotent reinit included, per
+  `docs/guides/idempotency.md`.
 - R5. Guide and docs ride the change: guide topic contributions for the new plugins through the
   universal contribution contract (the onboarding FRD's R14; the always-on guide-contributions rule
   arrives with onboarding phase 1), sample-config and completions updated, and the 0.14 upgrade
@@ -53,9 +54,7 @@ and the mise tooling step; the authoritative inventory of what moves versus what
   resources are detectable at finalize by construction. Scope: R7 governs resource-to-resource
   references; settings references keep the presence-not-availability contract wave 2 landed
   (`config/references.py`), with `doctor` surfacing the disabled state. R3's plugin-enablement error
-  is a distinct, plugin-level mechanism whose surfacing point stays open below. This may be the
-  firing trigger for the descriptor contract's deferred `consumer_gating` field; the effort records
-  that determination in the descriptor contract if gating derivation consolidates here.
+  is a distinct, plugin-level mechanism whose surfacing point stays open below.
 
 ## Settled constraints (inherited; do not reopen)
 
@@ -75,6 +74,10 @@ and the mise tooling step; the authoritative inventory of what moves versus what
   (a synthesized row that an operator declaration replaces, with provenance shown) are reserved for
   surfaces that declare them deliberately; wave 3's synthesized secret sources are the canonical
   case (`docs/sdd/2026-08-07-secret-sources/`).
+- C5. **Declared-resource move only** (operator ruling, 2026-08-08). Generic apt and install-command
+  execution stays core. Snap, mise, dotfiles, tmuxinator, and Claude setup are not moved or
+  behaviorally changed by this child. Moving any of those later requires its own scoped effort and,
+  for Claude user setup, the roadmap's harness-integration user facet.
 
 ## Growth path (recorded, explicitly out of scope now)
 
@@ -91,8 +94,9 @@ and the mise tooling step; the authoritative inventory of what moves versus what
   produces the R3 error naming surface, plugin, and the exact config remediation.
 - AC2. The same config with the plugin enabled initializes a VM to the same converged state as 0.13,
   and reinit is idempotent.
-- AC3. Core's initializer directory contains only the steps the R1 inventory classified as
-  core-essential.
+- AC3. The 16 inventoried rows no longer publish from `manifests/builtin`; they publish from the
+  `apt` or `install-command` plugin with unchanged names and specs. Core initializer execution is
+  unchanged.
 - AC4. `agw guide` teaches the new plugins through their own topic contributions.
 - AC5. Disabling a plugin-provided resource and declaring an operator resource under the same name
   yields the operator's resource, with the substitution shown by `describe`; the same config without
@@ -101,11 +105,11 @@ and the mise tooling step; the authoritative inventory of what moves versus what
   the reference and the remediation; the same disabled resource unreferenced simply leaves the
   normal views.
 
-## Open questions for the effort lead
+## Resolved design decisions
 
-- The R1 inventory and classification (the seed deliberately does not pre-judge it beyond the named
-  candidates).
-- Which mechanisms, if any, the R1 inventory folds under R2's shape test, and the plugin names that
-  result.
-- Whether the R3 disabled-plugin error surfaces at config load, finalize, or first use, and how it
-  interacts with `agw doctor` (R7's disable-list check is ruled finalize-time).
+- [HLA D1](./hla.md#d1-add-a-settings-only-resource-disable-policy) defines the settings spelling
+  and selector validation.
+- [HLA D2 through D4](./hla.md#d2-collect-a-complete-provider-claim-ledger) define complete-claim,
+  publication-order-independent collision adjudication and retained provenance.
+- [HLA D5](./hla.md#d5-reject-enabled-resource-edges-to-disabled-targets-at-finalize) defines the
+  finalize invariant and remediation contract; describe and doctor render the same stored evidence.
