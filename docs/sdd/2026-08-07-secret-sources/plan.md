@@ -140,41 +140,41 @@ machinery exist on the feature branch; the atomic production cutover remains own
 
 ### Phase 5: bounded clients and typed resolution core
 
-- [ ] Implement one lazy client per attempted source turn. No unused later source is constructed;
+- [x] Implement one lazy client per attempted source turn. No unused later source is constructed;
       setup is batched, first resolved source wins, and every context closes before the next source.
-- [ ] Implement env-var, prompt, and OnePassword clients. Prompt uses only the caller-owned broker;
+- [x] Implement env-var, prompt, and OnePassword clients. Prompt uses only the caller-owned broker;
       OnePassword applies the remaining timeout to subprocess calls and translates timeout,
       authentication/connectivity, hard mapping, and external failures once.
-- [ ] Implement stable outcome categories `resolved`, `unavailable`, `refused-interaction`,
+- [x] Implement stable outcome categories `resolved`, `unavailable`, `refused-interaction`,
       `timeout`, and `resolution-failure`, with safe detail codes and remediation.
-- [ ] Implement private `ResolutionBatch` value storage, redacted `repr`, no serializer, and a
+- [x] Implement private `ResolutionBatch` value storage, redacted `repr`, no serializer, and a
       complete-or-raise adapter used by existing operation callers until Phase 7.
-- [ ] Land the client and typed-batch machinery behind current production behavior and prove it with
+- [x] Land the client and typed-batch machinery behind current production behavior and prove it with
       focused tests before changing any settings, graph, mapping, or runtime reference to source
       names.
-- [ ] In one atomic cutover, repoint `[secret_config].backends`, `SecretDecl.dependencies`, mapping
+- [x] In one atomic cutover, repoint `[secret_config].backends`, `SecretDecl.dependencies`, mapping
       validation/extraction, graph candidate edges, chain validation, inspection, and runtime chain
       construction from backend names to source names. Replace the finalize backend-instance tuple
       with the generic read-only capability-class projection. Activate collection of validation-only
       map-key references as each host row enters the registry build or fixed-point walk, resolving
       them in the corresponding existing resolve stage so initially published and later materialized
       rows follow the same source-first rule without changing error precedence.
-- [ ] Only after source lookup misses, if the unknown name exactly matches a backend, hard-error
+- [x] Only after source lookup misses, if the unknown name exactly matches a backend, hard-error
       with the exact config- or manifest-specific source rewrite. Pin that a same-name synthesized
       or operator-declared source wins; every explicit mapping key is checked even when `false`
       suppresses candidate-edge emission. Do not add a deprecation producer, manifest carrier,
       compatibility source, or legacy parser.
-- [ ] OnePassword source config owns `account` and a positive external-operation `timeout`; its
+- [x] OnePassword source config owns `account` and a positive external-operation `timeout`; its
       permanent mapping is an `op://` reference. Update plugin fixtures and the 0.14 upgrade guide
       in this phase.
-- [ ] Preserve deduplication, precedence, soft fallthrough, hard-miss halt, readiness skipping,
+- [x] Preserve deduplication, precedence, soft fallthrough, hard-miss halt, readiness skipping,
       control-character rejection, batch attribution, and fail-before-prompt doom behavior.
-- [ ] Sentinel tests prove values cannot appear in outcomes, representations, warnings, logs,
+- [x] Sentinel tests prove values cannot appear in outcomes, representations, warnings, logs,
       errors, or renderer inputs. Lifecycle tests prove construction/prepare/resolve/close order on
       success, soft miss, hard failure, timeout, and interruption.
-- [ ] Golden tests prove the implied `env-var`/`prompt` simple case is behavior-identical, including
+- [x] Golden tests prove the implied `env-var`/`prompt` simple case is behavior-identical, including
       absent settings, explicit chains, default mappings, `false` opt-out, and operator overrides.
-- [ ] Update sample config, `cli/README.md` source-model sections, resource guide, secrets README,
+- [x] Update sample config, `cli/README.md` source-model sections, resource guide, secrets README,
       ADR 0016, and ADR 0023 for behavior made true; run Green, full phase review, and a fresh-eyes
       correctness/security review.
 
