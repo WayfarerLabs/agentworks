@@ -18,6 +18,7 @@ from agentworks.path_rendering import format_host_path
 
 if TYPE_CHECKING:
     from agentworks.config import Config
+    from agentworks.doctor_database import DoctorDatabaseFacts
     from agentworks.machine_output import JsonObject
     from agentworks.resources.registry import Registry
     from agentworks.vms.sites import VMSiteDecl
@@ -234,7 +235,11 @@ def run_checks(
     else:
         config_group, config, registry = _check_config()
 
-    report.groups.append(_check_system())
+    from agentworks.doctor_database import collect_database_facts
+
+    database_facts = collect_database_facts()
+
+    report.groups.append(_check_system(database_facts))
     report.groups.append(_check_python())
     report.groups.append(_check_required_tools())
     report.groups.append(_check_tailscale())
@@ -258,7 +263,7 @@ def run_checks(
     else:
         report.groups.append(_skipped_group("VM platforms", "Installed platforms"))
     if config is not None and registry is not None:
-        report.groups.append(_check_vm_sites(config, registry))
+        report.groups.append(_check_vm_sites(config, registry, database_facts))
     else:
         report.groups.append(_skipped_group("VM sites", "Declared sites"))
     report.groups.append(config_group)
@@ -270,7 +275,7 @@ def run_checks(
         report.groups.append(_check_secrets(config, registry))
     else:
         report.groups.append(_skipped_group("Secrets", "Declared secrets"))
-    report.groups.append(_check_database())
+    report.groups.append(_check_database(database_facts))
 
     if completion_version is not None:
         report.groups.append(_check_completions(completion_version))
@@ -304,44 +309,15 @@ def _skipped_group(name: str, item: str) -> HealthGroup:
     return g
 
 
-def _check_system() -> HealthGroup:
+def _check_system(database_facts: DoctorDatabaseFacts | None = None) -> HealthGroup:
     """Install-level identity: the system slug. Not a VM-site concern
     (it namespaces hostnames, backend-side names, and the managed SSH
     config file install-wide), so it leads the report under its own
     header rather than hiding in the VM groups.
     """
-    from agentworks.db import SYSTEM_SLUG_KEY, Database
+    from agentworks.doctor_database import check_system, collect_database_facts
 
-    g = HealthGroup("System")
-    try:
-        with Database.inspection_snapshot() as (db_exists, current, latest, db):
-            if not db_exists:
-                # No database means nothing has ever set the slug.
-                g.info("System slug", "unset (will ask at first vm create)")
-                return g
-            if current != latest:
-                # Opening the DB would auto-migrate mid-report; defer to the
-                # Database group's deliberate migration row.
-                g.info(
-                    "System slug",
-                    "pending database migration (see the Database group)",
-                )
-                return g
-            assert db is not None
-            slug = db.get_setting(SYSTEM_SLUG_KEY)
-        if slug:
-            g.ok("System slug", slug)
-        elif slug == "":
-            g.info("System slug", "declined (asked at first vm create)")
-        else:
-            g.info("System slug", "unset (will ask at first vm create)")
-    except Exception as e:
-        g.warn(
-            "System slug",
-            f"could not check the database: {e}",
-            machine_diagnostic=MachineDiagnostic.DATABASE_UNAVAILABLE,
-        )
-    return g
+    return check_system(database_facts or collect_database_facts())
 
 
 def _check_python() -> HealthGroup:
@@ -458,7 +434,11 @@ def _platform_summary(decl: VMSiteDecl) -> str:
     return summary
 
 
-def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
+def _check_vm_sites(
+    config: Config,
+    registry: Registry,
+    database_facts: DoctorDatabaseFacts | None = None,
+) -> HealthGroup:
     """VM sites: every registered site's state, and every VM's site
     resolving to a usable declaration.
 
@@ -487,11 +467,7 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
     that names it, and a site whose credential is prompt-only reads ok
     here, correctly, because nothing about that site is unhealthy.
     """
-    from agentworks.db import Database
-    from agentworks.vms.sites import (
-        VMSiteDecl,
-        site_manifest_hint,
-    )
+    from agentworks.vms.sites import VMSiteDecl
 
     g = HealthGroup("VM sites")
 
@@ -535,40 +511,14 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
             f"names '{default_site}', which is not ready: {not_ready[default_site]}",
         )
 
-    try:
-        with Database.inspection_snapshot() as (db_exists, current, latest, db):
-            if not db_exists:
-                # No VMs recorded yet; nothing to cross-check.
-                return g
-            if current != latest:
-                # Opening the DB would auto-migrate mid-report (interleaving
-                # the migration's own output into this group and stealing
-                # the Database group's deliberate migration row); defer.
-                g.info(
-                    "VM sites",
-                    "pending database migration (see the Database group); "
-                    "re-run doctor after migrating for the full report",
-                )
-                return g
-            assert db is not None
-            for vm in db.list_vms():
-                if vm.site in not_ready:
-                    g.warn(
-                        f"VM '{vm.name}'",
-                        f"site '{vm.site}' is not ready: {not_ready[vm.site]}",
-                    )
-                elif vm.site not in sites:
-                    g.fail(
-                        f"VM '{vm.name}'",
-                        f"site '{vm.site}' is not declared",
-                        hint=site_manifest_hint(vm.site),
-                    )
-    except Exception as e:
-        g.warn(
-            "VM sites",
-            f"could not check the database: {e}",
-            machine_diagnostic=MachineDiagnostic.DATABASE_UNAVAILABLE,
-        )
+    from agentworks.doctor_database import append_vm_site_checks, collect_database_facts
+
+    append_vm_site_checks(
+        g,
+        database_facts or collect_database_facts(),
+        sites=sites,
+        not_ready=not_ready,
+    )
     return g
 
 
@@ -910,57 +860,10 @@ def _check_secrets(config: Config, registry: Registry) -> HealthGroup:
     return g
 
 
-def _check_database() -> HealthGroup:
-    from agentworks.db import Database
+def _check_database(database_facts: DoctorDatabaseFacts | None = None) -> HealthGroup:
+    from agentworks.doctor_database import check_database, collect_database_facts
 
-    g = HealthGroup("Database")
-
-    try:
-        with Database.inspection_snapshot() as (exists, current, latest, db):
-            if not exists:
-                g.ok("Database", "does not exist yet (will be created on first use)")
-            elif current == latest:
-                g.ok("Schema", f"up to date (version {current})")
-                assert db is not None
-                _report_db_contents(g, db)
-            elif current < latest:
-                g.warn(
-                    "Schema",
-                    f"at version {current}, latest is {latest}; "
-                    "a normal Agentworks command that opens state will migrate it",
-                )
-            else:
-                g.fail("Schema", f"version {current} is newer than latest {latest} (downgrade?)")
-    except Exception as e:
-        g.fail("Database", str(e), machine_diagnostic=MachineDiagnostic.DATABASE_UNAVAILABLE)
-
-    return g
-
-
-def _report_db_contents(g: HealthGroup, db: object) -> None:
-    """Report DB contents and flag VMs in non-complete states."""
-    from agentworks.db import Database, InitStatus
-    from agentworks.ssh import LOG_DIR
-
-    assert isinstance(db, Database)
-
-    vms = db.list_vms()
-    ws_count = len(db.list_workspaces())
-    g.ok("Contents", f"{len(vms)} VMs, {ws_count} workspaces")
-
-    def _log_hint(vm_name: str) -> str:
-        if not LOG_DIR.exists():
-            return ""
-        logs = sorted(LOG_DIR.glob(f"{vm_name}-*.log"), reverse=True)
-        return f" Log: {format_host_path(logs[0])}" if logs else ""
-
-    for vm in vms:
-        if vm.init_status == InitStatus.FAILED.value:
-            g.warn(f"VM '{vm.name}'", f"failed state (only delete supported).{_log_hint(vm.name)}")
-        elif vm.init_status == InitStatus.PARTIAL.value:
-            g.warn(f"VM '{vm.name}'", f"initialized with warnings.{_log_hint(vm.name)}")
-        elif vm.init_status not in (InitStatus.COMPLETE.value, InitStatus.PENDING.value):
-            g.warn(f"VM '{vm.name}'", f"unexpected init status: {vm.init_status}")
+    return check_database(database_facts or collect_database_facts())
 
 
 def _check_completions(current_version: str) -> HealthGroup:

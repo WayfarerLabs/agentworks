@@ -2,14 +2,9 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
-import os
 import sqlite3
-import tempfile
 from contextlib import contextmanager
-from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import agentworks.db as _db
@@ -25,10 +20,10 @@ from agentworks.db.converters import (
     _to_workspace,
 )
 from agentworks.db.migrations import LATEST_VERSION, MIGRATIONS, MigrationContext
-from agentworks.errors import StateError
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
 
     from agentworks.db.models import (
         AgentGrantRow,
@@ -48,103 +43,6 @@ if TYPE_CHECKING:
 
 DatabaseDriverError = sqlite3.DatabaseError
 """Driver failure type exposed so read-only consumers need no SQLite import."""
-
-_INSPECTION_SNAPSHOT_ATTEMPTS = 3
-_SNAPSHOT_CHUNK_SIZE = 1024 * 1024
-
-
-class _SnapshotChanged(Exception):
-    """The source file set changed while an inspection copy was made."""
-
-
-@dataclass(frozen=True)
-class _FileFingerprint:
-    device: int
-    inode: int
-    size: int
-    mtime_ns: int
-    digest: bytes
-
-
-def _metadata(stat: os.stat_result) -> tuple[int, int, int, int]:
-    return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns
-
-
-def _fingerprint_stream(source: Path, destination: Path | None = None) -> _FileFingerprint:
-    """Hash one stable source identity, optionally copying it as it is read."""
-    try:
-        path_before = source.stat()
-        digest = hashlib.sha256()
-        with source.open("rb") as source_file:
-            descriptor_before = os.fstat(source_file.fileno())
-            if _metadata(descriptor_before) != _metadata(path_before):
-                raise _SnapshotChanged
-            destination_file = destination.open("wb") if destination is not None else None
-            try:
-                while chunk := source_file.read(_SNAPSHOT_CHUNK_SIZE):
-                    digest.update(chunk)
-                    if destination_file is not None:
-                        destination_file.write(chunk)
-            finally:
-                if destination_file is not None:
-                    destination_file.close()
-            descriptor_after = os.fstat(source_file.fileno())
-        path_after = source.stat()
-    except FileNotFoundError:
-        raise _SnapshotChanged from None
-
-    expected = _metadata(path_before)
-    if _metadata(descriptor_after) != expected or _metadata(path_after) != expected:
-        raise _SnapshotChanged
-    return _FileFingerprint(*expected, digest.digest())
-
-
-def _file_metadata(path: Path) -> tuple[int, int, int, int] | None:
-    try:
-        return _metadata(path.stat())
-    except FileNotFoundError:
-        return None
-
-
-def _copy_verified_file_set(source_db: Path, snapshot_db: Path) -> None:
-    """Copy one byte-stable database/WAL/SHM set or request a retry."""
-    source_paths = (
-        source_db,
-        source_db.with_name(f"{source_db.name}-wal"),
-        source_db.with_name(f"{source_db.name}-shm"),
-    )
-    snapshot_paths = (
-        snapshot_db,
-        snapshot_db.with_name(f"{snapshot_db.name}-wal"),
-        snapshot_db.with_name(f"{snapshot_db.name}-shm"),
-    )
-    initial = tuple(_file_metadata(path) for path in source_paths)
-    if initial[0] is None:
-        raise _SnapshotChanged
-
-    copied: list[_FileFingerprint | None] = []
-    for source, destination, expected in zip(source_paths, snapshot_paths, initial, strict=True):
-        if expected is None:
-            copied.append(None)
-            continue
-        fingerprint = _fingerprint_stream(source, destination)
-        if _metadata_tuple(fingerprint) != expected:
-            raise _SnapshotChanged
-        copied.append(fingerprint)
-        if tuple(_file_metadata(path) for path in source_paths) != initial:
-            raise _SnapshotChanged
-
-    verified: list[_FileFingerprint | None] = []
-    for source, expected in zip(source_paths, initial, strict=True):
-        verified.append(None if expected is None else _fingerprint_stream(source))
-        if tuple(_file_metadata(path) for path in source_paths) != initial:
-            raise _SnapshotChanged
-    if tuple(copied) != tuple(verified):
-        raise _SnapshotChanged
-
-
-def _metadata_tuple(fingerprint: _FileFingerprint) -> tuple[int, int, int, int]:
-    return fingerprint.device, fingerprint.inode, fingerprint.size, fingerprint.mtime_ns
 
 
 class Database:
@@ -203,72 +101,10 @@ class Database:
         opened by SQLite. A sidecar transition invalidates the candidate and
         retries the complete snapshot protocol.
         """
-        requested_path = path or _db.DB_PATH
-        if not requested_path.exists():
-            yield False, 0, LATEST_VERSION, None
-            return
+        from agentworks.db.inspection import inspection_snapshot
 
-        temporary: tempfile.TemporaryDirectory[str] | None = None
-        connection: sqlite3.Connection | None = None
-        database: Database | None = None
-        try:
-            try:
-                source_path = requested_path.resolve(strict=True)
-            except (OSError, RuntimeError):
-                raise StateError("state database inspection snapshot could not be created") from None
-
-            temporary = tempfile.TemporaryDirectory(prefix="agentworks-db-inspection-")
-            for attempt in range(_INSPECTION_SNAPSHOT_ATTEMPTS):
-                candidate_connection: sqlite3.Connection | None = None
-                try:
-                    attempt_directory = Path(temporary.name) / str(attempt)
-                    attempt_directory.mkdir()
-                    candidate = attempt_directory / source_path.name
-                    _copy_verified_file_set(source_path, candidate)
-                    candidate_connection = sqlite3.connect(
-                        f"{candidate.resolve().as_uri()}?mode=ro",
-                        uri=True,
-                    )
-                    if candidate_connection.execute("PRAGMA quick_check").fetchall() != [("ok",)]:
-                        candidate_connection.close()
-                        continue
-                except _SnapshotChanged:
-                    if candidate_connection is not None:
-                        candidate_connection.close()
-                    continue
-                except sqlite3.DatabaseError:
-                    if candidate_connection is not None:
-                        candidate_connection.close()
-                    continue
-                except OSError:
-                    raise StateError("state database inspection snapshot could not be created") from None
-                connection = candidate_connection
-                break
-            else:
-                raise StateError("state database inspection snapshot could not be created")
-
-            if connection is None:
-                raise StateError("state database inspection snapshot could not be created")
-            try:
-                row = connection.execute("SELECT MAX(version) FROM schema_version").fetchone()
-                current = row[0] or 0
-            except sqlite3.OperationalError:
-                current = 0
-            if current == LATEST_VERSION:
-                connection.row_factory = sqlite3.Row
-                connection.execute("PRAGMA foreign_keys = ON")
-                database = cls.__new__(cls)
-                database._conn = connection
-                database._tx_depth = 0
-                connection = None
-            yield True, current, LATEST_VERSION, database
-        finally:
-            if database is not None:
-                database.close()
-            if connection is not None:
-                connection.close()
-            if temporary is not None:
-                temporary.cleanup()
+        with inspection_snapshot(cls, path or _db.DB_PATH) as snapshot:
+            yield snapshot
 
     @contextmanager
     def transaction(self) -> Iterator[None]:

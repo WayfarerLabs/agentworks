@@ -122,12 +122,14 @@ def _main_in_request() -> None:
             from typer import _click as typer_click
 
             try:
-                _cli.app(color=False, standalone_mode=False)
+                exit_code = _cli.app(color=False, standalone_mode=False)
             except typer_click.ClickException as exception:
                 rendered = StringIO()
                 exception.show(file=rendered)
                 typer.echo(machine_stderr_text(rendered.getvalue(), force=True), nl=False, err=True)
                 raise SystemExit(exception.exit_code) from None
+            if isinstance(exit_code, int) and exit_code != 0:
+                raise SystemExit(exit_code)
         else:
             _cli.app()
     except ConfigError as e:

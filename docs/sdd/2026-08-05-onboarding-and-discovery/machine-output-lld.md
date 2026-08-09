@@ -1,6 +1,6 @@
 # Low-Level Design: Machine-Readable Operational Output
 
-- Status: Draft for Phase 2 implementation
+- Status: Implemented in Phase 2
 - Parent design: frd.md R7 and AC4, hla.md machine-readable output contract, and plan Phase 2
 - Baseline: main at 0cabf37b
 
@@ -278,18 +278,22 @@ mutation and passthrough arguments. The serializer writes stdout directly, rathe
 so the ambient handler cannot add presentation. --output human executes the exact current human
 renderer path.
 
-Doctor is inspection-only at both schema states. A stale schema yields the System, VM sites, and
-Database pending-migration rows without opening the original database through SQLite. A current,
-existing database is resolved to its real identity, then doctor stream-copies the main file and any
-resolved WAL/SHM sidecars into a private writable directory while recording file identity, size,
-modification time, and content fingerprints. The same bounded protocol handles main-only and active
-sets. A main-only candidate requires sidecar absence to remain stable throughout copying and
-verification. Doctor re-reads and re-stats the complete source set and accepts only an exact match,
-then validates and opens only the disposable copy through SQLite. A concurrent clean-to-active
-transition, checkpoint, replacement, or sidecar transition discards the candidate and retries a
-small bounded number of times; exhaustion is a path-free inspection-unavailable error. Each snapshot
-is cleaned up after the group reads its facts; doctor neither migrates nor creates or changes the
-original database, WAL, or SHM files.
+Doctor is inspection-only at both schema states. One report-scoped collection supplies the System,
+VM sites, and Database groups, so all three project facts from one verified database generation. A
+stale schema yields their pending-migration rows without opening the original database through
+SQLite. A current, existing database is resolved to its real identity, then doctor stream-copies the
+main file and any resolved WAL/SHM sidecars into a private writable directory while recording file
+identity, size, modification time, and content fingerprints. Source entries are acquired by
+non-blocking, no-follow descriptors and accepted only when the descriptor identifies a regular file.
+Reads are bounded to the acquired size. Broken or looping symlinks, FIFOs, devices, directories,
+sockets, and other unsupported entries fail closed with a path-free inspection-unavailable error.
+The same bounded protocol handles main-only and active sets. A main-only candidate requires sidecar
+absence to remain stable throughout copying and verification. Doctor reopens and re-fingerprints the
+complete source set and accepts only an exact match, then validates and opens only the disposable
+copy through SQLite. A concurrent clean-to-active transition, checkpoint, replacement, or sidecar
+transition discards the candidate and retries a small bounded number of times; exhaustion is the
+same path-free error. The report-scoped snapshot is cleaned up after all database facts are
+collected; doctor neither migrates nor creates or changes the original database, WAL, or SHM files.
 
 --names-only remains completion plumbing and is mutually exclusive with --output json on every
 covered list or kinds command that already has it. Validate that conflict before service work. It
@@ -331,9 +335,9 @@ Implementation must add:
    assert a positive live PID and a stopped PID_STOPPED row rendered as null. Harness-integration
    degradation fixtures assert null in list and describe JSON.
 
-cli/README.md gains the permanent JSON v1 contract: envelope, supported commands, resource and
-doctor examples, null and ordering rules, errors, doctor exit behavior, --names-only exclusion, and
-compatibility policy. Related command guidance links to it. Applicable guide action records use
+cli/command-reference.md owns the permanent JSON v1 contract: envelope, supported commands, resource
+and doctor examples, null and ordering rules, errors, doctor exit behavior, --names-only exclusion,
+and compatibility policy. Related command guidance links to it. Applicable guide action records use
 --output json and require the envelope schema_version, command, and data checks.
 
 The new public option requires generated Typer help and Bash, Zsh, and PowerShell completion

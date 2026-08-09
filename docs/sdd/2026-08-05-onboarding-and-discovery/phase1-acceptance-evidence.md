@@ -169,10 +169,32 @@ recorded from the branch runs below:
 - Rulesync generated-output check: clean;
 - mandatory file lint: 272 Markdown files clean, 246 spelling files clean, and Prettier clean.
 
-Full mypy was also run, but the exact merged base and this branch both report the same three errors
-in unchanged `tests/test_operational_json_reviewed.py`: two `attr-defined` errors for its
+Superseded inherited-mypy evidence: full mypy was also run for the PR #455 adaptation, but the exact
+merged base and that branch both reported the same three errors in unchanged
+`tests/test_operational_json_reviewed.py`: two `attr-defined` errors for its former
 `agentworks.db.database.tempfile` test override seam and one `SimpleNamespace`/`SessionRow`
-list-item error. This guide-only adaptation does not change that separate operational-JSON test. The
-full non-integration suite was not repeated because no general production path changed; the
-3,069-test boundary above includes the complete guide suite and every relevant schema, manifest,
-retired-shape, and git-credential service test.
+list-item error. That guide-only adaptation did not change the separate operational-JSON test. The
+later Phase 2 correction below removed the stale override seam, corrected the fixture typing, and
+supersedes this inherited result with a clean full mypy run. The full non-integration suite was not
+repeated for the earlier adaptation because no general production path changed; its 3,069-test
+boundary included the complete guide suite and every relevant schema, manifest, retired-shape, and
+git-credential service test.
+
+## Phase 2 accepted-feedback correction
+
+The PR #462 accepted-feedback correction preserves one complete JSON doctor report and now
+propagates its failing status through the installed `agw` entrypoint. Doctor collects System, VM
+sites, and Database facts once from one verified report-scoped database snapshot. Descriptor-first,
+non-blocking, regular-file-only reads reject broken or looping symlinks, FIFOs, devices,
+directories, sockets, and other unsupported entries with path-free diagnostics. Focused adversarial
+tests cover the installed entrypoint, snapshot generation consistency, bounded special-file
+handling, source integrity, aggregate call count, scale, human and JSON parity, and the extracted
+module boundaries.
+
+Final correction validation passed:
+
+- full non-integration suite: 6,689 passed and 3 deselected;
+- Ruff check and format check: 625 files clean;
+- full mypy: 625 source files clean, superseding the inherited PR #455 note above;
+- Rulesync generated-output check and locked-SDD validation: clean;
+- mandatory file lint: Prettier, markdownlint, and cspell clean.

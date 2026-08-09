@@ -594,11 +594,11 @@ secret views report only lookup prediction and metadata, never a secret value.
 reserved for shell completion, so it cannot be combined with JSON output. `agw doctor --output json`
 still exits 1 when its complete report contains failed checks, after writing that report.
 
-The [CLI JSON v1 reference](../../cli/README.md#machine-readable-output) documents the exact
-envelopes, fields, null rules, ordering, error behavior, and compatibility policy. Doctor's JSON
-diagnostic message and hint fields are closed safe diagnostics, so troubleshooting detail such as
-configuration paths, backend responses, exception text, and secret-adjacent text remains only in the
-human report.
+The [CLI JSON v1 reference](../../cli/command-reference.md#machine-readable-output) documents the
+exact envelopes, fields, null rules, ordering, error behavior, and compatibility policy. Doctor's
+JSON diagnostic message and hint fields are closed safe diagnostics, so troubleshooting detail such
+as configuration paths, backend responses, exception text, and secret-adjacent text remains only in
+the human report.
 
 The design rationale (the config/resource split, capability kinds, the vocabulary rules, and the
 vm-site / vm-platform pair) is recorded in ADR 0016. Its dual-path section records the original
