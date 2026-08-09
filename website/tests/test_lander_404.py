@@ -184,6 +184,7 @@ class BuildTests(unittest.TestCase):
         Path("static/lander.css"),
         Path("static/lander-model.js"),
         Path("static/lander-game.js"),
+        Path("static/site.css"),
     }
 
     def build(self, site_base: str) -> tuple[Path, tempfile.TemporaryDirectory[str]]:
@@ -203,6 +204,7 @@ class BuildTests(unittest.TestCase):
                 self.assertNotIn("{{", html)
                 self.assertIn(f'href="{site_base}"', html)
                 self.assertIn(f'href="{site_base}static/lander.css"', html)
+                self.assertIn(f'href="{site_base}static/site.css"', html)
                 self.assertIn(f'src="{site_base}static/lander-game.js"', html)
                 for fragment in ("agw-mark", "agw-engine-left", "agw-engine-right"):
                     self.assertIn(f'href="{site_base}assets/agw-rocket.svg#{fragment}"', html)
@@ -251,7 +253,7 @@ class BuildTests(unittest.TestCase):
             website_build.render_template(template + "{{OTHER}}", "/")
         for required in website_build.REQUIRED_TEMPLATE_REFERENCES:
             with self.subTest(required=required), self.assertRaises(ValueError):
-                website_build.render_template(template.replace(required, "missing", 1), "/")
+                website_build.render_template(template.replace(required, "missing"), "/")
 
 
 class StaticDocumentTests(unittest.TestCase):

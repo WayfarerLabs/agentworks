@@ -3,16 +3,32 @@
     <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="description" content="The requested Agentworks page was not found." />
+        <meta
+            http-equiv="Content-Security-Policy"
+            content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+        />
         <title>Page not found | Agentworks</title>
+        <link rel="canonical" href="https://agentworks.build/404.html" />
+        <link rel="stylesheet" href="{{SITE_BASE}}static/site.css" />
         <link rel="stylesheet" href="{{SITE_BASE}}static/lander.css" />
         <script type="module" src="{{SITE_BASE}}static/lander-game.js"></script>
     </head>
     <body>
-        <header>
-            <p class="site-name">Agentworks</p>
+        <a class="skip-link" href="{{SITE_BASE}}404.html#main-content">Skip to main content</a>
+        <header class="site-header">
+            <a class="brand" href="{{SITE_BASE}}">
+                <img src="{{SITE_BASE}}assets/agw-rocket.svg" alt="Agentworks home" />
+                <span aria-hidden="true">Agentworks</span>
+            </a>
+            <nav aria-label="Primary">
+                <a href="{{SITE_BASE}}">Home</a>
+                <a href="https://github.com/WayfarerLabs/agentworks">GitHub</a>
+                <a href="https://pypi.org/project/agentworks-cli/">PyPI</a>
+            </nav>
         </header>
-        <main>
-            <div class="error-copy">
+        <main id="main-content">
+            <div class="error-message">
                 <p class="error-code">404</p>
                 <h1>Page not found</h1>
                 <p id="not-found-message">

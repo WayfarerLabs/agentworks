@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="description" content="{{HOME_META_DESCRIPTION}}" />
+        <meta
+            http-equiv="Content-Security-Policy"
+            content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+        />
+        <title>Agentworks</title>
+        <link rel="canonical" href="https://agentworks.build/" />
+        <link rel="stylesheet" href="{{SITE_BASE}}static/site.css" />
+    </head>
+    <body>
+        <a class="skip-link" href="{{SITE_BASE}}#main-content">Skip to main content</a>
+        <header class="site-header">
+            <a class="brand" href="{{SITE_BASE}}">
+                <img src="{{SITE_BASE}}assets/agw-rocket.svg" alt="Agentworks home" />
+                <span aria-hidden="true">Agentworks</span>
+            </a>
+            <nav aria-label="Primary">
+                <a href="https://github.com/WayfarerLabs/agentworks">GitHub</a>
+                <a href="https://pypi.org/project/agentworks-cli/">PyPI</a>
+            </nav>
+        </header>
+        <main id="main-content">
+            <section class="identity-panel" aria-labelledby="home-heading">
+                <div>
+                    <p class="eyebrow">Project / Overview</p>
+                    <h1 id="home-heading">Agentworks</h1>
+                </div>
+                <div class="sourced-content">{{HOME_IDENTITY}}</div>
+            </section>
+
+            <section id="onboarding" class="status-panel" aria-labelledby="onboarding-heading">
+                <p class="status-label">Availability / Interim</p>
+                <h2 id="onboarding-heading">Guided onboarding</h2>
+                <p id="onboarding-availability">
+                    Guided onboarding is not yet published. You can still explore the repository, PyPI package,
+                    rationale, and security model.
+                </p>
+            </section>
+
+            <section id="problem" class="content-section">
+                <p class="section-index" aria-hidden="true">01</p>
+                <div>
+                    <h2>The problem space</h2>
+                    <div class="sourced-content">{{HOME_PROBLEM}}</div>
+                </div>
+            </section>
+
+            <section id="principles" class="content-section">
+                <p class="section-index" aria-hidden="true">02</p>
+                <div>
+                    <h2>Why it is built this way</h2>
+                    <div class="sourced-content">{{HOME_PRINCIPLES}}</div>
+                </div>
+            </section>
+
+            <nav class="explore-panel" aria-label="Explore Agentworks">
+                <p class="status-label">Explore / Permanent sources</p>
+                <div class="explore-links">
+                    <a href="https://github.com/WayfarerLabs/agentworks">View the GitHub repository</a>
+                    <a href="https://pypi.org/project/agentworks-cli/">View the PyPI package</a>
+                    <a href="https://github.com/WayfarerLabs/agentworks/blob/main/docs/why-agentworks.md"
+                        >Read why Agentworks is built this way</a
+                    >
+                    <a class="security-link" href="{{SITE_BASE}}security/">We take security seriously.</a>
+                </div>
+            </nav>
+        </main>
+        <footer>
+            <p>
+                <a href="https://github.com/WayfarerLabs/agentworks">Agentworks on GitHub</a>
+                <span aria-hidden="true">/</span>
+                <a href="{{SITE_BASE}}security/">Security</a>
+            </p>
+        </footer>
+    </body>
+</html>

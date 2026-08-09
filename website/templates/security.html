@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="description" content="{{SECURITY_META_DESCRIPTION}}" />
+        <meta
+            http-equiv="Content-Security-Policy"
+            content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+        />
+        <title>Security | Agentworks</title>
+        <link rel="canonical" href="https://agentworks.build/security/" />
+        <link rel="stylesheet" href="{{SITE_BASE}}static/site.css" />
+    </head>
+    <body>
+        <a class="skip-link" href="{{SITE_BASE}}security/#main-content">Skip to main content</a>
+        <header class="site-header">
+            <a class="brand" href="{{SITE_BASE}}">
+                <img src="{{SITE_BASE}}assets/agw-rocket.svg" alt="Agentworks home" />
+                <span aria-hidden="true">Agentworks</span>
+            </a>
+            <nav aria-label="Primary">
+                <a href="{{SITE_BASE}}">Home</a>
+                <a href="https://github.com/WayfarerLabs/agentworks">GitHub</a>
+                <a href="https://pypi.org/project/agentworks-cli/">PyPI</a>
+            </nav>
+        </header>
+        <main id="main-content">
+            <div class="page-heading">
+                <p class="eyebrow">Security model / Repository sourced</p>
+                <h1>Security at Agentworks</h1>
+            </div>
+
+            <section id="threat-model" class="content-section">
+                <p class="section-index" aria-hidden="true">01</p>
+                <div>
+                    <h2>Threat model</h2>
+                    <div class="sourced-content">{{SECURITY_THREATS}}</div>
+                </div>
+            </section>
+
+            <section id="boundaries" class="content-section">
+                <p class="section-index" aria-hidden="true">02</p>
+                <div>
+                    <h2>Boundaries and current limitations</h2>
+                    <div class="sourced-content">{{SECURITY_BOUNDARIES}}</div>
+                </div>
+            </section>
+
+            <section id="operator-posture" class="content-section">
+                <p class="section-index" aria-hidden="true">03</p>
+                <div>
+                    <h2>Operator posture</h2>
+                    <div class="sourced-content">{{SECURITY_POSTURE}}</div>
+                </div>
+            </section>
+
+            <section id="credentials" class="content-section">
+                <p class="section-index" aria-hidden="true">04</p>
+                <div>
+                    <h2>Credentials and secrets</h2>
+                    <div class="sourced-content">{{SECURITY_SECRETS}}</div>
+                </div>
+            </section>
+
+            <section id="reporting" class="reporting-panel">
+                <p class="status-label">Reporting / Repository policy</p>
+                <h2>Report a vulnerability</h2>
+                <div class="sourced-content">{{SECURITY_REPORTING}}</div>
+                <p class="reporting-links">
+                    <a
+                        href="https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing-information-about-vulnerabilities/privately-reporting-a-security-vulnerability"
+                        >GitHub private vulnerability reporting</a
+                    >
+                    <a href="https://github.com/WayfarerLabs/agentworks/security/policy"
+                        >Read the repository security policy</a
+                    >
+                </p>
+            </section>
+        </main>
+        <footer>
+            <p><a href="{{SITE_BASE}}">Return to agentworks.build</a></p>
+        </footer>
+    </body>
+</html>

@@ -1,5 +1,12 @@
 # Lunar Deployment Browser Checklist
 
+The full-site demo uses the same builder and game sources:
+
+```bash
+python3 website/build.py --repo-root . --output /tmp/agentworks-site-demo --site-base /
+python3 -m http.server --directory /tmp/agentworks-site-demo 8000
+```
+
 Use this package-free checklist against the built 404 artifact. Record each execution so a future
 reader can distinguish verified behavior from an expectation that has not been run.
 
@@ -161,3 +168,23 @@ browser. Safari or another WebKit browser is required before public launch.
       actions, and browser navigation and zoom remain available outside it.
 - [x] On a wide viewport, the scene remains capped at 60 rem with a 25:16 ratio; terrain never
       covers the landing zone, operations center, focus outline, controls, or status.
+
+## Shared shell acceptance
+
+- [ ] In current Chromium, Firefox, and WebKit at 320 CSS pixels, 400 percent zoom, touch landscape,
+      and wide desktop, home, security, and 404 have no page overflow, clipped text or navigation,
+      overlap, or fixed-height content loss. Record browser versions, viewport, date, and result
+      before public release.
+- [ ] With JavaScript disabled, home and security retain all content and links, while 404 retains
+      its message, named scene, and home link. No surface depends on terminal familiarity.
+- [ ] Keyboard-only traversal reaches the visible skip link, linked brand, navigation, content
+      links, 404 home link, and lander start control in source order with a visible focus outline.
+- [ ] A screen reader reports each page title, header, main, footer, one `h1`, nested section
+      headings, named navigation, sourced links, and 404 status/focus behavior. Initial game
+      controls remain hidden.
+- [ ] With reduced motion enabled, home and security remain motion-free and the 404 follows the
+      existing no-cue, direct-success contract. Human touch checks confirm page scroll outside the
+      active scene and tap, hold, and drag behavior inside it.
+- [ ] In a clean context, a visitor identifies what Agentworks is, sees that guided onboarding is
+      not yet published, and can choose the repository, PyPI package, rationale, or security path
+      without explanation. Record timing and any intervention.

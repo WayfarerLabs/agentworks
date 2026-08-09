@@ -31,6 +31,7 @@ import {
 } from "../static/lander-model.js";
 
 const TOLERANCE = 1e-10;
+const ZERO_INPUT = { left: 0, right: 0 };
 
 function close(actual, expected, tolerance = TOLERANCE) {
     assert.ok(Math.abs(actual - expected) <= tolerance, `expected ${actual} to be within ${tolerance} of ${expected}`);
@@ -394,5 +395,3 @@ test("the subtle cue is one-shot and exit creates strict settled preflight", () 
     const restarted = transitionMission(powered, "RESTART");
     assert.deepEqual(restarted, createFlightModel());
 });
-
-const ZERO_INPUT = { left: 0, right: 0 };

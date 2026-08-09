@@ -256,9 +256,13 @@ admin user and agents).
 
 ## Components
 
-Today the repo contains a single component: [`cli/`](cli/), the Python CLI that is the operator's
-primary interface. The structure leaves room for additional clients (a web UI is anticipated) to
-land alongside it without relocating the CLI.
+The repository contains two operator-facing components:
+
+- [`cli/`](cli/) is the Python CLI and the operator's primary interface.
+- [`website/`](website/) is the package-free static source and builder for `agentworks.build`.
+
+They share permanent product and security documentation without maintaining independent copies of
+the same claims.
 
 ## Contributing
 
