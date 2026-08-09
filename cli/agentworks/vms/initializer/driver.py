@@ -67,6 +67,17 @@ if TYPE_CHECKING:
     from agentworks.vms.templates import ResolvedVMTemplate
 
 
+class _BootstrapSecretCleanup:
+    def __init__(self, git_tokens: dict[str, str]) -> None:
+        self.git_tokens = git_tokens
+        self.logger: SSHLogger | None = None
+
+    def scrub_failure(self) -> None:
+        self.git_tokens.clear()
+        if self.logger is not None:
+            self.logger.discard_redactions()
+
+
 def bootstrap_vm(
     db: Database,
     config: Config,
@@ -77,11 +88,51 @@ def bootstrap_vm(
     ctx: RunContext,
     *,
     admin_username: str,
-    tailscale_auth_key: str,
+    tailscale_ctx: RunContext,
     git_tokens: dict[str, str],
     bootstrap_complete: bool = False,
     tailscale_ip: str | None = None,
     on_tailscale_ready: Callable[[], None] | None = None,
+) -> tuple[Transport, SSHLogger, str]:
+    cleanup = _BootstrapSecretCleanup(git_tokens)
+    try:
+        return _bootstrap_vm(
+            db,
+            config,
+            vm_template,
+            vm_name,
+            exec_target,
+            platform,
+            ctx,
+            admin_username=admin_username,
+            tailscale_ctx=tailscale_ctx,
+            git_tokens=git_tokens,
+            bootstrap_complete=bootstrap_complete,
+            tailscale_ip=tailscale_ip,
+            on_tailscale_ready=on_tailscale_ready,
+            _secret_cleanup=cleanup,
+        )
+    except BaseException:
+        cleanup.scrub_failure()
+        raise
+
+
+def _bootstrap_vm(
+    db: Database,
+    config: Config,
+    vm_template: ResolvedVMTemplate,
+    vm_name: str,
+    exec_target: Transport,
+    platform: VMPlatform,
+    ctx: RunContext,
+    *,
+    admin_username: str,
+    tailscale_ctx: RunContext,
+    git_tokens: dict[str, str],
+    bootstrap_complete: bool = False,
+    tailscale_ip: str | None = None,
+    on_tailscale_ready: Callable[[], None] | None = None,
+    _secret_cleanup: _BootstrapSecretCleanup,
 ) -> tuple[Transport, SSHLogger, str]:
     """Run Phase A (provisioning bootstrap + connectivity) on a fresh VM.
 
@@ -108,9 +159,10 @@ def bootstrap_vm(
     The caller owns the keepalive hold spanning both phases (this function
     does not open it) and the ``Provisioning`` output section (this function
     emits into the ambient section, opening none of its own). ``platform``
-    rides along for the WSL2 swap check; both ``tailscale_auth_key`` and
-    ``git_tokens`` are required (``create_vm`` resolves them via the framework
-    and threads them in), the latter only to seed the log's redactions.
+    rides along for the WSL2 swap check. ``tailscale_ctx`` supplies only the
+    declared Tailscale key and ``git_tokens`` supplies credential values;
+    both are resolved at ``create_vm``'s boundary and only seed the log's
+    redactions.
 
     ``ctx`` is the create op's own scoped :class:`RunContext`, threaded
     in so the ``secure_failed_vm`` hook (a backend NSG call on Azure)
@@ -123,15 +175,16 @@ def bootstrap_vm(
     from agentworks.ssh import SSHLogger
 
     home = f"/home/{admin_username}"
-    logger = SSHLogger(
+    _secret_cleanup.logger = SSHLogger(
         vm_name,
         "vm-create",
-        redactions=(tailscale_auth_key, *(git_tokens or {}).values()),
+        redactions=(tailscale_ctx.secret(vm_template.tailscale_auth_key), *(git_tokens or {}).values()),
     )
+    logger = _secret_cleanup.logger
 
     # Attach logger to the provisioning transport. ``Transport`` declares
     # ``logger`` on the ABC; the assignment is polymorphic.
-    exec_target.logger = logger
+    exec_target.logger = _secret_cleanup.logger
 
     transport = exec_target.describe()
 
@@ -155,7 +208,7 @@ def bootstrap_vm(
             admin_username,
             vm_row.hostname,
             logger,
-            tailscale_auth_key=tailscale_auth_key,
+            tailscale_ctx=tailscale_ctx,
             # WSL2 handles swap natively before bootstrap; every
             # other platform lets the script create the swapfile.
             script_swap=0 if platform.name == "wsl2" else vm_template.swap,
@@ -311,7 +364,7 @@ def _phase_a_bootstrap(
     hostname: str,
     logger: SSHLogger,
     *,
-    tailscale_auth_key: str,
+    tailscale_ctx: RunContext,
     script_swap: int,
     bootstrap_complete: bool = False,
     tailscale_ip: str | None = None,
@@ -351,7 +404,7 @@ def _phase_a_bootstrap(
             admin_username,
             hostname,
             logger,
-            tailscale_auth_key=tailscale_auth_key,
+            tailscale_ctx=tailscale_ctx,
             script_swap=script_swap,
         )
 
@@ -396,15 +449,15 @@ def _run_bootstrap_script(
     hostname: str,
     logger: SSHLogger,
     *,
-    tailscale_auth_key: str,
+    tailscale_ctx: RunContext,
     script_swap: int,
 ) -> str:
     """Generate, copy, and run a bootstrap script on the VM. Returns Tailscale IP.
 
     Used for WSL2 where the bootstrap cannot be embedded in a platform's
     native mechanism (Lima provision block, Azure cloud-init).
-    ``tailscale_auth_key`` is required; the framework-resolved value
-    arrives from ``create_vm`` -> ``bootstrap_vm`` -> ``_phase_a_bootstrap``.
+    The framework-resolved Tailscale key is read from this operation's scoped
+    ``tailscale_ctx`` only at the script-generation boundary.
     """
     import tempfile
 
@@ -416,21 +469,21 @@ def _run_bootstrap_script(
     output.info("Bootstrapping VM...")
 
     ssh_public_key = config.operator.ssh_public_key.read_text().strip()
-    script = generate_bootstrap_script(
-        admin_username=admin_username,
-        ssh_public_key=ssh_public_key,
-        provisioning_packages=PROVISIONING_PACKAGES,
-        tailscale_auth_key=tailscale_auth_key,
-        # The stored hostname (vms.hostname), never re-derived from
-        # live config.
-        hostname=hostname,
-        swap=script_swap,
-    )
-
     # Copy script to VM and execute synchronously over the provisioning transport
     remote_script = "/tmp/agentworks-bootstrap.sh"
     with tempfile.NamedTemporaryFile(mode="wb", suffix=".sh", delete=False) as f:
-        f.write(script.encode("utf-8"))
+        f.write(
+            generate_bootstrap_script(
+                admin_username=admin_username,
+                ssh_public_key=ssh_public_key,
+                provisioning_packages=PROVISIONING_PACKAGES,
+                tailscale_auth_key=tailscale_ctx.secret(vm_template.tailscale_auth_key),
+                # The stored hostname (vms.hostname), never re-derived from
+                # live config.
+                hostname=hostname,
+                swap=script_swap,
+            ).encode("utf-8")
+        )
         local_script = f.name
 
     try:

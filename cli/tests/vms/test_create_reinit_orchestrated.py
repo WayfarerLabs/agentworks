@@ -237,7 +237,11 @@ def test_create_init_failure_keeps_the_row(
     monkeypatch.setattr(
         vm_manager,
         "bootstrap_vm",
-        lambda *a, **k: (SimpleNamespace(), SimpleNamespace(), "/home/agentworks"),
+        lambda *a, **k: (
+            SimpleNamespace(),
+            SimpleNamespace(discard_redactions=lambda: None),
+            "/home/agentworks",
+        ),
     )
 
     def _init_boom(*a: object, **k: object) -> None:
@@ -466,6 +470,9 @@ def test_reinit_runs_initialization_through_the_gate(
             logger_redactions.append(redactions)
 
         def close(self) -> None:
+            pass
+
+        def discard_redactions(self) -> None:
             pass
 
     monkeypatch.setattr("agentworks.ssh.SSHLogger", _LoggerSpy)

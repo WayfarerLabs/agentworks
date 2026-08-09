@@ -41,7 +41,7 @@ _ROOT = Path(agentworks.__file__).parent
 # would miss a future `vm repair` calling `run_initialization`, or a new session
 # path calling `_realize_ephemerals`). A new caller of ANY of these fails the
 # test until its chain terminates at a gated command entry below. The terminal
-# entries are `create_vm` / `reinit_vm` (gate directly) and `create_session`
+# entries are `_create_vm` / `reinit_vm` (gate directly) and `create_session`
 # (whose build phase `_build_session_graph` gates).
 _EXPECTED_CALLERS: dict[str, set[str]] = {
     # agent-install runner chain -> create_agent / reinit_agent (+ session --new-agent)
@@ -50,10 +50,10 @@ _EXPECTED_CALLERS: dict[str, set[str]] = {
     "realize_agent": {"create_agent", "_realize_ephemerals"},
     "_realize_ephemerals": {"_roll_forward"},
     "_roll_forward": {"create_session"},
-    # vm-install runner chain -> create_vm / reinit_vm
+    # vm-install runner chain -> create_vm's fenced helper / reinit_vm
     "_run_install_commands": {"_phase_b_setup"},
     "_phase_b_setup": {"run_initialization"},
-    "run_initialization": {"create_vm", "reinit_vm"},
+    "run_initialization": {"_create_vm", "reinit_vm"},
 }
 
 # The gate-bearing functions (each must call `ensure_recipe_enabled`) and the
@@ -64,7 +64,7 @@ _EXPECTED_CALLERS: dict[str, set[str]] = {
 # that the runner chain reaches `create_session`, and `_build_session_graph`
 # gates.
 _ENTRY_GATES: dict[str, str | None] = {
-    "create_vm": "run_initialization",
+    "_create_vm": "run_initialization",
     "reinit_vm": "run_initialization",
     "create_agent": "realize_agent",
     "reinit_agent": "create_agent_on_vm",

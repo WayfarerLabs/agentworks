@@ -439,6 +439,9 @@ class _SilentProvisionLogger:
     def close(self) -> None:
         pass
 
+    def discard_redactions(self) -> None:
+        pass
+
 
 def _wire_remote_operation_success(monkeypatch: pytest.MonkeyPatch) -> None:
     from agentworks import remote_exec
@@ -513,6 +516,9 @@ def test_remote_interrupt_kills_the_detached_limactl_before_deleting(
             pass
 
         def close(self) -> None:
+            pass
+
+        def discard_redactions(self) -> None:
             pass
 
     monkeypatch.setattr("agentworks.ssh.SSHLogger", _StubLogger)

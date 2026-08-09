@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from agentworks.capabilities.base import RunContext
+from agentworks.orchestration.secrets import ScopedSecrets
 from agentworks.vms.initializer import driver
 
 if TYPE_CHECKING:
@@ -52,6 +53,10 @@ def _stub_exec_target() -> Any:
     return SimpleNamespace(describe=lambda: "stub-transport", logger=None)
 
 
+def _tailscale_ctx(secret: str) -> RunContext:
+    return RunContext(secrets=ScopedSecrets({"tailscale-auth-key": secret}, ("tailscale-auth-key",)))
+
+
 @pytest.fixture
 def _hermetic_driver(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Point the SSH log dir at tmp and stub the function-local imports
@@ -66,13 +71,13 @@ def _call_bootstrap(db: Database, platform: _SpyPlatform, on_ready: Any) -> tupl
     return driver.bootstrap_vm(
         db,
         SimpleNamespace(),  # type: ignore[arg-type]  # config: unused past the stubbed seams
-        SimpleNamespace(swap=0),  # type: ignore[arg-type]  # vm_template: only swap is read
+        SimpleNamespace(swap=0, tailscale_auth_key="tailscale-auth-key"),  # type: ignore[arg-type]
         "hookvm",
         _stub_exec_target(),
         platform,  # type: ignore[arg-type]
         RunContext(),
         admin_username="agentworks",
-        tailscale_auth_key="tskey-test",
+        tailscale_ctx=_tailscale_ctx("tskey-test"),
         git_tokens={},
         on_tailscale_ready=on_ready,
     )
@@ -101,13 +106,13 @@ def test_bootstrap_logger_receives_every_resolved_secret(
     driver.bootstrap_vm(
         db,
         SimpleNamespace(),  # type: ignore[arg-type]
-        SimpleNamespace(swap=0),  # type: ignore[arg-type]
+        SimpleNamespace(swap=0, tailscale_auth_key="tailscale-auth-key"),  # type: ignore[arg-type]
         "hookvm",
         _stub_exec_target(),
         _SpyPlatform(),  # type: ignore[arg-type]
         RunContext(),
         admin_username="admin",
-        tailscale_auth_key="tailscale-secret",
+        tailscale_ctx=_tailscale_ctx("tailscale-secret"),
         git_tokens={"gh": "github-secret", "gl": "gitlab-secret"},
         on_tailscale_ready=lambda: None,
     )

@@ -36,8 +36,10 @@ from agentworks.transports import LimaTransport, RemoteLimaTransport, SSHTranspo
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
+    from agentworks.capabilities.vm_platform.bootstrap_script import BootstrapResult
     from agentworks.config import Config
     from agentworks.db import VMRow
+    from agentworks.remote_exec import DetachedResult
     from agentworks.resources.graph import Readiness
     from agentworks.ssh import SSHLogger
     from agentworks.transports import Transport
@@ -51,6 +53,31 @@ _REMOTE_TEMPLATE_CLEANUP_ATTEMPTS = 3
 _REMOTE_TEMPLATE_ROOT = "/tmp"
 _REMOTE_TEMPLATE_PREFIX = "agentworks-lima-template."
 _REMOTE_TEMPLATE_RANDOM_LENGTH = 10
+
+
+class _RemoteCreateSensitiveState:
+    """Mutable secret-bearing state for one remote create attempt."""
+
+    def __init__(self, lima_yaml: str, redactions: tuple[str, ...]) -> None:
+        self.lima_yaml = lima_yaml
+        self.redactions = redactions
+        self.ssh_logger: SSHLogger | None = None
+        self.host_target: SSHTransport | None = None
+        self.result: DetachedResult | None = None
+        self.bootstrap: BootstrapResult | None = None
+        self.operation_failure: BaseException | None = None
+
+    def scrub(self) -> None:
+        self.lima_yaml = ""
+        self.redactions = ()
+        if self.ssh_logger is not None:
+            self.ssh_logger.discard_redactions()
+        if self.host_target is not None:
+            self.host_target.logger = None
+        self.result = None
+        self.bootstrap = None
+        self.operation_failure = None
+
 
 # Lima template for Debian cloud VMs (values substituted at create time).
 # The provision block runs the non-secret bootstrap script (user, packages,
@@ -587,19 +614,31 @@ class LimaPlatform(VMPlatform):
         *,
         redactions: tuple[str, ...],
     ) -> None:
+        sensitive = _RemoteCreateSensitiveState(lima_yaml, redactions)
+        try:
+            self._create_remote_sensitive(instance_name, sensitive)
+        finally:
+            sensitive.scrub()
+            lima_yaml = ""
+            redactions = ()
+
+    def _create_remote_sensitive(
+        self,
+        instance_name: str,
+        sensitive: _RemoteCreateSensitiveState,
+    ) -> None:
         """Create and start a Lima VM on the site's placement host.
 
-        ``lima_yaml`` is the exact provider-persisted configuration and must
-        contain no resolved secret. ``redactions`` remains defense in depth
-        for provider output, but is not permission to put resolved secrets in
-        the submitted template.
+        ``sensitive.lima_yaml`` is the exact provider-persisted configuration
+        and must contain no resolved secret. ``sensitive.redactions`` remains
+        defense in depth for provider output, but is not permission to put
+        resolved secrets in the submitted template.
         """
         assert self._remote_host is not None
         target = SSHTarget(host=self._remote_host, user=None)
 
         remote_template_dir = self._allocate_remote_template_dir(target)
         remote_template = f"{remote_template_dir}/template.yaml"
-        operation_failure: BaseException | None = None
         try:
             # Stream directly into the private directory allocated above.
             # ``umask 077`` creates mode 0600. The input is carried only on
@@ -608,15 +647,15 @@ class LimaPlatform(VMPlatform):
             ssh_run(
                 target,
                 f"umask 077 && cat > {shlex.quote(remote_template)}",
-                input_text=lima_yaml,
+                input_text=sensitive.lima_yaml,
             )
 
             # Run limactl create + start as a single detached operation
             from agentworks.remote_exec import run_detached
             from agentworks.ssh import SSHLogger
 
-            ssh_logger = SSHLogger(instance_name, "vm-provision", redactions=redactions)
-            host_target = self._host_transport(logger=ssh_logger)
+            sensitive.ssh_logger = SSHLogger(instance_name, "vm-provision", redactions=sensitive.redactions)
+            sensitive.host_target = self._host_transport(logger=sensitive.ssh_logger)
             lima_cmd = (
                 f"limactl create --name {instance_name} --tty=false {remote_template} && limactl start {instance_name}"
             )
@@ -626,8 +665,8 @@ class LimaPlatform(VMPlatform):
                 # status file can only be stale garbage from an interrupted
                 # attempt; consuming it would report a phantom result for a
                 # limactl run that never happened.
-                result = run_detached(
-                    host_target,
+                sensitive.result = run_detached(
+                    sensitive.host_target,
                     lima_cmd,
                     label=f"Lima ({instance_name})",
                     base_path=self._remote_base_path(instance_name),
@@ -635,18 +674,28 @@ class LimaPlatform(VMPlatform):
                     quiet=True,
                     reuse_completed=False,
                 )
-                if result.exit_code != 0:
+                if sensitive.result.exit_code != 0:
                     # Parse structured markers from provision script output if present
-                    bootstrap = parse_bootstrap_output(result.output, result.exit_code)
-                    for step in bootstrap.steps:
-                        if step.error:
-                            ssh_logger.log_error(f"Provision step '{step.name}': {step.error}")
+                    sensitive.bootstrap = parse_bootstrap_output(
+                        sensitive.result.output,
+                        sensitive.result.exit_code,
+                    )
+                    step = None
+                    try:
+                        for step in sensitive.bootstrap.steps:
+                            if step.error:
+                                sensitive.ssh_logger.log_error(f"Provision step '{step.name}': {step.error}")
+                    finally:
+                        # A parsed step may contain provider-reflected output.
+                        # The state owner clears the result graph; clear this
+                        # separate loop binding before any re-raise too.
+                        step = None
 
-                    ssh_logger.log_error(f"limactl failed (exit {result.exit_code})")
-                    ssh_logger.log_error(result.output)
+                    sensitive.ssh_logger.log_error(f"limactl failed (exit {sensitive.result.exit_code})")
+                    sensitive.ssh_logger.log_error(sensitive.result.output)
                     raise SSHError(
-                        f"limactl create/start failed (exit {result.exit_code})\n"
-                        f"Sanitized output is in SSH log: {ssh_logger.display_path}"
+                        f"limactl create/start failed (exit {sensitive.result.exit_code})\n"
+                        f"Sanitized output is in SSH log: {sensitive.ssh_logger.display_path}"
                     )
             finally:
                 # Exactly-once close, covering the paths where run_detached
@@ -662,14 +711,17 @@ class LimaPlatform(VMPlatform):
                 # itself is the operation that was interrupted.
                 active_failure = sys.exc_info()[1]
                 try:
-                    ssh_logger.close()
-                except OSError:
-                    pass
-                except KeyboardInterrupt:
-                    if active_failure is None:
-                        raise
+                    try:
+                        sensitive.ssh_logger.close()
+                    except OSError:
+                        pass
+                    except KeyboardInterrupt:
+                        if active_failure is None:
+                            raise
+                finally:
+                    active_failure = None
         except BaseException as exc:
-            operation_failure = exc
+            sensitive.operation_failure = exc
 
         cleanup_failure: SensitiveDataCleanupError | None = None
         try:
@@ -678,7 +730,7 @@ class LimaPlatform(VMPlatform):
             cleanup_failure = exc
 
         if cleanup_failure is not None:
-            if operation_failure is None:
+            if sensitive.operation_failure is None:
                 raise cleanup_failure
             # Residue risk takes precedence over the earlier failure. Do not
             # chain provider or transport text into the diagnostic: the safe
@@ -686,8 +738,8 @@ class LimaPlatform(VMPlatform):
             # the sensitive path.
             raise self._remote_template_cleanup_error(remote_template_dir, operation_failed=True) from None
 
-        if operation_failure is not None:
-            raise operation_failure
+        if sensitive.operation_failure is not None:
+            raise sensitive.operation_failure
 
     def _allocate_remote_template_dir(self, target: SSHTarget) -> str:
         """Atomically allocate and validate a private remote staging directory."""

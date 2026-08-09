@@ -352,3 +352,16 @@ class Resolver:
                 "skipped that step."
             )
         return dict(self._values)
+
+    def scrub_values(self) -> None:
+        """Discard every value retained by this operation's resolver.
+
+        Composition roots call this from their operation-level cleanup
+        fence after the last consumer, on success and on every unwind.
+        Declarations and configuration remain intact, but a scrubbed
+        resolver is no longer resolved or seeded.
+        """
+        self._seeded.clear()
+        if self._values is not None:
+            self._values.clear()
+            self._values = None

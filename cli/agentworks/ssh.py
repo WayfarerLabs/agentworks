@@ -120,19 +120,32 @@ class SSHLogger:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._active_handler: _PropagatingFileHandler | None = None
         normalized: list[str] = []
-        for secret in redactions:
-            if not secret:
-                continue
-            for representation in (secret, shlex.quote(secret)):
-                if representation not in normalized:
-                    normalized.append(representation)
-        # Prefer the longest representation so an overlapping shorter token
-        # cannot rewrite part of it before the complete value is matched.
-        self._redact = tuple(sorted(normalized, key=len, reverse=True))
-        self._warnings: list[str] = []
+        secret = ""
+        representation = ""
+        try:
+            for secret in redactions:
+                if not secret:
+                    continue
+                for representation in (secret, shlex.quote(secret)):
+                    if representation not in normalized:
+                        normalized.append(representation)
+            # Prefer the longest representation so an overlapping shorter token
+            # cannot rewrite part of it before the complete value is matched.
+            self._redact = tuple(sorted(normalized, key=len, reverse=True))
+            self._warnings: list[str] = []
 
-        ts = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
-        self._write(f"# Log: {vm_name} ({command_stem})\n# Started: {ts}\n\n")
+            ts = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+            self._write(f"# Log: {vm_name} ({command_stem})\n# Started: {ts}\n\n")
+        except BaseException:
+            # Constructor failures retain this frame too. Do not leave the
+            # partly-built logger as a second owner of its caller's tokens.
+            self._redact = ()
+            raise
+        finally:
+            redactions = ()
+            secret = ""
+            representation = ""
+            normalized.clear()
 
     @property
     def display_path(self) -> str:
@@ -212,6 +225,15 @@ class SSHLogger:
     @property
     def has_warnings(self) -> bool:
         return len(self._warnings) > 0
+
+    def discard_redactions(self) -> None:
+        """Forget plaintext redaction tokens after the operation ends.
+
+        Callers retain the logger long enough to sanitize every incremental
+        write and traceback. Once no further write is possible, keeping the
+        raw tokens only extends their lifetime through exception graphs.
+        """
+        self._redact = ()
 
     def close(self) -> None:
         """Write a footer with summary.

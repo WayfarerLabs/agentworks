@@ -225,8 +225,12 @@ class ScopedSecrets:
     """
 
     def __init__(self, values: Mapping[str, str], names: Iterable[str]) -> None:
-        self._values = values
         self._names = frozenset(names)
+        self._values = {name: values[name] for name in self._names if name in values}
+
+    def scrub_values(self) -> None:
+        """Discard this scoped copy after its operation finishes."""
+        self._values.clear()
 
     def get(self, name: str) -> str:
         if name not in self._names:

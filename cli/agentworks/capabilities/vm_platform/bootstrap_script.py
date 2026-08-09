@@ -269,23 +269,29 @@ def generate_bootstrap_script(
     system default, free to disagree with the first. It did: this
     parameter defaulted to 0 while ``ResolvedVMTemplate.swap`` is 4.
     """
-    return SCRIPT_TEMPLATE.format(
-        admin_username=shlex.quote(admin_username),
-        ssh_public_key=shlex.quote(ssh_public_key),
-        provisioning_packages=shlex.quote(" ".join(provisioning_packages)),
-        tailscale_auth_key=shlex.quote(tailscale_auth_key or ""),
-        vm_hostname=shlex.quote(hostname),
-        swap=swap,
-        ssh_preserve_path=SSH_PRESERVE_KEYS_PATH,
-        ssh_preserve_content=SSH_PRESERVE_KEYS_CONTENT,
-        reboot_sentinel=REBOOT_SENTINEL_PATH,
-        sve_apple_vz_grep=SVE_APPLE_VZ_GREP,
-        sve_cpuinfo_grep=SVE_CPUINFO_GREP,
-        sve_grub_path=SVE_NOSVE_GRUB_PATH,
-        sve_grub_content=SVE_NOSVE_GRUB_CONTENT,
-        bashrc_content=BASHRC,
-        zshrc_content=ZSHRC,
-    )
+    try:
+        return SCRIPT_TEMPLATE.format(
+            admin_username=shlex.quote(admin_username),
+            ssh_public_key=shlex.quote(ssh_public_key),
+            provisioning_packages=shlex.quote(" ".join(provisioning_packages)),
+            tailscale_auth_key=shlex.quote(tailscale_auth_key or ""),
+            vm_hostname=shlex.quote(hostname),
+            swap=swap,
+            ssh_preserve_path=SSH_PRESERVE_KEYS_PATH,
+            ssh_preserve_content=SSH_PRESERVE_KEYS_CONTENT,
+            reboot_sentinel=REBOOT_SENTINEL_PATH,
+            sve_apple_vz_grep=SVE_APPLE_VZ_GREP,
+            sve_cpuinfo_grep=SVE_CPUINFO_GREP,
+            sve_grub_path=SVE_NOSVE_GRUB_PATH,
+            sve_grub_content=SVE_NOSVE_GRUB_CONTENT,
+            bashrc_content=BASHRC,
+            zshrc_content=ZSHRC,
+        )
+    finally:
+        # A control-flow exception can preserve this production frame. The
+        # generated script is consumed by the caller, but the raw input need
+        # not remain bound here after either return or failure.
+        tailscale_auth_key = None
 
 
 @dataclass
