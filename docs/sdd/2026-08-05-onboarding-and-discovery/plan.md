@@ -226,6 +226,11 @@ blocks and the migration workflow only; the broader registry-inventory scope rem
       database inspection as a first-class non-failing doctor outcome, reject non-integer schema
       versions through a complete path-free report, clean the accepted inspection seams, and rerun
       project, fresh-eyes, full, and PR gates before requesting re-review.
+- [x] Resolve the pinned-parent, complete schema-history, and persisted-enum re-review round: carry
+      the resolved database directory identity through snapshot acquisition, distinguish an absent
+      schema history from malformed shape or rows, close corrupted persisted JSON enum values with
+      documented sentinels, and rerun project, fresh-eyes, full, and PR gates before requesting
+      re-review.
 
 Definition of done: R7 and AC4 hold across the named commands, with human and JSON renderers sharing
 one fact source.

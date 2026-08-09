@@ -404,8 +404,8 @@ inconclusive live inspection.
 
 Descriptor, schema-history, and persisted-enum correction validation passed:
 
-- focused adversarial snapshot, schema, JSON, human, and guide read-only suite: 98 passed;
-- full non-integration suite: 6,750 passed and 3 deselected;
+- focused adversarial snapshot, schema, JSON, human, and guide read-only suite: 102 passed;
+- full non-integration suite: 6,754 passed and 3 deselected;
 - Ruff check and format check: 629 files clean;
 - full mypy: 629 source files clean;
 - Rulesync generated-output check and locked-SDD validation: clean;
