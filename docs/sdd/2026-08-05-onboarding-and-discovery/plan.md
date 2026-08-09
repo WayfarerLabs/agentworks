@@ -218,7 +218,7 @@ blocks and the migration workflow only; the broader registry-inventory scope rem
 - [x] All focused and full gates pass; step reviewed by `agentworks-reviewer` and a fresh-eyes
       reviewer; valid findings resolved.
 - [x] Always-green ready-to-merge PR opened and roadmap-lead review requested.
-- [ ] Resolve the saga and installed-CLI review round: propagate failing JSON entrypoint status,
+- [x] Resolve the saga and installed-CLI review round: propagate failing JSON entrypoint status,
       reject invalid and special database paths without blocking, share one verified database
       snapshot across doctor groups, restore focused module sizes, reconcile final artifacts, and
       rerun project, fresh-eyes, full, and PR gates before requesting re-review.
