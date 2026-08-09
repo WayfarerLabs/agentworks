@@ -97,18 +97,18 @@ factory are precise before any backend contract or implementation changes.
 
 ### Phase 3: capability contract, registry, and relocation scaffold
 
-- [ ] Add the dual backend model contract and descriptor map-host records, with registration-time
+- [x] Add the dual backend model contract and descriptor map-host records, with registration-time
       conformance for model type/constructibility, JSON-native mapping input annotations, forbidden
       secret references in source config, fixed no-op capability lifecycle, and class-by-name
       storage.
-- [ ] Move capability-owned modules with `git mv` under `agentworks.capabilities.secret_backend`;
+- [x] Move capability-owned modules with `git mv` under `agentworks.capabilities.secret_backend`;
       repoint the descriptor, plugin adapter, registration snapshot/restore, graph publication, and
       imports; remove the `CONSTRUCTED_SINGLETON` policy and constructed adapter branch.
-- [ ] Keep production behavior green behind temporary internal call adapters within the feature
+- [x] Keep production behavior green behind temporary internal call adapters within the feature
       branch; no new operator surface or unused public abstraction is merged at this phase boundary.
-- [ ] Tests cover every conformance rejection, class identity on registry/graph rows, plugin
+- [x] Tests cover every conformance rejection, class identity on registry/graph rows, plugin
       registration atomicity, and absence of the old singleton branch.
-- [ ] Update the capability author README for the contract that is now true; run Green and phase
+- [x] Update the capability author README for the contract that is now true; run Green and phase
       review.
 
 **Definition of done:** backend code is an ordinary class-registered capability under its permanent
