@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -30,6 +30,29 @@ class Status(Enum):
     FAIL = "fail"
 
 
+class MachineDiagnostic(StrEnum):
+    """Closed, non-sensitive doctor diagnostics permitted in JSON v1."""
+
+    CONFIG_INVALID = "config_invalid"
+    CONFIG_MISSING = "config_missing"
+    MANIFEST_INVALID = "manifest_invalid"
+    RESOURCE_REGISTRY_INVALID = "resource_registry_invalid"
+    DATABASE_UNAVAILABLE = "database_unavailable"
+    SITE_PREFLIGHT_FAILED = "site_preflight_failed"
+    TAILSCALE_TIMED_OUT = "tailscale_timed_out"
+
+
+_MACHINE_DIAGNOSTICS: dict[MachineDiagnostic, tuple[str | None, str | None]] = {
+    MachineDiagnostic.CONFIG_INVALID: ("configuration did not load", None),
+    MachineDiagnostic.CONFIG_MISSING: ("configuration file is not available", "run agw config init"),
+    MachineDiagnostic.MANIFEST_INVALID: ("resource manifests did not load", None),
+    MachineDiagnostic.RESOURCE_REGISTRY_INVALID: ("resource registry did not build", None),
+    MachineDiagnostic.DATABASE_UNAVAILABLE: ("database check failed", None),
+    MachineDiagnostic.SITE_PREFLIGHT_FAILED: ("site preflight failed", None),
+    MachineDiagnostic.TAILSCALE_TIMED_OUT: ("timed out", None),
+}
+
+
 @dataclass
 class HealthCheck:
     name: str
@@ -39,6 +62,14 @@ class HealthCheck:
     """Optional remediation text. Rendered on a separate line by the
     CLI surface so the operator sees actionable next steps without
     cramming everything into one parenthetical."""
+    machine_diagnostic: MachineDiagnostic | None = None
+    """Closed machine-readable diagnostic, separate from human text.
+
+    ``message`` and ``hint`` can carry exception, backend, configuration, or
+    secret-adjacent text for the terminal renderer. JSON must never project
+    them directly. A check without an explicit diagnostic intentionally emits
+    null machine message and hint fields.
+    """
 
 
 @dataclass
@@ -46,17 +77,63 @@ class HealthGroup:
     name: str
     checks: list[HealthCheck] = field(default_factory=list)
 
-    def ok(self, name: str, message: str | None = None, *, hint: str | None = None) -> None:
-        self.checks.append(HealthCheck(name=name, status=Status.OK, message=message, hint=hint))
+    def _append(
+        self,
+        status: Status,
+        name: str,
+        message: str | None,
+        hint: str | None,
+        machine_diagnostic: MachineDiagnostic | None,
+    ) -> None:
+        self.checks.append(
+            HealthCheck(
+                name=name,
+                status=status,
+                message=message,
+                hint=hint,
+                machine_diagnostic=machine_diagnostic,
+            )
+        )
 
-    def info(self, name: str, message: str | None = None, *, hint: str | None = None) -> None:
-        self.checks.append(HealthCheck(name=name, status=Status.INFO, message=message, hint=hint))
+    def ok(
+        self,
+        name: str,
+        message: str | None = None,
+        *,
+        hint: str | None = None,
+        machine_diagnostic: MachineDiagnostic | None = None,
+    ) -> None:
+        self._append(Status.OK, name, message, hint, machine_diagnostic)
 
-    def warn(self, name: str, message: str | None = None, *, hint: str | None = None) -> None:
-        self.checks.append(HealthCheck(name=name, status=Status.WARN, message=message, hint=hint))
+    def info(
+        self,
+        name: str,
+        message: str | None = None,
+        *,
+        hint: str | None = None,
+        machine_diagnostic: MachineDiagnostic | None = None,
+    ) -> None:
+        self._append(Status.INFO, name, message, hint, machine_diagnostic)
 
-    def fail(self, name: str, message: str | None = None, *, hint: str | None = None) -> None:
-        self.checks.append(HealthCheck(name=name, status=Status.FAIL, message=message, hint=hint))
+    def warn(
+        self,
+        name: str,
+        message: str | None = None,
+        *,
+        hint: str | None = None,
+        machine_diagnostic: MachineDiagnostic | None = None,
+    ) -> None:
+        self._append(Status.WARN, name, message, hint, machine_diagnostic)
+
+    def fail(
+        self,
+        name: str,
+        message: str | None = None,
+        *,
+        hint: str | None = None,
+        machine_diagnostic: MachineDiagnostic | None = None,
+    ) -> None:
+        self._append(Status.FAIL, name, message, hint, machine_diagnostic)
 
 
 @dataclass
@@ -99,15 +176,7 @@ def health_report_data(report: HealthReport) -> JsonObject:
         "groups": [
             {
                 "name": group.name,
-                "checks": [
-                    {
-                        "name": check.name,
-                        "status": check.status.value,
-                        "message": check.message,
-                        "hint": check.hint,
-                    }
-                    for check in group.checks
-                ],
+                "checks": [_machine_health_check_data(check) for check in group.checks],
             }
             for group in report.groups
         ],
@@ -117,6 +186,24 @@ def health_report_data(report: HealthReport) -> JsonObject:
             "warn": counts[Status.WARN],
             "fail": counts[Status.FAIL],
         },
+    }
+
+
+def _machine_diagnostic_for(check: HealthCheck) -> tuple[str | None, str | None]:
+    """Return only closed JSON diagnostics, never human exception text."""
+    if check.machine_diagnostic is None:
+        return None, None
+    return _MACHINE_DIAGNOSTICS[check.machine_diagnostic]
+
+
+def _machine_health_check_data(check: HealthCheck) -> JsonObject:
+    """Project one check with its explicitly safe diagnostic pair."""
+    message, hint = _machine_diagnostic_for(check)
+    return {
+        "name": check.name,
+        "status": check.status.value,
+        "message": message,
+        "hint": hint,
     }
 
 
@@ -242,7 +329,11 @@ def _check_system() -> HealthGroup:
         else:
             g.info("System slug", "unset (will ask at first vm create)")
     except Exception as e:
-        g.warn("System slug", f"could not check the database: {e}")
+        g.warn(
+            "System slug",
+            f"could not check the database: {e}",
+            machine_diagnostic=MachineDiagnostic.DATABASE_UNAVAILABLE,
+        )
     return g
 
 
@@ -425,6 +516,7 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
                 name,
                 f"{_platform_summary(decl)}; preflight: {e}",
                 hint=getattr(e, "hint", None),
+                machine_diagnostic=MachineDiagnostic.SITE_PREFLIGHT_FAILED,
             )
             continue
         g.ok(name, _platform_summary(decl))
@@ -468,7 +560,11 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
         finally:
             db.close()
     except Exception as e:
-        g.warn("VM sites", f"could not check the database: {e}")
+        g.warn(
+            "VM sites",
+            f"could not check the database: {e}",
+            machine_diagnostic=MachineDiagnostic.DATABASE_UNAVAILABLE,
+        )
     return g
 
 
@@ -499,7 +595,11 @@ def _check_tailscale() -> HealthGroup:
         else:
             g.fail("Not connected", "run 'tailscale up'")
     except subprocess.TimeoutExpired:
-        g.fail("tailscale status", "timed out")
+        g.fail(
+            "tailscale status",
+            "timed out",
+            machine_diagnostic=MachineDiagnostic.TAILSCALE_TIMED_OUT,
+        )
     return g
 
 
@@ -522,7 +622,11 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     # is framed by `located()`, which is shared with every non-doctor
     # surface that reports the same error, so it is not doctor's to change.
     if not CONFIG_PATH.exists():
-        g.fail("Config file", f"not found: {format_host_path(CONFIG_PATH)}. Run 'agw config init' to create one.")
+        g.fail(
+            "Config file",
+            f"not found: {format_host_path(CONFIG_PATH)}. Run 'agw config init' to create one.",
+            machine_diagnostic=MachineDiagnostic.CONFIG_MISSING,
+        )
         return g, None, None
 
     g.ok("Config file", format_host_path(CONFIG_PATH))
@@ -538,7 +642,12 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
         # yields a fail row and lets the rest of the report render, per
         # doctor's maximal-visibility contract, instead of aborting with a
         # bare one-liner and no report.
-        g.fail("Config", str(e), hint=e.hint)
+        g.fail(
+            "Config",
+            str(e),
+            hint=e.hint,
+            machine_diagnostic=MachineDiagnostic.CONFIG_INVALID,
+        )
         config_load_failed = True
         # The resource-section hard error (config.toml still declares
         # resources) is exactly the mid-migration operator doctor helps most,
@@ -555,7 +664,7 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
         except (ConfigError, ValidationError):
             return g, None, None
     except SystemExit:
-        g.fail("Config", "failed to load")
+        g.fail("Config", "failed to load", machine_diagnostic=MachineDiagnostic.CONFIG_INVALID)
         return g, None, None
 
     # Manifest spec-level warnings (unknown keys with file:line, env
@@ -581,7 +690,12 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
         # and so can surface a ValidationError. Caught here it becomes a fail
         # row and the rest of the report (TOML issues, SSH checks, ...) still
         # renders, rather than aborting the whole run.
-        g.fail("Manifest", str(e), hint=e.hint)
+        g.fail(
+            "Manifest",
+            str(e),
+            hint=e.hint,
+            machine_diagnostic=MachineDiagnostic.MANIFEST_INVALID,
+        )
 
     for issue in config.config_issues:
         g.warn("Config", issue)
@@ -614,7 +728,12 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     try:
         registry = build_registry(config, manifests=manifests)
     except ConfigError as e:
-        g.fail("Resource registry", str(e), hint=e.hint)
+        g.fail(
+            "Resource registry",
+            str(e),
+            hint=e.hint,
+            machine_diagnostic=MachineDiagnostic.RESOURCE_REGISTRY_INVALID,
+        )
         return g, config, None
 
     # Dotfiles
@@ -805,7 +924,7 @@ def _check_database() -> HealthGroup:
         else:
             g.fail("Schema", f"version {current} is newer than latest {latest} (downgrade?)")
     except Exception as e:
-        g.fail("Database", str(e))
+        g.fail("Database", str(e), machine_diagnostic=MachineDiagnostic.DATABASE_UNAVAILABLE)
 
     return g
 

@@ -142,10 +142,139 @@ conventional SIGINT exit code (130).
 
 The operational inspection commands `agw resource list`, `agw resource kinds`,
 `agw resource describe`, `agw secret list`, `agw secret describe`, and `agw doctor` accept
-`--output json`. Successful responses are one UTF-8 JSON document with a `schema_version`,
-`command`, and `data` envelope. The default `--output human` preserves the normal terminal
-presentation. `--names-only` is completion-only and cannot be combined with JSON output. A failing
-doctor report still writes its JSON report and exits 1.
+`--output json`. The default `--output human` preserves the normal terminal presentation.
+
+Each successful JSON response is one UTF-8 document followed by one line feed, with no BOM, ANSI
+sequences, table layout, progress messages, or empty-state prose. Its top-level keys are always in
+this order:
+
+```json
+{ "schema_version": 1, "command": "resource.list", "data": {} }
+```
+
+`schema_version` is integer `1`; `command` is the exact command identifier below; and `data` is an
+object. Every documented object field is present and emitted in the listed order. Arrays retain the
+service's order and are never re-sorted by JSON rendering. Missing values are JSON `null`, never a
+human display sentinel. JSON string text retains Unicode but terminal control characters are
+escaped.
+
+The shared records are:
+
+```text
+origin = {
+  variant, file, line, source, source_resource, plugin
+}
+reference = {
+  source_kind, source_name, usage, declared_by_kind, declared_by_name
+}
+instance_reference = {kind, name}
+```
+
+`origin` is null or one of `operator-declared`, `auto-declared`, `built-in`, or `system-plugin`.
+Only its applicable provenance fields are populated. `source_resource` is null or `{kind,name}`.
+References retain every graph entry, including duplicates, in graph order. They are not formatted,
+deduplicated, grouped, or sorted.
+
+#### Resource JSON schemas
+
+`agw resource list --output json` uses command `resource.list` and data:
+
+```text
+{
+  resources: [{
+    kind, name, origin, reference_count, used_by_count, description,
+    not_ready_reason, disabled
+  }],
+  counts: {operator_declared, auto_declared, built_in, system_plugin}
+}
+```
+
+`origin`, `used_by_count`, and `not_ready_reason` may be null. `disabled` is boolean. Resource rows
+preserve the selected kind order, then name order, and counts are post-filter values. Disabled rows
+remain hidden unless `--include-disabled` is requested.
+
+`agw resource kinds --output json` uses command `resource.kinds` and data
+`{kinds: [{kind, category, resource_count, description}]}`. `category` is exactly `declarable` or
+`capability`; kinds sort lexically.
+
+`agw resource describe KIND/NAME --output json` uses command `resource.describe` and data:
+
+```text
+{resource: {
+  kind, name, origin, description, references, used_by,
+  not_ready_reason, disabled_reason
+}}
+```
+
+`references` is an array of `reference`; `used_by` is null or an array of `instance_reference`; and
+both reason fields are nullable. Explicit lookup continues to describe a disabled resource.
+
+For example:
+
+```bash
+agw resource list --kind secret --output json
+agw resource describe secret/npm-token --output json
+```
+
+#### Secret JSON schemas
+
+`agw secret list --output json` uses command `secret.list` and data:
+
+```text
+{
+  backends,
+  secrets: [{name, description, backends: [{backend, would_attempt, identifier, not_ready_reason}]}],
+  counts: {operator_declared, auto_declared}
+}
+```
+
+The top-level and per-secret backend arrays preserve active backend precedence. Secrets sort by
+name. `identifier` and `not_ready_reason` are nullable. This is lookup prediction only, and never
+resolves or serializes a secret value.
+
+`agw secret describe NAME --output json` uses command `secret.describe` and data:
+
+```text
+{secret: {
+  name, kind, origin, description, hint, references, used_by, backend_mappings,
+  resolution: {resolved_by, available, skipped_not_ready: [{backend, reason}]}
+}}
+```
+
+`hint`, `used_by`, mapping `identifier`, mapping `not_ready_reason`, and `resolved_by` may be null.
+`available` is boolean and equals whether `resolved_by` is non-null. Backend collections retain
+chain order. References and `used_by` have the same shapes and ordering rules as resource describe.
+
+#### Doctor JSON schema
+
+`agw doctor --output json` uses command `doctor` and data:
+
+```text
+{
+  groups: [{name, checks: [{name, status, message, hint}]}],
+  counts: {ok, info, warn, fail}
+}
+```
+
+`status` is exactly `ok`, `info`, `warn`, or `fail`. Group and check arrays keep report construction
+order, and counts are integers from the complete report. `message` and `hint` are nullable closed
+diagnostics. They never contain raw configuration, secret values, backend responses, exception text,
+or arbitrary host diagnostics. A failing report is still written in full, then the command exits 1:
+
+```bash
+agw doctor --output json
+```
+
+#### Errors and compatibility
+
+`--names-only` is completion-only and cannot be combined with JSON output on resource and secret
+lists or resource kinds. An unknown output format and this conflict are usage errors before config,
+registry, database, network, or service work. Domain and configuration errors write no JSON to
+stdout; they retain the normal stderr message and nonzero exit status.
+
+JSON v1 is additive. New optional fields may be added while preserving existing meanings and types.
+Removing a field, changing a type, changing a value's meaning, changing collection order, or
+changing an enum spelling requires a new schema version and an explicit compatibility period.
 
 ### Top-Level
 
