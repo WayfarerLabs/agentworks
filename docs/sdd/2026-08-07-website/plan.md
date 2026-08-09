@@ -66,14 +66,14 @@ settled, and PR #439 truthfully carries the reviewed contract that implementatio
 
 ## Phase 1: brand and lunar-deployment LLD
 
-- [ ] Delegate `brand-and-lander-lld.md` to an `agentworks-dev` subagent. It pins final asset names,
+- [x] Delegate `brand-and-lander-lld.md` to an `agentworks-dev` subagent. It pins final asset names,
       reusable SVG groups, responsive scene geometry, state machine, physics constants, landing
       envelope, deterministic stepping, plume scaling, keyboard and pointer mappings, lifecycle
       cleanup, reduced-motion behavior, NOC/landing geometry, deployment and departure sequence,
       accessible status, and test vectors.
-- [ ] Lead reviews the LLD against R6-R9 and D5/D7, resolving any conflict between the hidden
+- [x] Lead reviews the LLD against R6-R9 and D5/D7, resolving any conflict between the hidden
       reveal, useful static 404, mobile controls, and WCAG 2.2 AA.
-- [ ] `agentworks-reviewer` reviews the LLD; all valid findings are resolved and re-reviewed.
+- [x] `agentworks-reviewer` reviews the LLD; all valid findings are resolved and re-reviewed.
 
 Definition of done: the selected mark and bounded game are specified at implementable detail without
 introducing a framework, remote asset, hidden critical content, or onboarding dependency.
