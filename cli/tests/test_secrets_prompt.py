@@ -16,7 +16,11 @@ if TYPE_CHECKING:
 
 
 def _backend() -> ActiveBackend:
-    return ActiveBackend(capability=PromptBackend, readiness=Readiness.ready())
+    return ActiveBackend(
+        capability=PromptBackend,
+        readiness=Readiness.ready(),
+        registered_name="prompt",
+    )
 
 
 def _set_interactive(monkeypatch: pytest.MonkeyPatch, value: bool) -> None:

@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.capabilities.base import ScopeLevel
+    from agentworks.guide.contract import TopicContribution
 
 
 class PluginError(StateError):
@@ -78,6 +79,8 @@ class Plugin:
       (R10), recorded and displayable but unenforced.
     - ``commands`` is a reserved, typed placeholder frame (R10), inert in
       v1.
+    - ``guide_topics`` is inert contribution data consumed only by a
+      guide-scoped catalog request.
     """
 
     name: str
@@ -86,12 +89,15 @@ class Plugin:
     manifests: str | None = None
     required_scopes: tuple[ScopeLevel, ...] = ()  # reserved, inert (R10)
     commands: tuple[PluginCommand, ...] = ()  # reserved, inert (R10)
+    guide_topics: tuple[TopicContribution, ...] = ()
 
     def __post_init__(self) -> None:
-        """Normalize ``capabilities`` to an immutable ``MappingProxyType``
-        whose values are ``tuple``s. This is the sole invariant enforced at
-        construction; all semantic validation is deferred to
-        ``register_plugin``.
+        """Normalize descriptor contribution containers without validating them.
+
+        ``capabilities`` becomes an immutable ``MappingProxyType`` whose values
+        are tuples, and ``guide_topics`` becomes a tuple. Semantic validation
+        remains deferred to ``register_plugin`` or guide-scoped catalog build.
         """
         normalized = {kind: tuple(impls) for kind, impls in self.capabilities.items()}
         object.__setattr__(self, "capabilities", MappingProxyType(normalized))
+        object.__setattr__(self, "guide_topics", tuple(self.guide_topics))

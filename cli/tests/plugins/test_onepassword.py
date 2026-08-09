@@ -88,7 +88,13 @@ def _fake_op(
 
 
 def _backend_chain() -> list[ActiveBackend]:
-    return [ActiveBackend(capability=OnePasswordBackend, readiness=Readiness.ready())]
+    return [
+        ActiveBackend(
+            capability=OnePasswordBackend,
+            readiness=Readiness.ready(),
+            registered_name="onepassword",
+        )
+    ]
 
 
 # -- would_attempt -----------------------------------------------------------
@@ -661,8 +667,16 @@ def test_hard_miss_halts_chain_before_prompt(
         def _legacy_batch_get(cls, wants: list[tuple[Any, Any]]) -> dict[str, str]:
             raise AssertionError("later backend must not run after a hard miss")
 
-    op_chain = ActiveBackend(capability=OnePasswordBackend, readiness=Readiness.ready())
-    later = ActiveBackend(capability=_ExplodingBackend, readiness=Readiness.ready())  # type: ignore[arg-type]
+    op_chain = ActiveBackend(
+        capability=OnePasswordBackend,
+        readiness=Readiness.ready(),
+        registered_name="onepassword",
+    )
+    later = ActiveBackend(
+        capability=_ExplodingBackend,  # type: ignore[arg-type]
+        readiness=Readiness.ready(),
+        registered_name="later",
+    )
     secret = _decl("gone", backend_mappings={"onepassword": "op://Work/gone/token"})
     with pytest.raises(SecretMappingError):
         resolve_secrets([secret], [op_chain, later])

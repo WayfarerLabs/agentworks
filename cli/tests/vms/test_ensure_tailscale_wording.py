@@ -17,6 +17,7 @@ behaviour are unchanged; only the messages differ.
 from __future__ import annotations
 
 import contextlib
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -24,6 +25,7 @@ import pytest
 from agentworks import output
 from agentworks.capabilities.base import RunContext
 from agentworks.db import VMStatus
+from agentworks.errors import StateError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.vms import manager as vm_manager
 
@@ -103,6 +105,38 @@ def test_cold_start_probe_keeps_reconnect_wording(
     assert any("Waiting for Tailscale to reconnect" in line for line in captured_output.detail)
     assert any("several minutes" in line for line in captured_output.detail)
     assert any("Tailscale SSH reconnected" in line for line in captured_output.detail)
+
+
+def test_rejoin_rejects_a_redaction_free_operation_logger(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The auth-key command must never cross a logger lacking that redaction."""
+    config = make_config()
+    vm = _seed_vm(db)
+    platform = _bound_platform(db, config, vm)
+    monkeypatch.setattr("agentworks.transports.wait_for_reconnect", lambda *a, **k: False)
+    monkeypatch.setattr(
+        "agentworks.transports.native_transport",
+        lambda *a, **k: SimpleNamespace(logger=object()),
+    )
+    monkeypatch.setattr(vm_manager, "verify_tailscale_available", lambda: None)
+    monkeypatch.setattr(
+        vm_manager,
+        "rejoin_tailscale",
+        lambda *a, **k: pytest.fail("secret-bearing rejoin reached a redaction-free logger"),
+    )
+
+    with pytest.raises(StateError, match="unexpectedly has an operation logger"):
+        vm_manager._ensure_tailscale(
+            db,
+            config,
+            vm,
+            platform,
+            RunContext(),
+            auth_key_source=lambda: "tskey-test",
+        )
 
 
 @pytest.mark.parametrize(

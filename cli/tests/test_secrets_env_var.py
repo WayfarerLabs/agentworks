@@ -16,7 +16,11 @@ if TYPE_CHECKING:
 
 
 def _backend() -> ActiveBackend:
-    return ActiveBackend(capability=EnvVarBackend, readiness=Readiness.ready())
+    return ActiveBackend(
+        capability=EnvVarBackend,
+        readiness=Readiness.ready(),
+        registered_name="env-var",
+    )
 
 
 def test_default_convention_uppercases_and_dashes_to_underscores() -> None:

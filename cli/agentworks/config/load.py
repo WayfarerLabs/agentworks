@@ -196,6 +196,7 @@ def load_config(
     warn_issues: bool = True,
     warn_deprecations: bool = True,
     resources: bool = True,
+    raise_errors: bool = False,
 ) -> Config:
     """Load and validate the agentworks configuration.
 
@@ -211,6 +212,8 @@ def load_config(
             sample --write``, ``resource edit``'s fallback) pass False to read
             a config that still carries such sections. Settings load
             identically either way.
+        raise_errors: Raise typed errors for early file failures instead of
+            using the legacy stderr and ``SystemExit`` path.
 
     Returns:
         Validated Config object.
@@ -218,7 +221,7 @@ def load_config(
     Raises:
         ConfigError: If the config is missing, invalid, or declares resources
             (with ``resources=True``).
-        SystemExit: If the config file does not exist.
+        SystemExit: If an early file failure occurs and ``raise_errors`` is false.
     """
     # Re-imported here (rather than bound at module load) so that tests'
     # ``monkeypatch.setattr("agentworks.config.CONFIG_PATH", ...)``, which
@@ -230,14 +233,26 @@ def load_config(
 
     config_path = path or CONFIG_PATH
     if not config_path.exists():
+        if raise_errors:
+            raise ConfigError(
+                f"configuration file not found: {format_host_path(config_path)}",
+                hint="Create it to get started. See the documentation for the schema.",
+            )
         print(f"Configuration file not found: {format_host_path(config_path)}", file=sys.stderr)
         print("Run `agw config init` to create one from the commented sample.", file=sys.stderr)
         raise SystemExit(1)
 
-    raw_text = config_path.read_text()
+    try:
+        raw_text = config_path.read_text()
+    except (OSError, UnicodeError) as error:
+        if raise_errors:
+            raise ConfigError(f"cannot read configuration file {format_host_path(config_path)}: {error}") from None
+        raise
     try:
         data = tomllib.loads(raw_text)
     except tomllib.TOMLDecodeError as e:
+        if raise_errors:
+            raise ConfigError(f"invalid config file {format_host_path(config_path)}: {e}") from None
         print(f"Error: invalid config file {format_host_path(config_path)}: {e}", file=sys.stderr)
         raise SystemExit(1) from None
 

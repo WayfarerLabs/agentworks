@@ -78,6 +78,43 @@ def _call_bootstrap(db: Database, platform: _SpyPlatform, on_ready: Any) -> tupl
     )
 
 
+def test_bootstrap_logger_receives_every_resolved_secret(
+    db: Database, monkeypatch: pytest.MonkeyPatch, _hermetic_driver: None
+) -> None:
+    """The VM-create boundary supplies both the Tailscale key and every
+    credential token before the incremental logger writes its header."""
+    captured: list[tuple[str, ...]] = []
+
+    class _LoggerSpy:
+        path = "/dev/null"
+
+        def __init__(self, vm_name: str, command_stem: str, *, redactions: tuple[str, ...] = ()) -> None:
+            captured.append(redactions)
+
+        def close(self) -> None:
+            pass
+
+    db.insert_vm("hookvm", site="stub", hostname="hookvm")
+    monkeypatch.setattr("agentworks.ssh.SSHLogger", _LoggerSpy)
+    monkeypatch.setattr(driver, "_phase_a_bootstrap", lambda *a, **k: SimpleNamespace())
+
+    driver.bootstrap_vm(
+        db,
+        SimpleNamespace(),  # type: ignore[arg-type]
+        SimpleNamespace(swap=0),  # type: ignore[arg-type]
+        "hookvm",
+        _stub_exec_target(),
+        _SpyPlatform(),  # type: ignore[arg-type]
+        RunContext(),
+        admin_username="admin",
+        tailscale_auth_key="tailscale-secret",
+        git_tokens={"gh": "github-secret", "gl": "gitlab-secret"},
+        on_tailscale_ready=lambda: None,
+    )
+
+    assert captured == [("tailscale-secret", "github-secret", "gitlab-secret")]
+
+
 def test_success_path_fires_on_tailscale_ready(
     db: Database, monkeypatch: pytest.MonkeyPatch, _hermetic_driver: None
 ) -> None:

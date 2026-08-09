@@ -125,13 +125,13 @@ class Readiness:
     """A node's readiness verdict: can it run on this host, and if not, why.
 
     ``reason is None`` means ready; a string is the operator-facing reason it is
-    not. Construct via ``Readiness.ready()`` / ``Readiness.blocked(reason)``
-    rather than the raw constructor so call sites read as verdicts, not as
-    ``str | None`` bookkeeping (the double-negative ``readiness_of`` exists to
-    spare consumers, R10).
+    not. ``is_available`` distinguishes an observed not-ready verdict from a
+    deliberately omitted host check. Construct through the named classmethods
+    so call sites read as verdicts, not as ``str | None`` bookkeeping.
     """
 
     reason: str | None = None
+    is_available: bool = True
 
     @property
     def is_ready(self) -> bool:
@@ -144,6 +144,11 @@ class Readiness:
     @classmethod
     def blocked(cls, reason: str) -> Readiness:
         return cls(reason)
+
+    @classmethod
+    def unavailable(cls, reason: str) -> Readiness:
+        """Return a non-ready verdict whose host check was deliberately omitted."""
+        return cls(reason, is_available=False)
 
 
 @dataclass(frozen=True)
@@ -491,6 +496,12 @@ def _capability_kinds() -> frozenset[str]:
     return frozenset(descriptor.kind for descriptor in capability_descriptors())
 
 
+# These capability kinds invoke host-readiness code. Guide registry builds
+# consult this shared policy to suppress every such invocation. Keep the set
+# next to the dispatch below until capability descriptors own the policy.
+HOST_PROBING_CAPABILITY_KINDS = frozenset({"vm-platform", "secret-backend"})
+
+
 @runtime_checkable
 class _ReadinessResource(Protocol):
     """A consuming resource that self-determines its readiness from its
@@ -506,6 +517,8 @@ def fold_readiness(
     all_outbound: Mapping[tuple[str, str], Sequence[ResourceReference]],
     enablement: Mapping[tuple[str, str], Enablement] | None = None,
     disabled_marks: Mapping[tuple[str, str], DisabledMark] | None = None,
+    *,
+    probe_host: bool = True,
 ) -> dict[tuple[str, str], Readiness]:
     """Compute each present node's readiness verdict, dependency-first.
 
@@ -534,7 +547,9 @@ def fold_readiness(
     present = {(kind, name) for kind, kind_dict in resources.items() for name in kind_dict}
     readiness: dict[tuple[str, str], Readiness] = {}
     for key in _reverse_topo_order(present, all_outbound):
-        readiness[key] = node_readiness(key, resources, all_outbound, readiness, enablement, disabled_marks)
+        readiness[key] = node_readiness(
+            key, resources, all_outbound, readiness, enablement, disabled_marks, probe_host=probe_host
+        )
     return readiness
 
 
@@ -545,6 +560,8 @@ def node_readiness(
     readiness: Mapping[tuple[str, str], Readiness],
     enablement: Mapping[tuple[str, str], Enablement] | None = None,
     disabled_marks: Mapping[tuple[str, str], DisabledMark] | None = None,
+    *,
+    probe_host: bool = True,
 ) -> Readiness:
     """One node's readiness verdict, given the verdicts of its dependencies.
 
@@ -567,10 +584,14 @@ def node_readiness(
         return Readiness.ready()  # placeholder; enablement answers for a disabled node
     kind, name = key
     if kind in _capability_kinds():
+        if not probe_host and kind in HOST_PROBING_CAPABILITY_KINDS:
+            return Readiness.unavailable("host readiness unavailable: guide does not inspect the workstation")
         return _capability_node_readiness(kind, name)
     resource = resources[kind][name]
     if not isinstance(resource, _ReadinessResource):
         return Readiness.ready()
+    if not probe_host:
+        return Readiness.unavailable("host readiness unavailable: guide does not inspect the workstation")
     deps: dict[tuple[str, str], DependencyState] = {}
     for ref in all_outbound.get(key, ()):
         target = (ref.kind, ref.name)

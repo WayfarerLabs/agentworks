@@ -41,12 +41,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol, cast
 
 from agentworks.errors import ConfigError
-from agentworks.manifests.package import publish_manifest_package
+from agentworks.manifests.package import load_manifest_package, publish_manifest_package
 from agentworks.plugins.adapters import capability_adapters
 from agentworks.resources import Origin
 
 if TYPE_CHECKING:
     from agentworks.config import Config
+    from agentworks.plugins.base import Plugin
     from agentworks.resources.registry import Registry
 
 
@@ -80,6 +81,18 @@ class _NamedImpl(Protocol):
     as bare ``type``; this narrows the read without re-validating."""
 
     name: str
+
+
+def plugin_manifest_resource_owners(plugin: Plugin) -> tuple[tuple[str, str, str], ...]:
+    """Return declarable resource ownership from one plugin's manifest bundle."""
+    if plugin.manifests is None:
+        return ()
+    manifests = load_manifest_package(
+        anchor=plugin.manifests,
+        subdir="manifests",
+        allowed_kinds=PLUGIN_MANIFEST_KINDS,
+    )
+    return tuple((plugin.name, entry.kind, entry.name) for entry in manifests.entries)
 
 
 def publish_plugins(registry: Registry, config: Config) -> None:

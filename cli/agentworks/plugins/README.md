@@ -41,10 +41,72 @@ Fields:
 - **`manifests`** (optional): an importlib-resources package anchor whose `manifests/` subdirectory
   holds the plugin's bundled YAML resource manifests (the same envelope operators write; see
   `docs/guides/resources.md`). `None` when the plugin ships no manifests.
+- **`guide_topics`**: an inert tuple of `TopicContribution` records consumed only while building an
+  `agw guide` catalog. It does not execute during plugin registration or ordinary commands.
 - **`required_scopes`** and **`commands`**: reserved, inert placeholders (see below).
 
 The descriptor depends on nothing in the capability or registry machinery, so it is constructible in
 a test without a registry. It becomes valid or rejected only when the installed index registers it.
+
+### Guide contribution boundaries
+
+A plugin may contribute an implementation topic it owns, a declarable resource topic registered
+through its owner adapter, or a `plugin/<plugin>/<topic>` concept. It cannot claim core `concept-*`
+topics, bare kind topics, another plugin's namespace, or another owner's resource. The guide catalog
+isolates an invalid plugin topic while retaining valid core and plugin topics. The full index
+reports rejected content and exits 1, while an unrelated valid topic remains a clean response. A
+retained topic whose live projection is unavailable keeps its authored teaching, reports the scoped
+issue, and exits 1.
+
+Every renderer-owned level-2 heading in raw CLI Markdown carries the exact literal `⟦AGW framework⟧`
+marker. After bounded input validation, HTML entity decoding, and Unicode normalization, the
+contribution contract rejects either delimiter, whether literal or HTML-entity encoded, in authored
+topic titles, summaries, and Markdown. An authored contribution therefore cannot emit that exact
+literal marker in raw CLI Markdown. Other authored Markdown and HTML, including ordinary headings,
+remain authored content and are not relabeled.
+
+The marker is a source-provenance convention, not an anti-spoof guarantee for arbitrary downstream
+Markdown, HTML, or CSS renderers, images, or styling. It grants no authority or trust to the content
+that follows.
+
+Guide contributions are data, not callbacks. Expression markers in authored titles, summaries, and
+Markdown are accepted only inside a closed, same-line literal delimited by one unescaped backtick on
+each side. The backticks cannot touch another backtick. Multi-backtick spans, fenced blocks,
+multiline spans, escaped backticks, unmatched spans, headings, HTML, and prose do not exempt a
+marker. Guide rendering never evaluates the accepted literal. Terminal control bytes are removed
+from rendered output. Action records accept three exact token forms: a literal that starts with an
+ASCII letter or digit and then contains only ASCII letters, digits, `.`, `_`, `:`, `/`, or `-`; a
+flag that starts with `-` or `--`, then a lowercase ASCII letter or digit, and continues with
+lowercase ASCII letters, digits, or `-`; or an exact registered input placeholder such as
+`$SECRET_NAME`. Valid examples include `agw`, `vm-template/demo`, `secret_name`, `v1.2`, `-v`, and
+`--non-interactive`. Invalid examples include the absolute path `/tmp/file`, the tilde path
+`~/file`, `--flag=value`, `*.yaml`, and `#comment`. Each title is limited to 256 UTF-8 bytes, each
+summary to 2 KiB, each authored block to 64 KiB, and one topic to 64 blocks, 64 related links, and
+256 KiB of authored markdown. Every related link must be a canonical topic slug no larger than 317
+UTF-8 bytes. A field-reference section accepts at most 32 path items of 256 UTF-8 bytes each. Keep
+authored files under the owning package's `guide-content/` directory so the wheel package-data
+assertion exercises them.
+
+An `ActionList` contains inert `GuideAction` records, never an executor. Each action provides at
+most 32 inputs and exactly one of a literal-token command or bounded platform-neutral manual steps.
+Command and verification sequences contain at most 64 tokens, each at most 1 KiB. Input names are at
+most 64 bytes, input descriptions are at most 2 KiB, and preconditions, expected states, refusal
+alternatives, and manual instructions are each at most 8 KiB. One action list contains at most 32
+actions and 128 KiB of action data. Action IDs are unique across all action lists in a topic, and
+action data also counts toward the topic's 256 KiB bound. Rendered actions state their inputs,
+consent boundary, expected result, optional verification, and useful refusal alternative without
+executing any operation. The same expression-marker scanner covers every rendered action prose field
+and input description. Command and verification tokens remain under the closed literal grammar.
+
+`FieldReference` and `Sample` blocks contain selectors only. They read
+`agentworks.manifests.reference` and `agentworks.manifests.samples` directly, never another CLI's
+text or a copied field list. Field references are valid only for kind and capability-implementation
+anchors. Samples are valid only for declarable bare kinds. Keep a resource topic linked to its bare
+kind instead of attaching schema blocks to the resource instance. Field descriptions and alternative
+summaries use the shared prose normalization. Literal defaults, examples, choices, and constraints
+retain their exact rendered values inside Markdown code spans sized and padded for their backticks
+and edge spaces. After YAML rendering, backslashes, carriage returns, line feeds, and tabs become
+distinct visible escape sequences so one scalar cannot break the reference row across lines.
 
 ## Shipping a plugin
 

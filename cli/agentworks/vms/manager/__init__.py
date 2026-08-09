@@ -57,6 +57,7 @@ from .tailscale import (
     _warned_tailscale_missing,
     port_forward_vm,
 )
+from .verification import VMConnectionVerification, verify_vm_connection
 
 __all__ = [
     "_SLUG_PROMPT",
@@ -97,5 +98,7 @@ __all__ = [
     "start_vm",
     "stop_vm",
     "validate_slug",
+    "verify_vm_connection",
     "verify_tailscale_available",
+    "VMConnectionVerification",
 ]
