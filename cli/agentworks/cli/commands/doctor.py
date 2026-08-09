@@ -7,19 +7,40 @@ registered directly on the root `app` via `@app.command(...)`.
 
 from __future__ import annotations
 
+from typing import Annotated
+
 import typer
 
 from agentworks.cli._app import app
+from agentworks.machine_output import OutputFormat
 from agentworks.output import StatusStyle, style_status
 
 
 @app.command("doctor")
-def doctor() -> None:
+def doctor(
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option(
+            "--output",
+            help="Output format: human or json. Default: human.",
+        ),
+    ] = OutputFormat.HUMAN,
+) -> None:
     """Check environment, config, and dependencies."""
     from agentworks.completions.spec import build_spec, completion_version
-    from agentworks.doctor import Status, run_checks
+    from agentworks.doctor import Status, health_report_data, run_checks
 
     report = run_checks(completion_version=completion_version(build_spec(app)))
+
+    if output_format is OutputFormat.JSON:
+        from click import get_binary_stream
+
+        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+
+        write_json_envelope(MachineOutputCommand.DOCTOR, health_report_data(report), get_binary_stream("stdout"))
+        if report.has_failures:
+            raise typer.Exit(1)
+        return
 
     # Doctor's own Status -> StatusStyle mapping: the CLI renderer's business,
     # not doctor.py's (the service layer returns the bare Status enum and

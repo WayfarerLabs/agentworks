@@ -33,6 +33,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from agentworks import output
+from agentworks.machine_output import (
+    JsonObject,
+    JsonValue,
+    project_instance_references,
+    project_origin,
+    project_references,
+)
 from agentworks.resources.graph import Enablement
 from agentworks.resources.render import format_origin_line, format_reference_entry
 
@@ -124,6 +131,53 @@ class ResourceDescription:
     ``DisabledMark``). ``describe`` renders the named row even when disabled and
     annotates it with this line, exactly as the doctor roster phrases the
     state."""
+
+
+def resource_listing_data(listing: ResourceListing) -> JsonObject:
+    """Project list facts into the closed ``resource.list`` JSON data shape."""
+    return {
+        "resources": [
+            {
+                "kind": row.kind,
+                "name": row.name,
+                "origin": project_origin(row.origin),
+                "reference_count": row.reference_count,
+                "used_by_count": row.used_by_count,
+                "description": row.description,
+                "not_ready_reason": row.not_ready_reason,
+                "disabled": row.disabled,
+            }
+            for row in listing.rows
+        ],
+        "counts": {
+            "operator_declared": listing.operator_count,
+            "auto_declared": listing.auto_count,
+            "built_in": listing.code_count,
+            "system_plugin": listing.plugin_count,
+        },
+    }
+
+
+def resource_description_data(description: ResourceDescription) -> JsonObject:
+    """Project describe facts into the closed ``resource.describe`` JSON data shape."""
+    references: list[JsonValue] = [reference for reference in project_references(description.references)]
+    used_by: list[JsonValue] | None = (
+        None
+        if description.used_by is None
+        else [reference for reference in project_instance_references(description.used_by)]
+    )
+    return {
+        "resource": {
+            "kind": description.kind,
+            "name": description.name,
+            "origin": project_origin(description.origin),
+            "description": description.description,
+            "references": references,
+            "used_by": used_by,
+            "not_ready_reason": description.not_ready_reason,
+            "disabled_reason": description.disabled_reason,
+        },
+    }
 
 
 # -- Filter parsing ---------------------------------------------------------
@@ -439,6 +493,21 @@ def list_kinds(registry: Registry) -> list[KindRow]:
         )
         for name, handler in sorted(KIND_REGISTRY.items())
     ]
+
+
+def resource_kinds_data(rows: list[KindRow]) -> JsonObject:
+    """Project kind facts into the closed ``resource.kinds`` JSON data shape."""
+    return {
+        "kinds": [
+            {
+                "kind": row.kind,
+                "category": row.category,
+                "resource_count": row.resources,
+                "description": row.description,
+            }
+            for row in rows
+        ],
+    }
 
 
 def render_kind_table(rows: list[KindRow]) -> None:

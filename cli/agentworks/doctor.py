@@ -18,6 +18,7 @@ from agentworks.path_rendering import format_host_path
 
 if TYPE_CHECKING:
     from agentworks.config import Config
+    from agentworks.machine_output import JsonObject
     from agentworks.resources.registry import Registry
     from agentworks.vms.sites import VMSiteDecl
 
@@ -89,6 +90,34 @@ class HealthReport:
     @property
     def has_failures(self) -> bool:
         return self.counts()[Status.FAIL] > 0
+
+
+def health_report_data(report: HealthReport) -> JsonObject:
+    """Project a complete doctor report into the closed JSON v1 data shape."""
+    counts = report.counts()
+    return {
+        "groups": [
+            {
+                "name": group.name,
+                "checks": [
+                    {
+                        "name": check.name,
+                        "status": check.status.value,
+                        "message": check.message,
+                        "hint": check.hint,
+                    }
+                    for check in group.checks
+                ],
+            }
+            for group in report.groups
+        ],
+        "counts": {
+            "ok": counts[Status.OK],
+            "info": counts[Status.INFO],
+            "warn": counts[Status.WARN],
+            "fail": counts[Status.FAIL],
+        },
+    }
 
 
 def run_checks(*, completion_version: str | None = None) -> HealthReport:

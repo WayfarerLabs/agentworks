@@ -14,6 +14,7 @@ import typer
 
 from agentworks.cli._app import app
 from agentworks.cli._helpers import get_db
+from agentworks.machine_output import OutputFormat
 
 # Module-level because three commands in this file render a host path and
 # `path_rendering` is a leaf module (pathlib only), so hoisting it costs
@@ -69,6 +70,13 @@ def resource_list(
         "--names-only",
         help=("Emit one kind/name per line (no header, no formatting). Used by shell completion."),
     ),
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option(
+            "--output",
+            help="Output format: human or json. Default: human.",
+        ),
+    ] = OutputFormat.HUMAN,
 ) -> None:
     """List every Resource in the Registry across all kinds.
 
@@ -82,12 +90,16 @@ def resource_list(
     description field (see ``DeclaredResource``); only capability kinds
     whose registration record has none show empty.
     """
+    if names_only and output_format is OutputFormat.JSON:
+        raise typer.BadParameter("cannot be used with --output json", param_hint="--names-only")
+
     from agentworks import output
     from agentworks.bootstrap import load_request_registry
     from agentworks.config import load_config
     from agentworks.resources.inspect import (
         list_resources,
         render_resource_table,
+        resource_listing_data,
     )
 
     # Parse --kind here (CLI's job: turn argv shape into the service's
@@ -97,8 +109,8 @@ def resource_list(
     if kind is not None:
         kinds = tuple(k.strip() for k in kind.split(",") if k.strip())
 
-    config = load_config()
-    registry = load_request_registry(config)
+    config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
+    registry = load_request_registry(config, warn=output_format is OutputFormat.HUMAN)
     db = get_db()
     # ``list_resources`` validates ``origin_filter`` (typed
     # ``ValidationError`` from the service layer; see inspect.py); the
@@ -130,6 +142,17 @@ def resource_list(
         for row in listing.rows:
             output.info(f"{row.kind}/{row.name}")
         return
+    if output_format is OutputFormat.JSON:
+        from click import get_binary_stream
+
+        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+
+        write_json_envelope(
+            MachineOutputCommand.RESOURCE_LIST,
+            resource_listing_data(listing),
+            get_binary_stream("stdout"),
+        )
+        return
     render_resource_table(listing)
 
 
@@ -140,6 +163,13 @@ def resource_kinds(
         "--names-only",
         help=("Emit one kind name per line (no header, no formatting). Used by shell completion."),
     ),
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option(
+            "--output",
+            help="Output format: human or json. Default: human.",
+        ),
+    ] = OutputFormat.HUMAN,
 ) -> None:
     """List every resource kind the app defines.
 
@@ -151,6 +181,9 @@ def resource_kinds(
     registered code. RESOURCES counts the current registry rows per
     kind.
     """
+    if names_only and output_format is OutputFormat.JSON:
+        raise typer.BadParameter("cannot be used with --output json", param_hint="--names-only")
+
     from agentworks import output
 
     # The names-only path needs no config and no registry: kinds are
@@ -163,11 +196,19 @@ def resource_kinds(
 
     from agentworks.bootstrap import load_request_registry
     from agentworks.config import load_config
-    from agentworks.resources.inspect import list_kinds, render_kind_table
+    from agentworks.resources.inspect import list_kinds, render_kind_table, resource_kinds_data
 
-    config = load_config()
-    registry = load_request_registry(config)
-    render_kind_table(list_kinds(registry))
+    config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
+    registry = load_request_registry(config, warn=output_format is OutputFormat.HUMAN)
+    rows = list_kinds(registry)
+    if output_format is OutputFormat.JSON:
+        from click import get_binary_stream
+
+        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+
+        write_json_envelope(MachineOutputCommand.RESOURCE_KINDS, resource_kinds_data(rows), get_binary_stream("stdout"))
+        return
+    render_kind_table(rows)
 
 
 @resource_app.command("describe")
@@ -178,6 +219,13 @@ def resource_describe(
             help="Resource as KIND/NAME (e.g. secret/npm-token, vm-template/dev).",
         ),
     ],
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option(
+            "--output",
+            help="Output format: human or json. Default: human.",
+        ),
+    ] = OutputFormat.HUMAN,
 ) -> None:
     """Show the full per-resource detail view.
 
@@ -195,6 +243,7 @@ def resource_describe(
     from agentworks.resources.inspect import (
         describe_resource,
         render_resource_description,
+        resource_description_data,
     )
 
     # One KIND/NAME grammar across the resource group (`resource edit`
@@ -207,10 +256,21 @@ def resource_describe(
             hint="Example: agw resource describe secret/npm-token",
         )
 
-    config = load_config()
-    registry = load_request_registry(config)
+    config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
+    registry = load_request_registry(config, warn=output_format is OutputFormat.HUMAN)
     db = get_db()
     desc = describe_resource(registry, kind, name, db=db)
+    if output_format is OutputFormat.JSON:
+        from click import get_binary_stream
+
+        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+
+        write_json_envelope(
+            MachineOutputCommand.RESOURCE_DESCRIBE,
+            resource_description_data(desc),
+            get_binary_stream("stdout"),
+        )
+        return
     render_resource_description(desc)
 
 

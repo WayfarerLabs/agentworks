@@ -574,6 +574,18 @@ agw resource describe secret/npm-token  # where it's referenced, what uses it
 agw doctor                              # health: would every secret resolve?
 ```
 
+### JSON for automation
+
+The read-only resource, secret, and health commands also support `--output json`: `resource list`,
+`resource kinds`, `resource describe`, `secret list`, `secret describe`, and `doctor`. Each
+successful response is one JSON document with `schema_version`, `command`, and `data` fields. The
+backend lists and reference arrays retain their operational precedence and graph order, and the
+secret views report only lookup prediction and metadata, never a secret value.
+
+`--output human` is the default and keeps the terminal-oriented rendering. `--names-only` remains
+reserved for shell completion, so it cannot be combined with JSON output. `agw doctor --output json`
+still exits 1 when its complete report contains failed checks, after writing that report.
+
 The design rationale (the config/resource split, capability kinds, the vocabulary rules, and the
 vm-site / vm-platform pair) is recorded in ADR 0016. Its dual-path section records the original
 keep-both-paths stance, since superseded by ADR 0022: YAML manifests are the single

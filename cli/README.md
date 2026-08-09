@@ -138,6 +138,15 @@ conventional SIGINT exit code (130).
 
 ## Commands
 
+### Machine-readable output
+
+The operational inspection commands `agw resource list`, `agw resource kinds`,
+`agw resource describe`, `agw secret list`, `agw secret describe`, and `agw doctor` accept
+`--output json`. Successful responses are one UTF-8 JSON document with a `schema_version`,
+`command`, and `data` envelope. The default `--output human` preserves the normal terminal
+presentation. `--names-only` is completion-only and cannot be combined with JSON output. A failing
+doctor report still writes its JSON report and exits 1.
+
 ### Top-Level
 
 | Command                    | Description                              |
