@@ -52,6 +52,15 @@ node --test website/tests/lander-model.test.mjs
 ./scripts/rulesync-upgen.sh --check
 ```
 
+Pull requests and pushes to `main` run these website contracts in the `Website` job of
+`.github/workflows/ci.yml`; `ci-success` requires that job. The `Deploy website to Pages` workflow
+in `.github/workflows/pages.yml` runs only for pushes to `main`. Its read-only build job repeats the
+tests, normalizes the Pages-reported base path to `/` or the builder's slash-bounded project form,
+proves a second full build is byte-identical, and uploads only the generated
+`$RUNNER_TEMP/agentworks-site` directory. A separate `github-pages` deployment job alone receives
+Pages write and OIDC permissions, and it verifies the built source SHA still matches the event
+commit before deploying.
+
 The package-free browser, responsive, motion, touch, and assistive-technology checks are in
 [`tests/lander-browser-checklist.md`](tests/lander-browser-checklist.md). Complete its pending rows
 before a public release.
