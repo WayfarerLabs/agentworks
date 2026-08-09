@@ -202,6 +202,8 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             "MANIFEST_PATH contains one resource rewritten against the live sample and field reference for "
             "MANIFEST_KIND and, when present, the separate field reference for CAPABILITY_TARGET. "
             "Any retired presence shape uses the exact hard-error rewrite, including the outer-null mode mapping. "
+            "A git-credential token uses the canonical tagged stored arm; an outer token null is deleted or "
+            "rewritten exactly as token: {mode: stored}, while an existing scalar's secret name is preserved. "
             "EXPECTED_IDENTITIES remains byte-for-byte unchanged.",
             None,
             "Keep the last validated manifest set and do not remove any retired TOML section.",
@@ -210,7 +212,12 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             "separate field-reference topic for CAPABILITY_TARGET. If validation reports a retired "
             "service_principal, credentials, or vm_host shape, apply that hard error's exact rewrite in "
             "MANIFEST_PATH. For an outer explicit null, delete the retired line and write auth ambient, auth "
-            "ambient, or placement local, respectively. Require MANIFEST_PATH to equal the selected "
+            "ambient, or placement local, respectively. For a git-credential, consult its provider reference. "
+            "Omission still selects the stored default, and a scalar token remains accepted shorthand, but write "
+            "the canonical tagged stored arm. Preserve a scalar's secret name as token: {mode: stored, secret: "
+            "<existing-name>}. Delete an outer token: null line or replace it exactly with token: {mode: stored}; "
+            "an omitted or null inner token.secret selects the default. No minted arm exists. Require "
+            "MANIFEST_PATH to equal the selected "
             "EXPECTED_IDENTITIES entry's pre-recorded file. Never add, remove, or change a baseline entry. Do "
             "not copy a schema from this migration topic.",
         ),
@@ -230,7 +237,8 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             "Config with status fail, and it has no check named Manifest or Resource registry with status warn or "
             "fail. Machine-safe JSON cannot distinguish the expected Config failure from another config failure; "
             "it only corroborates that stable structural state. Its message and hint fields do not prove precise "
-            "diagnostic detail.",
+            "diagnostic detail. Any Manifest or Resource registry hard error leaves this action unverified and "
+            "returns the selected manifest to edit-one-manifest; repeat this validation after the edit.",
             ("agw", "doctor", "--output", "json"),
             "Leave the edit unverified, keep every retired TOML section, and block cutover.",
         ),

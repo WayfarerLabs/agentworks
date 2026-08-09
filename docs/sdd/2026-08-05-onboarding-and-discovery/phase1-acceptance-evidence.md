@@ -1,6 +1,6 @@
 # Phase 1 Acceptance Evidence
 
-- Date: 2026-08-06, updated 2026-08-08 after the PR #444 and PR #446 rebase
+- Date: 2026-08-06, updated 2026-08-08 after the PR #444, PR #446, and PR #455 rebases
 - Branch: `feat/onboarding-discovery-guide`
 - Environment: isolated temporary home, config, state, and fake executable directories
 - Budget: 20 commands and 10 minutes for the initial pass; 8 commands and 5 minutes for the focused
@@ -136,3 +136,43 @@ findings. Final rebased validation passed:
 - mypy: 611 source files clean;
 - Rulesync generated-output check and locked-SDD validation: clean;
 - mandatory file lint: Prettier, markdownlint, and cspell clean.
+
+## PR #455 git-token structural-union adoption
+
+The post-merge adaptation was based exactly on `25e47637`. PR #455 expresses provider token
+acquisition as an untagged scalar-or-table structural union. The live GitHub and AzDO references
+both expose exactly one `stored` arm with `mode` and `secret` rows, the `{mode: stored}` outer
+default, and the owner-templated `git-token-<name>` secret default. The declarable `git-credential`
+reference carries the same complete nested field tree. Focused renderer tests bind all three guide
+topics to those live `FieldEntry.alternatives`; no guide-specific field list or adapter switch was
+needed.
+
+The migration topic now preserves every released spelling deliberately. Omitted `provider.token`
+continues to select the stored arm and default secret. A scalar secret name remains accepted
+shorthand, while the guide writes the canonical tagged stored arm and preserves that name. An
+omitted or null inner `token.secret` selects the default. Explicit outer `token: null` is retired
+and routes through the manifest mutation loop for deletion or the exact `token: {mode: stored}`
+rewrite. No minted arm is taught because none exists. The site-specific read-only null review
+remains unchanged; any manifest validation hard error returns to `edit-one-manifest` before cutover.
+
+The guide-layer contract tests exercise `reference_for("git-credential")`, both live provider
+references, permanent capability validation, and secret-reference extraction. They prove scalar,
+omission, tagged, inner-null, outer-null, and unknown-mode behavior together, so prose cannot drift
+from either schema projection or service semantics. Final gate evidence for this adaptation is
+recorded from the branch runs below:
+
+- direct migration and schema-adapter contract slice: 55 passed;
+- complete guide suite: 444 passed;
+- guide, manifest, schema, retired-shape, and git-credential boundary: 3,069 passed;
+- Ruff: all checks passed; format: 621 files clean;
+- scoped mypy: 3 changed Python files clean;
+- Rulesync generated-output check: clean;
+- mandatory file lint: 272 Markdown files clean, 246 spelling files clean, and Prettier clean.
+
+Full mypy was also run, but the exact merged base and this branch both report the same three errors
+in unchanged `tests/test_operational_json_reviewed.py`: two `attr-defined` errors for its
+`agentworks.db.database.tempfile` test override seam and one `SimpleNamespace`/`SessionRow`
+list-item error. This guide-only adaptation does not change that separate operational-JSON test. The
+full non-integration suite was not repeated because no general production path changed; the
+3,069-test boundary above includes the complete guide suite and every relevant schema, manifest,
+retired-shape, and git-credential service test.
