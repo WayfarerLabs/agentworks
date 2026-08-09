@@ -120,6 +120,12 @@ def test_a_field_carries_its_type_requiredness_and_description() -> None:
     assert "Operator-facing text shown when the secret has to be entered by hand" in text
 
 
+def test_an_optional_root_union_keeps_its_outer_null_spelling() -> None:
+    entry = _field_entry(_text("session-template"), "harness_integration")
+
+    assert "harness_integration (table or null, optional)" in entry
+
+
 def test_a_field_that_folds_a_scalar_offers_both_spellings() -> None:
     """The shipped defect: an env table accepts ``FOO: a value`` and
     ``FOO: {secret: x}``, the emitted schema said so, and this surface

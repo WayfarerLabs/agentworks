@@ -457,13 +457,13 @@ def _collapsed(entry: FieldEntry) -> FieldEntry:
     inner = entry.children[0]
     if inner.name != "root":
         return entry
-    # The parent keeps its own path, description, and requiredness (they
-    # are the field's); the wrapped value supplies what it IS.
+    # The parent keeps the annotation an operator actually supplies. That
+    # includes wrappers outside the RootModel (notably ``| None``); only
+    # the root child's structural detail moves up for presentation.
     return replace(
         entry,
         doc=replace(
             entry.doc,
-            annotation=inner.doc.annotation,
             union_arms=inner.doc.union_arms,
             choices=inner.doc.choices,
         ),

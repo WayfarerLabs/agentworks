@@ -21,6 +21,7 @@ from agentworks.schema import (
     reference_marker_error,
     structural_union_error,
 )
+from agentworks.schema._shape import structural_arm_and_value, structural_arm_for
 
 OWNER = RefOwner(kind="fixture", name="demo")
 
@@ -224,6 +225,36 @@ def test_overlapping_table_languages_are_loud_even_without_markers() -> None:
     reason = structural_union_error(Overlapping)
     assert reason is not None
     assert "overlapping arms First and Second" in reason
+
+
+def test_overlapping_table_languages_do_not_select_an_arm() -> None:
+    class First(AgwModel):
+        value: str
+
+    class Second(AgwModel):
+        value: str
+        note: str | None = None
+
+    blob = {"value": "text"}
+
+    assert structural_arm_for((First, Second), blob) is None
+    assert structural_arm_and_value((First, Second), blob) == (None, blob)
+
+
+def test_overlapping_table_languages_do_not_invent_an_extracted_edge() -> None:
+    class First(AgwModel):
+        value: Annotated[str, SecretRef(usage="the first value")]
+
+    class Second(AgwModel):
+        value: str
+        note: str | None = None
+
+    class Overlapping(AgwModel):
+        source: Annotated[First | Second, StructuralUnion()]
+
+    blob = {"source": {"value": "api-token"}}
+
+    assert list(extract_references(Overlapping, blob)) == []
 
 
 def test_optional_overlapping_table_languages_stay_loud_without_markers() -> None:
