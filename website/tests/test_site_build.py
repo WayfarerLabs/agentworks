@@ -415,6 +415,60 @@ class TemplateContractTests(RepositoryFixture):
                 with self.subTest(name=name, change=changed[:100]), self.assertRaises(ValueError):
                     site_builder._validate_template(name, changed)
 
+    def test_reviewed_shell_text_cannot_come_from_hidden_or_structural_descendants(self) -> None:
+        template = (self.root / "website/templates/index.html").read_text(encoding="utf-8")
+        variants = (
+            template.replace(
+                "Skip to main content",
+                '<span hidden>Skip to main content</span>',
+                1,
+            ),
+            template.replace("<span>GitHub</span>", '<span><span aria-hidden="true">GitHub</span></span>', 1),
+            template.replace(
+                '<a href="{{SITE_BASE}}">Agentworks</a>',
+                '<a href="{{SITE_BASE}}"><span hidden>Agentworks</span></a>',
+                1,
+            ),
+            template.replace(
+                '<span aria-current="page">Home</span>',
+                '<span aria-current="page"><template>Home</template></span>',
+                1,
+            ),
+            template.replace(
+                "Product of Wayfarer Labs, LLC",
+                '<span aria-hidden="true">Product of Wayfarer Labs, LLC</span>',
+                1,
+            ),
+            template.replace(
+                ">Agentworks Manifesto</a>",
+                '><span style="visibility: hidden">Agentworks Manifesto</span></a>',
+                1,
+            ),
+        )
+        for changed in variants:
+            with self.subTest(change=changed[:120]), self.assertRaises(ValueError):
+                site_builder._validate_template("index.html", changed)
+
+    def test_service_icon_paths_are_exact_single_direct_children(self) -> None:
+        for name in site_builder.TEMPLATE_TOKENS:
+            template = (self.root / "website/templates" / name).read_text(encoding="utf-8")
+            for destination, path_data in site_builder.SERVICE_ICON_PATHS.items():
+                path = f'<path d="{path_data}" />'
+                self.assertIn(path, template)
+                variants = (
+                    template.replace(path, "", 1),
+                    template.replace(path, '<path d="M0 0" />', 1),
+                    template.replace(path, "<path />", 1),
+                    template.replace(path, f"{path}{path}", 1),
+                    template.replace(path, f"<g>{path}</g>", 1),
+                    template.replace(path, f'<path d="{path_data}">unexpected</path>', 1),
+                )
+                for changed in variants:
+                    with self.subTest(name=name, destination=destination), self.assertRaisesRegex(
+                        ValueError, "exact reviewed icon path"
+                    ):
+                        site_builder._validate_template(name, changed)
+
     def test_rocket_inventory_rejects_unclassified_extra_and_misplaced_images(self) -> None:
         extra = '<img src="{{SITE_BASE}}assets/agw-rocket.svg" alt="" />'
         for name in site_builder.TEMPLATE_TOKENS:
@@ -472,6 +526,23 @@ class TemplateContractTests(RepositoryFixture):
                     template.replace(
                         "</main>",
                         '<a href="{{SITE_BASE}}manifesto/#the-problem-space">Duplicate Manifesto route</a></main>',
+                        1,
+                    ),
+                    "duplicate normalized local route",
+                ),
+                (
+                    template.replace(
+                        "</main>",
+                        '<a href="{{SITE_BASE}}manifesto/index.html#the-problem-space">'
+                        "Aliased Manifesto route</a></main>",
+                        1,
+                    ),
+                    "duplicate normalized local route",
+                ),
+                (
+                    template.replace(
+                        "</main>",
+                        '<a href="{{SITE_BASE}}index.html">Aliased root route</a></main>',
                         1,
                     ),
                     "duplicate normalized local route",
@@ -621,6 +692,49 @@ class BuildAndInstallTests(RepositoryFixture):
         with self.assertRaisesRegex(ValueError, "local reference is absent from manifest"):
             site_builder.build_site(self.root, output, "/")
         self.assertEqual(snapshot(output), before)
+
+    def test_cross_document_fragment_must_exist_on_its_actual_target(self) -> None:
+        output = self.build()
+        before = snapshot(output)
+        template = self.root / "website/templates/security.html"
+        source = template.read_text(encoding="utf-8")
+        template.write_text(
+            source.replace(
+                "</main>",
+                '<a href="{{SITE_BASE}}404.html#not-a-real-id">Missing cross-page fragment</a>\n</main>',
+            ),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ValueError, "local reference fragment is absent"):
+            site_builder.build_site(self.root, output, "/agentworks/")
+        self.assertEqual(snapshot(output), before)
+
+    def test_manifest_without_root_index_cannot_suppress_root_reference_failure(self) -> None:
+        rendered, manifest = site_builder._render_artifact(self.root, "/")
+        without_index = manifest - {Path("index.html")}
+        with self.assertRaisesRegex(ValueError, "local reference is absent from manifest"):
+            site_builder._validate_local_references(rendered, without_index, "/")
+
+    def test_shared_css_cannot_conceal_reviewed_shell_content(self) -> None:
+        output = self.build()
+        before = snapshot(output)
+        stylesheet = self.root / "website/static/site.css"
+        source = stylesheet.read_text(encoding="utf-8")
+        mutations = (
+            ".canary { display /* normalized */ : none; }",
+            ".canary { VISIBILITY : HIDDEN !important; }",
+            ".canary { opacity : 0; }",
+            ".canary { opacity : 0.0 !important; }",
+            ".canary { content-visibility : hidden; }",
+        )
+        for mutation in mutations:
+            stylesheet.write_text(f"{source}\n{mutation}\n", encoding="utf-8")
+            with self.subTest(mutation=mutation), self.assertRaisesRegex(
+                ValueError, "shared CSS cannot conceal"
+            ):
+                site_builder.build_site(self.root, output, "/")
+            self.assertEqual(snapshot(output), before)
+        stylesheet.write_text(source, encoding="utf-8")
 
     def test_same_document_fragment_must_resolve_before_output_changes(self) -> None:
         output = self.build()

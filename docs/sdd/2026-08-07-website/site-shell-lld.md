@@ -69,8 +69,9 @@ Every page has one `header` after the skip link. Its first region is the page id
 
 The second region is one `nav` named `External`. It contains exactly one repository link labeled
 `GitHub` and one package link labeled `PyPI`. Each anchor contains one inline local SVG followed by
-visible label text. The SVG has `aria-hidden="true"` and `focusable="false"`; the text remains the
-accessible name if CSS or the icon is unavailable. No remote icon asset or package is used.
+visible direct label text. Each SVG has exactly one direct `path` with its reviewed service
+geometry, `aria-hidden="true"`, and `focusable="false"`; the text remains the accessible name if CSS
+or the icon is unavailable. No remote icon asset or package is used.
 
 The 404 breadcrumb's linked `Agentworks` crumb is its sole visible route-home action. The error body
 contains no second home link. The controller has no dependency on that removed element, so scene,
@@ -151,6 +152,14 @@ references in memory. It renders the complete explicit manifest to a sibling sta
 verifies exact regular files and directories, and atomically installs only after validation.
 Existing output is accepted only when every entry is builder-owned. No validator exception permits a
 generated local link outside the manifest. A failed install restores the prior output.
+
+One local-reference resolver serves both route uniqueness and manifest validation. Directory routes
+and their trailing `index.html` forms resolve to the same manifest path, including fragment-bearing
+references; root and `/index.html` likewise resolve together. Every same- or cross-document fragment
+must identify an actual element in its HTML or SVG target. Shared shell labels are visible leaf
+text, not text inherited from hidden or structural descendants. The builder also rejects normalized
+`display:none`, `visibility:hidden`, `opacity:0`, and `content-visibility:hidden` declarations in
+`static/site.css`; manual acceptance still verifies computed styles.
 
 The same inputs and arguments produce byte-identical output. Artifacts contain no timestamps,
 environment prose, or generated `CNAME`, and successful builds leave the repository clean.

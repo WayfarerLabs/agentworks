@@ -35,6 +35,20 @@ README_SOURCE_URL: Final = f"{REPOSITORY_URL}/blob/main/README.md"
 IDEMPOTENCY_URL: Final = f"{REPOSITORY_URL}/blob/main/docs/guides/idempotency.md"
 CLI_SECRETS_URL: Final = f"{REPOSITORY_URL}/blob/main/cli/README.md#environment-variables-and-secrets"
 PYPI_URL: Final = "https://pypi.org/project/agentworks-cli/"
+SERVICE_ICON_PATHS: Final = {
+    REPOSITORY_URL: (
+        "M8 .7a7.5 7.5 0 0 0-2.4 14.6v-2c-1.8.4-2.2-.8-2.2-.8-.3-.8-.8-1-1-1.1-.7-.5.1-.5.1-.5.8.1 "
+        "1.2.8 1.2.8.7 1.2 1.8.9 2.2.7.1-.5.3-.9.5-1.1-1.5-.2-3-.7-3-3.3 0-.7.2-1.3.7-1.8-.1-.2-.3-.9.1-1.8 0 "
+        "0 .6-.2 2.1.7A7 7 0 0 1 8 4.1a7 7 0 0 1 1.9.3c1.5-.9 2.1-.7 2.1-.7.4.9.2 1.6.1 1.8.5.5.7 1.1.7 1.8 0 "
+        "2.6-1.6 3.1-3 3.3.3.2.5.6.5 1.2v3.5A7.5 7.5 0 0 0 8 .7Z"
+    ),
+    PYPI_URL: (
+        "M7.8 1.1c-3.4 0-3.2 1.5-3.2 1.5v1.5h3.3v.5H3.3S1 4.3 1 8s2 3.6 2 3.6h1.2V9.9s-.1-2 2-2h3.3s1.9 0 "
+        "1.9-1.8V3s.3-1.9-3.6-1.9Zm-1.8 1a.6.6 0 1 1 0 1.2.6.6 0 0 1 0-1.2Zm2.2 12.8c3.4 0 3.2-1.5 "
+        "3.2-1.5v-1.5H8.1v-.5h4.6S15 11.7 15 8s-2-3.6-2-3.6h-1.2v1.7s.1 2-2 2H6.5s-1.9 0-1.9 1.8V13s-.3 1.9 "
+        "3.6 1.9Zm1.8-1a.6.6 0 1 1 0-1.2.6.6 0 0 1 0 1.2Z"
+    ),
+}
 MANIFESTO_SOURCE_SHA256: Final = "dba90181c0c3fca415d965ac4eb3933525044ffe560ec1ef2561be83e875d207"
 MANIFESTO_HEADINGS: Final = (
     (1, "Why Agentworks"),
@@ -91,6 +105,12 @@ TEMPLATE_METADATA: Final = {
     "manifesto.html": ("Agentworks Manifesto", "https://agentworks.build/manifesto/"),
     "security.html": ("Security | Agentworks", "https://agentworks.build/security/"),
     "404.html": ("Page not found | Agentworks", "https://agentworks.build/404.html"),
+}
+TEMPLATE_DESTINATIONS: Final = {
+    "index.html": Path("index.html"),
+    "manifesto.html": Path("manifesto/index.html"),
+    "security.html": Path("security/index.html"),
+    "404.html": Path("404.html"),
 }
 MAIN_ATTRIBUTES: Final = {
     "index.html": {"id": "main-content", "class": "home-main"},
@@ -751,6 +771,11 @@ class _ShellElement(NamedTuple):
     text: list[str]
 
 
+class _LocalReference(NamedTuple):
+    target: Path
+    fragment: str | None
+
+
 class _ShellParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
@@ -822,15 +847,47 @@ def _one(parser: _ShellParser, indexes: list[int], reason: str) -> int:
     return indexes[0]
 
 
-def _local_route(href: str | None) -> str | None:
-    if href is None or not href.startswith(SITE_BASE_TOKEN):
+def _resolve_local_reference(
+    reference: str | None, base: str, source: Path | None = None
+) -> _LocalReference | None:
+    if reference is None:
         return None
-    return href.split("#", 1)[0]
+    if reference.startswith("#"):
+        if source is None:
+            return None
+        return _LocalReference(source, reference[1:])
+    if not reference.startswith(base):
+        return None
+    location, separator, fragment = reference[len(base) :].partition("#")
+    if not location or location == "index.html":
+        target = Path("index.html")
+    elif location.endswith("/"):
+        target = Path(f"{location}index.html")
+    else:
+        target = Path(location)
+    return _LocalReference(target, fragment if separator else None)
+
+
+def _validate_visible_leaf(
+    parser: _ShellParser,
+    index: int,
+    attributes: dict[str, str | None],
+    text: str,
+    reason: str,
+) -> None:
+    element = parser.elements[index]
+    if (
+        element.attributes != attributes
+        or _hidden(parser, index)
+        or _children(parser, index)
+        or _normalized_text(element.text) != text
+    ):
+        raise ValueError(reason)
 
 
 def _validate_service_anchor(parser: _ShellParser, index: int, destination: str, label: str) -> None:
     anchor = parser.elements[index]
-    if anchor.tag != "a" or anchor.attributes != {"href": destination} or _normalized_text(anchor.text) != label:
+    if anchor.tag != "a" or anchor.attributes != {"href": destination}:
         raise ValueError(f"service destination {destination} must use visible label {label!r}")
     if _hidden(parser, index):
         raise ValueError(f"service destination {destination} must remain visible")
@@ -845,9 +902,24 @@ def _validate_service_anchor(parser: _ShellParser, index: int, destination: str,
         "viewbox": "0 0 16 16",
     }:
         raise ValueError(f"service destination {destination} requires one hidden decorative icon")
-    label_element = parser.elements[children[1]]
-    if label_element.attributes or _hidden(parser, children[1]) or _normalized_text(label_element.text) != label:
-        raise ValueError(f"service destination {destination} has a misplaced visible label")
+    icon_children = _children(parser, children[0])
+    if (
+        len(icon_children) != 1
+        or parser.elements[icon_children[0]].tag != "path"
+        or parser.elements[icon_children[0]].attributes != {"d": SERVICE_ICON_PATHS[destination]}
+        or _children(parser, icon_children[0])
+        or _normalized_text(parser.elements[icon_children[0]].text)
+    ):
+        raise ValueError(f"service destination {destination} requires its exact reviewed icon path")
+    _validate_visible_leaf(
+        parser,
+        children[1],
+        {},
+        label,
+        f"service destination {destination} has a misplaced visible label",
+    )
+    if _normalized_text(anchor.text) != label:
+        raise ValueError(f"service destination {destination} must use visible label {label!r}")
 
 
 def _validate_shared_shell(name: str, template: str) -> None:
@@ -879,8 +951,13 @@ def _validate_shared_shell(name: str, template: str) -> None:
     if [elements[index].tag for index in body_children] != ["a", "header", "main", "footer"]:
         raise ValueError(f"{name}: skip link, header, main, and footer must occur once in source order")
     skip_index, header_index, main_index, footer_index = body_children
-    if elements[skip_index].attributes != {"class": "skip-link", "href": "#main-content"} or _normalized_text(elements[skip_index].text) != "Skip to main content":
-        raise ValueError(f"{name}: exactly one reviewed skip link is required")
+    _validate_visible_leaf(
+        parser,
+        skip_index,
+        {"class": "skip-link", "href": "#main-content"},
+        "Skip to main content",
+        f"{name}: exactly one visible reviewed skip link is required",
+    )
     if elements[header_index].attributes != {"class": "site-header"}:
         raise ValueError(f"{name}: header requires the exact site-header class")
     if elements[main_index].attributes != MAIN_ATTRIBUTES[name]:
@@ -916,12 +993,27 @@ def _validate_shared_shell(name: str, template: str) -> None:
     if [elements[index].tag for index in breadcrumb_children] != ["a", "span", "span"]:
         raise ValueError(f"{name}: breadcrumb must contain home, separator, and current item in order")
     home_index, separator_index, current_index = breadcrumb_children
-    if elements[home_index].attributes != {"href": SITE_BASE_TOKEN} or _normalized_text(elements[home_index].text) != "Agentworks":
-        raise ValueError(f"{name}: Agentworks home crumb contract is invalid")
-    if elements[separator_index].attributes != {"class": "breadcrumb-separator", "aria-hidden": "true"}:
+    _validate_visible_leaf(
+        parser,
+        home_index,
+        {"href": SITE_BASE_TOKEN},
+        "Agentworks",
+        f"{name}: Agentworks home crumb contract is invalid",
+    )
+    if (
+        elements[separator_index].attributes
+        != {"class": "breadcrumb-separator", "aria-hidden": "true"}
+        or _children(parser, separator_index)
+        or _normalized_text(elements[separator_index].text) != "/"
+    ):
         raise ValueError(f"{name}: breadcrumb separator contract is invalid")
-    if elements[current_index].attributes != {"aria-current": "page"} or _normalized_text(elements[current_index].text) != CURRENT_PAGE_LABELS[name]:
-        raise ValueError(f"{name}: breadcrumb current-page state is invalid")
+    _validate_visible_leaf(
+        parser,
+        current_index,
+        {"aria-current": "page"},
+        CURRENT_PAGE_LABELS[name],
+        f"{name}: breadcrumb current-page state is invalid",
+    )
 
     if elements[external_index].attributes != {"class": "service-links", "aria-label": "External"}:
         raise ValueError(f"{name}: external navigation requires its exact class and accessible label")
@@ -994,8 +1086,13 @@ def _validate_shared_shell(name: str, template: str) -> None:
     if [elements[index].tag for index in footer_children] != ["p", "nav"]:
         raise ValueError(f"{name}: footer ownership must precede footer navigation")
     ownership_index, footer_nav_index = footer_children
-    if elements[ownership_index].attributes or _normalized_text(elements[ownership_index].text) != "Product of Wayfarer Labs, LLC":
-        raise ValueError(f"{name}: footer ownership text is invalid")
+    _validate_visible_leaf(
+        parser,
+        ownership_index,
+        {},
+        "Product of Wayfarer Labs, LLC",
+        f"{name}: footer ownership text is invalid",
+    )
     if elements[footer_nav_index].attributes != {"aria-label": "Footer"}:
         raise ValueError(f"{name}: footer navigation label is invalid")
     footer_links = _children(parser, footer_nav_index)
@@ -1006,8 +1103,13 @@ def _validate_shared_shell(name: str, template: str) -> None:
     if [elements[index].tag for index in footer_links] != ["a", "a"]:
         raise ValueError(f"{name}: footer must contain exactly Manifesto then Security")
     for index, (destination, label) in zip(footer_links, expected_footer, strict=True):
-        if elements[index].attributes != {"href": destination} or _normalized_text(elements[index].text) != label:
-            raise ValueError(f"{name}: footer destination {destination} is invalid")
+        _validate_visible_leaf(
+            parser,
+            index,
+            {"href": destination},
+            label,
+            f"{name}: footer destination {destination} is invalid",
+        )
 
     anchors = [element for element in elements if element.tag == "a"]
     invalid_local_hrefs = [
@@ -1021,8 +1123,18 @@ def _validate_shared_shell(name: str, template: str) -> None:
         matching = [anchor for anchor in anchors if anchor.attributes.get("href") == destination]
         if len(matching) != 1 or _normalized_text(matching[0].text) != label:
             raise ValueError(f"{name}: destination {destination} must occur once with label {label!r}")
-    local_routes = [route for anchor in anchors if (route := _local_route(anchor.attributes.get("href"))) is not None]
-    duplicates = sorted({route for route in local_routes if local_routes.count(route) > 1})
+    local_routes = [
+        reference.target
+        for anchor in anchors
+        if (
+            reference := _resolve_local_reference(
+                anchor.attributes.get("href"), SITE_BASE_TOKEN, TEMPLATE_DESTINATIONS[name]
+            )
+        )
+        is not None
+        and str(anchor.attributes.get("href")).startswith(SITE_BASE_TOKEN)
+    ]
+    duplicates = sorted({route.as_posix() for route in local_routes if local_routes.count(route) > 1})
     if duplicates:
         raise ValueError(f"{name}: duplicate normalized local route destinations: {duplicates}")
 
@@ -1142,32 +1254,31 @@ class _ReferenceParser(HTMLParser):
 
 
 def _validate_local_references(rendered: dict[Path, bytes], manifest: frozenset[Path], base: str) -> None:
+    parsed: dict[Path, _ReferenceParser] = {}
     for path, content in rendered.items():
-        if path.suffix != ".html":
+        if path.suffix not in {".html", ".svg"}:
             continue
         parser = _ReferenceParser()
         parser.feed(content.decode("utf-8"))
+        parsed[path] = parser
+
+    for path, parser in parsed.items():
         for reference in parser.references:
-            if reference.startswith("#"):
-                fragment = reference[1:]
-                if not fragment or fragment not in parser.ids:
-                    raise ValueError(f"{path}: same-document fragment is absent: {reference}")
-                continue
             if reference.startswith("https://"):
                 if reference not in APPROVED_EXTERNAL_URLS:
                     raise ValueError(f"{path}: unapproved external URL: {reference}")
                 continue
-            if not reference.startswith(base):
+            local = _resolve_local_reference(reference, base, path)
+            if local is None:
                 raise ValueError(f"{path}: local reference is outside site base: {reference}")
-            target = reference[len(base) :].split("#", 1)[0]
-            if not target:
-                if Path("index.html") not in manifest:
-                    continue
-                target = "index.html"
-            elif target.endswith("/"):
-                target += "index.html"
-            if Path(target) not in manifest:
+            if local.target not in manifest:
                 raise ValueError(f"{path}: local reference is absent from manifest: {reference}")
+            if local.fragment is not None and (
+                not local.fragment
+                or local.target not in parsed
+                or local.fragment not in parsed[local.target].ids
+            ):
+                raise ValueError(f"{path}: local reference fragment is absent: {reference}")
 
 
 def _validate_runtime_asset(path: Path, source: str) -> None:
@@ -1178,6 +1289,20 @@ def _validate_runtime_asset(path: Path, source: str) -> None:
             raise ValueError(f"{path}: CSS url() references are forbidden")
         if HTTP_URL_PATTERN.search(source) or QUOTED_PROTOCOL_RELATIVE_URL_PATTERN.search(source):
             raise ValueError(f"{path}: remote CSS URLs are forbidden")
+        if path == Path("static/site.css"):
+            normalized = re.sub(r"\s+", "", re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)).lower()
+            concealment = (
+                "display:none" in normalized
+                or "visibility:hidden" in normalized
+                or "content-visibility:hidden" in normalized
+                or re.search(
+                    r"(?:^|[;{])opacity:[+-]?(?:0+|0*\.0+)(?:e[+-]?\d+)?(?:!important)?(?:[;}]|\Z)",
+                    normalized,
+                )
+                is not None
+            )
+            if concealment:
+                raise ValueError(f"{path}: shared CSS cannot conceal reviewed shell content")
     elif path.suffix == ".js":
         if HTTP_URL_PATTERN.search(source) or QUOTED_PROTOCOL_RELATIVE_URL_PATTERN.search(source):
             raise ValueError(f"{path}: remote JavaScript URLs are forbidden")
@@ -1191,10 +1316,7 @@ def _render_artifact(repo_root: Path, site_base: str) -> tuple[dict[Path, bytes]
     rendered: dict[Path, bytes] = {}
     for name in template_names:
         template = _read_utf8(website / "templates" / name)
-        destination = {
-            "manifesto.html": Path("manifesto/index.html"),
-            "security.html": Path("security/index.html"),
-        }.get(name, Path(name))
+        destination = TEMPLATE_DESTINATIONS[name]
         rendered[destination] = render_named_template(name, template, site_base, substitutions).encode()
     copies = {
         Path("assets/agw-rocket.svg"): website / "assets/agw-rocket.svg",

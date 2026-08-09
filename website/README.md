@@ -86,6 +86,12 @@ encoding, and unbounded paths are rejected. The builder validates all content an
 an exact regular-file tree beside the destination, and then swaps it into place. Existing output is
 replaced only when every entry belongs to the complete manifest.
 
+Local directory URLs and trailing `index.html` aliases resolve to one manifest destination, and
+every local fragment must exist in its actual HTML or SVG target. Shared shell labels must remain
+visible direct text. `static/site.css` may not introduce normalized `display:none`,
+`visibility:hidden`, `opacity:0`, or `content-visibility:hidden` declarations; the manual checklist
+still verifies browser-computed visibility.
+
 Replacement uses a sibling backup. A failed installation or installed-manifest check restores the
 previous output. Once the installed manifest is verified, the new artifact is committed. A failure
 to remove the old backup after that point leaves the valid new artifact installed and prints a
@@ -134,7 +140,8 @@ header has exactly one linked `Agentworks` home crumb, a hidden visual separator
 current-page item, and one icon-and-text link each for GitHub and PyPI. Home omits the small header
 mark because its large hero follows; every other page has exactly one decorative small mark
 immediately before the breadcrumb. The footer has exact ownership text plus one Manifesto and one
-Security link. Those local and external destinations are not repeated in the body. On 404, the
+Security link. Each service icon has one pinned direct path; its adjacent visible text supplies the
+accessible name. Those local and external destinations are not repeated in the body. On 404, the
 linked home crumb is the sole visible route-home action.
 
 Build artifacts are disposable projections of the templates and permanent sources; maintain the

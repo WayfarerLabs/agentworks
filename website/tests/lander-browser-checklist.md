@@ -7,8 +7,9 @@ python3 website/build.py --repo-root . --output /tmp/agentworks-site-demo --site
 python3 -m http.server --directory /tmp/agentworks-site-demo 8000
 ```
 
-Use this package-free checklist against the built 404 artifact. Record each execution so a future
-reader can distinguish verified behavior from an expectation that has not been run.
+Use this package-free checklist against `/404.html` in the complete built site. Record each
+execution so a future reader can distinguish verified behavior from an expectation that has not been
+run.
 
 Phase 4B changed the shared header and footer and added `/manifesto/`. Automated source, generated
 document, and model checks pass, but no browser execution has been recorded for that source. All
