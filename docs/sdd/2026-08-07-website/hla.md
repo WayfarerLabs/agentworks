@@ -109,6 +109,11 @@ The builder accepts an explicit repository root and output directory, writes onl
 directory, and produces deterministic bytes for the same inputs. It starts from an empty
 caller-provided output directory in CI. Generated artifacts are ignored by Git and never committed.
 
+The builder has one output shape: the complete linked site. The former focused `--only 404` seam is
+removed now that 404 uses the shared navigation shell; a partial artifact would contain dead local
+links and would no longer be an honest page. Local game work serves `/404.html` from the complete
+artifact. Manifest validation has no missing-local-reference exception.
+
 The template vocabulary is closed to named placeholders owned by the builder. Shared text is HTML
 escaped before insertion. There is no evaluation of source content as a template, Markdown, Python,
 or JavaScript.

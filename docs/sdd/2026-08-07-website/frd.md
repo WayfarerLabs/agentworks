@@ -110,6 +110,11 @@ and none of it is in scope now.
   canonical content fails the build before output replacement. The permanent source may be renamed
   from `Why Agentworks` to `Agentworks Manifesto`; the website contract follows the reviewed source
   change rather than maintaining a conflicting title.
+- R17. The builder emits only the complete linked site artifact. The earlier `--only 404` partial
+  demo mode is retired because the accepted 404 now shares navigation with Home, Manifesto, and
+  Security; emitting only `404.html` would make its sole recovery action and footer links dead. Game
+  development and demos use `/404.html` from the same complete local build that production uses. No
+  validator exception may permit an emitted local link to resolve outside the selected manifest.
 
 ## Settled constraints (inherited; do not reopen)
 
@@ -203,6 +208,10 @@ merged and settled on `main`. The first slice must not build toward them specula
   mapped links are verified against the permanent source, contain no unexpanded source-relative URL,
   and remain useful without CSS or JavaScript. Changing a selected canonical passage without
   updating its reviewed build contract fails closed.
+- AC18. The builder CLI has no focused or partial-output option, its complete artifact contains
+  every local destination exposed by Home, Manifesto, Security, or 404, and validation rejects every
+  absent local reference. Automated game checks build the complete artifact and exercise its
+  `/404.html`; documented local preview commands do the same.
 
 ## Settled implementation rulings
 
