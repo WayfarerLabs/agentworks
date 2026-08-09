@@ -11,13 +11,9 @@
 ## What Is a Git Credential Provider?
 
 A git credential provider obtains the credential an agent needs to clone and push against ONE git
-host over https, without baking tokens into images or hand-carrying them onto a VM. Most providers
-source a token from an operator-named secret (a personal access token, or PAT); a provider may
-instead mint one, for example by calling the host's API to create a scoped token, rather than
-reading a pre-existing one. Either way, it says how git should present that credential: the store
-line, the username git keys on, and how the credential is selected when several serve the same host.
-That is the whole of what a provider does. It obtains a credential and describes its use; it never
-touches a VM.
+host over https, without putting tokens in config or images. It sources a personal access token
+(PAT) from an operator-named secret and describes how git presents and selects that credential. It
+never touches a VM.
 
 Everything downstream of that is Agentworks, not the provider. Agentworks resolves the named secret,
 materializes the token onto the VM in the form git expects, and wires up git so ordinary git
@@ -42,13 +38,9 @@ Two providers ship today, one per supported host. This list can change, so
 
 Whichever provider a credential names, an operator can rely on two guarantees:
 
-- **A live token is never pasted into config.** Today's providers use the `stored` arm of a
-  credential's `token` acquisition field. Its `secret` key points at the _name_ of a secret that
-  holds the token, and the secret backend supplies the value at provisioning time. The field
-  defaults to that arm, and a bare secret name is its scalar shorthand. A future `minted` arm may
-  create a token through the host's API instead. It is not implemented today, and its scopes,
-  repositories, permissions, and other creation parameters will remain credential configuration,
-  never secret mapping content.
+- **A live token is never pasted into config.** The `token.secret` key names the secret containing
+  the token, and a secret backend supplies its value at provisioning time. The field defaults to
+  stored acquisition; a bare secret name is shorthand for that arm.
 - **A bad token is caught early.** At provisioning time Agentworks verifies the token against its
   host before writing anything, so an expired, revoked, or mistyped token surfaces as a clear,
   actionable error up front rather than as a confusing git failure partway through setup. (The check
@@ -62,8 +54,7 @@ vouches for it. It:
 - **MUST** obtain a credential (a token) for its one git host by sourcing it from an operator-named
   secret, read only through the framework's resolve pass; it **MUST NOT** accept a pasted
   credential, and **MUST NOT** hold, cache, log, or persist a token beyond the call that produces
-  it. A future extension may support providers that mint tokens through a host API; that contract is
-  not implemented today.
+  it.
 - **MUST** produce what git needs to authenticate as that credential on a VM: the stored entry, the
   username git keys on, and the selection the helper uses.
 - **MUST** validate anything it interpolates into a store URL, a gitconfig header, or the generated
@@ -73,9 +64,8 @@ vouches for it. It:
   disjoint for that host.
 - **MUST NOT** write to the VM, configure git, or otherwise mutate the VM or its git configuration
   in any stage; it returns strings and lets Agentworks materialize and wire them.
-- **MUST NOT** mint or mutate in `runup` or `review_remote` (both are read-only), and **MUST NOT**
-  reach the network or the host anywhere but the token check and, for a minting provider, its
-  check-then-mint op, both of which happen after the resolve boundary.
+- **MUST NOT** mutate in `runup` or `review_remote` (both are read-only), and **MUST NOT** reach the
+  network or host anywhere but the token check after the resolve boundary.
 - **MUST NOT** speak for, serve, or advise on a host it does not own, so it never shadows another
   provider's credential or clobbers an unrelated host's git configuration.
 - **SHOULD** verify the token against its host before it is relied on, raising a typed rejection on
@@ -181,23 +171,21 @@ actually consumed:
    the three files onto the VM (`~/.git-credentials` at mode 600, the include
    `~/.agentworks-git-scopes.gitconfig` at mode 600, and the helper
    `~/.agentworks-git-cred-helper.sh` at mode 700), then points git's global `credential.helper` at
-   `!<helper path>` with `--replace-all` (which also migrates released VMs off git's
-   `credential-store`) and adds the include behind an idempotent guard. All three files are
-   overwritten wholesale on every init, so the whole step is idempotent by construction and re-runs
-   cleanly under `reinit`.
+   `!<helper path>` with `--replace-all` and adds the include behind an idempotent guard. All three
+   files are overwritten wholesale on every init, so the whole step is idempotent by construction
+   and re-runs cleanly under `reinit`.
 
 The **credential helper mechanism** is the runtime half. The managed include sets
 `credential.useHttpPath = true`, so git sends the helper the remote's host AND path on every query.
 The helper (generated in `git_credentials/__init__.py`'s `_helper_script`) picks the most specific
 credential for that (host, path): exact repo, then owner (first path segment), then the host's
-default (an unscoped credential), then the first store line for the host (legacy semantics, which
-also keeps `vm add-git-credential` additions serving). Selection lives entirely in the helper and
-keys on the store username each `HelperEntry` carries; the store file just maps username back to
-token. The helper's `erase` deliberately never deletes (git calls it after a rejected auth, which is
-exactly when the operator needs a diagnosis, not state destruction, the way `credential-store`
-silently wiped the provisioned line). Every user gets their own store, include, and helper, built
-from their own credential list: admin during VM init, and each agent during agent provisioning
-(`agents/initializer.py`).
+default (an unscoped credential), then the first store line for the host. Selection lives entirely
+in the helper and keys on the store username each `HelperEntry` carries; the store file just maps
+username back to token. The helper's `erase` deliberately never deletes (git calls it after a
+rejected auth, which is exactly when the operator needs a diagnosis, not state destruction, the way
+`credential-store` silently wiped the provisioned line). Every user gets their own store, include,
+and helper, built from their own credential list: admin during VM init, and each agent during agent
+provisioning (`agents/initializer.py`).
 
 `review_remote` is a fourth, config-only consumption path with no token and no VM:
 `remote_advisories` (`git_credentials/__init__.py`) asks every declared credential to review a repo
@@ -220,9 +208,8 @@ Register the class in `GIT_CREDENTIAL_PROVIDER_REGISTRY` for a core built-in; a 
 provider is seated into the same registry by the plugin machinery at import and its row publishes
 with a `system-plugin` origin instead (the `azdo` shape).
 
-Three class-level declarations are REQUIRED and none is defaulted, because a default would let an
-unmigrated implementation inherit a claim it never made. Registration refuses an implementation
-missing any of them, naming the plugin:
+Three class-level declarations are REQUIRED and none is defaulted. Registration refuses an
+implementation missing any of them, naming the plugin:
 
 - `contract_version`: the capability contract version this implementation is written against.
   Registration requires an exact match with the version its kind's descriptor declares supported, so
@@ -231,15 +218,10 @@ missing any of them, naming the plugin:
   with no fields beyond its tag, which is closed-world by construction.
 - `name` / `description`: the registry row's identity.
 
-The current git-credential-provider contract is version 2. Version 2 changes the provider config
-API, so a version 1 plugin fails during registration with the supported-version error before its
-class can be selected or constructed. To migrate, replace the exported `TokenSourcedConfig` base
-with `TokenAcquiringConfig`, keep provider-specific minting and scope fields on that config model,
-read the stored secret name as `self.config.token.secret` rather than `self.config.token`, and set
-the implementation's `contract_version = 2`. The old `TokenSourcedConfig` export remains only as a
-release-scoped compatibility surface: it lets a version 1 plugin import far enough for registration
-to print the contract-version migration instead of failing during module import. The version 2
-descriptor rejects that old base, so it is not a valid v2 config API.
+The current contract is version 2. Version 1 providers are rejected at registration. To migrate,
+extend `TokenAcquiringConfig`, read the stored secret name from `self.config.token.secret`, and set
+`contract_version = 2`. `TokenSourcedConfig` remains importable only so version 1 plugins receive
+that registration error; it is not valid for a version 2 provider.
 
 #### Token Acquisition: One Stored Arm Today
 
@@ -263,21 +245,16 @@ class TokenAcquiringConfig(AgwModel):
     token: TokenAcquisition = Field(default={"mode": "stored"})
 ```
 
-`StoredToken` declares `ScalarShorthand(annotation=str, field="secret")`, while the union's
-`UnionScalarShorthand` explicitly selects that arm before tag dispatch. Together they derive
-`token: my-secret` as the short spelling of `token: {mode: stored, secret: my-secret}` without
-guessing that any arm shorthand selects itself. Omission defaults to stored because omission
-historically sourced the `git-token-<credential name>` secret. No future arm may replace that
-default: a new acquisition mechanism must be selected explicitly. The tag stays `mode`, despite the
-noun-shaped field, because stored versus minted selects an acquisition mechanism; `type` would
-misname storage as a token kind, while `source` would blur credential-domain acquisition with secret
-sourcing.
+`StoredToken` declares `ScalarShorthand(annotation=str, field="secret")`, and the union's
+`UnionScalarShorthand` selects that arm before tag dispatch. This makes `token: my-secret` shorthand
+for `token: {mode: stored, secret: my-secret}`. Omission selects stored acquisition; any additional
+mechanism must be selected explicitly. The tag is `mode` because it selects an acquisition
+mechanism, not a token type.
 
 The `SecretRef` marker lives inside the stored arm, where the reference really exists. The core
 derives validation, default filling, total extraction, emitted schema, samples, and field
 documentation from that declaration. Omitted, scalar, and full-table spellings therefore contribute
-the same secret edge. Minting is deliberately absent. When it arrives it grows the union additively,
-and any minting parameters remain provider configuration rather than moving into secret mappings.
+the same secret edge.
 
 #### Config: One Declared Model per Provider
 
@@ -334,9 +311,7 @@ response header). `azdo._verify_token` probes `GET https://dev.azure.com/<org>/_
 with a Basic header (base64 of `:<token>`), and rejects on `401` OR `203` (Azure DevOps answers a
 bad PAT on some routes with its sign-in page under a 203, not a 401).
 
-Runup never mints and never mutates. A minting provider would READ-and-check the current token in
-runup and mint only in a flagged, idempotent, check-then-mint op (see the idempotency section of
-`../README.md`).
+Runup is read-only and never mutates.
 
 #### Ops: The Materials Surface
 
@@ -433,12 +408,11 @@ azdo org via `AzDOOrg`, and the materials assembly re-checks store usernames and
 `_assert_sh_safe` before baking them into sh. Validate new config fields the same way; the helper
 generator is safe by construction, not by a distant invariant.
 
-#### Idempotency Is Free Here, and Stays Free
+#### Idempotency
 
-The materials ops are deterministic functions of config plus token, and the domain writes all three
+The materials ops are deterministic functions of config plus token. The domain writes all three
 files wholesale and registers the helper with `--replace-all`, so `reinit` reconciles cleanly with
-no per-op state. Preserve that: a token-sourcing provider needs no idempotency flag. A minting
-provider would, and would owe the check-then-mint guard the flag documents.
+no per-op state.
 
 ### Testing
 

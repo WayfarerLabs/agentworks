@@ -371,7 +371,7 @@ def test_the_capability_union_replaces_the_open_block_at_the_host_field() -> Non
     """
     schema = document_schema("vm-site")
     platform = schema["$defs"]["VmSiteSpec"]["properties"]["platform"]
-    assert "vm-platform backing this site" in platform["description"]
+    assert "The platform backing this site" in platform["description"]
 
     union = schema["$defs"][platform["$ref"].rsplit("/", 1)[-1]]
     assert union["discriminator"]["propertyName"] == "name"

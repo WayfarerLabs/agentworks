@@ -121,9 +121,8 @@ class VMTemplate(DeclaredResource):
     # default with the name of no secret at all. That auto-declares a
     # secret called ``''`` and sends ``vm create`` to resolve it.
     tailscale_auth_key: Annotated[NonEmptyStr, SecretRef(usage="the Tailscale auth key")] | None = None
-    """The secret naming this VM's Tailscale auth key. Omit it to inherit,
-    which falls back to ``tailscale-auth-key`` once the chain resolves;
-    writing it empty is a mistake, not a way to unset it."""
+    """The secret containing this VM's Tailscale auth key. Omit to inherit;
+    the resolved default is ``tailscale-auth-key``."""
 
     def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         """This template's outbound edges: its ``inherits`` edges as

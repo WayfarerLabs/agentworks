@@ -146,9 +146,9 @@ apply directly.
 Every review above is incremental: it validates one change against the tree as it stood. That is
 precisely how contradictions _between_ process documents accumulate invisibly, because each change
 can be locally correct and still quietly disagree with a document nobody reread. So periodically,
-after a burst of process changes, before locking a roadmap-level effort, or whenever the operator
-asks, run one comprehensive consistency review over the whole process tree: skills, rules, and
-subagent definitions together, in a single pass.
+after a burst of process changes, before locking a saga-level effort, or whenever the operator asks,
+run one comprehensive consistency review over the whole process tree: skills, rules, and subagent
+definitions together, in a single pass.
 
 Run it as an `agentworks-reviewer` subagent in its consistency-review mode (defined in that
 subagent: six categories, composition failures chief among them), in a fresh context, launched
@@ -170,16 +170,15 @@ ones.
   SDD artifacts included. Split into multiple PRs only when there is a good reason. The usual one is
   legitimate SDD phases that each carry independent, standalone value; another is cross-effort
   visibility, per the `sdd` skill's merge-artifacts-early guidance: when another effort could build
-  against your design (under an active roadmap, assume one can), the SDD artifacts land on `main`
-  ahead of the implementation instead of riding the feature branch to the end. A phase that only has
-  value once a later phase lands is not a reason to split; it is a commit within the one PR.
-  Always-green phased commits give reviewers a natural commit-by-commit reading order inside a
-  single large PR. The ceiling: when a feature's projected diff grows past what one reviewer can
-  actually hold (as a rough guide, a few thousand lines of substantive change), the default flips
-  and the effort ships as a PR series of always-green phases. Plan the split at plan-writing time,
-  not when the branch is already huge; review depth decays faster than diff size grows, and a
-  monster PR forces the review to happen after the design has hardened, when findings are most
-  expensive to act on.
+  against your design (under an active saga, assume one can), the SDD artifacts land on `main` ahead
+  of the implementation instead of riding the feature branch to the end. A phase that only has value
+  once a later phase lands is not a reason to split; it is a commit within the one PR. Always-green
+  phased commits give reviewers a natural commit-by-commit reading order inside a single large PR.
+  The ceiling: when a feature's projected diff grows past what one reviewer can actually hold (as a
+  rough guide, a few thousand lines of substantive change), the default flips and the effort ships
+  as a PR series of always-green phases. Plan the split at plan-writing time, not when the branch is
+  already huge; review depth decays faster than diff size grows, and a monster PR forces the review
+  to happen after the design has hardened, when findings are most expensive to act on.
 - **Within a PR series, stack dependent phases; don't wait for merge.** The expensive deltas come
   from review, not from merge, so the gate for building phase N+1 on phase N is the dust settling on
   N: its major review findings incorporated and re-review clean, not its merge. Before that gate,

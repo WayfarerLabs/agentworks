@@ -102,9 +102,10 @@ class ManifestSet:
     is a hard error now, so building the carrier today would add a field
     nothing writes.
 
-    When the next manifest-shape deprecation arrives, and the roadmap
-    ledger says one is expected because this effort removed the warn
-    window that used to exist, the pattern to copy is
+    When the next manifest-shape deprecation arrives, and the
+    next-steps saga's target-state compatibility posture says one is
+    expected because this effort removed the warn window that used to
+    exist, the pattern to copy is
     ``Config.deprecation_issues``: a per-SOURCE carrier feeding the shared
     surface, so ``--no-deprecations`` and
     ``output.deprecations_suppressed`` serve it without changes. That

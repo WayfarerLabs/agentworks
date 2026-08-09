@@ -104,6 +104,13 @@ they need has to reach them through artifacts. Well-written code is the first an
 comments carry the why that the code cannot; docs, agent skills, and rules carry what spans files.
 Put each piece of information in the artifact closest to where the need for it arises.
 
+Outside artifacts whose purpose is history or transition (ADRs, SDDs, upgrade guides, and code that
+must recognize old data), documentation describes the destination, not the journey. Operator
+guidance, reference docs, docstrings, and comments state the current behavior and only the durable
+rationale needed to operate or maintain it safely. Design debate, superseded spellings, and the
+story of how the current shape emerged do not belong there. Prefer the shortest text that leaves the
+reader able to act correctly.
+
 Minimizing cognitive load is the day-to-day form of this. Every bespoke shape a reader must decode
 is a tax on everyone downstream, so use existing patterns and conventions when they exist and are
 appropriate. When they don't exist, strongly favor creating one and documenting it over leaving a

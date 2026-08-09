@@ -149,8 +149,7 @@ class CodexConfig(AgwModel):
 
     writable_dirs: list[str] = Field(default_factory=list)
     """Extra directories the sandbox may write, each forwarded as
-    ``--add-dir``. Inherited templates UNION this list rather than
-    replacing it: it is an additive grant."""
+    ``--add-dir``. Inheritance combines parent and child entries."""
 
     web_search: bool | None = None
     """Whether to pass ``--search``."""

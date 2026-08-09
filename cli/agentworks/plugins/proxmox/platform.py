@@ -49,16 +49,15 @@ class ProxmoxConfig(AgwModel):
     """The API token's id (``user@realm!tokenname``)."""
 
     template_vmid: int = Field(examples=[9000])
-    """The VMID of the template new VMs clone from. An integer: a quoted
-    number is an operator mistake, not a value to convert."""
+    """The VMID of the template new VMs clone from. Write it as an integer,
+    not a quoted number."""
 
     token_secret: Annotated[
         NonEmptyStr,
         SecretRef(usage="the Proxmox API token", default_template="proxmox-token"),
     ]
-    """The secret holding the API token's value. Never the value itself:
-    the field NAMES a secret in the framework's secret system. The
-    default env-var convention reads ``AW_SECRET_PROXMOX_TOKEN``."""
+    """The secret containing the API token. The default maps to
+    ``AW_SECRET_PROXMOX_TOKEN`` in the env-var backend."""
 
     storage: NonEmptyStr = "local-lvm"
     """The storage new VMs' disks are created on."""
@@ -71,10 +70,8 @@ class ProxmoxConfig(AgwModel):
     """The resource pool new VMs join."""
 
     verify_ssl: bool = True
-    """Whether to verify the cluster's TLS certificate. A boolean,
-    written unquoted: ``false`` and YAML's ``no`` both read as false. A
-    QUOTED ``"no"`` is a string, refused now, and it used to mean TRUE,
-    the opposite of what it reads as."""
+    """Whether to verify the cluster's TLS certificate. Write booleans
+    unquoted; quoted strings such as ``"no"`` are invalid."""
 
 
 class ProxmoxPlatform(VMPlatform):

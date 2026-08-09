@@ -72,19 +72,12 @@ def _http_probe(url: str, headers: dict[str, str], *, timeout: float = 5.0) -> t
 
 
 class StoredToken(AgwModel):
-    """Obtain this credential's token from a stored secret.
-
-    This is deliberately one arm of a real tagged union even though it is
-    the only arm today. Minting arrives later as an additive arm; its
-    scopes, repositories, permissions, and other creation parameters
-    belong to the credential domain, never to this secret reference.
-    """
+    """Obtain this credential's token from a stored secret."""
 
     scalar_shorthand: ClassVar = ScalarShorthand(annotation=str, field="secret")
     """A bare ``token: <name>`` is this arm with ``secret`` filled."""
 
     mode: Literal["stored"]
-    """Selects stored-secret token acquisition."""
 
     secret: Annotated[NonEmptyStr, SecretRef(usage="the auth token", default_template="git-token-{owner_name}")]
     """The secret holding this credential's personal access token."""
@@ -100,9 +93,8 @@ TokenAcquisition = Annotated[
 class TokenAcquiringConfig(AgwModel):
     """The config every token-acquiring git credential provider shares."""
 
-    # Stored is the only legal default because omission historically
-    # sourced a stored secret. A future arm must be operator-selected and
-    # must never replace this default. Raw data is intentional: the owner
+    # Omission selects stored acquisition. Any other arm must be selected
+    # explicitly. Raw data is intentional: the owner
     # boundary fills the stored arm's templated ``secret`` before pydantic
     # validates it, which a constructed instance could not express.
     token: TokenAcquisition = Field(default={"mode": "stored"})  # type: ignore[assignment]
@@ -156,11 +148,8 @@ class GitCredentialProvider(Capability):
         *,
         description: str | None = None,
     ) -> None:
-        # An omitted config is an EMPTY one, not a missing one: an
-        # unscoped credential writes nothing but the tag and its token
-        # secret comes from the owner template. Defaulted here
-        # rather than on each provider, which is where the two shipped
-        # ones used to spell it.
+        # An omitted config is an empty, unscoped provider config. The token
+        # secret still comes from the owner template.
         super().__init__(owner_name, config or {})
         # Display sugar for the consuming resource's name; not part of
         # the capability's config (which is the tagged table's other keys).
@@ -175,13 +164,7 @@ class GitCredentialProvider(Capability):
     def secret_name(self) -> str:
         """The token secret this credential sources its PAT from
         (default ``git-token-<name>``). Named by the helper's rejection
-        diagnosis and read from the context at ``runup``.
-
-        A plain field read: the model layer resolved the default at
-        validation, so there is nothing left here to fall back to. The
-        fallback this replaced was the last consumer-side defaulting of a
-        modeled field on this path (FR15).
-        """
+        diagnosis and read from the context at ``runup``."""
         return self.config.token.secret
 
     @property
@@ -285,8 +268,8 @@ class GitCredentialProvider(Capability):
         is set globally in the managed include), and picks the most
         specific credential: exact repo, then owner (first path
         segment), then the host's default (an entry without scopes),
-        then the first store line for the host (legacy semantics, which
-        also keeps ``vm add-git-credential`` additions serving).
+        then the first store line for the host, which keeps entries added
+        through ``vm add-git-credential`` usable.
         """
 
     @abstractmethod

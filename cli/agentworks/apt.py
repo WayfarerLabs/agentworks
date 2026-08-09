@@ -12,9 +12,8 @@ reference (an unknown apt-source named by a package, or an unknown
 apt-package named by a vm-template) surfaces as a framework
 ``ConfigError`` at ``build_registry`` time citing the reference's source.
 Built-in entries ship as bundled manifests under ``manifests/builtin/``;
-operators may add or override entries via YAML manifests. The
-``_load_apt_sources`` / ``_load_apt_packages`` helpers below survive the
-TOML sunset (ADR 0022) because the manifest apt decoders delegate to them.
+operators may add or override entries via YAML manifests. Manifest decoders
+delegate to ``_load_apt_sources`` and ``_load_apt_packages``.
 
 ``agentworks.resources.kinds.__init__`` imports this module so the two
 kinds self-register into ``KIND_REGISTRY`` at load.
@@ -92,10 +91,8 @@ class AptSourceEntry(DeclaredResource):
 
     key_dearmor: bool = False
     """Whether the fetched key is ASCII-armored and must be run through
-    ``gpg --dearmor`` before installation. A boolean, written unquoted:
-    ``false`` and YAML's ``no`` both read as false. A QUOTED ``"no"`` is
-    a string, refused now, and it used to mean TRUE, the opposite of
-    what it reads as."""
+    ``gpg --dearmor`` before installation. Write booleans unquoted;
+    quoted strings such as ``"no"`` are invalid."""
 
 
 class AptPackageEntry(DeclaredResource):
@@ -107,15 +104,8 @@ class AptPackageEntry(DeclaredResource):
     """
 
     apt: list[str] = Field(default_factory=list)
-    """The apt package names to install.
-
-    Optional, and deliberately so rather than by transcription: the loader
-    this replaces read it through ``_require_list``, whose ``get(key, [])``
-    made an omitted ``apt`` an empty list rather than an error. An
-    apt-package that installs nothing is a real declaration (it can carry
-    ``apt_sources`` alone, so a template gets the repository without a
-    package from it), so the model kept the tolerance rather than inventing
-    a requirement the old surface never had."""
+    """The apt package names to install. May be empty when the entry exists
+    only to install its ``apt_sources``."""
 
     apt_sources: list[Annotated[str, ResourceRef(kind="apt-source", usage="an apt source")]] = Field(
         default_factory=list
@@ -127,15 +117,12 @@ class AptPackageEntry(DeclaredResource):
         """Emit one ``ResourceReference`` per name in ``apt_sources``. The
         framework's ``apt-source`` kind uses an ``error`` miss policy, so
         an unknown source name surfaces as a clean ``ConfigError`` at
-        ``build_registry`` time with the referencing package's identity
-        attached (rather than the pre-Phase-2b silent ordering assumption
-        that packages must appear after their sources in TOML).
+        ``build_registry`` time with the referencing package's identity.
 
         The registry attaches the corresponding ``ReferenceEntry`` to
         each ``AptSourceEntry`` during finalize, so
         ``agw resource describe apt-source/github`` shows every apt-package
-        that depends on it: the dependency graph that was previously
-        implicit is now visible.
+        that depends on it.
         """
         from agentworks.resources.reference import ResourceReference
 
