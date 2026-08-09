@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Annotated, Final, TypeGuard, Union, get_args, get_origin
 
-from pydantic import BaseModel, Discriminator
+from pydantic import BaseModel, Discriminator, RootModel
 from pydantic.errors import PydanticSchemaGenerationError, PydanticUndefinedAnnotation
 from pydantic.fields import FieldInfo
 from pydantic.json_schema import SkipJsonSchema
@@ -93,6 +93,12 @@ class FieldShape:
     item_marker: RefMarker | None
     """The marker on a collection's elements: the field names many
     Resources."""
+
+    mapping_key_marker: RefMarker | None
+    """The marker on a mapping's keys: each authored key names one Resource.
+
+    ``None`` for sequences and unmarked mappings. Kept separate from
+    :attr:`item_marker`, which describes mapping values."""
 
     item_model: type[BaseModel] | None
     """The model each element of a collection holds."""
@@ -270,6 +276,7 @@ def shape_of(field: FieldInfo) -> FieldShape:
 
     collection: Collection | None = None
     item_marker: RefMarker | None = None
+    mapping_key_marker: RefMarker | None = None
     item_model: type[BaseModel] | None = None
     nested_model: type[BaseModel] | None = None
     discriminator: str | None = None
@@ -284,6 +291,8 @@ def shape_of(field: FieldInfo) -> FieldShape:
     found = _collection_element(inner)
     if found is not None:
         collection, element = found
+        if collection is Collection.MAPPING:
+            mapping_key_marker = _first_marker(_mapping_key_metadata(inner))
         element, element_meta = split_annotated(element)
         item_marker = _first_marker(element_meta)
         item_model = element if _is_model(element) else None
@@ -326,6 +335,7 @@ def shape_of(field: FieldInfo) -> FieldShape:
         marker=marker,
         collection=collection,
         item_marker=item_marker,
+        mapping_key_marker=mapping_key_marker,
         item_model=item_model,
         nested_model=nested_model,
         discriminator=discriminator,
@@ -505,6 +515,16 @@ def _collection_element(annotation: object) -> tuple[Collection, object] | None:
     return None
 
 
+def _mapping_key_metadata(annotation: object) -> list[object]:
+    """``Annotated`` metadata attached to a mapping's key type."""
+    origin = get_origin(annotation)
+    args = get_args(annotation)
+    if not isinstance(origin, type) or not issubclass(origin, Mapping) or len(args) != 2:
+        return []
+    _key, metadata = split_annotated(args[0])
+    return metadata
+
+
 def _first_marker(metadata: list[object]) -> RefMarker | None:
     for item in metadata:
         if isinstance(item, RefMarker):
@@ -618,7 +638,16 @@ def accepted_annotation(annotation: object, marker: RefMarker | None = None) -> 
     (:func:`~agentworks.schema.reference_marker_error` refuses it at
     registration), so there is no depth for this widening to reach.
     """
-    widened = _widened(strip_markers(annotation))
+    return _accepted_annotation(annotation, marker, ())
+
+
+def _accepted_annotation(
+    annotation: object,
+    marker: RefMarker | None,
+    visiting: tuple[type[BaseModel], ...],
+) -> object:
+    """Cycle-aware implementation of :func:`accepted_annotation`."""
+    widened = _widened(strip_markers(annotation), visiting)
     if marker is None or marker.default_template is None:
         return widened
     return Union[widened, None]  # noqa: UP007
@@ -641,17 +670,39 @@ def element_annotation(annotation: object) -> object | None:
     return None if found is None else found[1]
 
 
-def _widened(annotation: object) -> object:
+def _widened(
+    annotation: object,
+    visiting: tuple[type[BaseModel], ...],
+) -> object:
     """:func:`accepted_annotation`'s recursion, over an annotation whose
-    markers are already stripped."""
+    markers are already stripped.
+
+    Root models are expanded to the value an operator writes, but only on
+    their first occurrence along the current annotation path. A recursive
+    occurrence remains the root model itself, preserving the cycle for the
+    cycle-aware model walkers instead of recursing in this projection.
+    """
     base, metadata = split_annotated(annotation)
-    shorthand = scalar_shorthand_of(base)
-    if shorthand is not None:
+    widened: object
+    if _is_model(base) and issubclass(base, RootModel):
+        if base in visiting:
+            widened = base
+        else:
+            override = getattr(base, "operator_input_annotation", None)
+            if override is not None:
+                widened = override
+            else:
+                fields = model_fields_of(base)
+                root = None if fields is None else fields.get("root")
+                widened = (
+                    base if root is None else _accepted_annotation(root.annotation, marker_of(root), (*visiting, base))
+                )
+    elif (shorthand := scalar_shorthand_of(base)) is not None:
         # The shorthand first, so the rendered type leads with the form
         # nearly every operator writes.
-        widened: object = Union[shorthand.annotation, base]  # noqa: UP007
+        widened = Union[shorthand.annotation, base]  # noqa: UP007
     else:
-        widened = _rebuilt_arguments(base, _widened)
+        widened = _rebuilt_arguments(base, lambda argument: _widened(argument, visiting))
     if metadata:
         return Annotated[(widened, *metadata)]
     return widened
@@ -674,7 +725,10 @@ def _rebuilt_arguments(annotation: object, transform: Callable[[object], object]
         return annotation
     origin = get_origin(annotation)
     if origin in (Union, types.UnionType):
-        return Union[rebuilt]  # noqa: UP007
+        possible = tuple(arg for arg in rebuilt if arg is not typing.NoReturn)
+        if len(possible) == 1:
+            return possible[0]
+        return Union[possible]  # noqa: UP007
     if isinstance(origin, type):
         return types.GenericAlias(origin, rebuilt)
     return annotation

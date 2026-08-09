@@ -5,7 +5,13 @@ rest. Nothing here invokes capability code to validate a blob or to derive
 what it references, which is what the base-class docstrings promised all
 along and what keeps a misbehaving plugin out of the finalize pass.
 
-Three things live here, and every consuming resource needs all three:
+Two parallel model surfaces live here. Primary capability config is selected
+by a tag inside a host block; mapping config is selected by a key in a host
+map. Both use the same model lookup, validation, reference extraction, and
+union machinery, so a backend's source config and lookup config cannot drift
+into separate framework implementations.
+
+The primary config operations are:
 
 - :func:`validate_capability_config`, the throwing shape check, raising the
   error bridge's framed ``ConfigError``;
@@ -14,6 +20,11 @@ Three things live here, and every consuming resource needs all three:
 - :func:`capability_config_union`, the tagged union over a kind's
   registered models, which is what makes the "unknown name" message and
   (later) emitted schema possible.
+
+Their mapping counterparts are :func:`validate_capability_mapping`,
+:func:`capability_mapping_references`, and
+:func:`capability_mapping_union`. A descriptor's ``mapping_host`` owns any
+framework opt-out value; an implementation's mapping model never does.
 
 **The union is a root model, built per** ``kind`` **and cached on the
 registry's contents.** See :func:`capability_config_union` for why the
@@ -39,7 +50,7 @@ map-keyed kind passes ``name``, because its config carries no tag.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Annotated, Any, Union, cast
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Union, cast
 
 from pydantic import Field
 from pydantic import ValidationError as PydanticValidationError
@@ -58,7 +69,8 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from agentworks.capabilities.descriptor import CapabilityKindDescriptor
-    from agentworks.resources.reference import ConfigReference
+    from agentworks.declared_resource import DeclaredResource
+    from agentworks.resources.reference import ConfigReference, ResourceReference
     from agentworks.schema import RefOwner
     from agentworks.source_location import SourceLocation
 
@@ -66,6 +78,11 @@ if TYPE_CHECKING:
 #: built from. Never evicts; see :func:`capability_config_union` for both
 #: choices and what bounds the size.
 _UNION_CACHE: dict[tuple[str, frozenset[tuple[str, type[BaseModel]]]], type[BaseModel]] = {}
+
+#: Map-keyed unions, keyed by their ordered model identities and the host's
+#: opt-out declaration. Order affects emitted schema and is therefore part of
+#: the key rather than discarded into a set.
+_MAPPING_UNION_CACHE: dict[tuple[str, tuple[type[BaseModel], ...], bool], type[BaseModel]] = {}
 
 
 def selected_name(kind: str, config: object, name: str | None) -> str | None:
@@ -106,6 +123,18 @@ def capability_config_model(kind: str, name: str) -> type[BaseModel] | None:
     """
     impl = _seated_impl(descriptor_for(kind), name)
     return None if impl is None else offered_model(impl)
+
+
+def capability_mapping_model(kind: str, name: str) -> type[BaseModel] | None:
+    """The mapping model ``kind``/``name`` offers, or ``None`` on a miss.
+
+    Asking this of a kind with no mapping contract is a framework call-site
+    error. A missing implementation is ordinary resource resolution and stays
+    a tolerant ``None``, matching :func:`capability_config_model`.
+    """
+    descriptor = _mapping_descriptor(kind)
+    impl = _seated_impl(descriptor, name)
+    return None if impl is None else _declared_model(impl, "mapping_model")
 
 
 def validate_capability_config(
@@ -157,6 +186,32 @@ def validate_capability_config(
     # The union is a root model, so the thing the capability was written
     # against is what it wraps, never the wrapper.
     return cast("BaseModel", validated.root)  # type: ignore[attr-defined]
+
+
+def validate_capability_mapping(
+    *,
+    kind: str,
+    name: str,
+    mapping: object,
+    owner: RefOwner,
+    location: SourceLocation | None = None,
+) -> BaseModel | None:
+    """Validate one map-key-selected mapping against ``kind``/``name``.
+
+    The map key is the sole selector, so the value is delivered unchanged to
+    exactly the selected implementation model. Framework-owned opt-outs must
+    be intercepted by the host before calling this function.
+    """
+    model = capability_mapping_model(kind, name)
+    if model is None:
+        return None
+    return _validated(
+        model,
+        mapping,
+        owner=owner,
+        location=location,
+        hint=reference_hint(kind, name),
+    )
 
 
 def validate_own_config(
@@ -223,6 +278,25 @@ def capability_config_references(
     if model is None:
         return ()
     return extract_references(model, filled_defaults(model, config, owner))
+
+
+def capability_mapping_references(
+    *,
+    kind: str,
+    name: str,
+    mapping: object,
+    owner: RefOwner,
+) -> tuple[ConfigReference, ...]:
+    """Every resource reference one selected mapping value implies.
+
+    Total and never raising for arbitrary mapping values. A missing
+    implementation contributes no references; its resource miss is reported by
+    the framework reference path instead.
+    """
+    model = capability_mapping_model(kind, name)
+    if model is None:
+        return ()
+    return extract_references(model, filled_defaults(model, mapping, owner))
 
 
 def resolved_capability_modes(
@@ -325,6 +399,81 @@ def capability_config_union(kind: str) -> type[BaseModel]:
     return union
 
 
+def capability_mapping_union(kind: str) -> type[BaseModel]:
+    """The union of every registered mapping model for ``kind``.
+
+    Duplicate model classes are emitted once in registry order. The exact
+    singleton ``False`` is appended only when the descriptor's map host owns
+    that opt-out vocabulary.
+    """
+    descriptor = _mapping_descriptor(kind)
+    assert descriptor.mapping_host is not None
+    models = tuple(dict.fromkeys(_mapping_arms(descriptor).values()))
+    false_opt_out = descriptor.mapping_host.false_opt_out
+    key = (kind, models, false_opt_out)
+    cached = _MAPPING_UNION_CACHE.get(key)
+    if cached is not None:
+        return cached
+    if not models:
+        raise StateError(
+            f"no {kind} implementation is registered, so its mapping union has no arms; "
+            "the built-in rows publish unconditionally, so this means registration did not run"
+        )
+    arms: tuple[Any, ...] = (*models, Literal[False]) if false_opt_out else models
+    union_type: Any = Union[arms]  # noqa: UP007
+    union = cast(
+        "type[BaseModel]",
+        type(
+            f"{_class_name(kind)}Mapping",
+            (AgwRootModel[union_type],),
+            {"__module__": __name__, "__doc__": f"A mapping accepted by any registered {kind}."},
+        ),
+    )
+    _MAPPING_UNION_CACHE[key] = union
+    return union
+
+
+def mapping_value_is_opt_out(kind: str, value: object) -> bool:
+    """Whether ``value`` is the framework-owned opt-out for ``kind``."""
+    descriptor = _mapping_descriptor(kind)
+    assert descriptor.mapping_host is not None
+    return descriptor.mapping_host.false_opt_out and value is False
+
+
+def capability_mapping_key_references(
+    *,
+    descriptor: CapabilityKindDescriptor,
+    row: DeclaredResource,
+) -> tuple[ResourceReference, ...]:
+    """Validation-only references contributed by one descriptor map host.
+
+    The collector is deliberately dormant until Registry activates it. It is
+    total, never validates values, and preserves authored key order. Its
+    outputs are ordinary ``USES`` records, but callers must keep them outside
+    graph inbound and outbound maps.
+    """
+    host = descriptor.mapping_host
+    if host is None:
+        return ()
+    values = getattr(row, host.field_name, None)
+    if not isinstance(values, Mapping):
+        return ()
+    from agentworks.resources.reference import ResourceReference
+
+    source = (host.host_kind, row.name)
+    return tuple(
+        ResourceReference(
+            name=name,
+            kind=host.key_reference.kind,
+            usage=host.key_reference.usage,
+            source=source,
+            relationship=host.key_reference.relationship,
+        )
+        for name in values
+        if isinstance(name, str)
+    )
+
+
 def registered_implementations(kind: str) -> dict[str, type]:
     """Every implementation of ``kind`` this build has, keyed by the name
     that selects it, in registration order.
@@ -392,6 +541,27 @@ def _arms(descriptor: CapabilityKindDescriptor) -> dict[str, type[BaseModel]]:
     key cannot describe a union different from the one it would build.
     """
     return {name: offered_model(impl_class(seated)) for name, seated in descriptor.registry().items()}
+
+
+def _mapping_arms(descriptor: CapabilityKindDescriptor) -> dict[str, type[BaseModel]]:
+    """The mapping models offered by a descriptor's live registry."""
+    return {
+        name: _declared_model(impl_class(seated), "mapping_model") for name, seated in descriptor.registry().items()
+    }
+
+
+def _mapping_descriptor(kind: str) -> CapabilityKindDescriptor:
+    descriptor = descriptor_for(kind)
+    if descriptor.mapping_schema is None or descriptor.mapping_host is None:
+        raise StateError(f"the {kind} capability kind declares no mapping contract")
+    return descriptor
+
+
+def _declared_model(impl: type, attribute_name: str) -> type[BaseModel]:
+    model = getattr(impl, attribute_name, None)
+    if not isinstance(model, type):
+        raise StateError(f"{impl.__name__} declares no {attribute_name}")
+    return cast("type[BaseModel]", model)
 
 
 def _build_union(

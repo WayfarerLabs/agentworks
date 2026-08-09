@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, NoReturn
 
 from pydantic import BaseModel, model_validator
 
@@ -38,6 +38,8 @@ class PromptSourceConfig(AgwModel):
 
 class PromptMapping(AgwRootModel[Any]):
     """Prompt has no mapping vocabulary, so every authored value fails."""
+
+    operator_input_annotation: ClassVar[object | None] = NoReturn
 
     @model_validator(mode="before")
     @classmethod

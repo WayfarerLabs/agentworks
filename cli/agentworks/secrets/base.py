@@ -11,7 +11,8 @@ persist on the VM.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
+from math import isfinite
+from typing import TYPE_CHECKING, Annotated, ClassVar, cast
 
 from pydantic import BeforeValidator, Field
 from pydantic.json_schema import SkipJsonSchema
@@ -26,32 +27,48 @@ if TYPE_CHECKING:
     from agentworks.resources.reference import ResourceReference
 
 
-def _refuse_true(value: Any) -> Any:
-    """``true`` keeps its own message: the alternatives list the union
-    would otherwise render says what IS accepted without teaching that
-    ``false`` is the opt-out an operator was reaching for."""
-    if value is True:
-        raise ValueError("boolean must be `false` (opt-out); `true` is not a valid value")
+def require_exact_json_value(value: object) -> object:
+    """Reject Python lookalikes before pydantic can normalize them.
+
+    The validator is attached recursively, so a failure keeps the list index
+    or mapping key that led to it. Checking ``type`` rather than
+    ``isinstance`` is intentional: enum members and custom primitive
+    subclasses are not JSON-native runtime values even when Python makes
+    them behave like one.
+    """
+    value_type = type(value)
+    if value_type not in (type(None), bool, int, float, str, list, dict):
+        raise ValueError(f"must use exact JSON-native runtime types (got {value_type.__name__})")
+    if value_type is float and not isfinite(cast("float", value)):
+        raise ValueError("JSON numbers must be finite")
     return value
 
 
-MappingValue = Annotated[str | dict[str, object] | Literal[False], BeforeValidator(_refuse_true)]
-"""One entry in ``SecretDecl.backend_mappings``: an identifier override
-(string or structured), or ``False`` for an explicit opt-out."""
+def require_exact_json_string(value: object) -> object:
+    """Reject mapping-key lookalikes before pydantic string normalization."""
+    if type(value) is not str:
+        raise ValueError(f"must use exact JSON string keys (got {type(value).__name__})")
+    return value
+
+
+type _JsonString = Annotated[str, BeforeValidator(require_exact_json_string)]
+type MappingValue = Annotated[
+    None | bool | int | float | str | list[MappingValue] | dict[_JsonString, MappingValue],
+    BeforeValidator(require_exact_json_value),
+]
+"""One lossless JSON-native mapping value. Exact ``False`` remains the
+framework opt-out; every other value belongs to the selected model."""
 
 
 class SecretDecl(DeclaredResource):
     """A declared secret. Values are never stored here; only the existence,
     description, and per-backend identifier overrides.
 
-    ``backend_mappings`` is keyed by backend (capability) name
-    (``"env-var"``, ``"prompt"``; later ``"onepassword"``, ...). Value
-    forms per the env-and-secrets SDD:
+    ``backend_mappings`` is a selector-to-lookup-address map. Its raw carrier
+    preserves every JSON-native value for backend-specific validation:
 
-    - ``str``: backend's identifier for this secret (env var name, op:// URI, etc.).
-    - ``dict[str, object]``: structured identifier (for backends whose ID
-      carries more than the bare reference, e.g. 1Password's
-      ``{account, reference}`` for pinning a specific account).
+    - strings, numbers, ``True``, null, arrays, and string-keyed objects are
+      delivered to the selected model without framework coercion;
     - ``False``: opt out; skip this backend for this secret regardless of any
       default convention the backend would otherwise apply.
     - key absent: use the backend's default convention if it has one, else
@@ -82,11 +99,13 @@ class SecretDecl(DeclaredResource):
     """Operator-facing text shown when the secret has to be entered by
     hand: where to generate it, which account it belongs to."""
 
-    backend_mappings: dict[str, MappingValue] = Field(
+    backend_mappings: dict[_JsonString, MappingValue] = Field(
         default_factory=dict,
         examples=[{"env-var": "NPM_TOKEN"}],
     )
-    """Per-backend identifier overrides, keyed by backend name."""
+    """Lookup-address overrides. The editor schema offers every registered
+    backend mapping shape, marks each key as a secret-source reference, and
+    includes exact ``false`` as the framework opt-out."""
 
     def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         """The secret's ``secret -> secret-backend`` edges: the candidate

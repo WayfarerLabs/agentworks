@@ -403,6 +403,7 @@ _NOT_READY_ALLOWLIST = frozenset(
     {
         "resources/graph.py",  # the readiness fold
         "vms/sites.py",  # VMSite.not_ready hook -> platform impl off the graph
+        "secrets/sources.py",  # SecretSourceDecl.not_ready hook -> backend impl off the graph
     }
 )
 

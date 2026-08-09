@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from agentworks.capabilities.descriptor import (
     CapabilityKindDescriptor,
     ConfigContract,
+    HostSurface,
     MappingHost,
     ModelInputDomain,
     RegistryPolicy,
@@ -94,10 +95,11 @@ SECRET_BACKEND_DESCRIPTOR = CapabilityKindDescriptor(
     kind_strategy=KIND_REGISTRY["secret-backend"],
     readiness=_backend_readiness,
     publisher_source="agentworks.capabilities.secret_backend",
-    # The declarable host lands in Phase 4. Keeping this absent is truthful
-    # at the Phase 3 boundary while both permanent model contracts already
-    # exist and are registration-enforced.
-    manifest_section=None,
+    manifest_section=HostSurface(
+        host_kind="secret-source",
+        naming_field="backend",
+        config_field=None,
+    ),
     config_schema=ConfigContract(
         base=AgwModel,
         discriminator="name",

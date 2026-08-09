@@ -317,3 +317,65 @@ def descriptor_for(kind: str) -> CapabilityKindDescriptor:
             return descriptor
     known = ", ".join(d.kind for d in capability_descriptors())
     raise StateError(f"no capability-kind descriptor for {kind!r} (known capability kinds: {known})")
+
+
+def mapping_descriptors_for_host(host_kind: str) -> tuple[CapabilityKindDescriptor, ...]:
+    """Descriptors whose map-key-selected config is hosted by ``host_kind``.
+
+    Descriptor registration order is preserved. The table is checked as a
+    whole before any record is returned, because duplicate host fields and a
+    target kind with the wrong miss policy are framework declaration errors,
+    not malformed operator data.
+    """
+    descriptors = capability_descriptors()
+    _validate_mapping_descriptors(descriptors)
+    return tuple(
+        descriptor
+        for descriptor in descriptors
+        if descriptor.mapping_host is not None and descriptor.mapping_host.host_kind == host_kind
+    )
+
+
+def _validate_mapping_descriptors(descriptors: tuple[CapabilityKindDescriptor, ...]) -> None:
+    """Enforce the invariants every map-host consumer relies on."""
+    from agentworks.resources.kind import KIND_REGISTRY
+    from agentworks.schema._shape import Collection, shape_of
+    from agentworks.schema.reference import RefRelationship
+
+    claimed: dict[tuple[str, str], str] = {}
+    for descriptor in descriptors:
+        schema = descriptor.mapping_schema
+        host = descriptor.mapping_host
+        if (schema is None) != (host is None):
+            raise StateError(f"{descriptor.kind} must declare mapping_schema and mapping_host together")
+        if host is None:
+            continue
+        strategy = KIND_REGISTRY.get(host.host_kind)
+        if strategy is None or strategy.category != "declarable":
+            raise StateError(
+                f"{descriptor.kind} mapping host kind {host.host_kind!r} is not a declarable resource kind"
+            )
+        model = getattr(strategy, "model", None)
+        field = getattr(model, "model_fields", {}).get(host.field_name)
+        if field is None or shape_of(field).collection is not Collection.MAPPING:
+            raise StateError(
+                f"{descriptor.kind} mapping host field {host.host_kind}.{host.field_name} is not mapping-shaped"
+            )
+        key = (host.host_kind, host.field_name)
+        previous = claimed.get(key)
+        if previous is not None:
+            raise StateError(
+                f"{descriptor.kind} and {previous} both claim mapping host {host.host_kind}.{host.field_name}"
+            )
+        claimed[key] = descriptor.kind
+        if host.key_reference.relationship is not RefRelationship.USES:
+            raise StateError(f"{descriptor.kind} mapping host keys must use the USES relationship")
+        target = KIND_REGISTRY.get(host.key_reference.kind)
+        if target is None:
+            raise StateError(
+                f"{descriptor.kind} mapping host key target {host.key_reference.kind!r} is not a resource kind"
+            )
+        if target.miss_policy != "error":
+            raise StateError(
+                f"{descriptor.kind} mapping host key target {host.key_reference.kind!r} must use miss_policy='error'"
+            )

@@ -305,20 +305,8 @@ def _implementation(descriptor: CapabilityKindDescriptor, name: str) -> type:
     return impl
 
 
-def _implementation_documentation_model(kind: str, name: str, impl: type) -> type[BaseModel]:
-    """The model the currently shipped operator reference documents.
-
-    Secret sources do not exist at the Phase 3 boundary, so exposing their
-    source config here would create an unusable operator surface. Keep the
-    existing per-secret mapping reference through the feature branch's
-    private compatibility adapter until the atomic source cutover.
-    """
-    if kind == "secret-backend":
-        from agentworks.secrets._backend_compat import mapping_model
-
-        model = mapping_model(name)
-        if model is not None:
-            return model
+def _implementation_documentation_model(_kind: str, _name: str, impl: type) -> type[BaseModel]:
+    """The primary config model one capability implementation offers."""
     from agentworks.capabilities.config import offered_model
 
     return offered_model(impl)

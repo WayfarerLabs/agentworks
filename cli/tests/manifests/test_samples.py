@@ -54,7 +54,8 @@ def test_every_declarable_kind_renders() -> None:
     # error rather than crashing is one case of
     # `test_capability_kinds_report_no_sample`, which sweeps the category.
     assert "secret-backend" not in declarable_kinds()
-    assert set(declarable_kinds()) | {"secret-backend"} == set(KIND_SECTIONS)
+    # secret-source was born as YAML and has no retired TOML section.
+    assert (set(declarable_kinds()) - {"secret-source"}) | {"secret-backend"} == set(KIND_SECTIONS)
     for kind in declarable_kinds():
         assert sample_text(kind).strip()
 

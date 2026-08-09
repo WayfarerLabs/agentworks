@@ -29,6 +29,7 @@ from agentworks.secrets.resolve import (
     resolve_secrets,
     validate_chain,
 )
+from agentworks.secrets.sources import SecretSourceDecl, publish_builtin_secret_sources
 
 
 def _load_guide_contributions() -> tuple[TopicContribution, ...]:
@@ -48,11 +49,13 @@ __all__ = [
     "ActiveBackend",
     "SecretConfig",
     "SecretDecl",
+    "SecretSourceDecl",
     "SecretTarget",
     "active_backends",
     "compute_needed_secrets",
     "env_var_name_for",
     "guide_contributions",
+    "publish_builtin_secret_sources",
     "resolve_for_command",
     "resolve_secrets",
     "validate_chain",

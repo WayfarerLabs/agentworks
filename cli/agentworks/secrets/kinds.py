@@ -26,6 +26,7 @@ from agentworks.resources.kind import (
 )
 from agentworks.resources.walk import collect_secrets_for
 from agentworks.secrets.base import SecretDecl
+from agentworks.secrets.sources import SECRET_SOURCE_KIND_NAME, SecretSourceDecl
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
@@ -197,3 +198,37 @@ class _SecretKind:
 
 
 KIND_REGISTRY[SECRET_KIND_NAME] = _SecretKind()
+
+
+@dataclass(frozen=True)
+class _SecretSourceKind:
+    """Framework strategy for declarable configured secret sources."""
+
+    kind: str = SECRET_SOURCE_KIND_NAME
+    model: type[DeclaredResource] = SecretSourceDecl
+    description: str = "Configured instances of secret backend implementations"
+    prose: TopicProse = TopicProse(
+        title="Secret sources",
+        overview="""
+        A secret-source gives one backend implementation a configured name. The
+        backend table selects exactly one secret-backend and carries that backend's
+        per-source settings. Declare multiple sources when accounts or stores need
+        different configuration.
+
+        Agentworks publishes env-var and prompt source declarations under their usual
+        names. An operator declaration with either name replaces that built-in row;
+        the surviving row's origin records the override.
+        """,
+    )
+    miss_policy: Literal["auto-declare", "error"] = "error"
+    auto_declare_names: frozenset[str] | None = None
+    category: Literal["declarable", "capability"] = "declarable"
+    builtin_override: Literal["allow", "reserved"] = "allow"
+
+    def synthesize(self, references: Sequence[ResourceReference]) -> None:
+        raise NoUnreferencedDefaultError(
+            "the secret-source kind has miss_policy='error'; synthesize should never be dispatched"
+        )
+
+
+KIND_REGISTRY[SECRET_SOURCE_KIND_NAME] = _SecretSourceKind()

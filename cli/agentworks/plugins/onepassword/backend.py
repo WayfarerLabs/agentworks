@@ -433,7 +433,7 @@ class OnePasswordBackend(SecretBackend):
         allowed too).
 
         The string form reads through whichever account `op` is signed in to, or the one
-        `OP_ACCOUNT` names. Until declarable sources land, the compatibility table form
+        `OP_ACCOUNT` names. During the direct-backend compatibility window, the table form
         pins a specific account beside the same reference for a host signed in to several.
 
         Ships as the opt-in `onepassword` system plugin, and needs the `op` CLI on this

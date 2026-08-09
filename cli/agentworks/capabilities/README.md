@@ -590,8 +590,8 @@ implementation of it:
   kind's implementations are stored, published as read-only rows, and asked whether this host
   supports them.
 - **`manifest_section`** (a `HostSurface`), which declarable kind's spec selects this capability and
-  under which field. It remains `None` for `secret-backend` until declarable secret sources land;
-  its existing per-secret `backend_mappings` surface is described separately by `mapping_host`.
+  under which field. `secret-backend` is selected by `secret-source.backend`; its separate
+  per-secret `backend_mappings` surface is described by `mapping_host`.
 
 Every registry policy is `CLASS_BY_NAME`: adapters, graph nodes, and published rows preserve the
 exact registered class and registration never constructs it. The kind list is fixed by the core and

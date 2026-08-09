@@ -31,8 +31,8 @@ def test_declarable_kinds_is_the_registry_category_and_nothing_else() -> None:
     assert list(declarable_kinds()) == sorted(declarable)
 
 
-def test_a_kind_hosting_no_capability_is_its_own_row() -> None:
-    assert spec_model("secret") is row_model("secret")
+def test_a_kind_hosting_no_capability_or_mapping_is_its_own_row() -> None:
+    assert spec_model("apt-package") is row_model("apt-package")
 
 
 def test_a_hosting_kind_gets_the_union_spliced_onto_its_naming_field() -> None:
@@ -176,6 +176,8 @@ def test_the_plugin_platforms_are_present_in_a_FRESH_interpreter(script: str) ->
 def test_hosted_capability_answers_for_the_tagged_kinds_only() -> None:
     assert hosted_capability("vm-site") is not None
     assert hosted_capability("vm-site").kind == "vm-platform"  # type: ignore[union-attr]
+    assert hosted_capability("secret-source") is not None
+    assert hosted_capability("secret-source").kind == "secret-backend"  # type: ignore[union-attr]
     # A kind that hosts nothing, and a kind whose capability is selected by
     # a map key (secret-backend under `backend_mappings`), which has no
     # discriminator and so no union to splice.

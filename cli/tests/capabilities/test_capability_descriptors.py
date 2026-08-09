@@ -18,6 +18,7 @@ behavior rather than holding a mirror up to the table.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -27,6 +28,7 @@ from agentworks.capabilities.descriptor import (
     CapabilityKindDescriptor,
     ModelInputDomain,
     RegistryPolicy,
+    _validate_mapping_descriptors,
     capability_descriptors,
     descriptor_for,
 )
@@ -40,7 +42,7 @@ from agentworks.manifests.decode import _hosting_descriptors
 from agentworks.resources.graph import Readiness, _capability_node_readiness
 from agentworks.resources.kind import KIND_REGISTRY
 from agentworks.resources.registry import Registry
-from agentworks.schema import AgwModel, AgwRootModel
+from agentworks.schema import AgwModel, AgwRootModel, ResourceRef
 from agentworks.schema.reference import RefRelationship
 from tests.plugins._fixtures import ConformingVMPlatform
 
@@ -304,7 +306,7 @@ def test_the_graph_routes_a_capability_node_to_its_own_kinds_verdict() -> None:
 
 
 def test_manifest_sections_match_the_decoders_host_surfaces() -> None:
-    """Decode's host dispatch is exactly the three host surfaces, with the
+    """Decode's host dispatch is exactly the four host surfaces, with the
     capability kind and the field pair each one names.
 
     Spelled out rather than recomputed from the descriptors, because decode
@@ -322,6 +324,7 @@ def test_manifest_sections_match_the_decoders_host_surfaces() -> None:
         "vm-site": ("vm-platform", "platform", "platform_config"),
         "git-credential": ("git-credential-provider", "provider", "provider_config"),
         "session-template": ("harness-integration", "harness_integration", "harness_integration_config"),
+        "secret-source": ("secret-backend", "backend", None),
     }
 
     hosted = [d.manifest_section for d in _descriptors() if d.manifest_section is not None]
@@ -331,7 +334,13 @@ def test_manifest_sections_match_the_decoders_host_surfaces() -> None:
         f"fold dispatch by host_kind, so the second record would silently "
         f"overwrite the first and one host's fold would vanish."
     )
-    assert descriptor_for("secret-backend").manifest_section is None
+    source_host = descriptor_for("secret-backend").manifest_section
+    assert source_host is not None
+    assert (source_host.host_kind, source_host.naming_field, source_host.config_field) == (
+        "secret-source",
+        "backend",
+        None,
+    )
 
 
 # -- The kind's config contract ---------------------------------------------
@@ -370,6 +379,53 @@ def test_each_kinds_config_contract_matches_how_its_config_is_dispatched() -> No
 def test_mapping_contract_and_host_are_declared_together() -> None:
     for descriptor in _descriptors():
         assert (descriptor.mapping_schema is None) == (descriptor.mapping_host is None), descriptor.kind
+
+
+def test_mapping_descriptor_requires_contract_and_host_together() -> None:
+    backend = descriptor_for("secret-backend")
+    with pytest.raises(StateError, match="mapping_schema and mapping_host together"):
+        _validate_mapping_descriptors((replace(backend, mapping_host=None),))
+
+
+def test_mapping_descriptor_requires_a_declarable_mapping_shaped_host() -> None:
+    backend = descriptor_for("secret-backend")
+    assert backend.mapping_host is not None
+
+    capability_host = replace(backend.mapping_host, host_kind="secret-backend")
+    with pytest.raises(StateError, match="not a declarable resource kind"):
+        _validate_mapping_descriptors((replace(backend, mapping_host=capability_host),))
+
+    scalar_field = replace(backend.mapping_host, field_name="hint")
+    with pytest.raises(StateError, match="not mapping-shaped"):
+        _validate_mapping_descriptors((replace(backend, mapping_host=scalar_field),))
+
+
+def test_mapping_descriptor_requires_unique_host_field_ownership() -> None:
+    backend = descriptor_for("secret-backend")
+    with pytest.raises(StateError, match="both claim mapping host secret.backend_mappings"):
+        _validate_mapping_descriptors((backend, replace(backend, kind="other-mapping-kind")))
+
+
+def test_mapping_descriptor_key_is_a_hard_uses_reference() -> None:
+    backend = descriptor_for("secret-backend")
+    assert backend.mapping_host is not None
+
+    inherits = replace(
+        backend.mapping_host,
+        key_reference=replace(
+            backend.mapping_host.key_reference,
+            relationship=RefRelationship.INHERITS,
+        ),
+    )
+    with pytest.raises(StateError, match="must use the USES relationship"):
+        _validate_mapping_descriptors((replace(backend, mapping_host=inherits),))
+
+    auto_declared_target = replace(
+        backend.mapping_host,
+        key_reference=ResourceRef(kind="vm-template", usage="a fixture target"),
+    )
+    with pytest.raises(StateError, match="must use miss_policy='error'"):
+        _validate_mapping_descriptors((replace(backend, mapping_host=auto_declared_target),))
 
 
 # -- Conformance of everything this build ships -----------------------------

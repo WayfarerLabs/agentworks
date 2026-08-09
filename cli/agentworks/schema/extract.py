@@ -236,16 +236,26 @@ def _collection_nodes(shape: FieldShape, value: object) -> Iterator[_Node]:
     default holds, because ``value`` arrives as that default's blob, so a
     default with named elements extracts them like a written one.
     """
+    if shape.collection is Collection.MAPPING and isinstance(value, Mapping):
+        for key, element in value.items():
+            if shape.mapping_key_marker is not None:
+                yield from _scalar_edge(shape.mapping_key_marker, key)
+            yield from _element_nodes(shape, element)
+        return
     for element in _elements_of(shape.collection, value):
-        if shape.item_marker is not None:
-            if isinstance(element, str) and element:
-                yield _Edge(_reference(shape.item_marker, element))
-        elif shape.item_model is not None:
-            yield _Block(model=shape.item_model, blob=element)
-        elif shape.item_arms and shape.item_discriminator is not None:
-            yield from _arm_block(shape.item_arms, shape.item_discriminator, element)
-        elif shape.item_union_model is not None:
-            yield from _union_block(shape.item_union_model, shape.item_union_members, element)
+        yield from _element_nodes(shape, element)
+
+
+def _element_nodes(shape: FieldShape, element: object) -> Iterator[_Node]:
+    """The references or nested block one collection element contributes."""
+    if shape.item_marker is not None:
+        yield from _scalar_edge(shape.item_marker, element)
+    elif shape.item_model is not None:
+        yield _Block(model=shape.item_model, blob=element)
+    elif shape.item_arms and shape.item_discriminator is not None:
+        yield from _arm_block(shape.item_arms, shape.item_discriminator, element)
+    elif shape.item_union_model is not None:
+        yield from _union_block(shape.item_union_model, shape.item_union_members, element)
 
 
 def _elements_of(collection: Collection | None, value: object) -> tuple[object, ...]:

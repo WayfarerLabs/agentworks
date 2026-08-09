@@ -130,17 +130,30 @@ YAML_11_ONLY_INTEGERS: Final = (
     r"|[-+]?0x[0-9a-fA-F_]+|[-+]?[1-9][0-9_]*(?::[0-5]?[0-9])+)$"
 )
 
+#: Float spellings pyyaml's YAML 1.1 loader resolves to a number while a
+#: YAML 1.2 core editor leaves them as strings. Source config now contains a
+#: float timeout, so the parser-boundary widening covers this family too.
+YAML_11_ONLY_FLOATS: Final = (
+    r"^(?!(?:[-+]?(?:[0-9]+\.[0-9]*(?:[eE][-+]?[0-9]+)?"
+    r"|\.[0-9]+(?:[eE][-+]?[0-9]+)?))$)"
+    r"(?:[-+]?(?:[0-9][0-9_]*)\.[0-9_]*(?:[eE][-+][0-9]+)?"
+    r"|\.[0-9][0-9_]*(?:[eE][-+][0-9]+)?"
+    r"|[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*"
+    r"|[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN))$"
+)
+
 
 class _ManifestJsonSchema(GenerateJsonSchema):
     """Pydantic's generator, with scalars widened to what YAML spells.
 
     A JSON Schema never sees YAML; it sees whatever the editor's parser
     produced. The loader's parser and the editor's parser disagree about
-    which plain scalars are booleans and which are integers (see
-    :data:`YAML_11_ONLY_BOOLEANS` and :data:`YAML_11_ONLY_INTEGERS`), and
+    which plain scalars are booleans and which are numbers (see
+    :data:`YAML_11_ONLY_BOOLEANS`, :data:`YAML_11_ONLY_INTEGERS`, and
+    :data:`YAML_11_ONLY_FLOATS`), and
     that disagreement is not something any per-field annotation can fix,
     because it is a property of the PARSE rather than of the field. So it
-    is corrected in the one place every boolean and every integer in every
+    is corrected in the one place every boolean and every number in every
     emitted schema comes through.
 
     Overriding the generator rather than post-walking the emitted dict so
@@ -148,12 +161,11 @@ class _ManifestJsonSchema(GenerateJsonSchema):
     config, a nested block) is covered without anyone remembering to do
     it.
 
-    Floats would need the same treatment for the same reason: pyyaml
-    reads ``1_000.5`` as a float where 1.2 core reads a string. There is
-    no ``float_schema`` override because the emitted surface holds no
-    float, and writing one for a field that does not exist would be a
-    guess at its constraints. ``test_the_float_gap_is_still_unreachable``
-    fails the day one appears.
+    Floats need the same treatment for the same reason: pyyaml reads
+    ``1_000.5`` as a float where 1.2 core reads a string. Secret source
+    timeout config makes that surface reachable, so :meth:`float_schema`
+    applies the same parser-boundary widening while preserving the model's
+    numeric constraints.
     """
 
     def bool_schema(self, schema: core_schema.BoolSchema) -> JsonSchemaValue:
@@ -195,6 +207,10 @@ class _ManifestJsonSchema(GenerateJsonSchema):
         a regex, which would be a new place to be wrong about ``cpus``.
         """
         return {**super().int_schema(schema), "type": ["integer", "string"], "pattern": YAML_11_ONLY_INTEGERS}
+
+    def float_schema(self, schema: core_schema.FloatSchema) -> JsonSchemaValue:
+        """A number, or a YAML 1.1-only float spelling seen as a string."""
+        return {**super().float_schema(schema), "type": ["number", "string"], "pattern": YAML_11_ONLY_FLOATS}
 
 
 def schema_filename(kind: str) -> str:
