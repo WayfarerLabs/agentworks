@@ -276,17 +276,23 @@ def test_env_sources_emit_as_an_untagged_structural_one_of() -> None:
     env_entry = schema["$defs"]["EnvEntry"]
 
     assert "anyOf" not in env_entry
-    assert env_entry["oneOf"] == [
-        {"$ref": "#/$defs/PlaintextEnvEntry"},
-        {"$ref": "#/$defs/SecretEnvEntry"},
-    ]
-    assert schema["$defs"]["PlaintextEnvEntry"]["anyOf"][1]["required"] == ["value"]
-    assert schema["$defs"]["SecretEnvEntry"]["required"] == ["secret"]
+    plaintext, secret = env_entry["oneOf"]
+    assert plaintext["anyOf"][0] == {"type": "string"}
+    assert plaintext["anyOf"][1]["required"] == ["value"]
+    assert plaintext["anyOf"][1]["properties"]["secret"] == {"type": "null"}
+    assert secret["required"] == ["secret"]
+    assert secret["properties"]["value"] == {"type": "null"}
 
 
 @pytest.mark.parametrize(
     "entry",
-    ["text", {"value": "text"}, {"secret": "api-token"}],
+    [
+        "text",
+        {"value": "text"},
+        {"secret": "api-token"},
+        {"value": "text", "secret": None},
+        {"value": None, "secret": "api-token"},
+    ],
 )
 def test_the_emitted_schema_accepts_every_env_source_spelling(entry: object) -> None:
     document = {
