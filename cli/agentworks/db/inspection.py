@@ -84,7 +84,7 @@ def _require_snapshot_protocol() -> None:
 
 
 def _raise_if_unsupported_operation(error: OSError) -> None:
-    unavailable_errnos = {errno.EOPNOTSUPP}
+    unavailable_errnos = {errno.ENOSYS, errno.EOPNOTSUPP}
     if hasattr(errno, "ENOTSUP"):
         unavailable_errnos.add(errno.ENOTSUP)
     if error.errno in unavailable_errnos:
@@ -156,6 +156,25 @@ def _open_directory_component(name: str, parent_fd: int) -> int:
     except OSError as error:
         _raise_if_unsupported_operation(error)
         raise
+
+
+def _trusted_filesystem_anchor(requested_path: Path) -> str:
+    """Return the lexical filesystem anchor without inspecting the source."""
+    absolute_path = requested_path if requested_path.is_absolute() else Path.cwd() / requested_path
+    if not absolute_path.anchor:
+        raise _UnsupportedSnapshotEntry
+    return absolute_path.anchor
+
+
+def _preflight_snapshot_protocol(requested_path: Path) -> None:
+    """Exercise directory-relative acquisition on the source filesystem."""
+    _require_snapshot_protocol()
+    anchor_fd = _open_directory_anchor(_trusted_filesystem_anchor(requested_path))
+    try:
+        probe_fd = _open_directory_component(".", anchor_fd)
+        os.close(probe_fd)
+    finally:
+        os.close(anchor_fd)
 
 
 @contextmanager
@@ -307,7 +326,12 @@ def inspection_snapshot(
     requested_path: Path,
 ) -> Iterator[tuple[bool, int, int, Database | None]]:
     """Open a private, non-migrating, verified snapshot for inspection."""
-    _require_snapshot_protocol()
+    try:
+        _preflight_snapshot_protocol(requested_path)
+    except DatabaseInspectionUnavailable:
+        raise
+    except (_UnsupportedSnapshotEntry, OSError):
+        raise StateError(_SNAPSHOT_ERROR) from None
 
     if not _requested_entry_exists(requested_path):
         yield False, 0, LATEST_VERSION, None

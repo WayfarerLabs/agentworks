@@ -19,6 +19,9 @@ def _topic(slug: str):
 def test_migration_is_a_colocated_exception_topic_linked_without_teaching_duplication() -> None:
     migration = _topic("concept-migration")
     migration_teaching = next(block.markdown for block in migration.blocks if isinstance(block, Teaching))
+    assert "`data.counts.unavailable` to equal `0`" in migration_teaching
+    assert "An unavailable check leaves host readiness unverified" in migration_teaching
+    assert "though doctor itself exits `0`" in migration_teaching
     for slug in ("concept-onboarding", "concept-management"):
         topic = _topic(slug)
         assert "concept-migration" in topic.related_topics
@@ -165,6 +168,7 @@ def test_migration_actions_make_inventory_backups_and_verification_distinct() ->
     finish = by_id["finish-doctor"]
     assert finish.command == ("agw", "doctor", "--output", "json")
     assert "data.counts.fail equals 0" in finish.expected_state
+    assert "data.counts.unavailable equals 0" in finish.expected_state
     assert "command exits 0" in finish.expected_state
 
 

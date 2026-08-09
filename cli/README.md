@@ -485,11 +485,13 @@ absence remains stable through copying and verification. A second source fingerp
 complete set stayed unchanged before SQLite validates the private copy; concurrent transitions are
 retried. Doctor reports a pending migration without applying it and does not create or change the
 original database, WAL, or shared-memory files. If the host cannot provide every primitive required
-for secure descriptor-first inspection, the System, VM sites, and Database rows report
-`[unavailable]`; that state is neither a warning nor a failure, so it does not by itself change the
-exit status. Invalid database entries and malformed schema versions still fail closed and make
-doctor exit nonzero. See the [doctor JSON contract](command-reference.md#doctor-json-schema) for the
-matching machine-readable status and count shape.
+for secure descriptor-first inspection, the System, applicable VM sites, and Database rows report
+`[unavailable]`. The VM sites row applies when configuration and the registry load; otherwise its
+existing informational skip remains. That state is neither a warning nor a failure, so it does not
+by itself change the exit status. Invalid database entries and malformed schema versions still fail
+closed and make doctor exit nonzero. See the
+[doctor JSON contract](command-reference.md#doctor-json-schema) for the matching machine-readable
+status and count shape.
 
 ## Environment Variables
 

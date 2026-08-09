@@ -398,37 +398,45 @@ def test_inspection_snapshot_fails_before_source_access_without_required_protoco
     assert requested_entries == []
 
 
-@pytest.mark.parametrize("error_kind", ["not_implemented", "not_supported"])
+@pytest.mark.parametrize("error_kind", ["not_implemented", "not_supported", "not_implemented_syscall"])
 def test_inspection_snapshot_maps_runtime_primitive_unavailability(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     error_kind: str,
 ) -> None:
+    import agentworks.db.inspection as inspection_module
     from agentworks.db import Database
     from agentworks.errors import DatabaseInspectionUnavailable
 
     db_path = tmp_path / "runtime-unavailable.db"
-    writer = Database(db_path)
-    writer.set_setting("system_slug", "must-not-be-read")
+    assert not db_path.exists()
     original_open = os.open
+    source_access: list[Path] = []
+    relative_probes: list[str] = []
 
     def unavailable_open(path: str, flags: int, *args: object, **kwargs: object) -> int:
-        if flags & os.O_DIRECTORY:
+        if path == "." and kwargs.get("dir_fd") is not None:
+            relative_probes.append(path)
             if error_kind == "not_implemented":
                 raise NotImplementedError
-            raise OSError(errno.EOPNOTSUPP, "operator-private-runtime-detail")
+            error_number = errno.ENOSYS if error_kind == "not_implemented_syscall" else errno.EOPNOTSUPP
+            raise OSError(error_number, "operator-private-runtime-detail")
         return original_open(path, flags, *args, **kwargs)
 
+    monkeypatch.setattr(
+        inspection_module,
+        "_requested_entry_exists",
+        lambda path: source_access.append(path) or False,
+    )
     monkeypatch.setattr(os, "open", unavailable_open)
     monkeypatch.setattr(os, "supports_dir_fd", frozenset({unavailable_open}))
-    try:
-        with pytest.raises(DatabaseInspectionUnavailable) as raised, Database.inspection_snapshot(db_path):
-            pytest.fail("runtime primitive unavailability must not yield a snapshot")
-    finally:
-        writer.close()
+    with pytest.raises(DatabaseInspectionUnavailable) as raised, Database.inspection_snapshot(db_path):
+        pytest.fail("runtime primitive unavailability must not yield a snapshot")
 
     assert str(raised.value) == "secure database inspection is unavailable on this host"
     assert "operator-private" not in str(raised.value)
+    assert relative_probes == ["."]
+    assert source_access == []
 
 
 def test_inspection_snapshot_keeps_ordinary_open_errors_as_failures(
@@ -500,6 +508,7 @@ def test_inspection_snapshot_uses_complete_protocol_for_main_wal_and_shm(
     assert all(flags & os.O_NOFOLLOW for _name, _directory_fd, flags in acquisitions)
     assert all(flags & os.O_NONBLOCK for _name, _directory_fd, flags in acquisitions)
     assert directory_acquisitions
+    assert directory_acquisitions[0][0] == "."
     assert all(parent_fd >= 0 for _name, parent_fd, _flags in directory_acquisitions)
     assert all(flags & os.O_DIRECTORY for _name, _parent_fd, flags in directory_acquisitions)
     assert all(flags & os.O_NOFOLLOW for _name, _parent_fd, flags in directory_acquisitions)

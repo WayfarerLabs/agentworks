@@ -145,5 +145,7 @@ path, ignoring source line. This normal inventory command may probe host readine
 with consent to examine the workstation. Any missing, extra, or wrongly originated resource returns
 to the untouched backups for investigation. Finish only when a final `agw doctor --output json`
 reports zero failures. Parse its one JSON document and apply the same integer version, exact
-`doctor` command, and object-data checks. Require `data.counts.fail` to equal `0` and the command to
-exit `0` before recording completion.
+`doctor` command, and object-data checks. Require both `data.counts.fail` and
+`data.counts.unavailable` to equal `0`, and require the command to exit `0`, before recording
+completion. An unavailable check leaves host readiness unverified and the migration incomplete even
+though doctor itself exits `0`.

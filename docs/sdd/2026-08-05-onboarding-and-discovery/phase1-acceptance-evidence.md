@@ -259,12 +259,13 @@ Final integrated validation passed:
 
 The final re-review correction distinguishes an unsupported secure snapshot protocol from invalid
 database state. Missing or runtime-unsupported non-blocking, no-follow, directory-only, or
-directory-relative open primitives now produce closed `unavailable` checks for the System, VM sites,
-and Database groups. Those checks have their own JSON status and count, do not increment warn or
-fail, and leave an otherwise healthy human or JSON doctor run at exit 0. The protocol gate runs
-before checking whether the requested database exists, so absent and active databases follow the
-same no-access rule on unsupported hosts. Ordinary acquisition errors, unsupported source entries,
-copy failures, retry exhaustion, and malformed schema versions remain path-free failures.
+directory-relative open primitives now produce closed `unavailable` checks for the System,
+applicable VM sites, and Database groups. Those checks have their own JSON status and count, do not
+increment warn or fail, and leave an otherwise healthy human or JSON doctor run at exit 0. The
+protocol gate runs before checking whether the requested database exists, so absent and active
+databases follow the same no-access rule on unsupported hosts. Ordinary acquisition errors,
+unsupported source entries, copy failures, retry exhaustion, and malformed schema versions remain
+path-free failures.
 
 Schema inspection now accepts only null as version 0 or an exact nonnegative integer. Focused tests
 reject text, bytes, floating-point, boolean, and negative values; an installed-entrypoint regression
@@ -278,6 +279,25 @@ Unsupported-host and malformed-schema correction validation passed:
 - focused adversarial snapshot and installed-entrypoint suite: 37 passed;
 - wider doctor, JSON, parity, guide-action, and database slice: 198 passed;
 - full non-integration suite: 6,716 passed and 3 deselected;
+- Ruff check and format check: 625 files clean;
+- full mypy: 625 source files clean;
+- Rulesync generated-output check and locked-SDD validation: clean;
+- mandatory file lint: 277 Markdown files clean, 250 spelling files clean, and Prettier clean.
+
+## Runtime protocol preflight and migration completion correction
+
+The follow-up correction exercises the requested path's trusted filesystem anchor and an actual
+directory-relative open before checking the database entry. Runtime `EOPNOTSUPP` and `ENOSYS`
+results therefore become the same closed protocol-unavailable outcome even when the database is
+absent, without touching the main, WAL, or SHM entries. The final migration doctor action now
+requires both failure and unavailable counts to be zero. Diagnostic doctor actions remain permissive
+because unavailable state is still useful evidence there. The permanent CLI wording now names only
+applicable VM sites because a failed configuration or registry retains its informational skip row.
+
+Runtime preflight and migration completion correction validation passed:
+
+- focused adversarial snapshot and guide-action suite: 63 passed;
+- wider guide and doctor suite: 523 passed;
 - Ruff check and format check: 625 files clean;
 - full mypy: 625 source files clean;
 - Rulesync generated-output check and locked-SDD validation: clean;

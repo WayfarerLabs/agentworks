@@ -309,8 +309,9 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             ConsentBoundary.EXAMINE_WORKSTATION,
             ("agw", "doctor", "--output", "json"),
             "Before recording VERIFIED, parse exactly one JSON document and require schema_version is the "
-            "integer 1, command is exactly doctor, data is an object, data.counts.fail equals 0, and the command "
-            "exits 0. Doctor then reports zero failures for the migrated installation.",
+            "integer 1, command is exactly doctor, data is an object, data.counts.fail equals 0, "
+            "data.counts.unavailable equals 0, and the command exits 0. Doctor then reports zero failures and "
+            "no unavailable checks for the migrated installation.",
             None,
             "Leave host readiness unverified and do not declare the migration complete.",
         ),

@@ -481,7 +481,7 @@ def test_validate_manifest_action_rejects_config_disappearing_between_runs(
     assert "Config with status fail" in action.expected_state
 
 
-def test_finish_doctor_requires_zero_failures_and_exit_zero(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_finish_doctor_requires_zero_failures_unavailable_and_exit_zero(monkeypatch: pytest.MonkeyPatch) -> None:
     from agentworks import doctor
 
     report = HealthReport()
@@ -496,6 +496,36 @@ def test_finish_doctor_requires_zero_failures_and_exit_zero(monkeypatch: pytest.
 
     document = _parse_exact_v1(result, "doctor", exit_code=0)
     data = cast("dict[str, object]", document["data"])
-    assert cast("dict[str, int]", data["counts"])["fail"] == 0
+    counts = cast("dict[str, int]", data["counts"])
+    assert counts["fail"] == 0
+    assert counts["unavailable"] == 0
     assert "data.counts.fail equals 0" in action.expected_state
+    assert "data.counts.unavailable equals 0" in action.expected_state
     assert "command exits 0" in action.expected_state
+
+
+def test_finish_doctor_audit_refuses_real_unavailable_report(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks import doctor
+
+    report = HealthReport()
+    group = HealthGroup("Database")
+    group.unavailable(
+        "Database",
+        "operator-private-human-detail",
+        machine_diagnostic=MachineDiagnostic.DATABASE_INSPECTION_UNAVAILABLE,
+    )
+    report.groups.append(group)
+    monkeypatch.setattr(doctor, "run_checks", lambda **_kwargs: report)
+    action = _migration_actions()["finish-doctor"]
+    assert action.command is not None
+
+    result = CliRunner().invoke(app, list(action.command[1:]))
+
+    document = _parse_exact_v1(result, "doctor", exit_code=0)
+    data = cast("dict[str, object]", document["data"])
+    counts = cast("dict[str, int]", data["counts"])
+    verified = result.exit_code == 0 and counts["fail"] == 0 and counts["unavailable"] == 0
+    assert verified is False
+    assert counts == {"ok": 0, "info": 0, "unavailable": 1, "warn": 0, "fail": 0}
+    assert "data.counts.unavailable equals 0" in action.expected_state
+    assert action.refusal_alternative == "Leave host readiness unverified and do not declare the migration complete."
