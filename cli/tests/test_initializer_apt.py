@@ -249,8 +249,60 @@ def test_run_install_commands_runs_when_test_exec_missing() -> None:
     assert any("curl" in c for c in run_calls)
 
 
+def test_run_install_commands_skips_when_all_declared_tests_pass() -> None:
+    target = MagicMock()
+    target.run.return_value = MagicMock(stdout="", stderr="", returncode=0, ok=True)
+    entries = {
+        "my-tool": UserInstallCommandEntry(
+            name="my-tool",
+            command="run-install",
+            test_exec="my-tool",
+            test_file="~/.my-tool/installed",
+            test_dir="~/.my-tool",
+        ),
+    }
+    logger = MagicMock()
+
+    _run_install_commands(target, ["my-tool"], entries, "zsh", "/home/agentworks", logger)
+
+    commands = [call.args[0] for call in target.run.call_args_list]
+    assert len(commands) == 1
+    assert "command -v" in commands[0]
+    assert "test -f /home/agentworks/.my-tool/installed" in commands[0]
+    assert "test -d /home/agentworks/.my-tool" in commands[0]
+    assert " && " in commands[0]
+    assert not any("run-install" in command for command in commands)
+
+
+def test_run_install_commands_runs_when_any_declared_test_fails() -> None:
+    target = MagicMock()
+
+    def run_side_effect(cmd, **kwargs):
+        result = MagicMock(stdout="", stderr="")
+        result.returncode = 1 if "command -v" in cmd else 0
+        result.ok = result.returncode == 0
+        return result
+
+    target.run.side_effect = run_side_effect
+    entries = {
+        "my-tool": UserInstallCommandEntry(
+            name="my-tool",
+            command="run-install",
+            test_exec="my-tool",
+            test_file="~/.my-tool/installed",
+        ),
+    }
+    logger = MagicMock()
+
+    _run_install_commands(target, ["my-tool"], entries, "zsh", "/home/agentworks", logger)
+
+    commands = [call.args[0] for call in target.run.call_args_list]
+    assert any("command -v" in command and "test -f" in command for command in commands)
+    assert any("run-install" in command for command in commands)
+
+
 def test_run_install_commands_no_test_always_runs() -> None:
-    """When no test is set, command always runs."""
+    """When no non-empty test is set, the command always runs."""
     target = MagicMock()
     target.run.return_value = MagicMock(stdout="", stderr="", returncode=0, ok=True)
 
@@ -260,7 +312,9 @@ def test_run_install_commands_no_test_always_runs() -> None:
             description="My tool",
             command="curl install.sh | bash",
             path=["~/.my-tool/bin"],
-            # no test field
+            test_exec="",
+            test_file="",
+            test_dir="",
         ),
     }
     logger = MagicMock()

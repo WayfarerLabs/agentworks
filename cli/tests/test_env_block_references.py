@@ -47,12 +47,12 @@ def _write_cfg(
 
 
 def test_env_entry_plaintext_returns_empty_list() -> None:
-    entry = EnvEntry(value="bar")
+    entry = EnvEntry({"value": "bar"})
     assert entry.referenced_resources("API_KEY", ("admin-template", "default")) == []
 
 
 def test_env_entry_secret_ref_emits_secret_requirement() -> None:
-    entry = EnvEntry(secret="anthropic-api-key")
+    entry = EnvEntry({"secret": "anthropic-api-key"})
     reqs = entry.referenced_resources("API_KEY", ("admin-template", "default"))
     assert len(reqs) == 1
     req = reqs[0]
@@ -68,9 +68,9 @@ def test_env_entry_secret_ref_emits_secret_requirement() -> None:
 def test_admin_config_dependencies_aggregates_env() -> None:
     admin = AdminConfig(
         env={
-            "A": EnvEntry(secret="sec-a"),
-            "B": EnvEntry(value="plain"),
-            "C": EnvEntry(secret="sec-c"),
+            "A": EnvEntry({"secret": "sec-a"}),
+            "B": EnvEntry({"value": "plain"}),
+            "C": EnvEntry({"secret": "sec-c"}),
         }
     )
     reqs = admin.dependencies(FinalizeContext())
@@ -84,7 +84,7 @@ def test_vm_template_dependencies_uses_template_name_in_source() -> None:
     """
     tmpl = VMTemplate(
         name="azure-prod",
-        env={"KEY": EnvEntry(secret="ts-key")},
+        env={"KEY": EnvEntry({"secret": "ts-key"})},
     )
     reqs = tmpl.dependencies(FinalizeContext())
     # 1 env-block + 1 tailscale (Phase 1c)
@@ -104,7 +104,7 @@ def test_vm_template_dependencies_uses_template_name_in_source() -> None:
 def test_workspace_template_dependencies() -> None:
     tmpl = WorkspaceTemplate(
         name="default",
-        env={"K": EnvEntry(secret="ws-secret")},
+        env={"K": EnvEntry({"secret": "ws-secret"})},
     )
     reqs = tmpl.dependencies(FinalizeContext())
     assert reqs[0].source == ("workspace-template", "default")
@@ -113,7 +113,7 @@ def test_workspace_template_dependencies() -> None:
 def test_agent_template_dependencies() -> None:
     tmpl = AgentTemplate(
         name="claude",
-        env={"K": EnvEntry(secret="claude-key")},
+        env={"K": EnvEntry({"secret": "claude-key"})},
     )
     reqs = tmpl.dependencies(FinalizeContext())
     assert reqs[0].source == ("agent-template", "claude")
@@ -134,7 +134,7 @@ def test_session_template_dependencies_with_omitted_env() -> None:
 def test_session_template_dependencies_with_secrets() -> None:
     tmpl = SessionTemplate(
         name="claude-coder",
-        env={"K": EnvEntry(secret="cc-secret")},
+        env={"K": EnvEntry({"secret": "cc-secret"})},
     )
     reqs = tmpl.dependencies(FinalizeContext())
     assert reqs[0].source == ("session-template", "claude-coder")

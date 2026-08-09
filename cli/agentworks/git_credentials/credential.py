@@ -64,8 +64,8 @@ class GitCredentialConfig(DeclaredResource):
     """The git-credential-provider fronting this credential: one table
     whose ``name`` selects the provider and whose remaining keys are that
     provider's own config (azdo's ``org``; github's ``repos`` / ``owner``;
-    the ``token`` secret each provider sources its PAT from, defaulting to
-    ``git-token-<name>``)."""
+    the ``token`` acquisition choice, whose stored arm names a secret
+    defaulting to ``git-token-<name>``)."""
 
     @model_validator(mode="before")
     @classmethod

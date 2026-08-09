@@ -36,11 +36,10 @@ from agentworks.capabilities.descriptor import (
     HostSurface,
     RegistryPolicy,
 )
-from agentworks.capabilities.git_credential.base import GitCredentialProvider
+from agentworks.capabilities.git_credential.base import GitCredentialProvider, TokenAcquiringConfig
 from agentworks.git_credentials.credential import GitCredentialConfig
 from agentworks.resources.graph import Readiness
 from agentworks.resources.kind import KIND_REGISTRY, NoUnreferencedDefaultError
-from agentworks.schema import AgwModel
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
@@ -84,11 +83,11 @@ class _GitCredentialKind:
         provider capability and carries its config; admin and agent templates refer to
         the credential by name through `git_credentials`.
 
-        The token itself is a SECRET, named by the provider's `token` field and
-        defaulting to `git-token-<this credential's name>`. It resolves through the
-        backend chain at VM-init time, so nothing is stored on the VM. Because that
-        default secret name is derived from this resource's name, a name that breaks the
-        standard naming rules still loads but warns at config load.
+        The provider's `token` field says how the token is obtained. Its `stored` arm
+        names a SECRET and defaults to `git-token-<this credential's name>`; a bare
+        secret name is shorthand for that arm. The secret resolves through the backend
+        chain at VM-init time. Because the default name derives from this resource's
+        name, a name that breaks the standard naming rules still loads but warns.
 
         Declare several: the managed credential helper picks the right one per remote,
         which is what makes a fine-grained token scoped to one repository usable
@@ -176,7 +175,7 @@ def _readiness(name: str, impl: Any) -> Readiness:
 
 GIT_CREDENTIAL_PROVIDER_DESCRIPTOR = CapabilityKindDescriptor(
     kind="git-credential-provider",
-    contract_version=1,
+    contract_version=2,
     implementation_contract=GitCredentialProvider,
     registry_policy=RegistryPolicy.CLASS_BY_NAME,
     registry=_registry,
@@ -188,7 +187,7 @@ GIT_CREDENTIAL_PROVIDER_DESCRIPTOR = CapabilityKindDescriptor(
     kind_strategy=KIND_REGISTRY["git-credential-provider"],
     readiness=_readiness,
     publisher_source="agentworks.capabilities.git_credential",
-    config_schema=ConfigContract(base=AgwModel, discriminator="name"),
+    config_schema=ConfigContract(base=TokenAcquiringConfig, discriminator="name"),
     manifest_section=HostSurface(
         host_kind="git-credential",
         naming_field="provider",

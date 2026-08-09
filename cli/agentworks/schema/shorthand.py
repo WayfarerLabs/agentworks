@@ -33,8 +33,9 @@ Internal to the package: the public surface is
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Annotated, Any, Final, Literal, get_args, get_origin
 
+from pydantic import Discriminator
 from pydantic_core import core_schema
 
 from agentworks.errors import StateError
@@ -42,7 +43,7 @@ from agentworks.errors import StateError
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from pydantic import BaseModel
+    from pydantic import BaseModel, GetCoreSchemaHandler
     from pydantic_core import CoreSchema
 
 #: The scalar types a shorthand may be spelled as, each paired with the
@@ -108,6 +109,90 @@ class ScalarShorthand:
         """The scalar arm, as the schema a JSON Schema generator turns
         into one branch of the emitted ``anyOf``."""
         return _SCALAR_CORE_SCHEMAS[self.annotation]()
+
+
+@dataclass(frozen=True, kw_only=True)
+class UnionScalarShorthand:
+    """Dispatch one tagged-union scalar spelling to one declared arm.
+
+    An arm's :class:`ScalarShorthand` says how that MODEL folds a scalar.
+    It does not say that a discriminated union can select the arm before
+    the tag is available. This field-level declaration supplies that
+    missing selection fact once. Validation, schema emission, default
+    filling, extraction, and field documentation all read it.
+
+    ``arm`` names the model rather than repeating its scalar type, fold
+    field, or tag. Those are derived from the arm's ``ScalarShorthand``
+    and its single-string ``Literal`` discriminator field. Registration
+    conformance refuses a declaration whose arm is absent, ambiguous, or
+    otherwise does not support that derivation.
+    """
+
+    discriminator: str
+    """The field whose literal value tags the selected arm."""
+
+    arm: type[BaseModel]
+    """The union arm selected by the scalar spelling."""
+
+    def __post_init__(self) -> None:
+        if not self.discriminator.isidentifier():
+            raise StateError(
+                f"a union scalar shorthand must name a discriminator field, and "
+                f"{self.discriminator!r} is not a field name"
+            )
+
+    def __get_pydantic_core_schema__(self, source_type: Any, handler: GetCoreSchemaHandler) -> CoreSchema:
+        """Build ordinary tag dispatch, preceded by this declared fold.
+
+        Invalid declarations deliberately keep ordinary tagged validation
+        rather than raising while a plugin module imports. Registration
+        conformance reports the author-facing defect before seating the
+        plugin, which is the boundary that can name its owner.
+        """
+        tagged = handler.generate_schema(Annotated[source_type, Discriminator(self.discriminator)])
+        resolved = union_scalar_resolution(source_type, self)
+        if isinstance(resolved, str):
+            return tagged
+        shorthand, tag = resolved
+
+        def fold(value: Any) -> Any:
+            folded = shorthand.folded(value)
+            return value if folded is value else {self.discriminator: tag, **folded}
+
+        return core_schema.no_info_before_validator_function(
+            fold,
+            tagged,
+            json_schema_input_schema=core_schema.union_schema([shorthand.core_schema(), tagged]),
+        )
+
+
+def union_scalar_resolution(
+    annotation: object,
+    declaration: UnionScalarShorthand,
+) -> tuple[ScalarShorthand, str] | str:
+    """Resolve ``declaration`` against its union, or explain why not."""
+    base = _without_annotated(annotation)
+    members = get_args(base) or (base,)
+    matches = [member for member in members if _without_annotated(member) is declaration.arm]
+    arm_name = getattr(declaration.arm, "__name__", repr(declaration.arm))
+    if len(matches) != 1:
+        return f"selects arm {arm_name}, which occurs {len(matches)} times in the discriminated union"
+    shorthand = scalar_shorthand_of(declaration.arm)
+    if shorthand is None:
+        return f"selects arm {arm_name}, which declares no ScalarShorthand"
+    fields = getattr(declaration.arm, "model_fields", {})
+    field = fields.get(declaration.discriminator)
+    tags = get_args(field.annotation) if field is not None and get_origin(field.annotation) is Literal else ()
+    if len(tags) != 1 or not isinstance(tags[0], str):
+        return f"selects arm {arm_name}, whose {declaration.discriminator!r} field is not one string Literal"
+    return shorthand, tags[0]
+
+
+def _without_annotated(annotation: object) -> object:
+    """Remove nested ``Annotated`` wrappers from one union member."""
+    while get_origin(annotation) is Annotated:
+        annotation = get_args(annotation)[0]
+    return annotation
 
 
 def scalar_shorthand_of(annotation: object) -> ScalarShorthand | None:

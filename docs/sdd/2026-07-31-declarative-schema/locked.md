@@ -413,3 +413,24 @@ safe.
 templated field validated to the rendered name while extraction, which never folded shorthand,
 emitted no edge. The fill folds before filling, so both readers see the same mapping. Fixture-only
 today, and now pinned.
+
+## 2026-08-08: the variant-modeling rule was refined into three tiers
+
+The later operator ruling supersedes the simple required-field-set test recorded above without
+rewriting this effort's historical decision. Different shapes selected by a genuine mechanism or
+mode are never implicit: they are closed discriminated-union arms with a string `Literal` tag. A
+selector-free choice between distinct required-key shapes may instead be declared as an untagged
+structural union and emitted as plain `oneOf`; adding a ceremonial mode would make the common
+spelling worse.
+
+Anything that determines whether a secret reference or resource edge exists must remain visible in
+the model shape the walkers traverse. Extraction must reach exactly the models validation can
+select. That invariant is absolute. Cross-field validity among plain config fields is different: a
+loud, precise load-time validator is allowed to enforce it even when the emitted schema
+under-constrains the combination, because schema may under-report but must never reject what the
+loader accepts.
+
+Before encoding any constraint, first ask whether the forbidden combination should instead acquire
+meaning. Then protect the common spelling with defaults, scalar shorthands, or untagged structural
+unions. Finally weigh earlier editor feedback against the manifest cost paid by every operator. The
+permanent, worked rule lives in `cli/agentworks/capabilities/README.md`.

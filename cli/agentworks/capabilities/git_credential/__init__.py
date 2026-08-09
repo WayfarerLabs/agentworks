@@ -22,6 +22,9 @@ from __future__ import annotations
 from agentworks.capabilities.git_credential.base import (
     GitCredentialProvider,
     HelperEntry,
+    StoredToken,
+    TokenAcquiringConfig,
+    TokenAcquisition,
     TokenSourcedConfig,
 )
 from agentworks.capabilities.git_credential.github import GitHubCredentialProvider
@@ -31,6 +34,9 @@ __all__ = [
     "GitCredentialProvider",
     "GitHubCredentialProvider",
     "HelperEntry",
+    "StoredToken",
+    "TokenAcquiringConfig",
+    "TokenAcquisition",
     "TokenSourcedConfig",
 ]
 
