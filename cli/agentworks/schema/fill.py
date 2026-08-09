@@ -77,7 +77,7 @@ from agentworks.schema._shape import (
     addressed_arm_model,
     model_fields_of,
     shape_of,
-    structural_arm_for,
+    structural_arm_and_value,
     table_addresses_block,
 )
 from agentworks.schema.extract import _absent_defaults
@@ -230,8 +230,8 @@ def _filled_value(shape: FieldShape, value: object, owner: RefOwner, on_path: _P
         model = _armed_model(shape.arms, shape.discriminator, shape.union_scalar_shorthand, value)
         return value if model is None else (yield _filled_block(model, value, owner, on_path))
     if shape.structural_arms:
-        model = structural_arm_for(shape.structural_arms, value)
-        return value if model is None else (yield _filled_block(model, value, owner, on_path))
+        model, canonical = structural_arm_and_value(shape.structural_arms, value)
+        return value if model is None else (yield _filled_block(model, canonical, owner, on_path))
     if shape.union_model is not None:
         return (yield _filled_union(shape.union_model, shape.union_members, value, owner, on_path))
     return value
@@ -273,8 +273,8 @@ def _filled_element(shape: FieldShape, element: object, owner: RefOwner, on_path
         )
         return element if model is None else (yield _filled_block(model, element, owner, on_path))
     if shape.item_structural_arms:
-        model = structural_arm_for(shape.item_structural_arms, element)
-        return element if model is None else (yield _filled_block(model, element, owner, on_path))
+        model, canonical = structural_arm_and_value(shape.item_structural_arms, element)
+        return element if model is None else (yield _filled_block(model, canonical, owner, on_path))
     if shape.item_union_model is not None:
         return (yield _filled_union(shape.item_union_model, shape.item_union_members, element, owner, on_path))
     return element

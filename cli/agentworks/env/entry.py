@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Final, cast, overload
+from typing import TYPE_CHECKING, Annotated, ClassVar, Final
 
 from pydantic import AfterValidator, ConfigDict
-from pydantic_core import PydanticUndefined, PydanticUndefinedType
 
 from agentworks.schema import (
     AgwModel,
@@ -87,43 +86,6 @@ class EnvEntry(AgwRootModel[Annotated[PlaintextEnvEntry | SecretEnvEntry, Struct
     third came to be missing: ``describe-kind`` documented the table form
     alone for a field whose emitted schema had offered both since it was
     written."""
-
-    @overload
-    def __init__(self, *, value: str) -> None: ...
-
-    @overload
-    def __init__(self, *, secret: str) -> None: ...
-
-    @overload
-    def __init__(self, root: PlaintextEnvEntry | SecretEnvEntry | str | dict[str, Any]) -> None: ...
-
-    def __init__(
-        self,
-        root: PlaintextEnvEntry | SecretEnvEntry | str | dict[str, Any] | PydanticUndefinedType = PydanticUndefined,
-        *,
-        value: str | PydanticUndefinedType = PydanticUndefined,
-        secret: str | PydanticUndefinedType = PydanticUndefined,
-        **extra: Any,
-    ) -> None:
-        """Build from either historical keyword form or the root value.
-
-        The keyword compatibility is construction ergonomics only. It is
-        immediately validated as one of the two arm tables, so it does not
-        recreate the former combined model shape.
-        """
-        if root is not PydanticUndefined and (
-            value is not PydanticUndefined or secret is not PydanticUndefined or extra
-        ):
-            raise TypeError("EnvEntry accepts either a root value or value=/secret=, not both")
-        if root is PydanticUndefined:
-            data: dict[str, Any] = {}
-            if value is not PydanticUndefined:
-                data["value"] = value
-            if secret is not PydanticUndefined:
-                data["secret"] = secret
-            data.update(extra)
-            root = data
-        super().__init__(cast("Any", root))
 
     @property
     def value(self) -> str | None:

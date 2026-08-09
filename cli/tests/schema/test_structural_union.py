@@ -41,8 +41,34 @@ class SecretArm(AgwModel):
 Source = Annotated[PlainArm | SecretArm, StructuralUnion()]
 
 
+class DefaultSecretArm(AgwModel):
+    secret: Annotated[
+        str,
+        SecretRef(usage="the defaulted source", default_template="source-{owner_name}"),
+    ]
+
+
+DefaultSource = Annotated[PlainArm | DefaultSecretArm, StructuralUnion()]
+
+
 class Holder(AgwModel):
     sources: dict[str, Source] = Field(default_factory=dict)
+
+
+class OptionalHolder(AgwModel):
+    source: Source | None = None
+
+
+class OptionalItemsHolder(AgwModel):
+    sources: list[Source | None] = Field(default_factory=list)
+
+
+class OptionalDefaultHolder(AgwModel):
+    source: DefaultSource | None = None
+
+
+class OptionalDefaultItemsHolder(AgwModel):
+    sources: list[DefaultSource | None] = Field(default_factory=list)
 
 
 def _names(blob: object) -> list[str]:
@@ -62,20 +88,78 @@ def test_malformed_or_ambiguous_tables_do_not_guess_an_edge() -> None:
 
 
 def test_owner_default_filling_uses_the_same_structural_selection() -> None:
-    class DefaultSecretArm(AgwModel):
-        secret: Annotated[
-            str,
-            SecretRef(usage="the defaulted source", default_template="source-{owner_name}"),
-        ]
-
     class DefaultHolder(AgwModel):
-        source: Annotated[PlainArm | DefaultSecretArm, StructuralUnion()]
+        source: DefaultSource
 
     filled = filled_defaults(DefaultHolder, {"source": {}}, OWNER)
 
     assert filled == {"source": {"secret": "source-demo"}}
     assert DefaultHolder.model_validate(filled).source == DefaultSecretArm(secret="source-demo")
     assert [ref.name for ref in extract_references(DefaultHolder, filled)] == ["source-demo"]
+
+
+@pytest.mark.parametrize(
+    "model",
+    [OptionalHolder, OptionalItemsHolder],
+    ids=["optional-field", "optional-collection-element"],
+)
+def test_optional_structural_unions_are_visible_to_conformance(model: type[AgwModel]) -> None:
+    assert structural_union_error(model) is None
+    assert reference_marker_error(model) is None
+
+
+def test_optional_structural_unions_emit_one_of_at_both_positions() -> None:
+    field_schema = OptionalHolder.model_json_schema()["properties"]["source"]
+    element_schema = OptionalItemsHolder.model_json_schema()["properties"]["sources"]["items"]
+
+    for schema in (field_schema, element_schema):
+        structural = next(branch for branch in schema["anyOf"] if "oneOf" in branch)
+        assert len(structural["oneOf"]) == 2
+
+
+def test_optional_structural_unions_render_both_arms_at_both_positions() -> None:
+    field_doc = next(iter(iter_field_docs(OptionalHolder)))
+    item_doc = next(iter(iter_field_docs(OptionalItemsHolder)))
+
+    assert tuple(arm.doc.model for arm in field_doc.union_arms) == (PlainArm, SecretArm)
+    assert tuple(arm.doc.model for arm in item_doc.item_union_arms) == (PlainArm, SecretArm)
+
+
+@pytest.mark.parametrize(
+    ("model", "blob", "canonical"),
+    [
+        (
+            OptionalDefaultHolder,
+            {"source": {}},
+            {"source": {"secret": "source-demo"}},
+        ),
+        (
+            OptionalDefaultItemsHolder,
+            {"sources": [{}, None]},
+            {"sources": [{"secret": "source-demo"}, None]},
+        ),
+    ],
+    ids=["optional-field", "optional-collection-element"],
+)
+def test_optional_structural_unions_fill_the_selected_arm(
+    model: type[AgwModel], blob: object, canonical: object
+) -> None:
+    filled = filled_defaults(model, blob, OWNER)
+
+    assert filled == canonical
+    assert model.model_validate(filled) is not None
+
+
+@pytest.mark.parametrize(
+    ("model", "blob"),
+    [
+        (OptionalHolder, {"source": {"secret": "api-token"}}),
+        (OptionalItemsHolder, {"sources": [None, {"secret": "api-token"}]}),
+    ],
+    ids=["optional-field", "optional-collection-element"],
+)
+def test_optional_structural_unions_extract_the_selected_arm(model: type[AgwModel], blob: object) -> None:
+    assert [ref.name for ref in extract_references(model, blob)] == ["api-token"]
 
 
 def test_schema_and_field_docs_expose_the_same_alternatives() -> None:
@@ -107,6 +191,28 @@ def test_overlapping_table_languages_are_loud_even_without_markers() -> None:
     reason = structural_union_error(Overlapping)
     assert reason is not None
     assert "overlapping arms First and Second" in reason
+
+
+def test_optional_overlapping_table_languages_stay_loud_without_markers() -> None:
+    class First(AgwModel):
+        value: str
+
+    class Second(AgwModel):
+        value: str
+        note: str | None = None
+
+    OverlappingSource = Annotated[First | Second, StructuralUnion()]
+
+    class OptionalOverlap(AgwModel):
+        source: OverlappingSource | None = None
+
+    class OptionalOverlapItems(AgwModel):
+        sources: list[OverlappingSource | None] = Field(default_factory=list)
+
+    for model in (OptionalOverlap, OptionalOverlapItems):
+        reason = structural_union_error(model)
+        assert reason is not None
+        assert "overlapping arms First and Second" in reason
 
 
 @pytest.mark.parametrize("other", [str, BaseModel], ids=["non-model", "open-model"])

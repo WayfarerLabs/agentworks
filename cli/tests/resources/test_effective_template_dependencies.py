@@ -50,7 +50,7 @@ def _targets(row: DeclaredResource, context: FinalizeContext) -> set[tuple[str, 
 def test_vm_template_child_inherits_parent_needs_and_drops_what_it_overrides() -> None:
     parent = VMTemplate(
         name="base",
-        env={"BASE": EnvEntry(secret="base-secret")},
+        env={"BASE": EnvEntry({"secret": "base-secret"})},
         apt_packages=["build-tools"],
     )
     child = VMTemplate(name="kid", inherits=["base"], tailscale_auth_key="kid-ts-key")
@@ -93,7 +93,7 @@ def test_a_later_silent_parent_does_not_move_the_childs_auth_key_edge() -> None:
 
 
 def test_workspace_template_child_inherits_parent_env_secrets() -> None:
-    parent = WorkspaceTemplate(name="base", env={"K": EnvEntry(secret="base-secret")})
+    parent = WorkspaceTemplate(name="base", env={"K": EnvEntry({"secret": "base-secret"})})
     child = WorkspaceTemplate(name="kid", inherits=["base"])
     assert _targets(child, _context("workspace-template", parent, child)) == {
         ("secret", "base-secret"),
@@ -139,7 +139,7 @@ def test_a_bare_context_degrades_to_the_declaration_itself_not_to_nothing() -> N
     """``FinalizeContext()`` carries no rows, so there are no ancestors to
     merge; the row's OWN declaration still has to come through, or a
     context-less caller would silently see an empty edge set."""
-    template = VMTemplate(name="kid", inherits=["base"], env={"K": EnvEntry(secret="own-secret")})
+    template = VMTemplate(name="kid", inherits=["base"], env={"K": EnvEntry({"secret": "own-secret"})})
     assert ("secret", "own-secret") in _targets(template, FinalizeContext())
 
 

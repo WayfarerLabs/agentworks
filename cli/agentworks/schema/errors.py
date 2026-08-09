@@ -229,6 +229,9 @@ class _Problem:
     union_input: object = None
     """The raw value all member reports of this union share."""
 
+    unknown_field: bool = False
+    """Whether this came from Pydantic's structured unknown-field error."""
+
     def render(self) -> str:
         text = f"{self.path}: {self.message}" if self.path else self.message
         return f"{text} (inherited from {self.inherited_from})" if self.inherited_from else text
@@ -259,6 +262,7 @@ def _problem(
         structural_arms=address.structural_arms,
         union_member=address.union_member,
         union_input=detail.get("input"),
+        unknown_field=detail["type"] == "extra_forbidden",
     )
 
 
@@ -327,11 +331,7 @@ def _collapsed_structural(problems: list[_Problem]) -> list[_Problem]:
         raw = next((item.union_input for item in group if isinstance(item.union_input, Mapping)), problem.union_input)
         problem = replace(problem, union_input=raw)
         if not isinstance(problem.union_input, Mapping):
-            inferred = {
-                item.path.rsplit(".", 1)[-1]
-                for item in group
-                if item.message.startswith("unknown field; expected one of:")
-            }
+            inferred = {item.path.rsplit(".", 1)[-1] for item in group if item.unknown_field}
             allowed = {name for arm in problem.structural_arms for name in arm.model_fields}
             if inferred and inferred <= allowed and len(inferred) == len(group):
                 collapsed.extend(_structural_shape_problems(replace(problem, union_input=dict.fromkeys(inferred))))
@@ -359,6 +359,7 @@ def _structural_shape_problems(problem: _Problem) -> list[_Problem]:
                 path=".".join(filter(None, (problem.union_path, name))),
                 message=f"unknown field; expected one of: {expected}",
                 inherited_from=problem.inherited_from,
+                unknown_field=True,
             )
             for name in unknown
         ]

@@ -65,7 +65,7 @@ from agentworks.schema._shape import (
     addressed_arm_model,
     model_fields_of,
     shape_of,
-    structural_arm_for,
+    structural_arm_and_value,
     table_addresses_block,
 )
 from agentworks.schema.reference import ConfigReference
@@ -310,9 +310,9 @@ def _arm_block(
 
 def _structural_block(arms: tuple[type[BaseModel], ...], value: object) -> Iterator[_Block]:
     """The one closed arm a raw table's required and allowed keys select."""
-    arm = structural_arm_for(arms, value)
+    arm, canonical = structural_arm_and_value(arms, value)
     if arm is not None:
-        yield _Block(model=arm, blob=value)
+        yield _Block(model=arm, blob=canonical)
 
 
 def _union_block(model: type[BaseModel], members: tuple[object, ...], value: object) -> Iterator[_Block]:

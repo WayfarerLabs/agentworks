@@ -40,6 +40,7 @@ from agentworks.schema import (
     model_is_complete,
     reference_marker_error,
     structural_union_error,
+    union_scalar_shorthand_error,
 )
 from tests.plugins._fixtures import ConformingSecretBackend, ConformingVMPlatform
 
@@ -298,6 +299,17 @@ def test_every_structural_union_on_the_shipped_surface_is_a_true_one_of() -> Non
 
     blocks = [(kind, block, builder(kind)) for kind in declarable_kinds() for block, builder in _DOCUMENT_BLOCKS]
     faults = [f"{kind} {block}: {reason}" for kind, block, model in blocks if (reason := structural_union_error(model))]
+    assert not faults, "\n".join(faults)
+
+
+def test_every_union_scalar_shorthand_on_the_shipped_surface_is_complete() -> None:
+    """A future shipped model gets the same scalar-dispatch gate as plugins."""
+    from agentworks.manifests.spec_model import declarable_kinds
+
+    blocks = [(kind, block, builder(kind)) for kind in declarable_kinds() for block, builder in _DOCUMENT_BLOCKS]
+    faults = [
+        f"{kind} {block}: {reason}" for kind, block, model in blocks if (reason := union_scalar_shorthand_error(model))
+    ]
     assert not faults, "\n".join(faults)
 
 

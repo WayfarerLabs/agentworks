@@ -117,7 +117,7 @@ def test_graph_node_producers_expose_dependencies_not_referenced_resources() -> 
     assert not hasattr(site, "required_resources")
 
     # EnvEntry keeps its arg-taking aggregation variant, not the graph-node one.
-    entry = EnvEntry(secret="s")
+    entry = EnvEntry({"secret": "s"})
     assert hasattr(entry, "referenced_resources")
     assert not hasattr(entry, "dependencies")
     sig = inspect.signature(entry.referenced_resources)

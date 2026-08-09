@@ -268,13 +268,12 @@ def spine_metadata(field: FieldInfo) -> list[object]:
 def element_metadata(field: FieldInfo) -> list[object]:
     """Every ``Annotated`` metadata item on the elements of a collection
     field, or nothing when the field holds a single value."""
-    inner, _optional = unwrap_optional(field.annotation)
-    inner, _metadata = split_annotated(inner)
+    inner, _optional, _metadata = _unwrapped_annotation(field.annotation)
     found = _collection_element(inner)
     if found is None:
         return []
     _kind, element = found
-    _element, metadata = split_annotated(element)
+    _element, _element_optional, metadata = _unwrapped_annotation(element)
     return metadata
 
 
@@ -286,8 +285,7 @@ def marker_of(field: FieldInfo) -> RefMarker | None:
 
 def shape_of(field: FieldInfo) -> FieldShape:
     """Classify ``field``. Reads annotations only; runs no user code."""
-    inner, optional = unwrap_optional(field.annotation)
-    inner, _inner_metadata = split_annotated(inner)
+    inner, optional, inner_metadata = _unwrapped_annotation(field.annotation)
     marker = marker_of(field)
 
     collection: Collection | None = None
@@ -310,7 +308,7 @@ def shape_of(field: FieldInfo) -> FieldShape:
     found = _collection_element(inner)
     if found is not None:
         collection, element = found
-        element, element_meta = split_annotated(element)
+        element, _element_optional, element_meta = _unwrapped_annotation(element)
         item_marker = _first_marker(element_meta)
         item_discriminator = _element_discriminator(element_meta) if _is_model(element) or _is_union(element) else None
         if item_discriminator is not None:
@@ -345,7 +343,7 @@ def shape_of(field: FieldInfo) -> FieldShape:
             union_scalar_shorthand = _sole_union_scalar_shorthand(spine_metadata(field))
         elif _is_model(inner):
             nested_model = inner
-        elif _field_has_structural_union(field):
+        elif _has_structural_union([*field.metadata, *inner_metadata]):
             union_members = tuple(split_annotated(arg)[0] for arg in get_args(inner))
             structural_arms = _closed_model_arms(union_members)
         else:
@@ -391,6 +389,42 @@ class _ClosedShape:
     allowed: frozenset[str]
 
 
+def structural_arm_and_value(
+    arms: tuple[type[BaseModel], ...],
+    value: object,
+) -> tuple[type[BaseModel] | None, object]:
+    """The structural arm ``value`` addresses and its canonical spelling.
+
+    Old combined models could persist a selected field beside the other
+    arm's explicit ``null`` field. An explicit structural union treats that
+    null as a companion, not a second arm, only when removing it leaves one
+    uniquely addressed arm. Unknown keys and non-null cross-arm values stay
+    untouched so validation can refuse them.
+    """
+    if not isinstance(value, Mapping) or not all(isinstance(key, str) for key in value):
+        return None, value
+    keys = frozenset(value)
+    shapes = tuple((arm, shape) for arm in arms if (shape := _closed_shape_of(arm)) is not None)
+    matched = [arm for arm, shape in shapes if _matches(shape, keys)]
+    if len(matched) == 1:
+        return matched[0], value
+    if not isinstance(value, dict):
+        return None, value
+    known = frozenset(name for _arm, shape in shapes for name in shape.allowed)
+    if not keys <= known:
+        return None, value
+    candidates: list[tuple[type[BaseModel], dict[object, object]]] = []
+    for arm, shape in shapes:
+        canonical = {
+            key: item
+            for key, item in value.items()
+            if item is not None or not isinstance(key, str) or key in shape.allowed
+        }
+        if len(canonical) != len(value) and _matches(shape, frozenset(canonical)):
+            candidates.append((arm, canonical))
+    return candidates[0] if len(candidates) == 1 else (None, value)
+
+
 def structural_arm_for(arms: tuple[type[BaseModel], ...], value: object) -> type[BaseModel] | None:
     """The one structural arm ``value`` addresses, or ``None``.
 
@@ -399,11 +433,8 @@ def structural_arm_for(arms: tuple[type[BaseModel], ...], value: object) -> type
     and validation reports the scalar error. Unknown keys, missing required
     keys, and a key set accepted by several arms address nothing.
     """
-    if not isinstance(value, Mapping) or not all(isinstance(key, str) for key in value):
-        return None
-    keys = frozenset(value)
-    matched = [arm for arm in arms if (shape := _closed_shape_of(arm)) is not None and _matches(shape, keys)]
-    return matched[0] if len(matched) == 1 else None
+    arm, _canonical = structural_arm_and_value(arms, value)
+    return arm
 
 
 def structurally_addressable_arms(arms: tuple[type[BaseModel], ...]) -> tuple[type[BaseModel], ...]:
@@ -470,21 +501,20 @@ def _structural_declarations(
     field: FieldInfo,
 ) -> tuple[_StructuralDeclaration | None, _StructuralDeclaration | None]:
     """Structural-union member declarations on a field and its elements."""
-    inner, _optional = unwrap_optional(field.annotation)
-    inner, _own_metadata = split_annotated(inner)
+    inner, _optional, own_metadata = _unwrapped_annotation(field.annotation)
     own = (
         (
             tuple(split_annotated(arg)[0] for arg in get_args(inner)),
             _field_discriminator_declaration(field),
         )
-        if _field_has_structural_union(field)
+        if _has_structural_union([*field.metadata, *own_metadata])
         else None
     )
     found = _collection_element(inner)
     if found is None:
         return own, None
     _collection, element = found
-    element, element_metadata = split_annotated(element)
+    element, _element_optional, element_metadata = _unwrapped_annotation(element)
     elements = (
         (
             tuple(split_annotated(arg)[0] for arg in get_args(element)),
@@ -568,7 +598,7 @@ def _scalar_shorthands_overlap(left: type[BaseModel], right: type[BaseModel]) ->
 
 def _field_has_structural_union(field: FieldInfo) -> bool:
     """Whether metadata on the field's own union declares the shape."""
-    _base, annotation_metadata = split_annotated(field.annotation)
+    _base, _optional, annotation_metadata = _unwrapped_annotation(field.annotation)
     return _has_structural_union([*field.metadata, *annotation_metadata])
 
 
@@ -606,6 +636,9 @@ def _matches(shape: _ClosedShape, keys: frozenset[str]) -> bool:
 
 def _arm_is_addressable(arm: type[BaseModel], arms: tuple[type[BaseModel], ...]) -> bool:
     """Whether the arm's accepted key language has a unique member."""
+    # Registration rejects overlaps first, but ``reference_marker_error``
+    # is also a standalone public guard. The regression
+    # ``test_an_unaddressable_marker_is_still_refused`` keeps this load-bearing.
     shape = _closed_shape_of(arm)
     if shape is None:
         return False
@@ -1211,6 +1244,19 @@ def unwrap_optional(annotation: object) -> tuple[object, bool]:
     if len(present) == 1:
         return present[0], True
     return Union[present], True  # noqa: UP007
+
+
+def _unwrapped_annotation(annotation: object) -> tuple[object, bool, list[object]]:
+    """Peel interleaved ``Annotated`` and optional wrappers at one position."""
+    metadata: list[object] = []
+    optional = False
+    while True:
+        annotation, found_metadata = split_annotated(annotation)
+        metadata.extend(found_metadata)
+        annotation, found_optional = unwrap_optional(annotation)
+        optional = optional or found_optional
+        if not found_metadata and not found_optional:
+            return annotation, optional, metadata
 
 
 def _is_union(annotation: object) -> bool:

@@ -38,7 +38,7 @@ def test_every_field_round_trips() -> None:
         tmuxinator=False,
         git_user_name="Bot",
         git_user_email="bot@example.test",
-        env={"EDITOR": EnvEntry(value="nvim"), "TOKEN": EnvEntry(secret="my-token")},
+        env={"EDITOR": EnvEntry({"value": "nvim"}), "TOKEN": EnvEntry({"secret": "my-token"})},
     )
 
 

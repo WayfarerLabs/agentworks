@@ -37,8 +37,8 @@ def test_compose_env_merges_scopes_with_identity_winning() -> None:
     out = compose_env(
         values={},
         ctx=_ctx(session_name="s1", session_kind="admin"),
-        vm={"EDITOR": EnvEntry(value="nvim")},
-        admin={"AGENTWORKS_SESSION_KIND": EnvEntry(value="bogus")},
+        vm={"EDITOR": EnvEntry({"value": "nvim"})},
+        admin={"AGENTWORKS_SESSION_KIND": EnvEntry({"value": "bogus"})},
     )
     assert out["EDITOR"] == "nvim"
     assert out["AGENTWORKS_SESSION_KIND"] == "admin"  # identity wins
@@ -48,9 +48,9 @@ def test_compose_env_precedence_session_over_agent_over_vm() -> None:
     out = compose_env(
         values={},
         ctx=_ctx(),
-        vm={"K": EnvEntry(value="from-vm")},
-        agent={"K": EnvEntry(value="from-agent")},
-        session={"K": EnvEntry(value="from-session")},
+        vm={"K": EnvEntry({"value": "from-vm"})},
+        agent={"K": EnvEntry({"value": "from-agent"})},
+        session={"K": EnvEntry({"value": "from-session"})},
     )
     assert out["K"] == "from-session"
 
@@ -61,7 +61,7 @@ def test_compose_env_renders_secrets_from_values() -> None:
     out = compose_env(
         values={"shared": "resolved-value"},
         ctx=_ctx(),
-        vm={"API_KEY": EnvEntry(secret="shared")},
+        vm={"API_KEY": EnvEntry({"secret": "shared"})},
     )
     assert out["API_KEY"] == "resolved-value"
 
@@ -74,7 +74,7 @@ def test_compose_env_raises_loudly_on_uncovered_secret() -> None:
         compose_env(
             values={},
             ctx=_ctx(),
-            vm={"API_KEY": EnvEntry(secret="uncovered")},
+            vm={"API_KEY": EnvEntry({"secret": "uncovered"})},
         )
 
 
