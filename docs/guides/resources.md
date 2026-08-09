@@ -569,6 +569,11 @@ never probe an interaction to answer readiness.
 backends); `agw doctor` has a **Secret backends** group (one readiness row per backend) plus one row
 per secret with the runtime outcome.
 
+Use `agw secret verify <name>` when you need proof rather than a preview. It performs one real
+resolution pass without printing or retaining the value. Interactive backends are excluded by
+default. Add `--allow-interactive` only when you consent to a prompt, biometric check, or backend
+authentication; that opt-in is incompatible with the global `--non-interactive` flag.
+
 ## Inspecting the whole picture
 
 ```bash

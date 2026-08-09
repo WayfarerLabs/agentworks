@@ -510,7 +510,7 @@ def reinit_agent(
             from agentworks.agents.initializer import create_agent_on_vm
             from agentworks.ssh import SSHLogger
 
-            ssh_logger = SSHLogger(vm.name, "agent-reinit")
+            ssh_logger = SSHLogger(vm.name, "agent-reinit", redactions=tuple(git_tokens.values()))
             try:
                 try:
                     create_agent_on_vm(

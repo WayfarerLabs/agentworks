@@ -41,11 +41,41 @@ if TYPE_CHECKING:
     )
 
 
+DatabaseDriverError = sqlite3.DatabaseError
+"""Driver failure type exposed so read-only consumers need no SQLite import."""
+
+
 class Database:
     """Typed interface to the Agentworks state database."""
 
-    def __init__(self, path: Path | None = None) -> None:
+    def __init__(self, path: Path | None = None, *, read_only: bool = False) -> None:
         db_path = path or _db.DB_PATH
+        if read_only:
+            from agentworks.errors import StateError
+
+            connection: sqlite3.Connection | None = None
+            try:
+                connection = sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True)
+                row = connection.execute("SELECT MAX(version) FROM schema_version").fetchone()
+                current = row[0] or 0
+            except sqlite3.DatabaseError as error:
+                if connection is not None:
+                    connection.close()
+                raise StateError(
+                    "state database is unavailable or malformed",
+                    hint="Run a normal Agentworks command to initialize or repair the state database.",
+                ) from error
+            if current != LATEST_VERSION:
+                connection.close()
+                raise StateError(
+                    f"state database schema is outdated ({current}/{LATEST_VERSION})",
+                    hint="Run a normal Agentworks command to initialize or migrate the state database.",
+                )
+            self._conn = connection
+            self._conn.row_factory = sqlite3.Row
+            self._conn.execute("PRAGMA foreign_keys = ON")
+            self._tx_depth = 0
+            return
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(db_path))
         self._conn.row_factory = sqlite3.Row

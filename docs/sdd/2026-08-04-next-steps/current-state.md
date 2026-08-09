@@ -1,9 +1,10 @@
 # Current State
 
-- Snapshot date: 2026-08-07, post-wave-2 (update at wave boundaries)
+- Snapshot date: 2026-08-08, post-onboarding-phase-1 (update at wave boundaries)
 - Baseline: Agentworks 0.13.0 plus the phase 1 TOML sunset (PR #316), the 0.14 expired-compat
-  removals (PR #406), and declarative-schema phase 2 through the descriptor (PR #414); the 0.14.0
-  release itself is pending per the `phasing.md` release mapping
+  removals (PR #406), declarative-schema phase 2 through the descriptor (PR #414), and the
+  onboarding guide first slice (PR #428); the 0.14.0 release itself is pending per the `phasing.md`
+  release mapping
 
 This document records where the system actually is, verified by code reconnaissance rather than
 assumed from the perspectives. It is the ground truth the phasing rests on; when a wave lands,
@@ -34,6 +35,16 @@ edges as the written spelling. Written old shapes hard-error with the exact rewr
 never wrote the retired blocks cross without edits. The variant-modeling rule (one arm per
 required-field shape; the discriminator tracks shape, not concept) lives permanently in
 `cli/agentworks/capabilities/README.md`.
+
+## Guide and onboarding
+
+The guide first slice is on `main` (onboarding phase 1, PR #428, 2026-08-08): the `agw guide`
+command core with package-owned topic contributions, `concept-onboarding`, safe anchored projection
+(`build_guide_view` materializes global inventories only for concept roots the traversal plan
+permits; denied data is never constructed), verification surfaces with typed evidence, and the
+`guide-contributions` always-on rule requiring topic updates to ride the changes that make them
+true. Later phases (machine-readable output contract, bootstraps, schema-derived depth) proceed per
+that effort's per-phase PR plan.
 
 ## Deprecation removal targets
 

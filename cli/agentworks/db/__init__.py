@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from agentworks.config import CONFIG_DIR
 from agentworks.db.converters import _parse_shells
-from agentworks.db.database import Database
+from agentworks.db.database import Database, DatabaseDriverError
 from agentworks.db.migrations import (
     LATEST_VERSION,
     MIGRATIONS,
@@ -54,6 +54,7 @@ __all__ = [
     "ConsoleRow",
     "ConsoleSessionRow",
     "Database",
+    "DatabaseDriverError",
     "InitStatus",
     "MigrationContext",
     "ProvisioningStatus",

@@ -107,6 +107,22 @@ def vm_describe(
     describe_vm(get_db(), load_config(), name)
 
 
+@vm_app.command("verify-connection")
+def vm_verify_connection(
+    name: Annotated[str, typer.Argument(help="VM name")],
+) -> None:
+    """Verify the canonical admin connection without activating the VM."""
+    from agentworks import output
+    from agentworks.bootstrap import load_request_registry
+    from agentworks.config import load_config
+    from agentworks.vms.manager import verify_vm_connection
+
+    config = load_config()
+    registry = load_request_registry(config)
+    result = verify_vm_connection(get_db(), config, registry, name)
+    output.result(f"VM '{result.name}' connection verified via {result.transport}.")
+
+
 @vm_app.command("start")
 def vm_start(
     name: Annotated[str, typer.Argument(help="VM name")],

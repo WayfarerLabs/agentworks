@@ -1,6 +1,6 @@
 Please also reference the following rules as needed. The list below is provided in TOON format, and `@` stands for the project root directory.
 
-rules[12]:
+rules[13]:
   - path: @.codex/memories/always-consider-completions.md
   - path: @.codex/memories/always-consider-docs.md
   - path: @.codex/memories/always-consider-sample-config.md
@@ -19,6 +19,9 @@ rules[12]:
     applyTo[1]: **/*
   - path: @.codex/memories/development-process.md
     description: Follow the standard agentic development process on every effort
+    applyTo[1]: **/*
+  - path: @.codex/memories/guide-contributions.md
+    description: "Keep guide teaching complete, colocated, and safe"
     applyTo[1]: **/*
   - path: @.codex/memories/latest-stable-versions.md
     description: Always use the latest stable version when installing or updating software
