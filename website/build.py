@@ -622,6 +622,13 @@ def extract_content(repo_root: Path) -> dict[str, str]:
     return rendered
 
 
+def _attribute_map(tag: str, attrs: list[tuple[str, str | None]]) -> dict[str, str | None]:
+    names = [name for name, _ in attrs]
+    if len(names) != len(set(names)):
+        raise ValueError(f"{tag}: duplicate HTML attribute name")
+    return dict(attrs)
+
+
 class _TemplatePlacementParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
@@ -649,7 +656,7 @@ class _TemplatePlacementParser(HTMLParser):
                     self.description_content_tokens.add(token)
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        attributes = dict(attrs)
+        attributes = _attribute_map(tag, attrs)
         self._record_attributes(tag, attributes)
         self.stack.append((tag, attributes))
         if tag == "section" and attributes.get("id") == "onboarding":
@@ -662,7 +669,7 @@ class _TemplatePlacementParser(HTMLParser):
             self.onboarding_headings += 1
 
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        self._record_attributes(tag, dict(attrs))
+        self._record_attributes(tag, _attribute_map(tag, attrs))
 
     def handle_endtag(self, tag: str) -> None:
         for index in range(len(self.stack) - 1, -1, -1):
@@ -787,12 +794,15 @@ class _ReferenceParser(HTMLParser):
         self.ids: set[str] = set()
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        attributes = dict(attrs)
+        attributes = _attribute_map(tag, attrs)
         if attributes.get("id"):
             self.ids.add(str(attributes["id"]))
         for name in ("href", "src"):
             if attributes.get(name):
                 self.references.append(str(attributes[name]))
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.handle_starttag(tag, attrs)
 
 
 def _validate_local_references(rendered: dict[Path, bytes], manifest: frozenset[Path], base: str) -> None:

@@ -313,6 +313,27 @@ class TemplateContractTests(RepositoryFixture):
             with self.subTest(change=changed[-100:]), self.assertRaisesRegex(ValueError, "onboarding|notice"):
                 site_builder._validate_template("index.html", changed)
 
+    def test_duplicate_attributes_cannot_bypass_template_contracts(self) -> None:
+        template = (self.root / "website/templates/index.html").read_text(encoding="utf-8")
+        variants = (
+            template.replace(
+                'name="description" content="{{HOME_META_DESCRIPTION}}"',
+                'name="description" content="safe" content="{{HOME_META_DESCRIPTION}}"',
+            ),
+            template.replace(
+                '<section id="problem" class="content-section">',
+                '<section id="unreviewed" id="problem" class="content-section">',
+            ),
+            template.replace(
+                'aria-labelledby="onboarding-heading">',
+                'aria-labelledby="other" aria-labelledby="onboarding-heading">',
+                1,
+            ),
+        )
+        for changed in variants:
+            with self.subTest(change=changed[:200]), self.assertRaisesRegex(ValueError, "duplicate HTML attribute"):
+                site_builder._validate_template("index.html", changed)
+
     def test_reviewed_destination_and_reporting_literals_cannot_drift(self) -> None:
         for name, old, new in (
             ("index.html", site_builder.RATIONALE_URL, "https://example.com/rationale"),
@@ -376,6 +397,19 @@ class BuildAndInstallTests(RepositoryFixture):
         with self.assertRaisesRegex(ValueError, "same-document fragment"):
             site_builder.build_site(self.root, output, "/")
         self.assertEqual(snapshot(output), before)
+
+    def test_duplicate_rendered_references_cannot_hide_first_browser_destination(self) -> None:
+        manifest = frozenset({Path("index.html"), Path("static/site.css")})
+        canaries = (
+            '<a href="https://example.com/unapproved" href="/">unsafe external first</a>',
+            f'<a href="/missing" href="{site_builder.REPOSITORY_URL}">unsafe local first</a>',
+            '<script src="https://example.com/unapproved.js" src="/static/site.css"></script>',
+            f'<img src="/missing.png" src="{site_builder.REPOSITORY_URL}" />',
+        )
+        for canary in canaries:
+            rendered = {Path("index.html"): f'<main id="main-content">{canary}</main>'.encode()}
+            with self.subTest(canary=canary), self.assertRaisesRegex(ValueError, "duplicate HTML attribute"):
+                site_builder._validate_local_references(rendered, manifest, "/")
 
     def test_output_inside_repository_is_rejected_without_source_writes(self) -> None:
         before = snapshot(self.root / "website")
