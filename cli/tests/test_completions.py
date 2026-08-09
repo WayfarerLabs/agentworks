@@ -222,6 +222,16 @@ class TestOptionFlagsInSpec:
             "agentworks.resource.describe",
             "agentworks.secret.list",
             "agentworks.secret.describe",
+            "agentworks.vm.list",
+            "agentworks.vm.describe",
+            "agentworks.workspace.list",
+            "agentworks.workspace.describe",
+            "agentworks.agent.list",
+            "agentworks.agent.describe",
+            "agentworks.session.list",
+            "agentworks.session.describe",
+            "agentworks.console.list",
+            "agentworks.console.describe",
             "agentworks.doctor",
         )
         for path in expected_paths:

@@ -17,7 +17,15 @@ from agentworks.workspaces.manager._common import (
     workspace_has_sessions,
 )
 from agentworks.workspaces.manager.copy import copy_workspace
-from agentworks.workspaces.manager.create import create_workspace, describe_workspace, list_workspaces
+from agentworks.workspaces.manager.create import (
+    create_workspace,
+    describe_workspace,
+    list_workspaces,
+    render_workspace_description,
+    render_workspace_listing,
+    workspace_description,
+    workspace_listing,
+)
 from agentworks.workspaces.manager.delete import delete_workspace
 from agentworks.workspaces.manager.rehome import rehome_workspace
 from agentworks.workspaces.manager.repair import repair_workspace
@@ -29,8 +37,12 @@ __all__ = [
     "delete_workspace",
     "describe_workspace",
     "list_workspaces",
+    "render_workspace_description",
+    "render_workspace_listing",
     "rehome_workspace",
     "repair_workspace",
     "workspace_external_explicit_granters",
     "workspace_has_sessions",
+    "workspace_description",
+    "workspace_listing",
 ]

@@ -27,6 +27,67 @@ from agentworks.secrets.inspect import (
 )
 
 
+def test_operational_list_json_commands_are_closed_parseable_envelopes(monkeypatch) -> None:
+    """Wire every new operational list command through its fact projection."""
+    from agentworks.agents import manager as agents
+    from agentworks.agents.manager.inspect import AgentListing
+    from agentworks.cli.commands import agent, console, session, vm, workspace
+    from agentworks.sessions import manager as sessions
+    from agentworks.sessions import multi_console
+    from agentworks.sessions.manager._queries import SessionListing
+    from agentworks.sessions.multi_console.attach import ConsoleListing
+    from agentworks.vms import manager as vms
+    from agentworks.vms.manager.power import VMListing
+    from agentworks.workspaces import manager as workspaces
+    from agentworks.workspaces.manager.create import WorkspaceListing
+
+    monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: object())
+    for module in (agent, console, session, vm, workspace):
+        monkeypatch.setattr(module, "get_db", lambda: object())
+    monkeypatch.setattr(vms, "vm_listing", lambda _db: VMListing(vms=()))
+    monkeypatch.setattr(workspaces, "workspace_listing", lambda _db, **_kwargs: WorkspaceListing(workspaces=()))
+    monkeypatch.setattr(agents, "agent_listing", lambda _db, **_kwargs: AgentListing(agents=()))
+    monkeypatch.setattr(sessions, "session_listing", lambda _db, _config, **_kwargs: SessionListing(sessions=()))
+    monkeypatch.setattr(multi_console, "console_listing", lambda _db, **_kwargs: ConsoleListing(consoles=()))
+
+    for argv, command, collection in (
+        (["vm", "list", "--output", "json"], "vm.list", "vms"),
+        (["workspace", "list", "--output", "json"], "workspace.list", "workspaces"),
+        (["agent", "list", "--output", "json"], "agent.list", "agents"),
+        (["session", "list", "--output", "json", "--no-status"], "session.list", "sessions"),
+        (["console", "list", "--output", "json"], "console.list", "consoles"),
+    ):
+        result = CliRunner().invoke(app, argv)
+        assert result.exit_code == 0, result.output
+        document = _json_document(result)
+        assert document["command"] == command
+        assert document["data"] == {collection: []}
+
+
+def test_operational_json_usage_errors_have_empty_stdout_before_work(monkeypatch) -> None:
+    """New local output options reject invalid or incompatible forms before services."""
+    from agentworks.cli.commands import agent, console, session, vm, workspace
+
+    for module in (agent, console, session, vm, workspace):
+        monkeypatch.setattr(module, "get_db", lambda: (_ for _ in ()).throw(AssertionError("no database")))
+    monkeypatch.setattr(
+        "agentworks.config.load_config",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("no configuration")),
+    )
+
+    for argv in (
+        ["vm", "list", "--output", "yaml"],
+        ["workspace", "list", "--names-only", "--output", "json"],
+        ["agent", "list", "--names-only", "--output", "json"],
+        ["session", "list", "--names-only", "--output", "json"],
+        ["console", "list", "--names-only", "--output", "json"],
+    ):
+        result = CliRunner().invoke(app, argv)
+        assert result.exit_code != 0
+        assert result.stdout_bytes == b""
+        assert result.stderr_bytes
+
+
 def _json_document(result: Result) -> dict[str, object]:
     stdout_bytes = result.stdout_bytes
     assert stdout_bytes.endswith(b"\n")

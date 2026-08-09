@@ -141,8 +141,11 @@ conventional SIGINT exit code (130).
 ### Machine-readable output
 
 The operational inspection commands `agw resource list`, `agw resource kinds`,
-`agw resource describe`, `agw secret list`, `agw secret describe`, and `agw doctor` accept
-`--output json`. The default `--output human` preserves the normal terminal presentation.
+`agw resource describe`, `agw secret list`, `agw secret describe`, `agw vm list`, `agw vm describe`,
+`agw workspace list`, `agw workspace describe`, `agw agent list`, `agw agent describe`,
+`agw session list`, `agw session describe`, `agw console list`, `agw console describe`, and
+`agw doctor` accept `--output json`. The default `--output human` preserves the normal terminal
+presentation.
 
 Each successful JSON response is one UTF-8 document followed by one line feed, with no BOM, ANSI
 sequences, table layout, progress messages, or empty-state prose. Its top-level keys are always in
@@ -249,6 +252,96 @@ null. `available` is boolean and equals whether `resolved_by` is non-null. `back
 retains active backend chain ordering. References and `used_by` have the same shapes and ordering
 rules as resource describe.
 
+#### VM JSON schemas
+
+`agw vm list --output json` uses command `vm.list` and data:
+
+```text
+{vms: [{name, site, template, provisioning_status, initialization_status,
+        workspace_count, agent_count, session_count, tailscale_host, created_at}]}
+```
+
+`template` and `tailscale_host` are nullable. VMs retain name order. Provisioning is `pending`,
+`in_progress`, `complete`, or `failed`; initialization additionally permits `partial`.
+
+`agw vm describe NAME --output json` uses command `vm.describe` and data `{vm, issues}`. `vm` has
+this ordered shape:
+
+```text
+{name, created_at, site, platform, backend, observed_status, status_disposition,
+ operator_stopped, hostname, system_slug, system_slug_state, template, admin_template,
+ admin_username, provisioning_status, initialization_status, tailscale_host, last_seen_at,
+ provisioned_resources, live_resources, agents, workspaces, events}
+```
+
+`platform`, `backend`, `observed_status`, `status_disposition`, `system_slug`, `template`,
+`admin_template`, `tailscale_host`, `last_seen_at`, and `live_resources` are nullable.
+`observed_status` is `running`, `stopped`, `deallocated`, or `unknown`; `status_disposition` is
+`manual` or `idle` only for stopped or deallocated VMs; and `system_slug_state` is `set`,
+`declined`, or `unset`. `provisioned_resources` is `{cpus, memory_gib, disk_gib, swap_gib}` with
+nullable integers. `live_resources` is null or this record:
+
+```text
+{cpus, load_average, memory_total, memory_used, memory_percent, swap_total,
+ swap_used, swap_percent, disk_total, disk_used, disk_percent}
+```
+
+`agents[]` is `{name, linux_user, grant_all, grant_count}`. `workspaces[]` is
+`{name, path, sessions}` with session entries `{name, template, mode, agent_name}`. `events[]` is
+`{created_at, event, detail}`. `detail` and `agent_name` are nullable; mode is `admin` or `agent`.
+These arrays retain database order. `issues[]` is `{source, code}` in encounter order: source is
+`site_lookup`, `preflight`, `secret_resolution`, or `platform_status`, and code is always
+`unavailable`. Issues do not carry backend text or exception details.
+
+```bash
+agw vm list --output json
+agw vm describe build-vm --output json
+```
+
+#### Workspace and agent JSON schemas
+
+`agw workspace list --output json` uses `workspace.list` and
+`{workspaces: [{name, vm_name, template, created_at}]}`. `template` is nullable and order remains
+workspace name order after filtering. `agw workspace describe NAME --output json` uses
+`workspace.describe` and `{workspace}`; workspace is
+`{name, vm_name, template, path, created_at, sessions, agents}`. Session entries are
+`{name, template, mode, agent_name}` and agent entries are `{name, linux_user}`. `template` and
+`agent_name` are nullable, and mode is `admin` or `agent`.
+
+`agw agent list --output json` uses `agent.list` and
+`{agents: [{name, vm_name, template, grant_all, grants}]}`. `template` is nullable, `grant_all` is
+boolean, and grant entries are `{workspace_name, grant_type}` where grant type is `explicit`,
+`implicit`, or `both`. Agents retain VM then agent name order.
+`agw agent describe NAME --output json` uses `agent.describe` and `{agent}`; agent is
+`{name, vm_name, linux_user, template, grant_all, created_at, explicit_grants, sessions}`, with
+nullable `template` and session entries `{name, template, workspace_name}`.
+
+#### Session and console JSON schemas
+
+`agw session list --output json` uses `session.list` and `{sessions}`. Each session is
+`{name, workspace_name, vm_name, template, harness_integration, mode, agent_name, status}`.
+`harness_integration` and `agent_name` are nullable; mode is `admin` or `agent`; status is exactly
+`running`, `stopped`, `broken`, `unknown`, or `unavailable`. `unavailable` represents skipped or
+inconclusive status work, not a human display sentinel. Rows retain workspace then session name
+order. `agw session describe NAME --output json` uses `session.describe` and `{session}`. Session is
+this record:
+
+```text
+{name, workspace_name, vm_name, template, harness_integration, mode, agent_name,
+ status, pid, created_at, updated_at}
+```
+
+`pid` is a positive integer or null. Opaque harness state, socket paths, and boot identifiers are
+never serialized.
+
+`agw console list --output json` uses `console.list` and
+`{consoles: [{name, vm_name, session_count}]}` in configured name order after filtering.
+`agw console describe NAME --output json` uses `console.describe` and `{console}`. Console is
+`{name, vm_name, admin_shell, created_at, updated_at, sessions}`. Members are
+`{position, session_name, shells}` in ascending position, and shells are `{cwd, admin}` in
+configured shell order. `cwd` is nullable and all booleans remain JSON booleans. Console inspection
+is configured database state, never live tmux state.
+
 #### Doctor JSON schema
 
 `agw doctor --output json` uses command `doctor` and data:
@@ -271,12 +364,12 @@ agw doctor --output json
 
 #### Errors and compatibility
 
-`--names-only` is completion-only and cannot be combined with JSON output on resource and secret
-lists or resource kinds. An unknown output format and this conflict are usage errors before config,
-registry, database, network, or service work. For the ordinary covered commands, domain and
-configuration errors write no JSON to stdout; they retain the normal stderr message and nonzero exit
-status. Doctor is the exception: it converts checkable failures into its complete report, emits that
-JSON document, then exits 1.
+`--names-only` is completion-only and cannot be combined with JSON output on resource, secret, VM,
+workspace, agent, session, and console lists or resource kinds. An unknown output format and this
+conflict are usage errors before config, registry, database, network, or service work. For the
+ordinary covered commands, domain and configuration errors write no JSON to stdout; they retain the
+normal stderr message and nonzero exit status. Doctor is the exception: it converts checkable
+failures into its complete report, emits that JSON document, then exits 1.
 
 JSON v1 is additive. New optional fields may be added while preserving existing meanings and types.
 Removing a field, changing a type, changing a value's meaning, changing collection order, or

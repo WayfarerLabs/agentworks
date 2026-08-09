@@ -8,6 +8,7 @@ import typer
 
 from agentworks.cli._app import app
 from agentworks.cli._helpers import get_db, parse_csv_filter
+from agentworks.machine_output import OutputFormat
 
 session_app = typer.Typer(
     name="session",
@@ -72,12 +73,31 @@ def session_create(
 @session_app.command("describe")
 def session_describe(
     name: Annotated[str, typer.Argument(help="Session name")],
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option("--output", help="Output format: human or json. Default: human."),
+    ] = OutputFormat.HUMAN,
 ) -> None:
     """Show session details."""
     from agentworks.config import load_config
-    from agentworks.sessions.manager import describe_session
+    from agentworks.sessions.manager import describe_session, session_description
 
-    describe_session(get_db(), load_config(), name=name)
+    config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
+    if output_format is OutputFormat.JSON:
+        from click import get_binary_stream
+
+        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+        from agentworks.secrets.resolve import QuietResolutionReporter
+        from agentworks.sessions.manager._queries import session_description_data
+
+        description = session_description(get_db(), config, name=name, reporter=QuietResolutionReporter())
+        write_json_envelope(
+            MachineOutputCommand.SESSION_DESCRIBE,
+            session_description_data(description),
+            get_binary_stream("stdout"),
+        )
+        return
+    describe_session(get_db(), config, name=name)
 
 
 @session_app.command("list")
@@ -98,10 +118,17 @@ def session_list(
             "Used by shell completion; the order matches the table's row order.",
         ),
     ] = False,
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option("--output", help="Output format: human or json. Default: human."),
+    ] = OutputFormat.HUMAN,
 ) -> None:
     """List sessions. Filters compose with AND; name filters accept comma-separated values for OR-within-filter."""
+    if names_only and output_format is OutputFormat.JSON:
+        raise typer.BadParameter("cannot be used with --output json", param_hint="--names-only")
+
     from agentworks.config import load_config
-    from agentworks.sessions.manager import list_sessions
+    from agentworks.sessions.manager import list_sessions, render_session_listing, session_listing
 
     # Validate against the parsed filter, not the raw flag value, so inputs
     # that normalize to "no filter" (whitespace, lone commas) don't falsely
@@ -110,15 +137,53 @@ def session_list(
     if admin and parsed_agent is not None:
         raise typer.BadParameter("--admin and --agent are mutually exclusive")
 
-    list_sessions(
-        get_db(),
-        load_config(),
-        workspace_name=parse_csv_filter(workspace),
-        vm_name=parse_csv_filter(vm),
-        agent_name=parsed_agent,
-        admin_only=admin,
-        no_status=no_status,
-        names_only=names_only,
+    db = get_db()
+    config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
+    if output_format is OutputFormat.JSON:
+        from click import get_binary_stream
+
+        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+        from agentworks.secrets.resolve import QuietResolutionReporter
+        from agentworks.sessions.manager._queries import session_listing_data
+
+        listing = session_listing(
+            db,
+            config,
+            workspace_name=parse_csv_filter(workspace),
+            vm_name=parse_csv_filter(vm),
+            agent_name=parsed_agent,
+            admin_only=admin,
+            no_status=no_status,
+            reporter=QuietResolutionReporter(),
+        )
+        write_json_envelope(
+            MachineOutputCommand.SESSION_LIST,
+            session_listing_data(listing),
+            get_binary_stream("stdout"),
+        )
+        return
+    if names_only:
+        list_sessions(
+            db,
+            config,
+            workspace_name=parse_csv_filter(workspace),
+            vm_name=parse_csv_filter(vm),
+            agent_name=parsed_agent,
+            admin_only=admin,
+            no_status=no_status,
+            names_only=True,
+        )
+        return
+    render_session_listing(
+        session_listing(
+            db,
+            config,
+            workspace_name=parse_csv_filter(workspace),
+            vm_name=parse_csv_filter(vm),
+            agent_name=parsed_agent,
+            admin_only=admin,
+            no_status=no_status,
+        )
     )
 
 
