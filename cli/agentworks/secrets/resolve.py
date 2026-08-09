@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import math
 import time
-import unicodedata
 from collections.abc import Mapping
 from contextlib import AbstractContextManager, suppress
 from dataclasses import dataclass
@@ -28,6 +27,7 @@ from agentworks.secrets.outcomes import (
     ResolutionCategory,
     ResolutionDetail,
     ResolutionOutcome,
+    _safe_diagnostic_text,
     complete_resolution_error,
 )
 from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
@@ -350,10 +350,6 @@ def active_sources(config: Config, registry: Registry) -> tuple[ActiveSource, ..
     return tuple(active)
 
 
-def _identifier_safe(identifier: str) -> bool:
-    return all(unicodedata.category(char) not in {"Cc", "Cf"} for char in identifier)
-
-
 def _lookup_projection(
     secret: SecretDecl,
     source: ActiveSource,
@@ -389,7 +385,7 @@ def _lookup_projection(
         identifier = None
     if identifier_failed:
         raise _BackendProtocolError from None
-    if identifier is not None and (type(identifier) is not str or not _identifier_safe(identifier)):
+    if identifier is not None and (type(identifier) is not str or not _safe_diagnostic_text(identifier)):
         raise _BackendProtocolError
     return SecretLookupRequest(name=secret.name, mapping=validated), identifier
 

@@ -79,5 +79,9 @@ entry; cleanup failure warns with fixed source-only text and never masks the pri
 timeout, or interruption.
 
 Use `agw secret list` and `agw secret describe NAME` for value-free inspection. Use
-`agw secret verify NAME` for one real proof; it refuses interaction by default and requires
-`--allow-interactive` for prompt, biometric, or renewed authentication work.
+`agw secret verify NAME...` for one real batch proof. It deduplicates names in first-written order,
+resolves the batch once, and emits one value-free row per unique name with category, source, safe
+identifier, detail, and remediation. It exits 1 after rendering if any row is not `resolved`.
+Verification refuses interaction by default. Add `--allow-interaction` only with operator consent
+for prompts, biometric checks, or renewed authentication; the opt-in is incompatible with global
+`--non-interactive`.

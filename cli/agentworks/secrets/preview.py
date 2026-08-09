@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import unicodedata
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from agentworks.errors import StateError
+from agentworks.secrets.outcomes import _safe_diagnostic_text
 from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 from agentworks.secrets.resolve import ActiveSource, _BackendProtocolError, _lookup_projection
 
@@ -15,10 +15,6 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from .base import SecretDecl
-
-
-def _safe_text(value: str) -> bool:
-    return all(unicodedata.category(char) not in {"Cc", "Cf"} for char in value)
 
 
 class PreviewCategory(StrEnum):
@@ -33,7 +29,7 @@ class SkippedSource:
     reason: str
 
     def __post_init__(self) -> None:
-        if not self.reason or not _safe_text(self.source) or not _safe_text(self.reason):
+        if not self.reason or not _safe_diagnostic_text(self.source) or not _safe_diagnostic_text(self.reason):
             raise ValueError("invalid skipped source")
 
 
@@ -51,11 +47,11 @@ class ResolutionPreview:
                 raise ValueError("attemptable preview requires a source")
         elif self.source is not None or self.identifier is not None:
             raise ValueError("unavailable preview forbids source and identifier")
-        if not _safe_text(self.name):
+        if not _safe_diagnostic_text(self.name):
             raise ValueError("invalid preview name")
-        if self.source is not None and not _safe_text(self.source):
+        if self.source is not None and not _safe_diagnostic_text(self.source):
             raise ValueError("invalid preview source")
-        if self.identifier is not None and not _safe_text(self.identifier):
+        if self.identifier is not None and not _safe_diagnostic_text(self.identifier):
             raise ValueError("invalid preview identifier")
 
 

@@ -148,6 +148,14 @@ conventional SIGINT exit code (130).
 | `agw completion install`   | Install the completion script in-place   |
 | `agw completion uninstall` | Remove installed completions for a shell |
 
+### Secrets
+
+| Command                                           | Description                                       |
+| ------------------------------------------------- | ------------------------------------------------- |
+| `agw secret list`                                 | Preview source applicability without reading      |
+| `agw secret describe NAME`                        | Describe one secret without reading               |
+| `agw secret verify NAME... [--allow-interaction]` | Verify one or more secrets without showing values |
+
 ### VMs
 
 Manage virtual machines across declared vm-sites (Lima local or remote, Azure, AWS EC2, WSL2,
@@ -1035,22 +1043,29 @@ the command's resolution boundary determines whether a value is actually present
 To prove that a declared secret resolves through the configured source chain, use `verify`:
 
 ```bash
-agw secret verify tailscale-auth-key
-# Secret 'tailscale-auth-key' verified.
+agw secret verify tailscale-auth-key deploy-token
+# NAME                 CATEGORY  SOURCE   IDENTIFIER                    DETAIL    REMEDIATION
+# -------------------------------------------------------------------------------------------
+# tailscale-auth-key   resolved  env-var  AW_SECRET_TAILSCALE_AUTH_KEY  resolved  none
+# deploy-token         resolved  work-op  op://Engineering/deploy/token resolved  none
 ```
 
-Verification performs one real ordered resolution pass, but prints only the one-line success result
-and never returns or displays the secret value. By default it refuses interactive sources, so the
-command cannot unexpectedly prompt or initiate provider authentication. Opt in explicitly when an
-interactive source is required:
+Verification deduplicates names in first-written order, performs one real ordered resolution pass,
+and prints one value-free row per unique name. The columns report category, source, safe lookup
+identifier, typed detail, and remediation. If any row is not `resolved`, every row is still shown
+and the command exits 1; an all-resolved batch exits 0. Registry, configuration, and usage failures
+occur before the table and use normal CLI error framing.
+
+By default verification refuses interactive sources, so it cannot unexpectedly prompt or initiate
+provider authentication. Opt in explicitly when an interactive source is required:
 
 ```bash
-agw secret verify tailscale-auth-key --allow-interactive
+agw secret verify tailscale-auth-key --allow-interaction
 ```
 
-`--allow-interactive` is rejected when the global `--non-interactive` flag is set. Missing secrets,
-unavailable mappings, source timeouts, typed provider failures, and configuration failures use the
-normal framed CLI error categories without provider-authored values or diagnostics.
+`--allow-interaction` permits prompts, biometric checks, and renewed authentication. It is rejected
+when the global `--non-interactive` flag is set. Outcome rows use only framework-owned categories
+and remediation; resolved values and provider-authored payloads are never rendered.
 
 `agw doctor` keeps three adjacent secret groups. `Secret backends` reports implementation readiness;
 `Secret sources` shows every declared source with its selected backend, active/inactive,
@@ -1204,7 +1219,8 @@ config-management flow). To remove completions installed here, use
 dot-source line the installer appended to `$PROFILE`; user-authored lines around it are left
 untouched.
 
-Completions include dynamic VM, vm-site, workspace, session, and template name lookups.
+Completions include dynamic VM, vm-site, workspace, session, secret, and template name lookups.
+`agw secret verify` completes registered secret names at every positional argument.
 
 ## State
 

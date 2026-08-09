@@ -153,8 +153,12 @@ OUTCOME_RULES: dict[
 }
 
 
-def _safe_text(value: str) -> bool:
-    return all(unicodedata.category(char) not in {"Cc", "Cf"} for char in value)
+_UNSAFE_DIAGNOSTIC_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
+
+
+def _safe_diagnostic_text(value: str) -> bool:
+    """Reject text that can alter or forge a rendered diagnostic line."""
+    return all(unicodedata.category(char) not in _UNSAFE_DIAGNOSTIC_CATEGORIES for char in value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,11 +180,11 @@ class ResolutionOutcome:
             raise ValueError("invalid resolution outcome source")
         if not identifier_allowed and self.identifier is not None:
             raise ValueError("invalid resolution outcome identifier")
-        if not _safe_text(self.name):
+        if not _safe_diagnostic_text(self.name):
             raise ValueError("invalid resolution outcome name")
-        if self.source is not None and not _safe_text(self.source):
+        if self.source is not None and not _safe_diagnostic_text(self.source):
             raise ValueError("invalid resolution outcome source")
-        if self.identifier is not None and not _safe_text(self.identifier):
+        if self.identifier is not None and not _safe_diagnostic_text(self.identifier):
             raise ValueError("invalid resolution outcome identifier")
 
 

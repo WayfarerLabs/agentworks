@@ -23,6 +23,31 @@ _INVALID_NAME_ERROR = (
 )
 
 
+def render_verification(outcomes: tuple[ResolutionOutcome, ...]) -> None:
+    """Render value-free resolution outcomes in request order."""
+    from agentworks import output
+
+    headers = ["NAME", "CATEGORY", "SOURCE", "IDENTIFIER", "DETAIL", "REMEDIATION"]
+    rows = [
+        [
+            outcome.name,
+            outcome.category.value,
+            outcome.source or "-",
+            outcome.identifier or "-",
+            outcome.detail.value,
+            outcome.remediation.value,
+        ]
+        for outcome in outcomes
+    ]
+    max_col_width = max(len(cell) for row in [headers, *rows] for cell in row)
+    for line in output.render_table(
+        headers,
+        rows,
+        max_col_width=max_col_width,
+    ):
+        output.info(line)
+
+
 def verify_secrets(
     config: Config,
     registry: Registry,
@@ -34,13 +59,21 @@ def verify_secrets(
     interaction = validate_interaction_policy(interaction)
     if not names:
         raise ValidationError("at least one secret name is required")
+    invalid_name = False
     for name in names:
-        try:
-            if type(name) is not str:
-                raise ValueError
-            validate_name(name, max_length=MAX_SECRET_NAME_LENGTH)
-        except Exception:
-            raise ValidationError(_INVALID_NAME_ERROR) from None
+        if type(name) is not str:
+            invalid_name = True
+        else:
+            try:
+                validate_name(name, max_length=MAX_SECRET_NAME_LENGTH)
+            except ValidationError:
+                invalid_name = True
+        if invalid_name:
+            del name
+            names = ()
+            break
+    if invalid_name:
+        raise ValidationError(_INVALID_NAME_ERROR) from None
 
     unique_names = tuple(dict.fromkeys(names))
     from agentworks.secrets.kinds import SECRET_KIND_NAME

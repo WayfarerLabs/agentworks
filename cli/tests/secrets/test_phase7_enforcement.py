@@ -549,7 +549,7 @@ def test_verify_cli_manifest_selects_and_validates_explicit_policy_first(
     assert validation.func.id == "validate_interaction_policy"
     assert len(validation.args) == 1 and isinstance(validation.args[0], ast.IfExp)
     selected = validation.args[0]
-    assert isinstance(selected.test, ast.Name) and selected.test.id == "allow_interactive"
+    assert isinstance(selected.test, ast.Name) and selected.test.id == "allow_interaction"
     assert ast.unparse(selected.body) == "InteractionPolicy.ALLOW"
     assert ast.unparse(selected.orelse) == "InteractionPolicy.REFUSE"
 

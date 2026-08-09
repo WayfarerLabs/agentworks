@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Annotated
+
 import typer
 
 from agentworks import output
@@ -86,28 +88,28 @@ def secret_describe(
 
 @secret_app.command("verify")
 def secret_verify(
-    name: str = typer.Argument(..., help="Secret name to verify."),
-    allow_interactive: bool = typer.Option(
+    names: Annotated[list[str], typer.Argument(help="Secret names to verify.")],
+    allow_interaction: bool = typer.Option(
         False,
-        "--allow-interactive",
-        help="Allow backends that may prompt, authenticate, or require operator presence.",
+        "--allow-interaction",
+        help="Allow sources that may prompt, authenticate, or require operator presence.",
     ),
 ) -> None:
-    """Prove that one declared secret resolves without displaying its value."""
+    """Prove that declared secrets resolve without displaying their values."""
     interaction = validate_interaction_policy(
-        InteractionPolicy.ALLOW if allow_interactive else InteractionPolicy.REFUSE
+        InteractionPolicy.ALLOW if allow_interaction else InteractionPolicy.REFUSE
     )
     from agentworks.bootstrap import load_request_registry
     from agentworks.config import load_config
     from agentworks.errors import ValidationError
-    from agentworks.secrets.outcomes import ResolutionCategory, complete_resolution_error
-    from agentworks.secrets.verification import verify_secrets
+    from agentworks.secrets.outcomes import ResolutionCategory
+    from agentworks.secrets.verification import render_verification, verify_secrets
 
-    if allow_interactive and output.non_interactive():
-        raise ValidationError("--allow-interactive cannot be used with --non-interactive")
+    if allow_interaction and output.non_interactive():
+        raise ValidationError("--allow-interaction cannot be used with --non-interactive")
     config = load_config()
     registry = load_request_registry(config)
-    outcomes = verify_secrets(config, registry, [name], interaction=interaction)
-    if outcomes[0].category is not ResolutionCategory.RESOLVED:
-        raise complete_resolution_error(outcomes)
-    output.result(f"Secret '{outcomes[0].name}' verified.")
+    outcomes = verify_secrets(config, registry, names, interaction=interaction)
+    render_verification(outcomes)
+    if any(outcome.category is not ResolutionCategory.RESOLVED for outcome in outcomes):
+        raise typer.Exit(1)

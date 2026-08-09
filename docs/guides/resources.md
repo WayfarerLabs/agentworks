@@ -576,19 +576,25 @@ never probe an interaction to answer readiness.
 `not ready: <reason>` / `won't attempt`; `agw secret describe <name>` shows one secret in full
 (mappings flagged not-ready where they apply, and a resolution preview that skips not-ready
 sources); `agw doctor` has a **Secret backends** group (one readiness row per implementation) plus
-one row per secret with the runtime outcome.
+one non-probing row per secret previewing whether a source could attempt it and whether that source
+is ready. Doctor never resolves a secret or reports a runtime resolution outcome.
 
-Use `agw secret verify <name>` when you need proof rather than a preview. It performs one real
-resolution pass without printing or retaining the value. Interactive sources are refused by default.
-Add `--allow-interactive` only when you consent to a prompt, biometric check, or backend
-authentication; that opt-in is incompatible with the global `--non-interactive` flag.
+Use `agw secret verify NAME...` when you need proof rather than a preview. It deduplicates names in
+first-written order, performs one real batch resolution, and renders one value-free row per unique
+name. Each row reports category, source, safe identifier, typed detail, and remediation. An
+all-resolved batch exits 0; if any row is not `resolved`, the full table is still rendered and the
+command exits 1.
+
+Interactive sources are refused by default. Add `--allow-interaction` only when you consent to a
+prompt, biometric check, or backend authentication. That opt-in is incompatible with the global
+`--non-interactive` flag. Guide rendering and readiness or preview rows do not grant that consent.
 
 ## Inspecting the whole picture
 
 ```bash
 agw resource list --origin operator     # what you have declared, either source
 agw resource describe secret/npm-token  # where it's referenced, what uses it
-agw doctor                              # health: would every secret resolve?
+agw doctor                              # offline secret attempt/readiness preview
 ```
 
 The design rationale (the config/resource split, capability kinds, the vocabulary rules, and the
