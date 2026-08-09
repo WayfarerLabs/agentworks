@@ -148,7 +148,7 @@ but are not deployed or merged as a partial website.
       release-mode abstraction.
 - [x] Lead reviews the LLD against R10/R11/R13, AC11/AC13/AC14, C5, and D1/D3/D5/D10 and updates the
       lead-owned artifacts if detail exposes a gap.
-- [ ] `agentworks-reviewer` reviews the LLD; all valid findings are resolved and re-reviewed.
+- [x] `agentworks-reviewer` reviews the LLD; all valid findings are resolved and re-reviewed.
 
 Definition of done: the useful non-onboarding site is pinned at implementable detail against merged
 sources, with an explicit removable notice and no branch-only or speculative onboarding dependency.
