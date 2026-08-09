@@ -3,8 +3,8 @@
 - Status: Draft for R1 review
 - Date: 2026-08-08
 - Scope: VM provisioning, repeatable VM initialization, and the matching agent-user setup paths
-- Inputs: the [FRD](./frd.md), the initializer code at `75c6edd`, and the plugin and capability
-  contracts already on `main`
+- Inputs: the [FRD](./frd.md), the initializer code rebased onto `main` at `6b192394`, and the
+  plugin and capability contracts already on `main`
 
 ## Classification rule
 
@@ -48,28 +48,36 @@ per broad subsystem.
 
 ### Phase A: VM bootstrap and connectivity
 
-| ID  | Step in execution order                                                                       | Classification | Rationale                                                                                                                                           |
-| --- | --------------------------------------------------------------------------------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A01 | Create a missing admin user, private group, home, and bash shell; always converge sudo access | Core-essential | Establishes the control identity used by every later operation. Existing-user shell/home convergence and the primary-group check happen in B18-B19. |
-| A02 | Seed admin `.bashrc` and `.zshrc`                                                             | Core-essential | Prevents shell first-run behavior and gives the control identity a usable baseline.                                                                 |
-| A03 | Update the distribution and install the minimal provisioning package set                      | Core-essential | Installs only what is needed to make the VM reachable and able to join the core transport.                                                          |
-| A04 | Preserve SSH host keys across cloud-init boots                                                | Core-essential | Prevents the supported SSH identity from changing on restart.                                                                                       |
-| A05 | Install the operator's authorized SSH key                                                     | Core-essential | Makes the VM accessible for recovery through the operator identity.                                                                                 |
-| A06 | Configure swap                                                                                | Core-essential | Applies the VM template's machine-level provisioning contract.                                                                                      |
-| A07 | Set the persisted hostname                                                                    | Core-essential | Applies the stored VM identity consumed by networking and diagnostics.                                                                              |
-| A08 | Mask unusable Apple-vz SVE and update boot configuration                                      | Core-essential | Required compatibility repair for a supported VM platform.                                                                                          |
-| A09 | Install Tailscale                                                                             | Core-essential | Tailscale SSH is the current core VM transport, not an optional user tool.                                                                          |
-| A10 | Join the configured tailnet                                                                   | Core-essential | Makes the VM reachable through the core transport.                                                                                                  |
-| A11 | Switch to and verify Tailscale SSH with retries                                               | Core-essential | Proves Phase B can run and determines whether provisioning succeeded.                                                                               |
-| A12 | Invoke the platform's post-Tailscale-ready security hook and wait for reconnect               | Core-essential | Closes temporary platform access and re-establishes the transport after route changes.                                                              |
-| A13 | Synchronize the operator's local SSH configuration                                            | Core-essential | Publishes the supported operator access path after connectivity is known.                                                                           |
-| A14 | Record provisioning status/events and initialize the shared secret-redacting log              | Core-essential | Core owns truthful lifecycle state and diagnostics. Failure closes the log here; success keeps it open through B33.                                 |
-| A15 | On bootstrap failure or interrupt, best-effort close the platform's provisioning access       | Core-essential | Fails closed for platforms with temporary bootstrap ingress while preserving the original error or interrupt.                                       |
+| ID   | Step in execution order                                                                       | Classification      | Rationale                                                                                                                                           |
+| ---- | --------------------------------------------------------------------------------------------- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A01  | Create a missing admin user, private group, home, and bash shell; always converge sudo access | Core-essential      | Establishes the control identity used by every later operation. Existing-user shell/home convergence and the primary-group check happen in B18-B19. |
+| A02  | Seed admin `.bashrc` and `.zshrc`                                                             | Core-essential      | Prevents shell first-run behavior and gives the control identity a usable baseline.                                                                 |
+| A03a | On cloud images, update the distribution and install the minimal provisioning package set     | Core-essential      | Installs only what is needed to make the VM reachable and able to join the core transport.                                                          |
+| A03b | On WSL2, remove the Docker rootfs minimization hook                                           | Core-essential      | Allows service packages such as tailscaled to start in the supported WSL2 platform.                                                                 |
+| A03c | On WSL2, update apt and install the base-image parity package set                             | Core-essential      | Brings the minimal Docker rootfs to the platform baseline required for login, transport, diagnostics, and later core initialization.                |
+| A03d | On WSL2, install `tmuxinator` in the same hard-coded apt line                                 | Plugin-bound: `apt` | Mixes an optional workspace integration into platform bootstrap and must leave the unconditional WSL2 package set.                                  |
+| A04  | Preserve SSH host keys across cloud-init boots                                                | Core-essential      | Prevents the supported SSH identity from changing on restart.                                                                                       |
+| A05  | Install the operator's authorized SSH key                                                     | Core-essential      | Makes the VM accessible for recovery through the operator identity.                                                                                 |
+| A06  | Configure swap                                                                                | Core-essential      | Applies the VM template's machine-level provisioning contract.                                                                                      |
+| A07  | Set the persisted hostname                                                                    | Core-essential      | Applies the stored VM identity consumed by networking and diagnostics.                                                                              |
+| A08  | Mask unusable Apple-vz SVE and update boot configuration                                      | Core-essential      | Required compatibility repair for a supported VM platform.                                                                                          |
+| A09  | Install Tailscale                                                                             | Core-essential      | Tailscale SSH is the current core VM transport, not an optional user tool.                                                                          |
+| A10  | Join the configured tailnet                                                                   | Core-essential      | Makes the VM reachable through the core transport.                                                                                                  |
+| A11  | Switch to and verify Tailscale SSH with retries                                               | Core-essential      | Proves Phase B can run and determines whether provisioning succeeded.                                                                               |
+| A12  | Invoke the platform's post-Tailscale-ready security hook and wait for reconnect               | Core-essential      | Closes temporary platform access and re-establishes the transport after route changes.                                                              |
+| A13  | Synchronize the operator's local SSH configuration                                            | Core-essential      | Publishes the supported operator access path after connectivity is known.                                                                           |
+| A14  | Record provisioning status/events and initialize the shared secret-redacting log              | Core-essential      | Core owns truthful lifecycle state and diagnostics. Failure closes the log here; success keeps it open through B33.                                 |
+| A15  | On bootstrap failure or interrupt, best-effort close the platform's provisioning access       | Core-essential      | Fails closed for platforms with temporary bootstrap ingress while preserving the original error or interrupt.                                       |
 
-A03's closed set is `openssh-server`, `curl`, `sudo`, `ca-certificates`, and `gnupg`
-(`capabilities/vm_platform/cloud_init.py:12-20`). The sequence lives in
+A03a's cloud-image set is `openssh-server`, `curl`, `sudo`, `ca-certificates`, and `gnupg`
+(`capabilities/vm_platform/cloud_init.py:12-20`). A03c's WSL2 set is `bash`, `bash-completion`,
+`sudo`, `passwd`, `openssh-server`, `curl`, `git`, `ca-certificates`, `tmux`, `locales`, `procps`,
+`iproute2`, `iputils-ping`, `less`, `vim-tiny`, and `man-db`. These packages provide the supported
+cloud-image parity baseline or a binary core invokes. A03d identifies the one mixed optional package
+at HEAD (`capabilities/vm_platform/wsl2.py:630-668`). It must be removed from that line before the
+remaining WSL2 set can truthfully stay core-essential. The common sequence lives in
 `capabilities/vm_platform/bootstrap_script.py:70-239` and
-`vms/initializer/driver.py:70-239,303-501`. No Phase A step is plugin-bound.
+`vms/initializer/driver.py:70-239,303-501`.
 
 ### Phase B: repeatable VM and admin initialization
 
@@ -111,11 +119,16 @@ A03's closed set is `openssh-server`, `curl`, `sudo`, `ca-certificates`, and `gn
 
 These calls are ordered in `vms/initializer/driver.py:504-838`. B10 retains `git`, `tmux`, `acl`,
 and `zstd`, whose binaries core directly executes for workspace cloning, sessions, workspace ACLs,
-and backup/restore. `tmuxinator` is not core-essential: Agentworks generates and links project
-files, but never invokes its binary. Its installation becomes an apt-plugin resource that an
-operator selects explicitly from a VM template when they want the optional integration. R1 does not
-couple the workspace-template boolean to VM initialization. `unzip` and `jq` have no production
-consumer and are removed from the unconditional list rather than assigned speculative owners.
+and backup/restore. `tmuxinator` is not core-essential because Agentworks generates and links
+project files but never invokes its binary. It becomes an apt-plugin resource and leaves both
+unconditional package lists. However, workspace templates currently default `tmuxinator` to true,
+and the CLI guide documents the generated file as directly usable with the binary
+(`workspaces/templates.py:25-43`; `cli/README.md:545-552`). The HLA and R5 must therefore choose and
+document one observable behavior: change the workspace default to false, derive apt-resource
+selection when the workspace setting is true, or make the integration an explicit opt-in with exact
+upgrade remediation. Removing the binary while silently retaining the true default is not an
+acceptable outcome. `unzip` and `jq` have no production consumer and are removed from the
+unconditional list rather than assigned speculative owners.
 
 ### Agent-user bootstrap and self-configuration
 
@@ -144,6 +157,17 @@ The sequence is `agents/initializer.py:78-420`. Agent deletion (`delete_agent_on
 cleanup rather than initialization or setup and stays core; it terminates processes, removes the
 socket directory, and removes the Linux identity.
 
+### Related initializer entry points outside the primary pipelines
+
+| ID  | Step                                                                                | Classification | Rationale                                                                                                     |
+| --- | ----------------------------------------------------------------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------- |
+| X01 | Preflight whether Tailscale is available locally                                    | Core-essential | Determines whether the operator can use the supported VM transport before initialization begins.              |
+| X02 | Reinstall Tailscale when absent, rejoin the tailnet, and persist the replacement IP | Core-essential | Repairs a lost or expired core transport node; it intentionally duplicates A09-A10 outside create and reinit. |
+
+These paths live in `vms/initializer/credentials.py:25-46,127-186`. X02's direct install one-liner
+is not a hidden optional installer mechanism. It is fail-safe recovery for the same core transport
+A09 establishes.
+
 ## Plugin-bound grouping
 
 The shape test produces five new mechanisms. Apt, snap, mise, install commands, and dotfiles differ
@@ -159,6 +183,39 @@ separately settled harness-integration route into its existing plugin.
 | `install-command` | System/user install-command resources; VM, admin, and agent runners; test predicates and PATH additions                                                  | Executes authored shell with test-file, test-directory, or executable idempotency and bounded timeouts (`vms/initializer/packages.py:203-288`; `agents/initializer.py:461-546`). System and user scopes share one mechanism.                                                                                                                 |
 | `dotfiles`        | Admin/agent `dotfiles_*` fields; source parsing, directory synchronization, and the checkout-local install command                                       | Depends on source and git/file fetch semantics, then executes inside the checkout. Its config family and update behavior differ from generic install commands (`vms/initializer/driver.py:753-772`; `agents/initializer.py:312-383`).                                                                                                        |
 | existing `claude` | Admin/agent `claude_marketplaces` and `claude_plugins`; CLI discovery, marketplace registration, and plugin installation through scoped integration init | This behavior belongs to the shipped Claude harness integration. Per the roadmap's settled contract, the fields move into its admin/user-scope config and execute through `user_init`, not through a new general installer contribution (`docs/sdd/2026-08-04-next-steps/target-state.md:142-162`).                                          |
+
+The `install-command` plugin inherits the install-command resource model's predicate contract. The
+HLA must not restate its predicate cardinality because the parallel install-command effort owns that
+contract, including any move to multiple predicates with AND semantics.
+
+## Named built-in resource inventory
+
+Every named installer resource currently shipped from `manifests/builtin` moves with its mechanism.
+This is a data-ownership move, not a removal: each row remains packaged and discoverable as a
+present-but-disabled plugin manifest until the operator enables its owner.
+
+| Current resource                 | Destination                               | Rationale                                                                                        |
+| -------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `user-install-command/oh-my-zsh` | `install-command` plugin bundled manifest | It is an upstream shell installer with no core runtime consumer.                                 |
+| `user-install-command/bun`       | `install-command` plugin bundled manifest | It is an optional language runtime installed through the generic user-command mechanism.         |
+| `user-install-command/fnm`       | `install-command` plugin bundled manifest | It is an optional version manager installed through the generic user-command mechanism.          |
+| `user-install-command/nvm`       | `install-command` plugin bundled manifest | It is an optional version manager installed through the generic user-command mechanism.          |
+| `user-install-command/starship`  | `install-command` plugin bundled manifest | It is an optional shell prompt installed through the generic user-command mechanism.             |
+| `user-install-command/uv`        | `install-command` plugin bundled manifest | It is an optional Python toolchain installer with no core runtime consumer.                      |
+| `apt-package/gh`                 | `apt` plugin bundled manifest             | It is an optional package and must move with its paired `github-cli` source.                     |
+| `apt-source/github-cli`          | `apt` plugin bundled manifest             | Its key and repository lifecycle are owned by the apt mechanism used by `apt-package/gh`.        |
+| `apt-package/terraform`          | `apt` plugin bundled manifest             | It is an optional package and must move with its paired `hashicorp` source.                      |
+| `apt-source/hashicorp`           | `apt` plugin bundled manifest             | Its key and repository lifecycle are owned by the apt mechanism used by `apt-package/terraform`. |
+| `apt-package/nodejs`             | `apt` plugin bundled manifest             | It is an optional package and must move with its paired `nodesource-v22` source.                 |
+| `apt-source/nodesource-v22`      | `apt` plugin bundled manifest             | Its key and repository lifecycle are owned by the apt mechanism used by `apt-package/nodejs`.    |
+| `apt-package/ngrok`              | `apt` plugin bundled manifest             | It is an optional package and must move with its paired `ngrok-agent` source.                    |
+| `apt-source/ngrok-agent`         | `apt` plugin bundled manifest             | Its key and repository lifecycle are owned by the apt mechanism used by `apt-package/ngrok`.     |
+| `apt-package/tenv`               | `apt` plugin bundled manifest             | It is an optional package and must move with its paired `tofuutils-tenv` source.                 |
+| `apt-source/tofuutils-tenv`      | `apt` plugin bundled manifest             | Its key and repository lifecycle are owned by the apt mechanism used by `apt-package/tenv`.      |
+
+The new `apt-package/tmuxinator` row and the mise repository/package declarations are also bundled
+plugin contributions. They are not existing built-ins, so they are listed here separately from the
+one-to-one HEAD inventory.
 
 ## Config and resource ownership consequences
 
@@ -203,17 +260,22 @@ resource kinds, not special behavior in installer plugins.
 
 R1 proposes the following decisions for review before the HLA and implementation plan are finalized:
 
-1. Keep all Phase A steps in core.
+1. Keep all core-essential Phase A responsibilities in core. Remove the optional `tmuxinator`
+   contamination identified by A03d and let the apt plugin install that resource during Phase B.
 2. Keep the Phase B and agent steps marked core-essential above, including the orchestration files
    that own order, lifecycle state, core profile/rc files, and feature contributions to them.
-3. Keep only `git`, `tmux`, `acl`, and `zstd` in the internal Phase B apt bootstrap; make
-   `tmuxinator` an apt-plugin resource and remove unconditional `unzip` and `jq`.
+3. Keep only `git`, `tmux`, `acl`, and `zstd` in the internal Phase B apt bootstrap; remove
+   `tmuxinator` from both unconditional package paths, publish it as an apt-plugin resource, and
+   make the HLA and R5 choose one explicit workspace-default behavior before implementation. Remove
+   unconditional `unzip` and `jq`.
 4. Create mechanism plugins named `apt`, `snap`, `mise`, `install-command`, and `dotfiles`.
 5. Make mise depend on apt for its repository and binary instead of duplicating apt execution.
 6. Move Claude marketplace/plugin setup through the roadmap-settled Claude integration's scoped
    config and `user_init` route.
 7. Carry a typed initializer capability as the leading HLA option, while leaving the execution seat
    and `consumer_gating` decisions open until the HLA compares viable shapes.
+8. Move all 16 named apt and install-command built-ins itemized above into their mechanism plugin;
+   no named installer resource remains core-owned merely because it ships today.
 
 No implementation move begins until this classification passes the phased artifact review required
 by FRD R1.
