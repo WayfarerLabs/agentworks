@@ -1,6 +1,6 @@
 # FRD: Secret Sources (Wave 3)
 
-- Status: Implemented; post-ready fixes in progress
+- Status: Implemented; operator contract correction in progress
 - Date: 2026-08-07
 - Seeded by: the saga lead. This is the saga's wave 3 child (`docs/sdd/2026-08-04-next-steps/`),
   unblocked by wave 2's landing (PR #414): the per-source config model wants the schema machinery,

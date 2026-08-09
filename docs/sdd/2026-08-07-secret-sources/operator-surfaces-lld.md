@@ -2,7 +2,7 @@
 
 <!-- cspell:ignore isatty ljust onepassword proxmox repr unresolvable -->
 
-- Status: Reviewed and implemented
+- Status: Reviewed and implemented; operator contract correction in progress
 - Scope: Phase 6 operator-surface contract, consumed by implementation Phases 7 and 8
 - Governing artifacts: [FRD](./frd.md), [HLA](./hla.md),
   [migration strategy](./migration-strategy.md), [source contract](./source-contract-lld.md), and
@@ -318,9 +318,7 @@ with `resolve_for_command([], config, registry, extra_decls=[decl], interaction=
 wraps the returned mapping in a name-scoped `SecretReader`, then calls `_ensure_tailscale` with that
 reader and name. Resolution therefore remains conditional and precedes `_ensure_tailscale`; a
 healthy reconnect constructs no standalone resolver or auth source. The start branch owns the
-returned mapping through the ensure call and clears it in a `BaseException`-safe `finally`
-immediately after ensure returns or raises, still inside the hold; only then may the hold exit. The
-scoped reader has no independent value copy.
+returned mapping through the ensure call. The scoped reader has no independent value copy.
 
 `LiveVMNode.auto_start` owns the gate branch. After platform start, it enters its existing
 `platform.vm_active(self._row, config=self._config)` span. The reconnect probe, conditional repair
@@ -332,13 +330,12 @@ transitively through `gated_vm_boundary` and `LiveVMNode.auto_start`; there is n
 port-forward-to-ensure or ensure-to-resolve edge.
 
 The active hold is a lifecycle boundary, not an implementation convenience. Neither caller may
-probe, prompt/read, rejoin, wait, or clear a standalone value after its hold exits. Exact
-event-order tests pin:
+probe, prompt/read, rejoin, or wait after its hold exits. Exact event-order tests pin:
 
 ```text
 standalone healthy: hold-enter, probe-false, hold-exit
 standalone rejoin: hold-enter, probe-true, resolve, reader-build, ensure-enter, auth-read,
-  rejoin, final-wait, ensure-return, values-clear, hold-exit
+  rejoin, final-wait, ensure-return, hold-exit
 gate healthy: hold-enter, probe-false, hold-exit
 gate rejoin: hold-enter, probe-true, repair-name, ensure-enter, gate-reader-read, rejoin,
   final-wait, ensure-return, hold-exit
@@ -347,21 +344,18 @@ gate rejoin: hold-enter, probe-true, repair-name, ensure-enter, gate-reader-read
 For each standalone failure point (probe, resolve, reader construction, and ensure) and gate failure
 point (probe, repair-name lookup, gate-reader read, and ensure), tests inject `KeyboardInterrupt`
 and an ordinary exception. They assert identity-preserving propagation, exactly one hold release, no
-later event, and release only after any acquired standalone mapping is cleared. An ensure failure
-therefore orders `ensure-raise, values-clear, hold-exit`; a gate-reader or gate ensure failure
-orders the raise before `hold-exit`. Failures in rejoin or final wait count as ensure failures and
-obey the same ordering. A healthy probe never touches either source, and no exception path retries
-resolution, source access, ensure, or hold release.
+later event, and release after the failure. Failures in rejoin or final wait count as ensure
+failures and obey the same ordering. A healthy probe never touches either source, and no exception
+path retries resolution, source access, ensure, or hold release.
 
 Tests pin a healthy explicit start to zero `resolve_for_command`, reader construction, and reader
 access; a failed reconnect to one standalone resolution with the exact validated policy before one
-ensure call plus mapping cleanup on success and `BaseException`; and auto-start to
-identity-preserving gate-reader delivery with zero standalone resolution and no policy stored on
-`LiveVMNode`. An AST guard rejects optional/default auth sources, policy or ambient-state access in
-`_ensure_tailscale`, `resolve_for_command` or Registry/template resolution in its body, and either
-retired false edge; it also rejects policy or secret-source parameters on the reconnect probe. An
-AST shape guard requires probe, conditional acquisition, ensure, and standalone cleanup to remain
-lexically nested in the correct existing hold block in both callers.
+ensure call; and auto-start to identity-preserving gate-reader delivery with zero standalone
+resolution and no policy stored on `LiveVMNode`. An AST guard rejects optional/default auth sources,
+policy or ambient-state access in `_ensure_tailscale`, `resolve_for_command` or Registry/template
+resolution in its body, and either retired false edge; it also rejects policy or secret-source
+parameters on the reconnect probe. An AST shape guard requires probe, conditional acquisition, and
+ensure to remain lexically nested in the correct existing hold block in both callers.
 
 ### Preflight interaction subgraph
 
@@ -655,37 +649,14 @@ The lifecycle LLD's central legality map also owns the structured disabled-plugi
 `source-backend-plugin-disabled` uses `enable-plugin` and requires a plugin-identity target. No
 free-form readiness reason enters this record or a renderer.
 
-`ResolutionBatch` remains in `agentworks.secrets.resolve`. It gains one safe terminal projection and
-one idempotent cleanup operation:
+`ResolutionBatch` remains private to `agentworks.secrets.resolve`. `complete_or_raise()` remains the
+only complete value projection. Verification reads only the immutable outcome tuple; partial reveal
+uses one module-private projection for its explicitly authorized value cells. No generic value
+accessor is added.
 
-```python
-def discard_values(self) -> tuple[ResolutionOutcome, ...]: ...
-def scrub_values(self) -> None: ...
-```
-
-The method snapshots `_outcomes`, clears `_values`, and returns the snapshot. Its `BaseException`
-guard clears `_values` before propagating. It never returns a value count or mapping. Verification
-uses it before returning from the service. `complete_or_raise()` remains the only complete value
-projection. `scrub_values()` performs only the non-allocating, idempotent `_values.clear()` and is
-the cleanup primitive for consumer fences. None of these methods makes the batch public.
-
-### Required consumer cleanup fence
-
-Every direct `resolve_batch` consumer owns an outer `try/except BaseException` beginning with the
-first executable line after `resolve_batch` returns and ending only after its authorized result has
-been transferred to its final owner or returned. The fence is mandatory even though batch
-projections also scrub internally: an asynchronous interruption can land after the core returns but
-before the projection call, during a copied-value transfer, or at the return boundary.
-
-Within the fence, complete and partial consumers keep every copied value mapping initialized to an
-empty dictionary, scrub the batch immediately after projection, transfer values into the authorized
-final result, and replace or clear intermediate references before return. On `BaseException`, they
-clear every intermediate and partially published value mapping, call `batch.scrub_values()`, undo a
-partial cache or seed publication, clear any `PartialResolution.values`, and re-raise unchanged.
-Verification has no authorized values: its fence calls `discard_values()` and calls `scrub_values()`
-again on any `BaseException`. A successful return transfers only the operation cache, standalone
-result dictionary, singleton string, explicit partial reveal record, or value-free outcome tuple
-named by that consumer contract.
+Consumers use ordinary direct control flow. They do not add cleanup fences, scrub primitives,
+rollback-on-interrupt machinery, or intermediate owner graphs for in-memory erasure. The workstation
+process is trusted, and Python local/reference lifetime is best-effort only.
 
 ### Explicit caller policy
 
@@ -759,7 +730,7 @@ wrong completion types, including foreign enums and lookalikes.
 
 ### Final complete outcome-to-error mapping
 
-`ResolutionBatch.complete_or_raise()` clears values before it calls one final value-free function:
+`ResolutionBatch.complete_or_raise()` calls one final value-free function on incomplete results:
 
 ```python
 def complete_resolution_error(
@@ -820,14 +791,9 @@ are never caught by this mapper.
 3. If no declarations remain, cache a copy of the seeds.
 4. Build `active_sources` once and call `resolve_batch` once with `COMPLETE`, the resolver's frozen
    interaction policy, and an output interaction broker only under `ALLOW`.
-5. Enter the required outer cleanup fence on the first post-core line. Initialize an empty local
-   value dictionary, call `complete_or_raise()`, scrub the batch, and build a separate candidate
-   cache from gate seeds plus returned values.
-6. Clear the returned mapping after the join, publish the candidate as the operation cache only
-   after it is complete, then replace the local candidate with a new empty dictionary before
-   returning. On `BaseException`, clear the returned and candidate mappings, scrub the batch, clear
-   and unset a newly published cache, and re-raise. A previous idempotent cache is never inside this
-   fence and is never cleared.
+5. Call `complete_or_raise()`, join the returned values with gate seeds, and publish the completed
+   operation cache.
+6. Return after publication. Incomplete resolution raises before a cache is installed.
 7. Keep `get`, `values`, `resolved`, first-registration-wins, and late-registration errors
    unchanged.
 
@@ -840,11 +806,8 @@ batch.
 and console flows legitimately return values to `compose_env`. Its signature gains a required
 keyword-only `interaction: InteractionPolicy`. It computes declarations, returns `{}` without
 building active sources when none are needed, otherwise calls one `resolve_batch(... COMPLETE ...)`
-and enters the outer fence on the first post-core line. Within it, the service initializes empty
-`projected` and `result` dictionaries, calls `complete_or_raise()`, scrubs the batch, transfers into
-`result`, clears `projected`, and returns `result`. Its `BaseException` arm clears both
-dictionaries, scrubs the batch, and re-raises. It contains no parallel resolution loop or ambient
-interaction read.
+and returns `complete_or_raise()`. It contains no parallel resolution loop or ambient interaction
+read.
 
 ### Gate and late-repair sequencing
 
@@ -855,24 +818,18 @@ interaction read.
 3. If already seeded, return the existing seed.
 4. Resolve the singleton declaration through the same active sources, frozen interaction policy,
    broker rule, complete policy, and outcome-to-error mapping.
-5. Enter the outer fence on the first post-core line. Project to an empty local dictionary, scrub
-   the batch, validate the exact singleton key, seed the value, erase the local value reference and
-   mapping, and return by reading the seed cache. On `BaseException`, erase locals, scrub the batch,
-   remove a newly installed seed, and re-raise. A preexisting seed is never removed.
+5. Project the complete singleton result, validate the exact key, seed it, and return the value.
 
 `gate_secret_resolver` becomes a narrow callable adapter over this method. It contains no source or
 batch imports.
 
 `Resolver.resolve_late_repair(decl)` exists only for the session batch gate's rejoin repair key. It
 requires that the boundary cache already exists, resolves exactly the supplied declaration through
-the same frozen policy, and enters the outer fence on the first post-core line. It projects into an
-empty local dictionary, scrubs the batch, validates the singleton key, moves the value into a
-one-entry transfer dictionary, clears the projected mapping, and returns by popping the transfer
-entry so no value-bearing container remains in the retained frame. Its `BaseException` arm clears
-both dictionaries, scrubs the batch, and re-raises. It does not register, seed, or widen the cache.
-The existing `_scope.py` check that the name belongs to that VM node's `repair_secret_refs()`
-remains the authority that permits the call. Guard tests allow this one production call site and
-reject every other call. All other registration after `resolve()` remains an error.
+the same frozen policy, validates the complete singleton result, and returns its value. It does not
+register, seed, or widen the cache. The existing `_scope.py` check that the name belongs to that VM
+node's `repair_secret_refs()` remains the authority that permits the call. Guard tests allow this
+one production call site and reject every other call. All other registration after `resolve()`
+remains an error.
 
 ## Pure preview and inspection contracts
 
@@ -1061,21 +1018,16 @@ def resolve_partial_for_reveal(
 ```
 
 The record and service are owned by `agentworks.secrets.resolve`, are not package-root exports, and
-exist only for the explicit env reveal caller. The record is not frozen because cleanup clears
-`values` on interruption. It has a redacted `repr`, no serializer, and never reaches an output
-handler as a whole. The env renderer builds an outcome map for non-resolved names and renders the
-same safe line used by operation hints:
+exist only for the explicit env reveal caller. It has a redacted `repr`, no serializer, and never
+reaches an output handler as a whole. The env renderer builds an outcome map for non-resolved names
+and renders the same safe line used by operation hints:
 `<category>/<detail>; source=...; identifier=...; remediation=...`. It reads `values` only for an
 explicit reveal cell. The `errors: dict[str, str]` out-parameter and all legacy free-form resolution
 strings are deleted.
 
-The partial service receives the caller-derived interaction policy and calls `resolve_batch` with
-explicit `PARTIAL`. On the first post-core line it enters the outer fence with empty `projected` and
-`result.values` mappings. Its module-private projection copies successful values; the service then
-scrubs the batch, transfers into `result.values`, clears `projected`, and returns the result. Its
-`BaseException` arm clears `projected`, `result.values`, and any partially assigned transfer
-mapping, scrubs the batch, and re-raises. No generic batch value accessor or ambient-state read is
-added.
+The partial service receives the caller-derived interaction policy, calls `resolve_batch` with
+explicit `PARTIAL`, and uses its module-private projection to build the explicit reveal record. No
+generic batch value accessor or ambient-state read is added.
 
 ## Final verification surface
 
@@ -1120,9 +1072,8 @@ _INVALID_NAME_ERROR = (
    source client runs.
 5. Build the active source tuple once.
 6. Call `resolve_batch` once with `COMPLETE` and an output broker only for `ALLOW`.
-7. Enter the outer fence on the first post-core line, call `batch.discard_values()`, and return
-   every outcome, resolved or not. On `BaseException`, call `batch.scrub_values()` and re-raise
-   unchanged.
+7. Return the immutable outcome tuple, resolved or not. Values remain private to the unreturned
+   batch and become ordinary unreachable process memory when the service returns.
 
 Verification does not call `complete_or_raise`, translate provider results into legacy errors, or
 retain a success boolean. A resolved outcome is the proof record. The old service and proof type are
@@ -1314,13 +1265,12 @@ not configuration.
 One always-green Phase 7 commit may use private helpers while it is being assembled, but its final
 state MUST:
 
-1. move outcomes into the value-free owner and add the final complete error projection plus batch
-   scrub primitive;
+1. move outcomes into the value-free owner and add the final complete error projection;
 2. migrate the complete recursive service/CLI/edge manifests, `Resolver`, gate seeding, authorized
    late repair, standalone resolution, and partial reveal to first-statement-validated,
    identity-forwarded caller policy, including the complete preflight chain; move conditional
    Tailscale standalone resolution to `start_vm` and require an explicit auth reader at ensure; use
-   typed batches and mandatory outer cleanup fences;
+   typed batches without consumer-side memory-erasure machinery;
 3. replace string/none preview with pure typed previews and migrate orchestration prediction;
 4. migrate list, describe, doctor, and env reveal records and rendering;
 5. migrate the already-existing verification service to validated names, all outcomes, and its
@@ -1352,11 +1302,10 @@ fields after a separate interface decision.
 
 - Every operation, gate, repair, inspection reveal, and verification request calls the one typed
   core. No consumer reproduces source-turn or provider failure logic.
-- A batch is complete before values join an operation cache. On incomplete resolution, values are
-  cleared before error construction. Every consumer fence also scrubs successful and partial batches
-  and any uncompleted transfer on every `BaseException` through final ownership transfer.
-- Verification discards all values before returning outcomes. Mixed success never makes a success
-  value reachable from its renderer.
+- A batch is complete before values join an operation cache. Incomplete resolution exposes no value
+  through its public result or exception object.
+- Verification returns outcomes only. Mixed success never makes a success value reachable from its
+  renderer.
 - Preview, list, describe, doctor, guide, schema, and completion never read a secret or construct a
   client. Tests patch client factories, environment reads, subprocess, broker calls, and
   `resolve_batch` to fail if crossed.
@@ -1368,6 +1317,10 @@ fields after a separate interface decision.
 - Errors and rows contain only validated name, category, detail, remediation, source, and safe
   identifier fields. Provider messages, stderr, exceptions, provider/client tracebacks, and values
   never enter; ordinary Python `__traceback__` ownership remains unchanged.
+- The workstation process is trusted. In-memory reference lifetime and traceback locals are
+  best-effort only; application-layer ownership fences, frame rewriting, and adversarial memory
+  erasure are out of scope. Strong erasure, if ever required, belongs in an isolated process whose
+  address space exits.
 - Source override provenance is derived from the surviving Registry row, never stored as a second
   flag.
 - Partial env reveal holds values only in the explicit reveal record and rendered value cell.
@@ -1377,57 +1330,39 @@ fields after a separate interface decision.
 
 ## Exhaustive test matrix
 
-### First-post-core interruption pins
+Tests verify observable behavior and exception-object hygiene. They do not inject line-level
+interruptions to inspect local reference lifetime or traceback frames.
 
-Six tests use a line-event tracer, not a cooperative mock projection, to raise `KeyboardInterrupt`
-on the first source line executed after the instrumented `resolve_batch` returns a batch containing
-a distinct sentinel value:
-
-- `test_resolver_scrubs_if_interrupted_first_line_after_resolve_batch`;
-- `test_standalone_scrubs_if_interrupted_first_line_after_resolve_batch`;
-- `test_gate_scrubs_if_interrupted_first_line_after_resolve_batch`;
-- `test_late_repair_scrubs_if_interrupted_first_line_after_resolve_batch`;
-- `test_partial_reveal_scrubs_if_interrupted_first_line_after_resolve_batch`;
-- `test_verify_scrubs_if_interrupted_first_line_after_resolve_batch`.
-
-Each asserts identity-preserving `KeyboardInterrupt` propagation, `batch._values == {}`, and
-sentinel absence from every traceback local and output/error capture. The Resolver test additionally
-asserts no boundary cache, the gate test no new seed, late repair no cache widening, partial reveal
-no returned or partially published `PartialResolution.values`, standalone no returned/transfer
-mapping, and verification no renderer call. Companion interrupts at projection, cache/seed/result
-transfer, and the final pre-return line exercise the same outer fence; the first-post-core test is
-mandatory because projection-local cleanup cannot cover that window.
-
-| Area                     | Required coverage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Outcome module           | exact existing legality table; frozen/slotted/value-free; no import path to batch/client/output; root exports are exact                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| Error mapping            | every detail to exact exception type, including authentication to ExternalError and connectivity to ConnectivityError; first failed outcome owns type; all failed lines retained in order; resolved rows omitted; empty/all-resolved exact StateError/message; safe framing; no values/provider text/cause/context                                                                                                                                                                                                                                                                                                                             |
-| Resolver                 | required injected policy; one active-chain build and batch; seed exclusion/join; empty missing set; complete failure caches nothing; idempotence; late registration; operation cache copy; outer-fence interrupts through cache transfer; no second prompt                                                                                                                                                                                                                                                                                                                                                                                     |
-| Gate                     | pre-boundary only; singleton batch; repeat seed no re-read; same policy/broker/error map; seed before return; first-post/projection/seed/return interrupts remove new seed and scrub; no wrapper imports                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| Late repair              | boundary must have run; declared repair succeeds without cache widening; unauthorized site refuses before call; exactly one production call site; first-post/projection/transfer/return interrupts scrub; no seed or registration                                                                                                                                                                                                                                                                                                                                                                                                              |
-| Standalone operation     | empty target fast path; injected policy; target union and extras; one typed batch; complete-or-raise; first-post/projection/transfer/return interrupts clear batch and mappings; callers forward policy                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| Policy validation        | shared validator uses exact-type identity; exact enum returns unchanged; every service and internal-boundary manifest entry rejects strings, foreign Enum/StrEnum values, str subclasses, and `.value` lookalikes as its first action with exact StateError/message, no rejected value/cause/context, and zero work; every CLI root rejects a wrong derived value before work; core independently rejects wrong completion with its exact error                                                                                                                                                                                                |
-| Policy propagation       | ordinary secret-consuming CLI derives once: TTY plus no global flag allows, pipe/no TTY refuses, global refusal wins; manifest-driven AST validates signatures, exact first statements, reverse/forward closure, every edge keyword, cleanup closure binding, and sentinel identity; strict mypy covers production and tests only as a supplement; managers/services/core/backend/client never read ambient state; verification CLI rule is separate                                                                                                                                                                                           |
-| Preflight policy         | all twelve outward call sites pass the same local through first-statement-validated `preflight_all`, `require_predicted_refs`, `predict_resolution`, and `preview_operation_resolution`; empty inputs still validate; wrong types do zero work; reverse and forward closure are exact; no ambient read or Resolver-private substitution                                                                                                                                                                                                                                                                                                        |
-| Tailscale auth source    | start keeps probe, conditional standalone resolution/reader build, ensure, and value cleanup inside `vm_node.hold_active()`; auto-start keeps probe, conditional repair-name/gate-reader access, and ensure inside `platform.vm_active()`; exact healthy/rejoin event order; every probe/acquisition/ensure failure propagates after cleanup and before exactly one hold release; AST nesting guard; healthy start performs no source access; ensure requires reader+name and has no policy/default/Registry/template/standalone path; gate reader forwards by identity with no policy storage; port-forward has no direct ensure/resolve edge |
-| Nested/destructive paths | create-session pending workspace/agent nodes validate, store, revalidate outside catch-all, and identity-forward policy into nested delete; session-delete cleanup helpers bind the same local before warn-and-continue; batch resume forwards before per-item catches; delete_vm validates before lookup and best-effort try; wrong-type tests assert no mutation, teardown conversion, warning, prompt, or resolver construction                                                                                                                                                                                                             |
-| Preview legality         | exact category/source/identifier invariants; safe strings; immutable skipped records                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| Preview purity           | no environment read, factory, client, subprocess, broker, output, or typed batch; mapping validation/would-attempt/identifier only; protocol violation is StateError                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| Preview semantics        | first ready attemptable; not-ready skip order; interactive optimistic inspection; refused operation candidate with later non-interactive fallthrough; refused terminal; no candidate unavailable                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| Orchestration prediction | typed record per declaration; actual policy; impossible refs fail with category; env-var attemptability is not claimed proof; boundary stays authoritative                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| List                     | exact NAME/DESCRIPTION/source headers and order; exact four-state cell precedence/grammar; exact no-secret and no-active-source wording; cell record has only rendered fields and no backend/provenance copies; names-only remains value-free and no render work                                                                                                                                                                                                                                                                                                                                                                               |
-| Describe                 | source mappings; exact provenance phrases; pure preview wording; skipped readiness; no redundant boolean; NotFound unchanged; no clients or values                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| Doctor sources           | synthesized, override, and declared provenance; active/inactive; enabled/disabled; folded ready/not-ready; all present sources; exact adjacent backends/sources/secrets order; exact degraded placeholder; no backend method or client                                                                                                                                                                                                                                                                                                                                                                                                         |
-| Doctor secrets           | one row per registry secret; attemptable/unavailable wording; skipped readiness; prompt optimistic but unopened; env-var unopened; no values                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| Partial reveal           | separate values/outcomes; partial success; every failure category; inline safe format; redacted record; first-post/projection/transfer/return interruptions clear batch and every mapping; only explicit cells reveal sentinels                                                                                                                                                                                                                                                                                                                                                                                                                |
-| Retired seams            | exact semantic AST deny-list for twelve symbols, three old modules, forbidden root runtime/policy imports and root registry export; dead disabled helper absent; negative relocation fixture remains                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| Verify service           | required exact policy; empty input; validate every item before dedupe/lookup; non-str, empty, long, double-hyphen, control/newline exact safe ValidationError with no echo/cause; first-order dedupe; one chain/batch; all outcomes; outer-fence scrub; no ambient read                                                                                                                                                                                                                                                                                                                                                                        |
-| Verify CLI               | zero names usage exit 2; one/many/duplicates/mixed/all categories; invalid/control/newline names safe and absent from stdout/stderr; unknown/config failure; exact table; success 0/any outcome failure 1                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| Verify interaction       | default REFUSE without TTY read; explicit allow; global refusal plus allow exact CLI error before config; direct service ALLOW ignores CLI ambient state; prompt/OnePassword/plugin opt-in; doom before interaction; abort 1; interrupt 130                                                                                                                                                                                                                                                                                                                                                                                                    |
-| Verify disclosure        | distinct sentinels in every client boundary, success value, provider failure, cleanup, source config, and prompt metadata absent from rows, stdout/stderr, errors, logs, repr, cause/context, and traceback locals                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| Command shape            | required variadic `names`; final flag present; pre-release flag and singular result line absent; CLI remains thin                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| Completions              | command name; dynamic key names real variadic param; `multiple=True`; first, second, and later candidates in Bash, Zsh, PowerShell; list names-only source; removed flag absent                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| Docs and guide           | source vocabulary; pure preview versus proof; final syntax/flag/exits; consent language; universal topic contribution loads; no permanent SDD links                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Area                     | Required coverage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Outcome module           | exact existing legality table; frozen/slotted/value-free; no import path to batch/client/output; root exports are exact                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Error mapping            | every detail to exact exception type, including authentication to ExternalError and connectivity to ConnectivityError; first failed outcome owns type; all failed lines retained in order; resolved rows omitted; empty/all-resolved exact StateError/message; safe framing; no values/provider text/cause/context                                                                                                                                                                                                                                                        |
+| Resolver                 | required injected policy; one active-chain build and batch; seed exclusion/join; empty missing set; complete failure caches nothing; idempotence; late registration; operation cache copy; no second prompt                                                                                                                                                                                                                                                                                                                                                               |
+| Gate                     | pre-boundary only; singleton batch; repeat seed no re-read; same policy/broker/error map; exact singleton validation; no wrapper imports                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Late repair              | boundary must have run; declared repair succeeds without cache widening; unauthorized site refuses before call; exactly one production call site; no seed or registration                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Standalone operation     | empty target fast path; injected policy; target union and extras; one typed batch; complete-or-raise; callers forward policy                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Policy validation        | shared validator uses exact-type identity; exact enum returns unchanged; every service and internal-boundary manifest entry rejects strings, foreign Enum/StrEnum values, str subclasses, and `.value` lookalikes as its first action with exact StateError/message, no rejected value/cause/context, and zero work; every CLI root rejects a wrong derived value before work; core independently rejects wrong completion with its exact error                                                                                                                           |
+| Policy propagation       | ordinary secret-consuming CLI derives once: TTY plus no global flag allows, pipe/no TTY refuses, global refusal wins; manifest-driven AST validates signatures, exact first statements, reverse/forward closure, every edge keyword, and sentinel identity; strict mypy covers production and tests only as a supplement; managers/services/core/backend/client never read ambient state; verification CLI rule is separate                                                                                                                                               |
+| Preflight policy         | all twelve outward call sites pass the same local through first-statement-validated `preflight_all`, `require_predicted_refs`, `predict_resolution`, and `preview_operation_resolution`; empty inputs still validate; wrong types do zero work; reverse and forward closure are exact; no ambient read or Resolver-private substitution                                                                                                                                                                                                                                   |
+| Tailscale auth source    | start keeps probe, conditional standalone resolution/reader build, and ensure inside `vm_node.hold_active()`; auto-start keeps probe, conditional repair-name/gate-reader access, and ensure inside `platform.vm_active()`; exact healthy/rejoin event order; failures preserve the existing hold lifecycle; AST nesting guard; healthy start performs no source access; ensure requires reader+name and has no policy/default/Registry/template/standalone path; gate reader forwards by identity with no policy storage; port-forward has no direct ensure/resolve edge |
+| Nested/destructive paths | create-session pending workspace/agent nodes validate, store, revalidate outside catch-all, and identity-forward policy into nested delete; session-delete cleanup helpers bind the same local before warn-and-continue; batch resume forwards before per-item catches; delete_vm validates before lookup and best-effort try; wrong-type tests assert no mutation, teardown conversion, warning, prompt, or resolver construction                                                                                                                                        |
+| Preview legality         | exact category/source/identifier invariants; safe strings; immutable skipped records                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Preview purity           | no environment read, factory, client, subprocess, broker, output, or typed batch; mapping validation/would-attempt/identifier only; protocol violation is StateError                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Preview semantics        | first ready attemptable; not-ready skip order; interactive optimistic inspection; refused operation candidate with later non-interactive fallthrough; refused terminal; no candidate unavailable                                                                                                                                                                                                                                                                                                                                                                          |
+| Orchestration prediction | typed record per declaration; actual policy; impossible refs fail with category; env-var attemptability is not claimed proof; boundary stays authoritative                                                                                                                                                                                                                                                                                                                                                                                                                |
+| List                     | exact NAME/DESCRIPTION/source headers and order; exact four-state cell precedence/grammar; exact no-secret and no-active-source wording; cell record has only rendered fields and no backend/provenance copies; names-only remains value-free and no render work                                                                                                                                                                                                                                                                                                          |
+| Describe                 | source mappings; exact provenance phrases; pure preview wording; skipped readiness; no redundant boolean; NotFound unchanged; no clients or values                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Doctor sources           | synthesized, override, and declared provenance; active/inactive; enabled/disabled; folded ready/not-ready; all present sources; exact adjacent backends/sources/secrets order; exact degraded placeholder; no backend method or client                                                                                                                                                                                                                                                                                                                                    |
+| Doctor secrets           | one row per registry secret; attemptable/unavailable wording; skipped readiness; prompt optimistic but unopened; env-var unopened; no values                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Partial reveal           | separate values/outcomes; partial success; every failure category; inline safe format; redacted record; only explicit cells reveal sentinels                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Retired seams            | exact semantic AST deny-list for twelve symbols, three old modules, forbidden root runtime/policy imports and root registry export; dead disabled helper absent; negative relocation fixture remains                                                                                                                                                                                                                                                                                                                                                                      |
+| Verify service           | required exact policy; empty input; validate every item before dedupe/lookup; non-str, empty, long, double-hyphen, control/newline exact safe ValidationError with no echo/cause; first-order dedupe; one chain/batch; all outcomes; no ambient read                                                                                                                                                                                                                                                                                                                      |
+| Verify CLI               | zero names usage exit 2; one/many/duplicates/mixed/all categories; invalid/control/newline names safe and absent from stdout/stderr; unknown/config failure; exact table; success 0/any outcome failure 1                                                                                                                                                                                                                                                                                                                                                                 |
+| Verify interaction       | default REFUSE without TTY read; explicit allow; global refusal plus allow exact CLI error before config; direct service ALLOW ignores CLI ambient state; prompt/OnePassword/plugin opt-in; doom before interaction; abort 1; interrupt 130                                                                                                                                                                                                                                                                                                                               |
+| Verify disclosure        | distinct sentinels in every client boundary, success value, provider failure, source config, and prompt metadata absent from rows, stdout/stderr, errors, logs, repr, and exception-object cause/context                                                                                                                                                                                                                                                                                                                                                                  |
+| Command shape            | required variadic `names`; final flag present; pre-release flag and singular result line absent; CLI remains thin                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Completions              | command name; dynamic key names real variadic param; `multiple=True`; first, second, and later candidates in Bash, Zsh, PowerShell; list names-only source; removed flag absent                                                                                                                                                                                                                                                                                                                                                                                           |
+| Docs and guide           | source vocabulary; pure preview versus proof; final syntax/flag/exits; consent language; universal topic contribution loads; no permanent SDD links                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
 ## Completion boundary
 

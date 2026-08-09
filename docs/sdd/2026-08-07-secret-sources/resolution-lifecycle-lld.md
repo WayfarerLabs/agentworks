@@ -4,7 +4,7 @@
 <!-- cspell:ignore localns nonblocking staticmethod -->
 <!-- cspell:ignore repr soft-missed traceback unrequested -->
 
-- Status: Reviewed and implemented; post-ready fixes in progress
+- Status: Reviewed and implemented; operator contract correction in progress
 - Scope: Phase 2 resolution lifecycle and typed runtime contract, paired with the reviewed
   [source contract LLD](./source-contract-lld.md) and consumed by implementation Phases 3, 5, and 7
 - Governing artifacts: [FRD](./frd.md), [HLA](./hla.md),
@@ -348,10 +348,9 @@ Both exception classes define a constant, value-free `__str__` and redacted `__r
 cancelled, or killed and joined its underlying work before raising. A backend must not raise it
 while a worker thread, subprocess, request, or authentication task continues.
 
-Translation does not raise from inside a native `except` suite. A native exception or result may
-carry a secret in its message, arguments, captured output, cause, context, or traceback locals. The
-boundary records only failure and remediation enums inside `except`, leaves the suite so Python
-clears its exception target, clears any native result variable, and only then raises the
+Translation does not expose a native exception or result through the provider-facing exception
+object. A native exception or result may carry a secret in its message, arguments, captured output,
+cause, or context. The boundary records only failure and remediation enums and raises a value-free
 provider-facing failure with `from None`:
 
 ```python
@@ -379,22 +378,22 @@ assert value is not None
 return value
 ```
 
-The real implementation uses the backend's native exception types, but preserves that variable
-lifetime exactly. `classify_native` and `classify_result` are total and return no native object or
-text. The raised provider failure has `__cause__ is None` and `__context__ is None`, and none of its
-traceback frame locals references the native exception, result, stdout, stderr, or resolved value.
-The core's unexpected-exception conversion follows the same rule: it sets a boolean inside
-`except Exception` without binding the exception, leaves the suite, and then creates the value-free
-outcome.
+The real implementation uses the backend's native exception types. `classify_native` and
+`classify_result` are total and return no native object or text. The raised provider failure has
+`__cause__ is None` and `__context__ is None`; its message, arguments, and attributes are
+value-free. The core's unexpected-exception conversion follows the same exception-object rule.
 
-A client that resolves more than one request must also clear its value-bearing accumulator before
-any exception or control flow leaves `resolve`. If an internal typed failure occurs after an earlier
-success, the outer client copies only its enums or timeout bit inside `except`, clears the
-accumulator, leaves `except`, and raises a fresh typed failure with `from None`. It never re-raises
-the caught object. Prompt likewise clears answers already collected in that call before propagating
-`UserAbort` or other control flow. At the core boundary, control flow clears all private accumulated
-batch values before it is re-raised after cleanup. These rules keep the complete traceback-local
-graph value-free when no result is returned.
+The workstation process is the trust boundary. Ordinary Python traceback frames, immutable-string
+copies, and process memory are explicitly outside the non-disclosure guarantee. Clearing a local
+reference is an optional courtesy only when it is a one-line, semantics-free operation. The runtime
+MUST NOT add ownership graphs, frame walking, traceback rewriting, broad `BaseException` handling,
+or cleanup abstractions to simulate memory erasure. If a future requirement needs strong in-memory
+erasure, the sanctioned design is a short-lived isolated process whose address space exits.
+
+A client that resolves more than one request discards partial successful results before returning a
+typed failure. Prompt likewise discards answers already collected in that call before propagating
+`UserAbort` or other control flow. These are ownership and result-semantics rules, not promises that
+the interpreter has erased every in-memory copy.
 
 `UserAbort`, `KeyboardInterrupt`, `SystemExit`, and `GeneratorExit` are control flow, not provider
 failures. The orchestrator always cleans up and then re-raises them unchanged.
@@ -591,9 +590,7 @@ class ResolutionBatch:
     def complete_or_raise(self) -> dict[str, str]:
         if all(outcome.category is ResolutionCategory.RESOLVED for outcome in self._outcomes):
             return dict(self._values)
-        outcomes = self._outcomes
-        self._values.clear()
-        raise _compatibility_error(outcomes)
+        raise _compatibility_error(self._outcomes)
 
     def __repr__(self) -> str:
         return (
@@ -611,14 +608,12 @@ property, or value-bearing equality/repr. `str(batch)` is the redacted `repr`.
 batch's private values intact on success because the operation-scoped consumer immediately owns the
 fresh copy and the batch then falls out of scope.
 
-On any incomplete outcome, the method does not copy or bind `_values` to a local. It first binds
-only the value-free outcomes needed for error formatting, then calls `self._values.clear()`, and
-only after the clear constructs and raises the existing `SecretUnavailableError` compatibility type
-with requested names plus stable category/detail codes and enum-derived remediation. Thus the
-traceback may retain `self` through the `complete_or_raise` frame and a legacy wrapper may retain
-the batch local, but every retained batch is now value-free. The error retains no provider exception
-or value mapping. Phase 6 owns the final outcome-to-error mapping; this compatibility behavior
-exists only until Phase 7 deletes the dict-returning boundary.
+On any incomplete outcome, the method constructs and raises the existing `SecretUnavailableError`
+compatibility type from value-free outcomes, with requested names plus stable category/detail codes
+and enum-derived remediation. The error retains no provider exception or value mapping. The private
+batch may remain reachable through ordinary process memory or a traceback; that is inside the
+trusted workstation process and is not an erasure target. Phase 6 owns the final outcome-to-error
+mapping; this compatibility behavior exists only until Phase 7 deletes the dict-returning boundary.
 
 The module-private inspection projection is the only partial-value escape hatch. It receives a
 batch, copies resolved values into the existing explicit reveal path, and converts non-resolved
@@ -932,8 +927,9 @@ exactly: each native handler records only enums or a timeout boolean, the `Compl
 is set to `None`, and the typed exception is constructed and raised only after leaving every
 `except` suite. If a later `op read` fails, `resolve` clears values from all earlier reads before it
 raises the fresh typed failure. Tests require both `__cause__` and `__context__` to be `None` and
-traverse all typed failure traceback locals to prove no `TimeoutExpired`, `OSError`,
-`CompletedProcess`, stdout, stderr, reference to a native result, or resolved value survives.
+prove the typed exception object exposes no `TimeoutExpired`, `OSError`, `CompletedProcess`, stdout,
+stderr, native result, or resolved value through its message, arguments, attributes, cause, or
+context.
 
 OnePassword remains `interactive=True`, so `REFUSE` excludes it before construction. It receives no
 Agentworks prompt broker under `ALLOW`; any biometric or reauthentication UI belongs to the bounded
@@ -979,7 +975,8 @@ The following are implementation requirements, not review advice:
 - Outcomes, provider failures, compatibility errors, cleanup warnings, readiness records, logs,
   graph rows, resource rows, diagnostic render records, and safe identifiers are value-free.
 - No code logs a provider exception or traceback. An unexpected provider exception may contain a
-  value in its message, arguments, or chained cause, so even debug logging of it is forbidden.
+  value in its message, arguments, captured output, or chained cause, so even debug logging of it is
+  forbidden.
 - `ResolutionBatch` never reaches an output handler, generic serializer, `vars`, dataclass helper,
   Pydantic model, or JSON encoder. Renderers receive outcomes or the existing explicitly authorized
   reveal value, never the batch.
@@ -991,12 +988,10 @@ The following are implementation requirements, not review advice:
 Sentinel tests use distinct values in factory, entry, prepare, resolve, cleanup exception messages,
 returned secrets, and chained exceptions. Assertions cover `str` and `repr` of batch, outcomes,
 provider failures, compatibility errors, collected output events, `caplog`, human outcome render,
-and future JSON conversion. They recursively walk every raised object's complete `__cause__` and
-`__context__` graph plus every traceback frame's locals, including `complete_or_raise`, the complete
-adapter, and legacy `resolve_secrets` wrapper frames. Incomplete resolution must show the retained
-batch with an empty `_values`; provider failures must show no native exception or result. The only
-allowed sentinel occurrence is the explicitly authorized value returned by successful
-`complete_or_raise` or the existing value-reveal inspection cell.
+future JSON conversion, and every reachable exception object's message, arguments, captured-output
+attributes, cause, and context. Tests do not inspect traceback frame locals or claim process-memory
+erasure. The only allowed observable sentinel occurrence is the explicitly authorized value returned
+by successful `complete_or_raise` or the existing value-reveal inspection cell.
 
 ## Implementation and test matrix
 
@@ -1012,7 +1007,7 @@ allowed sentinel occurrence is the explicitly authorized value returned by succe
 | Native timeout            | Fake factory, entry, prepare, and resolve boundaries consume budget; timeout attributes whole attempted batch; no thread/future wrapper; fake work proves no callback/process continues after outcome; exit gets the same live remainder                                                                                                                                     |
 | Cleanup                   | Driver receives source and remainder; exact `exc_info`; exit always runs; normal positive-to-zero exit warns; normal pre-zero local exit does not; truthy/raising exit warns at either remainder; overlapping failures emit one source-naming fixed-template warning; warning-sink failure cannot mask; always false; original result/control flow unchanged; entry rollback |
 | Categories                | Exact five categories and exhaustive per-detail category/remediation/source/identifier table; exact provider mappings; deterministic first-source evidence; illegal tuple rejected; identifier controls rejected; frozen/slotted/value-free                                                                                                                                  |
-| Batch privacy             | Constructor invariants; request order; redacted repr/str; no serializer/mapping/iteration/partial property; complete returns a copy; incomplete clears `_values` before error construction; traceback-retained batch and all legacy wrapper locals are sentinel-free                                                                                                         |
+| Batch privacy             | Constructor invariants; request order; redacted repr/str; no serializer/mapping/iteration/partial property; complete returns a copy; incomplete returns no values through its public result or exception object                                                                                                                                                              |
 | Precedence and dedupe     | Duplicate first declaration wins; one outcome per name; first resolved source wins; later source never sees it; request and outcome order independent of client mapping order                                                                                                                                                                                                |
 | Fallthrough and halt      | Soft miss continues; hard mapping, auth, connectivity, external, unexpected, malformed value, protocol violation, and timeout halt every attributed secret; unrelated missing names may continue                                                                                                                                                                             |
 | Readiness and refusal     | Not-ready creates no client and falls through; refused interactive creates no client; final evidence precedence is refused, soft miss, not-ready, empty chain, no attempt; first refused/soft-miss/not-ready source attribution is deterministic                                                                                                                             |
@@ -1022,8 +1017,8 @@ allowed sentinel occurrence is the explicitly authorized value returned by succe
 | Command versus inspection | Same core batch; complete adapter returns all values or raises with none; inspection projection retains successes and typed failures; no prompt answer is repeated; no second resolution loop or error-text branch                                                                                                                                                           |
 | Env-var                   | Default name, explicit validated mapping, unset soft miss, CR/LF strip, one batch, no broker, no timeout, no logging                                                                                                                                                                                                                                                         |
 | Prompt                    | Explicit allow/refuse, missing broker is `StateError`, broker order and metadata rendering, no TTY/global read, abort/interrupt cleanup, control-value rejection                                                                                                                                                                                                             |
-| OnePassword               | Config account/timeout; exact argv/remainder; zero does not spawn; timeout child stopped; biometric/reauth charged and covered by doom; exact typed translations raised after native handler; later failure clears earlier values; no stdout/stderr/native reference in failure graph                                                                                        |
-| No disclosure             | Sentinels in values/native errors/results/every phase; cause/context graph and traceback-local traversal through provider, control flow, batch, complete adapter, and legacy wrapper; only successful complete dictionary and explicit reveal cell may contain a resolved sentinel                                                                                           |
+| OnePassword               | Config account/timeout; exact argv/remainder; zero does not spawn; timeout child stopped; biometric/reauth charged and covered by doom; exact typed translations; later failure returns no earlier values; no native stdout/stderr attached to rendered or raised exception objects                                                                                          |
+| No disclosure             | Sentinels in values/native errors/results/every phase are absent from persisted state, argv, logs, rendered output, outcomes, and exception-object messages/arguments/attributes/cause/context; successful complete dictionary and explicit reveal cell are the authorized observable value surfaces                                                                         |
 | Simple-case parity        | Absent settings, explicit env-var/prompt chain, env-name derivation, prompt opt-out, precedence, duplicate names, partial inspection, complete command failure, fail-before-interaction, operation cache, and gate-seed no-double-resolve match baseline                                                                                                                     |
 
 ## Phase handoff

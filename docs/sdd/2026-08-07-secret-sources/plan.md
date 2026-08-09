@@ -1,6 +1,6 @@
 # Plan: Secret Sources
 
-- Status: Active: post-ready review fixes
+- Status: Active: operator contract correction and unwind
 - FRD: [frd.md](./frd.md)
 - Architecture: [hla.md](./hla.md)
 - Migration: [migration-strategy.md](./migration-strategy.md)
@@ -281,3 +281,26 @@ remains.
 **Definition of done:** no resolved credential is persisted by Lima, every reviewed security
 boundary is non-vacuously enforced, current `main` is integrated, and the final lock describes the
 tested merge candidate.
+
+### Phase 11: operator contract correction and unwind
+
+The operator narrowed the secret-handling contract on 2026-08-09. The completed Phase 10 boxes
+remain the immutable record of work performed, but frame-level memory erasure is superseded: the
+workstation process is trusted, and verification must not expand the contract beyond persisted or
+externally observable disclosure boundaries.
+
+- [ ] Restore the pre-ratchet lifecycle, SSH, initializer, and unwind semantics using `f9381b46` as
+      the reference; remove every sensitive-state owner, operation fence, traceback rewrite,
+      scrub-on-every-`BaseException` path, and frame-walking test introduced for memory erasure.
+- [ ] Preserve the actual Secret Sources fixes: key-free Lima/provider-retained configuration,
+      centralized stdin delivery, safe logs/diagnostics/exception objects, broker scoping,
+      retired-module enforcement, plugin remediation, and the valid `str`-subclass attribution fix.
+- [ ] Prove the mistaken path is gone with structural deny-list scans and diff review against the
+      reference, then run focused behavior tests, the full non-integration suite, static/repository
+      gates, independent review, and supported-version CI.
+- [ ] Re-truth the prospective lock and acceptance counts. Keep the operator-gated live remote-Lima
+      run open until concrete inventory and a fresh authorized Tailscale key are available.
+
+**Definition of done:** the branch behaves as though the frame-erasure detour never happened. It
+protects durable and externally observable boundaries without dedicated in-memory cleanup machinery,
+semantic changes, complexity, friction, or performance cost.

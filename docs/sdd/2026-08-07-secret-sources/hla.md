@@ -1,6 +1,6 @@
 # HLA: Secret Sources
 
-- Status: Implemented; post-ready fixes in progress
+- Status: Implemented; operator contract correction in progress
 - FRD: `docs/sdd/2026-08-07-secret-sources/frd.md`
 - Prior art: `docs/sdd/2026-08-07-secret-sources/prior-art-research.md`
 - Saga contract: `docs/sdd/2026-08-04-next-steps/capability-descriptor-contract.md`
@@ -404,9 +404,16 @@ No permanent artifact points readers back to this SDD.
 ## Security and invariant enforcement
 
 - Source config may not contain `SecretRef` markers, enforced during backend registration.
-- Values exist only in the private `ResolutionBatch` mapping and the operation-scoped resolver,
-  never outcomes, resource rows, graph nodes, config models, logs, doctor records, describe records,
-  or persisted state.
+- Architectural owners of values are limited to the private `ResolutionBatch` mapping,
+  operation-scoped consumers, and the centralized process-input boundary. Values never enter
+  outcomes, resource rows, graph nodes, config models, logs, doctor records, describe records, argv,
+  or persisted/provider-retained state.
+- The workstation process is inside the trust boundary. In-memory references, immutable-string
+  copies, and ordinary Python traceback locals are best-effort only, not a security guarantee. A
+  workstation-user compromise already grants process access and passwordless administrative access
+  to managed VMs. Opportunistic reference clearing is acceptable only when it is trivial and has no
+  complexity, behavior, performance, or reliability cost; stronger erasure would require a separate
+  short-lived process whose address space exits.
 - Backend registries and graph nodes carry classes, never authenticated clients.
 - Source clients receive only immutable `SecretLookupRequest` projections, never descriptions,
   hints, declarations, registries, graphs, config roots, resolvers, or mappings for other sources;
