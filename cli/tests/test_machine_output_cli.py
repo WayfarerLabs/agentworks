@@ -88,6 +88,112 @@ def test_operational_json_usage_errors_have_empty_stdout_before_work(monkeypatch
         assert result.stderr_bytes
 
 
+def test_operational_describe_json_commands_are_deterministic_and_exclude_opaque_state(monkeypatch) -> None:
+    """Exercise every describe command through Typer with representative nullable facts."""
+    from agentworks.agents import manager as agents
+    from agentworks.agents.manager.inspect import AgentDescription, AgentSession
+    from agentworks.cli.commands import agent, console, session, vm, workspace
+    from agentworks.db import VMRow, WorkspaceRow
+    from agentworks.sessions import manager as sessions
+    from agentworks.sessions import multi_console
+    from agentworks.sessions.manager._queries import SessionDescription
+    from agentworks.sessions.multi_console.attach import ConsoleDescription, ConsoleMember, ConsoleShell
+    from agentworks.vms import manager as vms
+    from agentworks.vms.manager.power import VMDescription, VMIssue
+    from agentworks.workspaces import manager as workspaces
+    from agentworks.workspaces.manager.create import WorkspaceDescription, WorkspaceSession
+
+    marker = "secret-value platform-metadata socket-path boot-id harness-state"
+    vm_row = VMRow(
+        name="box",
+        site="site",
+        template=None,
+        admin_template=None,
+        extra_packages=[],
+        provisioning_status="complete",
+        init_status="complete",
+        tailscale_host=None,
+        cpus=None,
+        memory_gib=None,
+        disk_gib=None,
+        swap_gib=None,
+        admin_username="admin",
+        hostname="box",
+        created_at="2026-01-01",
+        last_seen_at=None,
+        platform_metadata={"opaque": marker},
+    )
+    workspace_row = WorkspaceRow("ws", "box", None, "/work/ws", "2026-01-01", "ws-ws")
+    monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: object())
+    for module in (agent, console, session, vm, workspace):
+        monkeypatch.setattr(module, "get_db", lambda: object())
+    monkeypatch.setattr(
+        vms,
+        "vm_description",
+        lambda *_args, **_kwargs: VMDescription(
+            vm=vm_row,
+            platform=None,
+            backend=None,
+            observed_status="stopped",
+            status_disposition="idle",
+            system_slug=None,
+            system_slug_state="unset",
+            live_resources=None,
+            agents=(),
+            workspaces=(),
+            events=(),
+            issues=(VMIssue("secret_resolution"),),
+            diagnostics=(),
+        ),
+    )
+    monkeypatch.setattr(
+        workspaces,
+        "workspace_description",
+        lambda *_args, **_kwargs: WorkspaceDescription(workspace_row, (WorkspaceSession("s", "t", "admin", None),), ()),
+    )
+    monkeypatch.setattr(
+        agents,
+        "agent_description",
+        lambda *_args, **_kwargs: AgentDescription(
+            "a", "box", "agent-a", None, False, "2026-01-01", (), (AgentSession("s", "t", "ws"),)
+        ),
+    )
+    monkeypatch.setattr(
+        sessions,
+        "session_description",
+        lambda *_args, **_kwargs: SessionDescription(
+            "s", "ws", "box", "t", None, "admin", None, "stopped", None, "2026-01-01", "2026-01-02"
+        ),
+    )
+    monkeypatch.setattr(
+        multi_console,
+        "console_description",
+        lambda *_args, **_kwargs: ConsoleDescription(
+            "c", "box", False, "2026-01-01", "2026-01-02", (ConsoleMember(0, "s", (ConsoleShell(None, False),)),)
+        ),
+    )
+
+    for argv, command, root_key in (
+        (["vm", "describe", "box", "--output", "json"], "vm.describe", "vm"),
+        (["workspace", "describe", "ws", "--output", "json"], "workspace.describe", "workspace"),
+        (["agent", "describe", "a", "--output", "json"], "agent.describe", "agent"),
+        (["session", "describe", "s", "--output", "json"], "session.describe", "session"),
+        (["console", "describe", "c", "--output", "json"], "console.describe", "console"),
+    ):
+        first = CliRunner().invoke(app, argv)
+        second = CliRunner().invoke(app, argv)
+        assert first.exit_code == second.exit_code == 0, first.output
+        assert first.stdout_bytes == second.stdout_bytes
+        document = _json_document(first)
+        assert document["command"] == command
+        assert root_key in cast("dict[str, object]", document["data"])
+        assert marker.encode() not in first.stdout_bytes
+
+    session_data = _json_document(CliRunner().invoke(app, ["session", "describe", "s", "--output", "json"]))["data"]
+    session_record = cast("dict[str, object]", cast("dict[str, object]", session_data)["session"])
+    assert session_record["pid"] is None
+
+
 def _json_document(result: Result) -> dict[str, object]:
     stdout_bytes = result.stdout_bytes
     assert stdout_bytes.endswith(b"\n")
