@@ -1,12 +1,12 @@
 # 13. CLI-side Secret Injection for VM Shells
 
-Date: 2026-06-06
+Date: 2026-06-06 (amended 2026-08-09)
 
 ## Status
 
 Accepted. The resolution mechanism ("env var, then prompt" as a hardcoded sourcing order) is
-superseded by ADR 0016's backend-chain model; the decision itself -- CLI-side injection, no VM-side
-secret storage -- stands.
+superseded by ADR 0016's configured `secret-source` model; the decision itself remains CLI-side
+injection with no VM-side secret storage.
 
 ## Context
 
@@ -202,11 +202,10 @@ for their secrets at start.
   trail, rotation story, monitoring) for benefits the CLI-injection model already provides via much
   simpler machinery.
 
-### C: Hybrid (broker as opt-in second source)
+### C: Hybrid (broker as an opt-in source)
 
-The HLA's `SecretSource` protocol already accommodates additional providers being added later
-(keychain, 1Password CLI, Vault, etc.). A VM-side broker could be added as a `BrokerSource` in a
-future iteration if a use case emerges.
+The bounded `SecretBackend` client contract accommodates additional implementations. A declarable
+`secret-source` could select a VM-side broker backend in a future iteration if a use case emerges.
 
 **Why considered:**
 
@@ -214,8 +213,8 @@ future iteration if a use case emerges.
 
 **Why not chosen now:**
 
-- Premature. No concrete use case justifies the complexity yet. The protocol shape already allows
-  adding it later if one materializes.
+- Premature. No concrete use case justifies the complexity yet. The backend contract and configured
+  source model allow adding it later if one materializes.
 
 ## Future shape
 
@@ -223,10 +222,10 @@ A likely future direction is a long-lived operator-side controller process that 
 CLI (or other clients) and the VMs, with its own access to secret sources (vaults, keychains). That
 direction does not change this ADR's core decision: the trust anchor stays on the operator side, and
 no secret material is persisted on the VM. The controller becomes the new "CLI" for the purposes of
-this ADR's reasoning. The `SecretSource` protocol shape is what makes the transition mechanical: the
-controller adds vault-backed sources, the prompt fallback drops away in favor of API errors to
-clients, and the resolver caching model gets revisited for the longer process lifetime. None of that
-requires reopening the core decision documented here.
+this ADR's reasoning. The bounded client contract and configured sources make the transition
+mechanical: the controller adds vault-backed sources, the prompt fallback drops away in favor of API
+errors to clients, and the client lifetime model gets revisited for the longer process lifetime.
+None of that requires reopening the core decision documented here.
 
 ## See also
 

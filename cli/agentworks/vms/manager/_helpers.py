@@ -288,13 +288,11 @@ def _lookup_or_synthesize_secret(registry: Registry, name: str) -> SecretDecl:
     if no Resource was published or auto-declared under that name.
 
     Used by ``start_vm``'s conditional standalone resolution and by operation
-    resolvers registering an undeclared repair name. The semantics: an operator who omits
-    every ``[vm_templates.*]`` section AND every ``[secrets.*]``
-    section leaves the registry empty under the ``secret`` kind, so a
-    strict lookup raises ``KeyError``. Synthesizing a bare
-    ``SecretDecl`` (the same shape ``_SecretKind.synthesize`` would
-    produce, minus ``origin`` which resolution doesn't read) keeps the
-    source chain callable.
+    resolvers registering an undeclared repair name. A well-known name that no
+    manifest references has no registry row, so a strict lookup raises
+    ``KeyError``. Synthesizing a bare ``SecretDecl`` (the same shape
+    ``_SecretKind.synthesize`` would produce, minus ``origin`` which resolution
+    doesn't read) keeps the source chain callable.
     """
     from agentworks.secrets.base import SecretDecl
     from agentworks.secrets.kinds import SECRET_KIND_NAME

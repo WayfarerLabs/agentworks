@@ -521,7 +521,7 @@ Three pieces have separate jobs:
   precedence order. Each `backend_mappings` key is also a source name. The default remains
   `["env-var", "prompt"]`.
 
-For example, a configured 1Password source owns its account and timeout:
+For example, a configured 1Password source owns its account and an optional operation timeout:
 
 ```yaml
 apiVersion: agentworks/v1
@@ -536,9 +536,12 @@ spec:
 ```
 
 Enable the `onepassword` plugin, add `work-op` to the chain, and map a secret with
-`work-op: op://vault/item/field`. The mapping is always scalar. Direct backend names break in 0.14;
-the error gives the exact source declaration and reference rewrite, with no compatibility row or
-legacy parser.
+`work-op: op://vault/item/field`. The mapping is always scalar. The synthesized `env-var` and
+`prompt` source names remain valid unchanged. A direct configured-backend reference such as
+`onepassword` breaks in 0.14; the error gives the exact source declaration and reference rewrite,
+with no compatibility row or legacy parser. When rewriting the old OnePassword mapping table, move
+its account to the source. The optional timeout is new source configuration and defaults to 30
+seconds; it did not move from the old mapping.
 
 ### The words the surfaces use
 

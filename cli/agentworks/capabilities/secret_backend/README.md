@@ -126,6 +126,5 @@ Provider failures cross the boundary only through `SecretClientFailure` and `Sec
 `SecretClientFailure` fixes each failure kind to its allowed remediation and accepts no free-form
 provider message, stderr, or secret-bearing context.
 
-The declarable source and map-host schema are intentionally not an authoring surface in this package
-yet. Capability implementations can target this version-2 contract without inventing a parallel
-public source API.
+The declarable source and map-host schema are framework-owned, not backend authoring surfaces.
+Capability implementations target this version-2 contract without inventing a parallel source API.

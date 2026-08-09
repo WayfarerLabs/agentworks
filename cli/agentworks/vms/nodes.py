@@ -336,9 +336,9 @@ class VMTemplateNode:
         git-credential nodes: those verify their declared names reach
         real registry rows, but the auth key rides
         ``secret_declarations``'s lookup-or-synthesize fallback on
-        purpose, so an operator with no ``[secrets.*]`` sections at all
-        still gets a callable source chain. Requiring a row here would
-        retire that fallback as a side effect.
+        purpose, so a well-known name with no manifest reference still
+        gets a synthesized declaration and a callable source chain.
+        Requiring a row here would retire that fallback as a side effect.
         """
 
     def runup(self, ctx: RunContext) -> None: ...

@@ -2826,7 +2826,14 @@ def test_permanent_runtime_vocabulary_and_rendered_secret_guide_are_source_first
     rendered = "\n".join(
         [topic.summary, *(block.markdown for block in topic.blocks if hasattr(block, "markdown"))]
     ).lower()
-    assert "source" in rendered
+    assert "secret-source" in rendered
+    assert "secret-backend" in rendered
+    assert "resource sample secret-source" in rendered
+    assert "env-var" in rendered and "prompt" in rendered
+    assert "onepassword" in rendered and "op://" in rendered
+    assert "implementation inventory is global" in rendered
+    assert "not configured secret sources or their order" in rendered
+    assert "configured source order" not in rendered
     assert "interaction policy" in rendered
     assert "preview" in rendered and "not proof" in rendered
     assert "consent" in rendered

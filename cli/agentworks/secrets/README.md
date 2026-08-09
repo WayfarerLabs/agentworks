@@ -55,9 +55,12 @@ spec:
     work-op: op://Engineering/npm/token
 ```
 
-Then place `work-op` wherever it belongs in `[secret_config].backends`. Direct backend names are not
-treated as sources in 0.14. An unknown name that exactly matches a backend produces a hard error
-with the source manifest and mapping rewrite; there is no compatibility source or legacy parser.
+Then place `work-op` wherever it belongs in `[secret_config].backends`. A configured backend name
+such as `onepassword` is not treated as a source alias in 0.14. The synthesized `env-var` and
+`prompt` source names remain valid unchanged. An unknown source name that exactly matches a
+configured backend produces a hard error with the source manifest and mapping rewrite; there is no
+compatibility source or legacy parser. When rewriting the old OnePassword mapping table, move its
+account to the source; the optional source timeout is new and defaults to 30 seconds.
 
 ## Runtime contract
 

@@ -1088,12 +1088,12 @@ lives in `agw secret list` and `agw secret describe`. `AGENTWORKS_*` identity ov
 the Configuration group (they're a config-load warning). Broken `{ secret: ... }` references are
 caught earlier as a hard config-load error before doctor runs. Git-credential tokens are just
 secrets: their _resolvability_ reports as ordinary `git-token-<name>` rows in the Secrets group,
-like any other secret. Doctor never prompts; its preview may probe ready non-interactive sources but
-discards their values, and it does not authenticate tokens against an interactive provider. Live
-verification (a token expired, revoked, or wrong-scope) happens at the capability `runup()` stage
-inside provisioning ops, and on-demand via the planned `agw doctor --runup` (which may prompt). The
-Tailscale group checks only workstation connectivity; the auth key is the `tailscale-auth-key`
-secret row.
+like any other secret. Doctor never opens a source, reads an environment variable, invokes a client,
+or prompts. Its preview is a value-free applicability prediction, not proof that a value exists. Use
+`agw secret verify NAME...` for an explicit value-free proof; interactive sources require
+`--allow-interaction`. Capability token authentication still occurs at the capability `runup()`
+stage inside provisioning operations. The Tailscale group checks only workstation connectivity; the
+auth key is the `tailscale-auth-key` secret row.
 
 When the config or a resource manifest fails to load, the groups that depend on them (VM sites,
 Secrets) do not vanish: each renders a single
@@ -1105,10 +1105,12 @@ the actual failure.
 
 A **source** is a declarable `secret-source` resource that selects one read-only `secret-backend`
 implementation in `spec.backend`. The chain and every `backend_mappings` key name sources, not
-implementations. `env-var` and `prompt` sources are synthesized. For 1Password, enable the plugin,
-declare a source with `backend.name: onepassword`, put `account` and `timeout` on that source, and
-map each secret's source key to one scalar `op://` reference. Direct backend names break in 0.14
-with an exact source declaration and mapping rewrite; no compatibility row is created.
+implementations. The synthesized `env-var` and `prompt` source names remain valid unchanged. For
+1Password, enable the plugin, declare a source with `backend.name: onepassword`, move the old
+mapping account to that source, optionally set the new source timeout, and map each secret's source
+key to one scalar `op://` reference. A direct configured-backend reference such as `onepassword`
+breaks in 0.14 with an exact source declaration and mapping rewrite; no compatibility row is
+created.
 
 ### System Plugins
 

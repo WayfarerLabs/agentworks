@@ -94,10 +94,10 @@ class Resolver:
 
         Looks the name up against the registry's ``secret`` rows and
         falls back to synthesizing a bare declaration when absent: an
-        operator who omits every ``[vm_templates.*]`` and ``[secrets.*]``
-        section leaves the registry empty under the ``secret`` kind, and
-        the source chain must stay callable for the well-known names
-        (the same fallback the pre-resolver ``_collect_secrets`` used).
+        operator who has no manifest referencing a well-known secret name
+        leaves the registry without that ``secret`` row, and the source
+        chain must stay callable for well-known names (the same fallback
+        the pre-resolver ``_collect_secrets`` used).
         """
         existing = self._decls.get(name)
         if existing is not None:

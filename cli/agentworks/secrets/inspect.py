@@ -277,7 +277,7 @@ class SecretDescription:
     as a multi-line block (variant + sub-fields). ``description`` is the
     operator-supplied text or the framework-synthesized text for
     auto-declared secrets (set during ``Registry.finalize``). ``hint``
-    is the operator-set prompt hint (``[secrets.<name>].hint``),
+    is the operator-set prompt hint from the ``secret`` manifest,
     surfaced for debugging "why isn't my prompt showing the helpful
     hint" without triggering a prompt.
 

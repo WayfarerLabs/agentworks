@@ -474,8 +474,10 @@ local path needs no `[plugins]` entry at all; "System plugins" in the
 names. Each key under a secret's `backend_mappings` is also a source name. The synthesized `env-var`
 and `prompt` sources work as-is, so the default `["env-var", "prompt"]` chain needs no changes.
 
-Direct `onepassword` references intentionally break. Enable its plugin, declare a source, move the
-account and timeout to that source, and make each mapping a scalar reference:
+Direct configured-backend references such as `onepassword` intentionally break. Enable its plugin,
+declare a source, move the old mapping's account to that source, and make each mapping a scalar
+reference. The optional source timeout is new in 0.14 and defaults to 30 seconds; it is not a field
+moved from the old mapping:
 
 ```yaml
 apiVersion: agentworks/v1

@@ -1,4 +1,4 @@
-"""`agentworks secret` -- inspect declared secrets and their backend mappings."""
+"""`agentworks secret` commands for value-free source inspection and proof."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from agentworks.secrets.policy import InteractionPolicy, validate_interaction_po
 
 secret_app = typer.Typer(
     name="secret",
-    help="Inspect declared secrets and their backend mappings.",
+    help="Inspect declared secrets and their source mappings.",
     no_args_is_help=True,
 )
 app.add_typer(secret_app)
@@ -69,11 +69,10 @@ def secret_describe(
     (which active source would attempt, or "not attemptable"). Does not prompt, does
     not resolve values.
 
-    The secret must be in the Resource Registry -- either
-    operator-declared via ``[secrets.<name>]`` or auto-declared via a
-    reference's miss policy (the framework auto-declares missing
-    names that something references; ``agw secret list`` shows every
-    such name).
+    The secret must be in the Resource Registry: either operator-declared
+    as a ``secret`` manifest or auto-declared via a reference's miss policy.
+    The framework auto-declares missing names that something references;
+    ``agw secret list`` shows every such name.
     """
     from agentworks.bootstrap import load_request_registry
     from agentworks.config import load_config

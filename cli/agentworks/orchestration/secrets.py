@@ -75,10 +75,9 @@ def secret_declarations(names: Iterable[str], registry: Registry) -> tuple[Secre
     """Declarations for ``names``, from the registry's ``secret`` rows.
 
     A name with no registry row falls back to a synthesized bare
-    declaration: an operator who omits every ``[secrets.*]`` section
-    leaves the registry empty under the ``secret`` kind, and the
-    source chain must stay callable for the well-known names (the
-    same fallback ``Resolver.register_name`` applies).
+    declaration. This keeps sources callable for well-known names that no
+    manifest references, matching the fallback ``Resolver.register_name``
+    applies.
     """
     from agentworks.secrets.base import SecretDecl
     from agentworks.secrets.kinds import SECRET_KIND_NAME

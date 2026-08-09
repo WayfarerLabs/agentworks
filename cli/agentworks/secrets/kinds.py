@@ -5,11 +5,11 @@
 :mod:`agentworks.capabilities.secret_backend.kinds`.
 
 ``SecretKind`` uses the ``auto-declare`` miss policy with no name
-restriction -- any name a ``SecretReference`` references is
+restriction: any name a ``SecretReference`` references is
 auto-synthesized when not operator-declared. The synthesized
 ``SecretDecl`` carries an empty ``description``; operators are warned
 that auto-declared secrets should be promoted to explicit
-``[secrets.<name>]`` blocks so they can carry a description.
+``secret`` manifests so they can carry a description.
 
 """
 
@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 SECRET_KIND_NAME = "secret"
 """Single source of truth for the ``"secret"`` kind identifier. Callers
 that need to render or compare against the kind name import this rather
-than re-typing the literal -- a hypothetical rename then flows through
+than re-typing the literal; a hypothetical rename then flows through
 every site by construction."""
 
 
