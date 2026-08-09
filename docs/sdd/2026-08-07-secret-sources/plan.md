@@ -272,8 +272,8 @@ remains.
       post-0.14 consolidation pass.
 - [ ] Run focused mutations, Green, provider-faithful persistence checks, live remote-Lima
       validation with independent cleanup, all supported-version CI, and full re-review. The local
-      portions are complete at independently reviewed `0dad790f`; supported-version CI and the live
-      remote-Lima run remain. The live run is operator-gated on concrete inventory and a fresh
+      portions are complete at independently reviewed `0dad790f`, and supported-version CI passed at
+      `94a26dc7`. Only the live run remains; it is operator-gated on concrete inventory and a fresh
       authorized Tailscale key. The previously exposed key must not be reused.
 - [ ] Re-truth `locked.md` for the final implementation and residuals, then leave PR #453 ready and
       mergeable with no valid finding unresolved.

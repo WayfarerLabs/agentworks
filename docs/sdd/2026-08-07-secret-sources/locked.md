@@ -53,8 +53,8 @@ guide at `docs/guides/upgrading-to-0.14.md` contains the before/after configurat
 - The exact independently reviewed local head `0dad790f` passed **7,562 non-integration tests with 3
   deselected**. Ruff, formatting, strict mypy over 646 files, file lint, Rulesync drift, locked-SDD,
   and diff checks passed.
-- PR CI passed on Python 3.12, 3.13, and 3.14, including CodeQL and aggregate `ci-success`, at
-  `f9381b46`. Every subsequent closeout commit must receive the same required CI before merge.
+- PR CI passed on Python 3.12, 3.13, and 3.14, including CodeQL and aggregate `ci-success`, at the
+  final code-and-evidence head `94a26dc7`.
 - The permanent POSIX real-entry harness exercises the shipped console script with isolated config:
   implied environment resolution, prompt refusal, mixed variadic verification, direct OnePassword
   remediation, a declared source through an exact fake-only `op` boundary, doctor, guide output, and
