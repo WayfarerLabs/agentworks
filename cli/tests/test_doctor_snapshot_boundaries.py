@@ -508,7 +508,8 @@ def test_inspection_snapshot_uses_complete_protocol_for_main_wal_and_shm(
     assert all(flags & os.O_NOFOLLOW for _name, _directory_fd, flags in acquisitions)
     assert all(flags & os.O_NONBLOCK for _name, _directory_fd, flags in acquisitions)
     assert directory_acquisitions
-    assert directory_acquisitions[0][0] == "."
+    preflight_names = [*db_path.parent.resolve().parts[1:], "."]
+    assert [name for name, _parent_fd, _flags in directory_acquisitions[: len(preflight_names)]] == (preflight_names)
     assert all(parent_fd >= 0 for _name, parent_fd, _flags in directory_acquisitions)
     assert all(flags & os.O_DIRECTORY for _name, _parent_fd, flags in directory_acquisitions)
     assert all(flags & os.O_NOFOLLOW for _name, _parent_fd, flags in directory_acquisitions)

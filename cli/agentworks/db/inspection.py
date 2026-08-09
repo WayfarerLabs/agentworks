@@ -158,23 +158,28 @@ def _open_directory_component(name: str, parent_fd: int) -> int:
         raise
 
 
-def _trusted_filesystem_anchor(requested_path: Path) -> str:
-    """Return the lexical filesystem anchor without inspecting the source."""
-    absolute_path = requested_path if requested_path.is_absolute() else Path.cwd() / requested_path
-    if not absolute_path.anchor:
+def _rooted_lexical_requested_path(requested_path: Path) -> Path:
+    """Root the requested path without resolving its final component."""
+    if requested_path.drive and not requested_path.root:
         raise _UnsupportedSnapshotEntry
-    return absolute_path.anchor
+    rooted_path = requested_path if requested_path.is_absolute() else Path.cwd() / requested_path
+    if not rooted_path.anchor:
+        raise _UnsupportedSnapshotEntry
+    return rooted_path
 
 
 def _preflight_snapshot_protocol(requested_path: Path) -> None:
     """Exercise directory-relative acquisition on the source filesystem."""
     _require_snapshot_protocol()
-    anchor_fd = _open_directory_anchor(_trusted_filesystem_anchor(requested_path))
+    rooted_path = _rooted_lexical_requested_path(requested_path)
     try:
-        probe_fd = _open_directory_component(".", anchor_fd)
+        resolved_parent = rooted_path.parent.resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise _UnsupportedSnapshotEntry from None
+
+    with _pinned_directory(resolved_parent) as directory_fd:
+        probe_fd = _open_directory_component(".", directory_fd)
         os.close(probe_fd)
-    finally:
-        os.close(anchor_fd)
 
 
 @contextmanager

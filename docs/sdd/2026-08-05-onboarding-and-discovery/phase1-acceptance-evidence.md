@@ -286,13 +286,13 @@ Unsupported-host and malformed-schema correction validation passed:
 
 ## Runtime protocol preflight and migration completion correction
 
-The follow-up correction exercises the requested path's trusted filesystem anchor and an actual
-directory-relative open before checking the database entry. Runtime `EOPNOTSUPP` and `ENOSYS`
-results therefore become the same closed protocol-unavailable outcome even when the database is
-absent, without touching the main, WAL, or SHM entries. The final migration doctor action now
-requires both failure and unavailable counts to be zero. Diagnostic doctor actions remain permissive
-because unavailable state is still useful evidence there. The permanent CLI wording now names only
-applicable VM sites because a failed configuration or registry retains its informational skip row.
+The follow-up correction gates static protocol capability and adds a live directory-relative probe
+before checking the database entry. Runtime `EOPNOTSUPP` and `ENOSYS` results therefore become the
+same closed protocol-unavailable outcome even when the database is absent, without touching the
+main, WAL, or SHM entries. The final migration doctor action now requires both failure and
+unavailable counts to be zero. Diagnostic doctor actions remain permissive because unavailable state
+is still useful evidence there. The permanent CLI wording now names only applicable VM sites because
+a failed configuration or registry retains its informational skip row.
 
 Runtime preflight and migration completion correction validation passed:
 
@@ -302,3 +302,23 @@ Runtime preflight and migration completion correction validation passed:
 - full mypy: 625 source files clean;
 - Rulesync generated-output check and locked-SDD validation: clean;
 - mandatory file lint: 277 Markdown files clean, 250 spelling files clean, and Prettier clean.
+
+## Resolved requested-parent preflight correction
+
+The final narrow correction moves the live probe from the lexical root to the requested parent's
+actual filesystem. It roots the lexical request without resolving its final component, rejects
+drive-relative forms, strictly resolves only the requested parent, pins that resolved parent through
+the component-by-component descriptor walk, and opens `.` relative to the resulting fd. The probe
+runs before any final-entry lstat, resolution, or read. Runtime `EOPNOTSUPP` and `ENOSYS` at the
+target probe become the same path-free protocol-unavailable result for absent and active databases,
+and every acquired directory descriptor is closed. Stable component and final database symlinks
+remain supported.
+
+Resolved requested-parent correction validation passed:
+
+- focused adversarial snapshot boundary suite: 43 passed;
+- wider doctor and machine-output slice: 125 passed;
+- Ruff check and format check: 626 files clean;
+- full mypy: 626 source files clean;
+- Rulesync generated-output check and locked-SDD validation: clean;
+- mandatory file lint: clean.
