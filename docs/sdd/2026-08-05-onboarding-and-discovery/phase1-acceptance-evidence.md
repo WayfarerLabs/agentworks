@@ -240,3 +240,17 @@ Component-pinning correction validation passed:
 
 The full non-integration suite was not repeated for this narrow P1 correction. The lead reruns that
 suite after integration.
+
+## Final integrated Phase 2 revalidation
+
+The lead integrated the accepted-feedback corrections, both independent re-review rounds, and
+current `main` before running the final local gate set. Both the project reviewer and the fresh-eyes
+reviewer approved the component-pinned snapshot boundary with no remaining findings.
+
+Final integrated validation passed:
+
+- full non-integration suite: 6,696 passed and 3 deselected;
+- Ruff check and format check: 625 files clean;
+- full mypy: 625 source files clean;
+- Rulesync generated-output check and locked-SDD validation: clean;
+- mandatory file lint: Prettier, markdownlint, and cspell clean.
