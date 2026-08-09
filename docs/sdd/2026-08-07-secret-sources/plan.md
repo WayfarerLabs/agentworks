@@ -262,16 +262,18 @@ remains.
 
 ### Phase 10: post-ready integration and security review fixes
 
-- [ ] Integrate current `main`, consume the saga rename message, resolve every merge conflict while
+- [x] Integrate current `main`, consume the saga rename message, resolve every merge conflict while
       preserving both contracts, and update current artifact status and terminology.
-- [ ] Replace persisted Lima Tailscale-key delivery with an ephemeral boundary, pin prompt-broker
+- [x] Replace persisted Lima Tailscale-key delivery with an ephemeral boundary, pin prompt-broker
       scoping, reject retired module identities, and preserve disabled-plugin remediation through
       source outcomes.
-- [ ] Publish the interaction broker deliberately, complete source vocabulary/readiness teaching,
+- [x] Publish the interaction broker deliberately, complete source vocabulary/readiness teaching,
       split the oversized Phase 7 enforcement suite, and mark literal caller pins for the planned
       post-0.14 consolidation pass.
 - [ ] Run focused mutations, Green, provider-faithful persistence checks, live remote-Lima
-      validation with independent cleanup, all supported-version CI, and full re-review.
+      validation with independent cleanup, all supported-version CI, and full re-review. Everything
+      except the live remote-Lima run is complete; that run is operator-gated on concrete inventory
+      and a fresh authorized Tailscale key. The previously exposed key must not be reused.
 - [ ] Re-truth `locked.md` for the final implementation and residuals, then leave PR #453 ready and
       mergeable with no valid finding unresolved.
 

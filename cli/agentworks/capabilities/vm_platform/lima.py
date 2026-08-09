@@ -531,7 +531,7 @@ class LimaPlatform(VMPlatform):
         """Create and start a local Lima VM without persisting its template."""
         try:
             # Lima's documented ``-`` template source consumes stdin. The
-            # secret-bearing YAML therefore never needs a local filesystem
+            # provider configuration therefore never needs a local filesystem
             # path, including on Windows where unlinking an open temp file is
             # not reliable.
             self._run_lima(
@@ -573,8 +573,8 @@ class LimaPlatform(VMPlatform):
 
         ``lima_yaml`` is the exact provider-persisted configuration and must
         contain no resolved secret. ``redactions`` remains defense in depth
-        for provider output, but is not permission to submit a secret-bearing
-        template.
+        for provider output, but is not permission to put resolved secrets in
+        the submitted template.
         """
         assert self._remote_host is not None
         target = SSHTarget(host=self._remote_host, user=None)
@@ -688,7 +688,7 @@ class LimaPlatform(VMPlatform):
         return remote_template_dir
 
     def _remove_remote_template_dir(self, target: SSHTarget, remote_template_dir: str) -> None:
-        """Retry and verify removal of the remote secret-bearing directory."""
+        """Retry and verify removal of the remote provider-input directory."""
         quoted_dir = shlex.quote(remote_template_dir)
         command = f"rm -rf -- {quoted_dir} && test ! -e {quoted_dir}"
         for _attempt in range(_REMOTE_TEMPLATE_CLEANUP_ATTEMPTS):
@@ -712,7 +712,7 @@ class LimaPlatform(VMPlatform):
             entity_kind="vm",
             hint=(
                 f"On VM host '{self._remote_host}', recursively remove directory "
-                f"'{remote_template_dir}' before retrying. It may contain credentials."
+                f"'{remote_template_dir}' before retrying. It may contain sensitive operator configuration."
             ),
         )
 

@@ -1,8 +1,10 @@
 # Secret Sources: locked
 
-**Locked 2026-08-09.** The SDD is complete. Secret Sources shipped on the single ordinary
-`feat/secret-sources` branch in PR #453. The lock binds when that PR lands on `main`; until then,
-the branch remains an operator-controlled merge candidate.
+**Prospective lock record, updated 2026-08-09.** The SDD is not yet complete: Phase 10's
+operator-gated live remote-Lima rerun remains open. Secret Sources is implemented on the single
+ordinary `feat/secret-sources` branch in PR #453. This record will become the final lock only after
+that run, final review, and the remaining Phase 10 boxes complete; the lock binds when the PR lands
+on `main`.
 
 ## What shipped
 
@@ -48,11 +50,12 @@ guide at `docs/guides/upgrading-to-0.14.md` contains the before/after configurat
 
 ## Acceptance and review evidence
 
-- The final local non-integration gate passed with **7,448 tests and 3 deselected**. Ruff,
-  formatting, strict mypy over 628 files, file lint, Rulesync drift, locked-SDD, and diff checks
-  passed.
-- PR CI passed on Python 3.12, 3.13, and 3.14, including CodeQL and aggregate `ci-success`, before
-  this documentation-only lock commit. The lock commit receives the same required CI before merge.
+- The most recent complete pre-round local non-integration gate passed with **7,480 tests and 3
+  deselected**. Ruff, formatting, strict mypy over 639 files, file lint, Rulesync drift, locked-SDD,
+  and diff checks passed. This final review-fix round must rerun those gates before the record
+  locks.
+- PR CI passed on Python 3.12, 3.13, and 3.14, including CodeQL and aggregate `ci-success`, at
+  `f9381b46`. Every subsequent closeout commit must receive the same required CI before merge.
 - The permanent POSIX real-entry harness exercises the shipped console script with isolated config:
   implied environment resolution, prompt refusal, mixed variadic verification, direct OnePassword
   remediation, a declared source through an exact fake-only `op` boundary, doctor, guide output, and
@@ -60,12 +63,13 @@ guide at `docs/guides/upgrading-to-0.14.md` contains the before/after configurat
 - Mutation review proved that tests fail when descriptor-derived source-key validation, `false`
   opt-out, retired-path enforcement, implied prompt fallback, value-free verification, variadic
   verification, or all-shell completion behavior is neutered; the restored tree passed its gates.
-- The final whole-PR `agentworks-reviewer` pass marked every FRD acceptance criterion and plan phase
-  satisfied. Independent fresh correctness/security, gate-honesty, and operator upgrade-path passes
-  were clean after three minor prose corrections.
+- Two independent fix reviews were clean at `f9381b46`. The later integration disposition found a
+  remaining traceback-local cleanup defect and one plugin-name contract mismatch; Phase 10 remains
+  open until their fixes and the operator-gated live run are reviewed.
 - Marking PR #453 ready triggered the repository's Copilot reviewer. It declined because the diff
   exceeds its 20,000-line limit, so the required fresh-eyes fallback is the independent cold review
-  recorded above; no valid finding remains unresolved.
+  recorded above. Findings from the latest fallback review are tracked in Phase 10 rather than
+  omitted from this prospective record.
 
 ## Permanent record
 
@@ -95,6 +99,10 @@ not edit the saga SDD.
 
 ## Honest residual work
 
+- A final real remote-Lima run must exercise the ephemeral stdin join and inspect the actual
+  retained instance YAML and `limactl list --json` before this record can lock. This session does
+  not have the concrete remote inventory, SSH identity, or a fresh authorized Tailscale key. The key
+  exposed by the earlier provider run must be revoked and must not be reused.
 - The operator still owns merging PR #453 and ensuring release PR #402 refreshes before release.
 - Real 1Password authentication and multi-account parsing were not exercised with operator
   credentials. Tests and the acceptance harness deliberately use a closed fake-provider boundary.
