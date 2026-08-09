@@ -270,6 +270,14 @@ class _DefaultProgress:
         print(f"{_pad(self._level + 1)}{self._label} done ({elapsed:.0f}s){suffix}")
 
 
+class _SilentProgress:
+    def update(self, current: int | None = None, message: str | None = None) -> None:
+        del current, message
+
+    def done(self, message: str | None = None) -> None:
+        del message
+
+
 class _DefaultHandler:
     def emit(self, role: Role, message: str, level: int) -> None:
         if role is Role.WARNING:
@@ -397,7 +405,7 @@ def section(title: str | None = None) -> Iterator[None]:
     raises, so a section can never strand the ambient level.
     """
     level = _current_level()
-    if title is not None:
+    if title is not None and not _presentation_suppressed.get():
         _handler.emit(Role.HEADER, title, level)
     token = _level.set(level + 1)
     try:
@@ -539,6 +547,8 @@ def prompt_secret(label: str, hint: str | None = None) -> str:
 
 def progress(label: str, total: int | None = None) -> Progress:
     """Start a tracked operation. Returns a Progress handle."""
+    if _presentation_suppressed.get():
+        return _SilentProgress()
     return _handler.progress(label, _current_level(), total)
 
 

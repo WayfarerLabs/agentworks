@@ -171,7 +171,12 @@ def _live_vm_boundary(
     if registry is None:
         registry = load_request_registry(config)
     resolver = Resolver(config, registry, reporter=reporter)
-    vm_node = live_vm_node(db, config, registry, vm)
+    try:
+        vm_node = live_vm_node(db, config, registry, vm)
+    except AgentworksError as exc:
+        if inspection_stages:
+            raise InspectionBoundaryFailure(source="site_lookup", diagnostic=exc) from None
+        raise
     nodes = walk(vm_node)
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
