@@ -4,7 +4,7 @@
 <!-- cspell:ignore localns nonblocking staticmethod -->
 <!-- cspell:ignore repr soft-missed traceback unrequested -->
 
-- Status: Draft for Phase 2 review
+- Status: Reviewed
 - Scope: Phase 2 resolution lifecycle and typed runtime contract, paired with the reviewed
   [source contract LLD](./source-contract-lld.md) and consumed by implementation Phases 3, 5, and 7
 - Governing artifacts: [FRD](./frd.md), [HLA](./hla.md),

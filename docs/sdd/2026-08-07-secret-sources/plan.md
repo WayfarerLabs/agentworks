@@ -82,7 +82,7 @@ identity decision, and the remaining client-lifecycle contract is explicitly ass
 
 ### Phase 2: resolution lifecycle LLD and typed core
 
-- [ ] Delegate `resolution-lifecycle-lld.md`. It pins:
+- [x] Delegate `resolution-lifecycle-lld.md`. It pins:
   - frozen `SecretLookupRequest`, caller-owned `InteractionBroker`, `ActiveSource`, the final
     `SecretBackend.create_client` signature, context-manager, and cleanup protocols;
   - monotonic budget ownership and remaining-time behavior across factory, entry, `prepare`,
@@ -90,7 +90,7 @@ identity decision, and the remaining client-lifecycle contract is explicitly ass
   - value-free outcome/detail enums, private redacted `ResolutionBatch`, soft/hard miss semantics,
     batch-failure attribution, and complete-or-raise behavior;
   - how the current dict-returning operation callers cross the temporary adapter until Phase 7.
-- [ ] Lead reviews the LLD; `agentworks-reviewer` finds no remaining valid issue.
+- [x] Lead reviews the LLD; `agentworks-reviewer` finds no remaining valid issue.
 
 **Definition of done:** lifecycle, timeout, error attribution, value authority, and the client
 factory are precise before any backend contract or implementation changes.

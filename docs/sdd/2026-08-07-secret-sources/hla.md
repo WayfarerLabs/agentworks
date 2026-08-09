@@ -332,9 +332,10 @@ Resolution receives an explicit immutable policy rather than reading TTY state i
 
 Ordinary operations preserve today's interaction default: the operation boundary derives `allow`
 only when stdin is a TTY and global `--non-interactive` is absent; otherwise it selects `refuse`.
-Before opening a prompt client, resolution preserves the existing fail-before-prompt doom check: if
-any still-missing secret has no remaining ready source that would attempt it, the operation fails
-without prompting for a different secret that cannot make the whole operation succeed.
+Before every allowed interactive source turn, resolution applies the fail-before-interaction doom
+check: if any still-missing secret has no remaining ready source that would attempt it, the
+operation fails without starting Prompt, 1Password, or an interactive plugin for a different secret
+that cannot make the whole operation succeed.
 
 The caller-owned `InteractionBroker` is the only interface permitted to render a prompt. A backend
 cannot infer interactivity from TTY state or gain ambient access to prompt metadata.
