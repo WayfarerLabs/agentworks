@@ -158,8 +158,9 @@ and their trailing `index.html` forms resolve to the same manifest path, includi
 references; root and `/index.html` likewise resolve together. Every same- or cross-document fragment
 must identify an actual element in its HTML or SVG target. Shared shell labels are visible leaf
 text, not text inherited from hidden or structural descendants. In `static/site.css`, the builder
-allows `display` only as `grid`, `flex`, or `inline-flex` and rejects every `opacity`, `visibility`,
-or `content-visibility` declaration; manual acceptance still verifies computed styles.
+rejects backslash escapes, allows `display` only as `grid`, `flex`, or `inline-flex`, and rejects
+every `opacity`, `visibility`, or `content-visibility` declaration; manual acceptance still verifies
+computed styles.
 
 The same inputs and arguments produce byte-identical output. Artifacts contain no timestamps,
 environment prose, or generated `CNAME`, and successful builds leave the repository clean.

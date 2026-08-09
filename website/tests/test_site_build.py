@@ -725,20 +725,25 @@ class BuildAndInstallTests(RepositoryFixture):
             ".canary { display: var(--concealed); }",
             ".canary { display: table; }",
             ".canary { display: block; }",
+            r".canary { dis\play: none; }",
+            r".canary { d\69 splay: none; }",
             ".canary { VISIBILITY : collapse; }",
             ".canary { visibility: visible; }",
+            r".canary { v\69 sibility: hidden; }",
             ".canary { opacity : 0; }",
             ".canary { opacity: 0%; }",
             ".canary { opacity: -0.0%; }",
             ".canary { opac/**/ity: calc(0); }",
             ".canary { opacity: 0.75; }",
+            r".canary { \6f pacity: 0; }",
             ".canary { content-visibility: hidden; }",
             ".canary { content-visibility: auto; }",
+            r".canary { content-v\69 sibility: hidden; }",
         )
         for mutation in mutations:
             stylesheet.write_text(f"{source}\n{mutation}\n", encoding="utf-8")
             with self.subTest(mutation=mutation), self.assertRaisesRegex(
-                ValueError, "outside the reviewed layout contract"
+                ValueError, "escape sequences|outside the reviewed layout contract"
             ):
                 site_builder.build_site(self.root, output, "/")
             self.assertEqual(snapshot(output), before)

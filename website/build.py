@@ -1290,6 +1290,8 @@ def _validate_runtime_asset(path: Path, source: str) -> None:
         if HTTP_URL_PATTERN.search(source) or QUOTED_PROTOCOL_RELATIVE_URL_PATTERN.search(source):
             raise ValueError(f"{path}: remote CSS URLs are forbidden")
         if path == Path("static/site.css"):
+            if "\\" in source:
+                raise ValueError(f"{path}: shared CSS cannot contain escape sequences")
             without_comments = re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)
             declarations = (
                 (match.group(1).lower(), re.sub(r"\s+", "", match.group(2)).lower())
