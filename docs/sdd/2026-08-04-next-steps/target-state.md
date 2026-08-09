@@ -1,7 +1,7 @@
 # Target State
 
 - Status: North star, accumulating settled rulings
-- Last updated: 2026-08-07
+- Last updated: 2026-08-08
 
 This document describes where Agentworks is going across this roadmap effort, synthesized from the
 perspectives in `inputs/`. It is the target of these waves, not a forever vision: when
@@ -91,17 +91,35 @@ post-finalize immutability staying a registry/fold property rather than a model-
 and one instance-state store designed once for instance specs, integration applied-state, and
 artifact ownership records (three perspectives converge on that store).
 
-**The variant-modeling contract** (operator rulings, 2026-08-07 and 2026-08-08): config that has
-variants is a discriminated union on a string `Literal` discriminator (spelled `mode` on today's
-action-named fields; the README's grammar rule governs the key), one arm per required-field shape
-(the discriminator tracks shape, not concept), the union field named for what it selects (sibling
-capabilities may diverge, as `auth` versus `placement` do), and new variants added as arms, never by
-pre-grouped mechanism awaiting a consumer. A union may default only to the mode its omission
-historically selected, never to a new arm, and extraction reads declared defaults as if written so a
-defaulted choice is graph-visible exactly like a written one. Permanent homes: the shape rule in
-`cli/agentworks/capabilities/README.md`, the extraction invariant in `schema/extract.py`'s
-docstring, the default posture's reasoning at the union sites themselves; the retirement pattern for
-old shapes is the exact-rewrite hard error plus the upgrade guide.
+**The variant-modeling contract** (operator rulings, 2026-08-07 and 2026-08-08) has three tiers.
+First, config variants are explicit shapes: a genuine mechanism choice carries a discriminated union
+on a string `Literal` discriminator (spelled `mode` on today's action-named fields; the README's
+grammar rule governs the key), one arm per required-field shape (the discriminator tracks shape, not
+concept), the union field named for what it selects (sibling capabilities may diverge, as `auth`
+versus `placement` do), and new variants added as arms, never by pre-grouped mechanism awaiting a
+consumer; when distinct required-key shapes discriminate themselves, an untagged structural union
+emitted as plain `oneOf` is the sanctioned selector-free form. Second, anything that decides whether
+a secret reference or resource edge exists must be model-visible to the walkers: extraction reaches
+exactly what validation can select, a union may default only to the mode its omission historically
+selected (never a new arm), and extraction reads declared defaults as if written so a defaulted
+choice is graph-visible exactly like a written one. Third, cross-field validity among plain config
+fields, where the combination touches no graph edge (mutual exclusions, dependencies), may be
+enforced by validators failing loudly at load with the emitted schema under-constraining there; wave
+2's soundness rule, that the schema must never reject what the loader accepts, sanctions exactly
+that under-reporting.
+
+Three tests precede any restructure. First, try dissolving the constraint by giving the forbidden
+combination a meaning; one dissolution is ruled (operator, 2026-08-08): install-command entries
+accept multiple test predicates with AND semantics, the install skipped only when at least one test
+is declared and every declared test passes, so with zero declared tests the command always runs, and
+previously invalid documents become valid, a pure widening. Second, the common spelling must not get
+heavier; defaults, scalar shorthands, and untagged structural unions are the mitigations, and a
+restructure that makes the common case more verbose fails its own test. Third, weigh who is actually
+affected against what the payoff buys; an editor-validation gain does not justify heavier manifests
+for everyone. Permanent homes: the complete rule in `cli/agentworks/capabilities/README.md`, the
+extraction invariant in `schema/extract.py`'s docstring, the default posture's reasoning at the
+union sites themselves; the retirement pattern for old shapes is the exact-rewrite hard error plus
+the upgrade guide.
 
 Two companion rulings (operator, 2026-08-08): **secret sources are simple KV stores with shared
 config**; creation specifications (a minted credential's scopes, repos, permissions) belong to the
@@ -134,10 +152,13 @@ backend with that source's config; per-source mapping to multiple backends is no
 settled reference shape (operator, 2026-08-05) is the synthesized-source model: every per-secret
 reference names a source, and zero-config backends get synthesized sources under their current names
 (`env-var`, `prompt`) so the simple case keeps its current spelling with only one concept in the
-model. Direct backend references become a deprecated compatibility path rather than a permanent
-second branch. The resolution API evolves in the same effort: typed per-secret outcomes, explicit
-failure categories, policy-aware interaction requirements, timeouts and cleanup, and bounded-
-lifetime source clients. The simple case must not get more verbose.
+model. Direct backend references hard-error in 0.14 with the exact rewrite (operator ruling,
+2026-08-08, superseding the earlier deprecated-compatibility-path posture): no warn window, because
+prompt and env-var spellings cross unchanged through their synthesized sources and the affected
+surface is effectively the operator's own onepassword config. The resolution API evolves in the same
+effort: typed per-secret outcomes, explicit failure categories, policy-aware interaction
+requirements, timeouts and cleanup, and bounded-lifetime source clients. The simple case must not
+get more verbose.
 
 ### Harness scopes (destination 4)
 
@@ -202,10 +223,13 @@ is reserved for surfaces that declare it, wave 3's synthesized sources being can
 ### Compatibility posture (all destinations)
 
 Breaking changes are acceptable across this roadmap provided each ships with a deprecation runway:
-warn in one release, reject in the next (the 0.13 to 0.14 pattern). Deprecations are dropped on
-their scheduled release rather than accumulating: wave 1 restores that baseline by clearing every
-expired surface, and each later breaking wave clears its own runway on schedule so the target state
-carries no expired compatibility. The generic deprecation framework survives every cleanup.
+warn in one release, reject in the next (the 0.13 to 0.14 pattern). The runway is a default, not an
+absolute: an operator ruling may waive the warn release where the affected population is known and
+near-zero, as with wave 2's settings-reference hard errors (2026-08-07) and the secret-sources
+direct-reference break (2026-08-08). Deprecations are dropped on their scheduled release rather than
+accumulating: wave 1 restores that baseline by clearing every expired surface, and each later
+breaking wave clears its own runway on schedule so the target state carries no expired
+compatibility. The generic deprecation framework survives every cleanup.
 
 **Remediation is precise errors plus the guide, not automated migrators** (operator ruling,
 2026-08-07). A breaking change ships with hard errors that name the offending input and the exact
