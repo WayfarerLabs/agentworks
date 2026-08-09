@@ -166,7 +166,7 @@ def test_doctor_clean_closed_wal_database_is_sidecar_free_and_directory_read_onl
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Immutable inspection reads a clean WAL main file without sidecars."""
+    """Private inspection reads a clean WAL main file without source sidecars."""
     import agentworks.db as db_module
     from agentworks.db import Database
 
@@ -279,6 +279,60 @@ def test_inspection_snapshot_retries_concurrent_checkpoint_after_main_copy(
     assert checkpointed is not None
     assert checkpointed[1:] == (None, None)
     assert _file_bytes(paths) == checkpointed
+
+
+def test_inspection_snapshot_retries_clean_to_active_transition_after_main_copy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A main-only observation cannot omit a WAL commit created during copy."""
+    import agentworks.db.database as database_module
+    from agentworks.db import Database
+
+    db_path = tmp_path / "clean-to-active.db"
+    clean = Database(db_path)
+    clean.set_setting("system_slug", "clean-before-transition")
+    clean.close()
+    paths = _database_files(db_path)
+    assert _file_bytes(paths)[1:] == (None, None)
+
+    original_copy = database_module._copy_verified_file_set
+    original_fingerprint = database_module._fingerprint_stream
+    attempts = 0
+    writer: Database | None = None
+    committed_files: tuple[bytes | None, ...] | None = None
+
+    def counted_copy(source_db: Path, snapshot_db: Path) -> None:
+        nonlocal attempts
+        attempts += 1
+        original_copy(source_db, snapshot_db)
+
+    def activate_after_main_copy(
+        source: Path,
+        destination: Path | None = None,
+    ):  # noqa: ANN202
+        nonlocal committed_files, writer
+        fingerprint = original_fingerprint(source, destination)
+        if source == db_path and destination is not None and writer is None:
+            writer = Database(db_path)
+            writer.set_setting("system_slug", "committed-after-clean-observation")
+            committed_files = _file_bytes(paths)
+        return fingerprint
+
+    monkeypatch.setattr(database_module, "_copy_verified_file_set", counted_copy)
+    monkeypatch.setattr(database_module, "_fingerprint_stream", activate_after_main_copy)
+    try:
+        with Database.inspection_snapshot(db_path) as (exists, current, latest, snapshot):
+            assert exists and current == latest and snapshot is not None
+            assert snapshot.get_setting("system_slug") == "committed-after-clean-observation"
+        assert committed_files is not None
+        assert committed_files[1] is not None and committed_files[2] is not None
+        assert _file_bytes(paths) == committed_files
+    finally:
+        if writer is not None:
+            writer.close()
+
+    assert attempts == 2
 
 
 def test_inspection_snapshot_resolves_symlink_before_active_sidecars(

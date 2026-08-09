@@ -280,14 +280,15 @@ renderer path.
 
 Doctor is inspection-only at both schema states. A stale schema yields the System, VM sites, and
 Database pending-migration rows without opening the original database through SQLite. A current,
-cleanly closed WAL database is resolved to its real identity and read through an immutable main-file
-connection, which cannot create sidecars. When resolved WAL/SHM sidecars exist, doctor stream-copies
-the complete main/WAL/SHM set into a private writable directory while recording file identity, size,
-modification time, and content fingerprints. It re-reads and re-stats the complete source set and
-accepts only an exact match, then validates and opens only the disposable copy through SQLite. A
-concurrent checkpoint, replacement, or sidecar transition discards the candidate and retries a small
-bounded number of times; exhaustion is a path-free inspection-unavailable error. Each snapshot is
-cleaned up after the group reads its facts; doctor neither migrates nor creates or changes the
+existing database is resolved to its real identity, then doctor stream-copies the main file and any
+resolved WAL/SHM sidecars into a private writable directory while recording file identity, size,
+modification time, and content fingerprints. The same bounded protocol handles main-only and active
+sets. A main-only candidate requires sidecar absence to remain stable throughout copying and
+verification. Doctor re-reads and re-stats the complete source set and accepts only an exact match,
+then validates and opens only the disposable copy through SQLite. A concurrent clean-to-active
+transition, checkpoint, replacement, or sidecar transition discards the candidate and retries a
+small bounded number of times; exhaustion is a path-free inspection-unavailable error. Each snapshot
+is cleaned up after the group reads its facts; doctor neither migrates nor creates or changes the
 original database, WAL, or SHM files.
 
 --names-only remains completion plumbing and is mutually exclusive with --output json on every

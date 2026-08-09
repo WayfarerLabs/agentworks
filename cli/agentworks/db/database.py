@@ -119,7 +119,7 @@ def _copy_verified_file_set(source_db: Path, snapshot_db: Path) -> None:
         snapshot_db.with_name(f"{snapshot_db.name}-shm"),
     )
     initial = tuple(_file_metadata(path) for path in source_paths)
-    if initial[0] is None or initial[1:] == (None, None):
+    if initial[0] is None:
         raise _SnapshotChanged
 
     copied: list[_FileFingerprint | None] = []
@@ -131,14 +131,15 @@ def _copy_verified_file_set(source_db: Path, snapshot_db: Path) -> None:
         if _metadata_tuple(fingerprint) != expected:
             raise _SnapshotChanged
         copied.append(fingerprint)
+        if tuple(_file_metadata(path) for path in source_paths) != initial:
+            raise _SnapshotChanged
 
-    verified = tuple(
-        None if expected is None else _fingerprint_stream(source)
-        for source, expected in zip(source_paths, initial, strict=True)
-    )
-    if tuple(copied) != verified:
-        raise _SnapshotChanged
-    if tuple(_file_metadata(path) for path in source_paths) != initial:
+    verified: list[_FileFingerprint | None] = []
+    for source, expected in zip(source_paths, initial, strict=True):
+        verified.append(None if expected is None else _fingerprint_stream(source))
+        if tuple(_file_metadata(path) for path in source_paths) != initial:
+            raise _SnapshotChanged
+    if tuple(copied) != tuple(verified):
         raise _SnapshotChanged
 
 
@@ -194,15 +195,13 @@ class Database:
         cls,
         path: Path | None = None,
     ) -> Iterator[tuple[bool, int, int, Database | None]]:
-        """Open a sidecar-free, non-migrating snapshot for inspection.
+        """Open a private, non-migrating snapshot for inspection.
 
-        A cleanly closed WAL database has no sidecars, so an immutable SQLite
-        connection can read its checkpointed main file without creating
-        ``-wal``/``-shm``. When sidecars exist, immutable mode would ignore
-        uncheckpointed rows. Stream-copy a byte-stable database/WAL/SHM set,
-        verify the resolved source set a second time, and let SQLite coordinate
-        only the disposable private copy. The active source files are never
-        opened by SQLite.
+        Stream-copy a byte-stable database/WAL/SHM set, including a main-only
+        clean set, verify the resolved source set a second time, and let SQLite
+        coordinate only the disposable private copy. The source files are never
+        opened by SQLite. A sidecar transition invalidates the candidate and
+        retries the complete snapshot protocol.
         """
         requested_path = path or _db.DB_PATH
         if not requested_path.exists():
@@ -218,18 +217,10 @@ class Database:
             except (OSError, RuntimeError):
                 raise StateError("state database inspection snapshot could not be created") from None
 
-            wal_path = source_path.with_name(f"{source_path.name}-wal")
-            shm_path = source_path.with_name(f"{source_path.name}-shm")
-            snapshot_path = source_path
-            immutable = False
+            temporary = tempfile.TemporaryDirectory(prefix="agentworks-db-inspection-")
             for attempt in range(_INSPECTION_SNAPSHOT_ATTEMPTS):
-                if not wal_path.exists() and not shm_path.exists():
-                    immutable = True
-                    break
                 candidate_connection: sqlite3.Connection | None = None
                 try:
-                    if temporary is None:
-                        temporary = tempfile.TemporaryDirectory(prefix="agentworks-db-inspection-")
                     attempt_directory = Path(temporary.name) / str(attempt)
                     attempt_directory.mkdir()
                     candidate = attempt_directory / source_path.name
@@ -251,24 +242,13 @@ class Database:
                     continue
                 except OSError:
                     raise StateError("state database inspection snapshot could not be created") from None
-                snapshot_path = candidate
                 connection = candidate_connection
                 break
             else:
                 raise StateError("state database inspection snapshot could not be created")
 
             if connection is None:
-                immutable_query = "&immutable=1" if immutable else ""
-                try:
-                    connection = sqlite3.connect(
-                        f"{snapshot_path.resolve().as_uri()}?mode=ro{immutable_query}",
-                        uri=True,
-                    )
-                    valid = connection.execute("PRAGMA quick_check").fetchall() == [("ok",)]
-                except (OSError, sqlite3.DatabaseError):
-                    raise StateError("state database inspection snapshot could not be created") from None
-                if not valid:
-                    raise StateError("state database inspection snapshot could not be created")
+                raise StateError("state database inspection snapshot could not be created")
             try:
                 row = connection.execute("SELECT MAX(version) FROM schema_version").fetchone()
                 current = row[0] or 0
