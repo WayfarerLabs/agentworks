@@ -87,6 +87,12 @@ def _stub_full_doctor_environment(
         monkeypatch.setattr(doctor, function_name, lambda *_args, _name=group_name, **_kwargs: group(_name))
 
 
+def _doctor_group(document: dict[str, object], name: str) -> dict[str, object]:
+    data = cast("dict[str, object]", document["data"])
+    groups = cast("list[dict[str, object]]", data["groups"])
+    return next(group for group in groups if group["name"] == name)
+
+
 def test_doctor_stale_schema_is_inspection_only_in_human_and_json(
     tmp_path: Path,
     make_config,  # noqa: ANN001
@@ -143,6 +149,43 @@ def test_doctor_stale_schema_is_inspection_only_in_human_and_json(
     assert db_path.read_bytes() == after_human == before
     assert Database.check_schema(db_path) == (True, stale_version, LATEST_VERSION)
     assert constructor_modes == []
+
+
+def test_doctor_warns_without_echoing_unexpected_vm_initialization_state(
+    tmp_path: Path,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agentworks.db as db_module
+    from agentworks import doctor
+    from agentworks.db import Database
+
+    marker = "unexpected-init-marker\x1b[31m"
+    database_path = tmp_path / "current.db"
+    database = Database(database_path)
+    database.insert_vm("box", site="fixture", hostname="box")
+    database.close()
+    connection = sqlite3.connect(database_path)
+    connection.execute("UPDATE vms SET init_status = ? WHERE name = 'box'", (marker,))
+    connection.commit()
+    connection.close()
+
+    monkeypatch.setattr(db_module, "DB_PATH", database_path)
+    _stub_full_doctor_environment(monkeypatch, make_config())
+    sites = doctor.HealthGroup("VM sites")
+    sites.ok("Reviewed fixture")
+    monkeypatch.setattr(doctor, "_check_vm_sites", lambda *_args, **_kwargs: sites)
+
+    human = CliRunner().invoke(app, ["doctor", "--output", "human"])
+    machine = CliRunner().invoke(app, ["doctor", "--output", "json"])
+
+    assert human.exit_code == machine.exit_code == 0
+    assert "VM 'box': unexpected initialization state" in human.stdout
+    document = cast("dict[str, object]", json.loads(machine.stdout))
+    database_group = _doctor_group(document, "Database")
+    checks = cast("list[dict[str, object]]", database_group["checks"])
+    assert checks[-1] == {"name": "VM 'box'", "status": "warn", "message": None, "hint": None}
+    assert marker not in human.stdout + machine.stdout + machine.stderr
 
 
 def test_vm_event_enum_covers_every_literal_producer() -> None:

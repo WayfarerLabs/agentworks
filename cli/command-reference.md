@@ -244,9 +244,8 @@ agw doctor --output json
 
 Doctor checks the schema before opening current state through the existing read-only database
 connection. It reports a pending migration without applying it. SQLite may perform ordinary
-read-side WAL and shared-memory bookkeeping. Doctor does not add a private database-copy protocol or
-claim protection from hostile same-account filesystem replacement. Database migration recovery and
-automatic backups are separate concerns at the migration boundary.
+read-side WAL and shared-memory bookkeeping. Database migration recovery and automatic backups are
+separate concerns at the migration boundary.
 
 #### Errors and compatibility
 

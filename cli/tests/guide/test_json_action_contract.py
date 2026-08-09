@@ -86,6 +86,13 @@ def _configuration_checks(document: dict[str, object]) -> list[dict[str, object]
     return cast("list[dict[str, object]]", configuration["checks"])
 
 
+def _database_checks(document: dict[str, object]) -> list[dict[str, object]]:
+    data = cast("dict[str, object]", document["data"])
+    groups = cast("list[dict[str, object]]", data["groups"])
+    database = next(group for group in groups if group["name"] == "Database")
+    return cast("list[dict[str, object]]", database["checks"])
+
+
 def _covered_command(command: tuple[str, ...] | None) -> str | None:
     if command is None:
         return None
@@ -453,6 +460,9 @@ def test_finish_doctor_requires_zero_failures_and_exit_zero(monkeypatch: pytest.
     group = HealthGroup("Configuration")
     group.ok("Config is valid")
     report.groups.append(group)
+    database = HealthGroup("Database")
+    database.ok("Schema", "up to date")
+    report.groups.append(database)
     monkeypatch.setattr(doctor, "run_checks", lambda **_kwargs: report)
     action = _migration_actions()["finish-doctor"]
     assert action.command is not None
@@ -464,4 +474,26 @@ def test_finish_doctor_requires_zero_failures_and_exit_zero(monkeypatch: pytest.
     counts = cast("dict[str, int]", data["counts"])
     assert counts["fail"] == 0
     assert "data.counts.fail equals 0" in action.expected_state
+    assert "Database group contains a Schema check whose status is exactly ok" in action.expected_state
     assert "command exits 0" in action.expected_state
+
+
+def test_finish_doctor_does_not_accept_a_stale_schema_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks import doctor
+
+    report = HealthReport()
+    database = HealthGroup("Database")
+    database.warn("Schema", "at an older version")
+    report.groups.append(database)
+    monkeypatch.setattr(doctor, "run_checks", lambda **_kwargs: report)
+    action = _migration_actions()["finish-doctor"]
+    assert action.command is not None
+
+    result = CliRunner().invoke(app, list(action.command[1:]))
+
+    document = _parse_exact_v1(result, "doctor", exit_code=0)
+    data = cast("dict[str, object]", document["data"])
+    counts = cast("dict[str, int]", data["counts"])
+    assert counts["fail"] == 0
+    assert _database_checks(document) == [{"name": "Schema", "status": "warn", "message": None, "hint": None}]
+    assert "status is exactly ok" in action.expected_state

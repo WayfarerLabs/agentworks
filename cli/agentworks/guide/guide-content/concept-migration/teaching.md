@@ -146,4 +146,6 @@ with consent to examine the workstation. Any missing, extra, or wrongly originat
 to the untouched backups for investigation. Finish only when a final `agw doctor --output json`
 reports zero failures. Parse its one JSON document and apply the same integer version, exact
 `doctor` command, and object-data checks. Require `data.counts.fail` to equal `0` and require the
-command to exit `0` before recording completion.
+`Database` group to contain a `Schema` check whose status is exactly `ok`. Require the command to
+exit `0` before recording completion. A stale schema warning is not migration completion, even
+though it is non-failing and a normal Agentworks command can migrate it.

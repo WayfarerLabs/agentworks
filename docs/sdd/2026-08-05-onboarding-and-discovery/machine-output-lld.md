@@ -290,9 +290,8 @@ renderer path.
 
 Doctor checks schema state before opening current state through the existing read-only database
 connection. A stale schema yields pending-migration rows without running migrations. SQLite may
-perform ordinary read-side WAL and shared-memory bookkeeping. Doctor does not copy the database or
-claim protection from hostile same-account filesystem replacement. Recovery and automatic backups
-belong to the database migration boundary and are outside this JSON-output implementation.
+perform ordinary read-side WAL and shared-memory bookkeeping. Recovery and automatic backups belong
+to the database migration boundary and are outside this JSON-output implementation.
 
 --names-only remains completion plumbing and is mutually exclusive with --output json on every
 covered list or kinds command that already has it. Validate that conflict before service work. It

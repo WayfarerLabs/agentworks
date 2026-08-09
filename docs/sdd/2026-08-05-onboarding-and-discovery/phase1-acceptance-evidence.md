@@ -205,3 +205,35 @@ Operator scope-correction validation passed:
 - full mypy: 625 source files clean;
 - Rulesync generated-output check: clean;
 - mandatory file lint: Prettier, markdownlint, and cspell clean.
+
+## Simplified doctor follow-up
+
+Review of the corrected scope found three ordinary doctor contract gaps. The same schema gate was
+repeated in three groups, malformed `schema_version` queries were mistaken for an absent legacy
+table, and an unexpected persisted VM initialization state no longer produced the human warning
+carried by main. The final migration action also accepted a non-failing stale-schema warning as
+completion. These were corrected without restoring any database-copying, filesystem-race, snapshot,
+unavailable-result, or schema-history subsystem.
+
+`doctor_state.py` now owns one context-managed gate that checks the scalar schema version and opens
+the existing read-only `Database` only when current. System, VM sites, and Database share that gate.
+The small `db/schema.py` module distinguishes a truly absent `schema_version` table from a malformed
+query and accepts only a nonnegative integer maximum. It exists solely to keep `database.py` below
+the project file ceiling. Other malformed database errors become the existing closed Database
+failure. Unexpected initialization values produce a fixed warning that does not echo persisted text.
+The migration guide requires a `Database` / `Schema` check with status `ok` in addition to zero
+failures and exit 0.
+
+The three removed-but-completed review rounds were restored to `plan.md` as truthful historical
+records and annotated as superseded by the operator scope correction. Permanent command and LLD text
+describe only the shipped ordinary read path, with no rejected implementation detail. No CLI shape,
+completions, or sample configuration changed.
+
+Simplified-doctor validation passed:
+
+- focused doctor, guide, database, machine-output, and operational JSON suite: 583 passed;
+- full non-integration suite: 6,686 passed and 3 deselected;
+- Ruff check and format check: 627 files clean;
+- full mypy: 627 source files clean.
+
+The PR remains draft while clean project, fresh-eyes, integration, and PR re-review are pending.

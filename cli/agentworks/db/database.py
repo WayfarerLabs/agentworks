@@ -20,6 +20,7 @@ from agentworks.db.converters import (
     _to_workspace,
 )
 from agentworks.db.migrations import LATEST_VERSION, MIGRATIONS, MigrationContext
+from agentworks.db.schema import read_schema_version
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -56,11 +57,12 @@ class Database:
             connection: sqlite3.Connection | None = None
             try:
                 connection = sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True)
-                row = connection.execute("SELECT MAX(version) FROM schema_version").fetchone()
-                current = row[0] or 0
-            except sqlite3.DatabaseError as error:
+                current = read_schema_version(connection)
+            except (sqlite3.DatabaseError, StateError) as error:
                 if connection is not None:
                     connection.close()
+                if isinstance(error, StateError):
+                    raise
                 raise StateError(
                     "state database is unavailable or malformed",
                     hint="Run a normal Agentworks command to initialize or repair the state database.",
@@ -120,18 +122,9 @@ class Database:
 
         Returns (exists, current_version, latest_version).
         """
-        db_path = path or _db.DB_PATH
-        if not db_path.exists():
-            return (False, 0, LATEST_VERSION)
-        conn = sqlite3.connect(str(db_path))
-        try:
-            row = conn.execute("SELECT MAX(version) FROM schema_version").fetchone()
-            current = row[0] or 0
-        except sqlite3.OperationalError:
-            current = 0
-        finally:
-            conn.close()
-        return (True, current, LATEST_VERSION)
+        from agentworks.db.schema import check_schema
+
+        return check_schema(path or _db.DB_PATH)
 
     def _migrate(self) -> None:
         self._conn.execute(

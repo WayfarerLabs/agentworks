@@ -461,8 +461,7 @@ def _check_vm_sites(
     that names it, and a site whose credential is prompt-only reads ok
     here, correctly, because nothing about that site is unhealthy.
     """
-    from agentworks.db import Database
-    from agentworks.vms.sites import VMSiteDecl, site_manifest_hint
+    from agentworks.vms.sites import VMSiteDecl
 
     g = HealthGroup("VM sites")
 
@@ -506,39 +505,9 @@ def _check_vm_sites(
             f"names '{default_site}', which is not ready: {not_ready[default_site]}",
         )
 
-    try:
-        db_exists, current, latest = Database.check_schema()
-        if not db_exists:
-            return g
-        if current != latest:
-            g.info(
-                "VM sites",
-                "pending database migration (see the Database group); "
-                "re-run doctor after migrating for the full report",
-            )
-            return g
-        db = Database(read_only=True)
-        try:
-            for vm in db.list_vms():
-                if vm.site in not_ready:
-                    g.warn(
-                        f"VM '{vm.name}'",
-                        f"site '{vm.site}' is not ready: {not_ready[vm.site]}",
-                    )
-                elif vm.site not in sites:
-                    g.fail(
-                        f"VM '{vm.name}'",
-                        f"site '{vm.site}' is not declared",
-                        hint=site_manifest_hint(vm.site),
-                    )
-        finally:
-            db.close()
-    except Exception as e:
-        g.warn(
-            "VM sites",
-            f"could not check the database: {e}",
-            machine_diagnostic=MachineDiagnostic.DATABASE_UNAVAILABLE,
-        )
+    from agentworks.doctor_state import append_vm_site_database_checks
+
+    append_vm_site_database_checks(g, sites=sites, not_ready=not_ready)
     return g
 
 

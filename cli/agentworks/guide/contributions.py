@@ -310,9 +310,11 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             ("agw", "doctor", "--output", "json"),
             "Before recording VERIFIED, parse exactly one JSON document and require schema_version is the "
             "integer 1, command is exactly doctor, data is an object, data.counts.fail equals 0, and the "
-            "command exits 0. Doctor then reports zero failures for the migrated installation.",
+            "Database group contains a Schema check whose status is exactly ok, and the command exits 0. "
+            "Doctor then reports a current database schema and zero failures for the migrated installation.",
             None,
-            "Do not declare the migration complete until doctor exits successfully with zero failures.",
+            "Do not declare the migration complete until doctor confirms a current database schema and exits "
+            "successfully with zero failures.",
         ),
     )
 
