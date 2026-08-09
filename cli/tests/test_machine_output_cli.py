@@ -173,12 +173,73 @@ def test_operational_describe_json_commands_are_deterministic_and_exclude_opaque
         ),
     )
 
-    for argv, command, root_key in (
-        (["vm", "describe", "box", "--output", "json"], "vm.describe", "vm"),
-        (["workspace", "describe", "ws", "--output", "json"], "workspace.describe", "workspace"),
-        (["agent", "describe", "a", "--output", "json"], "agent.describe", "agent"),
-        (["session", "describe", "s", "--output", "json"], "session.describe", "session"),
-        (["console", "describe", "c", "--output", "json"], "console.describe", "console"),
+    for argv, command, root_key, fields in (
+        (
+            ["vm", "describe", "box", "--output", "json"],
+            "vm.describe",
+            "vm",
+            [
+                "name",
+                "created_at",
+                "site",
+                "platform",
+                "backend",
+                "observed_status",
+                "status_disposition",
+                "operator_stopped",
+                "hostname",
+                "system_slug",
+                "system_slug_state",
+                "template",
+                "admin_template",
+                "admin_username",
+                "provisioning_status",
+                "initialization_status",
+                "tailscale_host",
+                "last_seen_at",
+                "provisioned_resources",
+                "live_resources",
+                "agents",
+                "workspaces",
+                "events",
+            ],
+        ),
+        (
+            ["workspace", "describe", "ws", "--output", "json"],
+            "workspace.describe",
+            "workspace",
+            ["name", "vm_name", "template", "path", "created_at", "sessions", "agents"],
+        ),
+        (
+            ["agent", "describe", "a", "--output", "json"],
+            "agent.describe",
+            "agent",
+            ["name", "vm_name", "linux_user", "template", "grant_all", "created_at", "explicit_grants", "sessions"],
+        ),
+        (
+            ["session", "describe", "s", "--output", "json"],
+            "session.describe",
+            "session",
+            [
+                "name",
+                "workspace_name",
+                "vm_name",
+                "template",
+                "harness_integration",
+                "mode",
+                "agent_name",
+                "status",
+                "pid",
+                "created_at",
+                "updated_at",
+            ],
+        ),
+        (
+            ["console", "describe", "c", "--output", "json"],
+            "console.describe",
+            "console",
+            ["name", "vm_name", "admin_shell", "created_at", "updated_at", "sessions"],
+        ),
     ):
         first = CliRunner().invoke(app, argv)
         second = CliRunner().invoke(app, argv)
@@ -186,12 +247,160 @@ def test_operational_describe_json_commands_are_deterministic_and_exclude_opaque
         assert first.stdout_bytes == second.stdout_bytes
         document = _json_document(first)
         assert document["command"] == command
-        assert root_key in cast("dict[str, object]", document["data"])
+        record = cast("dict[str, object]", cast("dict[str, object]", document["data"])[root_key])
+        assert list(record) == fields
         assert marker.encode() not in first.stdout_bytes
 
     session_data = _json_document(CliRunner().invoke(app, ["session", "describe", "s", "--output", "json"]))["data"]
     session_record = cast("dict[str, object]", cast("dict[str, object]", session_data)["session"])
     assert session_record["pid"] is None
+
+
+def test_operational_human_describe_commands_keep_literal_no_color_bytes(monkeypatch) -> None:
+    """Pin default and explicit human streams for all new describe paths."""
+    from agentworks.agents import manager as agents
+    from agentworks.agents.manager.inspect import AgentDescription
+    from agentworks.cli.commands import agent, console, session, vm, workspace
+    from agentworks.db import VMRow, WorkspaceRow
+    from agentworks.sessions import manager as sessions
+    from agentworks.sessions import multi_console
+    from agentworks.sessions.manager._queries import SessionDescription
+    from agentworks.sessions.multi_console.attach import ConsoleDescription
+    from agentworks.vms import manager as vms
+    from agentworks.vms.manager.power import VMDescription, render_vm_description
+    from agentworks.workspaces import manager as workspaces
+    from agentworks.workspaces.manager.create import WorkspaceDescription
+
+    vm_row = VMRow(
+        "box",
+        "site",
+        None,
+        None,
+        [],
+        "complete",
+        "complete",
+        None,
+        None,
+        None,
+        None,
+        None,
+        "admin",
+        "box",
+        "2026-01-01",
+        None,
+    )
+    ws_row = WorkspaceRow("ws", "box", None, "/work/ws", "2026-01-01", "ws-ws")
+    monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: object())
+    for module in (agent, console, session, vm, workspace):
+        monkeypatch.setattr(module, "get_db", lambda: object())
+    monkeypatch.setattr(
+        vms,
+        "vm_description",
+        lambda *_args, **_kwargs: VMDescription(
+            vm_row, None, None, None, None, None, "unset", None, (), (), (), (), ()
+        ),
+    )
+    monkeypatch.setattr(
+        workspaces, "workspace_description", lambda *_args, **_kwargs: WorkspaceDescription(ws_row, (), ())
+    )
+    monkeypatch.setattr(
+        agents,
+        "agent_description",
+        lambda *_args, **_kwargs: AgentDescription("a", "box", "agent-a", None, False, "2026-01-01", (), ()),
+    )
+    monkeypatch.setattr(
+        sessions,
+        "session_description",
+        lambda *_args, **_kwargs: SessionDescription(
+            "s", "ws", "box", "t", None, "admin", None, "stopped", None, "2026-01-01", "2026-01-02"
+        ),
+    )
+    monkeypatch.setattr(
+        multi_console,
+        "console_description",
+        lambda *_args, **_kwargs: ConsoleDescription("c", "box", False, "2026-01-01", "2026-01-02", ()),
+    )
+    monkeypatch.setattr(
+        vms,
+        "describe_vm",
+        lambda *_args, **_kwargs: render_vm_description(vms.vm_description(*_args, **_kwargs)),
+    )
+    monkeypatch.setattr(
+        sessions,
+        "describe_session",
+        lambda *_args, **_kwargs: sessions.render_session_description(sessions.session_description(*_args, **_kwargs)),
+    )
+
+    expected = {
+        (
+            "vm",
+            "describe",
+            "box",
+        ): b"Name:           box\nCreated:        2026-01-01\nSite:           site\nPlatform:       -\nBackend:        -\nStatus:         -\nHostname:       box\nSystem Slug:    -\nTemplate:       -\nAdmin User:     admin\nProvisioning:   complete\nInitialization: complete\nTailscale IP:   -\n\nAgents (0):\n  (none)\n\nWorkspaces (0):\n  (none)\n\nEvents (0):\n  (none)\n",  # noqa: E501
+        (
+            "workspace",
+            "describe",
+            "ws",
+        ): b"Name:       ws\nVM:         box\nTemplate:   default\nPath:       /work/ws\nCreated:    2026-01-01\n\nSessions (0):\n  (none)\n\nAgents with access (0):\n  (none)\n",  # noqa: E501
+        (
+            "agent",
+            "describe",
+            "a",
+        ): b"Name:       a\nVM:         box\nLinux user: agent-a\nTemplate:   -\nGrant all:  no\nCreated:    2026-01-01\n\nExplicit grants (0):\n  (none)\n\nSessions (0):\n  (none)\n",  # noqa: E501
+        (
+            "session",
+            "describe",
+            "s",
+        ): b"Name:       s\nWorkspace:  ws\nVM:         box\nTemplate:   t\nHarness integration: -\nMode:       admin\nStatus:     stopped\nCreated:    2026-01-01\nUpdated:    2026-01-02\n",  # noqa: E501
+        (
+            "console",
+            "describe",
+            "c",
+        ): b"Name:        c\nVM:          box\nAdmin shell: no\nCreated:     2026-01-01\nUpdated:     2026-01-02\n\nConfigured sessions: 0\n",  # noqa: E501
+    }
+    for command, expected_stdout in expected.items():
+        default = CliRunner().invoke(app, ["--non-interactive", *command])
+        explicit = CliRunner().invoke(app, ["--non-interactive", *command, "--output", "human"])
+        assert default.exit_code == explicit.exit_code == 0
+        assert default.stdout_bytes == explicit.stdout_bytes == expected_stdout
+        assert default.stderr_bytes == explicit.stderr_bytes == b""
+
+
+def test_operational_human_list_commands_keep_literal_empty_bytes(monkeypatch) -> None:
+    """Pin the established human empty-state bytes beside the JSON empty arrays."""
+    from agentworks.agents import manager as agents
+    from agentworks.agents.manager.inspect import AgentListing
+    from agentworks.cli.commands import agent, console, session, vm, workspace
+    from agentworks.sessions import manager as sessions
+    from agentworks.sessions import multi_console
+    from agentworks.sessions.manager._queries import SessionListing
+    from agentworks.sessions.multi_console.attach import ConsoleListing
+    from agentworks.vms import manager as vms
+    from agentworks.vms.manager.power import VMListing
+    from agentworks.workspaces import manager as workspaces
+    from agentworks.workspaces.manager.create import WorkspaceListing
+
+    monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: object())
+    for module in (agent, console, session, vm, workspace):
+        monkeypatch.setattr(module, "get_db", lambda: object())
+    monkeypatch.setattr(vms, "vm_listing", lambda _db: VMListing(()))
+    monkeypatch.setattr(workspaces, "workspace_listing", lambda _db, **_kwargs: WorkspaceListing(()))
+    monkeypatch.setattr(agents, "agent_listing", lambda _db, **_kwargs: AgentListing(()))
+    monkeypatch.setattr(sessions, "session_listing", lambda _db, _config, **_kwargs: SessionListing(()))
+    monkeypatch.setattr(multi_console, "console_listing", lambda _db, **_kwargs: ConsoleListing(()))
+    expected = {
+        ("vm", "list"): b"No VMs registered.\n",
+        ("workspace", "list"): b"No workspaces found.\n",
+        ("agent", "list"): b"No agents found.\n",
+        ("session", "list"): b"No sessions found.\n",
+        ("console", "list"): b"No consoles found.\n",
+    }
+    for command, expected_stdout in expected.items():
+        default = CliRunner().invoke(app, ["--non-interactive", *command])
+        explicit = CliRunner().invoke(app, ["--non-interactive", *command, "--output", "human"])
+        assert default.exit_code == explicit.exit_code == 0
+        assert default.stdout_bytes == explicit.stdout_bytes == expected_stdout
+        assert default.stderr_bytes == explicit.stderr_bytes == b""
 
 
 def _json_document(result: Result) -> dict[str, object]:
