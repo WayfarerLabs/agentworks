@@ -257,13 +257,19 @@ security, 404, source-ownership, responsive, accessibility, or deterministic-bui
       location, icon, breadcrumb state, logo exception, footer ownership string, and no-duplicate
       invariant at both supported site bases.
 - [x] Adversarially prove the shared-shell validator rejects missing or reordered landmark classes,
-      hidden calls to action, extra or misplaced icons and rockets, and duplicate normalized local
-      destinations introduced anywhere in a page.
+      HTML-hidden calls to action, reviewed CSS declarations outside the closed vocabulary, extra or
+      misplaced icons and rockets, and duplicate normalized local destinations introduced anywhere
+      in a page. Real-browser acceptance owns computed visibility, bounds, and pointer reachability
+      rather than an exhaustive CSS-concealment parser.
 - [x] Rebuild the served preview and run focused website/game, lint, locked-SDD, Rulesync, and diff
       gates without regressing no-JavaScript recovery, accessibility, reflow, or deterministic
       output.
 - [x] Obtain `agentworks-reviewer` and fresh-eyes approval and resolve every valid finding before
       considering the refinement complete.
+
+Review evidence: project reviewer and fresh-eyes passes approved the Phase 4B implementation after
+their findings were resolved, and the saga lead independently re-executed exact head `29ee7283` in
+PR #439's dated delta review.
 
 Definition of done: R15-R17 and AC16-AC18 hold, the revised navigation is conventional and
 predictable, the Manifesto is canonical-source generated, and the site's tiny information
@@ -273,9 +279,18 @@ architecture has no duplicate destination or hidden menu.
 
 - [x] Amend the FRD, HLA, `site-shell-lld.md`, and `brand-and-lander-lld.md` to pin the dedicated
       `/lander/` surface, shared game fragment, site-wide footer rocket link, and compact 404 title.
+- [x] Incorporate and review PR-feedback rulings for root-base redeployment, native lifecycle
+      controls, module sizing, independent manifest/import and URL-escaping witnesses, honest CSS
+      coverage, current topology and overlap, hero baseline, and the widened ready gate.
+- [ ] Before further builder growth, split content projection and site validation into focused
+      sibling modules and split the mirrored tests so every production and test module remains below
+      1,000 lines while `website/build.py` remains the sole CLI.
 - [ ] Add a semantic `/lander/` shell and render one validated `#lander-game` template fragment into
       both it and `404.html`; keep one controller/model/CSS implementation and preserve all game
       mechanics, IDs, no-JavaScript behavior, and lifecycle boundaries.
+- [ ] Add native active-state `Exit mission` and terminal-state `Restart mission` buttons to the
+      shared fragment; keep them hidden during preflight and route clicks through the existing
+      controller/model events and focus lifecycle.
 - [ ] Add the final icon-only AGW rocket link to every footer, targeting `/lander/#lander-game`;
       give it an independent accessible name, retain one Lander destination per page, and keep it at
       the lower right in wrapping document flow, with a visible-focus target of at least 24 by 24
@@ -286,6 +301,9 @@ architecture has no duplicate destination or hidden menu.
 - [ ] Extend the exact template, image, route, fragment, manifest, metadata, CSP, heading,
       local-link, deterministic-build, and no-JavaScript contracts for five pages and ten emitted
       files.
+- [ ] Replace production-derived manifest expectations with a literal test-owned ten-file contract,
+      prove every local JavaScript import resolves into it, add a malicious URL-attribute escaping
+      witness, and narrow CSS automation claims while adding computed browser visibility coverage.
 - [ ] Update permanent website build/demo documentation to use `/lander/` while continuing to test
       the actual `/404.html` fallback; run the complete focused and repository gates.
 - [ ] Obtain `agentworks-reviewer` and fresh-eyes approval for the implementation and resolve every
@@ -293,7 +311,9 @@ architecture has no duplicate destination or hidden menu.
 
 Definition of done: R7-R9, R15-R18, and AC5-AC8/AC13/AC16/AC18-AC19 hold. `/lander/` and `/404.html`
 render the exact same reviewed game subtree, the footer rocket is the only deliberate game
-destination, and the 404 begins directly with its title after a compact natural gap.
+destination, touch and assistive users can exit and restart, manifest/import and attribute
+boundaries fail closed without circular tests, production/test modules remain below 1,000 lines, and
+the 404 begins directly with its title after a compact natural gap.
 
 ## Phase 5: CI and default Pages deployment
 
@@ -319,13 +339,18 @@ destination, and the 404 begins directly with its title after a compact natural 
 - [x] `agentworks-reviewer` and a fresh-eyes reviewer inspect permissions, triggers, artifact
       boundaries, and failure modes; resolve valid findings and re-review.
 - [ ] Mark PR #439 ready only when the complete interim release is review-clean. Triage Copilot
-      comments, request the saga lead's standalone-effort review, resolve valid findings, and hand
-      the reviewed PR to the operator for merge.
+      comments, record the five-commit missing-session-trailer provenance exception, request the
+      saga lead's standalone-effort review, and resolve valid findings. Re-run current Chromium
+      no-JavaScript recovery, source-order focus, Escape/browser-key independence,
+      320-pixel/400-percent reflow, computed shared-shell visibility, reduced motion, and
+      clean-context comprehension, plus Firefox, WebKit, spoken screen-reader, and physical
+      touch/human-motion acceptance. Then hand the reviewed PR to the operator for merge.
 - [ ] After merge, verify the matching commit deploys automatically at the default Pages URL. Leave
       custom-domain, onboarding, and lock boxes unchecked.
 
 Definition of done: R3 and AC2 are implemented as a least-privilege automatic pipeline, and the
-interim artifact is merged and live at the default Pages URL without a manual publish step.
+interim artifact is merged and live at the default Pages URL without a routine manual publish step;
+Phase 6 retains the one-time same-run root-base redeployment gate before DNS cutover.
 
 ## Phase 6: interim domain activation and acceptance
 
@@ -341,6 +366,10 @@ interim artifact is merged and live at the default Pages URL without a manual pu
       the generated TXT record and record non-secret evidence.
 - [ ] Reconfirm the deployed default Pages URL, set `agentworks.build` as this repository's custom
       domain, and enforce HTTPS when GitHub makes the option available.
+- [ ] Use GitHub's `Re-run all jobs` on the already verified implementation merge-push workflow;
+      verify the same `main` SHA built with `site_base=/`, deployed successfully, and serves
+      root-based assets and routes before authorizing any DNS mutation. If the run is no longer
+      available for rerun, stop until a separately reviewed activation path exists.
 - [ ] With explicit operator approval for the recorded cutover, remove only identified conflicting
       parking/forwarding records; add the then-current GitHub-documented apex `A` records and `www`
       CNAME. Do not add a wildcard.

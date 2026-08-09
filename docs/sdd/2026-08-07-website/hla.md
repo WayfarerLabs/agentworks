@@ -9,25 +9,26 @@
 
 ## Architectural summary
 
-Build three semantic static pages from repository-owned inputs and deploy their artifact to GitHub
+Build five semantic static pages from repository-owned inputs and deploy their artifact to GitHub
 Pages on every push to `main`. Site sources live in `website/`; generated output does not. A small
 standard-library Python builder performs explicit substitutions, escapes shared text for HTML, emits
 the finished artifact, and fails when a content contract required by the current release is
 unavailable or ambiguous.
 
 Delivery has two honest stages over the same URLs and architecture. The interim release publishes
-the complete Home, Manifesto, and Security shells, repository-derived product/security passages,
-stable links, selected brand, custom 404, pipeline, and domain while canonical onboarding is
-unavailable. It contains a small semantic availability notice and no bootstrap-shaped substitute.
-After onboarding Phase 3 lands on `main`, a second release replaces that notice with the canonical
-bootstrap and its copy enhancement. This is a delivery sequence, not a runtime mode or parallel
-site.
+the complete Home, Manifesto, Security, Lander, and 404 shells, repository-derived product/security
+passages, stable links, selected brand, one shared Lander/404 game, pipeline, and domain while
+canonical onboarding is unavailable. It contains a small semantic availability notice and no
+bootstrap-shaped substitute. After onboarding Phase 3 lands on `main`, a second release replaces
+that notice with the canonical bootstrap and its copy enhancement. This is a delivery sequence, not
+a runtime mode or parallel site.
 
-The content pages use HTML and CSS for their full experience. A small local script adds the
-nonessential custom-404 lander game. The later onboarding release adds focused copy-button behavior,
-while its bootstrap and all error content remain useful when scripts are absent. The visual system
-includes local SVG logo assets. There are no remote fonts, scripts, images, runtime APIs, analytics,
-cookies, accounts, forms, or backend.
+The content pages use HTML and CSS for their full experience. A small local script progressively
+enhances the shared static scene on Lander and 404 into the same nonessential game. The later
+onboarding release adds focused copy-button behavior, while its bootstrap, the static Lander scene,
+and all error content remain useful when scripts are absent. The visual system includes local SVG
+logo assets. There are no remote fonts, scripts, images, runtime APIs, analytics, cookies, accounts,
+forms, or backend.
 
 GitHub Actions builds and checks the same artifact in pull requests and on `main`. A dedicated Pages
 workflow uploads that artifact and deploys it through the protected `github-pages` environment.
@@ -98,6 +99,12 @@ only its `Agentworks Manifesto` presentation title, metadata, breadcrumb label, 
 shell. If the permanent document adopts that title, the generated page follows it without a second
 rename mechanism.
 
+The Security page deliberately repeats the small canonical threat-model and composable-isolation
+passages that also occur within the complete Manifesto. Security must stand alone for visitors who
+do not read the long-form argument, and both projections are generated from one source rather than
+maintained as twins. Any rewrite or rename of that permanent source forces both reviewed selections
+to be revalidated; the website does not preserve obsolete overlap for its own sake.
+
 ### D2. Plain web technologies with a narrow build step
 
 The checked-in source consists of home, Manifesto, security, Lander, and 404 HTML shells, one shared
@@ -124,6 +131,12 @@ missing-local-reference exception.
 The template vocabulary is closed to named placeholders owned by the builder. Shared text is HTML
 escaped before insertion. There is no evaluation of source content as a template, Markdown, Python,
 or JavaScript.
+
+`website/build.py` remains the sole CLI entry point, while content projection/Markdown rendering and
+template/CSS/reference validation live in focused sibling modules. Production and test modules stay
+below the repository's 1,000-line ceiling. Tests mirror those seams rather than concentrating all
+contracts in one file. The split introduces no package dependency, plugin surface, or alternate
+builder API.
 
 ### D3. Repository content is a checked contract
 
@@ -235,7 +248,11 @@ its event target is the document body or lander scene, never when focus is on th
 another interactive/editable element. The lander is also an operable, accessibly named start control
 without visible instruction text. Activating it provides the pointer and assistive-technology path.
 The accepted preflight Space event is consumed so it cannot also scroll the page. Starting moves
-focus to the game scene and reveals concise controls and status.
+focus to the game scene and reveals concise controls, status, and a native `Exit mission` button. A
+native `Restart mission` button is also revealed after failure or success. Both remain hidden during
+preflight. They invoke the same EXIT and RESTART model events as Escape and `r`, preserve the
+established focus destinations, and make the complete lifecycle available to touch and assistive
+technology.
 
 While active, Space or Up commands equal thrust; Left or `h` increases the right engine to turn
 left; Right or `l` increases the left engine to turn right. Apart from the accepted preflight Space
@@ -298,6 +315,14 @@ The publishing workflow is not path-filtered. The site's authoritative inputs in
 `website/`, so every push to `main` must rebuild and verify the artifact rather than risk serving a
 stale bootstrap or product passage.
 
+A Pages custom-domain settings change does not itself trigger this workflow. After attaching the
+domain and before DNS mutation, the operator uses GitHub's `Re-run all jobs` action on the already
+verified implementation merge-push run. The rerun retains the same push event, `main` ref, source
+SHA, permissions, and protected environment while `configure-pages` reads the current root base. The
+root-base build and deployment must succeed and be verified before cutover. No broader manual
+dispatch trigger or second workflow is introduced; if the original run is no longer available for
+rerun, cutover stops until a separately reviewed activation path exists.
+
 The workflow pins current stable major versions of official GitHub actions at implementation time,
 consistent with repository conventions. No third-party deploy action or long-lived cloud credential
 is introduced.
@@ -321,10 +346,12 @@ rollback, and recovery. Setup and go-live are ordered so deployment exists befor
 2. merge the implementation and verify its automatic deployment at the default Pages URL;
 3. verify `agentworks.build` in the WayfarerLabs GitHub organization and retain GitHub's TXT record;
 4. set `agentworks.build` as this repository's custom domain;
-5. after explicit operator approval, replace GoDaddy's apex parking record with GitHub's documented
+5. rerun all jobs on the verified `main` merge-push workflow, prove it built with site base `/`, and
+   verify the expected commit's successful Pages deployment before any DNS mutation;
+6. after explicit operator approval, replace GoDaddy's apex parking record with GitHub's documented
    `A` records and point `www` by `CNAME` to `wayfarerlabs.github.io`;
-6. verify DNS answers, apex content, `www` redirect, certificate, and HTTPS enforcement;
-7. remove or repoint the DNS records promptly if Pages is ever disabled.
+7. verify DNS answers, apex content, `www` redirect, certificate, and HTTPS enforcement;
+8. remove or repoint the DNS records promptly if Pages is ever disabled.
 
 DNS values are copied from current GitHub documentation during go-live and recorded in acceptance
 evidence. They are not hidden in application code. No wildcard record is created.
@@ -351,9 +378,10 @@ turning a two-step delivery need into permanent configuration machinery.
 ## Component topology
 
 ```text
-README + docs/why-agentworks.md selectors --+--> home page
-interim availability notice ---------------+
+README.md identity selectors --+--> home page
+interim availability notice ---+
 
+docs/why-agentworks.md complete argument ------> Manifesto page
 docs/why-agentworks.md security selectors --+--> security page
 SECURITY.md reporting contract -------------+
 

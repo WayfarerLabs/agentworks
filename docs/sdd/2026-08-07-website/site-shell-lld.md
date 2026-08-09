@@ -189,7 +189,23 @@ must identify an actual element in its HTML or SVG target. Shared shell labels a
 text, not text inherited from hidden or structural descendants. In `static/site.css`, the builder
 rejects backslash escapes, allows `display` only as `grid`, `flex`, or `inline-flex`, and rejects
 every `opacity`, `visibility`, or `content-visibility` declaration; manual acceptance still verifies
-computed styles.
+computed styles. That declaration vocabulary is deliberately narrow, not a claim to detect every
+possible concealment technique. Browser acceptance separately verifies each reviewed shell link's
+computed visibility, in-viewport bounds, keyboard focus, and pointer reachability, including a
+canary for off-screen absolute positioning. No home-grown general CSS parser is introduced.
+
+`website/build.py` remains the executable CLI and artifact orchestrator. Content projection and
+Markdown rendering move to `website/site_content.py`; template, CSS, shell, and local-reference
+validation move to `website/site_validation.py`. Each production module and each test module remains
+below 1,000 lines. The split preserves one public build command and introduces no package or runtime
+dependency.
+
+Tests own a literal expected ten-file manifest independent of production constants. They scan every
+static JavaScript module import, resolve same-origin relative imports against its emitted path, and
+require the target in that literal manifest; a missing `lander-model.js` mutation must fail. A
+malicious reviewed-link canary containing quotes, ampersands, and an attempted attribute boundary
+must serialize as one escaped `href` with no injected attribute. These witnesses pin manifest and
+attribute safety without duplicating the whole builder implementation.
 
 The same inputs and arguments produce byte-identical output. Artifacts contain no timestamps,
 environment prose, or generated `CNAME`, and successful builds leave the repository clean.
@@ -229,12 +245,16 @@ repository-provenance label. Their shared detail-main inset is `clamp(0.75rem, 2
 the header; the page heading adds no second top inset. Canonical-source provenance remains a build
 contract rather than visitor-facing chrome.
 
+The Home hero's `3.2rem` to `4.8rem` width is measured against the accepted pre-refinement
+`1.6rem`-wide header presentation, yielding two to three times that historical baseline. It is not
+specified as two to three times the current compact `1.2rem` header mark; no CSS change is required.
+
 ## 9. Verification matrix
 
 | Contract                      | Automated evidence                                                                                                             |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | Source completeness and drift | Hash, heading-tree, UTF-8, fence, block, and link-map failure tests                                                            |
-| Template closure              | Token vocabulary, exact shell tree, hidden CTA, icon, breadcrumb, image, route-duplicate, and ownership mutation tests         |
+| Template closure              | Token vocabulary, exact shell tree, HTML-hidden CTA, icon, breadcrumb, image, route-duplicate, and ownership mutation tests    |
 | Generated semantics           | Five-page metadata, canonicals, landmarks, headings, skip links, shell, no-duplicate links, scripts, and local-reference tests |
 | Exact artifacts               | The complete ten-file manifest at `/` and `/agentworks/`; no partial API or CLI option                                         |
 | Determinism and safety        | Repeated byte snapshots, hostile output trees, rollback injection, path and symlink tests                                      |

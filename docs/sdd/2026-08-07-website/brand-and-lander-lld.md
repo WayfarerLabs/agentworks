@@ -2,7 +2,7 @@
 
 <!-- cspell:ignore focusout keyup pointerdown unitless -->
 
-- Status: Phase 4C amendment approved for implementation
+- Status: Phase 4C approved for implementation
 - Date: 2026-08-08
 - FRD: `frd.md`, specifically R6-R9 and R15-R18
 - HLA: `hla.md`, specifically D5 and D7
@@ -99,6 +99,10 @@ owns the following stable subtree and is rendered byte-equivalently into both sh
     <button id="lander-start" type="button" hidden aria-label="Start lunar deployment mission"></button>
   </div>
   <p id="lander-controls" hidden>...</p>
+  <div id="lander-actions" hidden>
+    <button id="lander-exit" type="button">Exit mission</button>
+    <button id="lander-restart" type="button" hidden>Restart mission</button>
+  </div>
   <p id="lander-status" role="status" aria-live="polite" aria-atomic="true"></p>
 </section>
 ```
@@ -110,6 +114,10 @@ game-specific compact gap, with no eyebrow, error-code, provenance, or other pre
 
 `#lander-controls` is the only control copy, stays hidden until START, and then reads exactly:
 `Thrust: Space or Up. Turn: Left/H or Right/L. Escape exits. R restarts after success or failure.`
+`#lander-actions` is also hidden in preflight. START reveals it with `Exit mission` enabled and
+`Restart mission` hidden. Failure or success reveals and enables Restart; flying, deployment,
+restart, and departure keep Restart hidden. Both buttons use native focus and click semantics and
+invoke the same controller methods and model events as Escape and `r`.
 
 The zero-angle preflight asset occupies scene `x=[285.92,314.08]`, `y=[163.2,243.36]`, including
 nose, body, engines, and settled plumes. Center the transparent start button at `(30%,31.7625%)` and
@@ -121,16 +129,18 @@ On start, the controller hides and disables `#lander-start`, gives `#lander-scen
 `tabindex="0"`, `role="application"`, `aria-label="Lunar deployment game"`, and
 `aria-describedby="lander-controls lander-status"`, then focuses it with `preventScroll: true`. On
 exit it removes those active attributes, restores `tabindex="-1"`, reveals and enables the start
-button, hides the controls, and focuses the start button without scrolling.
+button, hides the controls and action region, resets Restart hidden, and focuses the start button
+without scrolling. Restart hides its button, returns focus to the active scene without scrolling,
+and starts the same fresh in-memory run as `r`.
 
 Before activation the SVG is a named image whose description mentions the lander, surface, zone, and
 dark NOC, but no controls. While the shell is an application, the SVG is `aria-hidden`; status
 conveys changes and no SVG descendant is separately exposed.
 
-With JavaScript unavailable, the start button and controls remain hidden. The static named scene and
-each page heading remain visible and usable; 404 also retains its explanatory text and breadcrumb
-home anchor. No CSS selector depends on a JavaScript-added class to show shell content or the
-breadcrumb.
+With JavaScript unavailable, the start button, controls, and action region remain hidden. The static
+named scene and each page heading remain visible and usable; 404 also retains its explanatory text
+and breadcrumb home anchor. No CSS selector depends on a JavaScript-added class to show shell
+content or the breadcrumb.
 
 ## 5. Responsive scene geometry
 
@@ -443,7 +453,9 @@ preference on mid-sequence uses this shortcut; changing it in flight does not al
 Section 14's forbidden surfaces enforce in-memory runs; reload starts fresh. Home precedes game;
 never intercept Tab or move/trap focus. Restart retains shell focus. `destroy()` cancels
 clocks/listeners, clears input/capture/active ARIA, status, and thrust, hides its now-dead start
-control, and leaves the static no-JavaScript recovery intact.
+control, hides the action region, resets Restart hidden, disables Exit and Restart, and leaves the
+static no-JavaScript recovery intact. Automated teardown witnesses cover destruction from active and
+terminal states and prove no dead action remains visible, focusable, or enabled.
 
 ## 13. Deterministic vectors
 
@@ -478,14 +490,14 @@ and `/404.html` for fallback acceptance. The output is the complete ten-file art
 `assets/agw-rocket.svg`, `static/site.css`, `static/lander.css`, `static/lander-model.js`, and
 `static/lander-game.js`.
 
-| Layer                                                               | Required coverage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `node --test website/tests/lander-model.test.mjs`                   | One pure scheduler; state/event matrix; Space held through START; keyboard/pointer mixing; vectors; fuel; transformed geometry; landing/playable bounds; NOC/surface/bound ties and independent clamps; frame/input ties, catch-up/stall; plume/sequence; one-shot cue/EXIT; reset; exact status                                                                                                                                                                                                                                                                                          |
-| `python -m unittest discover -s website/tests -p 'test_*.py'`       | Builder rejects invalid bases, renders root/project bases to the exact output set, enforces the shared Lander/404 subtree and closed placeholder vocabulary, and checks template/rendered no-JS semantics, external SVG IDs, CSS units, antenna contrast `3.788:1`, and forbidden `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `navigator.sendBeacon`, `document.cookie`, `Cache`/`CacheStorage`/`caches`, `ServiceWorker`/`navigator.serviceWorker`, `location.href`/`assign`/`replace`, `history.pushState`/`replaceState`, `localStorage`, `sessionStorage`, and `indexedDB` |
-| Manual Chromium and Firefox acceptance; Safari or WebKit at go-live | No-JS recovery; one-shot cue; Space hold-through-start; native start/focus; shell-only Escape/home independence; keys; full pointer/stall teardown; safe/failure/success/reset; hidden time; request log labels initial same-origin document/module/CSS/SVG loads and proves zero game-initiated requests                                                                                                                                                                                                                                                                                 |
-| Manual responsive acceptance                                        | 320 CSS pixels, 400 percent zoom, touch landscape, and wide viewport: no page overflow, clipped controls, covered breadcrumb home link, or start target below the pinned full-silhouette bounds                                                                                                                                                                                                                                                                                                                                                                                           |
-| Standard-library accessibility assertions                           | Landmarks, heading order, duplicate IDs, names, hidden state, live region, focusable elements, and fixed-token 4.5:1 text and 3:1 necessary-graphic contrast                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| Manual keyboard and screen-reader acceptance                        | Logical tab/focus, no trap or intercepted Tab, restart/Escape focus, static description, start name, revealed controls, restrained intermediate announcements, failure and exact success, silent decorative SVG                                                                                                                                                                                                                                                                                                                                                                           |
+| Layer                                                               | Required coverage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `node --test website/tests/lander-model.test.mjs`                   | One pure scheduler; state/event matrix; Space held through START; keyboard/pointer mixing; vectors; fuel; transformed geometry; landing/playable bounds; NOC/surface/bound ties and independent clamps; frame/input ties, catch-up/stall; plume/sequence; one-shot cue/EXIT; reset; exact status                                                                                                                                                                                                                                                                                                                                                                 |
+| `python -m unittest discover -s website/tests -p 'test_*.py'`       | Builder rejects invalid bases, renders root/project bases to the independent exact output set, resolves every local module import, enforces the shared Lander/404 subtree, native action states, and closed placeholder vocabulary, and checks template/rendered no-JS semantics, external SVG IDs, CSS units, antenna contrast `3.788:1`, and forbidden `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `navigator.sendBeacon`, `document.cookie`, `Cache`/`CacheStorage`/`caches`, `ServiceWorker`/`navigator.serviceWorker`, `location.href`/`assign`/`replace`, `history.pushState`/`replaceState`, `localStorage`, `sessionStorage`, and `indexedDB` |
+| Manual Chromium and Firefox acceptance; Safari or WebKit at go-live | No-JS recovery; one-shot cue; Space hold-through-start; native start/focus; shell-only Escape/home independence; keys; full pointer/stall teardown; safe/failure/success/reset; hidden time; request log labels initial same-origin document/module/CSS/SVG loads and proves zero game-initiated requests                                                                                                                                                                                                                                                                                                                                                        |
+| Manual responsive acceptance                                        | 320 CSS pixels, 400 percent zoom, touch landscape, and wide viewport: no page overflow, clipped controls, covered breadcrumb home link, or start target below the pinned full-silhouette bounds; touch Exit and Restart remain visible and operable after activation                                                                                                                                                                                                                                                                                                                                                                                             |
+| Standard-library accessibility assertions                           | Landmarks, heading order, duplicate IDs, names, hidden state, live region, focusable elements, and fixed-token 4.5:1 text and 3:1 necessary-graphic contrast                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Manual keyboard and screen-reader acceptance                        | Logical tab/focus, no trap or intercepted Tab, keyboard and native-button exit/restart focus, static description, start and action names, revealed controls, restrained intermediate announcements, failure and exact success, silent decorative SVG                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 Reduced-motion acceptance additionally proves no cue, agent travel, sequential power animation, CSS
 transition, or departure, while playable physics and the complete success result remain.

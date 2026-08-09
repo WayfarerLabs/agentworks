@@ -17,11 +17,11 @@ site gives them useful product/security depth, permanent project links, and an h
 notice.
 
 The operator's sizing mandate is the controlling constraint: **super simple at first**. The first
-slice is a small static site, its publishing pipeline, and one bounded interactive surprise on the
-otherwise useful 404 page. It may ship in two complete stages: a useful public landing page while
-the onboarding contract is still in development, followed by the canonical bootstrap as soon as that
-contract lands. Every ambition beyond that is recorded as a growth path so nothing forecloses it,
-and none of it is in scope now.
+slice is a small static site, its publishing pipeline, and one bounded interactive surprise shared
+by a dedicated Lander page and the otherwise useful 404 page. It may ship in two complete stages: a
+useful public landing page while the onboarding contract is still in development, followed by the
+canonical bootstrap as soon as that contract lands. Every ambition beyond that is recorded as a
+growth path so nothing forecloses it, and none of it is in scope now.
 
 ## Requirements (first slice)
 
@@ -31,9 +31,12 @@ and none of it is in scope now.
 - R2. The bootstrap block is the centerpiece, presented for its real consumer: an operator will
   paste it to their agent, so it must be trivially copyable and byte-identical to the block the
   repository README carries.
-- R3. An integrated deployment pipeline: the site deploys automatically when its source merges to
-  `main`, with no manual publish step. The site source and pipeline live in this repository unless
-  the effort lead makes a recorded case otherwise.
+- R3. An integrated deployment pipeline: routine site-source merges to `main` deploy automatically,
+  with no manual publish step. The one-time default-host to custom-domain base-path transition uses
+  an explicitly invoked deployment of the same `main` commit after the custom domain is attached and
+  before DNS changes, because a Pages settings change does not trigger a build. That restricted
+  activation is setup, not a second publishing path. The site source and pipeline live in this
+  repository unless the effort lead makes a recorded case otherwise.
 - R4. Static only. No backend, no accounts, no data collection beyond whatever minimal analytics the
   operator explicitly approves (none is the default).
 - R5. The site serves humans and agents alike, consistent with destination 1's spirit: content is
@@ -58,7 +61,9 @@ and none of it is in scope now.
 - R9. The 404 content and route home and the dedicated Lander page work without JavaScript. The game
   has no audio, telemetry, network request, storage, or critical content; it pauses when inactive,
   can be exited, and honors reduced motion for all nonessential animation. Powered-NOC state lasts
-  only for the current run.
+  only for the current run. After activation, native visible `Exit mission` and terminal-state
+  `Restart mission` buttons provide touch and assistive-technology equivalents to Escape and `r`;
+  they remain hidden during hint-free preflight.
 - R10. Before the onboarding effort's canonical bootstrap source lands, an **interim public
   release** may serve the complete site shell, repository-sourced problem and principle content,
   selected brand, permanent links, custom 404, deployment pipeline, and custom domain. It states
@@ -172,11 +177,12 @@ merged and settled on `main`. The first slice must not build toward them specula
 - AC6. Space starts the game from the initial state on either 404 or `/lander/` when focus is not
   inside another control. Starting moves focus to the game scene. Arrow and vi controls produce the
   specified collective and differential thrust; tap, hold, and horizontal drag provide equivalent
-  touch control; and visible plume length reflects the commanded engine thrust.
+  touch control; visible plume length reflects the commanded engine thrust; and the native Exit
+  control returns either input mode to settled preflight.
 - AC7. A safe, upright touchdown left of the NOC completes the agent exit, NOC power-up, and lander
   departure sequence; the powered NOC remains visibly changed for the rest of the run; and the exact
   success status is exposed. An unsafe touchdown has a distinct non-destructive failure state and
-  can restart.
+  can restart through either `r` or the native Restart control.
 - AC8. Automated and browser acceptance cover state transitions, input mapping, consistent
   fixed-step physics across representative frame schedules, route-home fallback, hidden-until-start
   instructions, reduced motion, keyboard focus, narrow screens, and paused background behavior.
