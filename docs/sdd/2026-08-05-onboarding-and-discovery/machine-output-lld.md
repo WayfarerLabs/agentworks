@@ -30,11 +30,11 @@ option must not suggest that an unsupported command has a JSON contract.
 
 The implementation does not redesign agentworks.output.OutputHandler, replace the Typer handler, or
 add a global output-format renderer or process-global output setting. A narrow request-scoped
-ContextVar may carry parsed machine mode for plain error styling and may suppress ordinary
-presentation while a command collects facts; local JSON projections and the direct envelope writer
-remain the only JSON renderer. It must not run remote work solely because JSON was requested. It
-must not expose raw configuration, secret values or resolver results, session harness state, session
-socket paths, boot identifiers, or opaque VM platform metadata.
+ContextVar suppresses ordinary presentation while a command collects JSON facts; local JSON
+projections and the direct envelope writer remain the only JSON renderer. It must not run remote
+work solely because JSON was requested. It must not expose raw configuration, secret values or
+resolver results, session harness state, session socket paths, boot identifiers, or opaque VM
+platform metadata.
 
 ## Current paths and extraction seams
 
@@ -45,7 +45,7 @@ record. Human and JSON renderers consume that one record and never parse one ano
 | ------------------------------ | ---------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------- |
 | Resource list, kinds, describe | cli/agentworks/cli/commands/resource.py  | resources.inspect.list_resources, list_kinds, describe_resource | Reuse ResourceListing, ResourceSummary, KindRow, and ResourceDescription. |
 | Secret list, describe          | cli/agentworks/cli/commands/secret.py    | secrets.inspect.build_secret_table, describe_secret             | Reuse SecretTable, SecretRow, SecretCell, and SecretDescription.          |
-| VM list, describe              | cli/agentworks/cli/commands/vm.py        | vms.manager.power.list_vms, describe_vm                         | Extract DB and existing bounded live-read facts before rendering.         |
+| VM list, describe              | cli/agentworks/cli/commands/vm.py        | vms.manager.inspect.list_vms, describe_vm                       | Extract DB and existing bounded live-read facts before rendering.         |
 | Workspace list, describe       | cli/agentworks/cli/commands/workspace.py | workspaces.manager.create.list_workspaces, describe_workspace   | Extract facts from existing rows, sessions, and grants.                   |
 | Agent list, describe           | cli/agentworks/cli/commands/agent.py     | agents.manager.inspect.list_agents, describe_agent              | Extract facts from existing rows, grants, and sessions.                   |
 | Session list, describe         | cli/agentworks/cli/commands/session.py   | sessions.manager.\_queries.list_sessions, describe_session      | Extract facts while preserving current bounded status work.               |
@@ -111,20 +111,14 @@ renderer-private typed diagnostic for the human renderer, preserving today's std
 transcript. JSON writes only the safe issue on stdout. The existing live-resource helper already
 returns null for every failed or malformed live read and therefore creates no issue.
 
-Secret resolution is an output-neutral boundary operation. The ordered resolver accepts the existing
-ResolutionReporter protocol from its caller rather than constructing an output reporter internally.
-Resolver.resolve, the VM no-gate boundary, the session batch boundary, and its late repair-key
-resolution thread that reporter through. The singular session path also threads it unchanged:
-\_prepare_vm receives the reporter, passes it to gated_vm_boundary, and that boundary passes it to
-gate_secret_resolver and its Resolver.resolve call. Human rendering passes the existing output
-reporter and therefore preserves its resolution and skipped-backend transcript. JSON passes a quiet
-reporter to the same ordered resolver, active backend chain, interactive policy, preflight, and
-value cache. It does not use the verification-only quiet resolver, which has deliberately different
-backend wrapping and interactivity rules. Thus JSON suppression changes presentation only, never
-secret resolution semantics or whether a successful VM describe, session describe, or status-enabled
-session list can prompt. Request-local presentation suppression is a ContextVar. Session status
-workers receive an explicit, separate `copy_context()` for each ThreadPoolExecutor task, so
-suppression follows the request without leaking to overlapping human invocations.
+Secret resolution uses the ordinary resolver and its existing output reporter for both formats.
+Human rendering preserves the resolution and skipped-backend transcript. JSON wraps fact collection
+in request-local presentation suppression, so the same resolver, active backend chain, interactive
+policy, preflight, and value cache run without adding prose around the envelope. Suppression changes
+presentation only, never secret resolution semantics or whether a successful VM describe, session
+describe, or status-enabled session list can prompt. Session status workers receive an explicit,
+separate `copy_context()` for each ThreadPoolExecutor task, so suppression follows the request
+without leaking to overlapping human invocations.
 
 ## Data schemas
 
@@ -274,24 +268,14 @@ handling before work begins.
 
 Doctor is the only report-with-failure exception. A successful VM inspection that currently degrades
 after a bounded attempted read uses null for unavailable facts and a closed vm_issue; it is not a
-business-error envelope. JSON contains no ANSI on either output stream. Request-local machine stderr
-rendering removes C0 controls other than ordinary line feeds and tabs, DEL, and C1 controls from
-every prompt form's prose/default/options, exception messages, hints, and native Click/Typer usage
-that may repeat argv; machine prompts emit no terminal-mode reset sequences. Machine debug formats
-its full traceback through this sanitizer, while human debug keeps its raw re-raise. Human rendering
-otherwise remains unchanged. Covered callbacks record their parsed output mode in request-local
-state before mutex, config, database, or service work, and that state remains active while errors
-unwind. A closed pre-parsing detector recognizes only the 16 supported command paths, including
-after leading root option tokens, and the two JSON option spellings before a literal `--`; it
-disables and sanitizes native Click/Typer usage without selecting machine mode or interpreting
-mutation and passthrough arguments. The serializer writes stdout directly, rather than output.info,
-so the ambient handler cannot add presentation. --output human executes the exact current human
-renderer path.
+business-error envelope. Errors continue through the existing CLI error and usage routes. The
+serializer writes stdout directly, rather than output.info, so ordinary presentation cannot alter
+the envelope. --output human executes the existing human renderer path.
 
 Doctor checks schema state before opening current state through the existing read-only database
-connection. A stale schema yields pending-migration rows without running migrations. SQLite may
-perform ordinary read-side WAL and shared-memory bookkeeping. Recovery and automatic backups belong
-to the database migration boundary and are outside this JSON-output implementation.
+connection. A stale schema yields pending-migration rows without running migrations. Migration
+recovery and automatic backups belong to the database migration boundary and are outside this
+JSON-output implementation.
 
 --names-only remains completion plumbing and is mutually exclusive with --output json on every
 covered list or kinds command that already has it. Validate that conflict before service work. It
@@ -314,7 +298,7 @@ Implementation must add:
    human both match pre-Phase-2 stdout and stderr in a non-interactive no-color fixture. VM and
    session fixtures cover existing bounded status and degraded paths, including the existing session
    PID and boot-ID repair write.
-4. Mutual exclusion, no-ANSI, stderr-routing, error-empty-stdout, and doctor-report-before-exit
+4. Mutual exclusion, existing error routing, error-empty-stdout, and doctor-report-before-exit
    tests.
 5. Safety tests proving JSON excludes secret values, raw config, opaque platform metadata, harness
    state, sockets, and boot identifiers.
@@ -322,12 +306,9 @@ Implementation must add:
    output.
 7. Secret-boundary parity fixtures. A successful VM describe whose site requires a resolvable secret
    proves JSON stdout is exactly one parseable envelope with no resolver transcript. The equivalent
-   human fixture preserves the current resolved and skipped-backend transcript. A resolvable-secret
-   session-describe fixture proves that JSON passes the quiet reporter through \_prepare_vm,
-   gated_vm_boundary, and gate_secret_resolver: stdout is exactly one parseable envelope, while the
-   equivalent human invocation preserves its current transcript. The status-enabled session-list
-   fixture exercises the same quiet reporter through the batch boundary and its late repair-key
-   resolution, and proves it retains the existing status and PID-repair outcome.
+   human fixture preserves the current resolved and skipped-backend transcript. Session describe and
+   status-enabled session list exercise the same ordinary resolution boundaries under request-local
+   suppression and retain existing status and PID-repair outcomes.
 8. Reference fixtures with repeated entries and inheritance declarers. They assert the exact graph
    sequence, nullable declared_by fields, and no JSON-side deduplication. Session detail fixtures
    assert a positive live PID and a stopped PID_STOPPED row rendered as null. Harness-integration
@@ -346,21 +327,12 @@ has no new setting and is recorded as unaffected in the Phase 2 handoff.
 
 1. Add the local output enum, explicit envelope writer, safe shared projections, and serializer
    tests. Keep JSON projection and writing local; do not replace OutputHandler or add a global
-   output-format renderer. Narrow request-state and presentation-suppression ContextVars are allowed
-   only for presentation isolation and plain machine-error styling.
+   output-format renderer. A narrow presentation-suppression ContextVar is allowed only while
+   collecting successful JSON facts.
 2. Wire resource, kinds, secret, and doctor first, reusing existing fact records to establish the
    renderer, null, enum, error, and human-fixture patterns.
-3. Extract read facts for VM, workspace, agent, console, and session. Make the resolver reporter
-   caller-owned before wiring JSON VM describe, session describe, and status-enabled session list.
-   Preserve existing queries, secret-resolution behavior, and session PID-repair behavior, but make
-   fact construction independently testable.
+3. Extract read facts for VM, workspace, agent, console, and session. Preserve existing queries,
+   secret-resolution behavior, and session PID-repair behavior, but make fact construction
+   independently testable.
 4. Wire command options, permanent docs, completion expectations, and guide-action consumption, then
    run focused and full gates. This LLD changes no plan checkbox.
-
-## Coordination note: declarative-schema PR #455
-
-PR #455 changes schema structural unions and related model sources, but does not touch covered
-operational command modules, resource inspection services, doctor, or database rows. Phase 2 should
-not wait. Rebase after it merges and rerun focused JSON fixtures. Adapt only if Phase 2 deliberately
-projects a changed model shape. The safe projections above expose no raw manifest or opaque
-capability model, so no adaptation is expected from the current PR scope.

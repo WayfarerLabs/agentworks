@@ -169,71 +169,38 @@ recorded from the branch runs below:
 - Rulesync generated-output check: clean;
 - mandatory file lint: 272 Markdown files clean, 246 spelling files clean, and Prettier clean.
 
-Superseded inherited-mypy evidence: full mypy was also run for the PR #455 adaptation, but the exact
-merged base and that branch both reported the same three errors in unchanged
-`tests/test_operational_json_reviewed.py`: two `attr-defined` errors for its former
-`agentworks.db.database.tempfile` test override seam and one `SimpleNamespace`/`SessionRow`
-list-item error. That guide-only adaptation did not change the separate operational-JSON test. The
-later Phase 2 correction below removed the stale override seam, corrected the fixture typing, and
-supersedes this inherited result with a clean full mypy run. The full non-integration suite was not
-repeated for the earlier adaptation because no general production path changed; its 3,069-test
-boundary included the complete guide suite and every relevant schema, manifest, retired-shape, and
-git-credential service test.
+## Phase 2 machine-readable operational output
 
-## Phase 2 operator scope correction
+The covered resource, secret, VM, workspace, agent, session, console, and doctor commands expose
+local `--output human|json` options. JSON uses the exact v1 envelope and explicit domain-owned fact
+projections recorded in `machine-output-lld.md` and `cli/command-reference.md`. The human and JSON
+renderers consume the same presentation-neutral facts. Request-local presentation suppression keeps
+ordinary progress and resolver prose outside successful JSON documents without changing resolution,
+prompt, activation, status, or session-repair behavior. Domain and usage failures retain the
+existing CLI error routes.
 
-The operator rejected the doctor-specific database-copying and hostile-filesystem inspection
-subsystem as disproportionate to the JSON-output effort. The subsystem, its distinct unavailable
-status, schema-history validator, documentation, and dedicated adversarial tests were removed.
-Doctor now checks schema state before using the existing read-only database connection, does not run
-migrations, and accepts ordinary SQLite read-side WAL and shared-memory bookkeeping. Hostile
-same-account filesystem replacement is not part of doctor's threat model. Migration backups and
-restore behavior are a separate system-wide concern at the migration boundary.
+VM inspection classifies its four closed issue stages inside the inspection service while the normal
+VM operation boundary remains unchanged. VM, workspace, and session projections use frozen
+output-owned vocabularies for persisted enum values. Event names use a closed vocabulary and event
+details remain null. Opaque configuration, platform metadata, secret values, session harness state,
+socket paths, and boot identifiers are excluded.
 
-The JSON v1 work retained presentation-neutral facts, deterministic envelopes, redacted doctor
-diagnostics, request-local output suppression, frozen output-owned operational enum vocabularies,
-and human-output compatibility. The ordinary System and Database health groups live in the small
-`doctor_state.py` module so every touched production file remains below the project ceiling. No
-command or option shape changed during this correction, so completions and sample configuration
-require no update.
+Doctor projects `HealthReport`, `HealthGroup`, and `HealthCheck` directly, so human and JSON output
+carry the same message and hint facts. A failing report is emitted before exit 1. Doctor checks the
+ordinary scalar schema version before opening the existing read-only database connection and reports
+a stale schema without migrating it. The migration guide consumes the doctor JSON facts directly;
+its completion action requires zero failures, exit 0, and an exact successful Database Schema check.
 
-Operator scope-correction validation passed:
+The Phase 2 option additions updated generated help, Bash, Zsh, and PowerShell completion
+expectations in the implementation commits. Dynamic completion remains `--names-only`. No sample
+configuration setting was added.
 
-- focused doctor, guide, machine-output, and operational JSON suite: 178 passed;
-- full non-integration suite: 6,678 passed and 3 deselected;
+Clean-slate correction validation passed:
+
+- focused guide, doctor, machine-output, operational JSON, and completion suite: 566 passed;
+- full non-integration suite: 6,649 passed and 3 deselected;
 - Ruff check and format check: 625 files clean;
-- full mypy: 625 source files clean;
-- Rulesync generated-output check: clean;
-- mandatory file lint: Prettier, markdownlint, and cspell clean.
+- full mypy: 625 source files clean.
 
-## Simplified doctor follow-up
-
-Review of the corrected scope found three ordinary doctor contract gaps. The same schema gate was
-repeated in three groups, malformed `schema_version` queries were mistaken for an absent legacy
-table, and an unexpected persisted VM initialization state no longer produced the human warning
-carried by main. The final migration action also accepted a non-failing stale-schema warning as
-completion. These were corrected without restoring any database-copying, filesystem-race, snapshot,
-unavailable-result, or schema-history subsystem.
-
-`doctor_state.py` now owns one context-managed gate that checks the scalar schema version and opens
-the existing read-only `Database` only when current. System, VM sites, and Database share that gate.
-The small `db/schema.py` module distinguishes a truly absent `schema_version` table from a malformed
-query and accepts only a nonnegative integer maximum. It exists solely to keep `database.py` below
-the project file ceiling. Other malformed database errors become the existing closed Database
-failure. Unexpected initialization values produce a fixed warning that does not echo persisted text.
-The migration guide requires a `Database` / `Schema` check with status `ok` in addition to zero
-failures and exit 0.
-
-The three removed-but-completed review rounds were restored to `plan.md` as truthful historical
-records and annotated as superseded by the operator scope correction. Permanent command and LLD text
-describe only the shipped ordinary read path, with no rejected implementation detail. No CLI shape,
-completions, or sample configuration changed.
-
-Simplified-doctor validation passed:
-
-- focused doctor, guide, database, machine-output, and operational JSON suite: 583 passed;
-- full non-integration suite: 6,686 passed and 3 deselected;
-- Ruff check and format check: 627 files clean;
-- full mypy: 627 source files clean.
-
-The PR remains draft while clean project, fresh-eyes, integration, and PR re-review are pending.
+Clean project, fresh-eyes, integration, and PR re-review remain pending after the updated branch is
+published.

@@ -20,7 +20,6 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow, VMRow, WorkspaceRow
-    from agentworks.secrets.resolve import ResolutionReporter
     from agentworks.sessions.tmux import RunCommand
     from agentworks.ssh import SSHLogger
     from agentworks.transports import Transport
@@ -78,7 +77,6 @@ def _prepare_vm(
     session: SessionRow,
     *,
     operation: str | None = None,
-    reporter: ResolutionReporter | None = None,
 ) -> Iterator[tuple[WorkspaceRow, VMRow, RunCommand, RunCommand, Transport]]:
     """The singular session ops' composition root (stop / delete /
     describe / attach / logs): validate the session's workspace and VM
@@ -120,7 +118,6 @@ def _prepare_vm(
         registry,
         vm,
         scope=_session_scope(db, session, ws, vm),
-        reporter=reporter,
     ):
         logger = SSHLogger(vm.name, operation) if operation else None
         target = _mgr.transport(vm, config, logger=logger)
@@ -223,8 +220,6 @@ def _batch_vm_boundary(
     db: Database,
     config: Config,
     vms: Sequence[VMRow],
-    *,
-    reporter: ResolutionReporter | None = None,
 ) -> Iterator[None]:
     """The batch session ops' composition root (stop_all_sessions,
     resume_all_sessions, list_sessions' status pass): ONE boundary
@@ -282,7 +277,7 @@ def _batch_vm_boundary(
     from agentworks.vms.nodes import VMSiteNode, live_vm_node
 
     registry = load_request_registry(config)
-    resolver = Resolver(config, registry, reporter=reporter)
+    resolver = Resolver(config, registry)
     site_nodes: dict[str, VMSiteNode] = {}
     vm_nodes = [live_vm_node(db, config, registry, vm, site_nodes=site_nodes) for vm in vms]
     nodes = walk(*vm_nodes)
@@ -337,7 +332,6 @@ def _batch_vm_boundary(
                 [decl],
                 active_backends(config, registry),
                 registry=registry,
-                reporter=reporter,
             )[secret_name]
 
         return _resolve

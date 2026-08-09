@@ -19,18 +19,13 @@ from agentworks.errors import (
 )
 from agentworks.naming import MAX_VM_NAME_LENGTH
 
-from ._helpers import _require_vm
-from .boundary import (
-    InspectionBoundaryFailure,
-    VMInspectionIssueSource,
-    _live_vm_boundary,
-)
+from ._helpers import _require_vm, _vm_scope
+from .boundary import _platform_ops_ctx
 
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
     from agentworks.machine_output import JsonObject
-    from agentworks.secrets.resolve import ResolutionReporter
 
 # NAME-column truncation cap for ``vm list``, derived from the VM-name cap so
 # the two cannot drift: a valid name (<= MAX_VM_NAME_LENGTH) never truncates,
@@ -61,6 +56,15 @@ class VMIssueCode(StrEnum):
     """Closed JSON v1 outcome vocabulary for a VM inspection issue."""
 
     UNAVAILABLE = "unavailable"
+
+
+class VMInspectionIssueSource(StrEnum):
+    """Closed failure stages that JSON v1 may disclose for VM inspection."""
+
+    SITE_LOOKUP = "site_lookup"
+    PREFLIGHT = "preflight"
+    SECRET_RESOLUTION = "secret_resolution"
+    PLATFORM_STATUS = "platform_status"
 
 
 @dataclass(frozen=True)
@@ -427,12 +431,16 @@ def vm_description(
     db: Database,
     config: Config,
     name: str,
-    *,
-    reporter: ResolutionReporter | None = None,
 ) -> VMDescription:
     """Collect safe VM detail facts, degrading bounded live reads to issues."""
     import agentworks.vms.manager as _mgr
     from agentworks.bootstrap import load_request_registry
+    from agentworks.capabilities.base import RunContext
+    from agentworks.orchestration.readiness import preflight_all
+    from agentworks.orchestration.secrets import secret_union
+    from agentworks.orchestration.walk import walk
+    from agentworks.secrets.resolver import Resolver
+    from agentworks.vms.nodes import live_vm_node
     from agentworks.vms.sites import lookup_site
 
     vm = _require_vm(db, name)
@@ -455,35 +463,52 @@ def vm_description(
         issues.append(issue)
         diagnostics.append(VMDiagnostic(issue=issue, error=exc))
     else:
+        resolver = Resolver(config, registry)
         try:
-            vm_node, ops_ctx = _live_vm_boundary(
-                db,
-                config,
-                vm,
-                registry=registry,
-                reporter=reporter,
-                inspection_stages=True,
-            )
+            vm_node = live_vm_node(db, config, registry, vm)
         except UserAbort:
             raise
-        except InspectionBoundaryFailure as exc:
-            issue = VMIssue(source=exc.source)
+        except AgentworksError as exc:
+            issue = VMIssue(source=VMInspectionIssueSource.SITE_LOOKUP)
             issues.append(issue)
-            diagnostics.append(VMDiagnostic(issue=issue, error=exc.diagnostic))
+            diagnostics.append(VMDiagnostic(issue=issue, error=exc))
         else:
-            platform = vm_node.site.platform
+            nodes = walk(vm_node)
+            for secret_name in secret_union(nodes):
+                resolver.register_name(secret_name)
+            scope = _vm_scope(db, vm.name)
             try:
-                backend = platform.display_backend_name(vm)
-                observed = platform.status(vm, ops_ctx)
-                observed_status = observed.value
-                if observed in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
-                    status_disposition = "manual" if vm.operator_stopped else "idle"
-            except UserAbort:
-                raise
+                preflight_all(
+                    nodes,
+                    RunContext(config=config, operation_scope=scope),
+                    registry=registry,
+                )
             except AgentworksError as exc:
-                issue = VMIssue(source=VMInspectionIssueSource.PLATFORM_STATUS)
+                issue = VMIssue(source=VMInspectionIssueSource.PREFLIGHT)
                 issues.append(issue)
                 diagnostics.append(VMDiagnostic(issue=issue, error=exc))
+            else:
+                try:
+                    resolver.resolve()
+                except AgentworksError as exc:
+                    issue = VMIssue(source=VMInspectionIssueSource.SECRET_RESOLUTION)
+                    issues.append(issue)
+                    diagnostics.append(VMDiagnostic(issue=issue, error=exc))
+                else:
+                    ops_ctx = _platform_ops_ctx(config, scope, vm_node, resolver)
+                    platform = vm_node.site.platform
+                    try:
+                        backend = platform.display_backend_name(vm)
+                        observed = platform.status(vm, ops_ctx)
+                        observed_status = observed.value
+                        if observed in (VMStatus.STOPPED, VMStatus.DEALLOCATED):
+                            status_disposition = "manual" if vm.operator_stopped else "idle"
+                    except UserAbort:
+                        raise
+                    except AgentworksError as exc:
+                        issue = VMIssue(source=VMInspectionIssueSource.PLATFORM_STATUS)
+                        issues.append(issue)
+                        diagnostics.append(VMDiagnostic(issue=issue, error=exc))
 
     # A platform-status diagnostic does not make the bounded resource helper
     # unsafe. Preserve the legacy best-effort facts unless the observation

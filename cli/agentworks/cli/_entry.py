@@ -2,11 +2,6 @@
 
 from __future__ import annotations
 
-import sys
-import traceback
-from io import StringIO
-from typing import TYPE_CHECKING
-
 import click
 import typer
 
@@ -15,73 +10,8 @@ from agentworks.cli._errors import echo_hint, record_unhandled_error
 from agentworks.cli._typer_output import TyperHandler
 from agentworks.path_rendering import format_host_path
 
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-
-_MACHINE_OUTPUT_PATHS = frozenset(
-    {
-        ("resource", "list"),
-        ("resource", "kinds"),
-        ("resource", "describe"),
-        ("vm", "list"),
-        ("vm", "describe"),
-        ("workspace", "list"),
-        ("workspace", "describe"),
-        ("agent", "list"),
-        ("agent", "describe"),
-        ("session", "list"),
-        ("session", "describe"),
-        ("console", "list"),
-        ("console", "describe"),
-        ("secret", "list"),
-        ("secret", "describe"),
-        ("doctor",),
-    }
-)
-
-
-def _plain_native_usage_for_machine_request(arguments: Sequence[str]) -> bool:
-    """Recognize only supported JSON paths for native parse rendering.
-
-    This preparse pass does not select machine mode. It only disables Click's
-    ANSI usage styling when parsing fails before the selected command callback
-    can record its parsed ``OutputFormat``. Passthrough tokens after a literal
-    ``--`` are deliberately invisible.
-    """
-    before_passthrough = list(arguments[: arguments.index("--")]) if "--" in arguments else list(arguments)
-    remaining = before_passthrough.copy()
-    while remaining and remaining[0].startswith("-"):
-        remaining.pop(0)
-    if not remaining:
-        return False
-
-    path = (remaining[0],) if remaining[0] == "doctor" else tuple(remaining[:2])
-    if path not in _MACHINE_OUTPUT_PATHS:
-        return False
-    return "--output=json" in before_passthrough or any(
-        argument == "--output" and value == "json"
-        for argument, value in zip(before_passthrough, before_passthrough[1:], strict=False)
-    )
-
 
 def main() -> None:
-    """Run one isolated CLI request."""
-    from agentworks.output import request_output_state
-
-    with request_output_state():
-        _main_in_request()
-
-
-def _render_machine_debug_traceback(exception: BaseException) -> None:
-    """Render a full debug traceback without replaying terminal controls."""
-    from agentworks.output import machine_stderr_text
-
-    rendered = "".join(traceback.format_exception(type(exception), exception, exception.__traceback__))
-    typer.echo(machine_stderr_text(rendered), nl=False, err=True)
-
-
-def _main_in_request() -> None:
     """CLI entrypoint. Sets up output handler and catches business logic errors."""
     # Resolve `app` through the package namespace at call time so tests that
     # monkeypatch `agentworks.cli.app` to swap in a minimal test app actually
@@ -101,7 +31,7 @@ def _main_in_request() -> None:
         UserAbort,
         ValidationError,
     )
-    from agentworks.output import error, machine_readable, machine_stderr_text, set_handler
+    from agentworks.output import error, set_handler
 
     set_handler(TyperHandler())
 
@@ -114,28 +44,11 @@ def _main_in_request() -> None:
         # successfully. Inside the try so a Ctrl-C during the pre-pass still
         # routes through our wrapper.
         _seed_debug_from_pre_callback()
-        if _plain_native_usage_for_machine_request(sys.argv[1:]):
-            # Typer's Rich usage renderer does not honor Click's ``color``
-            # context flag. Standalone=False lets the vendored native Click
-            # exception escape so its own plain renderer can apply the same
-            # parsed usage and exit code without ANSI.
-            from typer import _click as typer_click
-
-            try:
-                exit_code = _cli.app(color=False, standalone_mode=False)
-            except typer_click.ClickException as exception:
-                rendered = StringIO()
-                exception.show(file=rendered)
-                typer.echo(machine_stderr_text(rendered.getvalue(), force=True), nl=False, err=True)
-                raise SystemExit(exception.exit_code) from None
-            if isinstance(exit_code, int) and exit_code != 0:
-                raise SystemExit(exit_code)
-        else:
-            _cli.app()
+        _cli.app()
     except ConfigError as e:
         # Config errors get their own label since the user is looking at the
         # wrong file, not at a runtime state problem.
-        typer.echo(machine_stderr_text(f"Configuration error: {e}"), err=True)
+        typer.echo(f"Configuration error: {e}", err=True)
         echo_hint(e)
         raise SystemExit(1) from None
     except UserAbort:
@@ -159,24 +72,17 @@ def _main_in_request() -> None:
         error(f"{type(e).__name__}: {e}")
         echo_hint(e)
         if debug_enabled():
-            if not machine_readable():
-                raise
-            _render_machine_debug_traceback(e)
-            raise SystemExit(1) from None
+            raise
         log_path = record_unhandled_error(e)
         if log_path is not None:
             typer.echo(
-                machine_stderr_text(
-                    f"(full traceback written to {format_host_path(log_path)}; "
-                    "rerun with --debug or AGW_DEBUG=1 to print on stderr)"
-                ),
+                f"(full traceback written to {format_host_path(log_path)}; "
+                "rerun with --debug or AGW_DEBUG=1 to print on stderr)",
                 err=True,
             )
         else:
             typer.echo(
-                machine_stderr_text(
-                    "(could not write traceback to log; rerun with --debug or AGW_DEBUG=1 to print on stderr)"
-                ),
+                "(could not write traceback to log; rerun with --debug or AGW_DEBUG=1 to print on stderr)",
                 err=True,
             )
         raise SystemExit(1) from None
@@ -206,12 +112,7 @@ def _main_in_request() -> None:
         # cover unknown-option / missing-argument errors from typer-native
         # params; typer renders those itself as its boxed panel and they never
         # reach this clause.
-        if machine_readable():
-            rendered = StringIO()
-            e.show(file=rendered)
-            typer.echo(machine_stderr_text(rendered.getvalue()), nl=False, err=True)
-        else:
-            e.show()
+        e.show()
         raise SystemExit(e.exit_code) from None
     except (click.exceptions.Exit, typer.Exit) as e:
         # Defensive: no known path delivers an Exit here. Typer vendors its own
@@ -252,25 +153,18 @@ def _main_in_request() -> None:
         # traceback to the error log for post-hoc debugging, and exit non-zero.
         # Re-raise under --debug / AGW_DEBUG=1 so devs/CI see the traceback.
         if debug_enabled():
-            if not machine_readable():
-                raise
-            _render_machine_debug_traceback(e)
-            raise SystemExit(1) from None
+            raise
         log_path = record_unhandled_error(e)
         error(f"{type(e).__name__}: {e}")
         if log_path is not None:
             typer.echo(
-                machine_stderr_text(
-                    f"(full traceback written to {format_host_path(log_path)}; "
-                    "rerun with --debug or AGW_DEBUG=1 to print on stderr)"
-                ),
+                f"(full traceback written to {format_host_path(log_path)}; "
+                "rerun with --debug or AGW_DEBUG=1 to print on stderr)",
                 err=True,
             )
         else:
             typer.echo(
-                machine_stderr_text(
-                    "(could not write traceback to log; rerun with --debug or AGW_DEBUG=1 to print on stderr)"
-                ),
+                "(could not write traceback to log; rerun with --debug or AGW_DEBUG=1 to print on stderr)",
                 err=True,
             )
         raise SystemExit(1) from None

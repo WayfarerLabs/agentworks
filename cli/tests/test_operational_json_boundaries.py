@@ -152,12 +152,12 @@ def _assert_json_envelope_only(result: object, command: str) -> dict[str, object
     return document
 
 
-def test_vm_describe_json_and_human_keep_resolver_semantics_with_quiet_reporting(
+def test_vm_describe_json_suppresses_the_ordinary_resolver_presentation(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """VM describe changes only reporter presentation, not the ordered pass."""
+    """Both formats use the same resolver while JSON suppresses its presentation."""
     config = make_config()
     _seed_vm(db)
     _wire_cli(monkeypatch, db, config)
@@ -182,19 +182,19 @@ def test_vm_describe_json_and_human_keep_resolver_semantics_with_quiet_reporting
         (
             ("proxmox-token",),
             ("skipped-store", "env-var", "prompt"),
-            "OutputResolutionReporter",
+            "_OutputResolutionReporter",
             True,
         ),
         (
             ("proxmox-token",),
             ("skipped-store", "env-var", "prompt"),
-            "QuietResolutionReporter",
+            "_OutputResolutionReporter",
             True,
         ),
     ]
 
 
-def test_session_describe_threads_reporter_through_the_real_gate_chain(
+def test_session_describe_uses_the_same_real_gate_chain_for_both_formats(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
@@ -213,7 +213,7 @@ def test_session_describe_threads_reporter_through_the_real_gate_chain(
     monkeypatch.setattr(sessions, "_ensure_pid", lambda row, *, target, db: row)
     monkeypatch.setattr(sessions, "check_session_status", lambda row, *, target: SessionStatus.STOPPED)
 
-    chain: list[tuple[str, str | None]] = []
+    chain: list[str] = []
     real_prepare = sessions._prepare_vm
     from agentworks.vms.manager import boundary as vm_boundary
 
@@ -222,21 +222,18 @@ def test_session_describe_threads_reporter_through_the_real_gate_chain(
 
     @contextlib.contextmanager
     def prepare(*args: object, **kwargs: object) -> Iterator[object]:
-        reporter = kwargs.get("reporter")
-        chain.append(("_prepare_vm", reporter.__class__.__name__ if reporter is not None else None))
+        chain.append("_prepare_vm")
         with real_prepare(*args, **kwargs) as value:  # type: ignore[arg-type]
             yield value
 
     @contextlib.contextmanager
     def boundary(*args: object, **kwargs: object) -> Iterator[object]:
-        reporter = kwargs.get("reporter")
-        chain.append(("gated_vm_boundary", reporter.__class__.__name__ if reporter is not None else None))
+        chain.append("gated_vm_boundary")
         with real_boundary(*args, **kwargs) as value:  # type: ignore[arg-type]
             yield value
 
     def gate_resolver(*args: object, **kwargs: object):  # noqa: ANN202
-        reporter = kwargs.get("reporter")
-        chain.append(("gate_secret_resolver", reporter.__class__.__name__ if reporter is not None else None))
+        chain.append("gate_secret_resolver")
         return real_gate_resolver(*args, **kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr(sessions, "_prepare_vm", prepare)
@@ -255,23 +252,23 @@ def test_session_describe_threads_reporter_through_the_real_gate_chain(
     _assert_json_envelope_only(machine, "session.describe")
     assert machine.stderr_bytes == b""
     assert chain == [
-        ("_prepare_vm", None),
-        ("gated_vm_boundary", None),
-        ("gate_secret_resolver", None),
-        ("_prepare_vm", "QuietResolutionReporter"),
-        ("gated_vm_boundary", "QuietResolutionReporter"),
-        ("gate_secret_resolver", "QuietResolutionReporter"),
+        "_prepare_vm",
+        "gated_vm_boundary",
+        "gate_secret_resolver",
+        "_prepare_vm",
+        "gated_vm_boundary",
+        "gate_secret_resolver",
     ]
     for excluded in (b"SECRET_HARNESS_STATE", b"SECRET_SOCKET", b"SECRET_BOOT_ID"):
         assert excluded not in machine.stdout_bytes
 
 
-def test_session_list_status_and_late_repair_resolution_keep_reporter_parity(
+def test_session_list_status_and_late_repair_use_the_same_resolution_path(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The batch boundary and lazy rejoin-key pass both receive the CLI reporter."""
+    """The batch boundary and lazy rejoin-key pass are presentation-neutral."""
     from agentworks.plugins.proxmox.platform import ProxmoxPlatform
     from agentworks.sessions import manager as sessions
     from agentworks.vms import manager as vms
@@ -319,13 +316,13 @@ def test_session_list_status_and_late_repair_resolution_keep_reporter_parity(
         (
             ("proxmox-token",),
             ("skipped-store", "env-var", "prompt"),
-            "QuietResolutionReporter",
+            "_OutputResolutionReporter",
             True,
         ),
         (
             ("tailscale-auth-key",),
             ("skipped-store", "env-var", "prompt"),
-            "QuietResolutionReporter",
+            "_OutputResolutionReporter",
             True,
         ),
     ]
@@ -348,13 +345,13 @@ def test_session_list_status_and_late_repair_resolution_keep_reporter_parity(
         (
             ("proxmox-token",),
             ("skipped-store", "env-var", "prompt"),
-            "OutputResolutionReporter",
+            "_OutputResolutionReporter",
             True,
         ),
         (
             ("tailscale-auth-key",),
             ("skipped-store", "env-var", "prompt"),
-            "OutputResolutionReporter",
+            "_OutputResolutionReporter",
             True,
         ),
     ]
@@ -365,7 +362,7 @@ def test_session_json_suppresses_activation_output_around_the_envelope(
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A quiet resolver must also keep activation presentation out of JSON stdout."""
+    """Request-local suppression keeps activation presentation out of JSON stdout."""
     from agentworks import output
     from agentworks.plugins.proxmox.platform import ProxmoxPlatform
     from agentworks.sessions import manager as sessions
@@ -393,7 +390,7 @@ def test_vm_event_detail_cannot_expose_secret_command_text(monkeypatch: pytest.M
     from agentworks.cli.commands import vm
     from agentworks.db import VMRow
     from agentworks.vms import manager
-    from agentworks.vms.manager.power import VMDescription, VMDetailEvent, VMDetailFacts
+    from agentworks.vms.manager.inspect import VMDescription, VMDetailEvent, VMDetailFacts
 
     marker = "SECRET_TOKEN=do-not-expose command --password do-not-expose"
     raw_event = f"historical-{marker}"
@@ -498,40 +495,6 @@ def test_vm_platform_status_issue_retains_successful_bounded_live_resources(
     }
 
 
-def test_falsey_custom_resolution_reporter_is_honored(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Reporter selection uses None as the default sentinel, not truthiness."""
-    from agentworks.resources.graph import Readiness
-    from agentworks.secrets.base import SecretDecl
-    from agentworks.secrets.resolve import ResolutionReporter, resolve_secrets
-
-    events: list[tuple[str, str, str]] = []
-
-    class FalseyReporter:
-        def __bool__(self) -> bool:
-            return False
-
-        def skipped(self, secret: str, backend: str, reason: str | None) -> None:
-            events.append(("skipped", secret, backend))
-
-        def resolved(self, secret: str, backend: str, identifier: str | None) -> None:
-            events.append(("resolved", secret, backend))
-
-    class ResolvingBackend(_SkippedBackend):
-        def batch_get(self, wants: list[tuple[SecretDecl, MappingValue | None]]) -> dict[str, str]:
-            return {decl.name: "value" for decl, _mapping in wants}
-
-    backend = ActiveBackend(ResolvingBackend(), Readiness.ready(), "custom")  # type: ignore[arg-type]
-    reporter: ResolutionReporter = FalseyReporter()
-    monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
-
-    assert resolve_secrets(
-        [SecretDecl(name="token", description="")],
-        [backend],
-        reporter=reporter,
-    ) == {"token": "value"}
-    assert events == [("resolved", "token", "custom")]
-
-
 def test_machine_presentation_suppression_keeps_prompts_interactive_on_stderr(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -540,7 +503,7 @@ def test_machine_presentation_suppression_keeps_prompts_interactive_on_stderr(
     from agentworks.cli._typer_output import TyperHandler
     from agentworks.cli.commands import vm
     from agentworks.vms import manager
-    from agentworks.vms.manager.power import VMDescription, VMDetailFacts
+    from agentworks.vms.manager.inspect import VMDescription, VMDetailFacts
 
     facts = VMDetailFacts(
         "box",

@@ -106,11 +106,12 @@ def test_real_list_and_describe_clis_never_echo_invalid_persisted_enums(
     )
     site = SimpleNamespace(platform=platform)
     monkeypatch.setattr(sites, "lookup_site", lambda *_args, **_kwargs: site)
-    monkeypatch.setattr(
-        vm_inspection,
-        "_live_vm_boundary",
-        lambda *_args, **_kwargs: (SimpleNamespace(site=site), object()),
-    )
+    monkeypatch.setattr("agentworks.vms.nodes.live_vm_node", lambda *_args, **_kwargs: SimpleNamespace(site=site))
+    monkeypatch.setattr("agentworks.orchestration.walk.walk", lambda node: (node,))
+    monkeypatch.setattr("agentworks.orchestration.secrets.secret_union", lambda _nodes: ())
+    monkeypatch.setattr("agentworks.orchestration.readiness.preflight_all", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("agentworks.secrets.resolver.Resolver.resolve", lambda _self: None)
+    monkeypatch.setattr(vm_inspection, "_platform_ops_ctx", lambda *_args: object())
 
     runner = CliRunner()
     vm_list = runner.invoke(app, ["vm", "list", "--output", "json"])
@@ -196,7 +197,7 @@ def test_projection_boundaries_close_manual_invalid_facts() -> None:
         session_description_data,
         session_listing_data,
     )
-    from agentworks.vms.manager.power import VMListing, VMListRow, vm_listing_data
+    from agentworks.vms.manager.inspect import VMListing, VMListRow, vm_listing_data
     from agentworks.workspaces.manager.create import (
         WorkspaceDescription,
         WorkspaceDetailFacts,

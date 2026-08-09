@@ -8,7 +8,7 @@ import typer
 
 from agentworks.cli._app import app
 from agentworks.cli._helpers import get_db, parse_csv_filter
-from agentworks.machine_output import OutputFormat, select_request_output
+from agentworks.machine_output import OutputFormat
 
 session_app = typer.Typer(
     name="session",
@@ -79,7 +79,6 @@ def session_describe(
     ] = OutputFormat.HUMAN,
 ) -> None:
     """Show session details."""
-    select_request_output(output_format)
     from agentworks.config import load_config
     from agentworks.sessions.manager import describe_session, session_description
 
@@ -89,11 +88,10 @@ def session_describe(
 
         from agentworks import output
         from agentworks.machine_output import MachineOutputCommand, write_json_envelope
-        from agentworks.secrets.resolve import QuietResolutionReporter
         from agentworks.sessions.manager._queries import session_description_data
 
         with output.suppress_presentation():
-            description = session_description(get_db(), config, name=name, reporter=QuietResolutionReporter())
+            description = session_description(get_db(), config, name=name)
         write_json_envelope(
             MachineOutputCommand.SESSION_DESCRIBE,
             session_description_data(description),
@@ -127,7 +125,6 @@ def session_list(
     ] = OutputFormat.HUMAN,
 ) -> None:
     """List sessions. Filters compose with AND; name filters accept comma-separated values for OR-within-filter."""
-    select_request_output(output_format)
     if names_only and output_format is OutputFormat.JSON:
         raise typer.BadParameter("cannot be used with --output json", param_hint="--names-only")
 
@@ -148,7 +145,6 @@ def session_list(
 
         from agentworks import output
         from agentworks.machine_output import MachineOutputCommand, write_json_envelope
-        from agentworks.secrets.resolve import QuietResolutionReporter
         from agentworks.sessions.manager._queries import session_listing_data
 
         with output.suppress_presentation():
@@ -160,7 +156,6 @@ def session_list(
                 agent_name=parsed_agent,
                 admin_only=admin,
                 no_status=no_status,
-                reporter=QuietResolutionReporter(),
             )
         write_json_envelope(
             MachineOutputCommand.SESSION_LIST,

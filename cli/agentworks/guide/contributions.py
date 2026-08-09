@@ -226,20 +226,16 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             "One manifest has been added or changed while all retired TOML sections remain in place.",
             (),
             ConsentBoundary.EXAMINE_WORKSTATION,
-            ("agw", "doctor"),
-            "Run the human report first. Its Configuration-group Config failure must be the expected migration "
-            "hard error: it says config.toml declares resources, says config.toml is settings only now, and "
-            "names the retained sections. Use its Manifest and Resource registry rows for precise diagnostics. "
-            "Both the human command and JSON verification must exit 1 for this retained-section checkpoint. Run "
-            "the JSON verification even after the human exit 1, and parse its one document. Before recording "
+            ("agw", "doctor", "--output", "json"),
+            "The command must exit 1 for this retained-section checkpoint and emit one JSON document. Before recording "
             "VERIFIED, require schema_version is the integer 1, command is exactly doctor, data is an object, "
             "data.groups contains the Configuration group, that group contains Config file with status ok and "
-            "Config with status fail, and it has no check named Manifest or Resource registry with status warn or "
-            "fail. Machine-safe JSON cannot distinguish the expected Config failure from another config failure; "
-            "it only corroborates that stable structural state. Its message and hint fields do not prove precise "
-            "diagnostic detail. Any Manifest or Resource registry hard error leaves this action unverified and "
+            "Config with status fail. That Config message must be the expected migration hard error: it says "
+            "config.toml declares resources, says config.toml is settings only now, and names the retained "
+            "sections. Use the Manifest and Resource registry facts for precise diagnostics, and require no check "
+            "with either name to have status warn or fail. Any such hard error leaves this action unverified and "
             "returns the selected manifest to edit-one-manifest; repeat this validation after the edit.",
-            ("agw", "doctor", "--output", "json"),
+            None,
             "Leave the edit unverified, keep every retired TOML section, and block cutover.",
         ),
         GuideAction(

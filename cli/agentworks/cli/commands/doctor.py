@@ -12,7 +12,7 @@ from typing import Annotated
 import typer
 
 from agentworks.cli._app import app
-from agentworks.machine_output import OutputFormat, select_request_output
+from agentworks.machine_output import OutputFormat
 from agentworks.output import StatusStyle, style_status
 
 
@@ -27,14 +27,10 @@ def doctor(
     ] = OutputFormat.HUMAN,
 ) -> None:
     """Check environment, config, and dependencies."""
-    select_request_output(output_format)
     from agentworks.completions.spec import build_spec, completion_version
     from agentworks.doctor import Status, health_report_data, run_checks
 
-    report = run_checks(
-        completion_version=completion_version(build_spec(app)),
-        machine_safe_config_load=output_format is OutputFormat.JSON,
-    )
+    report = run_checks(completion_version=completion_version(build_spec(app)))
 
     if output_format is OutputFormat.JSON:
         from click import get_binary_stream

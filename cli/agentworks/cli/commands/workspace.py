@@ -8,7 +8,7 @@ import typer
 
 from agentworks.cli._app import app
 from agentworks.cli._helpers import get_db, parse_csv_filter, prompt_vm
-from agentworks.machine_output import OutputFormat, select_request_output
+from agentworks.machine_output import OutputFormat
 
 workspace_app = typer.Typer(
     name="workspace",
@@ -59,7 +59,6 @@ def workspace_list(
     ] = OutputFormat.HUMAN,
 ) -> None:
     """List workspaces. --vm accepts comma-separated values for OR-within-filter."""
-    select_request_output(output_format)
     if names_only and output_format is OutputFormat.JSON:
         raise typer.BadParameter("cannot be used with --output json", param_hint="--names-only")
 
@@ -90,7 +89,6 @@ def workspace_describe(
     ] = OutputFormat.HUMAN,
 ) -> None:
     """Show workspace details, sessions, and agent access."""
-    select_request_output(output_format)
     from agentworks.workspaces.manager import render_workspace_description, workspace_description
 
     description = workspace_description(get_db(), name)

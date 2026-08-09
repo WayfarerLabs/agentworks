@@ -94,7 +94,7 @@ def test_installed_doctor_reports_malformed_schema_in_human_and_json(tmp_path: P
 
     assert human.returncode == machine.returncode == 1
     assert "Database:" in human.stdout
-    assert "state database schema is unavailable or malformed" in human.stdout
+    assert "state database is unavailable or malformed" in human.stdout
     document = cast("dict[str, object]", json.loads(machine.stdout))
     assert machine.stdout.count("\n") == 1
     assert machine.stderr == ""
@@ -106,7 +106,7 @@ def test_installed_doctor_reports_malformed_schema_in_human_and_json(tmp_path: P
         {
             "name": "Database",
             "status": "fail",
-            "message": "database check failed",
+            "message": "state database is unavailable or malformed",
             "hint": None,
         }
     ]

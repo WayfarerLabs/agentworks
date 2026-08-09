@@ -32,7 +32,7 @@ def _current_database() -> Iterator[tuple[bool, int, int, Database | None]]:
 def check_system() -> HealthGroup:
     """Report the install-level system slug without migrating state."""
     from agentworks.db import SYSTEM_SLUG_KEY
-    from agentworks.doctor import HealthGroup, MachineDiagnostic
+    from agentworks.doctor import HealthGroup
 
     group = HealthGroup("System")
     try:
@@ -54,18 +54,14 @@ def check_system() -> HealthGroup:
             group.info("System slug", "declined (asked at first vm create)")
         else:
             group.info("System slug", "unset (will ask at first vm create)")
-    except Exception as error:
-        group.warn(
-            "System slug",
-            f"could not check the database: {error}",
-            machine_diagnostic=MachineDiagnostic.DATABASE_UNAVAILABLE,
-        )
+    except Exception:
+        group.warn("System slug", "could not check the database")
     return group
 
 
 def check_database() -> HealthGroup:
     """Report schema and contents without migrating state."""
-    from agentworks.doctor import HealthGroup, MachineDiagnostic
+    from agentworks.doctor import HealthGroup
 
     group = HealthGroup("Database")
     try:
@@ -84,12 +80,8 @@ def check_database() -> HealthGroup:
                 )
             else:
                 group.fail("Schema", f"version {current} is newer than latest {latest} (downgrade?)")
-    except Exception as error:
-        group.fail(
-            "Database",
-            str(error),
-            machine_diagnostic=MachineDiagnostic.DATABASE_UNAVAILABLE,
-        )
+    except Exception:
+        group.fail("Database", "state database is unavailable or malformed")
     return group
 
 
@@ -125,7 +117,6 @@ def append_vm_site_database_checks(
     not_ready: dict[str, str],
 ) -> None:
     """Append stored VM-to-site checks without migrating state."""
-    from agentworks.doctor import MachineDiagnostic
     from agentworks.vms.sites import site_manifest_hint
 
     try:
@@ -152,9 +143,5 @@ def append_vm_site_database_checks(
                         f"site '{vm.site}' is not declared",
                         hint=site_manifest_hint(vm.site),
                     )
-    except Exception as error:
-        group.warn(
-            "VM sites",
-            f"could not check the database: {error}",
-            machine_diagnostic=MachineDiagnostic.DATABASE_UNAVAILABLE,
-        )
+    except Exception:
+        group.warn("VM sites", "could not check the database")

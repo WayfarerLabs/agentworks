@@ -37,7 +37,7 @@ def test_operational_list_json_commands_are_closed_parseable_envelopes(monkeypat
     from agentworks.sessions.manager._queries import SessionListing
     from agentworks.sessions.multi_console.attach import ConsoleListing
     from agentworks.vms import manager as vms
-    from agentworks.vms.manager.power import VMListing
+    from agentworks.vms.manager.inspect import VMListing
     from agentworks.workspaces import manager as workspaces
     from agentworks.workspaces.manager.create import WorkspaceListing
 
@@ -100,8 +100,7 @@ def test_operational_describe_json_commands_are_deterministic_and_exclude_opaque
     from agentworks.sessions.manager._queries import SessionDescription
     from agentworks.sessions.multi_console.attach import ConsoleDescription, ConsoleMember, ConsoleShell
     from agentworks.vms import manager as vms
-    from agentworks.vms.manager.boundary import VMInspectionIssueSource
-    from agentworks.vms.manager.power import VMDescription, VMDetailFacts, VMIssue
+    from agentworks.vms.manager.inspect import VMDescription, VMDetailFacts, VMInspectionIssueSource, VMIssue
     from agentworks.workspaces import manager as workspaces
     from agentworks.workspaces.manager.create import WorkspaceDescription, WorkspaceDetailFacts, WorkspaceSession
 
@@ -273,7 +272,7 @@ def test_operational_human_describe_commands_keep_literal_no_color_bytes(monkeyp
     from agentworks.sessions.manager._queries import SessionDescription
     from agentworks.sessions.multi_console.attach import ConsoleDescription
     from agentworks.vms import manager as vms
-    from agentworks.vms.manager.power import VMDescription, VMDetailFacts, render_vm_description
+    from agentworks.vms.manager.inspect import VMDescription, VMDetailFacts, render_vm_description
     from agentworks.workspaces import manager as workspaces
     from agentworks.workspaces.manager.create import WorkspaceDescription, WorkspaceDetailFacts
 
@@ -384,7 +383,7 @@ def test_operational_human_list_commands_keep_literal_empty_bytes(monkeypatch) -
     from agentworks.sessions.manager._queries import SessionListing
     from agentworks.sessions.multi_console.attach import ConsoleListing
     from agentworks.vms import manager as vms
-    from agentworks.vms.manager.power import VMListing
+    from agentworks.vms.manager.inspect import VMListing
     from agentworks.workspaces import manager as workspaces
     from agentworks.workspaces.manager.create import WorkspaceListing
 
@@ -682,36 +681,26 @@ def test_doctor_json_writes_complete_failing_report_before_exit(monkeypatch) -> 
     )
 
 
-def test_malformed_config_doctor_json_is_safe_and_human_keeps_legacy_bytes(
+def test_malformed_config_doctor_json_and_human_share_structured_facts(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """JSON catches parser errors as facts while human keeps the old transcript."""
+    """Both doctor formats consume the same typed config-load failure."""
     from agentworks import config, doctor
-    from agentworks.config import load_config
 
-    marker = "sensitive-config-do-not-leak"
-    config_path = tmp_path / f"{marker}.toml"
+    config_path = tmp_path / "config.toml"
     config_path.write_text('broken = "unterminated\n')
     monkeypatch.setattr(config, "CONFIG_PATH", config_path)
 
     def config_only_checks(
         *,
         completion_version: str | None = None,
-        machine_safe_config_load: bool = False,
     ) -> HealthReport:
         del completion_version
-        group, _config, _registry = doctor._check_config(raise_errors=machine_safe_config_load)
+        group, _config, _registry = doctor._check_config()
         return HealthReport(groups=[group])
 
     monkeypatch.setattr(doctor, "run_checks", config_only_checks)
-
-    with pytest.raises(SystemExit):
-        load_config(config_path)
-    legacy_stderr = capsys.readouterr().err.encode()
-    assert legacy_stderr
-    assert marker.encode() in legacy_stderr
 
     json_result = CliRunner().invoke(app, ["doctor", "--output", "json"])
     human_default = CliRunner().invoke(app, ["doctor"])
@@ -719,37 +708,17 @@ def test_malformed_config_doctor_json_is_safe_and_human_keeps_legacy_bytes(
 
     assert json_result.exit_code == 1, json_result.output
     assert json_result.stderr_bytes == b""
-    assert marker.encode() not in json_result.stdout_bytes
-    assert legacy_stderr not in json_result.stdout_bytes
     json_data = _json_document(json_result)["data"]
-    assert json_data == {
-        "groups": [
-            {
-                "name": "Configuration",
-                "checks": [
-                    {"name": "Config file", "status": "ok", "message": None, "hint": None},
-                    {
-                        "name": "Config",
-                        "status": "fail",
-                        "message": "configuration did not load",
-                        "hint": None,
-                    },
-                ],
-            },
-        ],
-        "counts": {"ok": 1, "info": 0, "warn": 0, "fail": 1},
-    }
-
-    expected_human_stdout = (
-        b"Checking environment...\n\n"
-        b"Configuration:\n"
-        + f"  [ok]   Config file: {config_path}\n".encode()
-        + b"  [FAIL] Config: failed to load\n\n"
-        + b"Results: 1 ok, 0 info, 0 warn, 1 fail\n"
-    )
+    groups = cast("list[dict[str, object]]", cast("dict[str, object]", json_data)["groups"])
+    checks = cast("list[dict[str, object]]", groups[0]["checks"])
+    config_check = checks[1]
+    assert config_check["status"] == "fail"
+    message = cast("str", config_check["message"])
+    assert "invalid config file" in message
     assert human_default.exit_code == human_explicit.exit_code == 1
-    assert human_default.stdout_bytes == human_explicit.stdout_bytes == expected_human_stdout
-    assert human_default.stderr_bytes == human_explicit.stderr_bytes == legacy_stderr
+    assert human_default.stdout_bytes == human_explicit.stdout_bytes
+    assert human_default.stderr_bytes == human_explicit.stderr_bytes == b""
+    assert message in human_default.stdout
 
 
 def test_invalid_output_and_names_only_json_fail_before_config_or_service_work(monkeypatch) -> None:

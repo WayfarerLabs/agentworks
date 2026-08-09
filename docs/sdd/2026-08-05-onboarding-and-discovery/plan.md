@@ -246,6 +246,10 @@ correction below subsequently removed the database-copying subsystem they exerci
       initialization states, require a current schema before migration completion, and rerun focused
       and full project gates.
 - [ ] Obtain clean project, fresh-eyes, integration, and PR re-review of the simplified doctor path.
+- [ ] Complete the operator-ruled clean-slate round: retain non-migrating doctor as one local
+      decision, unify human and JSON doctor facts, remove the machine-error detour and redundant
+      inspection plumbing, rewrite tests and permanent docs around only the final design, rerun all
+      gates, and obtain clean project, fresh-eyes, integration, and PR re-review.
 
 Definition of done: R7 and AC4 hold across the named commands, with human and JSON renderers sharing
 one fact source.

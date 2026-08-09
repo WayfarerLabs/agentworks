@@ -86,7 +86,7 @@ class ActiveBackend:
         return self.capability.batch_get(wants)
 
 
-class ResolutionReporter(Protocol):
+class _ResolutionReporter(Protocol):
     """Receive value-free events from the ordered resolution loop."""
 
     def skipped(self, secret: str, backend: str, reason: str | None) -> None: ...
@@ -94,7 +94,7 @@ class ResolutionReporter(Protocol):
     def resolved(self, secret: str, backend: str, identifier: str | None) -> None: ...
 
 
-class OutputResolutionReporter:
+class _OutputResolutionReporter:
     def skipped(self, secret: str, backend: str, reason: str | None) -> None:
         output.warn(f"secret {secret}: skipping {backend}, not ready: {reason}")
 
@@ -103,7 +103,7 @@ class OutputResolutionReporter:
         output.info(f"Resolved {secret} via {backend}{suffix}")
 
 
-class QuietResolutionReporter:
+class _QuietResolutionReporter:
     def skipped(self, secret: str, backend: str, reason: str | None) -> None:
         del secret, backend, reason
 
@@ -343,7 +343,6 @@ def resolve_secrets(
     *,
     errors: dict[str, str] | None = None,
     registry: Registry | None = None,
-    reporter: ResolutionReporter | None = None,
 ) -> dict[str, str]:
     """Resolve every secret through the active backends, in chain order.
 
@@ -387,7 +386,7 @@ def resolve_secrets(
         backends,
         errors=errors,
         registry=registry,
-        reporter=OutputResolutionReporter() if reporter is None else reporter,
+        reporter=_OutputResolutionReporter(),
         interactive_available=output.is_interactive(),
     )
 
@@ -414,7 +413,7 @@ def resolve_secrets_quiet(
         safe_backends,
         errors=None,
         registry=registry,
-        reporter=QuietResolutionReporter(),
+        reporter=_QuietResolutionReporter(),
         interactive_available=interactive_available,
         exclude_interactive=not interactive_available,
     )
@@ -613,7 +612,7 @@ def _resolve_secrets_ordered(
     *,
     errors: dict[str, str] | None,
     registry: Registry | None,
-    reporter: ResolutionReporter,
+    reporter: _ResolutionReporter,
     interactive_available: bool,
     exclude_interactive: bool = False,
 ) -> dict[str, str]:

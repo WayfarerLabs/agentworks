@@ -3,32 +3,11 @@
 from __future__ import annotations
 
 import contextlib
-from dataclasses import dataclass
-from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from agentworks.capabilities.base import RunContext
-from agentworks.errors import AgentworksError
 
 from ._helpers import _vm_scope
-
-
-class VMInspectionIssueSource(StrEnum):
-    """Closed failure stages that JSON v1 may disclose for VM inspection."""
-
-    SITE_LOOKUP = "site_lookup"
-    PREFLIGHT = "preflight"
-    SECRET_RESOLUTION = "secret_resolution"
-    PLATFORM_STATUS = "platform_status"
-
-
-@dataclass(frozen=True)
-class InspectionBoundaryFailure(Exception):
-    """One typed VM inspection boundary failure with its exact stage."""
-
-    source: VMInspectionIssueSource
-    diagnostic: AgentworksError
-
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -38,7 +17,6 @@ if TYPE_CHECKING:
     from agentworks.db import Database, VMRow
     from agentworks.resources import Registry
     from agentworks.secrets import SecretTarget
-    from agentworks.secrets.resolve import ResolutionReporter
     from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import LiveVMNode
 
@@ -78,7 +56,6 @@ def gated_vm_boundary(
     *,
     targets: Sequence[SecretTarget] = (),
     scope: OperationScope | None = None,
-    reporter: ResolutionReporter | None = None,
 ) -> Iterator[tuple[LiveVMNode, Resolver, RunContext]]:
     """The gate-opening commands' shared composition root (vm/agent
     shell and exec, console attach, the workspace lifecycle ops):
@@ -127,7 +104,7 @@ def gated_vm_boundary(
     from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import live_vm_node
 
-    resolver = Resolver(config, registry, reporter=reporter)
+    resolver = Resolver(config, registry)
     vm_node = live_vm_node(db, config, registry, vm)
     nodes = walk(vm_node)
     for secret_name in secret_union(nodes):
@@ -136,7 +113,7 @@ def gated_vm_boundary(
         resolver.register_targets(targets)
     if scope is None:
         scope = _vm_scope(db, vm.name)
-    with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver, reporter=reporter)):
+    with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
         preflight_all(nodes, RunContext(config=config, operation_scope=scope), registry=registry)
         resolver.resolve()
         yield vm_node, resolver, _platform_ops_ctx(config, scope, vm_node, resolver)
@@ -148,8 +125,6 @@ def _live_vm_boundary(
     vm: VMRow,
     *,
     registry: Registry | None = None,
-    reporter: ResolutionReporter | None = None,
-    inspection_stages: bool = False,
 ) -> tuple[LiveVMNode, RunContext]:
     """The no-gate commands' shared composition root (``start_vm`` /
     ``stop_vm`` / ``delete_vm`` / ``describe_vm``, whose graphs are
@@ -180,27 +155,12 @@ def _live_vm_boundary(
 
     if registry is None:
         registry = load_request_registry(config)
-    resolver = Resolver(config, registry, reporter=reporter)
-    try:
-        vm_node = live_vm_node(db, config, registry, vm)
-    except AgentworksError as exc:
-        if inspection_stages:
-            raise InspectionBoundaryFailure(source=VMInspectionIssueSource.SITE_LOOKUP, diagnostic=exc) from None
-        raise
+    resolver = Resolver(config, registry)
+    vm_node = live_vm_node(db, config, registry, vm)
     nodes = walk(vm_node)
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
     scope = _vm_scope(db, vm.name)
-    try:
-        preflight_all(nodes, RunContext(config=config, operation_scope=scope), registry=registry)
-    except AgentworksError as exc:
-        if inspection_stages:
-            raise InspectionBoundaryFailure(source=VMInspectionIssueSource.PREFLIGHT, diagnostic=exc) from None
-        raise
-    try:
-        resolver.resolve()
-    except AgentworksError as exc:
-        if inspection_stages:
-            raise InspectionBoundaryFailure(source=VMInspectionIssueSource.SECRET_RESOLUTION, diagnostic=exc) from None
-        raise
+    preflight_all(nodes, RunContext(config=config, operation_scope=scope), registry=registry)
+    resolver.resolve()
     return vm_node, _platform_ops_ctx(config, scope, vm_node, resolver)

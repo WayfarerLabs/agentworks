@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field
-from enum import Enum, StrEnum
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -30,29 +30,6 @@ class Status(Enum):
     FAIL = "fail"
 
 
-class MachineDiagnostic(StrEnum):
-    """Closed, non-sensitive doctor diagnostics permitted in JSON v1."""
-
-    CONFIG_INVALID = "config_invalid"
-    CONFIG_MISSING = "config_missing"
-    MANIFEST_INVALID = "manifest_invalid"
-    RESOURCE_REGISTRY_INVALID = "resource_registry_invalid"
-    DATABASE_UNAVAILABLE = "database_unavailable"
-    SITE_PREFLIGHT_FAILED = "site_preflight_failed"
-    TAILSCALE_TIMED_OUT = "tailscale_timed_out"
-
-
-_MACHINE_DIAGNOSTICS: dict[MachineDiagnostic, tuple[str | None, str | None]] = {
-    MachineDiagnostic.CONFIG_INVALID: ("configuration did not load", None),
-    MachineDiagnostic.CONFIG_MISSING: ("configuration file is not available", "run agw config init"),
-    MachineDiagnostic.MANIFEST_INVALID: ("resource manifests did not load", None),
-    MachineDiagnostic.RESOURCE_REGISTRY_INVALID: ("resource registry did not build", None),
-    MachineDiagnostic.DATABASE_UNAVAILABLE: ("database check failed", None),
-    MachineDiagnostic.SITE_PREFLIGHT_FAILED: ("site preflight failed", None),
-    MachineDiagnostic.TAILSCALE_TIMED_OUT: ("timed out", None),
-}
-
-
 @dataclass
 class HealthCheck:
     name: str
@@ -62,14 +39,6 @@ class HealthCheck:
     """Optional remediation text. Rendered on a separate line by the
     CLI surface so the operator sees actionable next steps without
     cramming everything into one parenthetical."""
-    machine_diagnostic: MachineDiagnostic | None = None
-    """Closed machine-readable diagnostic, separate from human text.
-
-    ``message`` and ``hint`` can carry exception, backend, configuration, or
-    secret-adjacent text for the terminal renderer. JSON must never project
-    them directly. A check without an explicit diagnostic intentionally emits
-    null machine message and hint fields.
-    """
 
 
 @dataclass
@@ -83,7 +52,6 @@ class HealthGroup:
         name: str,
         message: str | None,
         hint: str | None,
-        machine_diagnostic: MachineDiagnostic | None,
     ) -> None:
         self.checks.append(
             HealthCheck(
@@ -91,7 +59,6 @@ class HealthGroup:
                 status=status,
                 message=message,
                 hint=hint,
-                machine_diagnostic=machine_diagnostic,
             )
         )
 
@@ -101,9 +68,8 @@ class HealthGroup:
         message: str | None = None,
         *,
         hint: str | None = None,
-        machine_diagnostic: MachineDiagnostic | None = None,
     ) -> None:
-        self._append(Status.OK, name, message, hint, machine_diagnostic)
+        self._append(Status.OK, name, message, hint)
 
     def info(
         self,
@@ -111,9 +77,8 @@ class HealthGroup:
         message: str | None = None,
         *,
         hint: str | None = None,
-        machine_diagnostic: MachineDiagnostic | None = None,
     ) -> None:
-        self._append(Status.INFO, name, message, hint, machine_diagnostic)
+        self._append(Status.INFO, name, message, hint)
 
     def warn(
         self,
@@ -121,9 +86,8 @@ class HealthGroup:
         message: str | None = None,
         *,
         hint: str | None = None,
-        machine_diagnostic: MachineDiagnostic | None = None,
     ) -> None:
-        self._append(Status.WARN, name, message, hint, machine_diagnostic)
+        self._append(Status.WARN, name, message, hint)
 
     def fail(
         self,
@@ -131,9 +95,8 @@ class HealthGroup:
         message: str | None = None,
         *,
         hint: str | None = None,
-        machine_diagnostic: MachineDiagnostic | None = None,
     ) -> None:
-        self._append(Status.FAIL, name, message, hint, machine_diagnostic)
+        self._append(Status.FAIL, name, message, hint)
 
 
 @dataclass
@@ -176,7 +139,7 @@ def health_report_data(report: HealthReport) -> JsonObject:
         "groups": [
             {
                 "name": group.name,
-                "checks": [_machine_health_check_data(check) for check in group.checks],
+                "checks": [_health_check_data(check) for check in group.checks],
             }
             for group in report.groups
         ],
@@ -189,38 +152,23 @@ def health_report_data(report: HealthReport) -> JsonObject:
     }
 
 
-def _machine_diagnostic_for(check: HealthCheck) -> tuple[str | None, str | None]:
-    """Return only closed JSON diagnostics, never human exception text."""
-    if check.machine_diagnostic is None:
-        return None, None
-    return _MACHINE_DIAGNOSTICS[check.machine_diagnostic]
-
-
-def _machine_health_check_data(check: HealthCheck) -> JsonObject:
-    """Project one check with its explicitly safe diagnostic pair."""
-    message, hint = _machine_diagnostic_for(check)
+def _health_check_data(check: HealthCheck) -> JsonObject:
+    """Serialize the same check facts rendered to humans."""
     return {
         "name": check.name,
         "status": check.status.value,
-        "message": message,
-        "hint": hint,
+        "message": check.message,
+        "hint": check.hint,
     }
 
 
-def run_checks(
-    *,
-    completion_version: str | None = None,
-    machine_safe_config_load: bool = False,
-) -> HealthReport:
+def run_checks(*, completion_version: str | None = None) -> HealthReport:
     """Run all health checks and return structured results.
 
     Args:
         completion_version: current completion spec version for staleness check.
             Computed by the CLI layer and passed in to avoid coupling doctor
             to the CLI module. Omit to skip completion checks.
-        machine_safe_config_load: Raise typed config-load errors instead of
-            writing legacy diagnostics to stderr. The JSON CLI surface uses
-            this so its only output is the closed report envelope.
     """
     report = HealthReport()
 
@@ -229,10 +177,7 @@ def run_checks(
     # dependent group renders wherever it reads best. Identity first,
     # then the environment, then the VM stack, then everything the
     # config graph drives.
-    if machine_safe_config_load:
-        config_group, config, registry = _check_config(raise_errors=True)
-    else:
-        config_group, config, registry = _check_config()
+    config_group, config, registry = _check_config()
 
     report.groups.append(_check_system())
     report.groups.append(_check_python())
@@ -486,14 +431,13 @@ def _check_vm_sites(
 
             site_node = vm_site_node(registry, name)
             site_node.preflight(RunContext(config=config))
-        except Exception as e:
+        except Exception as error:
             # A failing preflight on an enabled site is the error the
             # operator's next command hits: warn.
             g.warn(
                 name,
-                f"{_platform_summary(decl)}; preflight: {e}",
-                hint=getattr(e, "hint", None),
-                machine_diagnostic=MachineDiagnostic.SITE_PREFLIGHT_FAILED,
+                f"{_platform_summary(decl)}; preflight: {error}",
+                hint=getattr(error, "hint", None),
             )
             continue
         g.ok(name, _platform_summary(decl))
@@ -538,16 +482,12 @@ def _check_tailscale() -> HealthGroup:
         else:
             g.fail("Not connected", "run 'tailscale up'")
     except subprocess.TimeoutExpired:
-        g.fail(
-            "tailscale status",
-            "timed out",
-            machine_diagnostic=MachineDiagnostic.TAILSCALE_TIMED_OUT,
-        )
+        g.fail("tailscale status", "timed out")
     return g
 
 
-def _check_config(*, raise_errors: bool = False) -> tuple[HealthGroup, Config | None, Registry | None]:
-    """Return the config group and facts, optionally suppressing legacy stderr."""
+def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
+    """Return config and registry facts for the complete doctor report."""
     from agentworks.config import CONFIG_PATH, ConfigError
     from agentworks.errors import ValidationError
 
@@ -568,7 +508,6 @@ def _check_config(*, raise_errors: bool = False) -> tuple[HealthGroup, Config | 
         g.fail(
             "Config file",
             f"not found: {format_host_path(CONFIG_PATH)}. Run 'agw config init' to create one.",
-            machine_diagnostic=MachineDiagnostic.CONFIG_MISSING,
         )
         return g, None, None
 
@@ -578,7 +517,7 @@ def _check_config(*, raise_errors: bool = False) -> tuple[HealthGroup, Config | 
     try:
         from agentworks.config import load_config
 
-        config = load_config(warn_issues=False, raise_errors=True) if raise_errors else load_config(warn_issues=False)
+        config = load_config(warn_issues=False, raise_errors=True)
     except (ConfigError, ValidationError) as e:
         # ValidationError is a SIBLING of ConfigError under AgentworksError,
         # not a subclass, so it must be named explicitly. Catching it here
@@ -589,7 +528,6 @@ def _check_config(*, raise_errors: bool = False) -> tuple[HealthGroup, Config | 
             "Config",
             str(e),
             hint=e.hint,
-            machine_diagnostic=MachineDiagnostic.CONFIG_INVALID,
         )
         config_load_failed = True
         # The resource-section hard error (config.toml still declares
@@ -603,16 +541,9 @@ def _check_config(*, raise_errors: bool = False) -> tuple[HealthGroup, Config | 
         from agentworks.config import load_config as _load_settings_only
 
         try:
-            if raise_errors:
-                config = _load_settings_only(warn_issues=False, resources=False, raise_errors=True)
-            else:
-                config = _load_settings_only(warn_issues=False, resources=False)
+            config = _load_settings_only(warn_issues=False, resources=False, raise_errors=True)
         except (ConfigError, ValidationError):
             return g, None, None
-    except SystemExit:
-        g.fail("Config", "failed to load", machine_diagnostic=MachineDiagnostic.CONFIG_INVALID)
-        return g, None, None
-
     # Manifest spec-level warnings (unknown keys with file:line, env
     # hygiene, ...) surface as doctor rows, exactly like TOML
     # config_issues below. Loading here (and passing the set into
@@ -640,7 +571,6 @@ def _check_config(*, raise_errors: bool = False) -> tuple[HealthGroup, Config | 
             "Manifest",
             str(e),
             hint=e.hint,
-            machine_diagnostic=MachineDiagnostic.MANIFEST_INVALID,
         )
 
     for issue in config.config_issues:
@@ -678,7 +608,6 @@ def _check_config(*, raise_errors: bool = False) -> tuple[HealthGroup, Config | 
             "Resource registry",
             str(e),
             hint=e.hint,
-            machine_diagnostic=MachineDiagnostic.RESOURCE_REGISTRY_INVALID,
         )
         return g, config, None
 

@@ -9,7 +9,7 @@ import typer
 
 from agentworks.cli._app import app
 from agentworks.cli._helpers import get_db
-from agentworks.machine_output import OutputFormat, select_request_output
+from agentworks.machine_output import OutputFormat
 
 vm_app = typer.Typer(
     name="vm",
@@ -85,7 +85,6 @@ def vm_list(
     ] = OutputFormat.HUMAN,
 ) -> None:
     """List VMs."""
-    select_request_output(output_format)
     if names_only and output_format is OutputFormat.JSON:
         raise typer.BadParameter("cannot be used with --output json", param_hint="--names-only")
 
@@ -100,7 +99,7 @@ def vm_list(
         from click import get_binary_stream
 
         from agentworks.machine_output import MachineOutputCommand, write_json_envelope
-        from agentworks.vms.manager.power import vm_listing_data
+        from agentworks.vms.manager.inspect import vm_listing_data
 
         write_json_envelope(
             MachineOutputCommand.VM_LIST,
@@ -131,7 +130,6 @@ def vm_describe(
     ] = OutputFormat.HUMAN,
 ) -> None:
     """Show detailed information about a VM."""
-    select_request_output(output_format)
     from agentworks.config import load_config
     from agentworks.vms.manager import describe_vm, vm_description
 
@@ -141,11 +139,10 @@ def vm_describe(
 
         from agentworks import output
         from agentworks.machine_output import MachineOutputCommand, write_json_envelope
-        from agentworks.secrets.resolve import QuietResolutionReporter
-        from agentworks.vms.manager.power import vm_description_data
+        from agentworks.vms.manager.inspect import vm_description_data
 
         with output.suppress_presentation():
-            description = vm_description(get_db(), config, name, reporter=QuietResolutionReporter())
+            description = vm_description(get_db(), config, name)
         write_json_envelope(
             MachineOutputCommand.VM_DESCRIBE,
             vm_description_data(description),

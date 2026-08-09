@@ -124,10 +124,6 @@ def _global_options(
 
     output.set_non_interactive(non_interactive)
     output.set_suppress_deprecations(no_deprecations)
-    # Every invocation begins in human mode. The 16 commands that support
-    # machine output switch this request-local value from their parsed
-    # ``OutputFormat`` before mutex/config/database/service work begins.
-    output.set_machine_readable(False)
     begin_request_warning_scope()
     # Authoritative: Click has parsed, so `debug` is the real flag. Recompute
     # the canonical state (flag OR ambient AGW_DEBUG), then mirror it to the

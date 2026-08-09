@@ -372,7 +372,6 @@ class _DefaultHandler:
 # handler. See output-model-lld.md sec 1 for the rationale.
 _level: ContextVar[int] = ContextVar("_output_level", default=0)
 _presentation_suppressed: ContextVar[bool] = ContextVar("_presentation_suppressed", default=False)
-_machine_readable: ContextVar[bool] = ContextVar("_machine_readable", default=False)
 _handler: OutputHandler = _DefaultHandler()
 
 
@@ -402,25 +401,6 @@ def presentation_suppressed() -> bool:
     work to a thread copy their request context into each worker explicitly.
     """
     return _presentation_suppressed.get()
-
-
-@contextmanager
-def request_output_state() -> Iterator[None]:
-    """Seed and restore output state at one CLI invocation boundary.
-
-    Context variables isolate overlapping invocations in different threads,
-    while the reset prevents state from leaking between sequential
-    ``cli.main`` invocations or embedded callers that use this boundary.
-    """
-    level_token = _level.set(0)
-    suppression_token = _presentation_suppressed.set(False)
-    machine_token = _machine_readable.set(False)
-    try:
-        yield
-    finally:
-        _machine_readable.reset(machine_token)
-        _presentation_suppressed.reset(suppression_token)
-        _level.reset(level_token)
 
 
 @contextmanager
@@ -523,7 +503,7 @@ def detail(message: str) -> None:
 def warn(message: str) -> None:
     """Emit a non-fatal warning."""
     if not presentation_suppressed():
-        _handler.emit(Role.WARNING, machine_stderr_text(message), _current_level())
+        _handler.emit(Role.WARNING, message, _current_level())
 
 
 def result(message: str) -> None:
@@ -546,39 +526,32 @@ def error(message: str) -> None:
     Emitted only from the CLI entry-point catch (``cli/_entry.py``),
     which is the sole ``ERROR``-role site.
     """
-    _handler.emit(Role.ERROR, machine_stderr_text(message), 0)
+    _handler.emit(Role.ERROR, message, 0)
 
 
 def confirm(message: str, default: bool = False) -> bool:
     """Present a yes/no question. Returns True for yes, False for no."""
-    return _handler.confirm(machine_stderr_text(message), _current_level(), default)
+    return _handler.confirm(message, _current_level(), default)
 
 
 def choose(message: str, options: list[str]) -> int:
     """Present a list of options. Returns the index of the selected option."""
-    return _handler.choose(
-        machine_stderr_text(message),
-        [machine_stderr_text(option) for option in options],
-        _current_level(),
-    )
+    return _handler.choose(message, options, _current_level())
 
 
 def pause(message: str) -> None:
     """Wait for user acknowledgment (press Enter)."""
-    _handler.pause(machine_stderr_text(message), _current_level())
+    _handler.pause(message, _current_level())
 
 
 def prompt(label: str, default: str | None = None) -> str:
     """Collect a string value. Returns default if user enters nothing."""
-    safe_default = None if default is None else machine_stderr_text(default)
-    return _handler.prompt(machine_stderr_text(label), _current_level(), safe_default)
+    return _handler.prompt(label, _current_level(), default)
 
 
 def prompt_secret(label: str, hint: str | None = None) -> str:
     """Collect a secret value with masked input. Rejects empty values."""
-    safe_label = machine_stderr_text(label)
-    safe_hint = None if hint is None else machine_stderr_text(hint)
-    return _handler.prompt_secret(safe_label, _current_level(), safe_hint)
+    return _handler.prompt_secret(label, _current_level(), hint)
 
 
 def progress(label: str, total: int | None = None) -> Progress:
@@ -641,30 +614,6 @@ def non_interactive() -> bool:
     stdin; color depends only on the flag and the output stream.
     """
     return _non_interactive
-
-
-def set_machine_readable(value: bool) -> None:
-    """Record whether this CLI invocation selected machine-readable output."""
-    _machine_readable.set(value)
-
-
-def machine_readable() -> bool:
-    """Return whether this CLI invocation selected machine-readable output."""
-    return _machine_readable.get()
-
-
-def machine_stderr_text(value: str, *, force: bool = False) -> str:
-    """Sanitize untrusted terminal text only for machine-mode stderr.
-
-    ``force`` is reserved for native parse errors recognized before Click can
-    run the covered command callback and seed request-local machine mode.
-    Human transcripts remain byte-for-byte unchanged.
-    """
-    if not force and not machine_readable():
-        return value
-    from agentworks.terminal import sanitize_terminal_output
-
-    return sanitize_terminal_output(value)
 
 
 _suppress_deprecations: bool = False

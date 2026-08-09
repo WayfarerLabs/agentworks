@@ -48,8 +48,8 @@ def test_migration_actions_pin_order_consent_operations_and_no_execution_authori
     ]
     assert action_block.actions[0].command is None
     assert action_block.actions[0].manual_steps is not None
-    assert action_block.actions[5].command == ("agw", "doctor")
-    assert action_block.actions[5].verification == ("agw", "doctor", "--output", "json")
+    assert action_block.actions[5].command == ("agw", "doctor", "--output", "json")
+    assert action_block.actions[5].verification is None
     assert action_block.actions[8].command == (
         "agw",
         "resource",
@@ -131,22 +131,19 @@ def test_migration_actions_make_inventory_backups_and_verification_distinct() ->
     assert "EXPECTED_IDENTITIES remains byte-for-byte unchanged" in edit.expected_state
 
     validation = by_id["validate-manifest-set"]
-    assert validation.command == ("agw", "doctor")
-    assert validation.verification == ("agw", "doctor", "--output", "json")
-    assert "human report first" in validation.expected_state
+    assert validation.command == ("agw", "doctor", "--output", "json")
+    assert validation.verification is None
     assert "config.toml declares resources" in validation.expected_state
     assert "config.toml is settings only now" in validation.expected_state
     assert "names the retained sections" in validation.expected_state
-    assert "Both the human command and JSON verification must exit 1" in validation.expected_state
-    assert "parse its one document" in validation.expected_state
+    assert "command must exit 1" in validation.expected_state
+    assert "one JSON document" in validation.expected_state
     assert "data.groups contains the Configuration group" in validation.expected_state
     assert "Config file with status ok" in validation.expected_state
     assert "Config with status fail" in validation.expected_state
-    assert "no check named Manifest or Resource registry" in validation.expected_state
-    assert "with status warn or fail" in validation.expected_state
-    assert "cannot distinguish the expected Config failure" in validation.expected_state
-    assert "only corroborates that stable structural state" in validation.expected_state
-    assert "do not prove precise diagnostic detail" in validation.expected_state
+    assert "require no check with either name" in validation.expected_state
+    assert "status warn or fail" in validation.expected_state
+    assert "Use the Manifest and Resource registry facts for precise diagnostics" in validation.expected_state
     assert "hard error leaves this action unverified" in validation.expected_state
     assert "returns the selected manifest to edit-one-manifest" in validation.expected_state
 
@@ -389,15 +386,11 @@ def test_migration_teaching_covers_cutover_validation_backends_and_auth_choices(
         "must say that `config.toml` declares resources",
         "`config.toml` is settings only now",
         "name the retained sections",
-        "`Resource registry` rows for precise diagnostics",
-        "Both this human command and the JSON verification",
-        "must exit `1` for the retained-section checkpoint",
+        "`Resource registry` facts for precise diagnostics",
+        "retained-section checkpoint exits `1`",
         "`Config file` with status `ok`",
         "`Config` with status `fail`",
-        "no check named `Manifest` or `Resource registry`",
-        "cannot distinguish the expected retained-section Config failure",
-        "only corroborates that stable structural state",
-        "do not prove precise diagnostic detail",
+        "no check with either name to have status `warn` or `fail`",
         "`[secret_backends.*]`",
         "`[secret_config].backends`",
         "Inspect every pre-existing and TOML-derived site manifest",

@@ -76,7 +76,6 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import SecretReader
     from agentworks.config import Config
     from agentworks.resources.registry import Registry
-    from agentworks.secrets.resolve import ResolutionReporter
     from agentworks.secrets.resolver import Resolver
 
 
@@ -208,8 +207,6 @@ def gate_secret_resolver(
     config: Config,
     registry: Registry,
     resolver: Resolver,
-    *,
-    reporter: ResolutionReporter | None = None,
 ) -> Callable[[str], str]:
     """The gate's just-in-time resolve callback, shared by every
     command whose gate opens BEFORE its boundary resolve: resolve
@@ -241,7 +238,6 @@ def gate_secret_resolver(
             [decl],
             active_backends(config, registry),
             registry=registry,
-            reporter=reporter,
         )[secret_name]
         resolver.seed({secret_name: value})
         return value

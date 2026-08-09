@@ -104,24 +104,6 @@ def agent_description_data(description: AgentDescription) -> JsonObject:
     }
 
 
-def _format_grants(db: Database, agent_name: str, grant_all: bool) -> str:
-    """Format workspace grants for display in agent list."""
-    if grant_all:
-        return "--ALL--"
-
-    grants = db.list_granted_workspaces_with_types(agent_name)
-    if not grants:
-        return "(none)"
-
-    parts: list[str] = []
-    for ws_name, has_explicit, has_implicit in grants:
-        # Mark with * if implicit-only (no explicit grant)
-        suffix = "*" if has_implicit and not has_explicit else ""
-        parts.append(f"{ws_name}{suffix}")
-
-    return output.truncate(", ".join(parts), MAX_GRANTS_DISPLAY)
-
-
 def _grant_facts(db: Database, agent_name: str) -> tuple[AgentGrant, ...]:
     """Return one ordered fact for every workspace grant relationship."""
     grants: list[AgentGrant] = []

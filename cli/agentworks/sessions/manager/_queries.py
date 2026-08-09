@@ -23,7 +23,6 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow, VMRow
     from agentworks.machine_output import JsonObject
-    from agentworks.secrets.resolve import ResolutionReporter
     from agentworks.sessions.tmux import RunCommand
 
 
@@ -375,7 +374,6 @@ def session_description(
     config: Config,
     *,
     name: str,
-    reporter: ResolutionReporter | None = None,
 ) -> SessionDescription:
     """Collect session detail facts while retaining the live status behavior.
 
@@ -394,7 +392,7 @@ def session_description(
     # registry aborts describe there regardless. The "-" fallback here
     # is thus defensive, not a graceful-degrade path describe can reach.
     harness_integration = _mgr._display_harness_integration(_mgr._display_registry(config), session.template)
-    with _mgr._prepare_vm(db, config, session, operation=None, reporter=reporter) as (
+    with _mgr._prepare_vm(db, config, session, operation=None) as (
         _ws,
         vm,
         _run_command,
@@ -511,7 +509,6 @@ def session_listing(
     agent_name: str | list[str] | None = None,
     admin_only: bool = False,
     no_status: bool = False,
-    reporter: ResolutionReporter | None = None,
 ) -> SessionListing:
     """Collect ordered session list facts with the existing status repair pass."""
     sessions = _mgr.filter_sessions(
@@ -526,7 +523,7 @@ def session_listing(
 
     status_map: dict[str, SessionStatus] = {}
     status_keepalive_vms: list[VMRow] = [] if no_status else _mgr._distinct_vms_for_sessions(db, sessions)
-    with _mgr._batch_vm_boundary(db, config, status_keepalive_vms, reporter=reporter):
+    with _mgr._batch_vm_boundary(db, config, status_keepalive_vms):
         if not no_status:
             sessions = _mgr.ensure_pids_batch(sessions, db=db, config=config)
             status_map = _mgr.batch_check_all_sessions(sessions, db=db, config=config)

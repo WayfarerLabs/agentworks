@@ -10,14 +10,13 @@ from agentworks.doctor import (
     HealthCheck,
     HealthGroup,
     HealthReport,
-    MachineDiagnostic,
     Status,
     health_report_data,
 )
 
 
-def _first_machine_check(report: HealthReport) -> dict[str, object]:
-    """Return the single check from a one-group, one-check machine report."""
+def _first_projected_check(report: HealthReport) -> dict[str, object]:
+    """Return the single check from a one-group, one-check report."""
     data = health_report_data(report)
     groups = cast("list[dict[str, object]]", data["groups"])
     checks = cast("list[dict[str, object]]", groups[0]["checks"])
@@ -81,39 +80,20 @@ def test_health_check_message_optional() -> None:
     assert check_with_msg.message == "details"
 
 
-def test_machine_output_fails_closed_for_human_diagnostic_text() -> None:
-    """JSON never inherits arbitrary text placed on a human health check."""
-    sensitive = "token=very-secret-value backend said no"
+def test_machine_output_serializes_the_same_health_check_facts() -> None:
+    """Human and JSON renderers consume one presentation-neutral check."""
     report = HealthReport()
     group = HealthGroup("Configuration")
-    group.fail("Config", sensitive, hint=sensitive)
+    group.fail("Config", "configuration did not load", hint="fix the config")
     report.groups.append(group)
 
-    check = _first_machine_check(report)
+    check = _first_projected_check(report)
 
-    assert check["message"] is None
-    assert check["hint"] is None
-    assert sensitive not in str(health_report_data(report))
-
-
-def test_machine_output_uses_only_closed_diagnostic_literals() -> None:
-    report = HealthReport()
-    group = HealthGroup("Tailscale")
-    group.fail(
-        "tailscale status",
-        "timed out after backend-provided detail",
-        machine_diagnostic=MachineDiagnostic.TAILSCALE_TIMED_OUT,
-    )
-    report.groups.append(group)
-
-    check = _first_machine_check(report)
-
-    assert check["message"] == "timed out"
-    assert check["hint"] is None
+    assert check["message"] == "configuration did not load"
+    assert check["hint"] == "fix the config"
 
 
-def test_config_exception_is_redacted_from_machine_output(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A config error can retain its terminal detail without reaching JSON."""
+def test_config_exception_becomes_one_shared_health_fact(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agentworks import config, doctor
     from agentworks.errors import ConfigError
 
@@ -131,12 +111,11 @@ def test_config_exception_is_redacted_from_machine_output(tmp_path, monkeypatch:
     report = HealthReport(groups=[config_group])
     rendered = health_report_data(report)
 
-    assert marker not in str(rendered)
     groups = cast("list[dict[str, object]]", rendered["groups"])
     checks = cast("list[dict[str, object]]", groups[0]["checks"])
     config_check = next(check for check in checks if check["name"] == "Config")
-    assert config_check["message"] == "configuration did not load"
-    assert config_check["hint"] is None
+    assert config_check["message"] == f"backend rejected {marker}"
+    assert config_check["hint"] == f"fix {marker}"
 
 
 class TestCompletionChecks:

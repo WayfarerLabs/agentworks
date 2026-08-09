@@ -53,13 +53,6 @@ class MachineOutputCommand(StrEnum):
     DOCTOR = "doctor"
 
 
-def select_request_output(output_format: OutputFormat) -> None:
-    """Record the parsed output mode before a covered command does work."""
-    from agentworks import output
-
-    output.set_machine_readable(output_format is OutputFormat.JSON)
-
-
 def encode_json_envelope(command: MachineOutputCommand, data: JsonObject) -> bytes:
     """Return the single UTF-8 JSON v1 document for an already-safe fact object.
 

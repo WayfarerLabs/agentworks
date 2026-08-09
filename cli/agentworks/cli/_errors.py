@@ -16,11 +16,9 @@ if TYPE_CHECKING:
 
 def echo_hint(exc: BaseException) -> None:
     """Render an AgentworksError's hint attribute on a second line if set."""
-    from agentworks.output import machine_stderr_text
-
     hint = getattr(exc, "hint", None)
     if hint:
-        typer.echo(machine_stderr_text(f"  Hint: {hint}"), err=True)
+        typer.echo(f"  Hint: {hint}", err=True)
 
 
 def record_unhandled_error(exc: BaseException) -> Path | None:

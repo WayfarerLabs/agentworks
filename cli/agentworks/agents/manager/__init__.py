@@ -53,7 +53,6 @@ from ._common import (
 )
 from .access import exec_agent, shell_agent
 from .inspect import (
-    _format_grants,
     agent_description,
     agent_listing,
     describe_agent,
@@ -70,7 +69,6 @@ __all__ = [
     "_AgentDirectEnvScopes",
     "_agent_direct_secret_target",
     "_assert_agent_ssh_works",
-    "_format_grants",
     "_require_vm",
     "_require_vm_for_workspace",
     "_require_workspace",

@@ -483,12 +483,9 @@ Completions include dynamic VM, vm-site, workspace, session, and template name l
 All state is stored in `~/.config/agentworks/agentworks.db` (SQLite). Schema migrations are
 forward-only and run automatically when a normal Agentworks command opens state. `agw doctor` checks
 the schema first and uses the existing read-only database connection only when the schema is
-current, so doctor does not run migrations. SQLite may still perform its ordinary read-side WAL and
-shared-memory bookkeeping. Doctor reports a pending migration and tells the operator to run a normal
-Agentworks command. Hostile same-account filesystem replacement is outside doctor's threat model;
-migration recovery and automatic backups belong to the database migration boundary rather than this
-inspection command. See the [doctor JSON contract](command-reference.md#doctor-json-schema) for the
-machine-readable result.
+current, so doctor does not run migrations. Doctor reports a pending migration and tells the
+operator to run a normal Agentworks command. See the
+[doctor JSON contract](command-reference.md#doctor-json-schema) for the machine-readable result.
 
 ## Environment Variables
 

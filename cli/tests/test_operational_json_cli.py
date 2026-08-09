@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 import contextlib
-import io
 import json
-import re
-import sys
 from dataclasses import FrozenInstanceError
 from typing import TYPE_CHECKING, cast
 
@@ -53,7 +50,7 @@ def test_nonempty_operational_lists_have_exact_ordered_json(monkeypatch: pytest.
     from agentworks.sessions.manager._queries import SessionListing, SessionListRow
     from agentworks.sessions.multi_console.attach import ConsoleListing, ConsoleListRow
     from agentworks.vms import manager as vms
-    from agentworks.vms.manager.power import VMListing, VMListRow
+    from agentworks.vms.manager.inspect import VMListing, VMListRow
     from agentworks.workspaces import manager as workspaces
     from agentworks.workspaces.manager.create import WorkspaceListing, WorkspaceListRow
 
@@ -202,14 +199,14 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
     from agentworks.sessions.manager._queries import SessionDescription
     from agentworks.sessions.multi_console.attach import ConsoleDescription, ConsoleMember, ConsoleShell
     from agentworks.vms import manager as vms
-    from agentworks.vms.manager.boundary import VMInspectionIssueSource
-    from agentworks.vms.manager.power import (
+    from agentworks.vms.manager.inspect import (
         VMDescription,
         VMDetailAgent,
         VMDetailEvent,
         VMDetailFacts,
         VMDetailSession,
         VMDetailWorkspace,
+        VMInspectionIssueSource,
         VMIssue,
         VMLiveResources,
     )
@@ -489,11 +486,12 @@ def test_session_json_status_repairs_and_no_status_are_preserved(
     monkeypatch.setattr(manager, "_display_registry", lambda _config: None)
     monkeypatch.setattr(manager, "_display_harness_integration", lambda _registry, _template: "-")
 
-    reporters: list[object] = []
+    boundary_calls = 0
 
     @contextlib.contextmanager
-    def boundary(_db: object, _config: object, _vms: object, *, reporter: object = None) -> Iterator[None]:
-        reporters.append(reporter)
+    def boundary(_db: object, _config: object, _vms: object) -> Iterator[None]:
+        nonlocal boundary_calls
+        boundary_calls += 1
         yield
 
     repairs = 0
@@ -524,7 +522,7 @@ def test_session_json_status_repairs_and_no_status_are_preserved(
     repaired = db.get_session("live")
     assert repaired is not None and (repaired.pid, repaired.boot_id) == (4321, "secret-boot-live")
     assert repairs == 1
-    assert reporters and reporters[0].__class__.__name__ == "QuietResolutionReporter"
+    assert boundary_calls == 1
     for excluded in (b"secret-boot-live", b"secret-boot-stopped"):
         assert excluded not in status_result.stdout_bytes
 
@@ -566,10 +564,8 @@ def test_session_describe_json_positive_and_stopped_pid_with_degraded_template(
         row: SessionRow,
         *,
         operation: str | None,
-        reporter: object,
     ) -> Iterator[tuple[object, object, object, object, object]]:
         del config, operation
-        assert reporter.__class__.__name__ == "QuietResolutionReporter"
         workspace = db.get_workspace(row.workspace_name)
         vm = db.get_vm("box")
         assert workspace is not None and vm is not None
@@ -643,9 +639,8 @@ def test_session_list_and_describe_degrade_harness_integration_without_error_tex
         row: SessionRow,
         *,
         operation: str | None,
-        reporter: object,
     ) -> Iterator[tuple[object, object, object, object, object]]:
-        del config, operation, reporter
+        del config, operation
         workspace = db.get_workspace(row.workspace_name)
         vm = db.get_vm("box")
         assert workspace is not None and vm is not None
@@ -685,7 +680,7 @@ def test_vm_describe_closed_status_and_slug_enums_reach_typer_json(
 ) -> None:
     from agentworks.cli.commands import vm
     from agentworks.vms import manager
-    from agentworks.vms.manager.power import VMDescription, VMDetailFacts
+    from agentworks.vms.manager.inspect import VMDescription, VMDetailFacts
 
     row = VMRow(
         "box",
@@ -720,70 +715,9 @@ def test_vm_describe_closed_status_and_slug_enums_reach_typer_json(
     assert (projected["system_slug"], projected["system_slug_state"]) == (slug, slug_state)
 
 
-def test_operational_domain_error_keeps_plain_json_stderr_and_human_parity_on_tty(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A valid JSON request keeps domain text and hint but never TTY ANSI."""
-    from agentworks import cli as cli_module
-    from agentworks import output
-    from agentworks.cli.commands import session
-    from agentworks.errors import NotFoundError
-    from agentworks.sessions import manager
-
-    monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: object())
-    monkeypatch.setattr(session, "get_db", lambda: object())
-    monkeypatch.delenv("NO_COLOR", raising=False)
-    monkeypatch.setenv("TERM", "xterm-256color")
-
-    def missing(*_args: object, **_kwargs: object) -> object:
-        raise NotFoundError(
-            "session 'missing' not found",
-            entity_kind="session",
-            entity_name="missing",
-            hint="choose an existing session",
-        )
-
-    monkeypatch.setattr(manager, "session_description", missing)
-    monkeypatch.setattr(manager, "describe_session", missing)
-
-    class FakeTTY(io.TextIOWrapper):
-        def isatty(self) -> bool:
-            return True
-
-    def invoke(output_format: str) -> tuple[int, bytes, bytes]:
-        stdout_bytes = io.BytesIO()
-        stderr_bytes = io.BytesIO()
-        stdout = FakeTTY(stdout_bytes, encoding="utf-8", write_through=True)
-        stderr = FakeTTY(stderr_bytes, encoding="utf-8", write_through=True)
-        with monkeypatch.context() as invocation:
-            invocation.setattr(sys, "stdout", stdout)
-            invocation.setattr(sys, "stderr", stderr)
-            invocation.setattr(
-                sys,
-                "argv",
-                ["agw", "session", "describe", "missing", "--output", output_format],
-            )
-            with pytest.raises(SystemExit) as raised:
-                cli_module.main()
-        stdout.flush()
-        stderr.flush()
-        return cast("int", raised.value.code), stdout_bytes.getvalue(), stderr_bytes.getvalue()
-
-    human = invoke("human")
-    machine = invoke("json")
-    output.set_machine_readable(False)
-
-    assert human[0] == machine[0] == 1
-    assert human[1] == machine[1] == b""
-    assert b"\x1b[" in human[2]
-    assert b"\x1b[" not in machine[2]
-    assert re.sub(rb"\x1b\[[0-9;]*m", b"", human[2]) == machine[2]
-    assert machine[2] == (b"Error: session 'missing' not found\n  Hint: choose an existing session\n")
-
-
 def test_vm_and_workspace_descriptions_snapshot_only_frozen_safe_scalars() -> None:
     """Mutable database rows and live dictionaries cannot alter collected facts."""
-    from agentworks.vms.manager.power import (
+    from agentworks.vms.manager.inspect import (
         VMDescription,
         VMDetailFacts,
         VMLiveResources,

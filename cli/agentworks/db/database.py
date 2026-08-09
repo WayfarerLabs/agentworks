@@ -20,7 +20,6 @@ from agentworks.db.converters import (
     _to_workspace,
 )
 from agentworks.db.migrations import LATEST_VERSION, MIGRATIONS, MigrationContext
-from agentworks.db.schema import read_schema_version
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -57,12 +56,11 @@ class Database:
             connection: sqlite3.Connection | None = None
             try:
                 connection = sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True)
-                current = read_schema_version(connection)
-            except (sqlite3.DatabaseError, StateError) as error:
+                row = connection.execute("SELECT MAX(version) FROM schema_version").fetchone()
+                current = row[0] or 0
+            except sqlite3.DatabaseError as error:
                 if connection is not None:
                     connection.close()
-                if isinstance(error, StateError):
-                    raise
                 raise StateError(
                     "state database is unavailable or malformed",
                     hint="Run a normal Agentworks command to initialize or repair the state database.",
@@ -122,9 +120,32 @@ class Database:
 
         Returns (exists, current_version, latest_version).
         """
-        from agentworks.db.schema import check_schema
+        from agentworks.errors import StateError
 
-        return check_schema(path or _db.DB_PATH)
+        db_path = path or _db.DB_PATH
+        if not db_path.exists():
+            return (False, 0, LATEST_VERSION)
+        connection: sqlite3.Connection | None = None
+        try:
+            connection = sqlite3.connect(str(db_path))
+            entry = connection.execute("SELECT type FROM sqlite_master WHERE name = 'schema_version'").fetchone()
+            if entry is None:
+                current = 0
+            elif entry[0] != "table":
+                raise StateError("state database schema is unavailable or malformed")
+            else:
+                row = connection.execute("SELECT MAX(version) FROM schema_version").fetchone()
+                current = row[0]
+                if current is None:
+                    current = 0
+                elif type(current) is not int or current < 0:
+                    raise StateError("state database schema version is invalid")
+        except sqlite3.DatabaseError as error:
+            raise StateError("state database schema is unavailable or malformed") from error
+        finally:
+            if connection is not None:
+                connection.close()
+        return (True, current, LATEST_VERSION)
 
     def _migrate(self) -> None:
         self._conn.execute(

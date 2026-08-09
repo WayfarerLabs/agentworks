@@ -70,10 +70,9 @@ def _configure_config_only_doctor(monkeypatch: pytest.MonkeyPatch, config_path: 
     def config_checks(
         *,
         completion_version: str | None = None,
-        machine_safe_config_load: bool = False,
     ) -> HealthReport:
         del completion_version
-        group, _config, _registry = doctor._check_config(raise_errors=machine_safe_config_load)
+        group, _config, _registry = doctor._check_config()
         return HealthReport(groups=[group])
 
     monkeypatch.setattr(doctor, "run_checks", config_checks)
@@ -143,17 +142,14 @@ def test_every_covered_guide_action_requests_and_requires_exact_json_v1() -> Non
     assert [(str(action.id), field, command) for action, field, _operation, command in covered] == [
         ("run-doctor", "command", "doctor"),
         ("validate-manifest-set", "command", "doctor"),
-        ("validate-manifest-set", "verification", "doctor"),
         ("compare-operator-inventory", "command", "resource.list"),
         ("finish-doctor", "command", "doctor"),
     ]
 
     validation = _migration_actions()["validate-manifest-set"]
-    assert validation.command == ("agw", "doctor")
-    assert validation.verification == ("agw", "doctor", "--output", "json")
-    for action, field, operation, command in covered:
-        if str(action.id) == "validate-manifest-set" and field == "command":
-            continue
+    assert validation.command == ("agw", "doctor", "--output", "json")
+    assert validation.verification is None
+    for action, _field, operation, command in covered:
         assert operation is not None
         _assert_action_requires_exact_v1(action, operation, command)
 
@@ -203,7 +199,7 @@ def test_guide_resource_inventory_action_emits_parseable_resource_list_v1(
     assert resources[0]["description"] == marker
 
 
-def test_guide_doctor_actions_emit_one_parseable_report_without_sensitive_diagnostics(
+def test_guide_doctor_actions_emit_the_shared_health_facts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from agentworks import doctor
@@ -220,12 +216,12 @@ def test_guide_doctor_actions_emit_one_parseable_report_without_sensitive_diagno
     result = CliRunner().invoke(app, list(action.command[1:]))
 
     document = _parse_exact_v1(result, "doctor", exit_code=1)
-    assert sensitive not in result.stdout
+    assert sensitive in result.stdout
     data = cast("dict[str, object]", document["data"])
     assert data["counts"] == {"ok": 0, "info": 0, "warn": 0, "fail": 1}
 
 
-def test_validate_manifest_action_keeps_human_detail_and_verifies_redacted_json(
+def test_validate_manifest_action_reports_precise_manifest_failure_in_json(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -245,35 +241,19 @@ def test_validate_manifest_action_keeps_human_detail_and_verifies_redacted_json(
     _configure_config_only_doctor(monkeypatch, config_path)
     action = _migration_actions()["validate-manifest-set"]
     assert action.command is not None
-    assert action.verification is not None
 
-    human = CliRunner().invoke(app, list(action.command[1:]))
-    machine = CliRunner().invoke(app, list(action.verification[1:]))
+    result = CliRunner().invoke(app, list(action.command[1:]))
 
-    assert human.exit_code == 1
-    assert human.stderr == ""
-    assert "[FAIL] Config:" in human.stdout
-    assert "config.toml declares resources" in human.stdout
-    assert "config.toml no longer supports" in human.stdout
-    assert "settings only now" in human.stdout
-    assert "[vm_templates.*]" in human.stdout
-    assert "[admin.config]" in human.stdout
-    assert "[FAIL] Manifest:" in human.stdout
-    assert sensitive in human.stdout
-    document = _parse_exact_v1(machine, "doctor", exit_code=1)
-    assert machine.stderr == ""
-    assert sensitive not in machine.stdout
+    document = _parse_exact_v1(result, "doctor", exit_code=1)
+    assert result.stderr == ""
+    assert sensitive in result.stdout
     data = cast("dict[str, object]", document["data"])
     checks = _configuration_checks(document)
     assert next(check for check in checks if check["name"] == "Config file")["status"] == "ok"
     assert next(check for check in checks if check["name"] == "Config")["status"] == "fail"
     manifest = next(check for check in checks if check["name"] == "Manifest")
-    assert manifest == {
-        "name": "Manifest",
-        "status": "fail",
-        "message": "resource manifests did not load",
-        "hint": None,
-    }
+    assert manifest["status"] == "fail"
+    assert sensitive in cast("str", manifest["message"])
     assert cast("dict[str, int]", data["counts"])["fail"] == 2
 
 
@@ -295,31 +275,16 @@ def test_validate_manifest_action_rejects_registry_failure_after_decode(
     _configure_config_only_doctor(monkeypatch, config_path)
     action = _migration_actions()["validate-manifest-set"]
     assert action.command is not None
-    assert action.verification is not None
 
-    human = CliRunner().invoke(app, list(action.command[1:]))
-    machine = CliRunner().invoke(app, list(action.verification[1:]))
+    result = CliRunner().invoke(app, list(action.command[1:]))
 
-    assert human.exit_code == 1
-    assert "[FAIL] Config:" in human.stdout
-    assert "config.toml declares resources" in human.stdout
-    assert "settings only now" in human.stdout
-    assert "[vm_templates.*]" in human.stdout
-    assert "[admin.config]" in human.stdout
-    assert "[FAIL] Resource registry:" in human.stdout
-    assert missing in human.stdout
-    document = _parse_exact_v1(machine, "doctor", exit_code=1)
-    assert missing not in machine.stdout
+    document = _parse_exact_v1(result, "doctor", exit_code=1)
     checks = _configuration_checks(document)
     assert not any(check["name"] == "Manifest" and check["status"] in {"warn", "fail"} for check in checks)
     registry = next(check for check in checks if check["name"] == "Resource registry")
-    assert registry == {
-        "name": "Resource registry",
-        "status": "fail",
-        "message": "resource registry did not build",
-        "hint": None,
-    }
-    assert "no check named Manifest or Resource registry" in action.expected_state
+    assert registry["status"] == "fail"
+    assert missing in cast("str", registry["message"])
+    assert "require no check with either name" in action.expected_state
 
 
 def test_validate_manifest_action_rejects_settings_error_before_manifest_check(
@@ -330,25 +295,15 @@ def test_validate_manifest_action_rejects_settings_error_before_manifest_check(
     _configure_config_only_doctor(monkeypatch, config_path)
     action = _migration_actions()["validate-manifest-set"]
     assert action.command is not None
-    assert action.verification is not None
 
-    human = CliRunner().invoke(app, list(action.command[1:]))
-    machine = CliRunner().invoke(app, list(action.verification[1:]))
+    result = CliRunner().invoke(app, list(action.command[1:]))
 
-    assert human.exit_code == 1
-    assert "[FAIL] Config:" in human.stdout
-    assert "unexpected-settings" in human.stdout
-    assert "config.toml declares resources" not in human.stdout
-    document = _parse_exact_v1(machine, "doctor", exit_code=1)
+    document = _parse_exact_v1(result, "doctor", exit_code=1)
     checks = _configuration_checks(document)
     assert [check["name"] for check in checks] == ["Config file", "Config"]
-    assert checks[1] == {
-        "name": "Config",
-        "status": "fail",
-        "message": "configuration did not load",
-        "hint": None,
-    }
-    assert "Config failure must be the expected migration hard error" in action.expected_state
+    assert checks[1]["status"] == "fail"
+    assert "unexpected-settings" in cast("str", checks[1]["message"])
+    assert "Config message must be the expected migration hard error" in action.expected_state
 
 
 def test_validate_manifest_action_reports_stable_retained_checkpoint_structure(
@@ -367,90 +322,18 @@ def test_validate_manifest_action_reports_stable_retained_checkpoint_structure(
     _configure_config_only_doctor(monkeypatch, config_path)
     action = _migration_actions()["validate-manifest-set"]
     assert action.command is not None
-    assert action.verification is not None
 
-    human = CliRunner().invoke(app, list(action.command[1:]))
-    machine = CliRunner().invoke(app, list(action.verification[1:]))
+    result = CliRunner().invoke(app, list(action.command[1:]))
 
-    assert human.exit_code == 1
-    assert "config.toml declares resources" in human.stdout
-    document = _parse_exact_v1(machine, "doctor", exit_code=1)
+    document = _parse_exact_v1(result, "doctor", exit_code=1)
     checks = _configuration_checks(document)
     assert next(check for check in checks if check["name"] == "Config file")["status"] == "ok"
-    assert next(check for check in checks if check["name"] == "Config")["status"] == "fail"
+    config = next(check for check in checks if check["name"] == "Config")
+    assert config["status"] == "fail"
+    assert "config.toml declares resources" in cast("str", config["message"])
     assert not any(
         check["name"] in {"Manifest", "Resource registry"} and check["status"] in {"warn", "fail"} for check in checks
     )
-
-
-def test_validate_manifest_action_rejects_config_becoming_clean_between_runs(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config_path = _write_doctor_config(
-        tmp_path,
-        """
-        [vm_templates.default]
-
-        [admin.config]
-        shell = "zsh"
-        """,
-    )
-    _configure_config_only_doctor(monkeypatch, config_path)
-    action = _migration_actions()["validate-manifest-set"]
-    assert action.command is not None
-    assert action.verification is not None
-
-    human = CliRunner().invoke(app, list(action.command[1:]))
-    _write_doctor_config(tmp_path, "")
-    machine = CliRunner().invoke(app, list(action.verification[1:]))
-
-    assert human.exit_code == 1
-    assert "config.toml declares resources" in human.stdout
-    document = _parse_exact_v1(machine, "doctor", exit_code=0)
-    checks = _configuration_checks(document)
-    assert next(check for check in checks if check["name"] == "Config file")["status"] == "ok"
-    assert any(check["name"] == "Config is valid" and check["status"] == "ok" for check in checks)
-    assert not any(check["name"] == "Config" and check["status"] == "fail" for check in checks)
-    assert "Both the human command and JSON verification must exit 1" in action.expected_state
-
-
-def test_validate_manifest_action_rejects_config_disappearing_between_runs(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config_path = _write_doctor_config(
-        tmp_path,
-        """
-        [vm_templates.default]
-
-        [admin.config]
-        shell = "zsh"
-        """,
-    )
-    _configure_config_only_doctor(monkeypatch, config_path)
-    action = _migration_actions()["validate-manifest-set"]
-    assert action.command is not None
-    assert action.verification is not None
-
-    human = CliRunner().invoke(app, list(action.command[1:]))
-    config_path.unlink()
-    machine = CliRunner().invoke(app, list(action.verification[1:]))
-
-    assert human.exit_code == 1
-    assert "config.toml declares resources" in human.stdout
-    document = _parse_exact_v1(machine, "doctor", exit_code=1)
-    checks = _configuration_checks(document)
-    assert checks == [
-        {
-            "name": "Config file",
-            "status": "fail",
-            "message": "configuration file is not available",
-            "hint": "run agw config init",
-        }
-    ]
-    assert "Config file with status ok" in action.expected_state
-    assert "Config with status fail" in action.expected_state
 
 
 def test_finish_doctor_requires_zero_failures_and_exit_zero(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -495,5 +378,7 @@ def test_finish_doctor_does_not_accept_a_stale_schema_warning(monkeypatch: pytes
     data = cast("dict[str, object]", document["data"])
     counts = cast("dict[str, int]", data["counts"])
     assert counts["fail"] == 0
-    assert _database_checks(document) == [{"name": "Schema", "status": "warn", "message": None, "hint": None}]
+    assert _database_checks(document) == [
+        {"name": "Schema", "status": "warn", "message": "at an older version", "hint": None}
+    ]
     assert "status is exactly ok" in action.expected_state

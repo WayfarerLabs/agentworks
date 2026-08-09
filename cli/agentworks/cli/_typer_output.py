@@ -16,7 +16,6 @@ from agentworks.output import (
     StatusStyle,
     _pad,
     _render_header,
-    machine_readable,
     non_interactive,
     presentation_suppressed,
 )
@@ -72,9 +71,7 @@ class TyperHandler:
         When this is false, the emit branches below bypass ``click.style``
         entirely so output is byte-identical to the no-color rendering.
         """
-        return (
-            os.environ.get("NO_COLOR") is None and stream.isatty() and not non_interactive() and not machine_readable()
-        )
+        return os.environ.get("NO_COLOR") is None and stream.isatty() and not non_interactive()
 
     def emit(self, role: Role, message: str, level: int) -> None:
         # Only the styling is gated on _color_enabled; indentation,
@@ -137,7 +134,7 @@ class TyperHandler:
         # has one definition.
         prompt_on_stderr = presentation_suppressed()
         prompt_stream = sys.stderr if prompt_on_stderr else sys.stdout
-        if prompt_stream.isatty() and not non_interactive() and not machine_readable():
+        if prompt_stream.isatty() and not non_interactive():
             typer.echo(MOUSE_TRACKING_DISABLE, nl=False, err=prompt_on_stderr)
         try:
             confirm = click.confirm if prompt_on_stderr else typer.confirm
