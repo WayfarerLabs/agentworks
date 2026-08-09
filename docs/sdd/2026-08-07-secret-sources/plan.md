@@ -1,6 +1,6 @@
 # Plan: Secret Sources
 
-- Status: Active — final closeout
+- Status: Locked
 - FRD: [frd.md](./frd.md)
 - Architecture: [hla.md](./hla.md)
 - Migration: [migration-strategy.md](./migration-strategy.md)
@@ -251,9 +251,9 @@ the new command.
 - [x] Run Green on every supported Python version through CI. Complete `agentworks-reviewer`,
       roadmap-lead, and fresh-eyes review (the fallback if Copilot is unavailable) with every valid
       finding resolved.
-- [ ] Create `locked.md` only in the final feature commit, summarizing shipped behavior, the 0.14
+- [x] Create `locked.md` only in the final feature commit, summarizing shipped behavior, the 0.14
       break, guide-topic status, PRs, gates, and any honest residual work.
-- [ ] Mark PR #453 ready, request Copilot review, and resolve every valid finding before merge;
+- [x] Mark PR #453 ready, request Copilot review, and resolve every valid finding before merge;
       notify the operator of any roadmap ledger inconsistency without editing the roadmap SDD.
 
 **Definition of done:** every FRD acceptance criterion is demonstrated, permanent documentation is
