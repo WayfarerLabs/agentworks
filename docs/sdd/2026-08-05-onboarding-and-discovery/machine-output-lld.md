@@ -29,8 +29,11 @@ commands, logs, interactive attachment, and every mutation command are outside v
 option must not suggest that an unsupported command has a JSON contract.
 
 The implementation does not redesign agentworks.output.OutputHandler, replace the Typer handler, or
-add a global output setting. It must not run remote work solely because JSON was requested. It must
-not expose raw configuration, secret values or resolver results, session harness state, session
+add a global output-format renderer or process-global output setting. A narrow request-scoped
+ContextVar may carry parsed machine mode for plain error styling and may suppress ordinary
+presentation while a command collects facts; local JSON projections and the direct envelope writer
+remain the only JSON renderer. It must not run remote work solely because JSON was requested. It
+must not expose raw configuration, secret values or resolver results, session harness state, session
 socket paths, boot identifiers, or opaque VM platform metadata.
 
 ## Current paths and extraction seams
@@ -118,7 +121,9 @@ reporter to the same ordered resolver, active backend chain, interactive policy,
 value cache. It does not use the verification-only quiet resolver, which has deliberately different
 backend wrapping and interactivity rules. Thus JSON suppression changes presentation only, never
 secret resolution semantics or whether a successful VM describe, session describe, or status-enabled
-session list can prompt.
+session list can prompt. Request-local presentation suppression is a ContextVar. Session status
+workers receive an explicit, separate `copy_context()` for each ThreadPoolExecutor task, so
+suppression follows the request without leaking to overlapping human invocations.
 
 ## Data schemas
 
@@ -188,8 +193,13 @@ live_resources is null or {cpus, load_average, memory_total, memory_used, memory
 swap_total, swap_used, swap_percent, disk_total, disk_used, disk_percent}. These retain current
 bounded live-read text and units. agents[] is {name, linux_user, grant_all, grant_count}.
 workspaces[] is {name, path, sessions}, and sessions[] is {name, template, mode, agent_name}.
-events[] is {created_at, event, detail} with nullable detail. mode is admin or agent; agent_name is
-nullable. These arrays retain current DB ordering. issues[] uses vm_issue in encounter order.
+events[] is {created_at, event, detail}. event is exactly provisioning_started,
+provisioning_complete, provisioning_failed, init_started, init_complete, init_partial, init_failed,
+backup_started, backup_completed, backup_failed, rekey, or unknown. Unknown or historical raw names
+project to the stable unknown sentinel and never echo stored text. detail is reserved and ALWAYS
+null in JSON v1: persisted event detail is unbounded historical diagnostic text, and v1 defines no
+safe non-null grammar. mode is admin or agent; agent_name is nullable. These arrays retain current
+DB ordering. issues[] uses vm_issue in encounter order.
 
 ### Workspaces and agents
 
@@ -253,9 +263,13 @@ handling before work begins.
 
 Doctor is the only report-with-failure exception. A successful VM inspection that currently degrades
 after a bounded attempted read uses null for unavailable facts and a closed vm_issue; it is not a
-business-error envelope. JSON contains no ANSI on either output stream. The serializer writes stdout
-directly, rather than output.info, so the ambient handler cannot add presentation. --output human
-executes the exact current human renderer path.
+business-error envelope. JSON contains no ANSI on either output stream. Covered callbacks record
+their parsed output mode in request-local state before mutex, config, database, or service work, and
+that state remains active while errors unwind. A closed pre-parsing detector recognizes only the 16
+supported command paths and the two JSON option spellings before a literal `--`; it disables native
+Click/Typer usage color without selecting machine mode or interpreting mutation and passthrough
+arguments. The serializer writes stdout directly, rather than output.info, so the ambient handler
+cannot add presentation. --output human executes the exact current human renderer path.
 
 --names-only remains completion plumbing and is mutually exclusive with --output json on every
 covered list or kinds command that already has it. Validate that conflict before service work. It
@@ -309,7 +323,9 @@ has no new setting and is recorded as unaffected in the Phase 2 handoff.
 ## Implementation sequence
 
 1. Add the local output enum, explicit envelope writer, safe shared projections, and serializer
-   tests. Do not modify output.py or the global Typer handler.
+   tests. Keep JSON projection and writing local; do not replace OutputHandler or add a global
+   output-format renderer. Narrow request-state and presentation-suppression ContextVars are allowed
+   only for presentation isolation and plain machine-error styling.
 2. Wire resource, kinds, secret, and doctor first, reusing existing fact records to establish the
    renderer, null, enum, error, and human-fixture patterns.
 3. Extract read facts for VM, workspace, agent, console, and session. Make the resolver reporter

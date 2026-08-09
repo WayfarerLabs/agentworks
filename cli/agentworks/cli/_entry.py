@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import sys
+from typing import TYPE_CHECKING
+
 import click
 import typer
 
@@ -10,8 +13,66 @@ from agentworks.cli._errors import echo_hint, record_unhandled_error
 from agentworks.cli._typer_output import TyperHandler
 from agentworks.path_rendering import format_host_path
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+
+_MACHINE_OUTPUT_PATHS = frozenset(
+    {
+        ("resource", "list"),
+        ("resource", "kinds"),
+        ("resource", "describe"),
+        ("vm", "list"),
+        ("vm", "describe"),
+        ("workspace", "list"),
+        ("workspace", "describe"),
+        ("agent", "list"),
+        ("agent", "describe"),
+        ("session", "list"),
+        ("session", "describe"),
+        ("console", "list"),
+        ("console", "describe"),
+        ("secret", "list"),
+        ("secret", "describe"),
+        ("doctor",),
+    }
+)
+_ROOT_BOOLEAN_OPTIONS = frozenset({"--non-interactive", "--debug", "--no-deprecations"})
+
+
+def _plain_native_usage_for_machine_request(arguments: Sequence[str]) -> bool:
+    """Recognize only supported JSON paths for native parse rendering.
+
+    This preparse pass does not select machine mode. It only disables Click's
+    ANSI usage styling when parsing fails before the selected command callback
+    can record its parsed ``OutputFormat``. Passthrough tokens after a literal
+    ``--`` are deliberately invisible.
+    """
+    before_passthrough = list(arguments[: arguments.index("--")]) if "--" in arguments else list(arguments)
+    remaining = before_passthrough.copy()
+    while remaining and remaining[0] in _ROOT_BOOLEAN_OPTIONS:
+        remaining.pop(0)
+    if not remaining:
+        return False
+
+    path = (remaining[0],) if remaining[0] == "doctor" else tuple(remaining[:2])
+    if path not in _MACHINE_OUTPUT_PATHS:
+        return False
+    return "--output=json" in before_passthrough or any(
+        argument == "--output" and value == "json"
+        for argument, value in zip(before_passthrough, before_passthrough[1:], strict=False)
+    )
+
 
 def main() -> None:
+    """Run one isolated CLI request."""
+    from agentworks.output import request_output_state
+
+    with request_output_state():
+        _main_in_request()
+
+
+def _main_in_request() -> None:
     """CLI entrypoint. Sets up output handler and catches business logic errors."""
     # Resolve `app` through the package namespace at call time so tests that
     # monkeypatch `agentworks.cli.app` to swap in a minimal test app actually
@@ -44,7 +105,20 @@ def main() -> None:
         # successfully. Inside the try so a Ctrl-C during the pre-pass still
         # routes through our wrapper.
         _seed_debug_from_pre_callback()
-        _cli.app()
+        if _plain_native_usage_for_machine_request(sys.argv[1:]):
+            # Typer's Rich usage renderer does not honor Click's ``color``
+            # context flag. Standalone=False lets the vendored native Click
+            # exception escape so its own plain renderer can apply the same
+            # parsed usage and exit code without ANSI.
+            from typer import _click as typer_click
+
+            try:
+                _cli.app(color=False, standalone_mode=False)
+            except typer_click.ClickException as exception:
+                exception.show()
+                raise SystemExit(exception.exit_code) from None
+        else:
+            _cli.app()
     except ConfigError as e:
         # Config errors get their own label since the user is looking at the
         # wrong file, not at a runtime state problem.

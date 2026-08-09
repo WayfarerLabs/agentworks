@@ -288,8 +288,13 @@ nullable integers. `live_resources` is null or this record:
 
 `agents[]` is `{name, linux_user, grant_all, grant_count}`. `workspaces[]` is
 `{name, path, sessions}` with session entries `{name, template, mode, agent_name}`. `events[]` is
-`{created_at, event, detail}`. `detail` and `agent_name` are nullable; mode is `admin` or `agent`.
-These arrays retain database order. `issues[]` is `{source, code}` in encounter order: source is
+`{created_at, event, detail}`. Event is exactly `provisioning_started`, `provisioning_complete`,
+`provisioning_failed`, `init_started`, `init_complete`, `init_partial`, `init_failed`,
+`backup_started`, `backup_completed`, `backup_failed`, `rekey`, or `unknown`. Historical or future
+raw names outside that closed set project as `unknown` and never echo their stored text. `detail` is
+reserved and always JSON `null` in v1 because persisted event detail is unbounded diagnostic text;
+no non-null detail grammar exists. `agent_name` is nullable, and mode is `admin` or `agent`. These
+arrays retain database order. `issues[]` is `{source, code}` in encounter order: source is
 `site_lookup`, `preflight`, `secret_resolution`, or `platform_status`, and code is always
 `unavailable`. Issues do not carry backend text or exception details.
 

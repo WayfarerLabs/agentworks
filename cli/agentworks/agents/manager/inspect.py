@@ -202,7 +202,12 @@ def list_agents(
     With ``names_only=True``, emit one agent name per line and skip
     the table render. Used by shell completion (see issue #147).
     """
-    render_agent_listing(agent_listing(db, vm_name=vm_name), names_only=names_only)
+    if names_only:
+        validate_name_filters(db, vm_name=vm_name)
+        for agent in db.list_agents(vm_name=vm_name):
+            output.info(agent.name)
+        return
+    render_agent_listing(agent_listing(db, vm_name=vm_name))
 
 
 def agent_description(

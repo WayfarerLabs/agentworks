@@ -8,7 +8,7 @@ import typer
 
 from agentworks.cli._app import app
 from agentworks.cli._helpers import get_db
-from agentworks.machine_output import OutputFormat
+from agentworks.machine_output import OutputFormat, select_request_output
 
 secret_app = typer.Typer(
     name="secret",
@@ -44,6 +44,7 @@ def secret_list(
     (a ``false`` opt-out, or a mapping-required backend with no mapping).
     Values are never resolved.
     """
+    select_request_output(output_format)
     if names_only and output_format is OutputFormat.JSON:
         raise typer.BadParameter("cannot be used with --output json", param_hint="--names-only")
 
@@ -98,6 +99,7 @@ def secret_describe(
     names that something references; ``agw secret list`` shows every
     such name).
     """
+    select_request_output(output_format)
     from agentworks.bootstrap import load_request_registry
     from agentworks.config import load_config
     from agentworks.secrets.inspect import describe_secret, render_secret_description, secret_description_data

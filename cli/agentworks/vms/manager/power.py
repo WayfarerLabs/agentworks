@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from agentworks import output
@@ -100,6 +101,31 @@ class VMDetailEvent:
     created_at: str
     event: str
     detail: str | None
+
+
+class VMEventName(StrEnum):
+    """Closed JSON v1 vocabulary for persisted VM event names."""
+
+    PROVISIONING_STARTED = "provisioning_started"
+    PROVISIONING_COMPLETE = "provisioning_complete"
+    PROVISIONING_FAILED = "provisioning_failed"
+    INIT_STARTED = "init_started"
+    INIT_COMPLETE = "init_complete"
+    INIT_PARTIAL = "init_partial"
+    INIT_FAILED = "init_failed"
+    BACKUP_STARTED = "backup_started"
+    BACKUP_COMPLETED = "backup_completed"
+    BACKUP_FAILED = "backup_failed"
+    REKEY = "rekey"
+    UNKNOWN = "unknown"
+
+
+def _project_vm_event_name(raw_name: str) -> str:
+    """Map historical or future raw event names to the stable sentinel."""
+    try:
+        return VMEventName(raw_name).value
+    except ValueError:
+        return VMEventName.UNKNOWN.value
 
 
 @dataclass(frozen=True)
@@ -292,7 +318,12 @@ def vm_description_data(description: VMDescription) -> JsonObject:
             # must fail closed rather than expose a command or secret-bearing
             # diagnostic. The human renderer retains the legacy detail display.
             "events": [
-                {"created_at": event.created_at, "event": event.event, "detail": None} for event in description.events
+                {
+                    "created_at": event.created_at,
+                    "event": _project_vm_event_name(event.event),
+                    "detail": None,
+                }
+                for event in description.events
             ],
         },
         "issues": [{"source": issue.source, "code": issue.code} for issue in description.issues],
@@ -376,7 +407,11 @@ def render_vm_listing(listing: VMListing, *, names_only: bool = False) -> None:
 
 def list_vms(db: Database, *, names_only: bool = False) -> None:
     """List all VMs with their init and runtime status."""
-    render_vm_listing(vm_listing(db), names_only=names_only)
+    if names_only:
+        for vm in db.list_vms():
+            output.info(vm.name)
+        return
+    render_vm_listing(vm_listing(db))
 
 
 def vm_description(
@@ -426,10 +461,6 @@ def vm_description(
             issue = VMIssue(source=exc.source)
             issues.append(issue)
             diagnostics.append(VMDiagnostic(issue=issue, error=exc.diagnostic))
-        except AgentworksError as exc:
-            issue = VMIssue(source="preflight")
-            issues.append(issue)
-            diagnostics.append(VMDiagnostic(issue=issue, error=exc))
         else:
             platform = vm_node.site.platform
             try:

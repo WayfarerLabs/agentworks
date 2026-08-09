@@ -8,7 +8,7 @@ import typer
 
 from agentworks.cli._app import app
 from agentworks.cli._helpers import get_db, parse_csv_filter
-from agentworks.machine_output import OutputFormat
+from agentworks.machine_output import OutputFormat, select_request_output
 
 session_app = typer.Typer(
     name="session",
@@ -79,6 +79,7 @@ def session_describe(
     ] = OutputFormat.HUMAN,
 ) -> None:
     """Show session details."""
+    select_request_output(output_format)
     from agentworks.config import load_config
     from agentworks.sessions.manager import describe_session, session_description
 
@@ -126,6 +127,7 @@ def session_list(
     ] = OutputFormat.HUMAN,
 ) -> None:
     """List sessions. Filters compose with AND; name filters accept comma-separated values for OR-within-filter."""
+    select_request_output(output_format)
     if names_only and output_format is OutputFormat.JSON:
         raise typer.BadParameter("cannot be used with --output json", param_hint="--names-only")
 

@@ -12,7 +12,7 @@ from typing import Annotated
 import typer
 
 from agentworks.cli._app import app
-from agentworks.machine_output import OutputFormat
+from agentworks.machine_output import OutputFormat, select_request_output
 from agentworks.output import StatusStyle, style_status
 
 
@@ -27,6 +27,7 @@ def doctor(
     ] = OutputFormat.HUMAN,
 ) -> None:
     """Check environment, config, and dependencies."""
+    select_request_output(output_format)
     from agentworks.completions.spec import build_spec, completion_version
     from agentworks.doctor import Status, health_report_data, run_checks
 

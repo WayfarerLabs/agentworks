@@ -930,10 +930,11 @@ def _check_database() -> HealthGroup:
             db = Database()
             _report_db_contents(g, db)
         elif current < latest:
-            g.warn("Schema", f"at version {current}, latest is {latest}. Migrating...")
-            db = Database()  # auto-migrates
-            g.ok("Schema", f"migrated to version {latest}")
-            _report_db_contents(g, db)
+            g.warn(
+                "Schema",
+                f"at version {current}, latest is {latest}; "
+                "a normal Agentworks command that opens state will migrate it",
+            )
         else:
             g.fail("Schema", f"version {current} is newer than latest {latest} (downgrade?)")
     except Exception as e:

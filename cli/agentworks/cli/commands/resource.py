@@ -14,7 +14,7 @@ import typer
 
 from agentworks.cli._app import app
 from agentworks.cli._helpers import get_db
-from agentworks.machine_output import OutputFormat
+from agentworks.machine_output import OutputFormat, select_request_output
 
 # Module-level because three commands in this file render a host path and
 # `path_rendering` is a leaf module (pathlib only), so hoisting it costs
@@ -90,6 +90,7 @@ def resource_list(
     description field (see ``DeclaredResource``); only capability kinds
     whose registration record has none show empty.
     """
+    select_request_output(output_format)
     if names_only and output_format is OutputFormat.JSON:
         raise typer.BadParameter("cannot be used with --output json", param_hint="--names-only")
 
@@ -181,6 +182,7 @@ def resource_kinds(
     registered code. RESOURCES counts the current registry rows per
     kind.
     """
+    select_request_output(output_format)
     if names_only and output_format is OutputFormat.JSON:
         raise typer.BadParameter("cannot be used with --output json", param_hint="--names-only")
 
@@ -237,6 +239,7 @@ def resource_describe(
     ``agw secret describe`` etc. for kind-specific detail (backend
     mappings, inheritance chains, resolution preview).
     """
+    select_request_output(output_format)
     from agentworks.bootstrap import load_request_registry
     from agentworks.config import load_config
     from agentworks.errors import ValidationError

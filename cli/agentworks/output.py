@@ -372,7 +372,7 @@ class _DefaultHandler:
 # the installed handler. See output-model-lld.md sec 1 for the rationale.
 _level: ContextVar[int] = ContextVar("_output_level", default=0)
 _presentation_suppressed: ContextVar[bool] = ContextVar("_presentation_suppressed", default=False)
-_presentation_suppression_depth: int = 0
+_machine_readable: ContextVar[bool] = ContextVar("_machine_readable", default=False)
 _handler: OutputHandler = _DefaultHandler()
 
 
@@ -388,26 +388,39 @@ def suppress_presentation() -> Iterator[None]:
     Prompts retain their handler path and interactivity; this only prevents
     service status, progress, and resolver narration from corrupting stdout.
     """
-    global _presentation_suppression_depth  # noqa: PLW0603
-
     token = _presentation_suppressed.set(True)
-    _presentation_suppression_depth += 1
     try:
         yield
     finally:
-        _presentation_suppression_depth -= 1
         _presentation_suppressed.reset(token)
 
 
 def presentation_suppressed() -> bool:
     """Return whether ordinary presentation is suppressed for this request.
 
-    The per-flow context preserves nesting semantics, while the depth counter
-    carries the request-wide state into worker threads used by status
-    collection. CLI invocations are process-serial, so a request-wide counter
-    is the appropriate boundary for presentation owned by a single command.
+    The per-flow context preserves nesting semantics. Callers that dispatch
+    work to a thread copy their request context into each worker explicitly.
     """
-    return _presentation_suppressed.get() or _presentation_suppression_depth > 0
+    return _presentation_suppressed.get()
+
+
+@contextmanager
+def request_output_state() -> Iterator[None]:
+    """Seed and restore output state at one CLI invocation boundary.
+
+    Context variables isolate overlapping invocations in different threads,
+    while the reset prevents state from leaking between sequential
+    ``cli.main`` invocations or embedded callers that use this boundary.
+    """
+    level_token = _level.set(0)
+    suppression_token = _presentation_suppressed.set(False)
+    machine_token = _machine_readable.set(False)
+    try:
+        yield
+    finally:
+        _machine_readable.reset(machine_token)
+        _presentation_suppressed.reset(suppression_token)
+        _level.reset(level_token)
 
 
 @contextmanager
@@ -588,7 +601,6 @@ def get_handler() -> OutputHandler:
 # ---------------------------------------------------------------------------
 
 _non_interactive: bool = False
-_machine_readable: bool = False
 
 
 def set_non_interactive(value: bool) -> None:
@@ -626,13 +638,12 @@ def non_interactive() -> bool:
 
 def set_machine_readable(value: bool) -> None:
     """Record whether this CLI invocation selected machine-readable output."""
-    global _machine_readable  # noqa: PLW0603
-    _machine_readable = value
+    _machine_readable.set(value)
 
 
 def machine_readable() -> bool:
     """Return whether this CLI invocation selected machine-readable output."""
-    return _machine_readable
+    return _machine_readable.get()
 
 
 _suppress_deprecations: bool = False

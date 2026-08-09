@@ -274,7 +274,10 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
                 ),
             ),
         ),
-        events=(VMDetailEvent("2026-01-04", "created", None), VMDetailEvent("2026-01-05", "started", "ok")),
+        events=(
+            VMDetailEvent("2026-01-04", "provisioning_started", None),
+            VMDetailEvent("2026-01-05", "init_complete", "ok"),
+        ),
         issues=tuple(
             VMIssue(source) for source in ("site_lookup", "preflight", "secret_resolution", "platform_status")
         ),
@@ -381,8 +384,8 @@ def test_nonempty_operational_describes_have_exact_safe_json(monkeypatch: pytest
                 }
             ],
             "events": [
-                {"created_at": "2026-01-04", "event": "created", "detail": None},
-                {"created_at": "2026-01-05", "event": "started", "detail": None},
+                {"created_at": "2026-01-04", "event": "provisioning_started", "detail": None},
+                {"created_at": "2026-01-05", "event": "init_complete", "detail": None},
             ],
         },
         "issues": [

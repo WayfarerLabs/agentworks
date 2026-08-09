@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 import threading
+from contextvars import copy_context
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
@@ -395,6 +396,7 @@ def test_vm_event_detail_cannot_expose_secret_command_text(monkeypatch: pytest.M
     from agentworks.vms.manager.power import VMDescription, VMDetailEvent, VMDetailFacts
 
     marker = "SECRET_TOKEN=do-not-expose command --password do-not-expose"
+    raw_event = f"historical-{marker}"
     row = VMRow(
         "box",
         "site",
@@ -424,7 +426,7 @@ def test_vm_event_detail_cannot_expose_secret_command_text(monkeypatch: pytest.M
         None,
         (),
         (),
-        (VMDetailEvent("2026-01-02", "failed", marker),),
+        (VMDetailEvent("2026-01-02", raw_event, marker),),
         (),
         (),
     )
@@ -436,6 +438,10 @@ def test_vm_event_detail_cannot_expose_secret_command_text(monkeypatch: pytest.M
 
     assert result.exit_code == 0, result.output
     assert marker.encode() not in result.stdout_bytes
+    document = cast("dict[str, object]", json.loads(result.stdout_bytes))
+    data = cast("dict[str, object]", document["data"])
+    vm_data = cast("dict[str, object]", data["vm"])
+    assert vm_data["events"] == [{"created_at": "2026-01-02", "event": "unknown", "detail": None}]
 
 
 def test_vm_platform_status_issue_retains_successful_bounded_live_resources(
@@ -566,7 +572,10 @@ def test_machine_presentation_suppression_keeps_prompts_interactive_on_stderr(
             progress.update(1, "half")
             progress.done("ready")
             output.result("RESULT_SENTINEL")
-        thread = threading.Thread(target=output.info, args=("THREAD_PRESENTATION_SENTINEL",))
+            thread = threading.Thread(
+                target=copy_context().run,
+                args=(output.info, "THREAD_PRESENTATION_SENTINEL"),
+            )
         thread.start()
         thread.join()
         answers.append(output.prompt("PROMPT_SENTINEL"))

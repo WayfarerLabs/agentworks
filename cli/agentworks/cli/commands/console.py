@@ -8,7 +8,7 @@ import typer
 
 from agentworks.cli._app import app
 from agentworks.cli._helpers import get_db, parse_csv_filter, prompt_vm
-from agentworks.machine_output import OutputFormat
+from agentworks.machine_output import OutputFormat, select_request_output
 
 console_app = typer.Typer(
     name="console",
@@ -127,6 +127,7 @@ def console_list(
     --workspace and --agent match a console when at least one of its member
     sessions matches. When both are passed, the SAME session must satisfy both.
     """
+    select_request_output(output_format)
     if names_only and output_format is OutputFormat.JSON:
         raise typer.BadParameter("cannot be used with --output json", param_hint="--names-only")
 
@@ -162,6 +163,7 @@ def console_describe(
     ] = OutputFormat.HUMAN,
 ) -> None:
     """Show a console's membership and shell layout."""
+    select_request_output(output_format)
     from agentworks.sessions.multi_console import console_description, render_console_description
 
     description = console_description(get_db(), name=name)

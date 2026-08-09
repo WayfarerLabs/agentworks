@@ -8,7 +8,7 @@ import typer
 
 from agentworks.cli._app import app
 from agentworks.cli._helpers import get_db, parse_csv_filter, prompt_vm
-from agentworks.machine_output import OutputFormat
+from agentworks.machine_output import OutputFormat, select_request_output
 
 agent_app = typer.Typer(
     name="agent",
@@ -62,6 +62,7 @@ def agent_list(
     ] = OutputFormat.HUMAN,
 ) -> None:
     """List agents. --vm accepts comma-separated values for OR-within-filter."""
+    select_request_output(output_format)
     if names_only and output_format is OutputFormat.JSON:
         raise typer.BadParameter("cannot be used with --output json", param_hint="--names-only")
 
@@ -92,6 +93,7 @@ def agent_describe(
     ] = OutputFormat.HUMAN,
 ) -> None:
     """Show detailed information about an agent."""
+    select_request_output(output_format)
     from agentworks.agents.manager import agent_description, render_agent_description
 
     description = agent_description(get_db(), name=name)

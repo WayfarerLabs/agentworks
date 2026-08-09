@@ -53,11 +53,19 @@ Three properties are load-bearing:
   watching it fail to reconnect; resolving eagerly would prompt every
   start for a key that is almost never used. Either way the node only
   reads from a reader the gate handed it (declare/receive holds) and
-  resolution stays orchestrator-owned. Everything resolved, eager or
-  lazy, lands in the values the gate returns, so the orchestrator can
-  SEED the boundary pass and no secret resolves or prompts twice in
-  one command (``Resolver.seed`` is that path: the orchestrator's
-  resolve callback seeds the boundary resolver as it resolves).
+  resolution stays orchestrator-owned. In a singular gate, everything
+  resolved, eager or lazy, lands in the values the gate returns, so the
+  pre-boundary :func:`gate_secret_resolver` callback can SEED the later
+  boundary pass and no secret resolves or prompts twice in one command
+  (``Resolver.seed`` is that path).
+
+  Batch session status is deliberately different: its shared boundary
+  resolves first, then each VM gate reads ordinary gate credentials from
+  that boundary cache. Only a repair key whose need becomes known after a
+  start resolves late, through the batch callback; it cannot seed a boundary
+  that has already completed. That post-boundary batch cache/late-repair
+  path is documented in ``sessions.manager._scope._batch_vm_boundary`` and
+  is not an expansion of ``gate_secret_resolver``.
 """
 
 from __future__ import annotations

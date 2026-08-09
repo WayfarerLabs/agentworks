@@ -9,7 +9,7 @@ import typer
 
 from agentworks.cli._app import app
 from agentworks.cli._helpers import get_db
-from agentworks.machine_output import OutputFormat
+from agentworks.machine_output import OutputFormat, select_request_output
 
 vm_app = typer.Typer(
     name="vm",
@@ -85,6 +85,7 @@ def vm_list(
     ] = OutputFormat.HUMAN,
 ) -> None:
     """List VMs."""
+    select_request_output(output_format)
     if names_only and output_format is OutputFormat.JSON:
         raise typer.BadParameter("cannot be used with --output json", param_hint="--names-only")
 
@@ -130,6 +131,7 @@ def vm_describe(
     ] = OutputFormat.HUMAN,
 ) -> None:
     """Show detailed information about a VM."""
+    select_request_output(output_format)
     from agentworks.config import load_config
     from agentworks.vms.manager import describe_vm, vm_description
 

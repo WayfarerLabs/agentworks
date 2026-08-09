@@ -202,6 +202,7 @@ def batch_check_all_sessions(
     pid=None/PID_STOPPED are excluded from the result.
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
+    from contextvars import copy_context
 
     # Resolve each session's VM and group
     by_vm: dict[str, list[SessionRow]] = {}
@@ -227,7 +228,7 @@ def batch_check_all_sessions(
         return batch_check_status(by_vm[vm_name], target=vm_targets[vm_name])
 
     with ThreadPoolExecutor(max_workers=min(8, len(by_vm))) as executor:
-        futures = {executor.submit(_check_vm, name): name for name in by_vm}
+        futures = {executor.submit(copy_context().run, _check_vm, name): name for name in by_vm}
         for future in as_completed(futures):
             vm_name = futures[future]
             try:
