@@ -219,9 +219,10 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             "One manifest has been added or changed while all retired TOML sections remain in place.",
             (),
             ConsentBoundary.EXAMINE_WORKSTATION,
-            ("agw", "doctor"),
-            "Doctor gives precise feedback for the growing manifest set even while the retired-section "
-            "config error remains.",
+            ("agw", "doctor", "--output", "json"),
+            "Before recording VERIFIED, parse exactly one JSON document and require schema_version is the "
+            "integer 1, command is exactly doctor, and data is an object. Doctor gives precise feedback for "
+            "the growing manifest set even while the retired-section config error remains.",
             None,
             "Leave the edit unverified, keep every retired TOML section, and block cutover.",
         ),
@@ -277,9 +278,11 @@ def _migration_actions() -> tuple[GuideAction, ...]:
                 ),
             ),
             ConsentBoundary.EXAMINE_WORKSTATION,
-            ("agw", "resource", "list", "--origin", "operator"),
-            "The operator inventory matches EXPECTED_IDENTITIES exactly by kind/name, operator-declared origin "
-            "variant, and intended manifest file path, with source line ignored and no missing or extra resource.",
+            ("agw", "resource", "list", "--origin", "operator", "--output", "json"),
+            "Before recording VERIFIED, parse exactly one JSON document and require schema_version is the "
+            "integer 1, command is exactly resource.list, and data is an object. The operator inventory matches "
+            "EXPECTED_IDENTITIES exactly by kind/name, operator-declared origin variant, and intended manifest "
+            "file path, with source line ignored and no missing or extra resource.",
             None,
             "Stop completion and use the backups to investigate any missing or extra resource.",
         ),
@@ -288,8 +291,10 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             "The operator inventory matches the caller-owned expected identities.",
             (),
             ConsentBoundary.EXAMINE_WORKSTATION,
-            ("agw", "doctor"),
-            "Doctor reports zero failures for the migrated installation.",
+            ("agw", "doctor", "--output", "json"),
+            "Before recording VERIFIED, parse exactly one JSON document and require schema_version is the "
+            "integer 1, command is exactly doctor, and data is an object. Doctor reports zero failures for the "
+            "migrated installation.",
             None,
             "Leave host readiness unverified and do not declare the migration complete.",
         ),

@@ -42,14 +42,17 @@ def test_migration_actions_pin_order_consent_operations_and_no_execution_authori
     ]
     assert action_block.actions[0].command is None
     assert action_block.actions[0].manual_steps is not None
-    assert action_block.actions[5].command == ("agw", "doctor")
+    assert action_block.actions[5].command == ("agw", "doctor", "--output", "json")
     assert action_block.actions[8].command == (
         "agw",
         "resource",
         "list",
         "--origin",
         "operator",
+        "--output",
+        "json",
     )
+    assert action_block.actions[9].command == ("agw", "doctor", "--output", "json")
 
 
 def test_migration_actions_make_inventory_backups_and_verification_distinct() -> None:
@@ -118,7 +121,15 @@ def test_migration_actions_make_inventory_backups_and_verification_distinct() ->
     comparison = by_id["compare-operator-inventory"]
     assert comparison.consent is ConsentBoundary.EXAMINE_WORKSTATION
     assert [item.name for item in comparison.required_inputs] == ["EXPECTED_IDENTITIES"]
-    assert comparison.command == ("agw", "resource", "list", "--origin", "operator")
+    assert comparison.command == (
+        "agw",
+        "resource",
+        "list",
+        "--origin",
+        "operator",
+        "--output",
+        "json",
+    )
 
 
 def test_only_inventory_can_author_an_expected_manifest_path() -> None:

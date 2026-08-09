@@ -57,10 +57,12 @@ Write one manifest at a time at its pre-recorded intended path while leaving eve
 section in place. The edit must consume its existing expected identity without changing the
 baseline. Use the manifest kind's sample and field reference. When the manifest contains tagged
 capability configuration, use that implementation's separate `kind/name` field reference. Run
-`agw doctor` after each edit. Its degraded configuration path validates the growing manifest set
-while continuing to report the retired-section failure. Fix closed-world fields, strict types,
-non-nullable nulls, and retired sibling capability shapes from that precise error and the live field
-reference.
+`agw doctor --output json` after each edit. Parse exactly one JSON document, require
+`schema_version` to be the integer `1`, `command` to equal `doctor`, and `data` to be an object
+before recording the action as verified. Its degraded configuration path validates the growing
+manifest set while continuing to report the retired-section failure. Fix closed-world fields, strict
+types, non-nullable nulls, and retired sibling capability shapes from that precise error and the
+live field reference.
 
 The `edit-one-manifest` mutation applies to both pre-existing manifests and manifests derived from
 retired TOML. If validation reports a written legacy `service_principal`, `credentials`, or
@@ -106,9 +108,12 @@ empty declarations during the final TOML cutover, and activate desired backends 
 `[secret_config].backends`.
 
 After every new manifest has passed its per-manifest doctor loop, remove all retired resource
-sections from `config.toml` in one edit. Run `agw resource list --origin operator` and compare the
-result with the caller-owned expected identities by `kind/name`, operator-declared origin variant,
-and intended manifest file path, ignoring source line. This normal inventory command may probe host
-readiness, so run it only with consent to examine the workstation. Any missing, extra, or wrongly
-originated resource returns to the untouched backups for investigation. Finish only when a final
-`agw doctor` reports zero failures.
+sections from `config.toml` in one edit. Run `agw resource list --origin operator --output json` and
+parse exactly one JSON document. Require `schema_version` to be the integer `1`, `command` to equal
+`resource.list`, and `data` to be an object before comparing the result with the caller-owned
+expected identities by `kind/name`, operator-declared origin variant, and intended manifest file
+path, ignoring source line. This normal inventory command may probe host readiness, so run it only
+with consent to examine the workstation. Any missing, extra, or wrongly originated resource returns
+to the untouched backups for investigation. Finish only when a final `agw doctor --output json`
+reports zero failures. Parse its one JSON document and apply the same integer version, exact
+`doctor` command, and object-data checks before recording completion.
