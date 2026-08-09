@@ -16,9 +16,11 @@ operator wrote, and that keeps its sweep over both.
 
 from __future__ import annotations
 
+from jsonschema import Draft202012Validator
 from pydantic import BaseModel
 
 from agentworks.install_commands import SystemInstallCommandEntry, UserInstallCommandEntry
+from agentworks.manifests.emit import document_schema
 
 from ._specs import WHERE, decode, rejection
 
@@ -80,32 +82,40 @@ def test_a_missing_command_says_it_is_required() -> None:
     assert not misread
 
 
-def test_two_tests_are_refused_by_name() -> None:
+def test_multiple_tests_round_trip_for_both_kinds() -> None:
     spec = {"command": "true", "test_exec": "example", "test_dir": "~/example"}
 
-    assert rejection(_KIND, "example", spec) == (
-        f"res.yaml:7: {_KIND}/example: at most one of test_exec, test_file, test_dir may be set; "
-        f"this one sets test_exec, test_dir"
-    )
+    rows = [decode(kind, "example", spec) for kind in _KINDS]
+
+    assert [(row.test_exec, row.test_dir) for row in rows] == [
+        ("example", "~/example"),
+        ("example", "~/example"),
+    ]
 
 
-def test_an_empty_test_says_which_key_to_delete() -> None:
-    """``test_exec: ""`` beside a real ``test_file`` used to be legal (the
-    empty string normalized away before the count), so this pair is one of
-    the loads this phase newly breaks.
+def test_emitted_schemas_accept_multiple_tests_for_both_kinds() -> None:
+    for kind in _KINDS:
+        document = {
+            "apiVersion": "agentworks/v1",
+            "kind": kind,
+            "metadata": {"name": "example"},
+            "spec": {
+                "command": "true",
+                "test_exec": "example",
+                "test_file": "~/example",
+                "test_dir": "~/example.d",
+            },
+        }
 
-    Naming the rule alone is not enough to act on: nothing in "at most one
-    of test_exec, test_file, test_dir may be set" says the EMPTY one is
-    what newly counts, which makes deleting the meaningful ``test_file``
-    exactly as plausible a reading.
-    """
+        assert list(Draft202012Validator(document_schema(kind)).iter_errors(document)) == []
+
+
+def test_an_empty_test_is_legal_beside_a_non_empty_test() -> None:
     spec = {"command": "true", "test_exec": "", "test_file": "~/example"}
 
-    assert rejection(_KIND, "example", spec) == (
-        f"res.yaml:7: {_KIND}/example: at most one of test_exec, test_file, test_dir may be set; "
-        f"this one sets test_exec (empty string), test_file. An empty string counts as set, so "
-        f"delete test_exec rather than blanking it"
-    )
+    row = decode(_KIND, "example", spec)
+
+    assert (row.test_exec, row.test_file) == ("", "~/example")
 
 
 def test_a_bare_test_key_keeps_its_remedy() -> None:

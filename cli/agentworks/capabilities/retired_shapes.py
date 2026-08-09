@@ -1,4 +1,4 @@
-"""Retired config shapes, refused BY NAME with the exact rewrite.
+"""Retired capability-config shapes, refused with the exact rewrite.
 
 RELEASE-SCOPED, like ``manifests/decode.py``'s retired sibling shape and
 the guide both of them name. This module exists to carry operators across
@@ -6,8 +6,8 @@ one break and is meant to be DELETED once 0.14 is far enough back that a
 generic "unknown field" is a good enough answer. Nothing else depends on
 it: remove the module, the two call sites in
 :mod:`agentworks.capabilities.config`, and the
-:attr:`~agentworks.capabilities.base.Capability.retired_shape`
-declarations, and the framework is unchanged.
+:attr:`~agentworks.capabilities.base.Capability.retired_shape` declarations,
+and the framework is unchanged.
 
 **The defect it is the receipt for.** Three platforms used to express a
 mode CHOICE through the presence or absence of an optional block: azure's
@@ -20,12 +20,13 @@ with the mode the old absence selected as its ordinary declared default
 (operator ruling, reversing an earlier required-with-no-default
 revision; the union sites carry the reasoning).
 
-The default is what keeps this break narrow: a manifest that omitted the
-old block still loads, landing on the same mechanism it always used.
-Only a document that WROTE the retired field crosses the break, in
-either of its two spellings (a real value, or an explicit ``null``), and
-a retired field is still a retired field: both get their exact rewrite
-here rather than a bare "unknown field".
+The default is what keeps those breaks narrow: a manifest that omitted an
+old block still loads, landing on the same mechanism it always used. Only
+a document that WROTE the retired field crosses the break. The git-token
+acquisition union has the same omission history and keeps the released
+scalar shorthand; its only retired spelling is explicit ``token: null``.
+Every changed written shape gets its exact rewrite here rather than a bare
+model error.
 """
 
 from __future__ import annotations
@@ -127,14 +128,45 @@ class RetiredPresenceShape:
         return f"{self.union_field}: {{mode: {self.absent_mode}}}"
 
 
+GIT_TOKEN_NULL_HINT = (
+    "Replace the null spelling as shown above; `agw resource describe-kind "
+    "git-credential-provider/<name>` documents the token field. "
+    'See "Git credential token acquisition is tagged now" in docs/guides/upgrading-to-0.14.md.'
+)
+"""Where an operator goes to replace the retired git-token null spelling."""
+
+
+@dataclass(frozen=True, kw_only=True)
+class RetiredNullTokenShape:
+    """The former ``token: null`` spelling of a stored git token.
+
+    A scalar token name still loads as the stored arm's shorthand, and an
+    omitted token still defaults to that arm. Explicit null is the one
+    written old shape that cannot survive the move: the union itself is
+    not nullable, and the stored arm's ``secret`` field is where the
+    owner-templated default now lives.
+    """
+
+    field: str = "token"
+    mode: str = "stored"
+
+    @property
+    def rewrite(self) -> str:
+        """The equivalent explicit choice for the old null spelling."""
+        return f"{self.field}: {{mode: {self.mode}}}"
+
+
+type RetiredShape = RetiredPresenceShape | RetiredNullTokenShape
+
+
 def retired_shape_error(
-    shape: RetiredPresenceShape | None,
+    shape: RetiredShape | None,
     config: object,
     owner: RefOwner,
     location: SourceLocation | None = None,
 ) -> None:
-    """Refuse a config that WROTE ``shape``'s retired field, naming the
-    exact rewrite; return silently for anything else.
+    """Refuse a config matching ``shape``, naming the exact rewrite;
+    return silently for anything else.
 
     A config that wrote nothing is not refused at all: the union's
     declared default resolves it to the same mechanism omission always
@@ -156,14 +188,18 @@ def retired_shape_error(
     they are about. Defaulted for the construct-time caller, which is
     validating a config that came from code and has no declaration site.
 
-    A config that already carries the union field is left entirely alone,
+    ``RetiredNullTokenShape`` handles the one old spelling whose value is
+    the whole signal: ``token: null``. Omission and a scalar name remain
+    accepted, so neither reaches the refusal.
+
+    For ``RetiredPresenceShape``, a config that already carries the union field is left entirely alone,
     even when the retired field sits beside it. That document is a
     half-applied migration rather than a pre-migration one, and the model
     layer's unknown-key error against the stray field is already the
     precise answer; printing a rewrite would tell the operator to write
     something they have already written.
 
-    **An explicit ``null`` names the ABSENT mode, so the branch is taken
+    **For a retired presence shape, explicit ``null`` names the ABSENT mode, so the branch is taken
     on the VALUE and not on key membership.** All three retired fields
     were optional, so a written ``null`` did exactly what omitting the
     key did: ``service_principal: null`` and ``credentials: null``
@@ -180,7 +216,23 @@ def retired_shape_error(
     braces, but advice that leaves the choice implicit while retiring
     the old implicit spelling would be a poor cure.
     """
-    if shape is None or not isinstance(config, Mapping) or shape.union_field in config:
+    if shape is None or not isinstance(config, Mapping):
+        return
+    if isinstance(shape, RetiredNullTokenShape):
+        if shape.field in config and config.get(shape.field) is None:
+            raise ConfigError(
+                located(
+                    location,
+                    f"{owner.display}: '{shape.field}: null' is a retired spelling. It selected the "
+                    f"stored token's default secret name, exactly as omitting '{shape.field}' did; "
+                    f"replace the null line with the explicit choice: {shape.rewrite}",
+                ),
+                entity_kind=owner.kind,
+                entity_name=owner.name,
+                hint=GIT_TOKEN_NULL_HINT,
+            )
+        return
+    if shape.union_field in config:
         return
     written = config.get(shape.retired_field)
     if written is not None:

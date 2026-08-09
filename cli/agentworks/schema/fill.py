@@ -72,7 +72,14 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, RootModel
 
-from agentworks.schema._shape import Collection, model_fields_of, shape_of, table_addresses_block
+from agentworks.schema._shape import (
+    Collection,
+    addressed_arm_model,
+    model_fields_of,
+    shape_of,
+    structural_arm_and_value,
+    table_addresses_block,
+)
 from agentworks.schema.extract import _absent_defaults
 from agentworks.schema.shorthand import scalar_shorthand_of
 
@@ -83,6 +90,7 @@ if TYPE_CHECKING:
 
     from agentworks.schema._shape import FieldShape, UnionArmType
     from agentworks.schema.markers import RefOwner
+    from agentworks.schema.shorthand import UnionScalarShorthand
 
     #: One step of the walk: a generator that yields subtasks and returns
     #: the (possibly rewritten) value it was asked about.
@@ -219,8 +227,15 @@ def _filled_value(shape: FieldShape, value: object, owner: RefOwner, on_path: _P
     if shape.nested_model is not None:
         return (yield _filled_block(shape.nested_model, value, owner, on_path))
     if shape.arms and shape.discriminator is not None:
-        model = _armed_model(shape.arms, shape.discriminator, value)
+        model = _armed_model(shape.arms, shape.discriminator, shape.union_scalar_shorthand, value)
         return value if model is None else (yield _filled_block(model, value, owner, on_path))
+    if shape.structural_arms:
+        model, canonical = structural_arm_and_value(
+            shape.structural_arms,
+            value,
+            canonicalize_null_companions=shape.structural_null_companions,
+        )
+        return value if model is None else (yield _filled_block(model, canonical, owner, on_path))
     if shape.union_model is not None:
         return (yield _filled_union(shape.union_model, shape.union_members, value, owner, on_path))
     return value
@@ -254,8 +269,20 @@ def _filled_element(shape: FieldShape, element: object, owner: RefOwner, on_path
     if shape.item_model is not None:
         return (yield _filled_block(shape.item_model, element, owner, on_path))
     if shape.item_arms and shape.item_discriminator is not None:
-        model = _armed_model(shape.item_arms, shape.item_discriminator, element)
+        model = _armed_model(
+            shape.item_arms,
+            shape.item_discriminator,
+            shape.item_union_scalar_shorthand,
+            element,
+        )
         return element if model is None else (yield _filled_block(model, element, owner, on_path))
+    if shape.item_structural_arms:
+        model, canonical = structural_arm_and_value(
+            shape.item_structural_arms,
+            element,
+            canonicalize_null_companions=shape.item_structural_null_companions,
+        )
+        return element if model is None else (yield _filled_block(model, canonical, owner, on_path))
     if shape.item_union_model is not None:
         return (yield _filled_union(shape.item_union_model, shape.item_union_members, element, owner, on_path))
     return element
@@ -276,10 +303,14 @@ def _filled_union(
     return (yield _filled_block(model, value, owner, on_path))
 
 
-def _armed_model(arms: tuple[UnionArmType, ...], discriminator: str, value: object) -> type[BaseModel] | None:
+def _armed_model(
+    arms: tuple[UnionArmType, ...],
+    discriminator: str,
+    shorthand: UnionScalarShorthand | None,
+    value: object,
+) -> type[BaseModel] | None:
     """The arm the RAW tag names, or ``None`` for a tag naming no arm,
-    which validation will refuse in its own vocabulary."""
-    if not isinstance(value, Mapping):
-        return None
-    tag = value.get(discriminator)
-    return next((arm.model for arm in arms if arm.tag == tag), None)
+    which validation will refuse in its own vocabulary. A scalar may name
+    the unique arm declaring it as shorthand; the shared selector keeps
+    this walk aligned with extraction."""
+    return addressed_arm_model(arms, discriminator, shorthand, value)

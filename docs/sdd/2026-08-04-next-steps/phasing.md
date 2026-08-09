@@ -1,7 +1,7 @@
 # Phasing
 
 - Status: Active sequencing
-- Last updated: 2026-08-05
+- Last updated: 2026-08-08
 
 This document records only ordering: the dependency structure that forces the sequence, the waves,
 and the release mapping. What each wave builds is defined by `target-state.md`; where the system
@@ -76,8 +76,12 @@ Two things this graph deliberately does not serialize:
   channel, secret-source resolution, the event stream) rather than per-change; (2) test
   consolidation and removal, with the working assumption that the accreted unit-test estate can be
   cut in half, maybe more, without sacrificing any coverage or quality; (3) code cleanup: file-size
-  limits, vestigial code removal, package renaming and refactoring left behind by the waves' moves.
-  Findings are fixed before the roadmap locks.
+  limits, vestigial code removal, package renaming and refactoring left behind by the waves' moves,
+  and an SDD tombstoning sweep (operator ruling, 2026-08-08): superseded SDDs' contents are deleted
+  down to their `locked.md` tombstones per the sdd skill, with `2026-07-01-resource-manifests` the
+  first identified candidate (its lockfile already carries the supersession record) and individual
+  SDDs tombstoned earlier whenever reading them actively misleads. Findings are fixed before the
+  roadmap locks.
 - **Wave 8: external plugin API.** Registration conformance, discovery, namespacing, versioning, and
   the distribution-trust model, promised publicly only once the internal contracts survive
   first-party use.
@@ -107,17 +111,25 @@ picked off whenever bandwidth allows, on its own merits and its own schedule.
 - **0.14.0 (held; operator ruling, 2026-08-06):** the breaking cleanup does not ship alone. The cut
   waits for the guide first slice (guide command core, `concept-onboarding`, the README bootstrap),
   so the release that rejects old inputs also ships the CLI that teaches the new ones; newcomers
-  ride the forgiving 0.13.0 until then. The installer-plugins child (operator ruling, 2026-08-07;
-  launchable whenever, see Tracks) also gates the cut: its moves are breaking and belong in the same
-  well-cushioned release. The 0.13.0 warnings stay true because the version number attaches to the
-  breaking content, not the date. If wave 2's generic-discriminator hard error lands in the same
-  window, it folds in: one well-cushioned breaking release instead of two. The vm-platform mode
-  contract (PR #444, merged 2026-08-08) folds in the same way: its written-old-shape hard errors
-  ride the cushioned release, and its omission-equals-historical-default posture means manifests
-  that never wrote the retired blocks cross without edits. The git-credential one-arm union
-  restructure (operator ruling, 2026-08-08, ahead of credential minting) also lands before the cut,
-  following the same pattern. While `main` holds unreleased breaking changes, urgent operator fixes
-  ship from a `0.13.x` backport branch.
+  ride the forgiving 0.13.0 until then. That gate is partially satisfied: the guide command core and
+  `concept-onboarding` merged 2026-08-08 via PR #428, while the README bootstrap arrives with the
+  onboarding child's bootstraps phase, so the gate stays open until it lands. The installer-plugins
+  child (operator ruling, 2026-08-07; launchable whenever, see Tracks) also gates the cut: its moves
+  are breaking and belong in the same well-cushioned release. The 0.13.0 warnings stay true because
+  the version number attaches to the breaking content, not the date. If wave 2's
+  generic-discriminator hard error lands in the same window, it folds in: one well-cushioned
+  breaking release instead of two. The vm-platform mode contract (PR #444, merged 2026-08-08) folds
+  in the same way: its written-old-shape hard errors ride the cushioned release, and its
+  omission-equals-historical-default posture means manifests that never wrote the retired blocks
+  cross without edits. The git-credential one-arm union restructure (operator ruling, 2026-08-08,
+  ahead of credential minting) also lands before the cut, following the same pattern, along with any
+  sibling variant restructures its survey task confirms against the variant-modeling contract in
+  `target-state.md`. The secret-sources reference break rides the cut as well (operator ruling,
+  2026-08-08): direct backend references hard-error with the exact rewrite and no warn window,
+  because prompt and env-var spellings cross unchanged through synthesized sources and the affected
+  surface is effectively the operator's own onepassword config; wave 3's breaking slice therefore
+  gates the cut alongside the installer-plugins child. While `main` holds unreleased breaking
+  changes, urgent operator fixes ship from a `0.13.x` backport branch.
 - **Later:** remaining waves map to releases as they prove out; no need to pin numbers now.
 
 ## Open ordering decisions

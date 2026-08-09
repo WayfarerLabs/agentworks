@@ -21,7 +21,7 @@ So this module calls ``conformance_error`` the way the self-test does.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Annotated, Literal
+from typing import Annotated, ClassVar, Literal
 
 import pytest
 from pydantic import Discriminator, Field
@@ -32,11 +32,15 @@ from agentworks.manifests.spec_model import metadata_model, spec_model
 from agentworks.schema import (
     AgwModel,
     RefOwner,
+    ScalarShorthand,
     SecretRef,
+    StructuralUnion,
     extract_references,
     filled_defaults,
     model_is_complete,
     reference_marker_error,
+    structural_union_error,
+    union_scalar_shorthand_error,
 )
 from tests.plugins._fixtures import ConformingSecretBackend, ConformingVMPlatform
 
@@ -92,6 +96,59 @@ class _ViaItemUnionModel(AgwModel):
 
     name: Literal["fixture-platform"]
     things: dict[str, str | _MisplacedMarker] = Field(default_factory=dict)
+
+
+class _MarkerFreePlainArm(AgwModel):
+    """A structural arm with no marker of its own."""
+
+    value: str
+
+
+class _MarkerFreeNamedArm(AgwModel):
+    """A disjoint structural arm with no marker of its own."""
+
+    named: str
+
+
+_MARKER_FREE_SOURCE = Annotated[_MarkerFreePlainArm | _MarkerFreeNamedArm, StructuralUnion()]
+
+
+class _MarkedStructuralHolder(AgwModel):
+    """A marker misplaced on a field-level structural union."""
+
+    name: Literal["fixture-platform"]
+    source: Annotated[_MARKER_FREE_SOURCE, SecretRef(usage="the source")]
+
+
+class _MarkedStructuralItems(AgwModel):
+    """A marker misplaced on each structural-union collection element."""
+
+    name: Literal["fixture-platform"]
+    sources: list[Annotated[_MARKER_FREE_SOURCE, SecretRef(usage="a source")]]
+
+
+class _AliasedSecretArm(AgwModel):
+    """A marker-bearing arm whose accepted key differs from its field name."""
+
+    secret_value: Annotated[str, SecretRef(usage="the aliased secret")] = Field(alias="secret")
+
+
+class _AliasedStructuralHolder(AgwModel):
+    name: Literal["fixture-platform"]
+    source: Annotated[_MarkerFreePlainArm | _AliasedSecretArm, StructuralUnion()]
+
+
+class _ScalarSecretArm(AgwModel):
+    """A secret arm whose shorthand validation folds a bare name."""
+
+    scalar_shorthand: ClassVar = ScalarShorthand(annotation=str, field="secret")
+
+    secret: Annotated[str, SecretRef(usage="the shorthand secret")]
+
+
+class _ScalarSecretHolder(AgwModel):
+    name: Literal["fixture-platform"]
+    source: Annotated[_MarkerFreePlainArm | _ScalarSecretArm, StructuralUnion()]
 
 
 # -- The name rule, which only the self-test path reaches --------------------
@@ -233,6 +290,117 @@ def test_every_marker_a_shipped_model_declares_sits_where_it_can_be_honored() ->
 
     faults = [f"{kind} {block}: {reason}" for kind, block, model in blocks if (reason := reference_marker_error(model))]
     assert not faults, "\n".join(faults)
+
+
+def test_every_structural_union_on_the_shipped_surface_is_a_true_one_of() -> None:
+    """The emitted ``oneOf`` must not reject a value ordinary union
+    validation accepts, including for marker-free arms."""
+    from agentworks.manifests.spec_model import declarable_kinds
+
+    blocks = [(kind, block, builder(kind)) for kind in declarable_kinds() for block, builder in _DOCUMENT_BLOCKS]
+    faults = [f"{kind} {block}: {reason}" for kind, block, model in blocks if (reason := structural_union_error(model))]
+    assert not faults, "\n".join(faults)
+
+
+def test_every_union_scalar_shorthand_on_the_shipped_surface_is_complete() -> None:
+    """A future shipped model gets the same scalar-dispatch gate as plugins."""
+    from agentworks.manifests.spec_model import declarable_kinds
+
+    blocks = [(kind, block, builder(kind)) for kind in declarable_kinds() for block, builder in _DOCUMENT_BLOCKS]
+    faults = [
+        f"{kind} {block}: {reason}" for kind, block, model in blocks if (reason := union_scalar_shorthand_error(model))
+    ]
+    assert not faults, "\n".join(faults)
+
+
+def test_overlapping_structural_arms_are_refused_at_registration_without_markers() -> None:
+    class First(AgwModel):
+        value: str
+
+    class Second(AgwModel):
+        value: str
+        note: str | None = None
+
+    class Overlapping(AgwModel):
+        name: Literal["fixture-platform"]
+        source: Annotated[First | Second, StructuralUnion()]
+
+    reason = conformance_error(VM_PLATFORM, _impl(Overlapping))
+    assert reason is not None
+    assert "invalid structural union" in reason
+    assert "overlapping arms First and Second" in reason
+
+
+def test_a_discriminated_structural_union_is_refused_at_registration_without_markers() -> None:
+    class ValueArm(AgwModel):
+        mode: Literal["value"]
+        value: str
+
+    class NamedArm(AgwModel):
+        mode: Literal["named"]
+        named: str
+
+    class Selected(AgwModel):
+        name: Literal["fixture-platform"]
+        source: Annotated[
+            ValueArm | NamedArm,
+            StructuralUnion(),
+            Discriminator("mode"),
+        ]
+
+    reason = conformance_error(VM_PLATFORM, _impl(Selected))
+    assert reason is not None
+    assert "invalid structural union" in reason
+    assert "selector-free" in reason
+
+
+@pytest.mark.parametrize(
+    ("config_model", "blob"),
+    [
+        pytest.param(
+            _MarkedStructuralHolder,
+            {"name": "fixture-platform", "source": {"named": "secret-name"}},
+            id="field",
+        ),
+        pytest.param(
+            _MarkedStructuralItems,
+            {"name": "fixture-platform", "sources": [{"named": "secret-name"}]},
+            id="collection-element",
+        ),
+    ],
+)
+def test_a_marker_on_a_structural_union_holder_is_refused_at_registration(
+    config_model: type[AgwModel], blob: object
+) -> None:
+    """A holder marker shadows arm traversal even when both arms are innocent."""
+    config_model.model_validate(blob)
+    assert extract_references(config_model, blob) == ()
+
+    reason = conformance_error(VM_PLATFORM, _impl(config_model))
+    assert reason is not None
+    assert "selects a structural union arm" in reason
+
+
+def test_an_aliased_structural_arm_is_refused_before_marker_placement() -> None:
+    blob = {"name": "fixture-platform", "source": {"secret": "secret-name"}}
+    _AliasedStructuralHolder.model_validate(blob)
+    assert extract_references(_AliasedStructuralHolder, blob) == ()
+
+    reason = conformance_error(VM_PLATFORM, _impl(_AliasedStructuralHolder))
+    assert reason is not None
+    assert "invalid structural union" in reason
+    assert "_AliasedSecretArm.secret_value declares validation alias" in reason
+
+
+def test_a_marker_bearing_scalar_structural_arm_is_refused() -> None:
+    blob = {"name": "fixture-platform", "source": "secret-name"}
+    _ScalarSecretHolder.model_validate(blob)
+    assert extract_references(_ScalarSecretHolder, blob) == ()
+
+    reason = conformance_error(VM_PLATFORM, _impl(_ScalarSecretHolder))
+    assert reason is not None
+    assert "scalar shorthand" in reason
+    assert "marker-bearing structural arm _ScalarSecretArm" in reason
 
 
 #: The two blocks of a kind document, by the function that builds each.

@@ -47,13 +47,13 @@ failures produce warnings and a `partial` status.
 
 These add things on reinit but do not remove them when removed from config:
 
-| Step                    | Notes                                                                     |
-| ----------------------- | ------------------------------------------------------------------------- |
-| Apt packages            | Never removed. Transitive deps not cleaned up. Too risky for reinit.      |
-| Snap packages           | Never removed.                                                            |
-| System install commands | Not uninstalled when removed from config. Skipped if test passes.         |
-| User install commands   | Same as system install commands.                                          |
-| Mise packages           | When `mise_prune_on_reinit = false`, stale tool versions are not removed. |
+| Step                    | Notes                                                                                                                     |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Apt packages            | Never removed. Transitive deps not cleaned up. Too risky for reinit.                                                      |
+| Snap packages           | Never removed.                                                                                                            |
+| System install commands | Not uninstalled when removed from config. Skipped only when at least one test is declared and every declared test passes. |
+| User install commands   | Same as system install commands.                                                                                          |
+| Mise packages           | When `mise_prune_on_reinit = false`, stale tool versions are not removed.                                                 |
 
 ### Other
 

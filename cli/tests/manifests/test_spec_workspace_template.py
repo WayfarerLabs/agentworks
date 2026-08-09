@@ -9,6 +9,8 @@ fatal).
 
 from __future__ import annotations
 
+import pytest
+
 from agentworks.env import EnvEntry
 from agentworks.workspaces.template import WorkspaceTemplate
 
@@ -36,7 +38,7 @@ def test_every_field_round_trips() -> None:
         tmuxinator=False,
         git_user_name="Bot",
         git_user_email="bot@example.test",
-        env={"EDITOR": EnvEntry(value="nvim"), "TOKEN": EnvEntry(secret="my-token")},
+        env={"EDITOR": EnvEntry({"value": "nvim"}), "TOKEN": EnvEntry({"secret": "my-token"})},
     )
 
 
@@ -77,9 +79,34 @@ def test_an_env_entry_that_is_neither_shape_is_refused() -> None:
     )
 
 
+def test_an_env_entry_with_neither_source_field_is_refused_as_one_problem() -> None:
+    assert rejection("workspace-template", "web", {"env": {"TOKEN": {}}}) == (
+        "res.yaml:7: workspace-template/web.env.TOKEN: must match exactly one table shape; "
+        "required fields by alternative: value or secret"
+    )
+
+
+def test_an_env_entry_with_both_source_fields_is_refused_as_one_problem() -> None:
+    assert rejection(
+        "workspace-template",
+        "web",
+        {"env": {"TOKEN": {"value": "plain", "secret": "token"}}},
+    ) == (
+        "res.yaml:7: workspace-template/web.env.TOKEN: must match exactly one table shape; "
+        "required fields by alternative: value or secret"
+    )
+
+
 def test_an_env_entry_with_an_unknown_inner_key_is_refused() -> None:
     assert rejection("workspace-template", "web", {"env": {"TOKEN": {"secrit": "x"}}}) == (
         "res.yaml:7: workspace-template/web.env.TOKEN.secrit: unknown field; expected one of: secret, value"
+    )
+
+
+@pytest.mark.parametrize("field", ["value", "secret"])
+def test_a_malformed_selected_env_arm_keeps_only_its_real_error(field: str) -> None:
+    assert rejection("workspace-template", "web", {"env": {"TOKEN": {field: 8}}}) == (
+        f"res.yaml:7: workspace-template/web.env.TOKEN.{field}: must be a string"
     )
 
 

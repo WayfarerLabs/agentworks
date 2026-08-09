@@ -133,7 +133,7 @@ class ConformingGitCredentialProvider(GitCredentialProvider):
     """A concrete ``GitCredentialProvider``. Subclasses add ``name`` /
     ``description``."""
 
-    contract_version = 1
+    contract_version = 2
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         super().__init_subclass__(**kwargs)

@@ -5,9 +5,15 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Annotated, ClassVar, Final
 
-from pydantic import AfterValidator, model_validator
+from pydantic import AfterValidator, ConfigDict
 
-from agentworks.schema import AgwModel, ScalarShorthand, SecretRef
+from agentworks.schema import (
+    AgwModel,
+    AgwRootModel,
+    ScalarShorthand,
+    SecretRef,
+    StructuralUnion,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -32,23 +38,52 @@ the message the hand-rolled loader gave verbatim, naming the offending
 key rather than making the operator parse a regex."""
 
 
-class EnvEntry(AgwModel):
-    """One env var declaration.
+class PlaintextEnvEntry(AgwModel):
+    """An env var whose exported value is written as plaintext."""
 
-    Exactly one of ``value`` or ``secret`` is set. ``value`` carries a plaintext
-    value to export; ``secret`` carries the name of a declared secret
-    resolved through the active backends at command time.
+    model_config = ConfigDict(title="plaintext")
 
-    Two spellings, one type: an operator writes ``FOO: a value`` for the
-    plaintext form and ``FOO: {secret: my-secret}`` for the other, and the
-    shorthand declared below folds the first into the second. The KEY is
+    scalar_shorthand: ClassVar = ScalarShorthand(annotation=str, field="value")
+
+    value: str
+    """The plaintext value to export."""
+
+
+class SecretEnvEntry(AgwModel):
+    """An env var whose exported value comes from a declared secret."""
+
+    model_config = ConfigDict(title="secret")
+
+    secret: Annotated[str, SecretRef(usage="an env var's value")]
+    """The name of a declared secret whose value is exported."""
+
+
+class EnvEntry(
+    AgwRootModel[
+        Annotated[
+            PlaintextEnvEntry | SecretEnvEntry,
+            StructuralUnion(canonicalize_null_companions=True),
+        ]
+    ]
+):
+    """One env var declaration, as a structural plaintext-or-secret union.
+
+    ``PlaintextEnvEntry`` and ``SecretEnvEntry`` are distinct closed arms.
+    Their required and allowed fields select the arm for validation,
+    reference extraction, and owner-default filling; no cross-field
+    validator carries that choice.
+
+    Three spellings, one type: an operator writes ``FOO: a value`` or
+    ``FOO: {value: a value}`` for plaintext, and
+    ``FOO: {secret: my-secret}`` for the other. The shorthand declared
+    below makes the first spelling the plaintext arm's short form. The KEY is
     the env var's name and lives in the table that holds this entry; it is
     deliberately not a field here, because two places to say one thing is
     two places that can disagree (nothing ever enforced that a table's key
     matched its entry's).
     """
 
-    scalar_shorthand: ClassVar = ScalarShorthand(annotation=str, field="value")
+    scalar_shorthand: ClassVar = PlaintextEnvEntry.scalar_shorthand
     """``FOO: a value`` is the plaintext form, and it is the shape
     operators write for all but a handful of entries.
 
@@ -59,19 +94,15 @@ class EnvEntry(AgwModel):
     alone for a field whose emitted schema had offered both since it was
     written."""
 
-    value: str | None = None
-    """The plaintext value to export."""
+    @property
+    def value(self) -> str | None:
+        """The plaintext value, or ``None`` for the secret arm."""
+        return self.root.value if isinstance(self.root, PlaintextEnvEntry) else None
 
-    secret: Annotated[str, SecretRef(usage="an env var's value")] | None = None
-    """The name of a declared secret whose value is exported instead."""
-
-    @model_validator(mode="after")
-    def _exactly_one_source(self) -> EnvEntry:
-        if self.value is None and self.secret is None:
-            raise ValueError("must set exactly one of value or secret")
-        if self.value is not None and self.secret is not None:
-            raise ValueError("cannot set both value and secret")
-        return self
+    @property
+    def secret(self) -> str | None:
+        """The secret name, or ``None`` for the plaintext arm."""
+        return self.root.secret if isinstance(self.root, SecretEnvEntry) else None
 
     def referenced_resources(
         self,
@@ -79,8 +110,7 @@ class EnvEntry(AgwModel):
         source: tuple[str, str],
         declared_by: tuple[str, str] | None = None,
     ) -> list[SecretReference]:
-        """Emit a ``SecretReference`` for this entry's secret reference,
-        or an empty list for plaintext entries.
+        """Adapt the structurally extracted edge to its owning Resource.
 
         Called by the Resource that owns this env entry's table (admin,
         the four template kinds, named_console) through
@@ -94,23 +124,28 @@ class EnvEntry(AgwModel):
         merged one: it names the template that actually wrote this entry,
         so the edge can be attributed to a file that contains it.
 
-        The import of ``SecretReference`` is ``TYPE_CHECKING``-only to
-        keep ``EnvEntry`` framework-ignorant at runtime; constructed
-        lazily inside the method.
+        Which arm carries an edge is read from the same ``SecretRef`` marker
+        and structural selector as pre-validation extraction. This method
+        adds only the owning Resource facts the schema layer cannot know.
+
+        The import of ``SecretReference`` is ``TYPE_CHECKING``-only to keep
+        ``EnvEntry`` framework-ignorant at runtime; constructed lazily inside
+        the method.
         """
-        if self.secret is None:
-            return []
         from agentworks.resources.reference import SecretReference
+        from agentworks.schema import extract_references
         from agentworks.secrets.kinds import SECRET_KIND_NAME
 
         return [
             SecretReference(
-                name=self.secret,
+                name=reference.name,
                 kind=SECRET_KIND_NAME,
                 usage=f"the {key} env var",
                 source=source,
                 declared_by=declared_by,
             )
+            for reference in extract_references(type(self), self.model_dump())
+            if reference.kind == SECRET_KIND_NAME
         ]
 
 

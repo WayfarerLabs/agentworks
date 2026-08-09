@@ -23,6 +23,7 @@ import pytest
 import agentworks
 import agentworks.plugins as plugins_pkg
 from agentworks.capabilities.descriptor import RegistryPolicy, capability_descriptors
+from agentworks.capabilities.git_credential import TokenSourcedConfig
 from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.errors import StateError
 from agentworks.origin import Origin
@@ -43,6 +44,7 @@ from agentworks.resources.graph import (
 )
 from agentworks.schema import AgwModel, AgwRootModel
 from tests.plugins._fixtures import (
+    ConformingGitCredentialProvider,
     ConformingSecretBackend,
     ConformingVMPlatform,
     FixtureHarnessIntegration,
@@ -257,6 +259,25 @@ class _BackendWithNonBooleanInteractive(ConformingSecretBackend):
     interactive = 1  # type: ignore[assignment]
 
 
+class _LegacyGitConfig(TokenSourcedConfig):
+    name: Literal["old-git-provider", "old-shape-v2"]
+
+
+class _GitProviderOnV1(ConformingGitCredentialProvider):
+    """A provider written against the pre-token-union config contract."""
+
+    name = "old-git-provider"
+    description = "still exposes the version 1 token field"
+    contract_version = 1
+    config_model = _LegacyGitConfig
+
+
+class _GitProviderOnOldShapeV2(ConformingGitCredentialProvider):
+    name = "old-shape-v2"
+    description = "claims version 2 without migrating its token config"
+    config_model = _LegacyGitConfig
+
+
 class _NotAModel:
     """Whatever this is, it is not a model, so nothing could validate a
     blob against it."""
@@ -308,6 +329,8 @@ class _PlatformWithAMistaggedModel(ConformingVMPlatform):
         ("secret-backend", _BackendMissingItsOperations, "does not derive from SecretBackend"),
         ("secret-backend", _BackendWithoutInteractive, "does not derive from SecretBackend"),
         ("vm-platform", _PlatformOnAnOldContract, "declares contract_version 0"),
+        ("git-credential-provider", _GitProviderOnV1, "declares contract_version 1"),
+        ("git-credential-provider", _GitProviderOnOldShapeV2, "not a TokenAcquiringConfig subclass"),
         ("vm-platform", _PlatformWithoutAConfigModel, "declares no config_model"),
         ("vm-platform", _PlatformWithoutAModel, "not a AgwModel subclass"),
         ("vm-platform", _PlatformWithAnUntaggedModel, "does not tag itself"),
@@ -320,6 +343,8 @@ class _PlatformWithAMistaggedModel(ConformingVMPlatform):
         "missing-operations",
         "missing-attribute",
         "unsupported-version",
+        "old-git-provider-contract",
+        "old-git-provider-shape",
         "no-config-model",
         "config-model-is-not-a-model",
         "config-model-carries-no-tag",

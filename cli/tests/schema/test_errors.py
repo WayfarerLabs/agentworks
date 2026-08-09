@@ -22,6 +22,7 @@ import pytest
 from pydantic import Field, model_validator
 from pydantic import ValidationError as PydanticValidationError
 
+from agentworks.env import EnvEntry
 from agentworks.errors import ConfigError
 from agentworks.schema import (
     MAX_ERROR_LINES,
@@ -31,6 +32,7 @@ from agentworks.schema import (
     config_error_from,
     filled_defaults,
 )
+from agentworks.schema import errors as schema_errors
 from agentworks.schema.errors import _problems
 from agentworks.source_location import SourceLocation, synthesized
 
@@ -130,6 +132,19 @@ def test_an_unknown_key_names_the_fields_that_are_valid() -> None:
     lines = _lines(PrincipalLike, {"client_id": "c", "tenant_id": "t", "client_ids": 1})
 
     assert lines == ["vm-site/lab.client_ids: unknown field; expected one of: client_id, secret, tenant_id"]
+
+
+def test_structural_collapse_uses_unknown_field_state_not_rendered_wording(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rewording a member error cannot silently disable union collapse."""
+    monkeypatch.setattr(schema_errors, "_unknown_field", lambda _container: "unexpected member field")
+
+    problems = _problems(_fails(EnvEntry, {"secrit": "x"}), EnvEntry, OWNER)
+
+    assert [(problem.path, problem.message) for problem in problems] == [
+        ("secrit", "unknown field; expected one of: secret, value")
+    ]
 
 
 def test_a_wrong_type_says_what_the_field_must_be() -> None:

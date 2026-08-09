@@ -25,7 +25,12 @@ from agentworks.capabilities.config import (
     registered_implementations,
     validate_capability_config,
 )
-from agentworks.capabilities.retired_shapes import RETIRED_SHAPE_HINT, RetiredPresenceShape
+from agentworks.capabilities.git_credential.base import GitCredentialProvider
+from agentworks.capabilities.retired_shapes import (
+    GIT_TOKEN_NULL_HINT,
+    RETIRED_SHAPE_HINT,
+    RetiredPresenceShape,
+)
 from agentworks.errors import ConfigError
 from agentworks.plugins.aws.platform import EC2Platform
 from agentworks.plugins.azure.platform import AzureVMPlatform
@@ -318,7 +323,8 @@ def test_each_declaration_matches_the_live_union_it_rewrites_to() -> None:
             f"'{shape.absent_mode}' arm the declaration names as what omission meant"
         )
         for mode in (shape.present_mode, shape.absent_mode):
-            assert mode in arms, f"{name}: mode '{mode}' selects no arm of '{shape.union_field}' (live: {sorted(arms)})"
+            ordered_arms = sorted(arms, key=lambda tag: "" if tag is None else tag)
+            assert mode in arms, f"{name}: mode '{mode}' selects no arm of '{shape.union_field}' (live: {ordered_arms})"
         if shape.scalar_field is not None:
             arm_model = arms[shape.present_mode]
             assert shape.scalar_field in arm_model.model_fields, (
@@ -365,3 +371,49 @@ def test_a_platform_with_no_retired_shape_is_untouched() -> None:
     message = str(_refuse("proxmox", {"api_url": "https://pve:8006", "node": "n", "token_id": "t"}))
     assert "template_vmid: is required" in message
     assert "no longer a supported field" not in message
+
+
+# -- Git token null: the one written spelling the nested union retires -------
+
+
+@pytest.mark.parametrize(
+    ("provider", "base"),
+    [pytest.param("github", {}, id="github"), pytest.param("azdo", {"org": "acme"}, id="azdo")],
+)
+def test_git_token_null_prints_an_exact_working_rewrite(provider: str, base: dict[str, object]) -> None:
+    """Both historical stored-token providers declare the retirement.
+
+    The scalar token spelling and omission still load. Explicit null is
+    the one written old shape that changed, so it names a replacement that
+    preserves the old default-secret behavior and validates when applied.
+    """
+    owner = RefOwner(kind="git-credential", name="dev")
+    with pytest.raises(ConfigError) as excinfo:
+        validate_capability_config(
+            kind="git-credential-provider",
+            config={"name": provider, **base, "token": None},
+            owner=owner,
+            location=_WHERE,
+        )
+    error = excinfo.value
+    assert str(error).startswith("/etc/agentworks/resources/sites.yaml:12: git-credential/dev")
+    assert "replace the null line with the explicit choice: token: {mode: stored}" in str(error)
+    assert error.hint == GIT_TOKEN_NULL_HINT
+
+    rewrite = yaml.safe_load("token: {mode: stored}")
+    validate_capability_config(
+        kind="git-credential-provider",
+        config={"name": provider, **base, **rewrite},
+        owner=owner,
+    )
+
+
+def test_a_future_git_provider_does_not_inherit_the_release_specific_retirement() -> None:
+    """Only implementations that accepted ``token: null`` may diagnose
+    it as retired; the provider contract itself has no such history."""
+
+    class FutureProvider(GitCredentialProvider):
+        pass
+
+    assert GitCredentialProvider.retired_shape is None
+    assert FutureProvider.retired_shape is None

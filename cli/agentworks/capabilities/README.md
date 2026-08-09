@@ -619,79 +619,78 @@ to the same contract by the descriptor table's own self-test.
 
 ### Modeling a Config That Has Variants
 
-When a capability can be driven more than one way, the choice must be DECLARABLE. That is the whole
-rule, and it is narrower than it first appears: the failure is not that absence selects a mechanism,
-it is that there is no way to WRITE the choice down. Azure and AWS sites once worked that way.
-Omitting the credential block selected the platform's ambient chain, and no spelling existed that
-said so, so a manifest could not distinguish a deliberate choice from a forgotten one and neither
-could a reviewer, `doctor`, or the graph. Lima was worse, because presence of `vm_host` selected
-between two transports, which is why a typo in that one key silently turned a remote site into a
-not-ready local one and suppressed the error naming the typo.
+Apply these tiers in order. A lower tier cannot excuse a violation of a higher one.
 
-Once an explicit form exists, a default is an ordinary default, like `storage: local-lvm`. All three
-of those fields carry one today. **The rule for which arm: whatever the field already does when
-omitted.** That makes every default a strict no-op for existing manifests, which is what makes
-adding one non-breaking, and it forbids the dangerous move directly: **never default to a NEW arm.**
-When a capability grows a mode it did not have, defaulting to it would silently change behavior for
-configurations already in the field. Ambient is not privileged here; it is simply what omission
-already did on the clouds, which is also what the wrapped SDKs do.
+1. **Different shapes are never implicit.** When an operator-written choice selects a genuine
+   mechanism or mode with arm-specific required fields, model it as a discriminated union: one
+   closed arm per required shape and a string `Literal` discriminator. Do not put a mode field next
+   to optional fields and recover the shapes in a validator. A choice between distinct required-key
+   shapes that has no mechanism selector may instead be an explicitly declared untagged structural
+   union, emitted as plain `oneOf`. Do not add a `mode` tag merely to make that structural choice
+   declarable.
+2. **Anything that changes the resource graph is model-visible.** If a field or combination decides
+   whether a secret reference or resource edge exists, that decision must be present in the model
+   shape the walkers traverse. It cannot hide in validator logic. Extraction must reach exactly the
+   models validation can select, so extraction and validation cannot disagree about whether an edge
+   exists.
+3. **Plain-config cross-field validity may live in validators.** Mutual exclusions, dependencies,
+   and similar combinations that do not touch the resource graph may use cross-field validation,
+   provided the load-time error is loud and precise. The emitted schema may under-constrain that
+   combination. This follows the soundness rule: schema must never reject something the loader
+   accepts, while sanctioned under-reporting can let an editor catch the same error one step later.
 
-The shape for this is a nested discriminated union with a string `Literal` tag per arm, required or
-defaulted as above:
+Before encoding a constraint or restructuring a model, apply three companion tests:
+
+- **Dissolve the constraint first.** Ask whether the forbidden combination deserves useful meaning.
+  GitHub credential `repos` and `owner` scopes combine as a union. Multiple install tests combine as
+  an all-pass condition: an install is skipped only when at least one test is declared and every
+  declared test passes; zero tests means the idempotent command always runs. A constraint that no
+  longer exists needs no tier.
+- **Protect the common spelling.** A restructure that makes the common case heavier fails the
+  ergonomic guardrail. Use defaults, scalar shorthands, and untagged structural unions with distinct
+  required shapes to preserve it. Reserve a discriminator tag for genuine mechanism selection.
+- **Ask whether it is worth it.** Weigh who pays for the restructure and what it buys. Earlier
+  editor feedback rarely justifies a heavier manifest for every operator when the existing loader
+  failure is already loud and precise. Tier 3 may be the right result.
+
+For a tagged union, the discriminator selects the shape as well as the mechanism. The normal form is
+a nested union with a string `Literal` tag per arm:
 
 ```python
 auth: Annotated[AmbientAuth | ServicePrincipalAuth, Field(discriminator="mode")]
 ```
 
-Not a boolean, and not a mode field sitting beside optional credential fields. Pydantic emits this
-as `oneOf` over closed object shapes with `discriminator.propertyName` and a `const` per arm, so one
-authoritative declaration serves runtime validation, editor validation, samples, the field
-reference, and the guide. The alternative needs cross-field constraints ("`mode: ssh` requires
-`host`, `mode: local` forbids it"), and it loses on DERIVATION, not on expressiveness. JSON Schema
-states that constraint perfectly well: as `oneOf` over closed arms, which is exactly what we ship,
-or as `if`/`then` on the discriminator. What does not survive the trip is imperative code. The enum
-design has to put the rule in a `model_validator`, and pydantic does not derive a validator's body
-into the schema it emits, so the emitted schema would say nothing at all about the one rule that
-design added. The union states the same rule declaratively, so emission reads it off the same
-declaration the loader validates against.
+Pydantic emits this as `oneOf` over closed object shapes with `discriminator.propertyName` and a
+`const` per arm. One authoritative declaration then serves runtime validation, editor validation,
+samples, field documentation, and graph extraction. Adding a real mechanism is additive: add an arm
+rather than pre-grouping fields for an implementation that does not exist yet.
 
-That silence is not unsound, since a schema more permissive than the loader is sanctioned
-under-approximation, but it forfeits the DIAGNOSTIC: a mixed-arm config gets silence from the editor
-and fails at load instead. Emitting schema exists to move that feedback earlier, so the enum spends
-the point of it.
+For a selector-free structural choice, make the structural intent explicit:
 
-**The discriminator selects a SHAPE, not a concept, and the operational test is whether the required
-field sets differ.** Two ways of driving a capability that need different required fields are two
-arms even when they feel like one mechanism, and two that need the same fields are one arm even when
-they feel like two. Worked example: Azure service principals authenticating by certificate rather
-than by secret are conceptually the same mechanism, but they need a certificate in place of a secret
-name, so they would be their own arm. Merging them would need "exactly one of `secret` or
-`certificate_path`", which is the same validator-only cross-field constraint one level down, inside
-the arm that exists to eliminate it.
+```python
+source: Annotated[PlaintextSource | SecretSource, StructuralUnion()]
+```
 
-**Adding an arm is the extension path, and it is additive.** Existing manifests keep validating, the
-emitted schema grows a branch and a mapping entry, and nothing restructures. So do not pre-group
-fields against a variant that does not exist yet: that is mechanism without a consumer, and this
-codebase deletes those. Name each arm for the MECHANISM it selects rather than for a position
-(`ssh`, not `remote`; `ambient`, `service-principal`, `access-key`), because a positional name
-leaves the mechanism implicit and reintroduces one layer up exactly what the union removes. A name
-that is fully specified today is fine even if a future sibling would make it ambiguous; implicitness
-is judged against what exists, not against what might.
+`StructuralUnion` is narrower than an ordinary untagged union. It requires at least two closed model
+arms whose required and allowed keys cannot overlap, and it emits them as plain `oneOf`. Structural
+unions cannot also declare a discriminator; use a tagged union when a selector exists. Structural
+arms use their field names as operator-written keys, so validation aliases are refused. Put a
+resource marker on the field inside its arm, never on the union holder or a collection element that
+holds the union. A scalar shorthand is allowed only on a marker-free structural arm because raw
+graph traversal selects these arms from table keys. Registration checks all of these constraints,
+including on unions whose arms currently contain no resource markers, before an implementation is
+seated.
 
-**Pick the DISCRIMINATOR key by the field's grammar, and expect `mode`.** Every union shipped today
-spells it `mode`, and a new one probably should: `auth` and `placement` both name an ACTION, and an
-action is done in a mode. That is why `placement.mode` reads and `placement.type` does not. A field
-named for a STATE rather than an action takes `type` instead, because a state has a kind and not a
-manner, and forcing `mode` onto one would be the same category error in reverse. So
-`<mechanism>.mode` is the dominant pattern rather than a rule: follow it unless your field is a noun
-of the other sort, and if you diverge, say at the site which it is so the next reader sees a
-decision rather than an inconsistency.
+A union default may select only what omission historically selected, never a new arm. This makes the
+default a no-op for existing manifests. Scalar shorthands must dispatch through the same union-level
+declaration used by validation, filling, extraction, schema emission, and conformance; an arm-local
+shorthand alone cannot select an arm.
 
-**Name the FIELD for what it selects, and let sibling capabilities diverge.** `auth` on `azure-vm`
-and `aws-ec2` and `placement` on `lima` are the same shape doing different jobs: one selects an
-identity, the other selects where `limactl` runs. Naming both of them the same thing for symmetry's
-sake would make one of the two names a lie, so the divergence is deliberate and is not a consistency
-defect to be tidied away.
+Name each arm for the mechanism it selects rather than its position (`ssh`, not `remote`; `ambient`,
+`service-principal`, `access-key`). Pick the discriminator key by the field's grammar. Action-named
+fields normally use `mode`; state nouns normally use `type`. Name the union field for what it
+selects, even when that means sibling capabilities use different names, such as `auth` and
+`placement`.
 
 ### Secrets Are Just Declared References
 

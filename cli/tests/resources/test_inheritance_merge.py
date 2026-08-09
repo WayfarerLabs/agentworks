@@ -65,7 +65,7 @@ class _Kind:
     movable fails just as loudly as a field nobody covered."""
 
 
-_ENV = {"API_KEY": EnvEntry(secret="api-secret")}
+_ENV = {"API_KEY": EnvEntry({"secret": "api-secret"})}
 
 KINDS = {
     "vm-template": _Kind(

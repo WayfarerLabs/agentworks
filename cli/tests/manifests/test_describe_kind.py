@@ -133,6 +133,12 @@ def test_secret_source_kind_describes_the_backend_union_and_override_provenance(
     assert "`agw resource sample secret-source`" in text
 
 
+def test_an_optional_root_union_keeps_its_outer_null_spelling() -> None:
+    entry = _field_entry(_text("session-template"), "harness_integration")
+
+    assert "harness_integration (table or null, optional)" in entry
+
+
 def test_a_field_that_folds_a_scalar_offers_both_spellings() -> None:
     """The shipped defect: an env table accepts ``FOO: a value`` and
     ``FOO: {secret: x}``, the emitted schema said so, and this surface
@@ -148,8 +154,10 @@ def test_a_field_that_folds_a_scalar_offers_both_spellings() -> None:
 
     assert "  env  (table of string or table, optional)" in text
     assert "    <key>  (string or table, required)" in text
-    assert "      value  (string or null, optional)" in text
-    assert "      secret  (string or null, optional, names a secret)" in text
+    assert "      - plaintext: An env var whose exported value is written as plaintext." in text
+    assert "        value  (string, required)" in text
+    assert "      - secret: An env var whose exported value comes from a declared secret." in text
+    assert "        secret  (string, required, names a secret)" in text
 
 
 def test_secret_backend_describes_its_source_config() -> None:
@@ -193,6 +201,17 @@ def test_an_implementation_shows_the_config_it_declares() -> None:
     # parenthetical carries it: what an omitting document resolves to
     # should not take opening the model to learn.
     assert "placement  (table, optional, default {mode: local})" in text
+
+
+def test_git_token_describe_keeps_the_one_arm_union_visible() -> None:
+    """The reference surface agrees with schema and sample: one stored
+    arm, its default, its scalar spelling, and the SecretRef field."""
+    text = _text("git-credential-provider/github")
+
+    assert "token  (string or table, optional, default {mode: stored})" in text
+    assert "- stored: Obtain this credential's token from a stored secret." in text
+    assert "mode  (one of: stored, required)" in text
+    assert "secret  (string or null, optional, defaults to `git-token-<name>`, names a secret" in text
 
 
 def test_a_nested_tagged_union_renders_every_arm_with_its_own_fields() -> None:

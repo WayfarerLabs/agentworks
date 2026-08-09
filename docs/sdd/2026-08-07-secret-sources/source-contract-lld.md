@@ -183,11 +183,12 @@ it overrides final SecretBackend.runup; secret backends resolve before ordinary 
 3. required attributes and source-contract operations (`backend_readiness`, `would_attempt`, and
    `describe_lookup`), plus the exact client-factory operation only after Phase 2 adds it to the
    reviewed final ABC;
-4. `config_model` against `descriptor.config_schema`;
-5. `mapping_model` against `descriptor.mapping_schema`, including its input domain;
-6. forbidden reference kinds on `config_model`;
-7. forbidden `preflight`/`runup` overrides;
-8. exact contract version 2.
+4. exact contract version 2, so an implementation written for an older public model contract gets
+   the version migration error before a secondary model-shape error;
+5. `config_model` against `descriptor.config_schema`;
+6. `mapping_model` against `descriptor.mapping_schema`, including its input domain;
+7. forbidden reference kinds on `config_model`;
+8. forbidden `preflight`/`runup` overrides.
 
 Both model checks require a class, the declared base, successful model construction, legal marker
 placement, and the required tag only when that contract has a discriminator. The common checker

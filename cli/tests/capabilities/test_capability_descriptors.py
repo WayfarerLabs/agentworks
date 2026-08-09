@@ -32,6 +32,7 @@ from agentworks.capabilities.descriptor import (
     capability_descriptors,
     descriptor_for,
 )
+from agentworks.capabilities.git_credential.base import TokenAcquiringConfig
 from agentworks.capabilities.git_credential.kinds import GitCredentialProviderEntry
 from agentworks.capabilities.harness_integration.kinds import HarnessIntegrationEntry
 from agentworks.capabilities.publish import publish_capability_rows
@@ -356,9 +357,12 @@ def test_each_kinds_config_contract_matches_how_its_config_is_dispatched() -> No
     """
     contracts = {d.kind: d.config_schema for d in _descriptors()}
 
-    for tagged in ("vm-platform", "harness-integration", "git-credential-provider"):
+    for tagged in ("vm-platform", "harness-integration"):
         assert contracts[tagged].base is AgwModel, tagged
         assert contracts[tagged].discriminator == "name", tagged
+
+    assert contracts["git-credential-provider"].base is TokenAcquiringConfig
+    assert contracts["git-credential-provider"].discriminator == "name"
 
     backend = descriptor_for("secret-backend")
     assert backend.config_schema.base is AgwModel

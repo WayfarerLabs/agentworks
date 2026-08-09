@@ -17,13 +17,14 @@ from __future__ import annotations
 from datetime import date
 from typing import Annotated, ClassVar, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field
 
 from agentworks.capabilities.git_credential.base import (
     GitCredentialProvider,
     HelperEntry,
-    TokenSourcedConfig,
+    TokenAcquiringConfig,
 )
+from agentworks.capabilities.retired_shapes import RetiredNullTokenShape
 from agentworks.topics import TopicProse
 
 # GitHub owner/repo name charset. Interpolated verbatim into gitconfig
@@ -39,12 +40,12 @@ GitHubRepo = Annotated[str, Field(pattern=rf"^{_NAME}/{_NAME}$")]
 """A GitHub repository, as ``owner/name``."""
 
 
-class GitHubConfig(TokenSourcedConfig):
+class GitHubConfig(TokenAcquiringConfig):
     """Scope for a GitHub personal access token.
 
-    ``repos`` and ``owner`` are mutually exclusive: a fine-grained PAT is
-    scoped to selected repositories OR to everything under one owner,
-    never both. An unscoped credential declares neither and serves the
+    ``repos`` contributes exact-repository scopes and ``owner`` contributes
+    every repository under one owner. When both are present their scopes
+    are combined. An unscoped credential declares neither and serves the
     host by default.
     """
 
@@ -62,14 +63,6 @@ class GitHubConfig(TokenSourcedConfig):
     the one field here with nothing to default to: there is no owner
     that means "no owner scope"."""
 
-    @model_validator(mode="after")
-    def _scope_is_repos_or_owner(self) -> GitHubConfig:
-        if self.repos and self.owner is not None:
-            raise ValueError(
-                "repos and owner are mutually exclusive (a fine-grained PAT is scoped to one or the other)"
-            )
-        return self
-
 
 def _parse_expiration(raw: str | None) -> date | None:
     """The header value looks like ``2026-10-01 17:24:32 UTC``; take the
@@ -86,13 +79,14 @@ class GitHubCredentialProvider(GitCredentialProvider):
     """Configures git credentials for GitHub via a personal access token.
 
     Optionally scoped in the ``spec.provider`` table: ``repos: ["owner/name", ...]``
-    (the fine-grained PAT's selected repos) or ``owner: "org"`` (an
-    owner-scoped PAT covering any repo under that owner, including
-    repos cloned ad hoc that no workspace declared). Unscoped
-    credentials keep the released host-level line verbatim.
+    (the fine-grained PAT's selected repos), ``owner: "org"`` (every repo
+    under that owner, including ad hoc clones), or both as the union of
+    those scopes. Unscoped credentials keep the released host-level line
+    verbatim.
     """
 
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int] = 2
+    retired_shape: ClassVar[RetiredNullTokenShape | None] = RetiredNullTokenShape()
     name: ClassVar[str] = "github"
     description: ClassVar[str] = "GitHub personal access token"
     config_model: ClassVar[type[GitHubConfig]] = GitHubConfig
@@ -105,7 +99,7 @@ class GitHubCredentialProvider(GitCredentialProvider):
         A classic token needs no scoping. A fine-grained token does: `repos` pins the
         credential to specific repositories, and `owner` covers everything under one
         user or organization, including repositories cloned ad hoc that no workspace
-        declared. The two are alternatives, not a pair.
+        declared. When both are present, the credential covers their union.
 
         Declaring several credentials is normal. The managed credential helper picks the
         one whose scope matches each remote, and an unscoped credential is the fallback.

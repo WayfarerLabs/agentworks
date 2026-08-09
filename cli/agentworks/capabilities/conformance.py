@@ -11,7 +11,13 @@ from pydantic import BaseModel
 
 from agentworks.capabilities.descriptor import ConfigContract, ModelInputDomain
 from agentworks.errors import StateError
-from agentworks.schema import RefMarker, model_is_complete, reference_marker_error
+from agentworks.schema import (
+    RefMarker,
+    model_is_complete,
+    reference_marker_error,
+    structural_union_error,
+    union_scalar_shorthand_error,
+)
 
 if TYPE_CHECKING:
     from agentworks.capabilities.descriptor import CapabilityKindDescriptor
@@ -28,6 +34,7 @@ def conformance_error(descriptor: CapabilityKindDescriptor, impl: type) -> str |
         or _attributes_error(descriptor, impl)
         or _operations_error(descriptor, impl)
         or _focused_operation_error(descriptor, impl)
+        or _version_error(descriptor, impl)
         or _model_error(descriptor, impl, "config_model", descriptor.config_schema)
         or (
             _model_error(descriptor, impl, "mapping_model", descriptor.mapping_schema)
@@ -36,7 +43,6 @@ def conformance_error(descriptor: CapabilityKindDescriptor, impl: type) -> str |
         )
         or _forbidden_reference_error(descriptor, impl)
         or _fixed_lifecycle_error(descriptor, impl)
-        or _version_error(descriptor, impl)
     )
 
 
@@ -115,9 +121,15 @@ def _model_error(
             f"its {attribute_name} {model.__name__} cannot be built (an unresolved annotation?), "
             "so nothing could validate or extract references against it"
         )
+    union_shape = structural_union_error(model)
+    if union_shape is not None:
+        return f"its {attribute_name} declares an invalid structural union: {union_shape}"
     placement = reference_marker_error(model)
     if placement is not None:
         return f"its {attribute_name} declares a reference marker nothing can honor: {placement}"
+    shorthand = union_scalar_shorthand_error(model)
+    if shorthand is not None:
+        return f"its {attribute_name} declares an inconsistent union scalar shorthand: {shorthand}"
     tag_error = _model_tag_error(descriptor, impl, attribute_name, model, contract)
     if tag_error is not None:
         return tag_error
@@ -296,6 +308,18 @@ def _fixed_lifecycle_error(descriptor: CapabilityKindDescriptor, impl: type) -> 
 
 
 def _version_error(descriptor: CapabilityKindDescriptor, impl: type) -> str | None:
+    """The impl declares a contract version this build supports.
+
+    Trivially satisfied while there is one version, which is the point: the
+    declaration and the comparison both exist before the first incompatible
+    change, so nothing has to be retrofitted when one arrives.
+
+    Exact equality, deliberately: a contract change is a hard cutover, and
+    every impl migrates before the descriptor's number moves. Supporting two
+    versions at once is a real decision (a supported range, a compatibility
+    rule) to make when a migration actually needs it, not a default to drift
+    into.
+    """
     declared = getattr(impl, "contract_version", None)
     if declared != descriptor.contract_version:
         return (

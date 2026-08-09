@@ -41,10 +41,11 @@ from agentworks.schema._shape import (
     model_fields_of,
     models_in,
     shape_of,
+    structurally_addressable_arms,
     table_addresses_block,
 )
 from agentworks.schema.markers import REF_SCHEMA_KEY
-from agentworks.schema.shorthand import ScalarShorthand, shorthand_field_error
+from agentworks.schema.shorthand import ScalarShorthand, scalar_shorthand_of, shorthand_field_error
 
 if TYPE_CHECKING:
     from pydantic import GetJsonSchemaHandler
@@ -183,9 +184,9 @@ def _with_marker_corrections(
     declared field and knows nothing about the fill:
 
     - not required, or an editor red-underlines the very omission the
-      mechanism exists to resolve (``provider: {name: github}`` with no
-      ``token``, which is what every unscoped credential writes);
-    - nullable, or it red-underlines ``token: null``, which is that same
+      mechanism exists to resolve (the stored git-token arm with no
+      ``secret`` key);
+    - nullable, or it red-underlines ``secret: null``, which is that same
       instruction spelled out, and which loads today.
 
     **Every marked field carries its ``x-agw-ref`` on the property
@@ -426,7 +427,14 @@ _UNMARKABLE_SHAPES: Final = (
     ("collection", "holds many values"),
     ("nested_model", "opens a nested block"),
     ("arms", "selects a discriminated union arm"),
+    ("structural_arms", "selects a structural union arm"),
 )
+
+#: How one collection element that cannot carry a marker holds its value.
+#: Kept separate from :data:`_UNMARKABLE_SHAPES` because the attributes
+#: describe a different annotation level: ``marker`` names the whole field,
+#: while ``item_marker`` names one element.
+_UNMARKABLE_ITEM_SHAPES: Final = (("item_structural_arms", "selects a structural union arm"),)
 
 
 def _marker_error(model_cls: type[BaseModel], visiting: tuple[type[BaseModel], ...]) -> str | None:
@@ -451,6 +459,30 @@ def _marker_error(model_cls: type[BaseModel], visiting: tuple[type[BaseModel], .
                 f"where nothing can honor it; a marker names one Resource, so move it onto the "
                 f"value that names one"
             )
+        item_held = next(
+            (prose for attribute, prose in _UNMARKABLE_ITEM_SHAPES if getattr(shape, attribute)),
+            None,
+        )
+        if shape.item_marker is not None and item_held is not None:
+            return (
+                f"{model_cls.__name__}.{name} carries a reference marker on each collection "
+                f"element that {item_held}, where nothing can honor it; a marker names one "
+                f"Resource, so move it onto the value that names one"
+            )
+        structural_groups = (
+            ("field", shape.structural_arms),
+            ("collection element", shape.item_structural_arms),
+        )
+        for level, arms in structural_groups:
+            for arm in arms:
+                if scalar_shorthand_of(arm) is not None and _hides_marker(arm, ()):
+                    return (
+                        f"{model_cls.__name__}.{name} lets a scalar shorthand select "
+                        f"marker-bearing structural arm {arm.__name__} at the {level}, but "
+                        "reference extraction selects structural arms only from table keys, so "
+                        "the scalar's Resource would never become a graph edge; remove the "
+                        "shorthand or every reference marker from that arm"
+                    )
         if _has_unplaceable_marker(field, shape):
             return (
                 f"{model_cls.__name__}.{name} carries a reference marker in a position this layer "
@@ -528,6 +560,8 @@ def _reachable_models(shape: FieldShape) -> tuple[type[BaseModel], ...]:
         _addressable_block(shape.item_union_model, shape.item_union_members),
         *(arm.model for arm in shape.arms),
         *(arm.model for arm in shape.item_arms),
+        *structurally_addressable_arms(shape.structural_arms),
+        *structurally_addressable_arms(shape.item_structural_arms),
     )
     return tuple(model for model in models if model is not None)
 

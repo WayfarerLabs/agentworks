@@ -93,7 +93,7 @@ def test_every_inheriting_kind_marks_its_inherits_edges_and_nothing_else() -> No
     so the assertion proves the split rather than just the presence of the
     marker.
     """
-    env = {"K": EnvEntry(secret="a-secret")}
+    env = {"K": EnvEntry({"secret": "a-secret"})}
     templates = {
         "vm-template": VMTemplate(name="kid", inherits=["base"], env=env),
         "workspace-template": WorkspaceTemplate(name="kid", inherits=["base"], env=env),

@@ -34,7 +34,7 @@ from agentworks.workspaces.templates import effective_template as workspace_effe
 
 
 def _env(secret: str) -> dict[str, EnvEntry]:
-    return {"K": EnvEntry(secret=secret)}
+    return {"K": EnvEntry({"secret": secret})}
 
 
 def _diamond(build: Callable[..., Any]) -> dict[str, Any]:
