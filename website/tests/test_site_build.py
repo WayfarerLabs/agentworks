@@ -393,6 +393,21 @@ class TemplateContractTests(RepositoryFixture):
                 with self.subTest(name=name, change=changed[:80]), self.assertRaises(ValueError):
                     site_builder._validate_template(name, changed)
 
+    def test_detail_page_headings_reject_provenance_eyebrows(self) -> None:
+        headings = {
+            "manifesto.html": "Agentworks Manifesto",
+            "security.html": "Security at Agentworks",
+        }
+        for name, heading in headings.items():
+            template = (self.root / "website/templates" / name).read_text(encoding="utf-8")
+            changed = template.replace(
+                f"<h1>{heading}</h1>",
+                f'<p class="eyebrow">Generated from the repository</p><h1>{heading}</h1>',
+                1,
+            )
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, "detail page heading"):
+                site_builder._validate_template(name, changed)
+
     def test_service_ctas_reject_hidden_ancestors_and_icon_bypasses(self) -> None:
         extra_icon = '<svg aria-hidden="true" focusable="false" viewBox="0 0 16 16"><path d="M0 0" /></svg>'
         for name in site_builder.TEMPLATE_TOKENS:
@@ -1124,6 +1139,8 @@ class GeneratedDocumentTests(RepositoryFixture):
 
     def test_manifesto_is_complete_semantic_source_projection_with_mapped_links(self) -> None:
         document = self.documents["manifesto"]
+        self.assertIn('<main id="main-content" class="manifesto-main detail-main">', self.pages["manifesto"])
+        self.assertNotIn("Repository sourced / Long-form argument", self.pages["manifesto"])
         expected_headings = ["Agentworks Manifesto", *[text for _, text in site_builder.MANIFESTO_HEADINGS[1:]]]
         self.assertEqual(document.headings, expected_headings)
         for passage in (
@@ -1141,6 +1158,8 @@ class GeneratedDocumentTests(RepositoryFixture):
 
     def test_security_outline_and_reporting_links_are_exact(self) -> None:
         document = self.documents["security"]
+        self.assertIn('<main id="main-content" class="detail-main">', self.pages["security"])
+        self.assertNotIn("Security model / Repository sourced", self.pages["security"])
         self.assertEqual(
             document.headings,
             [
@@ -1232,6 +1251,10 @@ class GeneratedDocumentTests(RepositoryFixture):
         self.assertIn("object-fit: contain", hero_rule)
         home_main_rule = css.split(".home-main {", 1)[1].split("}", 1)[0]
         self.assertIn("gap: clamp(1.5rem, 4vw, 2.75rem)", home_main_rule)
+        detail_main_rule = css.split(".detail-main {", 1)[1].split("}", 1)[0]
+        self.assertIn("padding-block-start: clamp(0.75rem, 2vw, 1.25rem)", detail_main_rule)
+        detail_heading_rule = css.split(".detail-main .page-heading {", 1)[1].split("}", 1)[0]
+        self.assertIn("padding-top: 0", detail_heading_rule)
 
     def test_pinned_color_contrasts_meet_text_component_and_status_thresholds(self) -> None:
         expected = (

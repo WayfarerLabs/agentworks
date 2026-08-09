@@ -114,9 +114,13 @@ TEMPLATE_DESTINATIONS: Final = {
 }
 MAIN_ATTRIBUTES: Final = {
     "index.html": {"id": "main-content", "class": "home-main"},
-    "manifesto.html": {"id": "main-content", "class": "manifesto-main"},
-    "security.html": {"id": "main-content"},
+    "manifesto.html": {"id": "main-content", "class": "manifesto-main detail-main"},
+    "security.html": {"id": "main-content", "class": "detail-main"},
     "404.html": {"id": "main-content"},
+}
+DETAIL_PAGE_HEADINGS: Final = {
+    "manifesto.html": "Agentworks Manifesto",
+    "security.html": "Security at Agentworks",
 }
 
 FULL_MANIFEST: Final = frozenset(
@@ -964,6 +968,24 @@ def _validate_shared_shell(name: str, template: str) -> None:
         raise ValueError(f"{name}: main landmark requires its exact CSS-critical attributes")
     if elements[footer_index].attributes != {"class": "site-footer"}:
         raise ValueError(f"{name}: footer requires the exact site-footer class")
+
+    if expected_heading := DETAIL_PAGE_HEADINGS.get(name):
+        main_children = _children(parser, main_index)
+        if not main_children or (
+            elements[main_children[0]].tag != "div"
+            or elements[main_children[0]].attributes != {"class": "page-heading"}
+        ):
+            raise ValueError(f"{name}: detail page heading must be the first main child")
+        heading_children = _children(parser, main_children[0])
+        if [elements[index].tag for index in heading_children] != ["h1"]:
+            raise ValueError(f"{name}: detail page heading must contain only its reviewed h1")
+        _validate_visible_leaf(
+            parser,
+            heading_children[0],
+            {},
+            expected_heading,
+            f"{name}: detail page heading requires its exact reviewed h1",
+        )
 
     header_children = _children(parser, header_index)
     if name == "index.html":

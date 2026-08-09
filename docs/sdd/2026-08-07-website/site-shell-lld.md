@@ -177,6 +177,10 @@ boundaries, and compact labels. It does not introduce a fake terminal, remote fo
 client routing, or essential motion. Header and footer regions wrap rather than overflow. Body and
 content dimensions use `min-width: 0`, bounded widths, fluid spacing and type, and anywhere link
 wrapping to preserve one-dimensional reflow at 320 CSS pixels and the 400-percent zoom equivalent.
+Manifesto and Security begin with their `h1` and no repository-provenance eyebrow. Their shared
+detail-main inset is `clamp(0.75rem, 2vw, 1.25rem)` below the header; the page heading adds no
+second top inset. Canonical-source provenance remains a build contract rather than visitor-facing
+chrome.
 
 ## 9. Verification matrix
 
