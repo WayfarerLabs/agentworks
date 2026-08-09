@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.errors import BackupError, NotFoundError, StateError
+from agentworks.path_rendering import format_host_path
 from agentworks.vms.manager import gated_vm_boundary
 
 if TYPE_CHECKING:
@@ -85,7 +86,7 @@ def backup_vm(
         # _archive_workspaces had a try/except, so other failure paths left
         # the DB without an event and the log without its trailing summary.
         try:
-            with output.section(f"Backing up VM '{vm_name}' to {backup_dir}"):
+            with output.section(f"Backing up VM '{vm_name}' to {format_host_path(backup_dir)}"):
                 # Snapshot all DB data in a single transaction for consistency
                 output.info("Reading database (consistent snapshot)...")
                 _vm, agents, workspaces, sessions, events, grants_by_agent = db.snapshot_vm_backup_data(vm_name)
@@ -155,6 +156,7 @@ def backup_vm(
                         target,
                         workspaces,
                         local_archive,
+                        vm.admin_username,
                     )
                 else:
                     output.info("No VM workspaces to archive.")
@@ -174,7 +176,7 @@ def backup_vm(
                 _write_json(backup_dir / "manifest.json", manifest)
 
             db.insert_vm_event(vm_name, "backup_completed", detail=str(backup_dir))
-            output.result(f"Backup complete: {backup_dir}")
+            output.result(f"Backup complete: {format_host_path(backup_dir)}")
             return backup_dir
         except Exception:
             db.insert_vm_event(vm_name, "backup_failed")
@@ -187,6 +189,7 @@ def _archive_workspaces(
     target: SSHTransport,
     vm_workspaces: list[WorkspaceRow],
     local_archive: Path,
+    admin_username: str,
 ) -> tuple[list[str], list[str]]:
     """Create a single zstd-compressed tar of all workspace paths and transfer locally.
 
@@ -195,6 +198,13 @@ def _archive_workspaces(
 
     The archive is created in a root-owned temp directory to avoid symlink
     attacks and collisions in /tmp.
+
+    ``admin_username`` is the account the archive is chowned to so scp can
+    read it. It comes from the VM row, which is where the value is
+    declared, rather than from ``target.user``: the transport's user is
+    optional (the VM-host transports defer to SSH config), and folding
+    that ``None`` to a literal "agentworks" would silently chown to the
+    wrong account on a VM whose admin-template renamed the admin user.
 
     Returns (archived_paths, skipped_paths) -- paths that were actually included
     and paths that were skipped because they didn't exist on the VM.
@@ -241,7 +251,7 @@ def _archive_workspaces(
         # (was detail(indent=2)).
         with output.section():
             output.detail(f"Remote archive: {archive}")
-            output.detail(f"Local archive:  {local_archive}")
+            output.detail(f"Local archive:  {format_host_path(local_archive)}")
 
         # Write paths file via scp to avoid shell escaping issues.
         paths_file = f"{tmp_dir}/paths.txt"
@@ -336,7 +346,7 @@ def _archive_workspaces(
 
         # Transfer to local. Chown the temp dir and archive to the admin
         # user so scp can read it (avoids making it world-readable).
-        admin = shlex.quote(target.user or "agentworks")
+        admin = shlex.quote(admin_username)
         target.run(f"chown {admin} {q_tmp} {q_archive}", sudo=True)
 
         # Get remote archive size for progress reporting
@@ -408,7 +418,7 @@ def _transfer_with_progress(
             stderr = (proc.stderr.read() or b"").decode("utf-8", errors="replace").strip()
             raise SSHError(f"scp failed: {stderr}")
 
-        output.detail(f"Saved: {local_path} ({_fmt_size(local_path.stat().st_size)})")
+        output.detail(f"Saved: {format_host_path(local_path)} ({_fmt_size(local_path.stat().st_size)})")
 
     except (KeyboardInterrupt, Exception):
         proc.terminate()

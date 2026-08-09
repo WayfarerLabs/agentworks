@@ -107,7 +107,10 @@ consuming resource that holds one.
   earlier parent's config); a child naming a DIFFERENT integration starts from a fresh blob (the
   parent's config was addressed to the wrong capability and never leaks); a child naming the SAME
   integration merges via that integration's `merge_config` (child-wins per key, `shell` unioning
-  `required_commands`). Completeness validation runs once on the merged blob at resolve.
+  `required_commands`). Validation runs once on the merged blob, at load: the declarative-schema
+  effort (FR12) moved it there from resolve, since a template's merged config is exactly as
+  checkable at load as the config of a resource that inherits nothing, and an error naming a key an
+  ancestor declared says which template to go and edit.
 
 ## Consequences
 
@@ -115,10 +118,9 @@ consuming resource that holds one.
 
 - A session's runtime is a first-class, extensible model concept. Adding a runtime is registering a
   integration class; no session-manager surgery, and the registry lists it uniformly.
-- The integration reuses the whole capability contract: shape validation at load, completeness on
-  the merged blob at resolve, the declared-secret / scoped-delivery model, and the preflight/runup
-  split. A future secret-declaring integration needs no new plumbing (the node already folds
-  `secret_refs`).
+- The integration reuses the whole capability contract: shape validation at load on the merged blob,
+  the declared-secret / scoped-delivery model, and the preflight/runup split. A future
+  secret-declaring integration needs no new plumbing (the node already folds `secret_refs`).
 - One readiness fork, in one place, shared by every integration member, replacing the session-only
   `RequiredCommandsCheck` stand-in. The identity guard closes a gap the stand-in never had.
 - Pair-inheritance fixes a real multi-parent divergence: an integration-silent parent can no longer

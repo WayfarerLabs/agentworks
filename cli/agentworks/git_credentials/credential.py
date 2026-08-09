@@ -1,4 +1,4 @@
-"""``GitCredentialConfig``: the operator-declared git-credential dataclass,
+"""``GitCredentialConfig``: the operator-declared git-credential row,
 plus the ``credential_references`` helper.
 
 Moved out of ``agentworks.config`` so the ``git_credentials`` domain owns
@@ -11,28 +11,34 @@ loader that constructs it.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from pydantic import model_validator
 
 from agentworks.declared_resource import DeclaredResource
+from agentworks.schema import CapabilityBlock, RefOwner
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from agentworks.resources.graph import BuildContext, DependencyState, Readiness
+    from agentworks.resources.graph import DependencyState, FinalizeContext, Readiness
     from agentworks.resources.reference import ResourceReference
 
 
 def credential_references(
     git_credentials: list[str] | None,
     source: tuple[str, str],
+    declarers: Mapping[str, tuple[str, str]] | None = None,
 ) -> list[ResourceReference]:
     """Emit a ``ResourceReference`` of kind ``"git-credential"`` per
     name in ``git_credentials``. Used by ``AdminConfig.dependencies``
     and ``AgentTemplate.dependencies`` to feed the
     ``GitCredentialKind``'s error miss policy: a typo'd or undeclared
-    name errors at finalize with the reference source pointing at the
-    declaring Resource.
+    name errors at finalize naming the template that wrote the name.
+
+    ``declarers`` maps a credential name to the template that declared
+    it, for an inheriting owner passing its MERGED list (FR17). Absent, or
+    missing a name, means the owner declared it.
     """
     from agentworks.resources.reference import ResourceReference
 
@@ -44,34 +50,37 @@ def credential_references(
             kind="git-credential",
             usage="the git credential",
             source=source,
+            declared_by=(declarers or {}).get(cred_name),
         )
         for cred_name in git_credentials
     ]
 
 
-@dataclass(frozen=True, kw_only=True)
 class GitCredentialConfig(DeclaredResource):
-    # The internal representation follows the YAML manifest shape (ADR
-    # 0016): field name ``provider``, matching ``spec.provider``. Only
-    # the TOML section still spells ``type`` (with ``provider`` as the
-    # preferred alias); the loader maps at its boundary.
-    provider: str
-    # Provider-owned configuration (azdo's org), nested per the
-    # provider_config pattern (ADR 0016). The flat TOML section is the
-    # ONLY place org lives at the top level; this loader nests it at
-    # the boundary, so the internal representation matches the YAML
-    # manifest shape.
-    # Provider-owned configuration (azdo's org; github's repos/owner;
-    # and the ``token`` secret name that every current provider sources
-    # its PAT from, default ``git-token-<name>``, owned by the
-    # provider's ``dependencies`` since sourcing is provider-specific
-    # (a future minting provider declares a bootstrap secret, or none).
-    # The flat TOML section is the ONLY place these live at the top
-    # level; the loader nests them here so the internal representation
-    # matches the YAML manifest shape.
-    provider_config: dict[str, object] = field(default_factory=dict)
+    """A declared git credential: which provider fronts it, and that
+    provider's own configuration."""
 
-    def dependencies(self, context: BuildContext) -> list[ResourceReference]:
+    provider: CapabilityBlock
+    """The git-credential-provider fronting this credential: one table
+    whose ``name`` selects the provider and whose remaining keys are that
+    provider's own config (azdo's ``org``; github's ``repos`` / ``owner``;
+    the ``token`` acquisition choice, whose stored arm names a secret
+    defaulting to ``git-token-<name>``)."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _steer_a_top_level_token(cls, data: Any) -> Any:
+        """``token`` is the mistake operators make coming from the flat
+        TOML shape. As a plain unknown key it would name the valid field
+        without saying where the token goes."""
+        if isinstance(data, dict) and "token" in data:
+            raise ValueError(
+                "'token' is provider config now: move it into the spec.provider table "
+                "(its 'name' key selects the provider)"
+            )
+        return data
+
+    def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         from agentworks.resources.reference import (
             ResourceReference as _ResourceReq,
         )
@@ -82,29 +91,31 @@ class GitCredentialConfig(DeclaredResource):
         # kind; framework miss policy catches typos.
         refs: list[ResourceReference] = [
             _ResourceReq(
-                name=self.provider,
+                name=self.provider.name,
                 kind="git-credential-provider",
                 usage="the provider",
                 source=source,
             ),
         ]
         # Everything the credential references (its token secret and any
-        # other provider-declared resources) comes from the provider
-        # deriving the references its config block implies (dependencies,
-        # total and non-throwing); this resource (the config block's
-        # owner) attributes them to itself via the shared conversion.
-        from agentworks.capabilities.git_credential import (
-            GIT_CREDENTIAL_PROVIDER_REGISTRY,
-        )
+        # other resource the provider's config names) is read structurally
+        # off the provider's DECLARED model, by the core: no provider code
+        # runs here. Total and non-throwing, so a malformed blob
+        # contributes no edges rather than sinking the walk. This resource
+        # (the config block's owner) attributes them to itself via the
+        # shared conversion.
+        from agentworks.capabilities.config import capability_config_references
 
-        capability = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(self.provider)
-        if capability is not None:
-            refs.extend(
-                sourced_references(
-                    capability.dependencies(f"git-credential/{self.name}", self.provider_config),
-                    source,
-                )
+        refs.extend(
+            sourced_references(
+                capability_config_references(
+                    kind="git-credential-provider",
+                    config=self.provider.tagged,
+                    owner=RefOwner(kind="git-credential", name=self.name),
+                ),
+                source,
             )
+        )
         return refs
 
     def not_ready(self, deps: Mapping[tuple[str, str], DependencyState]) -> Readiness:
@@ -126,24 +137,31 @@ class GitCredentialConfig(DeclaredResource):
         """
         from agentworks.resources.graph import Enablement, Readiness
 
-        provider = deps[("git-credential-provider", self.provider)]
+        provider = deps[("git-credential-provider", self.provider.name)]
         if provider.enablement is Enablement.disabled:
             tail = provider.disabled_reason or "enable its unit"
-            return Readiness.blocked(f"depends on git-credential-provider '{self.provider}', which is disabled; {tail}")
+            return Readiness.blocked(
+                f"depends on git-credential-provider '{self.provider.name}', which is disabled; {tail}"
+            )
         return Readiness.ready()
 
-    def validate(self, enabled_backends: frozenset[str]) -> None:
-        """Throwing shape check for the ``provider_config`` blob, run by
-        the finalize ``validate`` pass (``enabled_backends`` is the
-        secret-only R9.9 input, ignored here). Mirrors ``dependencies``:
-        the named provider capability validates the blob it owns. An
-        unknown provider is tolerated here (the framework miss policy
-        reports it); a seated provider validates the blob.
-        """
-        from agentworks.capabilities.git_credential import (
-            GIT_CREDENTIAL_PROVIDER_REGISTRY,
-        )
+    def validate_config(self, context: FinalizeContext) -> None:
+        """Throwing shape check for the provider config block, run by
+        the finalize ``validate`` pass. Mirrors ``dependencies``:
+        the CORE validates the blob against the named provider's declared
+        model, and no provider code runs. An unknown provider is tolerated
+        here (the framework miss policy reports it); a seated provider's
+        blob is validated.
 
-        capability = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(self.provider)
-        if capability is not None:
-            capability.validate(f"git-credential/{self.name}", self.provider_config)
+        The error this raises already carries its own file/line framing
+        (the schema error bridge), so the finalize pass leaves it alone
+        rather than appending an origin a second time.
+        """
+        from agentworks.capabilities.config import validate_capability_config
+
+        validate_capability_config(
+            kind="git-credential-provider",
+            config=self.provider.tagged,
+            owner=RefOwner(kind="git-credential", name=self.name),
+            location=self.error_location,
+        )

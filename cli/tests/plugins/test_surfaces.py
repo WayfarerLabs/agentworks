@@ -19,8 +19,8 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 from agentworks.capabilities.base import ScopeLevel
-from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.doctor import Status, _check_plugins
+from agentworks.origin import Origin
 from agentworks.plugins import Plugin, PluginCommand, plugin_enablement_source, publish_plugins, seated_plugin
 from agentworks.resources.graph import Enablement
 from agentworks.resources.inspect import (
@@ -29,9 +29,10 @@ from agentworks.resources.inspect import (
     render_resource_description,
     render_resource_table,
 )
-from agentworks.resources.origin import Origin
 from agentworks.resources.registry import Registry
+from agentworks.schema import CapabilityBlock
 from agentworks.vms.sites import VMSiteDecl
+from tests.plugins._fixtures import ConformingVMPlatform
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -44,10 +45,11 @@ if TYPE_CHECKING:
 _MANIFEST_ANCHOR = f"{__package__}._manifest_fixture"
 
 
-# -- Real fixture impls (subclasses, so they fold through their consumers) ------
+# -- Real fixture impls (subclasses, so they fold through their consumers, and
+#    so registration's conformance check accepts them) ---------------------------
 
 
-class _ReadyPlatform(VMPlatform):
+class _ReadyPlatform(ConformingVMPlatform):
     name = "alpha-platform"
     description = "A ready plugin platform"
 
@@ -56,7 +58,7 @@ class _ReadyPlatform(VMPlatform):
         return None
 
 
-class _NotReadyPlatform(VMPlatform):
+class _NotReadyPlatform(ConformingVMPlatform):
     name = "alpha-notready-platform"
     description = "An enabled-but-not-ready plugin platform"
 
@@ -69,7 +71,7 @@ class _NotReadyPlatform(VMPlatform):
         return "unsupported on this host (fixture)"
 
 
-class _BetaPlatform(VMPlatform):
+class _BetaPlatform(ConformingVMPlatform):
     name = "beta-platform"
     description = "A disabled plugin platform"
 
@@ -124,7 +126,7 @@ def _seat_and_publish(monkeypatch: pytest.MonkeyPatch, config: Config) -> Regist
         registry.add(
             "vm-site",
             "alpha-site",
-            VMSiteDecl(name="alpha-site", platform="alpha-platform", platform_config={}),
+            VMSiteDecl(name="alpha-site", platform=CapabilityBlock.of("alpha-platform", **{})),
             _operator(),
         )
         registry.finalize(enablement_sources=[plugin_enablement_source(config)])
@@ -213,25 +215,15 @@ def test_include_disabled_render_marks_disabled_and_not_ready_distinctly(
 # -- describe of a disabled row (explicit lookup, always renders) ---------------
 
 
-def test_describe_disabled_row_renders_with_disabled_line_and_provenance(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config = _config("alpha")  # beta disabled
-    registry = _seat_and_publish(monkeypatch, config)
-
-    desc = describe_resource(registry, "vm-platform", "beta-platform")
-    # describe is an explicit lookup: it renders the named row even disabled.
-    assert desc.name == "beta-platform"
-    # The Disabled line's text is derived from origin + config, exactly as the
-    # roster phrases it, NOT from a per-node reason.
-    assert desc.disabled_reason == "not enabled in [plugins].system (plugin beta)"
-
-
 def test_describe_disabled_row_render_output(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    config = _config("alpha")
+    """describe is an explicit lookup: it renders the named row even when
+    the row is disabled, and the Disabled line's text is derived from
+    origin plus config, exactly as the roster phrases it, NOT from a
+    per-node reason."""
+    config = _config("alpha")  # beta disabled
     registry = _seat_and_publish(monkeypatch, config)
 
     render_resource_description(describe_resource(registry, "vm-platform", "beta-platform"))

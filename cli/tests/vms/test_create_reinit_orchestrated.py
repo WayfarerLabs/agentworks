@@ -39,7 +39,7 @@ PLUGINS_ENABLED = """
 system = ["proxmox"]
 """
 
-GIT_CRED_GH = ManifestDoc("git-credential", "gh", {"provider": "github"})
+GIT_CRED_GH = ManifestDoc("git-credential", "gh", {"provider": {"name": "github"}})
 
 
 @pytest.fixture
@@ -455,6 +455,19 @@ def test_reinit_runs_initialization_through_the_gate(
 
     monkeypatch.setattr(LimaPlatform, "vm_active", _hold)
     captured: dict[str, object] = {}
+    logger_redactions: list[tuple[str, ...]] = []
+
+    class _LoggerSpy:
+        path = "/dev/null"
+        warnings: list[str] = []
+
+        def __init__(self, vm_name: str, command_stem: str, *, redactions: tuple[str, ...] = ()) -> None:
+            logger_redactions.append(redactions)
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr("agentworks.ssh.SSHLogger", _LoggerSpy)
 
     def _fake_init(*args: object, **kwargs: object) -> None:
         captured["git_tokens"] = kwargs["git_tokens"]
@@ -469,6 +482,7 @@ def test_reinit_runs_initialization_through_the_gate(
     vm_manager.reinit_vm(db, config, "rvm")
 
     assert captured["git_tokens"] == {"gh": "ghtok"}
+    assert logger_redactions == [("ghtok",)]
     assert list(captured["providers"]) == ["gh"]  # type: ignore[call-overload]
     assert captured["held"] == ["open"]  # init ran inside the span
     assert holds == ["open", "close"]  # span closed at the end

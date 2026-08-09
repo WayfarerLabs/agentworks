@@ -1,14 +1,22 @@
 # Target State
 
 - Status: North star, accumulating settled rulings
-- Last updated: 2026-08-07
+- Last updated: 2026-08-08
 
-This document describes where Agentworks is going across this roadmap effort, synthesized from the
+This document describes where Agentworks is going across this saga effort, synthesized from the
 perspectives in `inputs/`. It is the target of these waves, not a forever vision: when
-`current-state.md` agrees with this document and every child SDD is locked, the roadmap is done.
-Every phasing choice is tested against these destinations, and individual efforts must not paint
-over them. Settled operator rulings are recorded here with dates; a child SDD builds on these rather
-than reopening them.
+`current-state.md` agrees with this document and every child SDD is locked, the saga is done. Every
+phasing choice is tested against these destinations, and individual efforts must not paint over
+them. Settled operator rulings are recorded here with dates; a child SDD builds on these rather than
+reopening them.
+
+Vocabulary (operator ruling, 2026-08-08): this construct is a **saga**, replacing the earlier
+"roadmap" term ("program" was retired 2026-08-05). A saga is a grouping of related efforts that
+overlap enough to require coordination; the distributed-systems borrowing is deliberate, since
+children commit independently and completely, intermediate states stay visible on `main`, a lead
+orchestrates rather than locks, and the whole runs to its lock or is deliberately unwound.
+Historical text in immutable records (checked ledger boxes, locked SDDs, the frozen starting-state)
+keeps the old words.
 
 ## The seven destinations
 
@@ -91,6 +99,44 @@ post-finalize immutability staying a registry/fold property rather than a model-
 and one instance-state store designed once for instance specs, integration applied-state, and
 artifact ownership records (three perspectives converge on that store).
 
+**The variant-modeling contract** (operator rulings, 2026-08-07 and 2026-08-08) has three tiers.
+First, config variants are explicit shapes: a genuine mechanism choice carries a discriminated union
+on a string `Literal` discriminator (spelled `mode` on today's action-named fields; the README's
+grammar rule governs the key), one arm per required-field shape (the discriminator tracks shape, not
+concept), the union field named for what it selects (sibling capabilities may diverge, as `auth`
+versus `placement` do), and new variants added as arms, never by pre-grouped mechanism awaiting a
+consumer; when distinct required-key shapes discriminate themselves, an untagged structural union
+emitted as plain `oneOf` is the sanctioned selector-free form. Second, anything that decides whether
+a secret reference or resource edge exists must be model-visible to the walkers: extraction reaches
+exactly what validation can select, a union may default only to the mode its omission historically
+selected (never a new arm), and extraction reads declared defaults as if written so a defaulted
+choice is graph-visible exactly like a written one. Third, cross-field validity among plain config
+fields, where the combination touches no graph edge (mutual exclusions, dependencies), may be
+enforced by validators failing loudly at load with the emitted schema under-constraining there; wave
+2's soundness rule, that the schema must never reject what the loader accepts, sanctions exactly
+that under-reporting.
+
+Three tests precede any restructure. First, try dissolving the constraint by giving the forbidden
+combination a meaning; one dissolution is ruled (operator, 2026-08-08): install-command entries
+accept multiple test predicates with AND semantics, the install skipped only when at least one test
+is declared and every declared test passes, so with zero declared tests the command always runs, and
+previously invalid documents become valid, a pure widening. Second, the common spelling must not get
+heavier; defaults, scalar shorthands, and untagged structural unions are the mitigations, and a
+restructure that makes the common case more verbose fails its own test. Third, weigh who is actually
+affected against what the payoff buys; an editor-validation gain does not justify heavier manifests
+for everyone. Permanent homes: the complete rule in `cli/agentworks/capabilities/README.md`, the
+extraction invariant in `schema/extract.py`'s docstring, the default posture's reasoning at the
+union sites themselves; the retirement pattern for old shapes is the exact-rewrite hard error plus
+the upgrade guide.
+
+Two companion rulings (operator, 2026-08-08): **secret sources are simple KV stores with shared
+config**; creation specifications (a minted credential's scopes, repos, permissions) belong to the
+consuming capability's domain, never the source or per-secret mapping, so credential minting models
+as a git-credential variant. Consequently **git-credential joins the variant contract before the
+0.14.0 cut**: a one-arm union restructure (defaulting to the stored arm per the omission-history
+rule, with the scalar shorthand as the stored arm's spelling) so minting later lands as a purely
+additive arm. Executed: PR #455, merged 2026-08-08.
+
 ### Capability descriptor (destination 3)
 
 A core-owned, typed capability-kind descriptor registered once per kind, from which graph stamping,
@@ -114,10 +160,13 @@ backend with that source's config; per-source mapping to multiple backends is no
 settled reference shape (operator, 2026-08-05) is the synthesized-source model: every per-secret
 reference names a source, and zero-config backends get synthesized sources under their current names
 (`env-var`, `prompt`) so the simple case keeps its current spelling with only one concept in the
-model. Direct backend references become a deprecated compatibility path rather than a permanent
-second branch. The resolution API evolves in the same effort: typed per-secret outcomes, explicit
-failure categories, policy-aware interaction requirements, timeouts and cleanup, and bounded-
-lifetime source clients. The simple case must not get more verbose.
+model. Direct backend references hard-error in 0.14 with the exact rewrite (operator ruling,
+2026-08-08, superseding the earlier deprecated-compatibility-path posture): no warn window, because
+prompt and env-var spellings cross unchanged through their synthesized sources and the affected
+surface is effectively the operator's own onepassword config. The resolution API evolves in the same
+effort: typed per-secret outcomes, explicit failure categories, policy-aware interaction
+requirements, timeouts and cleanup, and bounded-lifetime source clients. The simple case must not
+get more verbose.
 
 ### Harness scopes (destination 4)
 
@@ -153,13 +202,41 @@ fidelity, collector survivability, adversarial assurance) frames what any slice 
 The distiller consumes the record store and proposes reviewed PRs, never direct commits; harness
 memory is a cache, the repository is the system of record, and distillation is the flush.
 
+### Core surface: installer plugins (operator ruling, 2026-08-07)
+
+The miscellaneous built-in installers in core VM initialization (the package installers and similar
+setup steps; authoritative inventory owned by the child effort) move behind one or more system
+plugins before the 0.14.0 cut, as a child of this saga (`docs/sdd/2026-08-07-installer-plugins/`).
+The ruling deliberately accepts the reopened current-equals-target gap that a late target addition
+costs; the child's ledger entry and the 0.14.0 release gate are the catch-up plan. The core keeps
+only what is essential to what a VM is. An existing config referencing a moved surface without the
+owning plugin enabled fails with a crisp disabled error naming the surface, the plugin, and the
+exact remediation, per the remediation posture below. This gives the internal plugin boundary
+first-party exercise ahead of wave 8's external promises.
+
+### Plugin namespace and name stability (operator ruling, 2026-08-07)
+
+**One name, one source.** In-repo contributions (built-ins and system plugins) share one curated
+namespace in which a collision is a defect, caught at registration seat time with attribution, never
+a runtime policy question. Third-party plugins (wave 8) MUST NOT collide with in-repo names, and use
+their unique plugin name as a namespace so cross-plugin uniqueness is structural rather than
+policed; the guide's plugin-topic namespacing with its ownership gate (settled in the onboarding
+child's design, landing with its phase 1) is the shape wave 8 inherits. Operator declarations
+interact with provided names through the collision semantics settled in the installer-plugins child
+(name-is-the-contract; silent collision is a hard error naming both remediations;
+disable-and-redeclare is the sanctioned replacement with provenance surfaced; defaults-with-override
+is reserved for surfaces that declare it, wave 3's synthesized sources being canonical).
+
 ### Compatibility posture (all destinations)
 
-Breaking changes are acceptable across this roadmap provided each ships with a deprecation runway:
-warn in one release, reject in the next (the 0.13 to 0.14 pattern). Deprecations are dropped on
-their scheduled release rather than accumulating: wave 1 restores that baseline by clearing every
-expired surface, and each later breaking wave clears its own runway on schedule so the target state
-carries no expired compatibility. The generic deprecation framework survives every cleanup.
+Breaking changes are acceptable across this saga provided each ships with a deprecation runway: warn
+in one release, reject in the next (the 0.13 to 0.14 pattern). The runway is a default, not an
+absolute: an operator ruling may waive the warn release where the affected population is known and
+near-zero, as with wave 2's settings-reference hard errors (2026-08-07) and the secret-sources
+direct-reference break (2026-08-08). Deprecations are dropped on their scheduled release rather than
+accumulating: wave 1 restores that baseline by clearing every expired surface, and each later
+breaking wave clears its own runway on schedule so the target state carries no expired
+compatibility. The generic deprecation framework survives every cleanup.
 
 **Remediation is precise errors plus the guide, not automated migrators** (operator ruling,
 2026-08-07). A breaking change ships with hard errors that name the offending input and the exact
@@ -178,7 +255,7 @@ a hard break with guide coverage.
 
 A recurring principle, now named (operator agreement, 2026-08-05), that child SDDs should test
 designs against: contributions declare rather than do, and access arrives as an anchored, typed
-projection rather than ambient authority. Instances already settled across this roadmap: the `me`
+projection rather than ambient authority. Instances already settled across this saga: the `me`
 anchored template projection, per-integration state namespacing, declared secret references resolved
 at the operation boundary, core performing tmux and PTY operations on integrations' behalf, and the
 universal event representation. The principle governs surfaces where enforcement is real; trusted
@@ -206,11 +283,11 @@ registry's cycle detector was deliberately iterative while a finalize-pass walke
 hand-rolled, unmemoized, and exponential on diamond inheritance). Bounded walks over code-shaped
 structures (a model class's own fields) may stay naturally recursive; the discipline applies where
 the input size or shape is the operator's to choose. The closeout wave checks this property across
-everything the roadmap touched.
+everything the saga touched.
 
 ## Explicitly out of scope
 
-These are not part of this roadmap's target state. They are recorded so their triggers are not lost,
+These are not part of this saga's target state. They are recorded so their triggers are not lost,
 and so no wave accidentally forecloses them:
 
 - **The living graph** (per-instance specs introducing post-finalize graph updates). A future SDD;
@@ -218,13 +295,13 @@ and so no wave accidentally forecloses them:
 - **The herdr rendering backend.** Gated on its spike per the 2026-07-30 ruling; the
   ephemeral-agents direction and observability's authoritative state reporting are the revisit
   triggers.
-- **The named-console-template selector SDD** (`2026-07-19`, drafted pre-roadmap) and the
+- **The named-console-template selector SDD** (`2026-07-19`, drafted pre-saga) and the
   companion-shell and resilient-attach wins unbundled from the herdr FRD. Standalone work that
-  proceeds independently of this roadmap.
+  proceeds independently of this saga.
 - **The agentworks.build website** (`docs/sdd/2026-08-07-website/`, seeded 2026-08-07 at operator
-  request as a standalone SDD, deliberately not a child: it consumes roadmap outputs rather than
-  gating any wave, and adding it late would reopen the current-equals-target gap). Relationship: the
-  site renders from the same authoritative sources as the guide and reference surfaces, never a
+  request as a standalone SDD, deliberately not a child: it consumes saga outputs rather than gating
+  any wave, and adding it late would reopen the current-equals-target gap). Relationship: the site
+  renders from the same authoritative sources as the guide and reference surfaces, never a
   hand-maintained second copy, and its growth path (web-rendered guide topics, schema-derived
   reference) consumes wave 2 and onboarding surfaces as they land on `main`. Launch timing may pair
   with the 0.14.0 cut as an operator call without structural coupling.

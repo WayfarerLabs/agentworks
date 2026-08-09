@@ -1,7 +1,10 @@
-"""Tests for ``agentworks.resources.render`` -- the framework-shared
-origin renderer that backs both ``agw resource describe`` (cross-kind)
-and ``agw secret describe`` (per-kind). The renderer lives in the
-framework layer so kind-specific modules don't drift from each other.
+"""Tests for ``agentworks.resources.render``: the framework-shared origin
+renderer that backs both ``agw resource describe`` (cross-kind) and
+``agw secret describe`` (per-kind). The renderer lives in the framework
+layer so kind-specific modules don't drift from each other.
+
+The host-path spelling these renderers embed is tested next to the rule
+itself, in ``test_path_rendering.py``.
 """
 
 from __future__ import annotations
@@ -10,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from agentworks.resources.origin import Origin
-from agentworks.resources.render import format_file_path, format_origin_line, format_origin_location
+from agentworks.origin import Origin
+from agentworks.resources.render import format_origin_line
 
 
 def test_format_origin_line_handles_none() -> None:
@@ -70,14 +73,6 @@ def test_format_origin_line_system_plugin_without_plugin_degrades_gracefully() -
     assert format_origin_line(origin) == "system-plugin (agentworks.plugins.apt)"
 
 
-def test_format_origin_location_system_plugin_falls_through_to_line() -> None:
-    """A system-plugin origin carries no file:line, so the bare-location
-    renderer falls through to the labelled ``format_origin_line`` form.
-    """
-    origin = Origin.system_plugin(plugin="apt", source="agentworks.plugins.apt")
-    assert format_origin_location(origin) == "system-plugin apt (agentworks.plugins.apt)"
-
-
 def test_format_origin_line_raises_on_unknown_variant() -> None:
     """A future ``Origin`` variant must be wired through the renderer
     explicitly; failing loudly catches the silent-drift case.
@@ -89,22 +84,3 @@ def test_format_origin_line_raises_on_unknown_variant() -> None:
     )()
     with pytest.raises(AssertionError):
         format_origin_line(fake)  # type: ignore[arg-type]
-
-
-def test_format_file_path_uses_tilde_for_home(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
-    rendered = format_file_path(tmp_path / "agentworks" / "config.toml")
-    assert rendered == "~/agentworks/config.toml"
-
-
-def test_format_file_path_falls_back_to_absolute_outside_home(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
-    rendered = format_file_path(Path("/etc/agentworks.toml"))
-    assert rendered == "/etc/agentworks.toml"
-
-
-def test_format_file_path_relative_path_renders_as_is() -> None:
-    """Relative ``Path`` inputs render verbatim -- only absolute paths
-    are candidates for the ``~/`` rewrite.
-    """
-    assert format_file_path(Path("config.toml")) == "config.toml"

@@ -1,7 +1,7 @@
 # Phasing
 
 - Status: Active sequencing
-- Last updated: 2026-08-05
+- Last updated: 2026-08-08
 
 This document records only ordering: the dependency structure that forces the sequence, the waves,
 and the release mapping. What each wave builds is defined by `target-state.md`; where the system
@@ -38,7 +38,7 @@ Two things this graph deliberately does not serialize:
   frontend every other wave assumes is in place.
 - **Wave 1: the 0.14 cleanup release.** The deprecation-removal child SDD, built on post-phase-1
   `main` (the efforts overlap in session-template loading, manifest decode, and migration planning).
-  Budget fixture conversion as first-class work. Fold in the pre-roadmap SDD closeouts listed in
+  Budget fixture conversion as first-class work. Fold in the pre-saga SDD closeouts listed in
   `current-state.md`. Ships as one breaking-cleanup release with phase 1.
 - **Design track (parallel with wave 1):** settle, in rough order: the capability-kind descriptor
   contract; the reference-field metadata vocabulary; the scope-participation contract shared by
@@ -69,21 +69,29 @@ Two things this graph deliberately does not serialize:
   real event stream. This closes the memory-learning loop.
 - **Wave 7: structured control.** Observability phase 2 (validated intents, ACP projection,
   stale-decision rejection).
-- **Closeout wave (gates the roadmap lock; operator ruling, 2026-08-06):** after the waves complete
-  and before the roadmap locks, one comprehensive review of everything the roadmap changed, in
-  strict priority order: (1) security above all, reviewing the accumulated whole as one attack
-  surface (the trust-based integration discipline, the gated graph projection and guide content
-  channel, secret-source resolution, the event stream) rather than per-change; (2) test
-  consolidation and removal, with the working assumption that the accreted unit-test estate can be
-  cut in half, maybe more, without sacrificing any coverage or quality; (3) code cleanup: file-size
-  limits, vestigial code removal, package renaming and refactoring left behind by the waves' moves.
-  Findings are fixed before the roadmap locks.
+- **Closeout wave (gates the saga lock; operator ruling, 2026-08-06):** after the waves complete and
+  before the saga locks, one comprehensive review of everything the saga changed, in strict priority
+  order: (1) security above all, reviewing the accumulated whole as one attack surface (the
+  trust-based integration discipline, the gated graph projection and guide content channel,
+  secret-source resolution, the event stream) rather than per-change; (2) test consolidation and
+  removal, with the working assumption that the accreted unit-test estate can be cut in half, maybe
+  more, without sacrificing any coverage or quality; (3) code cleanup: file-size limits, vestigial
+  code removal, package renaming and refactoring left behind by the waves' moves, and an SDD
+  tombstoning sweep (operator ruling, 2026-08-08): superseded SDDs' contents are deleted down to
+  their `locked.md` tombstones per the sdd skill, with `2026-07-01-resource-manifests` the first
+  identified candidate (its lockfile already carries the supersession record) and individual SDDs
+  tombstoned earlier whenever reading them actively misleads. Findings are fixed before the saga
+  locks.
 - **Wave 8: external plugin API.** Registration conformance, discovery, namespacing, versioning, and
   the distribution-trust model, promised publicly only once the internal contracts survive
   first-party use.
 
 ## Tracks
 
+- **Installer-plugins child (pre-0.14 core slimming): seeded 2026-08-07, launchable whenever.** The
+  R1 inventory has no dependencies; the plugin moves consume wave 2's descriptor registration and
+  the guide topics consume onboarding's first slice, both of which precede the 0.14.0 cut this child
+  gates (see release mapping).
 - **Onboarding-and-discovery child (destination 1): seeds at wave 1 completion, runs parallel to
   wave 2.** Slotted as early as sensible without rework: it teaches the post-cleanup 0.14 surface,
   so nothing wave 1 removes gets taught, and its first slice (onboarding harness plugin and skills,
@@ -92,21 +100,38 @@ Two things this graph deliberately does not serialize:
   content) consumes wave 2's emission as it lands. Plan A onboarding does not depend on the wave 6
   artifacts layer at all.
 
-Adjacent standalone work, explicitly out of roadmap scope (see `target-state.md`): the
+Adjacent standalone work, explicitly out of saga scope (see `target-state.md`): the
 named-console-template selector SDD, the companion-shell command and resilient session attach
 unbundled from the herdr FRD, herdr itself (behind its own spike gate), and opportunistic doc/config
-hygiene. An active roadmap does not pause other development: anything outside its scope can be
-picked off whenever bandwidth allows, on its own merits and its own schedule.
+hygiene. An active saga does not pause other development: anything outside its scope can be picked
+off whenever bandwidth allows, on its own merits and its own schedule.
 
 ## Release mapping
 
 - **0.14.0 (held; operator ruling, 2026-08-06):** the breaking cleanup does not ship alone. The cut
   waits for the guide first slice (guide command core, `concept-onboarding`, the README bootstrap),
   so the release that rejects old inputs also ships the CLI that teaches the new ones; newcomers
-  ride the forgiving 0.13.0 until then. The 0.13.0 warnings stay true because the version number
-  attaches to the breaking content, not the date. If wave 2's generic-discriminator hard error lands
-  in the same window, it folds in: one well-cushioned breaking release instead of two. While `main`
-  holds unreleased breaking changes, urgent operator fixes ship from a `0.13.x` backport branch.
+  ride the forgiving 0.13.0 until then. That gate is partially satisfied: the guide command core and
+  `concept-onboarding` merged 2026-08-08 via PR #428, while the README bootstrap arrives with the
+  onboarding child's bootstraps phase, so the gate stays open until it lands. The installer-plugins
+  child (operator ruling, 2026-08-07; launchable whenever, see Tracks) also gates the cut: its moves
+  are breaking and belong in the same well-cushioned release. The 0.13.0 warnings stay true because
+  the version number attaches to the breaking content, not the date. If wave 2's
+  generic-discriminator hard error lands in the same window, it folds in: one well-cushioned
+  breaking release instead of two. The vm-platform mode contract (PR #444, merged 2026-08-08) folds
+  in the same way: its written-old-shape hard errors ride the cushioned release, and its
+  omission-equals-historical-default posture means manifests that never wrote the retired blocks
+  cross without edits. The git-credential one-arm union restructure (operator ruling, 2026-08-08,
+  ahead of credential minting) landed 2026-08-08 via PR #455, following the same pattern, together
+  with the survey-confirmed sibling restructures: the env structural union with legacy
+  null-companion canonicalization, the github repos/owner scope-union dissolution, and the
+  install-command multi-test widening. That gate is satisfied. The secret-sources reference break
+  rides the cut as well (operator ruling, 2026-08-08): direct backend references hard-error with the
+  exact rewrite and no warn window, because prompt and env-var spellings cross unchanged through
+  synthesized sources and the affected surface is effectively the operator's own onepassword config;
+  wave 3's breaking slice therefore gates the cut alongside the installer-plugins child. While
+  `main` holds unreleased breaking changes, urgent operator fixes ship from a `0.13.x` backport
+  branch.
 - **Later:** remaining waves map to releases as they prove out; no need to pin numbers now.
 
 ## Open ordering decisions

@@ -55,7 +55,7 @@ if TYPE_CHECKING:
     from agentworks.db import VMRow
     from tests.conftest import CapturedOutput
 
-_CONFIG = {"subscription_id": "sub-A", "resource_group": "rg1", "region": "eastus"}
+_CONFIG = {"subscription_id": "sub-A", "resource_group": "rg1", "region": "eastus", "auth": {"mode": "ambient"}}
 _DETECTED = "198.18.0.7"
 _DETECTED_PREFIX = f"{_DETECTED}/32"
 
@@ -137,6 +137,12 @@ class TestCreate:
             # No Tailscale key: create skips the inline bootstrap wait,
             # keeping the test hermetic (no SSH).
             tailscale_auth_key=None,
+            # The vm-template layer's resolved defaults, which is the only
+            # shape a platform ever sees (the hardware fields are required).
+            cpus=4,
+            memory_gib=8,
+            disk_gib=50,
+            swap_gib=4,
         )
 
     def test_create_provisions_deny_baseline_and_scoped_bootstrap_allow(self, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -40,10 +40,72 @@ Fields:
 - **`manifests`** (optional): an importlib-resources package anchor whose `manifests/` subdirectory
   holds the plugin's bundled YAML resource manifests (the same envelope operators write; see
   `docs/guides/resources.md`). `None` when the plugin ships no manifests.
+- **`guide_topics`**: an inert tuple of `TopicContribution` records consumed only while building an
+  `agw guide` catalog. It does not execute during plugin registration or ordinary commands.
 - **`required_scopes`** and **`commands`**: reserved, inert placeholders (see below).
 
 The descriptor depends on nothing in the capability or registry machinery, so it is constructible in
 a test without a registry. It becomes valid or rejected only when the installed index registers it.
+
+### Guide contribution boundaries
+
+A plugin may contribute an implementation topic it owns, a declarable resource topic registered
+through its owner adapter, or a `plugin/<plugin>/<topic>` concept. It cannot claim core `concept-*`
+topics, bare kind topics, another plugin's namespace, or another owner's resource. The guide catalog
+isolates an invalid plugin topic while retaining valid core and plugin topics. The full index
+reports rejected content and exits 1, while an unrelated valid topic remains a clean response. A
+retained topic whose live projection is unavailable keeps its authored teaching, reports the scoped
+issue, and exits 1.
+
+Every renderer-owned level-2 heading in raw CLI Markdown carries the exact literal `⟦AGW framework⟧`
+marker. After bounded input validation, HTML entity decoding, and Unicode normalization, the
+contribution contract rejects either delimiter, whether literal or HTML-entity encoded, in authored
+topic titles, summaries, and Markdown. An authored contribution therefore cannot emit that exact
+literal marker in raw CLI Markdown. Other authored Markdown and HTML, including ordinary headings,
+remain authored content and are not relabeled.
+
+The marker is a source-provenance convention, not an anti-spoof guarantee for arbitrary downstream
+Markdown, HTML, or CSS renderers, images, or styling. It grants no authority or trust to the content
+that follows.
+
+Guide contributions are data, not callbacks. Expression markers in authored titles, summaries, and
+Markdown are accepted only inside a closed, same-line literal delimited by one unescaped backtick on
+each side. The backticks cannot touch another backtick. Multi-backtick spans, fenced blocks,
+multiline spans, escaped backticks, unmatched spans, headings, HTML, and prose do not exempt a
+marker. Guide rendering never evaluates the accepted literal. Terminal control bytes are removed
+from rendered output. Action records accept three exact token forms: a literal that starts with an
+ASCII letter or digit and then contains only ASCII letters, digits, `.`, `_`, `:`, `/`, or `-`; a
+flag that starts with `-` or `--`, then a lowercase ASCII letter or digit, and continues with
+lowercase ASCII letters, digits, or `-`; or an exact registered input placeholder such as
+`$SECRET_NAME`. Valid examples include `agw`, `vm-template/demo`, `secret_name`, `v1.2`, `-v`, and
+`--non-interactive`. Invalid examples include the absolute path `/tmp/file`, the tilde path
+`~/file`, `--flag=value`, `*.yaml`, and `#comment`. Each title is limited to 256 UTF-8 bytes, each
+summary to 2 KiB, each authored block to 64 KiB, and one topic to 64 blocks, 64 related links, and
+256 KiB of authored markdown. Every related link must be a canonical topic slug no larger than 317
+UTF-8 bytes. A field-reference section accepts at most 32 path items of 256 UTF-8 bytes each. Keep
+authored files under the owning package's `guide-content/` directory so the wheel package-data
+assertion exercises them.
+
+An `ActionList` contains inert `GuideAction` records, never an executor. Each action provides at
+most 32 inputs and exactly one of a literal-token command or bounded platform-neutral manual steps.
+Command and verification sequences contain at most 64 tokens, each at most 1 KiB. Input names are at
+most 64 bytes, input descriptions are at most 2 KiB, and preconditions, expected states, refusal
+alternatives, and manual instructions are each at most 8 KiB. One action list contains at most 32
+actions and 128 KiB of action data. Action IDs are unique across all action lists in a topic, and
+action data also counts toward the topic's 256 KiB bound. Rendered actions state their inputs,
+consent boundary, expected result, optional verification, and useful refusal alternative without
+executing any operation. The same expression-marker scanner covers every rendered action prose field
+and input description. Command and verification tokens remain under the closed literal grammar.
+
+`FieldReference` and `Sample` blocks contain selectors only. They read
+`agentworks.manifests.reference` and `agentworks.manifests.samples` directly, never another CLI's
+text or a copied field list. Field references are valid only for kind and capability-implementation
+anchors. Samples are valid only for declarable bare kinds. Keep a resource topic linked to its bare
+kind instead of attaching schema blocks to the resource instance. Field descriptions and alternative
+summaries use the shared prose normalization. Literal defaults, examples, choices, and constraints
+retain their exact rendered values inside Markdown code spans sized and padded for their backticks
+and edge spaces. After YAML rendering, backslashes, carriage returns, line feeds, and tabs become
+distinct visible escape sequences so one scalar cannot break the reference row across lines.
 
 ## Shipping a plugin
 
@@ -57,8 +119,8 @@ _INSTALLED_MODULES: tuple[_PluginModule, ...] = (
 )
 ```
 
-The index ships the installed system plugins (`onepassword`, `claude`, `proxmox`, `azure`, `codex`);
-each listed module is registered and seated at import. On import the index:
+Every module listed there is registered and seated at import; `agw doctor`'s **System plugins**
+roster is what a given build actually ships. On import the index:
 
 - registers each plugin, wrapping any failure with the real module name (a bad descriptor is a
   curation bug that reads as `system plugin '<module>' failed to register: ...`, not an opaque
@@ -66,11 +128,114 @@ each listed module is registered and seated at import. On import the index:
 - rejects a duplicate plugin name as a typed error.
 
 `register_plugin` validates the **whole** descriptor first (name shape; every capability kind has an
-adapter; every impl is a class with a non-empty, `/`-free `name`; no intra-descriptor name
-collisions), then seats every impl **atomically**: no capability registry is touched until every
-impl across the descriptor is known seatable, so a mid-descriptor failure can never leave orphaned
-impls behind. Registration is idempotent per impl name; a cross-plugin or plugin-versus-built-in
-name clash on the same capability is a typed error naming the occupant's real origin.
+adapter; every impl is a class with a non-empty, `/`-free `name`; every impl **conforms to its
+kind's contract**, see below; no intra-descriptor name collisions), then seats every impl
+**atomically**: no capability registry is touched until every impl across the descriptor is known
+seatable, so a mid-descriptor failure can never leave orphaned impls behind. Registration is
+idempotent per impl name; a cross-plugin or plugin-versus-built-in name clash on the same capability
+is a typed error naming the occupant's real origin.
+
+### Contract conformance
+
+Every impl is checked against its kind's descriptor (`agentworks/capabilities/descriptor.py`) before
+anything is seated, so a class that merely looks plausible is refused at registration rather than
+failing far from the mistake. The checks:
+
+- **Contract**: derives from the kind's capability base. `secret-backend`'s contract is a `Protocol`
+  rather than a base class, so it cannot be checked nominally; the attribute and operation checks
+  below are its enforcement, which is what a Protocol's enforcement is anyway.
+- **Metadata**: `name` (non-empty, `/`-free) and `description`, readable as class attributes.
+- **Attributes**: the kind's other non-operation members are present (`secret-backend`'s
+  `interactive`, which the resolve loop reads on every chain pass). Empty for the three base-class
+  kinds, whose base supplies these to every subclass.
+- **Constructibility**: nothing would stop the class being constructed (no unimplemented
+  `@abstractmethod`). Checked structurally; the impl is never constructed to find out.
+- **Operations**: the domain operations the framework depends on are present and callable.
+- **Config model**: the impl declares a `config_model` (see [Declaring config](#declaring-config)),
+  it extends the base its kind's contract names, it can be built, and for a kind dispatched by a
+  tagged union it tags itself with its own name. A model that could never be reached from a manifest
+  is refused where its author can see it rather than going quietly unaddressable.
+- **Contract version**: the impl's `contract_version` equals the version this build supports. Every
+  impl of every kind spells it; nothing defaults it, so a version claim is always made rather than
+  inherited. Exact equality, so a contract change is a hard cutover.
+
+Each failure is a `PluginError` naming the plugin, the kind, the impl, and what is missing.
+
+## Declaring config
+
+A capability implementation DECLARES the shape of its config as a model, and the core does
+everything else with it: shape validation, reference extraction, defaulting, JSON Schema emission,
+`agw resource sample`, and `agw resource describe-kind` are all derived views of that one
+declaration. **No plugin code is invoked for any of them**, which is what keeps a misbehaving plugin
+out of the registry's finalize pass and what makes it impossible for a plugin's validator and its
+documentation to disagree.
+
+```python
+from typing import Annotated, ClassVar, Literal
+
+from pydantic import Field
+
+from agentworks.schema import AgwModel, NonEmptyStr, SecretRef
+
+
+class ExampleCloudConfig(AgwModel):
+    """An Example Cloud region, as one vm-site points at it."""
+
+    name: Literal["example-cloud"]
+    """The platform this config is for."""
+
+    region: NonEmptyStr = Field(examples=["us-west-2"])
+    """The region new VMs are created in."""
+
+    api_token: Annotated[
+        NonEmptyStr,
+        SecretRef(usage="the Example Cloud API token", default_template="example-cloud-token"),
+    ]
+    """The secret holding the API token's value. Never the value itself:
+    the field NAMES a secret in the framework's secret system."""
+
+    instance_prefix: NonEmptyStr = "agw"
+    """The name prefix new VMs are created under."""
+
+
+class ExampleCloudPlatform(VMPlatform):
+    name: ClassVar[str] = "example-cloud"
+    description: ClassVar[str] = "Example Cloud VMs (region-scoped)"
+    contract_version: ClassVar[int] = 1
+    config_model: ClassVar[type[AgwModel]] = ExampleCloudConfig
+```
+
+A site then writes `platform: {name: example-cloud, region: us-west-2}`, and `api_token` resolves to
+the `example-cloud-token` secret because the field was omitted. An OMITTED reference field and an
+explicit `null` both mean "the owner-templated default", so leaving it out is how an operator takes
+the default rather than how they opt out of the dependency.
+
+What the base and the markers buy you:
+
+- **`AgwModel` is strict, frozen, and closed-world.** A key the model does not declare is a load
+  error naming the fields it does, a wrong type is an error rather than a coercion, and the operator
+  reads it framed as their resource with the file and line they wrote it on.
+- **The attribute docstring IS the field's operator-facing description.** It is what
+  `agw resource describe-kind`, the generated sample, and the editor's hover text render, so write
+  it for an operator. Do not restate the field list anywhere else; a second copy is free to drift.
+- **`SecretRef` / `ResourceRef` mark a field that NAMES another resource**, optionally with an
+  owner-templated default (`git-token-{owner_name}`). That marker is the single authored place the
+  reference semantics live: extraction reads it to build the dependency graph, validation fills the
+  default from it, emitted JSON Schema carries it as `x-agw-ref`, and it is what later authorizes an
+  op to read that secret through `ctx.secret(name)`.
+- **A capability that accepts no configuration still declares a model**, one with no fields beyond
+  its tag. "Accepts nothing" has to be something an author SAYS, not something they get by
+  forgetting.
+
+Whether the model carries a `name` tag depends on how the kind is dispatched: `vm-platform`,
+`harness-integration`, and `git-credential-provider` are selected by a `name` key inside their
+tagged table, so their models tag themselves; `secret-backend` is selected by the map key its value
+sits under, so its mapping model carries no tag, and it extends `AgwRootModel` rather than
+`AgwModel` because a mapping may be a bare string. Conformance checks whichever applies.
+
+The capability model as a whole, including how a config is offered per facet and what the framework
+does with the declaration at each lifecycle stage, is
+[`../capabilities/README.md`](../capabilities/README.md).
 
 ## The enablement model: opt-in, present-but-disabled
 
@@ -120,9 +285,11 @@ A plugin contributes implementations of existing capability kinds only:
 - **`git-credential-provider`**: how a git token is obtained and served.
 - **`secret-backend`**: where a secret's value is read from.
 
-Each impl subclasses the kind's capability base class and exposes `name` / `description` class
-attributes. The published row is read-only and lists, describes, and is referenced like any other
-resource of that kind.
+Each impl subclasses the kind's capability base class (except `secret-backend`, whose contract is a
+`Protocol`, so its impls satisfy it structurally) and exposes `name` / `description` class
+attributes. Registration checks that conformance before seating anything; see
+[Contract conformance](#contract-conformance). The published row is read-only and lists, describes,
+and is referenced like any other resource of that kind.
 
 **Bundled manifests** are ordinary YAML resource documents the plugin ships, under the `manifests/`
 subdirectory of the package `manifests` points at. Only declarable kinds whose consumption sites are

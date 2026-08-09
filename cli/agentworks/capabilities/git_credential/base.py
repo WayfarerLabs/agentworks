@@ -1,8 +1,8 @@
 """Base interface for git credential providers.
 
 A git credential provider is a capability (see ``capabilities/README.md``):
-it validates its own ``provider_config`` block (``validate``),
-declares the secret its token comes from, checks that token against the
+it DECLARES the shape of its own config block as a model,
+including the secret its token comes from, checks that token against the
 host at the post-resolve ``runup`` stage, and produces the credential
 materials (``credential_lines`` / ``helper_entry``) as its op. Token
 resolution itself lives in the framework: each provider declares a
@@ -16,15 +16,37 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
+
+from pydantic import Field
 
 from agentworks.capabilities.base import Capability
+from agentworks.schema import (
+    AgwModel,
+    NonEmptyStr,
+    ScalarShorthand,
+    SecretRef,
+    UnionScalarShorthand,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.capabilities.base import RunContext
-    from agentworks.resources.reference import ConfigReference
+
+
+class TokenSourcedConfig(AgwModel):
+    """Version 1 provider config, retained only for registration errors.
+
+    Third-party version 1 providers may still import this formerly public
+    base. Keeping the old shape importable lets registration reject their
+    declared contract version with the migration message. The version 2
+    descriptor refuses this base, so a provider cannot claim version 2
+    while retaining the outer scalar/null token contract.
+    """
+
+    token: Annotated[NonEmptyStr, SecretRef(usage="the auth token", default_template="git-token-{owner_name}")]
+    """The version 1 secret-name field."""
 
 
 def _http_probe(url: str, headers: dict[str, str], *, timeout: float = 5.0) -> tuple[int, bytes, dict[str, str]]:
@@ -49,53 +71,43 @@ def _http_probe(url: str, headers: dict[str, str], *, timeout: float = 5.0) -> t
         return (exc.code, body, {k.lower(): v for k, v in exc.headers.items()})
 
 
-def credential_name_from_owner(owner: str) -> str:
-    """The credential name from a standardized ``git-credential/<name>``
-    owner. Resource names cannot contain ``/``, so the split
-    is exact."""
-    return owner.split("/", 1)[1] if "/" in owner else owner
+class StoredToken(AgwModel):
+    """Obtain this credential's token from a stored secret.
 
-
-def default_token_secret(credential_name: str) -> str:
-    """The per-credential default token secret name."""
-    return f"git-token-{credential_name}"
-
-
-def token_dependency(owner: str, config: Mapping[str, object]) -> ConfigReference | None:
-    """The token-secret reference a token-sourcing provider implies from
-    its ``provider_config``: the ``token`` field names the secret
-    (default ``git-token-<name>``). Shared by github and azdo (both
-    source a PAT from a mapped secret today). A minting provider would
-    instead declare its bootstrap secret(s) here (or none).
-
-    Total and non-throwing (the extraction half of the split): the
-    edge's identity is the token secret name, so a malformed ``token``
-    field (present but not a non-empty string) makes the name underivable
-    and returns ``None`` (the edge is omitted) rather than raising;
-    :func:`validate_token_field` is where that shape error surfaces.
+    This is deliberately one arm of a real tagged union even though it is
+    the only arm today. Minting arrives later as an additive arm; its
+    scopes, repositories, permissions, and other creation parameters
+    belong to the credential domain, never to this secret reference.
     """
-    from agentworks.resources.reference import ConfigReference
 
-    raw = config.get("token")
-    if raw is None:
-        name = default_token_secret(credential_name_from_owner(owner))
-    elif isinstance(raw, str) and raw:
-        name = raw
-    else:
-        return None
-    return ConfigReference(kind="secret", name=name, usage="the auth token")
+    scalar_shorthand: ClassVar = ScalarShorthand(annotation=str, field="secret")
+    """A bare ``token: <name>`` is this arm with ``secret`` filled."""
+
+    mode: Literal["stored"]
+    """Selects stored-secret token acquisition."""
+
+    secret: Annotated[NonEmptyStr, SecretRef(usage="the auth token", default_template="git-token-{owner_name}")]
+    """The secret holding this credential's personal access token."""
 
 
-def validate_token_field(owner: str, config: Mapping[str, object]) -> None:
-    """The throwing shape check for the ``token`` field: a present token
-    must be a non-empty secret name (a string). The correctness half of
-    the split, paired with :func:`token_dependency`.
-    """
-    from agentworks.errors import ConfigError
+TokenAcquisition = Annotated[
+    StoredToken,
+    UnionScalarShorthand(discriminator="mode", arm=StoredToken),
+]
+"""How a git credential obtains its token, as a one-arm tagged union."""
 
-    raw = config.get("token")
-    if raw is not None and (not isinstance(raw, str) or not raw):
-        raise ConfigError(f"{owner}.token must be a non-empty secret name (a string)")
+
+class TokenAcquiringConfig(AgwModel):
+    """The config every token-acquiring git credential provider shares."""
+
+    # Stored is the only legal default because omission historically
+    # sourced a stored secret. A future arm must be operator-selected and
+    # must never replace this default. Raw data is intentional: the owner
+    # boundary fills the stored arm's templated ``secret`` before pydantic
+    # validates it, which a constructed instance could not express.
+    token: TokenAcquisition = Field(default={"mode": "stored"})  # type: ignore[assignment]
+    """How this credential obtains its token. Defaults to the stored arm;
+    a bare secret name is that arm's shorthand."""
 
 
 @dataclass(frozen=True)
@@ -118,19 +130,21 @@ class GitCredentialProvider(Capability):
 
     A thin-wrapper capability (``git-credential`` over
     ``git-credential-provider``): the ``git-credential`` consuming
-    resource names a provider and supplies its ``provider_config``, and
-    the instance does the real work. It is constructed by the
-    composition roots as ``cls(credential_name, provider_config,
-    description=...)``: bound to one declared credential, never
+    resource names a provider in one tagged ``spec.provider`` table and
+    the rest of that table IS this config, so the instance does the real
+    work. It is constructed by the composition roots as
+    ``cls(credential_name, config, description=...)``, with the
+    capability's OWN keys and not the tag: bound to one declared
+    credential, never
     resolved secret values (see the ``Capability`` lifecycle). The
     declared token secret joins the operation's boundary union through
     the holding node's ``secret_refs`` and its value arrives through
     the context at ``runup`` / op time.
 
     Subclasses (``GitHubCredentialProvider``, ``AzDOCredentialProvider``)
-    override ``dependencies`` / ``validate`` (declaring the token secret
-    and validating any scope shape), ``_verify_token`` (the authenticated
-    probe), and the ops ``helper_entry`` / ``credential_lines``.
+    declare their ``config_model`` (the token secret and any scope
+    fields), implement ``_verify_token`` (the authenticated probe), and
+    implement the ops ``helper_entry`` / ``credential_lines``.
     """
 
     owner_kind: ClassVar[str] = "git-credential"
@@ -138,24 +152,37 @@ class GitCredentialProvider(Capability):
     def __init__(
         self,
         owner_name: str,
-        config: Mapping[str, object],
+        config: Mapping[str, object] | None = None,
         *,
         description: str | None = None,
     ) -> None:
-        super().__init__(owner_name, config)
+        # An omitted config is an EMPTY one, not a missing one: an
+        # unscoped credential writes nothing but the tag and its token
+        # secret comes from the owner template. Defaulted here
+        # rather than on each provider, which is where the two shipped
+        # ones used to spell it.
+        super().__init__(owner_name, config or {})
         # Display sugar for the consuming resource's name; not part of
-        # the capability's config (which is provider_config alone).
+        # the capability's config (which is the tagged table's other keys).
         self._description = description
 
     @property
+    def config(self) -> TokenAcquiringConfig:
+        """This credential's validated provider config."""
+        return self._config_as(TokenAcquiringConfig)
+
+    @property
     def secret_name(self) -> str:
-        """The token secret this credential sources its PAT from: the
-        one secret its ``dependencies`` declared (default
-        ``git-token-<name>``). Named by the helper's rejection
-        diagnosis and read from the context at ``runup``."""
-        if self._secret_refs:
-            return self._secret_refs[0].name
-        return default_token_secret(self.owner_name)
+        """The token secret this credential sources its PAT from
+        (default ``git-token-<name>``). Named by the helper's rejection
+        diagnosis and read from the context at ``runup``.
+
+        A plain field read: the model layer resolved the default at
+        validation, so there is nothing left here to fall back to. The
+        fallback this replaced was the last consumer-side defaulting of a
+        modeled field on this path (FR15).
+        """
+        return self.config.token.secret
 
     @property
     def store_username(self) -> str:

@@ -12,6 +12,8 @@ from agentworks.workspaces.acls import apply_workspace_acls
 from agentworks.workspaces.tmuxinator import console_session_name, generate_config
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from agentworks.config import Config
     from agentworks.db import VMRow
     from agentworks.ssh import SSHLogger
@@ -216,8 +218,13 @@ def generate_vscode_workspace(
     config: Config,
     ws_name: str,
     workspace_path: str,
-) -> str:
-    """Generate a .code-workspace file for VS Code SSH Remote."""
+) -> Path:
+    """Generate a .code-workspace file for VS Code SSH Remote.
+
+    Returns the host path of the file written. It used to return ``str``,
+    which forced every caller that reports it to an operator to re-wrap it
+    to render the path the standard home-relative way.
+    """
     from agentworks.ssh_config import ssh_host_alias
 
     # Use the SSH config alias so VS Code picks up the right host/user/key
@@ -237,4 +244,4 @@ def generate_vscode_workspace(
     vscode_path = vscode_dir / f"{ws_name}.code-workspace"
     vscode_path.write_text(json.dumps(ws_file, indent=2) + "\n")
 
-    return str(vscode_path)
+    return vscode_path

@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from agentworks.capabilities import vm_platform as vm_platforms
+from agentworks.capabilities.descriptor import descriptor_for
+from agentworks.capabilities.publish import publish_capability_rows
 from agentworks.errors import ConfigError
 from agentworks.manifests.loader import load_manifests
 from agentworks.resources import KIND_REGISTRY, Registry
@@ -35,7 +36,7 @@ def test_publisher_adds_one_row_per_core_built_in_platform(
 
     stub_platform_support(monkeypatch)
     registry = Registry.empty()
-    vm_platforms.publish_to(registry)
+    publish_capability_rows(registry, descriptor_for("vm-platform"))
     names = {entry.name for entry in registry.iter_kind("vm-platform")}
     assert names == {"lima", "wsl2"}
     row = registry.lookup("vm-platform", "lima")
@@ -60,7 +61,7 @@ def test_publisher_publishes_unsupported_platform_unconditionally(
         classmethod(lambda cls: "Windows only"),
     )
     registry = Registry.empty()
-    vm_platforms.publish_to(registry)
+    publish_capability_rows(registry, descriptor_for("vm-platform"))
     names = {entry.name for entry in registry.iter_kind("vm-platform")}
     # Core built-ins only; proxmox's and azure-vm's rows come from their plugins.
     assert names == {"lima", "wsl2"}

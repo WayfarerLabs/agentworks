@@ -127,10 +127,10 @@ can roll back (e.g. `vm create` during the provisioning phase, `workspace create
 On every platform the `vm create` provisioning-phase rollback also deletes the partially created
 backend state: Azure the cloud resource set (VM, NIC, public IP, NSG, vnet, disk), which can take a
 minute or two; Proxmox the partially cloned VM (cancelling a still-running clone task first); Lima
-the instance (local, or on the site's `vm_host` for a remote site); WSL2 the distro plus its install
-directory. A second Ctrl-C abandons that cleanup, printing what to remove manually: the resource
-group and name prefix, the node and VMID, or the exact removal command
-(`limactl delete --force <name>`, run on the `vm_host` for a remote site, or
+the instance (local, or on the site's placement host for an ssh-placed site); WSL2 the distro plus
+its install directory. A second Ctrl-C abandons that cleanup, printing what to remove manually: the
+resource group and name prefix, the node and VMID, or the exact removal command
+(`limactl delete --force <name>`, run on the placement host for an ssh-placed site, or
 `wsl --unregister <name>` plus deleting the install directory it names). Where rollback isn't
 possible (`vm reinit`, `agent reinit`, the init phase of `vm create`) it prints a recovery hint: the
 next command to run (`vm reinit`, `vm delete --force`, ...). Every cancellation exits with the
@@ -162,9 +162,9 @@ registers on every host and reports not-ready when this host lacks what it needs
 Windows-only; a local Lima site needs `limactl`; a platform may simply not be installed, or its
 plugin not enabled): a not-ready site still lists and describes, using it is an error naming the
 requirement, and `agw doctor` shows each platform's and site's state with the reason. Run
-`agw resource sample vm-site` for commented, ready-to-edit examples (an Azure site, a remote-Lima
-site with a `vm_host` key). The former `agw vm-host` registry is gone: a remote Lima host is now
-just a vm-site.
+`agw resource sample vm-site` for a commented, ready-to-edit document, and
+`agw resource describe-kind vm-platform/azure-vm` (or any other platform) for that platform's own
+fields. The former `agw vm-host` registry is gone: a remote Lima host is now just a vm-site.
 
 > **Note on WSL2:** WSL2 distros share the Windows workstation's lifecycle. They idle-shut after
 > ~60s of no `wsl.exe` activity (`vmIdleTimeout` in `.wslconfig`) and do not survive workstation
@@ -179,6 +179,7 @@ just a vm-site.
 | `agw vm create <name>`                              | Create a new VM (provision + initialize)                      |
 | `agw vm list`                                       | List VMs with status and resources                            |
 | `agw vm describe <name>`                            | Show VM details, workspaces, and event log                    |
+| `agw vm verify-connection <name>`                   | Test the canonical admin connection without starting the VM   |
 | `agw vm shell <name> [--workspace <ws>]`            | Admin shell on a VM (optionally rooted in a workspace)        |
 | `agw vm exec <name> [--workspace <ws>] -- <cmd...>` | Run a one-shot command as admin (optionally from a workspace) |
 | `agw vm start <name>`                               | Start a stopped VM and clear its manual-stop intent           |
@@ -610,23 +611,15 @@ spec:
     required_commands: [htop]
 ```
 
-`shell`'s config vocabulary is the command surface every template used to spell at the spec top
-level:
+`agw resource describe-kind harness-integration/shell` documents its config field by field. Two
+things that reference cannot tell you: command strings support `{{session_name}}` and
+`{{workspace_name}}` substitution (double-brace syntax), and the executables an integration checks
+are checked on the session's launch target (the agent, or the VM admin for admin sessions) before
+any state mutation, so launching a session whose tool is not installed fails fast with a clear error
+instead of a cryptic downstream tmux failure.
 
-- `command`: the pane command (empty/omitted is a plain login shell). Supports `{{session_name}}`
-  and `{{workspace_name}}` variable substitution (double-brace syntax).
-- `resume_command`: used by `session resume`, for a tool that needs a different invocation on
-  resume. If omitted, `command` is used. (To run Claude Code, prefer the dedicated `claude-code`
-  integration below, which resumes the previous conversation on its own.)
-- `required_commands`: executables the command needs, checked on the session's launch target (the
-  agent, or the VM admin for admin sessions) before any state mutation, so launching a session whose
-  tool is not installed fails fast with a clear error instead of a cryptic downstream tmux failure.
-  Merged (de-duped, order-preserving) across template inheritance.
-
-In a YAML manifest these three keys live only inside the `harness_integration` table; spelling any
-of them at the `spec` top level is a load error that points you at the nested shape. That check is
-an explicit session-template validation boundary. It is separate from the TOML flat-field handling
-below, which is a permanent supported spelling, not a deprecation.
+Those keys live only inside the `harness_integration` table; spelling any of them at the `spec` top
+level is a load error that points you at the nested shape.
 
 The `claude-code` integration runs Claude Code as the session: `session create` starts a new Claude
 session and `session resume` resumes the same conversation when its transcript still exists on disk
@@ -636,14 +629,10 @@ ready, but creating a session on it is refused with an "enable plugin `claude`" 
 `claude` to `[plugins].system`. (The built-in `shell` integration stays the default and needs no
 opt-in.) Once enabled, it needs only that `claude` is installed on the launch target, and announces
 the chosen action (resume vs new session) in the pane, so the decision is never silent. Its config
-vocabulary is three optional fields:
-
-- `permission_mode`: forwarded verbatim to `claude --permission-mode` (its choice set is Claude's,
-  not validated here).
-- `model`: forwarded verbatim to `claude --model`.
-- `extra_args`: a list of raw argv tokens appended last, the escape hatch for any flag the
-  integration does not model. Each element is one argv token (shell-quoted, never re-split), and
-  elements support the `{{session_name}}` / `{{workspace_name}}` variables.
+is all optional and documented by `agw resource describe-kind harness-integration/claude-code`. The
+fields that forward a value to `claude` are not validated here, because the choice sets are Claude's
+and they move between its releases; and each `extra_args` element is one argv token (shell-quoted,
+never re-split).
 
 ```yaml
 apiVersion: agentworks/v1
@@ -674,19 +663,11 @@ fallback remains a heuristic, though, so if that conversation is the only one re
 workspace the new session's first resume can still adopt it, announced with the id it chose. It
 ships as the opt-in `codex` system plugin, disabled by default with the same gating as `claude-code`
 above. Once enabled, it needs only that `codex` is installed on the launch target, and announces
-which of those it did, both in the command output and in the pane. Its config vocabulary is ten
-optional fields: `model`, `sandbox`, `approval_policy`, and `profile` forward verbatim to `codex -m`
-/ `-s` / `-a` / `-p` (their choice sets are Codex's, not validated here); `network` (bool) forwards
-to Codex's `sandbox_workspace_write.network_access` config key (sandboxed network is off by default,
-so coding sessions usually want `network: true`); `approvals_reviewer` (string) forwards to Codex's
-`approvals_reviewer` config key (who adjudicates approval escalations: `user`, the default, prompts
-the human; `auto_review` routes them to Codex's risk-based reviewer subagent, the usual choice for
-unattended-leaning auto templates, trading a person's approval for a model's while the sandbox still
-enforces the outer boundary); `writable_dirs` (list of paths) emits one `codex --add-dir` each;
-`web_search` (bool) enables the live web-search tool (`codex --search`); `disable_strict_config`
-(bool) suppresses the `--strict-config` the integration otherwise always passes (strictness makes a
-Codex config mistake or a Codex-renamed key fail loudly at launch instead of being silently
-ignored); and `extra_args` is the same appended-last escape hatch:
+which of those it did, both in the command output and in the pane. Its config is all optional and
+documented by `agw resource describe-kind harness-integration/codex`; the
+[resources guide](../docs/guides/resources.md) covers the Codex behavior behind the fields (network
+off by default under `workspace-write`, who adjudicates an approval escalation, and why the
+integration always passes `--strict-config`):
 
 ```yaml
 apiVersion: agentworks/v1
@@ -712,7 +693,103 @@ description merge as usual.
 **TOML session-template sections are removed.** `config.toml` is settings only, so
 `[session_templates.<name>]` no longer loads: any resource-declaring section is now a hard error at
 config load. Declare session templates as YAML manifests (`agw resource sample session-template`),
-and run `agw resource migrate session-template` to move any that still live in `config.toml`.
+and rewrite any that still live in `config.toml`; the
+[0.14 upgrade guide](../docs/guides/upgrading-to-0.14.md) walks through it.
+
+### Guide
+
+`agw guide [TOPIC]...` renders Markdown teaching together with safe facts from the current finalized
+resource registry. With no topic it prints a security disclosure, onboarding entry point, and topic
+index. Bare declarable-kind topics such as `vm-template` render current resources, a live field
+reference, and a generated sample from the same schema services the manifest loader uses.
+Capability-kind and implementation topics render their live alternatives or configuration fields,
+including implementations that are installed but disabled. Exact declared-resource topics describe
+current state and relationships and link back to their kind's shared schema. Core concepts use names
+such as `concept-onboarding`, `concept-migration`, `concept-secrets`, and `concept-reporting-bugs`.
+Schema literal values remain on one reference row: YAML-rendered backslashes, carriage returns, line
+feeds, and tabs appear as distinct visible escape sequences inside safe variable-backtick code
+spans.
+
+Multiple topics render in the requested order and are validated atomically: one unknown topic
+prevents all output. Repeated topics render once at their first position. `--agent` and `--human`
+override automatic presentation selection; explicit selection wins over the Claude Code execution
+signature and stdout TTY fallback. Both modes carry the same semantic content. Guide output is
+instructional and never grants consent to resolve secrets, inspect the workstation, connect to a VM,
+or mutate state.
+
+Guide registry construction never probes host tools or backend availability. Readiness that would
+require workstation inspection is rendered as unavailable; use an explicitly consented diagnostic
+surface when that fact is needed. Normal commands retain their ordinary readiness probes.
+
+Every renderer-owned level-2 heading in raw CLI Markdown carries the exact literal `⟦AGW framework⟧`
+marker. The contribution contract rejects either delimiter, whether literal or HTML-entity encoded,
+in authored topic titles, summaries, and Markdown. An authored contribution therefore cannot emit
+that exact literal marker in raw CLI Markdown. Other authored Markdown and HTML remain authored
+content and are not relabeled.
+
+The marker is a source-provenance convention, not an anti-spoof guarantee for arbitrary downstream
+Markdown, HTML, or CSS renderers, images, or styling. It grants no authority or trust to the content
+that follows.
+
+`concept-onboarding` also renders a pure assessment of the projected registry, relationship, and
+stored-instance facts. It reports each fact as done, disabled, not ready, or unverifiable and emits
+only the still-applicable ordered action records. Verification evidence is caller-owned and scoped
+to one named target; a verified rerun is a no-op, while refusal keeps the documented manual
+alternative without executing or repeating the command.
+
+The guide service composes a frozen onboarding snapshot from registered exact-resource guide views.
+The assessment receives only their bounded fact records; it cannot traverse the registry, database,
+configuration, or operational capabilities.
+
+Replay a caller-owned verification log with a repeatable, target-scoped flag such as
+`--evidence verify-named-secret:secret/tailscale-auth-key=verified` or
+`--evidence verify-vm-connection:vm/worker=refused`. The accepted outcomes are `verified`, `failed`,
+and `refused`; malformed, duplicate, mismatched, or inapplicable records fail the whole request
+before output. Agentworks does not persist an evidence ledger. Direct guided, non-interactive, and
+future bootstrap service consumers may provide the typed tuple they own at the service boundary.
+
+Guide remains useful when configuration or registry finalization fails. Authored prose still
+renders, schema-derived field references and samples remain available without configuration, other
+live blocks are marked unavailable, the framed failure appears once, and the command exits 1.
+`--names-only` emits one retained topic per line, degrades to authored topics plus every retained
+schema-describable kind and capability implementation under broken configuration, and exits 0. An
+invalid schema-derived topic is isolated as a scoped content issue in normal rendering and omitted
+from name discovery, while unaffected topics remain available. This stable stream backs Bash, Zsh,
+and PowerShell topic completion.
+
+`concept-migration` is the exceptional 0.14 resource-model rewrite guide, not a general upgrade
+workflow. It keeps the sequence, checkpoints, and consent boundaries in colocated package data and
+points to the installed kind and implementation topics for fields and samples. Its action records
+are inert instructions. Rendering them never reads a path, runs doctor, edits configuration, or
+authorizes an agent to do so. Under the first read boundary, the sequence inventories existing
+manifests and retired-TOML resources, records every intended TOML manifest file, and freezes their
+complete identity union. It then backs up configuration and resources separately to fresh
+operator-selected destinations outside the active trees, verifies matching copies or an explicit
+absent resources baseline without extending the union, and edits only at pre-recorded paths. Final
+identity matching keeps operator origin and manifest paths while ignoring mutable source lines. The
+final operator inventory can probe host readiness, so its action requires consent to examine the
+workstation.
+
+| Command                                                               | Description                                      |
+| --------------------------------------------------------------------- | ------------------------------------------------ |
+| `agw guide`                                                           | Render the guide index and onboarding disclosure |
+| `agw guide TOPIC...`                                                  | Render one or more exact topics atomically       |
+| `agw guide TOPIC... --agent/--human`                                  | Override automatic presentation mode             |
+| `agw guide concept-onboarding --evidence ACTION_ID:KIND/NAME=OUTCOME` | Replay caller-owned proof                        |
+| `agw guide --names-only`                                              | Emit topic names for shell completion            |
+
+### Guide management coverage
+
+The authored guide remains useful after initial setup. These operator goals have permanent entry
+points:
+
+| Goal                            | Guide coverage                                                       | Ordinary CLI surface                                                                        |
+| ------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Create or change a resource     | `concept-management`, then the bare kind and exact `kind/name` topic | The resource's owning command or canonical manifest                                         |
+| Adopt a capability              | `concept-management`, then the capability implementation topic       | `agw resource list --include-disabled` and the owning configuration surface                 |
+| Resolve upgrade deprecations    | `concept-management`                                                 | Follow the emitted migration instruction before unrelated changes                           |
+| Migrate the 0.14 resource model | `concept-migration`, then each live kind or implementation topic     | Validate each manifest with doctor, cut over TOML once, then compare operator inventory     |
+| Troubleshoot                    | `concept-troubleshooting`                                            | Run `agw doctor` only with consent to examine the workstation; authorize repairs separately |
 
 ### Config
 
@@ -739,9 +816,10 @@ mappings, template inheritance chains, resolution previews), reach for the per-k
 | `agw resource list`                  | List every resource in the registry across all kinds                 |
 | `agw resource kinds`                 | List every kind: category (declarable/capability), counts, purpose   |
 | `agw resource describe KIND/NAME`    | Show the per-resource detail view (header + Referenced by + Used by) |
+| `agw resource describe-kind TARGET`  | Show what a KIND (or a KIND/NAME capability) accepts, field by field |
 | `agw resource edit KIND/NAME`        | Open the declaring YAML manifest in $EDITOR                          |
-| `agw resource migrate [SELECTOR]...` | Move TOML resources to YAML manifests                                |
 | `agw resource sample KIND [--write]` | Print (or save) a kind's commented sample manifest (--all for all)   |
+| `agw resource schema [KIND]`         | Print the manifest JSON Schema (`--write` saves the whole set)       |
 
 `resource list` accepts `--kind <csv>` (e.g. `--kind secret,vm-template`) and `--origin <variant>`
 where variant is `operator`, `auto`, `builtin`, or `plugin`. Disabled rows (a not-enabled system
@@ -749,35 +827,42 @@ plugin's capabilities and bundled resources) are hidden by default; pass `--incl
 reveal them (combine with `--origin plugin` to see just a not-enabled plugin's rows). `--names-only`
 emits `kind/name` per line and backs shell completion (`/` cannot appear in resource names, so the
 split is unambiguous). The `kind/name` token is the one grammar across the resource group:
-`resource describe secret/npm-token` and `resource migrate vm-template/dev` take the same shape.
+`resource describe secret/npm-token` and `resource edit vm-template/dev` take the same shape.
 
-`resource migrate` is a recurring, incremental migration command. It moves resources (or a subset)
-from TOML to YAML manifests. Selectors scope the TOML path: `KIND` selects one kind, `KIND/NAME` one
-resource (overlaps union), and `--all` selects everything migratable; a bare invocation errors
-rather than migrating the whole config by accident. `--layout per-kind|single|per-resource` picks
-the file mapping for TOML-derived documents (default one multi-document file per kind, e.g.
-`resources/vm-templates.yaml`).
+`resource schema` emits JSON Schema (draft 2020-12) for manifests: one document schema per kind plus
+an any-kind one, derived from the same models the loader validates against, so it cannot describe a
+shape the loader would refuse. A bare invocation prints the any-kind schema; naming a kind prints
+that kind's. `--write` saves the whole set under `resources/.schema/`, which is the path the
+`# yaml-language-server: $schema=...` line in written manifests refers to. See
+[the resources guide](../docs/guides/resources.md) for the editor setup.
 
-TOML-derived documents append after a `---` separator without rewriting the existing YAML content.
-Before any write, the command backs up `config.toml` and stores recovery copies of existing YAML
-files it will append to under `paths.backups`. Digest checks refuse to replace a TOML or YAML file
-changed since planning. Writes are atomic, and rollback restores only files that still match this
-run's output digest, so a concurrent operator edit is never overwritten; an incomplete rollback
-reports the recovery copy for manual repair.
-
-Migrated TOML sections are commented out in place with a `# migrated to resources/<file>` marker
-(default) or removed with `--toml delete`. Deprecated `[secret_backends.*]` sections are dropped
-(with a note) by any run, including a bare run with nothing else to migrate. Every real run finishes
-by verifying that each migrated resource still decodes to exactly what it declared in TOML; on
-mismatch the run rolls back and reports. `--dry-run` prints a summary of what would migrate or be
-rewritten and writes nothing; add `--full` for complete YAML documents, YAML diffs, and the
-`config.toml` diff.
+Agentworks ships no migration command. A `config.toml` that still declares resources is a hard error
+naming every offending section, and the rewrite is the operator's, walked through by
+[the resources guide](../docs/guides/resources.md). `resource sample --write` and
+`resource describe-kind` are what that walkthrough leans on, and both read no config (or settings
+only), so they answer while `config.toml` is still failing.
 
 `resource sample` prints a kind's fully-commented-out sample manifest (`--all` for every kind) --
 the YAML teaching surface, mirroring `agw config sample` for the settings file. `--write <file>`
 saves under the resources directory instead (relative `.yaml`/`.yml` path; appends if the file
-exists). Written samples are inert until you uncomment them (delete one leading `#` per line), so
+exists). Dot-prefixed names are refused, file or directory: the manifest loader skips them (that is
+what keeps the generated `.schema/` out of the walk), so a manifest written there could never be
+activated. Written samples are inert until you uncomment them (delete one leading `#` per line), so
 `--write` can never create a live resource or a duplicate.
+
+Samples are RENDERED from the same declarations the loader validates against, so they cannot drift
+from what a kind actually accepts, and a capability a plugin contributed appears on the same terms
+as a first-party one. Every field is there: the ones you must write are live document lines, and
+every optional field is a commented suggestion at its own indent with its type, its default, and
+what it means. Where a field selects a capability (a vm-site's `platform`), one implementation is
+rendered and the rest are named.
+
+`resource describe-kind` answers the same question without producing a document to edit:
+`agw resource describe-kind vm-site` lists every field of the kind,
+`agw resource describe-kind vm-platform` lists the platforms this build has, and
+`agw resource describe-kind vm-platform/aws-ec2` documents one platform's config. It reads no config
+and builds no registry, so it works on a host whose `config.toml` does not load, and it documents a
+capability whose plugin is not enabled yet.
 
 ## Configuration
 
@@ -790,9 +875,9 @@ Configuration splits into two surfaces:
   declared as YAML manifests under `~/.config/agentworks/resources/`, auto-loaded whenever a command
   needs them. `agw resource sample <kind>` prints a commented starter (`--all` for every kind). The
   classic TOML resource sections are no longer supported: a `config.toml` that still declares
-  resources is a hard error at load (they were previously deprecated with a warning). Run
-  `agw resource migrate` to move any legacy TOML declarations to YAML. See
-  [docs/guides/resources.md](../docs/guides/resources.md).
+  resources is a hard error at load (they were previously deprecated with a warning). Rewriting
+  those sections as manifests is a manual step, walked through by
+  [docs/guides/upgrading-to-0.14.md](../docs/guides/upgrading-to-0.14.md).
 
 Settings sections (`config.toml`, permanent):
 
@@ -805,38 +890,32 @@ Settings sections (`config.toml`, permanent):
 - `[plugins]`: the plugin-subsystem namespace; its `system` key is the opt-in list of enabled system
   plugins (see [System Plugins](#system-plugins) below)
 
-Resource kinds (declared as YAML manifests). Each parenthetical names the removed legacy TOML
-section that used to declare the kind: it no longer loads, and is listed only as a reference for
-`agw resource migrate`:
+Resources are declared as YAML manifests. `agw resource kinds` lists every kind with its category
+and purpose, and `agw resource describe-kind KIND` documents what one accepts, field by field.
 
-- `vm-site` (`[azure]` / `[proxmox]`, flat legacy shape): a configured place to create VMs.
-  `spec.platform` is one tagged table: its `name` key selects the backing platform and the remaining
-  keys are its settings (Azure subscription/resource-group/region plus an optional
-  `service_principal` block to authenticate as a specific service principal instead of with ambient
-  credentials, Proxmox API endpoint + token secret, remote-Lima `vm_host`). The `lima-local` and
-  `wsl2` sites ship built in (on hosts where their platform can run) and their names are reserved
-- `vm-platform`: read-only capability rows for the VM platforms (`lima`, `wsl2` built in;
-  `azure-vm`, `proxmox`, and `aws-ec2` ship as the opt-in `azure`, `proxmox`, and `aws` system
-  plugins, disabled by default, see [System Plugins](#system-plugins)); listed by
-  `agw resource kinds`, never declared
-- `vm-template` (`[vm_templates.*]`): VM resources, apt packages, system install commands, mise, and
-  the target `site`
-- `admin-template` (`[admin.config]`) -- admin user shell, dotfiles, git credentials, user install
-  commands, mise
-- `agent-template` (`[agent_templates.*]`) -- agent user shell, dotfiles, git credentials, user
-  install commands, mise
-- `session-template` (`[session_templates.*]`) -- session commands with variable substitution
-- `workspace-template` (`[workspace_templates.*]`): workspace repo, tmuxinator, optional git
-  identity (`git_user_name` / `git_user_email`, stamped into the cloned repo), inheritance
-- `named-console-template` (`[named_console]`) -- named-console layout (tmux preset names +
-  `aw-session-vertical`)
-- `git-credential` (`[git_credentials.*]`) -- git credentials; `spec.provider` selects github or
-  azdo
-- `secret` (`[secrets.*]`) -- secret declarations referenced by `{secret: name}` env entries
-- `apt-source` / `apt-package` / `system-install-command` / `user-install-command`
-  (`[apt_sources.*]` etc.): apt / install-command extensions
-- Env vars ride their owning resource: an `env` map in the template's `spec` (the removed TOML shape
-  used `[<scope>.env]` subsections) at vm / workspace / admin / agent / session scope
+The table below exists for one thing this repository is otherwise the only record of: which removed
+legacy TOML section used to declare each kind. Those sections no longer load; the mapping is a
+reference for reading an old `config.toml` and for rewriting it as manifests.
+
+| Kind                                                                          | Removed TOML section                        |
+| ----------------------------------------------------------------------------- | ------------------------------------------- |
+| `vm-site`                                                                     | `[azure]` / `[proxmox]` (flat legacy shape) |
+| `vm-template`                                                                 | `[vm_templates.*]`                          |
+| `admin-template`                                                              | `[admin.config]`                            |
+| `agent-template`                                                              | `[agent_templates.*]`                       |
+| `session-template`                                                            | `[session_templates.*]`                     |
+| `workspace-template`                                                          | `[workspace_templates.*]`                   |
+| `named-console-template`                                                      | `[named_console]`                           |
+| `git-credential`                                                              | `[git_credentials.*]`                       |
+| `secret`                                                                      | `[secrets.*]`                               |
+| `apt-source`, `apt-package`, `system-install-command`, `user-install-command` | `[apt_sources.*]` and siblings              |
+
+The four capability kinds (`vm-platform`, `harness-integration`, `git-credential-provider`,
+`secret-backend`) are read-only rows for registered code, never declared and never in TOML.
+
+Env vars ride their owning resource, as an `env` map in the template's `spec` (the removed TOML
+shape used `[<scope>.env]` subsections), at vm / workspace / admin / agent / session scope. The
+`lima-local` and `wsl2` vm-sites ship built in and their names are reserved.
 
 ### Environment Variables and Secrets
 
@@ -864,7 +943,8 @@ spec:
 
 Every secret reference points to a `secret` resource declaration (auto-declared with a
 framework-synthesized description if you skip it). Active backends (and their precedence order) are
-listed in `[secret_config].backends`. Today the implemented backends are:
+listed in `[secret_config].backends`. `agw resource describe-kind secret-backend` lists the backends
+this build has, and naming one documents the address it expects. The two that are always available:
 
 - `env-var` -- reads from the operator's process env. Default convention is
   `AW_SECRET_<UPPER_SNAKE_CASE>`, overridable per secret via the secret's `backend_mappings`
@@ -947,6 +1027,26 @@ agw secret describe tailscale-auth-key
 
 `describe` reports state -- it does not prompt and does not resolve the secret's value.
 
+To prove that a declared secret resolves through the configured backend chain, use `verify`:
+
+```bash
+agw secret verify tailscale-auth-key
+# Secret 'tailscale-auth-key' verified.
+```
+
+Verification performs one real ordered resolution pass, but prints only the one-line success result
+and never returns or displays the secret value. By default it skips interactive backends, so the
+command cannot unexpectedly prompt or initiate provider authentication. Opt in explicitly when an
+interactive backend is required:
+
+```bash
+agw secret verify tailscale-auth-key --allow-interactive
+```
+
+`--allow-interactive` is rejected when the global `--non-interactive` flag is set. Missing secrets,
+unavailable mappings, backend connectivity failures, and configuration failures use the normal
+framed CLI error categories with backend-authored details sanitized at this verification boundary.
+
 `agw doctor`'s Secrets group emits exactly one row per registry secret -- operator-declared and
 auto-declared alike (auto-declared rows, e.g. `tailscale-auth-key` and the `git-token-*` family,
 carry an `(auto)` marker; they are exactly the secrets most likely to prompt at command time):
@@ -962,7 +1062,7 @@ carry an `(auto)` marker; they are exactly the secrets most likely to prompt at 
 
 Backend-applicability detail (per-backend soft-skip reasons, inactive mappings, per-secret
 references) lives in `agw secret list` and `agw secret describe`. `AGENTWORKS_*` identity overrides
-surface in the Configuration group (they're a config-load warning). Broken `{ secret = "..." }`
+surface in the Configuration group (they're a config-load warning). Broken `{ secret: ... }`
 references are caught earlier as a hard config-load error before doctor runs. Git-credential tokens
 are just secrets: their _resolvability_ reports as ordinary `git-token-<name>` rows in the Secrets
 group, like any other secret. Doctor is preflight-only and never prompts, so it does not

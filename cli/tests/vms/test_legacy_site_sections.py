@@ -3,10 +3,10 @@ config.toml is settings only), plus the defaults.site
 alias behavior (settings, unaffected) and the YAML vm-site manifest path.
 
 The old dual-path (flat TOML sections loading as vm-site resources) is gone:
-those sections migrate to YAML manifests via `agw resource migrate`, whose
-oracle keeps reading the flat shape. The token_secret nonconforming-name
-warning that the flat TOML loader emitted is now surfaced only on the YAML
-manifest path (tested here) and inside the migrator oracle.
+an operator rewrites those sections as vm-site manifests by hand, which is
+what the load error tells them to do and what the resources guide walks
+through. The token_secret nonconforming-name warning that the flat TOML
+loader emitted is now surfaced only on the YAML manifest path (tested here).
 """
 
 from __future__ import annotations
@@ -56,18 +56,21 @@ def write_config(tmp_path: Path):
 
 def test_legacy_sections_are_a_hard_error(write_config) -> None:
     """[azure] / [proxmox] are resource-declaring sections now, so a normal
-    load hard-errors, naming the sections and the vm-site migration clause."""
+    load hard-errors, naming the sections and the vm-site clause (the kind
+    they become, which neither section name would suggest)."""
     with pytest.raises(ConfigError) as excinfo:
         load_config(write_config(AZURE_SECTION + PROXMOX_SECTION), warn_issues=False)
     message = str(excinfo.value)
     assert "[azure]" in message
     assert "[proxmox]" in message
-    assert "migrate as vm-site" in message
+    assert "become vm-site manifests" in message
 
 
 def test_settings_only_load_reads_a_config_with_legacy_sections(write_config) -> None:
-    """The escape hatch loads a config carrying [azure] without error (the
-    migrator uses it); settings load identically."""
+    """The escape hatch loads a config carrying [azure] without error
+    (`resource sample --write` uses it, so an operator can author the
+    replacement manifests before deleting the sections); settings load
+    identically."""
     config = load_config(write_config(AZURE_SECTION), warn_issues=False, resources=False)
     assert config.operator is not None
 
@@ -107,8 +110,8 @@ def _write_site_manifest(manifest_dir: Path, token_secret: str) -> None:
         "metadata:\n"
         "  name: proxmox\n"
         "spec:\n"
-        "  platform: proxmox\n"
-        "  platform_config:\n"
+        "  platform:\n"
+        "    name: proxmox\n"
         '    api_url: "https://pve:8006"\n'
         "    node: pve1\n"
         f'    token_secret: "{token_secret}"\n'
@@ -124,11 +127,9 @@ def test_manifest_token_secret_nonconforming_warns(tmp_path: Path) -> None:
     manifest_dir = tmp_path / "resources"
     _write_site_manifest(manifest_dir, "GITHUB_TOKEN")
     manifests = load_manifests(manifest_dir)
-    assert any("GITHUB_TOKEN" in issue and "token_secret (platform config)" in issue for issue in manifests.issues), (
-        manifests.issues
-    )
+    assert any("GITHUB_TOKEN" in issue and "vm-site/proxmox" in issue for issue in manifests.issues), manifests.issues
     (entry,) = manifests.entries
-    assert entry.resource.platform_config["token_secret"] == "GITHUB_TOKEN"
+    assert entry.resource.platform.config["token_secret"] == "GITHUB_TOKEN"
 
 
 def test_manifest_token_secret_conforming_emits_no_warning(tmp_path: Path) -> None:

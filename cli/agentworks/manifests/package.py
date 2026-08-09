@@ -1,4 +1,4 @@
-"""The shared, typed-error body for publishing a manifest package.
+"""The shared, typed-error read and publish paths for a manifest package.
 
 Both the app-bundled built-in manifests (``agentworks/manifests/builtin/``)
 and a system plugin's bundled manifests anchor a directory of YAML resources
@@ -28,8 +28,41 @@ from agentworks.resources.kind import KIND_REGISTRY
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from agentworks.resources.origin import Origin
+    from agentworks.manifests.loader import ManifestSet
+    from agentworks.origin import Origin
     from agentworks.resources.registry import Registry
+
+
+def load_manifest_package(
+    *,
+    anchor: str,
+    subdir: str,
+    allowed_kinds: frozenset[str] | None = None,
+) -> ManifestSet:
+    """Decode and validate one bundled manifest package without publishing it.
+
+    This is the authoritative read path shared by registry publication and
+    inventory consumers. A returned entry is therefore exactly one that the
+    package publisher is prepared to add to a registry.
+    """
+    try:
+        directory = importlib_resources.files(anchor) / subdir
+    except (ImportError, TypeError) as exc:
+        raise ConfigError(f"manifest package {anchor!r}/{subdir} could not be resolved: {exc}") from exc
+    if allowed_kinds is not None and not directory.is_dir():
+        raise ConfigError(
+            f"plugin manifest package {anchor!r} declares manifests but ships no {subdir!r} "
+            f"package data (expected a {subdir}/ directory beside {anchor})"
+        )
+    with importlib_resources.as_file(directory) as resolved:
+        manifests = load_manifests(Path(resolved))
+
+    if manifests.issues:
+        raise ConfigError(f"bundled manifests under {anchor}/{subdir} must be issue-free: {manifests.issues}")
+    if allowed_kinds is not None:
+        for entry in manifests.entries:
+            _reject_unbundleable(entry.kind, entry.name, entry.location.file.name, allowed_kinds)
+    return manifests
 
 
 def publish_manifest_package(
@@ -83,46 +116,10 @@ def publish_manifest_package(
     ``ConfigError`` rather than asserting (``assert`` is stripped under
     ``python -O``), so a dirty bundle fails loudly in every build mode.
     """
-    try:
-        directory = importlib_resources.files(anchor) / subdir
-    except (ImportError, TypeError) as exc:
-        # files() raises ModuleNotFoundError/ImportError for an unimportable
-        # anchor and TypeError for a non-package module; re-type all of them so
-        # a bad manifest anchor is never an opaque traceback.
-        raise ConfigError(f"manifest package {anchor!r}/{subdir} could not be resolved: {exc}") from exc
-    # A plugin (``allowed_kinds is not None``) that imports fine but ships no
-    # ``<subdir>/`` package data is a curation bug: the anchor resolved, so the
-    # unimportable-anchor guard above never fired, but ``load_manifests`` on the
-    # missing directory would silently publish nothing. Fail loudly instead. The
-    # ``.is_dir()`` traversable check reads False for a missing subdir under both
-    # the repo (a real ``PosixPath``) and a wheel install (a ``zipfile.Path``),
-    # so it holds for every install mode. The built-in caller passes
-    # ``allowed_kinds=None`` and its ``builtin/`` subdir always ships, so it is
-    # never gated here and its behavior is unchanged.
-    if allowed_kinds is not None and not directory.is_dir():
-        raise ConfigError(
-            f"plugin manifest package {anchor!r} declares manifests but ships no {subdir!r} "
-            f"package data (expected a {subdir}/ directory beside {anchor})"
-        )
-    # The traversable is a real directory both in the repo and in wheels
-    # (hatchling ships package data); resolve to a Path for the loader.
-    with importlib_resources.as_file(directory) as resolved:
-        manifests = load_manifests(Path(resolved))
-
-    if manifests.issues:
-        raise ConfigError(f"bundled manifests under {anchor}/{subdir} must be issue-free: {manifests.issues}")
-    # Deprecated shapes in a first-party bundle are the same class of
-    # curation bug: shipped manifests are the pattern book operators
-    # copy, so they must always spell the canonical shape.
-    if manifests.deprecation_issues:
-        raise ConfigError(
-            f"bundled manifests under {anchor}/{subdir} must not use deprecated shapes: {manifests.deprecation_issues}"
-        )
+    manifests = load_manifest_package(anchor=anchor, subdir=subdir, allowed_kinds=allowed_kinds)
 
     for entry in manifests.entries:
         file_name = entry.location.file.name
-        if allowed_kinds is not None:
-            _reject_unbundleable(entry.kind, entry.name, file_name, allowed_kinds)
         registry.add(
             entry.kind,
             entry.name,

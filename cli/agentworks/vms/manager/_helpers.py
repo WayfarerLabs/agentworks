@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, NamedTuple
 from agentworks import output
 from agentworks.db import SYSTEM_SLUG_KEY
 from agentworks.errors import NotFoundError, ValidationError
+from agentworks.path_rendering import format_host_path
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -195,7 +196,7 @@ def _init_log_hint(vm_name: str) -> str:
     if not LOG_DIR.exists():
         return ""
     logs = sorted(LOG_DIR.glob(f"{vm_name}-*.log"), reverse=True)
-    return f" See log: {logs[0]}" if logs else ""
+    return f" See log: {format_host_path(logs[0])}" if logs else ""
 
 
 def _guard_failed_vm(vm: VMRow, *, allow_failed_init: bool = False) -> None:

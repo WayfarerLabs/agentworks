@@ -107,6 +107,7 @@ def _substitute_template_vars_in_env(
     string at backend time, not the secret name).
     """
     from agentworks.env import EnvEntry as _EnvEntry
+    from agentworks.env import PlaintextEnvEntry as _PlaintextEnvEntry
 
     result: dict[str, _EnvEntry] = {}
     for key, entry in env.items():
@@ -117,7 +118,7 @@ def _substitute_template_vars_in_env(
         if new_val == entry.value:
             result[key] = entry
         else:
-            result[key] = _EnvEntry(key=key, value=new_val)
+            result[key] = _EnvEntry(_PlaintextEnvEntry(value=new_val))
     return result
 
 

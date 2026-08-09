@@ -26,18 +26,18 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled, harness_integration_for
-from agentworks.capabilities.harness_integration.base import HarnessIntegration
-from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.errors import ConfigError, StateError
 from agentworks.manifests.package import publish_manifest_package
+from agentworks.origin import Origin
 from agentworks.plugins import Plugin, plugin_enablement_source, publish_plugins, seated_plugin
 from agentworks.plugins.registration import _capability_registries
 from agentworks.resources.graph import Enablement
-from agentworks.resources.origin import Origin
 from agentworks.resources.registry import Registry
+from agentworks.schema import CapabilityBlock
 from agentworks.sessions.manager._env import _resolve_template
 from agentworks.sessions.template import SessionTemplate
 from agentworks.vms.sites import VMSiteDecl
+from tests.plugins._fixtures import ConformingHarnessIntegration, ConformingVMPlatform
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -57,10 +57,11 @@ _DIRTY_ANCHOR = f"{__package__}._manifest_dirty_fixture"
 _NO_SUBDIR_ANCHOR = f"{__package__}._manifest_no_subdir_fixture"
 
 
-# -- Real fixture impls (subclasses, so they fold through their consumers) ------
+# -- Real fixture impls (subclasses, so they fold through their consumers, and
+#    so registration's conformance check accepts them) ---------------------------
 
 
-class _FixtureVMPlatform(VMPlatform):
+class _FixtureVMPlatform(ConformingVMPlatform):
     name = "fixture-platform"
     description = "Fixture VM platform (plugin publish test)"
 
@@ -71,7 +72,7 @@ class _FixtureVMPlatform(VMPlatform):
         return None
 
 
-class _FixtureHarnessIntegration(HarnessIntegration):
+class _FixtureHarnessIntegration(ConformingHarnessIntegration):
     name = "fixture-harness"
     description = "Fixture harness (plugin publish test)"
 
@@ -116,7 +117,7 @@ def test_enabled_plugin_publishes_capability_and_manifest(monkeypatch: pytest.Mo
         registry.add(
             "vm-site",
             "s",
-            VMSiteDecl(name="s", platform="fixture-platform", platform_config={}),
+            VMSiteDecl(name="s", platform=CapabilityBlock.of("fixture-platform", **{})),
             _operator(),
         )
         registry.finalize(enablement_sources=[plugin_enablement_source(config)])
@@ -152,7 +153,7 @@ def test_not_enabled_plugin_row_and_manifest_present_but_disabled(monkeypatch: p
         registry.add(
             "vm-site",
             "s",
-            VMSiteDecl(name="s", platform="fixture-platform", platform_config={}),
+            VMSiteDecl(name="s", platform=CapabilityBlock.of("fixture-platform", **{})),
             _operator(),
         )
         registry.finalize(enablement_sources=[plugin_enablement_source(config)])
@@ -347,7 +348,7 @@ def test_disabled_plugin_harness_integration_reaches_use_gate_not_unknown(monkey
         registry.add(
             "session-template",
             "tmpl",
-            SessionTemplate(name="tmpl", harness_integration="fixture-harness"),
+            SessionTemplate(name="tmpl", harness_integration=CapabilityBlock(name="fixture-harness")),
             _operator(),
         )
         registry.finalize(enablement_sources=[plugin_enablement_source(config)])

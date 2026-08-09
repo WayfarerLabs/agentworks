@@ -36,6 +36,7 @@ spec:
   platform:
     name: aws-ec2
     region: us-east-1
+    auth: { mode: ambient }
 """
 
 

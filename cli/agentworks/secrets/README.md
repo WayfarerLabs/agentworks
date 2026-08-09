@@ -33,11 +33,11 @@ prompt.
 
 ## Available Backends
 
-Three backends ship today. This list can change, so
-`agw resource list --kind secret-backend --include-disabled` is the definitive set on any given
-install. A single secret can map to whichever one matches how the operator stores it, and the active
-backends form a chain: each secret is offered to the backends in turn until one resolves it, so
-different secrets in the same environment can come from different sources.
+Three backends ship today. This list can change, so `agw resource describe-kind secret-backend` is
+the definitive set on any given install, and `agw resource describe-kind secret-backend/<name>` the
+definitive mapping shape for one. A single secret can map to whichever one matches how the operator
+stores it, and the active backends form a chain: each secret is offered to the backends in turn
+until one resolves it, so different secrets in the same environment can come from different sources.
 
 - **`env-var`** (built in) reads the value from an operator-side environment variable. By default it
   derives the variable name from the secret (`github-token` becomes `AW_SECRET_GITHUB_TOKEN`), or

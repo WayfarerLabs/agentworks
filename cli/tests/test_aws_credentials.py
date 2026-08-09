@@ -23,14 +23,22 @@ from agentworks.capabilities.base import RunContext
 from agentworks.db import VMStatus
 from agentworks.errors import ConfigError
 from agentworks.plugins.aws.network import EC2Error
-from agentworks.plugins.aws.platform import DEFAULT_SECRET_ACCESS_KEY, EC2Platform
+from agentworks.plugins.aws.platform import EC2Platform
 from tests._aws_fakes import client_error, install_fakes
+
+#: The well-known default the model's SecretRef template names.
+DEFAULT_SECRET_ACCESS_KEY = "aws-secret-access-key"
 
 if TYPE_CHECKING:
     from agentworks.db import VMRow
 
 _CONFIG = {"region": "us-east-1"}
-_CREDS = {"access_key_id": "AKIAEXAMPLE", "access_key_secret": "aws-secret"}
+#: The ambient arm, which every site that is not testing the access key
+#: declares. Spelled out rather than omitted: the whole point of the
+#: required ``auth`` union is that no site selects an identity by writing
+#: nothing.
+_AMBIENT_AUTH = {"mode": "ambient"}
+_CREDS = {"mode": "access-key", "access_key_id": "AKIAEXAMPLE", "access_key_secret": "aws-secret"}
 
 
 def _fake_vm() -> Any:
@@ -52,12 +60,17 @@ class _Secrets:
 
 
 def _platform() -> EC2Platform:
-    return EC2Platform("aws-site", dict(_CONFIG))
+    """A platform bound to a site that selects the ambient credential
+    chain, explicitly."""
+    return EC2Platform("aws-site", {**_CONFIG, "auth": dict(_AMBIENT_AUTH)})
 
 
 def _creds_platform(*, name_field: bool = True) -> EC2Platform:
+    """A platform bound to a site that selects the access-key arm.
+    ``name_field=False`` omits ``access_key_secret`` so the default name
+    applies."""
     creds = dict(_CREDS) if name_field else {k: v for k, v in _CREDS.items() if k != "access_key_secret"}
-    return EC2Platform("aws-site", {**_CONFIG, "credentials": creds})
+    return EC2Platform("aws-site", {**_CONFIG, "auth": creds})
 
 
 def _ctx(name: str = "aws-secret", value: str = "secret-value") -> RunContext:
@@ -114,14 +127,15 @@ class TestCredentialSelection:
         credentials makes no live call."""
         from botocore.credentials import DeferredRefreshableCredentials
 
-        from agentworks.plugins.aws.platform import _build_explicit_session, _Credentials
+        from agentworks.plugins.aws.platform import AwsAccessKeyAuth, _build_access_key_session
 
-        creds = _Credentials(
+        auth = AwsAccessKeyAuth(
+            mode="access-key",
             access_key_id="AKIAEXAMPLE",
-            secret_name="aws-secret",
+            access_key_secret="aws-secret",
             assume_role_arn="arn:aws:iam::111122223333:role/agw",
         )
-        session = _build_explicit_session(creds, "secret-value", "aws-site", "us-east-1")
+        session = _build_access_key_session(auth, "secret-value", "aws-site", "us-east-1")
         resolved = session.get_credentials()
         assert isinstance(resolved, DeferredRefreshableCredentials)
         assert resolved.method == "assume-role"

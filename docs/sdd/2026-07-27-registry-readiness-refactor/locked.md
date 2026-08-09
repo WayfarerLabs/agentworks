@@ -128,3 +128,44 @@ Nothing operator- or contributor-facing depends on `docs/sdd/`:
 Each phase was reviewed by an `agentworks-reviewer` pass and a fresh-eyes pass (the atomic Phase 3
 at Fable tier with a delta re-review); a capstone verification pass signed off the whole before
 merge.
+
+## 2026-08-07: the validate pass is no longer scoped to READY and ENABLED
+
+Recorded here because this effort's R3 and R9.4 stated that scope, and the declarative-schema effort
+(`docs/sdd/2026-07-31-declarative-schema/`) removed it.
+
+The scope let a resource's own malformed config decide whether that config got checked. Readiness is
+computed at finalize pass 4 from config the validate pass has not yet validated, so a misspelled
+`vm_host` key read as an absent one, which made a remote lima site look local, which made it
+not-ready for want of `limactl`, which suppressed the error naming the typo. The same document was
+correctly refused on a host that happened to have `limactl` installed. Closed-world config that is
+closed only on some hosts is not closed (operator ruling, 2026-08-07: unexpected keys are config
+errors everywhere unless the capability's own schema allows them, enforced like anything else).
+
+Finalize pass 7 now validates every present resource unconditionally. What this effort's FRD gave as
+the justification, "there is nothing to run, and its capability may be unavailable", is served
+without the gate: an implementation the host has not seated selects no model, so the call is a no-op
+and the dangling capability edge reports it once as the R9.2 finalize miss.
+
+**R9.4's load-bearing half is untouched.** The readiness fold stays total over unvalidated config
+because `not_ready` is non-constructing, which is what prevents a malformed block from becoming a
+permanent readiness reason that defers its own validation. That contract never required the validate
+pass to be gated; the two were coupled by accident. A test now pins non-construction directly on
+`not_ready` rather than by way of the deferral behavior.
+
+**R9.9's own suppression closed too, later the same day.** This entry originally recorded it as
+surviving by design: the skip of a mapping addressed to a present-but-disabled secret backend. The
+operator ruled against that on the grounds that it lets an operator accumulate invalid configuration
+which then fails at the worst possible moment, when they enable the resource. A mapping is now
+validated whether or not its backend is enabled. The mapping staying INERT for resolution is a
+separate property and is untouched: that lives in `active_backends`, on a different path, and the
+two were only ever entangled in the prose. The `enabled_backends` parameter that carried the
+suppression is retired from the `validate_config` contract entirely, rather than left as an unused
+input that reads as an invitation to gate on the environment again.
+
+What remains on the validate path is not enablement-keyed: an implementation this host has not
+seated selects no model, so the shape check no-ops and the dangling capability edge reports the
+absence once. Separately, R12 materialization gating means a row referenced only by not-ready or
+disabled nodes is never synthesized, so pass 7 never sees it. That is deliberate and documented, but
+it reaches the same outcome by another mechanism and is worth knowing about when reading the
+"unconditional" claim above.

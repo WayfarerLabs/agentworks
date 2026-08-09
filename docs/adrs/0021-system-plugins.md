@@ -122,9 +122,10 @@ completes with a summary.
   integration + the `claude` install-command), `proxmox` (vm-platform), and `azure` (the `azure-vm`
   platform, the `azdo` git-credential provider, and the `az-cli` install-command). Together they
   exercise all four capability kinds and the bundled-manifest path against their real consumers, and
-  they establish the migration pattern (impl `git mv` into the plugin package; the core `publish_to`
-  skips the plugin-seated name so it is published once with a `system-plugin` origin, not twice).
-  The core keeps only the universal path (`lima`/`wsl2`, `shell`, `env-var`/`prompt`, `github`).
+  they establish the migration pattern (impl `git mv` into the plugin package; the core capability
+  publisher skips the plugin-seated name so it is published once with a `system-plugin` origin, not
+  twice). The core keeps only the universal path (`lima`/`wsl2`, `shell`, `env-var`/`prompt`,
+  `github`).
 
 ### Negative
 
@@ -154,8 +155,8 @@ completes with a summary.
   the resource is not-ready (or refused at use) with an "enable plugin `<name>`" hint. This is
   deliberate (the whole point is that world-specific functionality is opt-in), guided (the hint
   names the exact fix, never a silent failure or an unknown-name dead end), and bounded (the default
-  local path is untouched). The upgrade note lives in `docs/guides/resources.md`; the release
-  carries a `BREAKING CHANGE` changelog entry.
+  local path is untouched). The upgrade note lives in `docs/guides/upgrading-to-0.14.md`; the
+  release carries a `BREAKING CHANGE` changelog entry.
 
 ## Alternatives Considered
 

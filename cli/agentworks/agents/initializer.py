@@ -779,25 +779,31 @@ def _build_agent_test_command(
     home: str,
     shell: str,
 ) -> str | None:
-    """Build a test command that runs as the agent user.
+    """Build a test command that passes when every declared test passes.
 
     The caller runs this via the agent's ``Transport``. ``test_exec`` checks
     are wrapped in a login shell so the agent's PATH (including mise shims
     and ~/.local/bin) is in scope; ``test_file`` / ``test_dir`` use plain
-    POSIX tests against absolute paths in the agent's home.
+    POSIX tests against absolute paths in the agent's home. Empty tests are
+    ignored. Returning ``None`` when none remain prevents an empty conjunction
+    from vacuously skipping the install.
     """
     import shlex as _shlex
 
-    test_exec: str | None = getattr(entry, "test_exec", None)
-    test_file: str | None = getattr(entry, "test_file", None)
-    test_dir: str | None = getattr(entry, "test_dir", None)
+    # Plain reads, matching the VM-side twin in
+    # ``vms/initializer/packages.py``: all three are declared fields on the
+    # entry model, so a getattr default would only hide a rename.
+    test_exec = entry.test_exec
+    test_file = entry.test_file
+    test_dir = entry.test_dir
+    commands: list[str] = []
     if test_exec:
         inner = f"command -v {_shlex.quote(test_exec)} > /dev/null 2>&1"
-        return f"{shell} -lc {_shlex.quote(inner)}"
+        commands.append(f"{shell} -lc {_shlex.quote(inner)}")
     if test_file:
         path = test_file.replace("~", home, 1) if test_file.startswith("~") else test_file
-        return f"test -f {_shlex.quote(path)}"
+        commands.append(f"test -f {_shlex.quote(path)}")
     if test_dir:
         path = test_dir.replace("~", home, 1) if test_dir.startswith("~") else test_dir
-        return f"test -d {_shlex.quote(path)}"
-    return None
+        commands.append(f"test -d {_shlex.quote(path)}")
+    return " && ".join(commands) or None

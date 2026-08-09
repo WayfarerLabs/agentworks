@@ -1,0 +1,33 @@
+# agw-test-env: template for this host's real values
+
+Copy this file to `inventory.local.md` in this same directory, then fill in your host's real
+values in place of every placeholder below. The copy is auto-ignored by the repo's `*.local.*`
+gitignore rule (this `.example` file is the committed template; `inventory.local.md` itself
+never is), so your real values stay local to this machine.
+
+This file fills in the generic, committed `agw-test-env` skill's operator-parameter
+placeholders. Never put a real value in THIS file (the `.example` is committed); only in your
+own `inventory.local.md` copy.
+
+## Parameter values
+
+| Placeholder | Value | Notes |
+| --- | --- | --- |
+| `<aws-account-id>` | `<your-aws-account-id>` | Account hosting the aws-ec2 vm-site. |
+| `<iam-user>` | `<your-iam-user>` | Dedicated least-privilege EC2+SSM IAM user. |
+| `<aws-region>` | `<your-aws-region>` | The AWS region the aws-ec2 site is pinned to. |
+| `<azure-subscription>` | `<your-azure-subscription>` | Subscription used for azure-vm testing. |
+| `<azure-resource-group>` | `<your-azure-resource-group>` | The Azure resource group VMs are created in. Note any host-sharing caution that applies to it. |
+| `<azure-region>` | `<your-azure-region>` | Region used for VM creation (quota). |
+| `<azure-rg-region>` | `<your-azure-rg-region>` | Region the resource group itself lives in (can differ from the VM's). |
+| `<remote-lima-host>` | `<your-remote-lima-host>` | The remote machine running Lima for the remote vm-site, if you have one. |
+| `<vm-host-alias>` | `<your-vm-host-alias>` | vm-site name / ssh-alias root for `<remote-lima-host>`. |
+| `<remote-user>` | `<your-remote-user>` | ssh/lima user on `<remote-lima-host>`. |
+| `<host-owner>` | `<your-host-owner>` | Who else, if anyone, shares the host (only relevant on a shared machine). |
+| `<system-slug>` | `<your-system-slug>` | The agentworks system slug seeded on this host (prefixes VM/tailnet names). |
+
+## Notes specific to this host
+
+Add anything a reader would need that is not captured by the table above: known standing
+gotchas, account-activation quirks, host-sharing cautions, or anything else specific to your
+environment that the generic skill cannot know in advance.

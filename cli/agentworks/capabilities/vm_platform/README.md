@@ -24,9 +24,9 @@ includes location, credentials, and other platform-specific settings.
 
 ## Available Platforms
 
-Five platforms ship today. This list can change, so
-`agw resource list --kind vm-platform --include-disabled` is the definitive set on any given
-install.
+Five platforms ship today. This list can change, so `agw resource describe-kind vm-platform` is the
+definitive set on any given install (it reads no config, so it answers even on a host that cannot
+load one), and `agw resource describe-kind vm-platform/<name>` is the definitive config for one.
 
 - **`lima`** (built in) runs fast local VMs on the operator's machine (commonly macOS, but any host
   Lima supports). It can also connect to a remote Linux host over SSH and drive `limactl` there,
@@ -135,10 +135,10 @@ has a concrete example, it names the platform and file that demonstrates it.
 A VM platform is the code capable of running VMs on a specific VM provider. Each subclasses
 `VMPlatform` (`base.py`), registers in `VM_PLATFORM_REGISTRY` (`__init__.py`), and publishes as a
 read-only `vm-platform` capability resource. Operators never invoke a platform directly: a
-declarable `vm-site` binds a platform to a config blob (`spec.platform` + `spec.platform_config`),
-and all invocation goes through site resolution (`agentworks.vms.sites`). ADR 0016 records the
-capability/declarable split; ADR 0019 records the orchestration layer that now drives the lifecycle
-(below).
+declarable `vm-site` binds a platform to a config blob (one tagged `spec.platform` table whose
+`name` key selects the platform), and all invocation goes through site resolution
+(`agentworks.vms.sites`). ADR 0016 records the capability/declarable split; ADR 0019 records the
+orchestration layer that now drives the lifecycle (below).
 
 ### Host Control and Platform Obligations
 
@@ -151,7 +151,7 @@ replicating it in another category would cross the platform's ownership boundary
    group, ENI, launched into an existing subnet), so it owns the security posture end to end. The
    locked-down-by-default exposure model below applies in full, as do the rollback obligations for
    the remotely billed resources a failed create must not leak.
-2. **Externally administered hosts** (`proxmox`; remote Lima via a site's `vm_host`). The hypervisor
+2. **Externally administered hosts** (`proxmox`; Lima via a site's `ssh` placement). The hypervisor
    belongs to the operator's infrastructure. Agentworks does not control host or network security
    there and must not try to: no firewall management, no exposure toggling. The operator's own
    perimeter is authoritative (Proxmox VMs get `ipconfig0: ip=dhcp` on the operator's bridge and the
@@ -263,21 +263,26 @@ process having warmed a credential cache.
 - `unsupported_reason()` is a class-level, zero-arg classmethod run at every registry build. It
   answers "could any config of this platform ever work on this host," and is the **platform node's
   own** readiness in the fold. WSL2 is the only platform that overrides it (`"Windows only"` off
-  Windows). Lima deliberately does not: a remote-Lima site runs `limactl` on the `vm_host` over SSH
-  and needs nothing locally.
+  Windows). Lima deliberately does not: an ssh-placed site runs `limactl` on the placement host over
+  SSH and needs nothing locally.
 - `not_ready(config) -> Readiness` (inherited from `Capability`, default ready) is a
   **non-constructing classmethod**: "is a site with THIS config ready," host-introspection only, no
   network or secrets, no instance built. A local Lima site with no `limactl` is not-ready; a remote
   one is not. WSL2 reports a site with no `wsl` on PATH not-ready even on Windows. The fold calls it
   off the graph-carried impl to fold into the vm-site's verdict.
 
-**Class-level contract methods**:
+**Class-level contract**. `contract_version`, `config_model`, `name`, and `description` are all
+REQUIRED and none is defaulted, because a default would let an unmigrated implementation inherit a
+claim it never made; registration refuses an implementation missing any of them, naming the plugin.
+`contract_version` must match exactly the version the vm-platform descriptor declares supported, so
+a contract change is a hard cutover rather than a silent re-certification.
 
-- `dependencies(owner, config) -> tuple[ConfigReference, ...]` (total, non-throwing) declares any
-  secret references the `platform_config` implies, and `validate(owner, config) -> None` is the
-  throwing shape check. Both are pure classmethods. Proxmox returns a
-  `ConfigReference(kind="secret", ...)` for its API token from `dependencies`; declaring it is what
-  later lets the op read it (below).
+- `config_model` declares what the platform's config IS (the keys a site writes beside `name` inside
+  `spec.platform`), as an `AgwModel` carrying the platform's own name as a `Literal` tag plus one
+  field per accepted key. The core validates against it (closed-world) and extracts the references
+  its `SecretRef` / `ResourceRef` markers imply (total, never raising); no platform code runs for
+  either. Proxmox marks its `token_secret` field; the marker is what later lets the op read that
+  secret (below).
 - `legacy_platform_metadata(cls, row, legacy) -> dict[str, str]` maps pre-migration DB rows into the
   `platform_metadata` shape, consumed only by the one-shot DB migration.
 
@@ -288,9 +293,9 @@ read back only by the owning platform (Lima stores `instance_name`, WSL2 `distro
 `backend_name`, and never the public IP, which it reads live). Add a platform-specific **input** by
 adding a field to `ProvisionRequest`, not by changing the protocol. But note the opposite pattern is
 also right: purely internal translation stays inside the platform. Azure's VM-size selection
-(mapping the request's `cpus`/`memory_gib`/`disk_gib` onto a concrete SKU, with a
-`platform_config.vm_sizes` override, per ADR 0018) lives entirely in `plugins/azure/platform.py` and
-adds nothing to `ProvisionRequest`.
+(mapping the request's `cpus`/`memory_gib`/`disk_gib` onto a concrete SKU, with a site-level
+`vm_sizes` override, per ADR 0018) lives entirely in `plugins/azure/platform.py` and adds nothing to
+`ProvisionRequest`.
 
 ### How an Op Gets Its Dependencies
 
@@ -306,8 +311,8 @@ author most needs to get right.
 accessor methods rather than bare fields so a future permission model can gate them without changing
 signatures: `admin_target()` / `agent_target()` return execution `Transport`s, and `secret(name)`
 returns a resolved secret value. `ctx.secret(name)` raises a typed `ConfigError` if the context was
-assembled without a resolve pass, and it is scoped: an op can read only the names its `dependencies`
-declared.
+assembled without a resolve pass, and it is scoped: an op can read only the names its config model
+marked.
 
 What differs between stages is timing, not shape. `preflight` gets the command-start slice (existing
 targets only, no resolved secrets, which is what makes it structurally dependency-blind); `runup`
@@ -329,55 +334,82 @@ GCP or AWS backend) should follow that shape.
 ### Credentials on a Cloud Platform: The Reference Shape
 
 Azure is the worked example, and a new cloud platform should copy it rather than invent a variant.
-The `aws-ec2` platform (`plugins/aws/platform.py`) is the first copy of it: its optional
-`credentials` table is the AWS analogue named below, with `access_key_id` as the plain identifier
-and `access_key_secret` naming the secret that holds the secret access key (plus an optional
-`assume_role_arn`). Read it alongside azure when adding the third. Four rules, in
-`plugins/azure/platform.py`:
+The `aws-ec2` platform (`plugins/aws/platform.py`) is the first copy of it: its `access-key` arm is
+the AWS analogue named below, with `access_key_id` as the plain identifier and `access_key_secret`
+naming the secret that holds the secret access key (plus an optional `assume_role_arn`). Read it
+alongside azure when adding the third. Four rules, in `plugins/azure/platform.py`:
 
-**1. Explicit credentials are an OPTIONAL nested table naming a secret.** The site's
-`platform_config` may carry a `service_principal` table:
+**1. Authentication is a REQUIRED tagged union, one arm per mechanism.** The site's platform block
+carries an `auth` table whose `mode` selects the arm:
 
 ```yaml
-platform_config:
-  subscription_id: "..."
-  service_principal:
-    tenant_id: "..." # plain config: an identifier, not a secret
-    client_id: "..." # plain config
-    secret: azure-client-secret # the NAME of a secret, and the default
+spec:
+  platform:
+    name: azure-vm
+    subscription_id: "..."
+    auth:
+      mode: service-principal
+      tenant_id: "..." # plain config: an identifier, not a secret
+      client_id: "..." # plain config
+      secret: azure-client-secret # the NAME of a secret, and the default
 ```
 
-Three deliberate choices. The identifiers are plain config because they are identifiers, not
-credentials. The field is `secret` and holds a NAME, not `client_secret` holding a value, so nothing
-invites an operator to paste a live credential into a plaintext file; the value resolves through the
-framework secret system like proxmox's `token_secret`. And the table is nested rather than flattened
-into three top-level keys so a future variant (a certificate instead of a client secret) slots in
-beside `secret` without a breaking change to declared sites. The `aws-ec2` platform is exactly this
-analogue realized: a `credentials` table with the plain `access_key_id` and an `access_key_secret`
-naming the secret access key.
+```yaml
+spec:
+  platform:
+    name: azure-vm
+    subscription_id: "..."
+    auth: { mode: ambient } # the host's own credential chain, said out loud
+```
 
-**2. Declare the edge from `dependencies`, validate the shape in `validate`.** `dependencies` is
-total and non-throwing, so it emits the edge whenever it can derive the secret NAME (even if the
-table's other fields are malformed) and omits it only when the name itself is underivable.
-`validate` is where every shape error surfaces, including unknown keys inside the table. Declaring
-the edge is what puts the secret in the site node's `secret_refs`, which is what gets it into the
-boundary resolve and therefore delivered to `ctx.secret`.
+Four deliberate choices. The field is REQUIRED with no omission alias, because the previous shape
+(an optional credential table) expressed the choice by ABSENCE, and no document could tell "I
+deliberately borrow the host's identity" from "nobody configured this yet"; neither could a
+reviewer, `doctor`, or the dependency graph. The tag is a string `Literal` rather than a boolean,
+because each mode carries its own fields and further mechanisms (azure managed identity, an AWS
+profile or web identity) are new arms rather than another shape change. The identifiers are plain
+config because they are identifiers, not credentials. And the field is `secret` and holds a NAME,
+not `client_secret` holding a value, so nothing invites an operator to paste a live credential into
+a plaintext file; the value resolves through the framework secret system like proxmox's
+`token_secret`.
 
-**3. Explicit credentials never fall back.** `_get_credential(ctx)` forks on config, not on runtime
-luck: with the table present it builds exactly that credential and a failure is fatal; without it,
-the ambient chain (`DefaultAzureCredential` plus the browser fallback) runs as before. Falling back
-from a configured identity to an ambient one would run the operator's command as somebody else,
-which is worse than failing. Cache the credential per instance: its identity is fixed by the bound
-config, so one build and one probe serve every op.
+A union rather than an `auth_mode` enum beside nullable blocks, and the reason is mechanical:
+pydantic emits a discriminated union directly as `oneOf` with a `discriminator` mapping and a
+`const` per arm, so the loader and the emitted schema agree by construction. The enum alternative
+needs a cross-field validator, and pydantic does not derive a validator's body into the schema it
+emits, so the emitted schema would accept mixed-arm configs the loader rejects. The limit is that
+derivation and not JSON Schema, which states such a constraint fine; it just has to be declared
+rather than written as code. Under `manifests/emit.py`'s contract a schema may be more permissive
+than the loader, so that is not unsound; what it forfeits is the DIAGNOSTIC, since a `tenant_id`
+written under `mode: ambient` would draw no editor complaint and fail only at load.
+
+Proxmox is deliberately NOT in this shape: it has one authentication mechanism, so it keeps its
+required token fields with no mode selector. Add a union when there are two mechanisms to choose
+between, not before.
+
+**2. Mark the field, and let the core do both halves.** Extraction is total and non-throwing, so it
+emits the edge whenever it can derive the secret NAME (even if the table's other fields are
+malformed) and omits it only when the name itself is underivable. Validation is where every shape
+error surfaces, including unknown keys inside the table. Marking the field is what puts the secret
+in the site node's `secret_refs`, which is what gets it into the boundary resolve and therefore
+delivered to `ctx.secret`, and the marker's `default_template` is where the well-known default name
+lives.
+
+**3. An explicit credential never falls back.** `_get_credential(ctx)` forks on the declared arm,
+not on runtime luck: a `service-principal` site builds exactly that credential and a failure is
+fatal; an `ambient` site gets the ambient chain (`DefaultAzureCredential` plus the browser
+fallback). Falling back from a configured identity to an ambient one would run the operator's
+command as somebody else, which is worse than failing. Cache the credential per instance: its
+identity is fixed by the bound config, so one build and one probe serve every op.
 
 **4. Probe once at build, and let runup pay for it.** Both credential paths make one live token
 request when built, but they answer a failed probe differently, and the difference is the point. On
-the EXPLICIT path the probe is purely diagnostic: there is no fallback to choose, so a failure
-becomes a typed error naming the site and the secret at the point of construction, rather than a raw
-SDK exception from whichever call happened to be first. On the AMBIENT path the probe is the
-fallback DECISION: a failure means nothing in the chain can authenticate, so it answers with an
+the SERVICE-PRINCIPAL path the probe is purely diagnostic: there is no fallback to choose, so a
+failure becomes a typed error naming the site and the secret at the point of construction, rather
+than a raw SDK exception from whichever call happened to be first. On the AMBIENT path the probe is
+the fallback DECISION: a failure means nothing in the chain can authenticate, so it answers with an
 unprobed interactive-browser credential and raises nothing. The platform's `runup` is where the
-explicit path's error lands on the provisioning timeline, ahead of `create`, so a wrong credential
+credential arm's error lands on the provisioning timeline, ahead of `create`, so a wrong credential
 aborts `vm create` with nothing realized.
 
 Two placement rules go with it. Client construction stays OUTSIDE the `try` that wraps SDK calls in
@@ -387,20 +419,20 @@ But keep the credential's own construction INSIDE the try that produces that typ
 its probe: SDKs validate constructor arguments eagerly, and a resolved secret that comes back empty
 is reachable in a way config validation cannot catch.
 
-Read `_parse_service_principal`, `_build_service_principal_credential`, and `_get_credential`
-together: that trio is the whole pattern. On EC2 the analogous trio is `_parse_credentials`,
-`_build_explicit_session`, and `_get_session`; two things differ deliberately, both because the SDKs
-differ. First, `_get_session` does NOT probe at build (boto3 sessions are inert), so the runup and
-status classify a definitive credential rejection apart from an unreachable endpoint: azure-identity
-collapses an Entra rejection and an unreachable Entra into one `ClientAuthenticationError`, so azure
-must treat every credential failure as fatal, but botocore surfaces a rejection as a `ClientError`
-with an auth error code and an outage as an `EndpointConnectionError`, so `aws-ec2` follows proxmox
-(runup makes a rejection fatal and warns-and-continues on indeterminacy) and its `status` re-raises
-a rejection typed rather than degrading to UNKNOWN, so a misconfigured site never reads as UNKNOWN
-in `vm describe` (the exact #303 hole). Second, an `assume_role_arn` builds AUTO-REFRESHING
-credentials (botocore's `AssumeRoleCredentialFetcher` + `DeferredRefreshableCredentials`) rather
-than a one-shot assume, so a long op cannot fail with `ExpiredToken` from a frozen cache. See
-`test_platform_runup.py` and `test_aws_ec2_ops.py` (directly under `cli/tests/`) for the halves.
+Read `AzureAuth`, `_build_service_principal_credential`, and `_get_credential` together: that trio
+is the whole pattern. On EC2 the analogous trio is `AwsAuth`, `_build_access_key_session`, and
+`_get_session`; two things differ deliberately, both because the SDKs differ. First, `_get_session`
+does NOT probe at build (boto3 sessions are inert), so the runup and status classify a definitive
+credential rejection apart from an unreachable endpoint: azure-identity collapses an Entra rejection
+and an unreachable Entra into one `ClientAuthenticationError`, so azure must treat every credential
+failure as fatal, but botocore surfaces a rejection as a `ClientError` with an auth error code and
+an outage as an `EndpointConnectionError`, so `aws-ec2` follows proxmox (runup makes a rejection
+fatal and warns-and-continues on indeterminacy) and its `status` re-raises a rejection typed rather
+than degrading to UNKNOWN, so a misconfigured site never reads as UNKNOWN in `vm describe` (the
+exact #303 hole). Second, an `assume_role_arn` builds AUTO-REFRESHING credentials (botocore's
+`AssumeRoleCredentialFetcher` + `DeferredRefreshableCredentials`) rather than a one-shot assume, so
+a long op cannot fail with `ExpiredToken` from a frozen cache. See `test_platform_runup.py` and
+`test_aws_ec2_ops.py` (directly under `cli/tests/`) for the halves.
 
 ### Exposure on a Cloud Platform: Baseline Deny, Ephemeral Scoped Allows
 
@@ -606,9 +638,9 @@ YAML block scalar, remote shell). Two traps that have already occurred:
    with a persistent client memoizes the derived client, not the secret (the Proxmox `_api`
    pattern). `create` is intentionally not `@idempotent_op`; the idempotent ops must land in-state
    themselves.
-2. `validate` checks the `platform_config` shape, and `dependencies` returns a `ConfigReference` for
-   each secret the implementation reads. Declaring a secret in `dependencies` authorizes the op to
-   read it later.
+2. `config_model` declares the shape of the platform's own config block, with a `SecretRef` marker
+   on each field naming a secret the implementation reads. Marking a field authorizes the op to read
+   that secret later.
 3. The class is registered in `VM_PLATFORM_REGISTRY` (`__init__.py`).
 4. `unsupported_reason` identifies platforms that cannot run on some hosts (WSL2 off Windows), while
    the non-constructing `not_ready(config)` handles per-site tool checks (Lima with no `limactl`).
@@ -625,9 +657,9 @@ YAML block scalar, remote shell). Two traps that have already occurred:
 
 The existing tests under `cli/tests/vms/` are the templates to copy from:
 
-- `test_platform_config_contract.py`: table-driven `validate` shape and `dependencies` edge
-  extraction across all platforms, plus a registry-name/class parity check. A good template for a
-  new platform's registration test.
+- `test_platform_config_contract.py`: table-driven validation and edge extraction across all
+  platforms, through the core entry points, plus a registry-name/class parity check. A good template
+  for a new platform's registration test.
 - `test_platform_support.py`: `unsupported_reason` (host-wide) vs. `not_ready` (per-site config) vs.
   the graph's stored `readiness_of` verdict (the fold composes the first two into the last). Uses
   the `stub_platform_support` fixture to pin platforms ready regardless of host, so dispatch-shape

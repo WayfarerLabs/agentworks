@@ -1,6 +1,7 @@
 """``_GitCredentialKind`` and ``_GitCredentialProviderKind``: framework
 strategies for the ``"git-credential"`` and ``"git-credential-provider"``
-kinds, plus the ``GitCredentialProviderEntry`` capability row.
+kinds, plus the ``GitCredentialProviderEntry`` capability row and the
+provider kind's ``CapabilityKindDescriptor``.
 
 Both live in the ``git_credentials`` domain package next to the provider
 implementations; ``agentworks.resources.kinds.__init__`` imports this
@@ -29,12 +30,23 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
+from agentworks.capabilities.descriptor import (
+    CapabilityKindDescriptor,
+    ConfigContract,
+    HostSurface,
+    RegistryPolicy,
+)
+from agentworks.capabilities.git_credential.base import GitCredentialProvider, TokenAcquiringConfig
+from agentworks.git_credentials.credential import GitCredentialConfig
+from agentworks.resources.graph import Readiness
 from agentworks.resources.kind import KIND_REGISTRY, NoUnreferencedDefaultError
+from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from agentworks.resources.origin import Origin
+    from agentworks.declared_resource import DeclaredResource
+    from agentworks.origin import Origin
     from agentworks.resources.reference import ResourceReference
 
 
@@ -62,7 +74,26 @@ class _GitCredentialKind:
     """Implementation of ``ResourceKind`` for ``"git-credential"``."""
 
     kind: str = "git-credential"
+    model: type[DeclaredResource] = GitCredentialConfig
     description: str = "Declared git credentials"
+    prose: TopicProse = TopicProse(
+        title="Git credentials",
+        overview="""
+        A git-credential is how a VM obtains a git token. `spec.provider` selects the
+        provider capability and carries its config; admin and agent templates refer to
+        the credential by name through `git_credentials`.
+
+        The provider's `token` field says how the token is obtained. Its `stored` arm
+        names a SECRET and defaults to `git-token-<this credential's name>`; a bare
+        secret name is shorthand for that arm. The secret resolves through the backend
+        chain at VM-init time. Because the default name derives from this resource's
+        name, a name that breaks the standard naming rules still loads but warns.
+
+        Declare several: the managed credential helper picks the right one per remote,
+        which is what makes a fine-grained token scoped to one repository usable
+        alongside a broader one.
+        """,
+    )
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None  # ignored under "error"
     category: Literal["declarable", "capability"] = "declarable"
@@ -90,7 +121,19 @@ class _GitCredentialProviderKind:
     """Implementation of ``ResourceKind`` for ``"git-credential-provider"``."""
 
     kind: str = "git-credential-provider"
-    description: str = "Capability for provisioning git credentials based on the provider (github, azdo)"
+    description: str = "Capability for obtaining git tokens from one forge"
+    prose: TopicProse = TopicProse(
+        title="Git credential providers",
+        overview="""
+        A git-credential-provider knows how one forge's tokens work: what scoping a
+        credential may declare, and how to check that a token is live before a VM
+        depends on it.
+
+        Providers are code, and a git-credential document selects one by writing its
+        name inside `spec.provider`. The keys allowed beside that name are the
+        provider's own, which is why each documents its own config.
+        """,
+    )
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
     category: Literal["declarable", "capability"] = "capability"
@@ -110,3 +153,46 @@ class _GitCredentialProviderKind:
 
 KIND_REGISTRY["git-credential"] = _GitCredentialKind()
 KIND_REGISTRY["git-credential-provider"] = _GitCredentialProviderKind()
+
+
+def _registry() -> dict[str, Any]:
+    from agentworks.capabilities.git_credential import GIT_CREDENTIAL_PROVIDER_REGISTRY
+
+    return GIT_CREDENTIAL_PROVIDER_REGISTRY
+
+
+def _entry(name: str, impl: Any, origin: Origin | None) -> GitCredentialProviderEntry:
+    # The impl's ``description`` is deliberately not carried: this row is
+    # name-and-origin only, and giving it one would change row content.
+    return GitCredentialProviderEntry(name=name, origin=origin)
+
+
+def _readiness(name: str, impl: Any) -> Readiness:
+    """Always ready: a credential provider has no host-support concept (it
+    talks to a forge over the network, which is a runtime concern)."""
+    return Readiness.ready()
+
+
+GIT_CREDENTIAL_PROVIDER_DESCRIPTOR = CapabilityKindDescriptor(
+    kind="git-credential-provider",
+    contract_version=2,
+    implementation_contract=GitCredentialProvider,
+    registry_policy=RegistryPolicy.CLASS_BY_NAME,
+    registry=_registry,
+    required_operations=frozenset({"helper_entry", "credential_lines"}),
+    # Empty: GitCredentialProvider supplies every non-operation member a
+    # subclass needs.
+    required_attributes=frozenset(),
+    entry_factory=_entry,
+    kind_strategy=KIND_REGISTRY["git-credential-provider"],
+    readiness=_readiness,
+    publisher_source="agentworks.capabilities.git_credential",
+    config_schema=ConfigContract(base=TokenAcquiringConfig, discriminator="name"),
+    manifest_section=HostSurface(
+        host_kind="git-credential",
+        naming_field="provider",
+        config_field="provider_config",
+    ),
+)
+"""The git-credential-provider record in the capability-kind descriptor
+table (``agentworks.capabilities.descriptor``)."""

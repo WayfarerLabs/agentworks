@@ -1,7 +1,7 @@
 """The ``shell`` harness integration: run an operator-authored command (or a bare
 login shell) as the session workload.
 
-The plain, default member. Its ``harness_integration_config`` vocabulary is exactly
+The plain, default member. Its config vocabulary is exactly
 the flat session-template fields the harness integration model replaces: ``command``
 (the pane command; empty = login shell), ``resume_command`` (the
 command on ``session resume``, falling back to ``command``), and
@@ -11,19 +11,55 @@ PATH). All optional.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, Literal
+
+from pydantic import Field
 
 from agentworks.capabilities.harness_integration.base import HarnessIntegration, require_commands
-from agentworks.errors import ConfigError
+from agentworks.schema import AgwModel
+from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.capabilities.base import RunContext
-    from agentworks.resources.reference import ConfigReference
     from agentworks.transports import Transport
 
-_SHELL_FIELDS = {"command", "resume_command", "required_commands"}
+
+class ShellConfig(AgwModel):
+    """What a session template tells the ``shell`` integration to run.
+
+    **Every field beyond the tag must stay optional**, and this one model
+    is the only place that is true of by obligation rather than by
+    accident. ``shell`` is the DEFAULT workload: a session template that
+    names no integration at all resolves to it, including the reserved
+    auto-declared ``default`` row, which has no config to give. A required
+    field here would make every operator's config fail to load with no
+    remedy available to them. Pinned by
+    ``tests/test_shell_integration.py``; any other integration is free to
+    require what it likes, because a template has to opt into it.
+
+    Optional means DEFAULTED, not nullable (FR15): each field declares
+    the concrete value an omitted declaration means, so the integration
+    reads a string or a list rather than re-inventing "absent means
+    empty" at every read.
+    """
+
+    name: Literal["shell"]
+    """The harness integration this config is for."""
+
+    command: str = Field(default="", examples=["htop"])
+    """The command the session's pane runs. Empty (the default) is a bare
+    login shell."""
+
+    resume_command: str = ""
+    """The command a resumed session's pane runs. Empty (the default)
+    reruns ``command``."""
+
+    required_commands: list[str] = Field(default_factory=list, examples=[["htop"]])
+    """Commands that must exist on the session's target before it starts.
+    Inherited templates UNION this list rather than replacing it, so a
+    child adding one never silently drops the parent's."""
 
 
 def _as_str_list(value: object) -> list[str] | None:
@@ -40,15 +76,6 @@ def _as_str_list(value: object) -> list[str] | None:
     if isinstance(value, list) and all(isinstance(item, str) for item in value):
         return list(value)
     return None
-
-
-def _run_str_list(value: object) -> list[str]:
-    """Narrow an op-time list field best-effort: by op time the merged
-    blob has passed ``validate``, so a non-conforming value cannot occur;
-    degrade to empty rather than raising if one somehow does."""
-    if isinstance(value, list):
-        return [item for item in value if isinstance(item, str)]
-    return []
 
 
 def _append_dedupe(target: list[str], source: list[str]) -> list[str]:
@@ -72,34 +99,33 @@ def _append_dedupe(target: list[str], source: list[str]) -> list[str]:
 class ShellIntegration(HarnessIntegration):
     """Runs an operator command (or a login shell) as the session."""
 
+    contract_version: ClassVar[int] = 1
     name: ClassVar[str] = "shell"
     description: ClassVar[str] = "Run an operator command or a login shell"
+    prose: ClassVar[TopicProse | None] = TopicProse(
+        title="Shell sessions",
+        overview="""
+        Runs whatever you tell it to. With no `command`, the session is a bare login
+        shell, which is what a session-template that selects no integration gets.
 
-    @classmethod
-    def dependencies(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
-        """``shell`` implies no resource reference, so its edge set is
-        empty (total, non-throwing per the ``dependencies`` contract)."""
-        return ()
+        `resume_command` is what `agw session resume` runs instead, falling back to
+        `command` when it is empty. That pair is enough to drive a harness with no
+        dedicated integration of its own: launch it one way, reattach another. A real
+        integration is more robust (it knows whether a session exists to resume), but
+        the shell escape hatch is always there.
 
-    @classmethod
-    def validate(cls, owner: str, config: Mapping[str, object]) -> None:
-        """Shape-and-vocabulary only (FRD R2/R4): unknown fields raise;
-        each present field is type-checked. Completeness (there is none
-        for ``shell``) would run on the merged blob at resolve; this call
-        fires per declared blob, where a restating child may be partial.
-        """
-        unknown = sorted(set(config) - _SHELL_FIELDS)
-        if unknown:
-            raise ConfigError(f"{owner}: unknown shell harness integration field(s): {', '.join(unknown)}")
-        for field_name in ("command", "resume_command"):
-            value = config.get(field_name)
-            if value is not None and not isinstance(value, str):
-                raise ConfigError(f"{owner}.{field_name} must be a string")
-        required = config.get("required_commands")
-        if required is not None and (
-            not isinstance(required, list) or not all(isinstance(item, str) for item in required)
-        ):
-            raise ConfigError(f"{owner}.required_commands must be a list of strings")
+        `required_commands` are checked on the target before the session starts, which
+        turns a missing binary into a clear message instead of a pane that dies
+        immediately.
+        """,
+    )
+
+    config_model: ClassVar[type[ShellConfig]] = ShellConfig
+
+    @property
+    def config(self) -> ShellConfig:
+        """This session's validated shell config."""
+        return self._config_as(ShellConfig)
 
     @classmethod
     def merge_config(cls, base: Mapping[str, object], child: Mapping[str, object]) -> dict[str, object]:
@@ -111,8 +137,8 @@ class ShellIntegration(HarnessIntegration):
         The union runs only when BOTH sides are clean lists of strings:
         the merge sees raw declared blobs, and filtering a mixed list
         into a valid-looking union would hide the invalid entry from the
-        merged-blob ``validate`` pass. An unclean side falls through to
-        the shallow merge, so ``validate`` still rejects it."""
+        validation of the merged blob. An unclean side falls through to
+        the shallow merge, so validation still rejects it."""
         merged = {**base, **child}
         base_cmds = _as_str_list(base.get("required_commands"))
         child_cmds = _as_str_list(child.get("required_commands"))
@@ -123,23 +149,23 @@ class ShellIntegration(HarnessIntegration):
         return merged
 
     def start(self, ctx: RunContext) -> str:
-        """The pane command for ``session create``: ``command`` verbatim,
-        empty string when undeclared (a bare login shell)."""
-        return self._command_field("command")
+        """The pane command for ``session create``: ``command`` verbatim
+        (empty = a bare login shell)."""
+        return self.config.command
 
     def resume(self, ctx: RunContext) -> str:
         """The pane command for ``session resume``: ``resume_command``
-        when declared, else ``command`` (empty = login shell)."""
-        resume_command = self._command_field("resume_command")
-        return resume_command or self._command_field("command")
+        when declared, else ``command`` (empty = login shell).
 
-    def _command_field(self, field_name: str) -> str:
-        value = self.config.get(field_name, "")
-        return value if isinstance(value, str) else ""
+        The remaining ``or`` is the cross-field derivation the model's
+        own description states, not a fallback to a literal: an empty
+        ``resume_command`` means "rerun ``command``", and ``command`` is
+        already resolved by the time it is read."""
+        return self.config.resume_command or self.config.command
 
     def _probe_target(self, transport: Transport) -> None:
         require_commands(
-            tuple(_run_str_list(self.config.get("required_commands"))),
+            tuple(self.config.required_commands),
             transport,
             harness_integration_name=self.name,
             template_name=self.owner_name,

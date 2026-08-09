@@ -19,25 +19,25 @@ which publishers exist; that's application-level knowledge.
 
 from __future__ import annotations
 
-import dataclasses
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
+from agentworks.declared_resource import replace_fields
 from agentworks.errors import ConfigError, StateError
 from agentworks.resources.kind import KIND_REGISTRY
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping, Sequence
 
+    from agentworks.origin import Origin
     from agentworks.resources.graph import (
-        BuildContext,
         DependencyGraph,
         DisabledMark,
         Enablement,
         EnablementSource,
+        FinalizeContext,
         Readiness,
     )
-    from agentworks.resources.origin import Origin
     from agentworks.resources.reference import ReferenceEntry, ResourceReference
 
 
@@ -112,7 +112,7 @@ class Registry:
         """Add a Resource from any publisher. The publisher constructs
         the appropriate ``Origin`` variant (``operator_declared`` /
         ``built_in`` / future variants) and passes it in; the
-        Registry attaches it to the Resource via ``dataclasses.replace``
+        Registry attaches it to the Resource via ``replace_fields``
         and stores the result keyed by ``(kind, name)``.
 
         Raises ``RuntimeError`` if the Registry has been finalized.
@@ -186,7 +186,7 @@ class Registry:
         elif weak:
             # Weak row landing in a free slot: record the key as weak-held.
             self._weak.add(key)
-        stamped = dataclasses.replace(resource, origin=origin)
+        stamped = replace_fields(resource, origin=origin)
         self._resources.setdefault(kind, {})[name] = stamped
 
     @staticmethod
@@ -306,7 +306,12 @@ class Registry:
 
     # -- Finalize phase ------------------------------------------------
 
-    def finalize(self, enablement_sources: Sequence[EnablementSource] = ()) -> None:
+    def finalize(
+        self,
+        enablement_sources: Sequence[EnablementSource] = (),
+        *,
+        probe_host_readiness: bool = True,
+    ) -> None:
         """Run the framework pass over published Resources, then freeze.
 
         ``enablement_sources`` is the injected list of enablement sources
@@ -349,12 +354,13 @@ class Registry:
         6. **attach**: build the retained frozen ``DependencyGraph``
            (inbound references + fold verdicts on the node), then synthesize
            descriptions for auto-declared rows from the graph's inbound refs.
-        7. **validate**: run each READY + ENABLED Resource's ``validate()``
-           (throwing, ``file:line``-framed). A not-ready or disabled row's
-           block is deferred, not validated (R9.4). Distinct from graph
-           construction (R3): the build passes never throw on a malformed
-           block, so a config with both a malformed block and a cycle
-           reports the cycle first (R9.3).
+        7. **validate**: run EVERY present Resource's ``validate_config()``
+           (throwing, ``file:line``-framed), with no readiness or enablement
+           gate: what config is valid is the declared model's answer alone,
+           so it cannot vary by host. Distinct from graph construction (R3):
+           the build passes never throw on a malformed block, so a config
+           with both a malformed block and a cycle reports the cycle first
+           (R9.3).
         8. **freeze**.
 
         Semantic checks that need CONFIG alongside the finalized graph
@@ -417,9 +423,9 @@ class Registry:
         # 4: fold readiness for the present nodes (LLD c). ``marks`` is the
         # single source of truth: compose the injected enablement sources over
         # the present rows (all-enabled when none fire). The binary
-        # ``enablement`` map the fold / materialization gate / ``build_graph`` /
-        # ``_validate_resources`` consume is a PURE PROJECTION of ``marks``
-        # (disabled iff a mark exists), so "which nodes are disabled" and "why"
+        # ``enablement`` map the fold / materialization gate / ``build_graph``
+        # consume is a PURE PROJECTION of ``marks`` (disabled iff a mark
+        # exists), so "which nodes are disabled" and "why"
         # never drift; ``marks`` also flows to the fold as ``disabled_marks`` so
         # a propagating dependent's hint reads the carried reason.
         marks = compose_enablement(enablement_sources, self._resources)
@@ -442,10 +448,19 @@ class Registry:
             for kind, kind_dict in self._resources.items()
             for key in ((kind, name) for name in kind_dict)
         }
-        readiness = fold_readiness(self._resources, all_outbound, enablement, marks)
+        readiness = fold_readiness(self._resources, all_outbound, enablement, marks, probe_host=probe_host_readiness)
 
         # 5: readiness-gated materialization (R12), looping to a fixpoint.
-        self._materialize_deferred(deferred, all_refs, all_outbound, readiness, enablement, marks, context)
+        self._materialize_deferred(
+            deferred,
+            all_refs,
+            all_outbound,
+            readiness,
+            enablement,
+            marks,
+            context,
+            probe_host_readiness=probe_host_readiness,
+        )
 
         # 6: attach. Build the retained graph (inbound + readiness + enablement
         # on the node), then polish auto-declared descriptions off its inbound
@@ -457,69 +472,109 @@ class Registry:
                 inbound = self._graph.dependents_of(kind, name)
                 self._resources[kind][name] = _polish_auto_declared_description(existing, kind, inbound)
 
-        # 7: validate the ready + enabled set only (R3, R9.4).
-        self._validate_resources(enablement)
+        # 7: validate every present resource's capability config (R3). No
+        # readiness or enablement gate: the declared model is the only
+        # authority on what config is valid.
+        self._validate_resources(context)
 
         # 8: freeze.
         self._frozen = True
 
-    def _validate_resources(self, enablement: Mapping[tuple[str, str], Enablement]) -> None:
-        """Run each READY + ENABLED Resource's ``validate()`` (the throwing
+    def _validate_resources(self, context: FinalizeContext) -> None:
+        """Run EVERY present Resource's ``validate_config()`` (the throwing
         correctness check for its capability config sub-block), raising on
         the first malformed block.
 
-        Scoped to the READY + ENABLED set (R3, R9.4): a not-ready or disabled
-        resource's block is DEFERRED, not validated (there is nothing to run,
-        and its capability may be unavailable), so a malformed ``platform_config``
-        on a site the host cannot run does not abort every command; it is
-        validated when the resource becomes ready. A disabled node's stored
-        readiness is a placeholder (enablement answers for it), so the gate
-        checks enablement explicitly rather than leaning on ``is_ready``.
+        UNCONDITIONAL, and that is the point: no readiness verdict, no
+        enablement verdict, and no property of the host may decide whether
+        a declaration is well-formed. The declared model is the only
+        authority on what config is valid, so a key that model does not
+        accept is an error on every host, and a model that legitimately
+        accepts open keys keeps accepting them. Openness is a fact about
+        the model, never an accident of environment.
 
-        The capability's ``validate`` frames its message with the logical
-        owner label (``kind/name``); the source location that decode/load
-        used to supply (the manifest ``file:line``, the TOML section) is
-        gone once validation runs here, so this pass re-attaches it from
-        the Resource's ``origin`` (the same provenance operators see in
-        ``describe`` / ``doctor``, rendered location-only for the inline
-        message).
+        The pass used to skip not-ready and disabled resources (R3, R9.4,
+        "there is nothing to run, and its capability may be unavailable").
+        That inverted the two questions. Validation is pure, cheap, and
+        answerable from the document alone; readiness is the environmental
+        question, and it is computed at pass 4 from config this pass has
+        not yet checked. Gating the pure check on the environmental one let
+        a typo decide its own fate: an operator's misspelled ``vm_host``
+        read as an absent one, which made a remote lima site look local,
+        which made it not-ready for want of ``limactl``, which suppressed
+        the very error that named the typo. The operator was told
+        ``limactl not installed``, and the same document was correctly
+        refused on a host that happened to have ``limactl``. Closed-world
+        config that is only closed on some hosts is not closed.
 
-        The ``getattr(resource, "validate", None)`` guard skips the
+        What the old scope was protecting is served without it. "Its
+        capability may be unavailable" is already
+        :func:`~agentworks.capabilities.config.validate_capability_config`'s
+        answer: an implementation this host has not seated selects no
+        model, so the call is a no-op and the resource's dangling
+        capability edge reports it once, as the hard finalize miss (R9.2).
+        Blast radius is the real cost and it is the intended one: a
+        malformed block aborts the build rather than lurking on a row
+        nobody looked at. A wrong or unreachable host VALUE is untouched
+        by any of this, because a value the model accepts is valid; that
+        site stays ready, and it fails at use with a live error.
+
+        Totality of the READINESS fold is a separate contract and still
+        holds: ``not_ready`` never constructs and never validates (LLD c),
+        so the fold at pass 4 stays total over unvalidated config. That
+        contract is what avoids the R9.4 loop (a malformed block becoming a
+        permanent readiness reason); it never required this pass to be
+        gated, and the two were only ever coupled by accident.
+
+        This pass adds NO framing of its own, and that is the whole story
+        now: every error reaching it comes from the schema error bridge,
+        which owns the location because pydantic reports every problem at
+        once and a suffix appended here could only reach the last line.
+        The pass used to carry a fork (re-raise what the bridge framed,
+        append the resource's origin to anything else) for as long as
+        hand-rolled validators raised unframed errors beside it; there are
+        none.
+
+        The ``getattr(resource, "validate_config", None)`` guard skips the
         capability marker rows (``VMPlatformEntry`` and friends), which
-        carry no ``validate`` attribute; a ``DeclaredResource`` subclass
+        carry no such attribute; a ``DeclaredResource`` subclass
         with no capability config (a secret, an apt entry) validates via
-        the no-op base ``validate`` and passes.
+        the no-op base ``validate_config`` and passes.
 
-        Each ``validate`` is handed the enabled ``secret-backend`` name set so a
-        ``secret`` validates only mappings addressed to a present AND enabled
-        backend (R9.9); a mapping to a disabled backend stays inert until
-        enabled. Every non-secret resource ignores the set.
+        NO enablement-keyed suppression survives here, and the pass takes
+        no enablement input at all. It briefly kept one, recorded here as an
+        exception: a ``secret``'s mapping addressed to a present-but-DISABLED
+        ``secret-backend`` was left unvalidated until the backend was
+        enabled (R9.9's disabled sub-clause), for which this pass threaded
+        the enabled backend-name set down to every ``validate_config``. It
+        was the same shape as the pass-level gate removed above, only
+        narrower, and it failed the same way: an operator could accumulate
+        mappings no model would ever accept and learn about all of them at
+        the instant they enabled the backend, which is the worst moment to
+        find out. So the skip is retired and the parameter with it; a
+        mapping is validated whether or not its backend is enabled.
+
+        What that skip was conflated with survives untouched. A mapping to a
+        disabled backend is still INERT for resolution
+        (:func:`~agentworks.secrets.resolve.active_backends` drops a disabled
+        backend from the chain, so it is never selected or resolved
+        through). Being validated and being live were always two properties;
+        only the second one tracks enablement.
+
+        Each ``validate_config`` is handed the build walk's own ``context``,
+        so an INHERITING resource validates the same merged declaration its
+        edges came from (FR12: validation runs on the effective config,
+        because a child's declared blob is legitimately partial). One context
+        object for both passes is what keeps the two readings of a chain from
+        drifting.
         """
-        from agentworks.resources.graph import Enablement
-        from agentworks.resources.render import format_origin_location
-
-        assert self._graph is not None  # built in pass 6, before this pass
-        enabled_backends = frozenset(
-            name for (kind, name), axis in enablement.items() if kind == "secret-backend" and axis is Enablement.enabled
-        )
         for kind in list(self._resources.keys()):
             for name in list(self._resources[kind].keys()):
-                if enablement.get((kind, name), Enablement.enabled) is Enablement.disabled:
-                    continue
-                if not self._graph.is_ready(kind, name):
-                    continue
                 resource = self._resources[kind][name]
-                validate = getattr(resource, "validate", None)
-                if validate is None:
+                validate_config = getattr(resource, "validate_config", None)
+                if validate_config is None:
                     continue
-                try:
-                    validate(enabled_backends)
-                except ConfigError as exc:
-                    origin = getattr(resource, "origin", None)
-                    raise ConfigError(
-                        f"{exc} ({format_origin_location(origin)})",
-                        hint=exc.hint,
-                    ) from exc
+                validate_config(context)
 
     def _present_keys(self) -> set[tuple[str, str]]:
         """The ``(kind, name)`` of every currently-published Resource."""
@@ -561,14 +616,14 @@ class Registry:
         key: tuple[str, str],
         all_refs: dict[tuple[str, str], list[ResourceReference]],
         all_outbound: dict[tuple[str, str], list[ResourceReference]],
-        context: BuildContext,
+        context: FinalizeContext,
     ) -> None:
         """Walk one Resource's ``dependencies(context)``, appending its
         edges into ``all_refs`` (keyed by target) and ``all_outbound``
         (keyed by source). The source of every edge is ``key``, so
         ``all_outbound[key]`` holds this Resource's edges contiguously in
         emission order (LLD a's first-encountered guarantee). ``context`` is
-        the builder's threaded :class:`BuildContext` (the secret's
+        the builder's threaded :class:`FinalizeContext` (the secret's
         backend-list read; every other resource ignores it).
         """
         kind, name = key
@@ -595,19 +650,23 @@ class Registry:
                 continue
             kind_handler = _lookup_kind(kind, refs[0])
             first = refs[0]
+            # The DECLARER, not the publisher: an inheriting row publishes
+            # the runtime needs of its merged declaration, so blaming its
+            # ``source`` would send an operator to a file that does not
+            # contain the name, and which row got blamed would depend on
+            # the order the walk reached them in.
+            blamed = first.declarer
             if kind_handler.miss_policy == "auto-declare":
                 allowed = kind_handler.auto_declare_names
                 if allowed is not None and name not in allowed:
                     raise ConfigError(
                         f"{kind} kind only auto-declares the reserved name(s) "
                         f"{sorted(allowed)!r}; got {name!r} "
-                        f"(required by {first.source[0]}/{first.source[1]})"
+                        f"(required by {blamed[0]}/{blamed[1]})"
                     )
                 deferred.add(target)
             elif kind_handler.miss_policy == "error":
-                raise ConfigError(
-                    f"{first.source[0]} {first.source[1]!r} references unknown {kind} {name!r} ({first.usage})"
-                )
+                raise ConfigError(f"{blamed[0]} {blamed[1]!r} references unknown {kind} {name!r} ({first.usage})")
             else:
                 raise StateError(f"unexpected miss_policy {kind_handler.miss_policy!r} on KIND_REGISTRY[{kind!r}]")
 
@@ -619,7 +678,9 @@ class Registry:
         readiness: dict[tuple[str, str], Readiness],
         enablement: Mapping[tuple[str, str], Enablement],
         disabled_marks: Mapping[tuple[str, str], DisabledMark],
-        context: BuildContext,
+        context: FinalizeContext,
+        *,
+        probe_host_readiness: bool = True,
     ) -> None:
         """Materialize deferred auto-declare targets, readiness-gated (R12),
         looping to a fixpoint (LLD b subtlety 3).
@@ -657,7 +718,7 @@ class Registry:
                     # A disabled referrer does not drive materialization (R12):
                     # its readiness is not even computed.
                     continue
-                if verdict.is_ready:
+                if verdict.is_ready or not verdict.is_available:
                     return True
             return False
 
@@ -682,7 +743,13 @@ class Registry:
                 self._walk_into(target, all_refs, all_outbound, context)
                 self._resolve_misses(all_refs, deferred)
                 readiness[target] = node_readiness(
-                    target, self._resources, all_outbound, readiness, enablement, disabled_marks
+                    target,
+                    self._resources,
+                    all_outbound,
+                    readiness,
+                    enablement,
+                    disabled_marks,
+                    probe_host=probe_host_readiness,
                 )
             if not progressed:
                 # Every remaining deferred target lacks a ready referrer (R12):
@@ -749,12 +816,12 @@ class Registry:
 # -- Internal helpers --------------------------------------------------
 
 
-def _dependencies(resource: Any, context: BuildContext) -> Sequence[ResourceReference]:
+def _dependencies(resource: Any, context: FinalizeContext) -> Sequence[ResourceReference]:
     """Return the Resource's ``dependencies(context)`` edges or an empty
     sequence if it doesn't define the method. The capability marker rows
     (``SecretBackendEntry`` and friends) carry no ``dependencies``, so the
     ``getattr`` fallback keeps the walk safe. ``context`` is the builder's
-    threaded :class:`~agentworks.resources.graph.BuildContext` (the secret
+    threaded :class:`~agentworks.resources.graph.FinalizeContext` (the secret
     reads its available-backend list; every other resource ignores it).
     """
     method = getattr(resource, "dependencies", None)
@@ -765,13 +832,15 @@ def _dependencies(resource: Any, context: BuildContext) -> Sequence[ResourceRefe
 
 def _lookup_kind(kind: str, req: ResourceReference) -> Any:
     """Look up the kind in ``KIND_REGISTRY``, raising a clear error if
-    the reference references a kind no one has registered. Includes
-    the reference's source in the error for traceability.
+    the reference references a kind no one has registered. Names the
+    reference's DECLARER for traceability (the row whose declaration
+    carries the name, which on an inheriting row is not the publisher).
     """
     try:
         return KIND_REGISTRY[kind]
     except KeyError:
-        raise ConfigError(f"{req.source[0]} {req.source[1]!r} references unregistered kind {kind!r}") from None
+        blamed = req.declarer
+        raise ConfigError(f"{blamed[0]} {blamed[1]!r} references unregistered kind {kind!r}") from None
 
 
 def _polish_auto_declared_description(
@@ -815,12 +884,15 @@ def _polish_auto_declared_description(
         description = f"(auto) auto-declared default {kind}"
     else:
         first = references[0]
-        # ReferenceEntry.source is typed tuple[str, str]; the framework
-        # guarantees the shape at finalize time. No runtime guard.
-        distinct_other = {entry.source for entry in references} - {first.source}
+        # Keyed on the DECLARER: a row auto-declared because an inheriting
+        # template published its merged declaration's need is described by
+        # the template that wrote the name, not by every descendant that
+        # inherited it. ReferenceEntry's tuples are shape-guaranteed by
+        # the framework at finalize time, so there is no runtime guard.
+        distinct_other = {entry.declarer for entry in references} - {first.declarer}
         suffix = f" (and {len(distinct_other)} more)" if distinct_other else ""
-        description = f"(auto) {first.usage} for {first.source[0]}/{first.source[1]}{suffix}"
-    return dataclasses.replace(resource, description=description)
+        description = f"(auto) {first.usage} for {first.declarer[0]}/{first.declarer[1]}{suffix}"
+    return replace_fields(resource, description=description)
 
 
 def _detect_cycles(

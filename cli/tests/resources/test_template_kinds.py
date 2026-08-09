@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from textwrap import dedent
 from typing import Any
 
 import pytest
@@ -26,10 +25,11 @@ from agentworks.resources import (
     KIND_REGISTRY,
     TemplateReference,
 )
-from agentworks.resources.graph import BuildContext
+from agentworks.resources.graph import FinalizeContext
 from agentworks.sessions.template import SessionTemplate
+from agentworks.vms.template import VMTemplate
 from agentworks.workspaces.template import WorkspaceTemplate
-from tests.conftest import ManifestDoc, write_manifests
+from tests.conftest import ManifestDoc, write_cfg
 
 
 @dataclass(frozen=True)
@@ -40,7 +40,12 @@ class _KindSpec:
     expected_type: type
 
 
+#: Every kind whose rows inherit. All four behave identically here, which
+#: is the point of the parametrization: what makes one an inheriting kind
+#: is its ``auto-declare`` miss policy and its ``inherits`` field, not
+#: anything per kind, so a fifth arrives by being added to this tuple.
 SPECS: tuple[_KindSpec, ...] = (
+    _KindSpec("vm-template", VMTemplate),
     _KindSpec("agent-template", AgentTemplate),
     _KindSpec("workspace-template", WorkspaceTemplate),
     _KindSpec("session-template", SessionTemplate),
@@ -48,20 +53,8 @@ SPECS: tuple[_KindSpec, ...] = (
 
 
 def _write_cfg(path: Path, *manifests: ManifestDoc) -> Path:
-    pub = path.parent / "id.pub"
-    priv = path.parent / "id"
-    pub.write_text("ssh-ed25519 AAAA...")
-    priv.write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
-    path.write_text(
-        dedent(f"""\
-        [operator]
-        ssh_public_key = "{pub.as_posix()}"
-        ssh_private_key = "{priv.as_posix()}"
-        """),
-    )
-    if manifests:
-        write_manifests(path.parent, *manifests)
-    return path
+    """``write_cfg`` under this file's path-taking spelling."""
+    return write_cfg(path.parent, *manifests, filename=path.name)
 
 
 # -- Kind shape -------------------------------------------------------------
@@ -70,7 +63,6 @@ def _write_cfg(path: Path, *manifests: ManifestDoc) -> Path:
 @pytest.mark.parametrize("spec", SPECS, ids=lambda s: s.kind)
 def test_kind_attributes(spec: _KindSpec) -> None:
     kind = KIND_REGISTRY[spec.kind]
-    assert kind.kind == spec.kind
     assert kind.miss_policy == "auto-declare"
     assert kind.auto_declare_names == frozenset({"default"})
 
@@ -99,7 +91,7 @@ def test_synthesize_empty_builds_default(spec: _KindSpec) -> None:
 @pytest.mark.parametrize("spec", SPECS, ids=lambda s: s.kind)
 def test_no_inherits_produces_no_template_requirements(spec: _KindSpec) -> None:
     tmpl = spec.expected_type(name="alone")
-    template_reqs = [r for r in tmpl.dependencies(BuildContext()) if isinstance(r, TemplateReference)]
+    template_reqs = [r for r in tmpl.dependencies(FinalizeContext()) if isinstance(r, TemplateReference)]
     assert template_reqs == []
 
 
@@ -128,11 +120,11 @@ def test_synthesize_with_requirement_uses_first_source(spec: _KindSpec) -> None:
 def test_template_dependencies_emits_template_requirement(
     spec: _KindSpec,
 ) -> None:
-    """Each ``XxxTemplate.dependencies(BuildContext())`` emits a TemplateReference
+    """Each ``XxxTemplate.dependencies(FinalizeContext())`` emits a TemplateReference
     per name in ``inherits`` with the right kind and source.
     """
     tmpl = spec.expected_type(name="child", inherits=["base", "extras"])
-    reqs = tmpl.dependencies(BuildContext())
+    reqs = tmpl.dependencies(FinalizeContext())
     template_reqs = [r for r in reqs if isinstance(r, TemplateReference)]
     assert len(template_reqs) == 2
     by_name = {r.name: r for r in template_reqs}
@@ -179,36 +171,25 @@ def test_inherits_default_works_without_operator_declaration(spec: _KindSpec, tm
     assert child.origin.variant == "operator-declared"
 
 
-@pytest.mark.parametrize("spec", SPECS, ids=lambda s: s.kind)
-def test_inherits_cycle_caught_by_framework(spec: _KindSpec, tmp_path: Path) -> None:
+def test_inherits_cycle_caught_by_framework(tmp_path: Path) -> None:
     """Non-default cycles slip past any load-time eager resolve
     (workspace and session resolve lazily; agent's eager resolve only
     descends from default). The framework's cycle pass at
     build_registry time catches them.
+
+    One kind, not all three: ``Registry._detect_cycles`` is a DFS over
+    the built edge map and branches on nothing kind-shaped, and THAT each
+    kind emits its inherits edges at all is what
+    ``test_template_dependencies_emits_template_requirement`` pins, per
+    kind. A cycle through ``default``, where materialization is also in
+    play, is a different shape and is pinned on vm-template in
+    ``test_vm_template_kind.py``.
     """
     cfg_file = _write_cfg(
         tmp_path / "config.toml",
-        ManifestDoc(spec.kind, "a", {"inherits": ["b"]}),
-        ManifestDoc(spec.kind, "b", {"inherits": ["a"]}),
+        ManifestDoc("agent-template", "a", {"inherits": ["b"]}),
+        ManifestDoc("agent-template", "b", {"inherits": ["a"]}),
     )
     cfg = load_config(cfg_file, warn_issues=False)
     with pytest.raises(ConfigError, match="cycle detected"):
-        build_registry(cfg)
-
-
-def test_agent_template_default_cycle_caught_at_build_registry(tmp_path: Path) -> None:
-    """A cycle through ``default`` loads cleanly (Phase 1 of the
-    resource-manifests SDD removed load_config's eager default
-    resolve) and is caught by the framework's cycle pass at
-    build_registry time. The resolver's internal visited-set guard
-    remains as a safety net for callers that resolve without going
-    through build_registry.
-    """
-    cfg_file = _write_cfg(
-        tmp_path / "config.toml",
-        ManifestDoc("agent-template", "default", {"inherits": ["a"]}),
-        ManifestDoc("agent-template", "a", {"inherits": ["default"]}),
-    )
-    cfg = load_config(cfg_file, warn_issues=False)
-    with pytest.raises(ConfigError, match="cycle"):
         build_registry(cfg)

@@ -44,7 +44,10 @@ from __future__ import annotations
 
 import subprocess
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Any
+
+from pydantic import AfterValidator, model_validator
+from pydantic import ValidationError as PydanticValidationError
 
 from agentworks.errors import (
     ConfigError,
@@ -52,10 +55,11 @@ from agentworks.errors import (
     ExternalError,
     SecretMappingError,
 )
+from agentworks.schema import AgwModel, AgwRootModel, NonEmptyStr, config_error_from
+from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
     from agentworks.resources.graph import Readiness
-    from agentworks.resources.reference import ConfigReference
     from agentworks.secrets.base import MappingValue, SecretDecl
 
 _OP_BINARY = "op"
@@ -95,7 +99,6 @@ _NOT_FOUND_MARKERS = (
 _FORMS_HINT = (
     "use an 'op://vault/item/field' string, or a {account, reference} table when a specific account must be pinned"
 )
-_TABLE_KEYS = ("account", "reference")
 
 
 @dataclass(frozen=True)
@@ -169,7 +172,7 @@ def _signed_out_message(account: str | None) -> str:
     return "not signed in to the 1Password CLI"
 
 
-def _validate_op_uri(owner: str, uri: str) -> None:
+def _check_op_uri(uri: str) -> str:
     """Reject an ``op://`` reference that is clearly malformed. A valid
     reference is ``op://`` followed by at least three non-empty path
     segments (vault, item, field; an optional section segment may add a
@@ -177,48 +180,56 @@ def _validate_op_uri(owner: str, uri: str) -> None:
     itself."""
     prefix = "op://"
     if not uri.startswith(prefix):
-        raise ConfigError(
-            f"{owner}: onepassword reference {uri!r} must start with 'op://' "
+        raise ValueError(
+            f"onepassword reference {uri!r} must start with 'op://' "
             f"(an 'op://vault/item/field' reference, optionally with a "
             f"section: 'op://vault/item/section/field')"
         )
     path = uri[len(prefix) :].split("?", 1)[0]
     segments = path.split("/")
     if len(segments) < 3 or not all(segments[:3]):
-        raise ConfigError(
-            f"{owner}: onepassword reference {uri!r} is malformed; expected "
+        raise ValueError(
+            f"onepassword reference {uri!r} is malformed; expected "
             f"'op://vault/item/field' with non-empty vault, item, and field"
         )
+    return uri
 
 
-def _ref_from_table(owner: str, mapping: dict[str, object]) -> _OpRef:
-    """Validate a ``{account, reference}`` table and return the resolved
-    ``_OpRef``. ``owner`` is display context for errors.
+OpUri = Annotated[NonEmptyStr, AfterValidator(_check_op_uri)]
+"""A native 1Password reference, ``op://vault/item/field``."""
 
-    Any key other than ``account`` and ``reference`` is rejected and named;
-    ``reference`` must be a valid ``op://`` string and ``account`` a
-    non-empty selector."""
-    unknown = sorted(set(mapping) - set(_TABLE_KEYS))
-    if unknown:
-        raise ConfigError(
-            f"{owner}: unknown key(s) {unknown} in the onepassword table; "
-            f"only 'account' and 'reference' are allowed. {_FORMS_HINT}"
-        )
-    reference = mapping.get("reference")
-    if not isinstance(reference, str) or not reference:
-        raise ConfigError(
-            f"{owner}: the onepassword table needs a non-empty string "
-            f"'reference' (an 'op://vault/item/field' reference)"
-        )
-    _validate_op_uri(owner, reference)
-    account = mapping.get("account")
-    if not isinstance(account, str) or not account:
-        raise ConfigError(
-            f"{owner}: the onepassword table needs a non-empty string "
-            f"'account' (a 1Password account selector); to use op's default "
-            f"account, drop the table and give the bare op:// string"
-        )
-    return _OpRef(reference=reference, account=account)
+
+class OnePasswordAccountRef(AgwModel):
+    """The pinned-account mapping form: a reference plus the account to
+    read it from. To use op's default account, drop the table and give
+    the bare ``op://`` string."""
+
+    account: NonEmptyStr
+    """A 1Password account selector."""
+
+    reference: OpUri
+    """The ``op://vault/item/field`` reference to read."""
+
+
+class OnePasswordMapping(AgwRootModel[OpUri | OnePasswordAccountRef]):
+    """A onepassword mapping is either form (see the module docstring).
+
+    A root model because one of the two forms is a bare string, which no
+    ``BaseModel`` can be. The before-validator keeps the shipped one-line
+    message for a value that is neither form: pydantic would otherwise
+    report one failure per arm, and "must be a string" is a poor answer
+    for someone who wrote a number.
+    """
+
+    @model_validator(mode="before")
+    @classmethod
+    def _one_of_the_two_forms(cls, value: object) -> object:
+        if not isinstance(value, str | dict):
+            raise ValueError(
+                f"the onepassword backend needs an 'op://vault/item/field' string "
+                f"or a {{account, reference}} table (got {type(value).__name__}). {_FORMS_HINT}"
+            )
+        return value
 
 
 class OnePasswordBackend:
@@ -245,8 +256,29 @@ class OnePasswordBackend:
       the chain, which is intended.
     """
 
+    contract_version = 1
+    config_model: type[AgwRootModel[Any]] = OnePasswordMapping
     name = "onepassword"
     description = "resolves via the 1Password CLI (op read op://vault/item/field)"
+    prose = TopicProse(
+        title="1Password",
+        overview="""
+        Reads a secret's value through the `op` CLI. There is no naming convention to
+        fall back on, so a secret is resolvable here only if it declares an explicit
+        `backend_mappings.onepassword` address: the `op://vault/item/field` reference
+        1Password's "Copy Secret Reference" produces (a `.../section/field` segment is
+        allowed too).
+
+        The string form reads through whichever account `op` is signed in to, or the one
+        `OP_ACCOUNT` names. The table form pins a specific account beside the same
+        reference, for a host signed in to several.
+
+        Ships as the opt-in `onepassword` system plugin, and needs the `op` CLI on this
+        host; a mapping stays dormant until both are true. Resolution may trigger a
+        biometric or re-auth prompt, so inspection surfaces report it optimistically
+        rather than probing it.
+        """,
+    )
 
     # interactive = True: resolving a onepassword secret may involve
     # operator interaction, because `op read` can trigger a biometric or
@@ -277,46 +309,48 @@ class OnePasswordBackend:
             return Readiness.blocked("op CLI not installed")
         return Readiness.ready()
 
-    def validate_mapping(self, owner: str, mapping: MappingValue) -> None:
-        # Load-time gate (called by validate_chain). ``_resolved_ref`` keeps
-        # its own defensive check for hand-built decls that never pass
-        # through validate_chain, mirroring env_var's ``_resolved_name``.
-        if isinstance(mapping, str):
-            if not mapping:
-                raise ConfigError(
-                    f"{owner}: backend_mappings for the onepassword backend "
-                    f"must be a non-empty 'op://vault/item/field' string; "
-                    f"{_FORMS_HINT}"
-                )
-            _validate_op_uri(owner, mapping)
-            return
-        if isinstance(mapping, dict):
-            _ref_from_table(owner, mapping)
-            return
-        raise ConfigError(
-            f"{owner}: backend_mappings for the onepassword backend must be "
-            f"an 'op://vault/item/field' string or a {{account, reference}} "
-            f"table (got {type(mapping).__name__})"
-        )
-
-    def dependencies(self, mapping: MappingValue) -> tuple[ConfigReference, ...]:
-        """A onepassword mapping is an ``op://`` reference into an external
-        vault, not an agentworks resource, so it implies no edge (total,
-        non-throwing)."""
-        return ()
-
     def _resolved_ref(self, secret: SecretDecl, mapping: MappingValue | None) -> _OpRef:
-        owner = f"secret {secret.name!r}"
-        if isinstance(mapping, str):
-            _validate_op_uri(owner, mapping)
-            return _OpRef(reference=mapping, account=None)
-        if isinstance(mapping, dict):
-            return _ref_from_table(owner, mapping)
-        # would_attempt gates this out, so reaching here means a hand-built
-        # decl bypassed validate_chain (defense in depth, like env_var).
-        raise ConfigError(
-            f"{owner}: the onepassword backend needs a backend_mappings.onepassword entry ({_FORMS_HINT})"
-        )
+        """The mapping as the lookup it addresses.
+
+        Re-validated here rather than trusted: ``would_attempt`` gates the
+        absent case out, so reaching this with anything but a well-formed
+        mapping means a hand-built decl bypassed the finalize validate
+        pass. Defense in depth, exactly as env-var's ``_resolved_name``
+        keeps its own check.
+
+        Framed through ``SecretDecl.mapping_owner`` and the error bridge,
+        so the text an operator reads here is the text the finalize pass
+        would have given for the same mapping. Two validations of one value
+        that disagree about how to describe its faults are worse than one,
+        and the operator has no way to know which pass they reached.
+        """
+        owner = secret.mapping_owner(self.name)
+        if mapping is None:
+            raise ConfigError(
+                f"{owner.display}: the onepassword backend needs a backend_mappings.onepassword entry",
+                entity_kind=owner.kind,
+                entity_name=owner.name,
+                hint=_FORMS_HINT,
+            )
+        try:
+            root = OnePasswordMapping.model_validate(mapping).root
+        except PydanticValidationError as exc:
+            # Through the bridge, like every other validation of a modeled
+            # surface. Reading ``errors()[0]`` instead reported whichever
+            # arm pydantic tried first, so every malformed table came back
+            # "Input should be a valid string": the one message this
+            # model's own before-validator exists to prevent, delivered by
+            # the one call site that skipped the shared translation.
+            raise config_error_from(
+                exc,
+                model_cls=OnePasswordMapping,
+                owner=owner,
+                location=secret.error_location,
+                hint=_FORMS_HINT,
+            ) from exc
+        if isinstance(root, str):
+            return _OpRef(reference=root, account=None)
+        return _OpRef(reference=root.reference, account=root.account)
 
     def would_attempt(
         self,

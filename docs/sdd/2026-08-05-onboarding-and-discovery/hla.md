@@ -67,21 +67,31 @@ service fact records ------> human renderers
 
 The initial block vocabulary is closed:
 
-- `Overview`: inert markdown prose. The proposed wave 2 alignment maps its planned blurb to this
-  same block rather than a separate blurb registry.
+- `Overview`: inert markdown prose. The declarative-schema topic prose maps to this same block
+  rather than a separate blurb registry.
 - `Teaching`: inert markdown prose rendered by guide, not by describe.
 - `AgentContract`: inert markdown prose whose heading and placement are foregrounded in agent mode.
 - `InstanceList`: core-rendered live resources anchored at a kind or implementation.
 - `State`: core-rendered enablement and readiness for `me`.
 - `Relationships`: core-rendered inbound and outbound resource relationships for `me`.
-- `FieldReference`: a core-rendered wave 2 field-doc fragment once its contract lands.
-- `Sample`: a core-rendered wave 2 live sample once its contract lands.
+- `FieldReference`: a core-rendered declarative-schema field-documentation fragment. It reads the
+  landed `SchemaReference` tree, including each union alternative's fields and recurring or
+  separately addressable arms. An exact section selector may cross an alternative only when one
+  field path matches.
+- `Sample`: a core-rendered declarative-schema live sample.
+- `ActionList`: inert, strictly validated `GuideAction` records with an exact consent boundary,
+  command or platform-neutral manual step, expected state, verification, and refusal alternative.
 - `TopicLinks`: core-rendered related-topic links.
 
 Contributions supply block records and authored strings only. They cannot supply functions, imports,
 expressions, format strings, attribute paths, or renderer names outside the closed enum. Markdown is
 emitted as text, never interpreted by Agentworks as executable content. Registration rejects unknown
-fields and any expression-like placeholder syntax. A participant with no content registers no topic.
+fields and expression-like placeholder syntax outside the contract's narrow same-line inline-code
+form. Inline literals are always inert and are never template-evaluated. A participant with no
+content registers no topic. Registration also enforces byte and count bounds on every authored
+field, block payload, selector, and related-topic slug. Rendering removes terminal control bytes at
+one final boundary, preserving only line feed and tab from the control ranges, so neither authored
+nor projected text can reset a terminal, ring a bell, erase output, or forge a control sequence.
 
 ### Registration ownership
 
@@ -112,9 +122,14 @@ copied field lists or rendered CLI text.
   registered category.
 - Additional plugin-owned topics, if needed, use `plugin/<plugin>/<topic>`.
 
-Every canonical slug has exactly one owner. Duplicate registration is a startup error regardless of
-load order; there is no precedence or override rule. The catalog validates every related-topic link
-after registration.
+Every canonical slug has exactly one owner; there is no precedence or override rule. Strict CI
+construction makes trusted in-tree taxonomy, ownership, duplicate, and broken-link contradictions
+hard failures. Runtime construction records trusted taxonomy drift as a scoped issue and retains
+unaffected topics, so a kind rename cannot make the installed guide unusable. Other trusted
+ownership, duplicate, and broken-link contradictions remain hard startup failures because they are
+curation bugs with no unambiguous winner. Invalid plugin content is isolated before it can suppress
+trusted content. A full index renders all visible isolated issues and exits 1; an explicit retained
+topic keys status only to issues visible for that request and can render cleanly with exit 0.
 
 Multiple requested topics are validated as one request before output begins, rendered in the order
 requested, and separated by a markdown horizontal rule. Repeated slugs render once at their first
@@ -131,6 +146,10 @@ already-materialized data:
 - enablement and readiness verdicts from finalized graph nodes;
 - declared inbound and outbound relationships from graph edges;
 - resource instances from existing kind-owned instance inventory hooks.
+
+Descriptions are operator or plugin data, not authored teaching. Guide projects them as labeled
+plain text with Markdown and HTML syntax neutralized, so configured facts cannot become agent
+instructions, headings, links, images, or executable markup.
 
 The mode is gated by leaving powers unwired. Its public API has no secret resolver, run target,
 capability implementation, mutable node, raw config, or arbitrary graph traversal entry point. In
@@ -149,13 +168,27 @@ connection, probes the workstation, invokes a capability, or mutates data. Datab
 inventory is a read-only stored-row query already used by resource inspection; it cannot initiate a
 remote operation.
 
+Host-probing capability kinds are declared once in the resource-graph policy used by both ordinary
+readiness dispatch and the guide's suppression path. End-to-end guide tests exercise the default
+composition path and enforce an import boundary that prevents guide modules from acquiring probe,
+resolver, transport, mutation, or low-level filesystem-write powers through direct aliases.
+
 Guide remains usable when operator configuration is broken. It always loads and validates authored
-core content independently, then attempts a normal config load and full registry build for every
-guide request. If config load or finalization fails, authored content still renders, each affected
-dynamic block says its facts are unavailable, and the original framed config error appears in the
-markdown. `GuideView` construction is non-interactive by construction and can never prompt for or
-resolve a secret. A malformed plugin contribution is isolated to the guide-scoped catalog build,
-reported as unavailable, and cannot break unrelated CLI commands or valid core topics.
+core content independently, then attempts a normal config load and a guide-scoped registry build for
+every guide request. The guide build preserves declaration, publication, materialization,
+validation, graph finalization, and freezing, but disables host-readiness probes. A readiness fact
+that requires such a probe remains explicitly unavailable and is assessed as unverifiable, never as
+an observed failure. Normal command registry builds retain their existing readiness probes. If
+config load or finalization fails, authored content still renders, each affected dynamic block says
+its facts are unavailable, and the original framed config error appears in the markdown. `GuideView`
+construction is non-interactive by construction and can never prompt for or resolve a secret. A
+malformed plugin contribution is isolated to the guide-scoped catalog build, reported as
+unavailable, and cannot break unrelated CLI commands or valid core topics.
+
+Expected per-topic projection failures, such as a declared relationship naming a resource absent
+from the finalized registry, become scoped unavailable facts. Translation occurs at the exact lookup
+boundary. Programming errors from graph methods or kind-owned inventory hooks are not caught as
+missing resources.
 
 ## Guide rendering and agent shaping
 
@@ -184,6 +217,17 @@ immediately after the summary, expand their heading, and foreground the R12 disc
 consent rules. It may not add, remove, or alter factual content. Snapshot tests normalize headings
 and prove both modes contain the same semantic block identifiers.
 
+`concept-migration` is the exceptional remediation topic for breaking resource-model changes. It is
+not a general upgrade guide: ordinary upgrades should remain routine. The topic carries authored
+rewrite sequencing and points into kind and implementation topics whose `FieldReference` and
+`Sample` blocks consume the declarative-schema services now on `main`. An operator or agent
+therefore works against the installed model rather than a frozen migration oracle.
+`concept-onboarding` and `concept-management` link to it without duplicating its teaching.
+
+Schema-derived guide topics consume the context-free reference and sample records. Owner-dependent
+default filling remains at the manifest decode boundary; the guide does not recreate that step, pass
+Pydantic validation context, or construct capability implementations.
+
 `concept-onboarding` does not persist a second onboarding ledger. Done and not-yet-done status is a
 pure assessment over sanitized facts already available through `GuideView`: resource identity and
 description from registry rows, finalized enablement and readiness verdicts from graph nodes,
@@ -198,7 +242,8 @@ record refusals in the current interaction or caller-owned replay log. The guide
 action plan:
 
 - guided use lets the agent ask before each consent boundary and execute the next action;
-- replayable use uses the same actions with `agw --non-interactive` and explicit inputs;
+- replayable use uses the same actions with `agw --non-interactive`, explicit inputs, and repeatable
+  target-scoped `--evidence ACTION_ID:KIND/NAME=OUTCOME` values from the caller-owned replay log;
 - reruns skip facts already ready and report new, disabled, not-ready, or unverifiable items.
 
 The first slice defines the assessment and plan. It does not add a CLI wizard or hidden state
@@ -211,13 +256,17 @@ action records. Equivalence means both produce the same registry, graph, stored-
 verification outcomes for the same inputs. A refusal produces the same `unverifiable` outcome in
 both modes.
 
+Evidence outcomes are `verified`, `failed`, or `refused`. The CLI validates every evidence item
+atomically and persists none of them. A verified rerun can therefore become a no-op without adding
+an Agentworks onboarding ledger; the caller remains responsible for retaining and replaying proof.
+
 ### Verification surface inventory
 
 | Need                          | Existing surface                                                                                                                                        | Gap and commitment                                                                                                                                                                                                                                                                |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Secret reference availability | `agw secret describe` predicts the ready backend without resolving or exposing a value. Doctor reports the same prediction in its consented full check. | Prediction is not proof. Add a named-secret verification operation that resolves through the normal boundary, returns only success or framed failure, never emits or returns the value to the caller, and cannot fall through to an interactive backend without explicit consent. |
 | Required host tools           | `agw doctor` checks `ssh`, `scp`, and `tailscale`; finalized capability rows carry already-computed readiness for their host requirements.              | The LLD inventories every onboarding action's required tool and adds a safe explicit check only where doctor or readiness does not already cover it. Agent-side discovery of other installed tools remains consent-first.                                                         |
-| SSH connectivity              | VM lifecycle code verifies connectivity during mutating operations, but there is no dedicated read-only operator surface for an existing VM.            | Add a non-mutating named-VM connection verification operation that uses the standard transport and reports success or framed failure without repairing, rekeying, or changing power state.                                                                                        |
+| SSH connectivity              | VM lifecycle code verifies connectivity during mutating operations, but there is no dedicated read-only operator surface for an existing VM.            | Add a bounded, non-mutating named-VM connection verification operation that uses the standard transport and reports success or framed failure without repairing, rekeying, or changing power state.                                                                               |
 
 Doctor and the new proof operations run only as explicit, consented action records. Guide rendering
 never calls them.
@@ -308,29 +357,25 @@ check existing issues, and use the repository's bug-report template. The topic m
 to prepare or submit an issue only with the operator's explicit authorization. It never files an
 issue automatically and is not presented as a channel for general feedback.
 
-## Wave 2 coordination boundary
+## Declarative-schema coordination boundary
 
-As of 2026-08-06, wave 2's branch-only `FieldDoc`, `ModelDoc`, schema, and blurb ideas are
-provisional. Main has no schema package or renderer contract. PR #420 proposes the following
-coordination contract before wave 2 implements plan section 2.8; it is not coordinated fact until
-the recipient accepts it:
+Declarative-schema Phase 2 merged on 2026-08-07 and accepted the early topic-content direction.
+`agentworks.topics.TopicProse` keeps one title and overview beside each kind or implementation, and
+`summary_of` plus `prose_of` expose those authored facts without a second blurb registry.
+`agentworks.manifests.reference.SchemaReference` is the config-free field contract for declarable
+kinds, capability kinds, and disabled implementations. `describable_targets` enumerates those
+targets, and `agentworks.manifests.samples.sample_text` renders declarable samples from the same
+model stream.
 
-- keep `FieldDoc` and schema sources presentation-free;
-- replace the proposed standalone blurb registration with `TopicContribution.summary` plus
-  `Overview` blocks;
-- expose service APIs for field reference and samples so guide blocks call sources, never CLI text;
-- settle distinct names for instance describe and schema field reference without changing guide
-  topic identities;
-- let disabled implementations render from registered models without constructing implementations.
+The release-gate adapter resolves these services from typed topic anchors. Bare kind and capability
+implementation topics render schema facts even when operator config fails, while resource state and
+graph facts continue to degrade through the existing framed `GuideView` boundary. Capability
+references are never passed to the manifest sample renderer. The exact record mapping, target rules,
+failure behavior, and tests are pinned in `wave2-guide-adapter-lld.md`.
 
-Each adapter is gated only on its required surface merging to `main`, so schema-derived depth can
-adopt field docs, samples, or descriptor inventory incrementally as they land. If wave 2 lands a
-different authoritative shape, this HLA and plan are updated before the affected adapter is built.
-The agreed record shape is the coordination contract, not an implementation dependency in either
-direction. Whichever effort reaches the seam first implements the record where it naturally lives;
-the other consumes that landed shape. Wave 2 never waits for onboarding phase 1. If it reaches plan
-section 2.8 first, it proceeds with the agreed shape, or with its own blurb surface if agreement has
-not completed, and onboarding adapts after re-verifying the authoritative `main` contract.
+The landed contract is compatible with the HLA's safety boundary and requires no provisional
+dependency. Broader Phase 4 registry inventory and specific-resource projection remain separately
+gated work.
 
 ## Documentation and compatibility
 
@@ -349,18 +394,20 @@ then regenerates and commits the Claude Code, Codex, and Copilot projections wit
 Rulesync drift check.
 
 `agw guide` and JSON v1 are additive. Bootstrap packages state their minimum compatible CLI.
-Machine-contract breaking changes follow the repository's normal warn-and-migrate then reject
-policy.
+Breaking changes follow the repository's warn-then-reject runway where one exists. Remediation is
+precise errors plus `concept-migration`, not an automated migrator. Machine-contract changes keep
+their own explicit versioning and compatibility rules.
 
 ## Key risks
 
-- Wave 2 may land a blurb or renderer shape inconsistent with the universal topic contract. Route
-  this HLA's proposed contract to the operator before its section 2.8 implementation.
+- Declarative-schema prose and schema facts must cross the guide contribution validator exactly
+  once. Escaping authored Markdown or bypassing contribution validation would each violate one side
+  of the shared contract.
 - Entity commands do not all currently return structured fact records. Each conversion must keep
   human output byte-compatible and avoid remote work solely for JSON.
 - The current graph exposes capability implementations. The guide view must be tested as a
   deny-by-construction boundary, not trusted renderer discipline.
 - Cross-harness package formats evolve independently. Generated committed wrappers and real install
   probes reduce drift risk.
-- Registry inventory will move when wave 2 lands. Sequence that work late or rebase once as
-  directed.
+- Specific-resource projection still depends on the runtime registry and remains fail-soft when
+  configuration cannot build it; config-free schema discovery must not invent resource instances.

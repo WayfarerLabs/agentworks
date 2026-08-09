@@ -194,8 +194,11 @@ class LiveVMNode:
         if self._repair_refs is None:
             from agentworks.vms.templates import resolve_template
 
+            # One ref, always: the resolved template's auth-key name is
+            # non-optional (the kind's default is "tailscale-auth-key"),
+            # so there is no absent case to fold to an empty tuple.
             tmpl = resolve_template(self._registry, self._row.template)
-            self._repair_refs = () if tmpl.tailscale_auth_key is None else (tmpl.tailscale_auth_key,)
+            self._repair_refs = (tmpl.tailscale_auth_key,)
         return self._repair_refs
 
     def confirmed_active(self) -> bool:
@@ -218,7 +221,7 @@ class LiveVMNode:
         # That degrade covers the BACKEND read only. A failure in the
         # credential layer beneath it does not reach here as UNKNOWN: a
         # platform with explicitly configured credentials (an azure site
-        # with a service_principal) raises a typed error instead, and
+        # on the service-principal arm) raises a typed error instead, and
         # deliberately so, since its identity layer cannot distinguish a
         # rejected credential from an unreachable one and reporting
         # UNKNOWN would hide a misconfiguration behind a plausible

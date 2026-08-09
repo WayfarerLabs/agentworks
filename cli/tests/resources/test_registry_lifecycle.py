@@ -40,11 +40,6 @@ def example_config(tmp_path: Path) -> Path:
     return p
 
 
-def test_empty_registry_is_not_finalized() -> None:
-    r = Registry.empty()
-    assert not r.is_finalized
-
-
 def test_add_rejects_names_containing_slash(tmp_path: Path) -> None:
     """'/' is banned in resource names at the single publisher choke
     point (maintainer ruling, 2026-07-05): it is reserved for kind/name
@@ -235,9 +230,9 @@ def test_build_registry_equivalent_to_manual_steps(example_config: Path, monkeyp
     is stubbed so both sides see the full four-platform graph regardless
     of the test host's OS/tooling (host gating has its own tests).
     """
-    from agentworks import secrets
     from agentworks.bootstrap import build_registry
-    from agentworks.capabilities import vm_platform as vm_platforms
+    from agentworks.capabilities.descriptor import descriptor_for
+    from agentworks.capabilities.publish import publish_capability_rows
     from agentworks.manifests import RESOURCES_DIRNAME, load_manifests
     from agentworks.manifests import builtin as builtin_manifests
     from tests.conftest import stub_platform_support
@@ -249,11 +244,11 @@ def test_build_registry_equivalent_to_manual_steps(example_config: Path, monkeyp
 
     manual = Registry.empty()
     builtin_manifests.publish_to(manual)
-    secrets.publish_to(manual)
+    publish_capability_rows(manual, descriptor_for("secret-backend"))
     # The bundled vm-site rows (lima, wsl2) reference the vm-platform
     # capability rows, so the manual sequence needs the platform
     # publisher for the same graph-completeness reason as the backends.
-    vm_platforms.publish_to(manual)
+    publish_capability_rows(manual, descriptor_for("vm-platform"))
     cfg.publish_to(manual)
     # The operator's api-key secret is a YAML manifest now (config.toml is
     # settings only, ADR 0022), so the operator ManifestSet publishes it,

@@ -19,8 +19,13 @@ self-disable but a hard finalize error (R9.2): the site emits its
 platform edge unconditionally and the absent capability row is a loud
 miss. A not-ready site still lists, describes, and holds references;
 using it (:func:`resolve_site`) is a typed error with the reason, and
-existing references (VMs, ``defaults.site``) degrade to doctor warnings
-rather than breaking every command. Readiness is folded once at finalize and
+existing references to it (VMs, ``defaults.site``) degrade to doctor
+warnings rather than breaking every command. That degradation is about
+UNREADINESS only. A name that resolves to NO site at all is a different
+answer and always has been: it is a hard error, from the generic
+settings-reference check for ``defaults.site``
+(``config.references.validate_setting_references``) and from finalize for a
+manifest's ``site`` field. Readiness is folded once at finalize and
 read off the graph (``graph.readiness_of``); :func:`select_site` /
 :func:`ensure_site_ready` and the inspect / doctor projections all read that
 stored verdict rather than recomputing it.
@@ -28,37 +33,58 @@ stored verdict rather than recomputing it.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
+
+from pydantic import model_validator
 
 from agentworks.declared_resource import DeclaredResource
 from agentworks.errors import ConfigError
+from agentworks.naming import MAX_FREEFORM_NAME_LENGTH
+from agentworks.schema import CapabilityBlock, RefOwner
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.capabilities.vm_platform import VMPlatform
-    from agentworks.config import Config
-    from agentworks.resources.graph import BuildContext, DependencyState, Readiness
+    from agentworks.resources.graph import DependencyState, FinalizeContext, Readiness
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
 
 
-@dataclass(frozen=True, kw_only=True)
 class VMSiteDecl(DeclaredResource):
-    """The declared ``vm-site`` resource.
+    """The declared ``vm-site`` resource: a configured place to create
+    VMs."""
 
-    The internal representation follows the YAML manifest shape (ADR
-    0016): ``platform`` names the capability; ``platform_config`` is
-    the nested platform-owned blob. The flat legacy TOML sections
-    (``[azure]`` / ``[proxmox]``) are the only place platform-owned
-    fields sit at a top level; their loader nests at the boundary.
-    """
+    # Site names hit no OS-level identifier limit: they are a registry key
+    # and a display surface only, never derived into a hostname or an SSH
+    # host alias (VM names, not site names, feed {slug}-{vm} hostnames). So
+    # they take the freeform cap, not the tighter VM-name cap.
+    NAME_MAX_LENGTH: ClassVar[int | None] = MAX_FREEFORM_NAME_LENGTH
 
-    platform: str
-    platform_config: dict[str, object] = field(default_factory=dict)
+    platform: CapabilityBlock
+    """The vm-platform backing this site: one table whose ``name`` selects
+    the platform and whose remaining keys are that platform's own config
+    (``{name: lima, placement: {mode: ssh, host: me@box}}``)."""
 
-    def dependencies(self, context: BuildContext) -> list[ResourceReference]:
+    @model_validator(mode="after")
+    def _no_shadowed_platform(self) -> VMSiteDecl:
+        """A site named after a known platform must declare THAT platform.
+
+        A ``vm-site/azure-vm`` backed by lima would make every
+        ``--site azure-vm`` mean something other than it says. A
+        cross-field rule over ``name`` and ``platform.name``, and it reads
+        the platform registry at exactly the moment decode used to.
+        """
+        from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+
+        if self.name in VM_PLATFORM_REGISTRY and self.platform.name != self.name:
+            raise ValueError(
+                f"a vm-site named '{self.name}' must declare platform "
+                f"'{self.name}' (it shadows a platform name), not '{self.platform.name}'"
+            )
+        return self
+
+    def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         from agentworks.resources.reference import (
             ResourceReference as _ResourceRef,
         )
@@ -72,33 +98,40 @@ class VMSiteDecl(DeclaredResource):
         # Whether this site can run on the host is READINESS (the fold), and
         # readiness gates whether its config-implied secrets materialize (R12),
         # so the edges are emitted unconditionally here and gated downstream.
-        from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+        from agentworks.capabilities.config import capability_config_references
 
         refs: list[ResourceReference] = [
             _ResourceRef(
-                name=self.platform,
+                name=self.platform.name,
                 kind="vm-platform",
                 usage="the VM platform",
                 source=source,
             )
         ]
-        capability = VM_PLATFORM_REGISTRY.get(self.platform)
-        if capability is not None:
-            # Capability-implied references: the platform derives the
-            # references its config block implies (dependencies, total and
-            # non-throwing); this resource (the config block's owner)
-            # attributes them to itself via the shared sourced-conversion. An
-            # unknown platform emits only the (dangling) platform edge above,
-            # which the resolve pass turns into the R9.2 hard error.
-            refs.extend(
-                sourced_references(capability.dependencies(f"vm-site/{self.name}", self.platform_config), source)
+        # Config-implied references, read structurally off the platform's
+        # DECLARED model by the core: no platform code runs. Total and
+        # non-throwing, so a malformed blob contributes no edges rather than
+        # sinking the walk. This resource (the config block's owner)
+        # attributes them to itself via the shared sourced-conversion. An
+        # unknown platform contributes nothing here and emits only the
+        # (dangling) platform edge above, which the resolve pass turns into
+        # the R9.2 hard error.
+        refs.extend(
+            sourced_references(
+                capability_config_references(
+                    kind="vm-platform",
+                    config=self.platform.tagged,
+                    owner=RefOwner(kind="vm-site", name=self.name),
+                ),
+                source,
             )
+        )
         return refs
 
     def not_ready(self, deps: Mapping[tuple[str, str], DependencyState]) -> Readiness:
         """This site's readiness verdict, self-determined from its single
         platform dependency's :class:`DependencyState` (the fold hands it in
-        ``deps``) plus its own ``platform_config`` (LLD c). Pure, total,
+        ``deps``) plus its own platform config (LLD c). Pure, total,
         NON-CONSTRUCTING: the config-dependent tool check calls the platform's
         ``not_ready`` classmethod off the graph-carried impl, never building an
         instance (which would re-run the throwing validator: the B1 loop).
@@ -120,10 +153,10 @@ class VMSiteDecl(DeclaredResource):
 
         from agentworks.resources.graph import Enablement, Readiness
 
-        platform = deps[("vm-platform", self.platform)]
+        platform = deps[("vm-platform", self.platform.name)]
         if platform.enablement is Enablement.disabled:
             tail = platform.disabled_reason or "enable its unit"
-            return Readiness.blocked(f"depends on vm-platform '{self.platform}', which is disabled; {tail}")
+            return Readiness.blocked(f"depends on vm-platform '{self.platform.name}', which is disabled; {tail}")
         if platform.readiness is not None and not platform.readiness.is_ready:
             return platform.readiness
         if platform.impl is None:
@@ -131,25 +164,42 @@ class VMSiteDecl(DeclaredResource):
         # The impl is the platform CLASS the graph stamped (``_impl_for`` fails
         # fast on a missing impl), so ``not_ready`` is a classmethod call, never
         # a construction.
-        return cast("type[VMPlatform]", platform.impl).not_ready(self.platform_config)
+        return cast("type[VMPlatform]", platform.impl).not_ready(self.platform.config)
 
-    def validate(self, enabled_backends: frozenset[str]) -> None:
-        """Throwing shape check for the ``platform_config`` blob, run by
-        the finalize ``validate`` pass (``enabled_backends`` is the
-        secret-only R9.9 input, ignored here). Mirrors ``dependencies``:
-        the named platform capability validates the blob it owns. An
-        unknown platform is a no-op HERE (the platform capability is absent,
-        so there is no blob owner to validate against); the site's dangling
-        platform edge is what makes the unknown platform a hard finalize miss
-        (R9.2). The blob is validated whenever the platform's implementation
-        is seated, regardless of host support (an unsupported platform still
-        validates an empty or well-formed blob for a ready+enabled site).
+    def validate_config(self, context: FinalizeContext) -> None:
+        """Throwing shape check for the platform config block, run by
+        the finalize ``validate`` pass. Mirrors ``dependencies``:
+        the CORE validates the blob against the named platform's declared
+        model, and no platform code runs. An unknown platform is a no-op
+        HERE (there is no declared model to validate against); the site's
+        dangling platform edge is what makes the unknown platform a hard
+        finalize miss (R9.2). The blob is validated whenever the platform's
+        implementation is seated, regardless of host support (an unsupported
+        platform still validates an empty or well-formed blob for a
+        ready+enabled site).
+
+        The error this raises already carries its own file/line framing
+        (the schema error bridge), so the finalize pass leaves it alone
+        rather than appending an origin a second time.
+
+        UNGATED, which is worth naming beside the shadow guard decode used
+        to carry: the finalize pass runs this for every present site
+        regardless of readiness or enablement, so a key the platform does
+        not accept is refused on every host. A ``wsl2`` site carrying junk
+        is refused on Linux exactly as on Windows. The refusal is a
+        property of the document alone, which is the only way a closed
+        capability config can mean anything: it was readiness-gated once,
+        and the effect was that a typo severe enough to change a site's
+        readiness thereby bought its own silence.
         """
-        from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+        from agentworks.capabilities.config import validate_capability_config
 
-        capability = VM_PLATFORM_REGISTRY.get(self.platform)
-        if capability is not None:
-            capability.validate(f"vm-site/{self.name}", self.platform_config)
+        validate_capability_config(
+            kind="vm-platform",
+            config=self.platform.tagged,
+            owner=RefOwner(kind="vm-site", name=self.name),
+            location=self.error_location,
+        )
 
 
 def site_manifest_hint(name: str, *, vm_host: str | None = None) -> str:
@@ -158,10 +208,13 @@ def site_manifest_hint(name: str, *, vm_host: str | None = None) -> str:
     Used by the stranded-VM ``ConfigError`` (a migrated remote-Lima row
     whose site manifest the operator has not added yet), the DB
     migration's printed snippets, and doctor.
+
+    ``vm_host`` keeps its parameter name because it is what the CALLERS
+    have: a legacy ``vm_hosts.ssh_host`` column and a retired
+    ``defaults.vm_host`` setting. What it RENDERS is the current shape,
+    the remote placement arm.
     """
-    config_lines = ""
-    if vm_host is not None:
-        config_lines = f"\n    vm_host: {vm_host}"
+    placement = "{ mode: local }" if vm_host is None else f"{{ mode: ssh, host: {vm_host} }}"
     return (
         "declare it under ~/.config/agentworks/resources/ (any filename), "
         "e.g.:\n\n"
@@ -171,8 +224,8 @@ def site_manifest_hint(name: str, *, vm_host: str | None = None) -> str:
         f"  name: {name}\n"
         "spec:\n"
         "  platform:\n"
-        "    name: lima"
-        f"{config_lines}\n\n"
+        "    name: lima\n"
+        f"    placement: {placement}\n\n"
         "(adjust the platform table's name and config keys to match where "
         "this site's VMs actually live; see `agw resource sample vm-site`)"
     )
@@ -250,7 +303,7 @@ def site_platform_name(site: str, registry: Registry) -> str:
     it (``AGENTWORKS_PLATFORM``, ``vm describe``). Same stranded-site
     ``ConfigError`` as :func:`lookup_site` on an undeclared site.
     """
-    return lookup_site(site, registry).platform
+    return lookup_site(site, registry).platform.name
 
 
 def resolve_site(
@@ -260,7 +313,7 @@ def resolve_site(
     """Resolve a site name to its constructed platform instance.
 
     Returns the platform class instantiated with the site's validated
-    ``platform_config`` (construction is cheap and never resolves or
+    platform config (construction is cheap and never resolves or
     prompts; the declared config secrets join the operation's boundary
     union through the holding node's ``secret_refs``). Manager code
     holds the bound platform and never sees ``VM_PLATFORM_REGISTRY``
@@ -275,8 +328,8 @@ def resolve_site(
     decl = lookup_site(name, registry)
     ensure_site_ready(decl, registry)
     # Ready implies the platform is installed and supported here.
-    platform_cls = VM_PLATFORM_REGISTRY[decl.platform]
-    return platform_cls(decl.name, decl.platform_config)
+    platform_cls = VM_PLATFORM_REGISTRY[decl.platform.name]
+    return platform_cls(decl.name, decl.platform.config)
 
 
 def ensure_site_ready(decl: VMSiteDecl, registry: Registry) -> None:
@@ -301,29 +354,13 @@ def ensure_site_ready(decl: VMSiteDecl, registry: Registry) -> None:
         )
 
 
-def validate_sites(config: Config, registry: Registry) -> None:
-    """Config consistency at the composition boundary (run by
-    ``bootstrap.build_registry`` after finalize, beside
-    ``secrets.validate_chain``): settings that name sites must resolve.
-
-    Config vocabulary in the errors; settings are never published as
-    pseudo-resources (ADR 0016).
-    """
-    site = config.defaults.site
-    if site is None:
-        return
-    try:
-        registry.lookup("vm-site", site)
-    except KeyError:
-        # Unknown only: a DISABLED site is valid config here (this
-        # host may simply lack the requirement); using it errors at
-        # resolve_site with the reason, and doctor warns on the
-        # reference.
-        raise ConfigError(
-            f"defaults.site names an unknown site '{site}'",
-            hint=(
-                f"declare a vm-site named '{site}' "
-                f"(see `agw resource sample vm-site`) or point defaults.site "
-                f"at a declared site (`agw resource list --kind vm-site`)"
-            ),
-        ) from None
+# ``validate_sites`` used to live here: the post-finalize check that
+# ``defaults.site`` names a real vm-site. It was one of three hand-written
+# answers to a single question, so it is now a row in
+# ``config.references``'s table of settings that name resources, which
+# raises the same message shape a dangling manifest reference gets. Nothing
+# about it was vm-specific: it looked a name up in the registry.
+#
+# What IS vm-specific stayed put. Whether a site that exists can be USED
+# here is :func:`ensure_site_ready` above, and it is a different (typed,
+# non-config) error on purpose.

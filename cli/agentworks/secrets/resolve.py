@@ -10,13 +10,15 @@ feature with different security properties.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Protocol, cast
 
 from agentworks import output
-from agentworks.errors import AgentworksError, ConfigError, SecretUnavailableError
+from agentworks.errors import AgentworksError, ConfigError, ExternalError, SecretUnavailableError
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
     from agentworks.config import Config
     from agentworks.resources.graph import Readiness
     from agentworks.resources.registry import Registry
@@ -32,6 +34,11 @@ class ActiveBackend:
     resolution loop and inspection surfaces share so the opt-out is enforced
     structurally in one place (a ``False`` mapping never reaches the capability).
 
+    ``registered_name`` is the config and registry-owned key used to select the
+    implementation. Resolution never asks provider code to restate its own
+    identity, so diagnostics and mapping lookup cannot be influenced by a
+    stateful or secret-bearing provider property.
+
     ``readiness`` is the verdict the fold stored on the backend's graph node
     (read by :func:`active_backends`, never recomputed, R11). Resolution gates
     on it (R9.6): a not-ready backend is skipped with a warning.
@@ -39,10 +46,11 @@ class ActiveBackend:
 
     capability: SecretBackend
     readiness: Readiness
+    registered_name: str
 
     @property
     def name(self) -> str:
-        return self.capability.name
+        return self.registered_name
 
     @property
     def interactive(self) -> bool:
@@ -78,6 +86,31 @@ class ActiveBackend:
         return self.capability.batch_get(wants)
 
 
+class _ResolutionReporter(Protocol):
+    """Receive value-free events from the ordered resolution loop."""
+
+    def skipped(self, secret: str, backend: str, reason: str | None) -> None: ...
+
+    def resolved(self, secret: str, backend: str, identifier: str | None) -> None: ...
+
+
+class _OutputResolutionReporter:
+    def skipped(self, secret: str, backend: str, reason: str | None) -> None:
+        output.warn(f"secret {secret}: skipping {backend}, not ready: {reason}")
+
+    def resolved(self, secret: str, backend: str, identifier: str | None) -> None:
+        suffix = f" ({identifier})" if identifier else ""
+        output.info(f"Resolved {secret} via {backend}{suffix}")
+
+
+class _QuietResolutionReporter:
+    def skipped(self, secret: str, backend: str, reason: str | None) -> None:
+        del secret, backend, reason
+
+    def resolved(self, secret: str, backend: str, identifier: str | None) -> None:
+        del secret, backend, identifier
+
+
 def active_backends(config: Config, registry: Registry) -> list[ActiveBackend]:
     """The active chain as runtime backends, in precedence order.
 
@@ -85,9 +118,18 @@ def active_backends(config: Config, registry: Registry) -> list[ActiveBackend]:
     (``[secret_config].backends``, a setting), and each opted-in name is
     resolved to its ``secret-backend`` graph node, off which this reads the
     backend IMPL and its stored readiness verdict (LLD d; no
-    ``SECRET_BACKEND_REGISTRY`` probe, R11). An unknown chain name gets the
-    operator's vocabulary (the chain is config, so the error is a config
-    error), and the hint enumerates the registered backends.
+    ``SECRET_BACKEND_REGISTRY`` probe, R11).
+
+    The unknown-name ``ConfigError`` is a BACKSTOP, not the primary check.
+    On every registry built by ``bootstrap.build_registry`` the generic
+    settings-reference pass has already refused an unknown chain name with a
+    better-framed message, so this branch is unreachable there. It is kept
+    because this function is public and takes any registry: a caller that
+    assembles one by hand (``Registry.empty()`` + ``publish_to`` +
+    ``finalize``, which the tests and multi-source orchestration do) skips
+    that pass, and without this branch a typo would surface as a bare
+    ``KeyError`` out of ``impl_of``. A precise config error at the layer that
+    can still tell what went wrong beats a traceback, so it stays.
 
     The chain is filtered to ``present`` (a node exists) and ``enabled`` (its
     opt-in axis, LLD d): a present-but-DISABLED opted-in backend is dormant,
@@ -123,6 +165,7 @@ def active_backends(config: Config, registry: Registry) -> list[ActiveBackend]:
             ActiveBackend(
                 capability=cast("SecretBackend", impl),
                 readiness=graph.readiness_of("secret-backend", name),
+                registered_name=name,
             )
         )
     return backends
@@ -181,10 +224,11 @@ def validate_chain(config: Config, registry: Registry) -> None:
     """
     from agentworks.resources.access import secret_decls
 
-    # Validate the chain names are known backends (config vocabulary) by
-    # building the active chain; the returned backends are not otherwise used
-    # here (reachability reads the frozen edges, not a live would_attempt).
-    active_backends(config, registry)
+    # The chain's NAMES are already settled: ``build_registry`` runs the
+    # generic settings-reference check immediately before this, so every name
+    # in ``backends`` resolves to a secret-backend row by the time we get
+    # here. This used to call ``active_backends`` purely for that side effect
+    # and throw the result away.
     opted_in = set(config.secret_config_data.backends)
 
     graph = registry.graph
@@ -221,7 +265,7 @@ def validate_chain(config: Config, registry: Registry) -> None:
 
 def _fail_unavailable(
     missing: list[SecretDecl],
-    backends: list[ActiveBackend],
+    backends: Sequence[ActiveBackend | _VerificationBackend],
     errors: dict[str, str] | None,
     registry: Registry | None = None,
 ) -> None:
@@ -337,6 +381,242 @@ def resolve_secrets(
     resolution path passes the registry it already holds; defaulted to ``None``
     (no hint), so callers that pass only backends (tests) are unaffected.
     """
+    return _resolve_secrets_ordered(
+        secrets,
+        backends,
+        errors=errors,
+        registry=registry,
+        reporter=_OutputResolutionReporter(),
+        interactive_available=output.is_interactive(),
+    )
+
+
+def resolve_secrets_quiet(
+    secrets: list[SecretDecl],
+    backends: list[ActiveBackend],
+    *,
+    registry: Registry | None = None,
+    interactive_available: bool,
+) -> dict[str, str]:
+    """Resolve through the canonical ordered loop without progress output."""
+    allowed_secret_names = frozenset(secret.name for secret in secrets)
+    safe_backends = tuple(
+        _VerificationBackend.wrap(
+            backend,
+            allowed_secret_names=allowed_secret_names,
+            allow_interactive=interactive_available,
+        )
+        for backend in backends
+    )
+    return _resolve_secrets_ordered(
+        secrets,
+        safe_backends,
+        errors=None,
+        registry=registry,
+        reporter=_QuietResolutionReporter(),
+        interactive_available=interactive_available,
+        exclude_interactive=not interactive_available,
+    )
+
+
+def _safe_exception_attribute(exc: Exception, name: str) -> object | None:
+    """Read an optional exception field without trusting subclass setup."""
+    try:
+        return getattr(exc, name, None)
+    except Exception:
+        return None
+
+
+def _sanitize_verification_exception(
+    exc: Exception,
+    *,
+    allowed_secret_names: frozenset[str] = frozenset(),
+) -> AgentworksError:
+    """Replace provider-controlled exception state with safe typed framing."""
+    from agentworks.errors import (
+        AlreadyExistsError,
+        AuthorizationError,
+        BackupError,
+        BrokenStateError,
+        ConfigError,
+        ConnectivityError,
+        NotFoundError,
+        ProvisioningError,
+        SecretMappingError,
+        SecretUnavailableError,
+        StateError,
+        TokenRejectedError,
+        ValidationError,
+    )
+
+    safe_categories: dict[type[Exception], type[AgentworksError]] = {
+        TokenRejectedError: TokenRejectedError,
+        NotFoundError: NotFoundError,
+        AlreadyExistsError: AlreadyExistsError,
+        ValidationError: ValidationError,
+        StateError: StateError,
+        BrokenStateError: BrokenStateError,
+        AuthorizationError: AuthorizationError,
+        ConnectivityError: ConnectivityError,
+        SecretUnavailableError: SecretUnavailableError,
+        SecretMappingError: SecretMappingError,
+        ExternalError: ExternalError,
+        ProvisioningError: ProvisioningError,
+        BackupError: BackupError,
+        ConfigError: ConfigError,
+    }
+    category = safe_categories.get(type(exc), ExternalError)
+    if isinstance(exc, AgentworksError):
+        entity_kind = _safe_exception_attribute(exc, "entity_kind")
+        entity_name = _safe_exception_attribute(exc, "entity_name")
+        # Exception fields are backend-authored too. Preserve only the fixed
+        # kind and an exact name from the caller's already-known declaration
+        # set; malformed, surprising, or secret-bearing fields are discarded.
+        if entity_kind == "secret" and type(entity_name) is str and entity_name in allowed_secret_names:
+            return category("secret verification failed", entity_kind="secret", entity_name=entity_name)
+        if entity_kind == "secret":
+            return category("secret verification failed", entity_kind="secret")
+        return category("secret verification failed")
+    return ExternalError("secret verification failed")
+
+
+def _verification_backend_call[T](
+    operation: Callable[[], T],
+    *,
+    allowed_secret_names: frozenset[str],
+) -> T:
+    """Call provider code, sanitizing only the verification boundary."""
+    sanitized: AgentworksError | None = None
+    try:
+        return operation()
+    except Exception as exc:
+        sanitized = _sanitize_verification_exception(exc, allowed_secret_names=allowed_secret_names)
+
+    # Raising outside the provider exception handler prevents the fetched
+    # value and provider traceback from remaining as implicit context.
+    assert sanitized is not None
+    raise sanitized from None
+
+
+@dataclass(frozen=True)
+class _VerificationBackend:
+    """Sanitized, lazy backend snapshot for named-secret verification.
+
+    Provider-authored policy is read only when the ordered resolver reaches
+    this backend. Each property is then cached so a stateful provider cannot
+    change the decision between filtering and resolution.
+    """
+
+    backend: ActiveBackend
+    allowed_secret_names: frozenset[str]
+    name: str
+    allow_interactive: bool
+    _readiness: Readiness | None = field(default=None, init=False, repr=False)
+    _interactive: bool | None = field(default=None, init=False, repr=False)
+
+    @classmethod
+    def wrap(
+        cls,
+        backend: ActiveBackend,
+        *,
+        allowed_secret_names: frozenset[str],
+        allow_interactive: bool,
+    ) -> _VerificationBackend:
+        """Wrap a backend without evaluating provider-authored policy."""
+        return cls(
+            backend=backend,
+            allowed_secret_names=allowed_secret_names,
+            name=backend.registered_name,
+            allow_interactive=allow_interactive,
+        )
+
+    @property
+    def readiness(self) -> Readiness:
+        """Return one exact-type-validated, value-safe readiness snapshot."""
+        from agentworks.resources.graph import Readiness
+
+        cached = self._readiness
+        if cached is None:
+            readiness = _verification_backend_call(
+                lambda: self.backend.readiness,
+                allowed_secret_names=self.allowed_secret_names,
+            )
+            if (
+                type(readiness) is not Readiness
+                or (readiness.reason is not None and type(readiness.reason) is not str)
+                or type(readiness.is_available) is not bool
+            ):
+                raise ExternalError("secret verification failed")
+            # Quiet verification never reports provider-authored readiness
+            # prose. Copy only its decision axes so later property access is
+            # guaranteed first-party and cannot expose provider state.
+            safe_readiness = Readiness(
+                reason=None if readiness.reason is None else "backend unavailable",
+                is_available=readiness.is_available,
+            )
+            object.__setattr__(self, "_readiness", safe_readiness)
+            cached = safe_readiness
+        return cached
+
+    @property
+    def interactive(self) -> bool:
+        """Return the provider policy after one sanitized, cached read."""
+        cached = self._interactive
+        if cached is None:
+            interactive = _verification_backend_call(
+                lambda: self.backend.interactive,
+                allowed_secret_names=self.allowed_secret_names,
+            )
+            if type(interactive) is not bool:
+                raise ExternalError("secret verification failed")
+            object.__setattr__(self, "_interactive", interactive)
+            cached = interactive
+        return cached
+
+    def would_attempt(self, secret: SecretDecl) -> bool:
+        # Failure attribution revisits every backend after the ordered loop.
+        # Keep a backend excluded by verification policy fully inert there too.
+        if not self.allow_interactive and self.interactive:
+            return False
+        attempted = _verification_backend_call(
+            lambda: self.backend.would_attempt(secret),
+            allowed_secret_names=self.allowed_secret_names,
+        )
+        if type(attempted) is not bool:
+            raise ExternalError("secret verification failed")
+        return attempted
+
+    def describe_lookup(self, secret: SecretDecl) -> None:
+        # Quiet verification has no progress surface, so it does not invoke
+        # this provider-authored diagnostic hook at all.
+        del secret
+
+    def resolve(self, secrets: list[SecretDecl]) -> dict[str, str]:
+        resolved = _verification_backend_call(
+            lambda: self.backend.resolve(secrets),
+            allowed_secret_names=self.allowed_secret_names,
+        )
+        expected = {secret.name for secret in secrets}
+        if (
+            type(resolved) is not dict
+            or any(type(name) is not str or type(value) is not str for name, value in resolved.items())
+            or not set(resolved).issubset(expected)
+        ):
+            raise ExternalError("secret verification failed")
+        return resolved
+
+
+def _resolve_secrets_ordered(
+    secrets: list[SecretDecl],
+    backends: Sequence[ActiveBackend | _VerificationBackend],
+    *,
+    errors: dict[str, str] | None,
+    registry: Registry | None,
+    reporter: _ResolutionReporter,
+    interactive_available: bool,
+    exclude_interactive: bool = False,
+) -> dict[str, str]:
+    """Shared value-resolution algorithm with caller-selected reporting."""
     resolved: dict[str, str] = {}
     deduped: list[SecretDecl] = []
     seen: set[str] = set()
@@ -349,6 +629,11 @@ def resolve_secrets(
     for index, backend in enumerate(backends):
         if not missing:
             break
+        # Named-secret verification defaults to a strict non-interactive
+        # policy. Evaluate that policy only when ordered resolution reaches
+        # this backend, then skip before readiness or provider execution.
+        if exclude_interactive and backend.interactive:
+            continue
         # R9.6: a not-ready opted-in backend is SKIPPED WITH A WARNING (never
         # silent) and the chain falls through to the next candidate. Delta vs
         # today: a mapped-but-unavailable store (e.g. onepassword with no `op`)
@@ -358,7 +643,7 @@ def resolve_secrets(
         if not backend.readiness.is_ready:
             for s in missing:
                 if backend.would_attempt(s):
-                    output.warn(f"secret {s.name}: skipping {backend.name}, not ready: {backend.readiness.reason}")
+                    reporter.skipped(s.name, backend.name, backend.readiness.reason)
             continue
         # Fail before an interactive backend prompts (issue #202). Once
         # the non-interactive backends ahead of it have run, their soft
@@ -380,7 +665,7 @@ def resolve_secrets(
         # never runs interactive backends, and in --non-interactive mode
         # the prompt backend no-ops, so there is no prompt to get ahead
         # of and the end-of-loop raise stands.
-        if errors is None and backend.interactive and output.is_interactive():
+        if errors is None and backend.interactive and interactive_available:
             remaining = [b for b in backends[index:] if b.readiness.is_ready]
             doomed = [s for s in missing if not any(b.would_attempt(s) for b in remaining)]
             if doomed:
@@ -408,8 +693,7 @@ def resolve_secrets(
         decl_by_name = {s.name: s for s in attemptable}
         for name in sorted(got):
             ident = backend.describe_lookup(decl_by_name[name])
-            suffix = f" ({ident})" if ident else ""
-            output.info(f"Resolved {name} via {backend.name}{suffix}")
+            reporter.resolved(name, backend.name, ident)
         for name, value in got.items():
             # ADR 0014: embedded newlines would corrupt SSH
             # `-o SetEnv=KEY=VALUE` arguments. The env-var backend

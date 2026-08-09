@@ -23,19 +23,42 @@ from __future__ import annotations
 
 import shlex
 import uuid
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, Literal
+
+from pydantic import Field
 
 from agentworks.capabilities.harness_integration.base import HarnessIntegration, require_commands
-from agentworks.errors import ConfigError, StateError
+from agentworks.errors import StateError
+from agentworks.schema import AgwModel
+from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from agentworks.capabilities.base import RunContext
-    from agentworks.resources.reference import ConfigReference
     from agentworks.transports import Transport
 
-_CLAUDE_CODE_FIELDS = {"permission_mode", "model", "extra_args"}
+
+class ClaudeCodeConfig(AgwModel):
+    """What a session template tells the ``claude-code`` integration.
+
+    The ``--permission-mode`` and ``--model`` CHOICE sets are Claude's own
+    and drift between releases, so the values are forwarded unvalidated:
+    an invalid one surfaces as Claude's own startup error in the pane,
+    which is a better answer than a list of ours going stale.
+    """
+
+    name: Literal["claude-code"]
+    """The harness integration this config is for."""
+
+    permission_mode: str | None = None
+    """Forwarded as ``--permission-mode``."""
+
+    model: str | None = None
+    """Forwarded as ``--model``."""
+
+    extra_args: list[str] = Field(default_factory=list)
+    """Appended to the command verbatim, last, so it can carry any flag
+    this integration does not model."""
+
 
 # The transcript's config root. ``CLAUDE_CONFIG_DIR`` is the CLI's own
 # override env var (confirmed present in the v2.1.205 binary); the default
@@ -47,18 +70,31 @@ _PROJECTS_DIR = "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects"
 class ClaudeCodeIntegration(HarnessIntegration):
     """Runs Claude Code, resuming or launching fresh per on-disk state."""
 
+    contract_version: ClassVar[int] = 1
     name: ClassVar[str] = "claude-code"
     description: ClassVar[str] = "Run Claude Code, resuming its session when one exists"
+    config_model: ClassVar[type[ClaudeCodeConfig]] = ClaudeCodeConfig
+    prose: ClassVar[TopicProse | None] = TopicProse(
+        title="Claude Code",
+        overview="""
+        Runs Claude Code as the session's workload. Starting a session that already has
+        on-disk state resumes that conversation; starting a fresh one launches fresh, so
+        `agw session resume` and a reattach after a reboot behave the way an operator
+        expects without either being configured.
+
+        Ships as the opt-in `claude` system plugin, and needs the `claude` CLI on the
+        session's target.
+        """,
+    )
 
     # Set by _resume_or_launch on each start/restart; drives launch_note().
     # None until the op runs (nothing decided yet).
     _resumed: bool | None = None
 
-    @classmethod
-    def dependencies(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
-        """``claude-code`` implies no resource reference, so its edge set
-        is empty (total, non-throwing per the ``dependencies`` contract)."""
-        return ()
+    @property
+    def config(self) -> ClaudeCodeConfig:
+        """This session's validated claude-code config."""
+        return self._config_as(ClaudeCodeConfig)
 
     @classmethod
     def hoist_legacy_state(cls, blob: dict[str, object]) -> None:
@@ -96,27 +132,6 @@ class ClaudeCodeIntegration(HarnessIntegration):
         namespaced = namespace.get("session_id")
         if not (isinstance(namespaced, str) and namespaced):
             namespace["session_id"] = legacy
-
-    @classmethod
-    def validate(cls, owner: str, config: Mapping[str, object]) -> None:
-        """Shape-and-vocabulary only (FRD R4): unknown fields raise; each
-        present field is type-checked. The ``--permission-mode`` / ``--model``
-        CHOICE sets are Claude-owned and drift between releases, so the
-        VALUE is forwarded unvalidated (an invalid one surfaces as Claude's
-        own startup error in the pane).
-        """
-        unknown = sorted(set(config) - _CLAUDE_CODE_FIELDS)
-        if unknown:
-            raise ConfigError(f"{owner}: unknown claude-code harness integration field(s): {', '.join(unknown)}")
-        for field_name in ("permission_mode", "model"):
-            value = config.get(field_name)
-            if value is not None and not isinstance(value, str):
-                raise ConfigError(f"{owner}.{field_name} must be a string")
-        extra_args = config.get("extra_args")
-        if extra_args is not None and (
-            not isinstance(extra_args, list) or not all(isinstance(item, str) for item in extra_args)
-        ):
-            raise ConfigError(f"{owner}.extra_args must be a list of strings")
 
     def start(self, ctx: RunContext) -> str:
         """The pane command for ``session create``: resume the stored
@@ -189,15 +204,11 @@ class ClaudeCodeIntegration(HarnessIntegration):
         ``extra_args`` is appended verbatim last so it can carry any flag
         the harness integration does not model (FRD R4)."""
         tokens: list[str] = []
-        permission_mode = self.config.get("permission_mode")
-        if isinstance(permission_mode, str):
-            tokens += ["--permission-mode", permission_mode]
-        model = self.config.get("model")
-        if isinstance(model, str):
-            tokens += ["--model", model]
-        extra_args = self.config.get("extra_args")
-        if isinstance(extra_args, list):
-            tokens += [item for item in extra_args if isinstance(item, str)]
+        if self.config.permission_mode is not None:
+            tokens += ["--permission-mode", self.config.permission_mode]
+        if self.config.model is not None:
+            tokens += ["--model", self.config.model]
+        tokens += self.config.extra_args
         return tokens
 
     def _transcript_exists(self, transport: Transport, sid: str) -> bool:

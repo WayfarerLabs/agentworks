@@ -1,17 +1,24 @@
-"""The Lima VM platform: local limactl, or limactl over SSH when the
-site's ``platform_config`` declares a ``vm_host``."""
+"""The Lima VM platform: local limactl, or limactl over SSH, whichever
+the site's ``platform_config.placement`` selects."""
 
 from __future__ import annotations
 
 import contextlib
 import json
+import re
 import shlex
-import tempfile
+import sys
 import textwrap
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+
+# Imported at RUNTIME, not just for typing: not_ready reads an unvalidated
+# placement table and has to isinstance-check it.
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
+
+from pydantic import Field
 
 from agentworks import output
+from agentworks.capabilities.retired_shapes import RetiredPresenceShape
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
 from agentworks.capabilities.vm_platform.bootstrap_script import (
     REBOOT_SENTINEL_PATH,
@@ -20,19 +27,18 @@ from agentworks.capabilities.vm_platform.bootstrap_script import (
 )
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.db import VMStatus
-from agentworks.errors import ConfigError, StateError
-from agentworks.ssh import SSHError, SSHTarget, copy_to
+from agentworks.errors import ProvisioningError, SensitiveDataCleanupError, StateError
+from agentworks.schema import AgwModel, NonEmptyStr
+from agentworks.ssh import SSHError, SSHTarget
 from agentworks.ssh import run as ssh_run
+from agentworks.topics import TopicProse
 from agentworks.transports import LimaTransport, RemoteLimaTransport, SSHTransport
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import VMRow
     from agentworks.resources.graph import Readiness
-    from agentworks.resources.reference import ConfigReference
     from agentworks.ssh import SSHLogger
     from agentworks.transports import Transport
 
@@ -40,6 +46,11 @@ if TYPE_CHECKING:
 # either way, so an absent sentinel stays a normal result, not an exception.
 _REBOOT_PENDING_MARKER = "AGW_REBOOT_PENDING"
 _REBOOT_CLEAR_MARKER = "AGW_REBOOT_CLEAR"
+
+_REMOTE_TEMPLATE_CLEANUP_ATTEMPTS = 3
+_REMOTE_TEMPLATE_ROOT = "/tmp"
+_REMOTE_TEMPLATE_PREFIX = "agentworks-lima-template."
+_REMOTE_TEMPLATE_RANDOM_LENGTH = 10
 
 # Lima template for Debian cloud VMs (values substituted at create time).
 # The provision block runs the full bootstrap script (user, packages, swap,
@@ -90,29 +101,171 @@ provision:
 """
 
 
+# Why an arm with no fields but its tag exists at all: local and ssh are
+# different execution mechanisms (a local subprocess versus a two-hop SSH
+# transport) with different readiness rules, and before the union there
+# was no way to write the choice down: presence of ``vm_host`` selected
+# ssh, and a misspelled host key made an ssh site look local and report
+# ``limactl not installed``, naming a problem the operator did not have.
+# The union ends that: an ssh site's mistakes error inside the ssh arm,
+# and ``mode: local`` is the writable form of the default.
+class LimaLocalPlacement(AgwModel):
+    """Run limactl on this machine.
+
+    Needs ``limactl`` installed here, and the site reports not-ready
+    without it.
+    """
+
+    mode: Literal["local"]
+    """Selects this arm."""
+
+
+# Tagged ``ssh`` rather than ``remote`` deliberately. "Remote" names a
+# POSITION and leaves the mechanism implicit, which would reproduce one
+# layer up the exact defect this union removes: absence implying a
+# mechanism would simply become a word implying one. ``ssh`` names what
+# actually happens, reads coherently with the arm's own field
+# (``mode: ssh, host: me@gpu-box``), and matches the other platforms,
+# whose modes already name mechanisms rather than positions (``ambient``,
+# ``service-principal``, ``access-key``). It also leaves room: a second
+# non-local drive path would sit beside ``ssh``, where ``remote`` would
+# already be taken and ambiguous.
+#
+# ``host`` rather than ``vm_host``: the arm it sits in already says which
+# host this is, so the ``vm_`` prefix that disambiguated at the flat level
+# is noise once nested.
+class LimaSshPlacement(AgwModel):
+    """Run limactl on another host over SSH.
+
+    The VMs live on a shared box and nothing but SSH is needed here.
+    """
+
+    mode: Literal["ssh"]
+    """Selects this arm."""
+
+    host: NonEmptyStr = Field(examples=["me@gpu-box"])
+    """The SSH host running ``limactl`` (e.g. ``user@host``). Required in
+    this arm: an SSH-driven site with no host is not a site, which is
+    exactly what the flat ``vm_host`` could not say."""
+
+
+#: Where a ``lima`` site's ``limactl`` runs, as a tagged union DEFAULTING
+#: to the local arm.
+#:
+#: An earlier revision made this required with no default, and that
+#: reasoning is in the history, so here is why it reversed (operator
+#: ruling): the defect the union fixed was never "absence selects a
+#: mechanism", it was that there was no way to DECLARE the choice at all,
+#: so a misspelled host key silently turned an ssh site local. The union
+#: fixes the second, and once an explicit form exists, a default is an
+#: ordinary default, carried in the emitted schema and in
+#: ``describe-kind`` like any other. Local is the right one because it is
+#: what the wrapped tool already does: ``limactl`` runs where it is
+#: invoked, so requiring an explicit placement would make this site
+#: stricter than the tool it wraps. The general pattern: ambient where
+#: the underlying tool has an ambient notion, required where it does not,
+#: which is why proxmox has no union at all rather than being an
+#: exception to one.
+#:
+#: The pair reads asymmetric (``local`` is a position, ``ssh`` is a
+#: transport) and that was decided knowingly: the symmetric spelling would
+#: be ``direct``/``ssh``, but ``local`` is immediately understood where
+#: ``direct`` is not, and obvious beats symmetric. Do not "fix" it.
+#:
+#: Not an enum beside an optional ``host``, and the reason is the
+#: DIAGNOSTIC rather than soundness: that shape can only state "``ssh``
+#: requires a host, ``local`` forbids one" in a ``model_validator``, and
+#: pydantic does not derive a validator's body into the schema it emits,
+#: so a mixed-arm config would draw no editor complaint and fail only at
+#: load. (A schema more
+#: permissive than the loader is sanctioned under-approximation, so that
+#: alternative would not have broken ``manifests/emit.py``'s contract; it
+#: would simply have spent the point of emitting schema at all.) The union
+#: puts the constraint where the editor checks it, and pydantic emits it
+#: directly as ``oneOf`` with a ``discriminator`` mapping.
+LimaPlacement = Annotated[LimaLocalPlacement | LimaSshPlacement, Field(discriminator="mode")]
+
+
+class LimaConfig(AgwModel):
+    """Where a Lima site's ``limactl`` runs."""
+
+    name: Literal["lima"]
+    """The platform this config is for."""
+
+    placement: LimaPlacement = LimaLocalPlacement(mode="local")
+    """Where ``limactl`` runs: ``{mode: local}`` on this machine, or
+    ``{mode: ssh, host: ...}`` over SSH. Defaults to local, matching
+    where ``limactl`` runs when told nothing."""
+
+
 class LimaPlatform(VMPlatform):
     """Runs VMs via limactl, locally or on a remote host over SSH."""
 
+    contract_version: ClassVar[int] = 1
     name: ClassVar[str] = "lima"
     description: ClassVar[str] = "Lima VMs (local, or on a remote host via SSH)"
+    config_model: ClassVar[type[LimaConfig]] = LimaConfig
+    # A lima site that WROTE ``vm_host`` (or wrote it null) crosses this
+    # break and gets its exact rewrite; the zero-config local site that
+    # wrote nothing lands on the local default and was never broken.
+    # Release-scoped.
+    retired_shape: ClassVar[RetiredPresenceShape | None] = RetiredPresenceShape(
+        retired_field="vm_host",
+        union_field="placement",
+        present_mode="ssh",
+        absent_mode="local",
+        scalar_field="host",
+    )
+    prose: ClassVar[TopicProse | None] = TopicProse(
+        title="Lima",
+        overview="""
+        Lima runs Linux VMs through `limactl`. `placement` says where, and defaults
+        to `{mode: local}`: `limactl` runs on this machine, which is what the
+        built-in `lima-local` site is. `placement: {mode: ssh, host: me@gpu-box}`
+        runs `limactl` on that host over SSH, so the VMs live on a shared box and
+        nothing but SSH is needed here.
+
+        Local sites need `limactl` installed here and report not-ready without it.
+        Remote sites need nothing locally.
+        """,
+    )
     # No unsupported_reason override: the platform is supported on
-    # every host, because remote-Lima sites run limactl on the vm_host
-    # over SSH and need nothing locally.
+    # every host, because remote-Lima sites run limactl on the placement
+    # host over SSH and need nothing locally.
 
     @classmethod
     def not_ready(cls, config: Mapping[str, object]) -> Readiness:
-        """A LOCAL Lima site (no ``vm_host``) is pointless without a
-        local ``limactl``. This covers the bundled ``lima-local``
-        site and any operator-declared local site alike; a host that
-        later installs Lima enables them on the next look. Remote
-        sites need nothing here.
+        """A site placed ``local`` is pointless without a local
+        ``limactl``. This covers the bundled ``lima-local`` site and any
+        operator-declared local site alike; a host that later installs
+        Lima enables them on the next look. Remote sites need nothing
+        here.
 
         Non-constructing (LLD c): reads ``config`` fields directly, never
         builds an instance, so the readiness fold stays total over
-        unvalidated ``platform_config``."""
+        unvalidated ``platform_config``.
+
+        Keyed on the tag saying ``local``, never on a GUESS about what
+        absence means. That is what makes the verdict self-standing
+        rather than trustworthy-by-luck. It used to key on a missing
+        ``vm_host``, which made a missing host and a MISSPELLED one
+        indistinguishable: both read as local, and this reported
+        ``limactl not installed``, naming a problem the operator did not
+        have while their host setting silently did not apply. A WRITTEN
+        ``placement`` that does not say ``local`` is not treated as
+        local, so an unreadable or malformed one yields ``ready`` here
+        and the validate pass reports the real error against
+        ``placement`` itself. An ABSENT ``placement`` is not a guess:
+        it resolves to the field's declared default, read off the model
+        so this cannot disagree with what validation resolves."""
         from agentworks.resources.graph import Readiness
 
-        if config.get("vm_host"):
+        if "placement" in config:
+            placement = config.get("placement")
+            local = isinstance(placement, Mapping) and placement.get("mode") == "local"
+        else:
+            local = isinstance(LimaConfig.model_fields["placement"].default, LimaLocalPlacement)
+        if not local:
             return Readiness.ready()
         import shutil
 
@@ -120,22 +273,10 @@ class LimaPlatform(VMPlatform):
             return Readiness.blocked("limactl not installed")
         return Readiness.ready()
 
-    @classmethod
-    def dependencies(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
-        """``lima`` implies no resource reference, so its edge set is empty
-        (total, non-throwing per the ``dependencies`` contract)."""
-        return ()
-
-    @classmethod
-    def validate(cls, owner: str, config: Mapping[str, object]) -> None:
-        vm_host = config.get("vm_host")
-        if vm_host is not None and (not isinstance(vm_host, str) or not vm_host):
-            raise ConfigError(
-                f"{owner}.vm_host must be a non-empty SSH host string (e.g. 'user@host'), got {vm_host!r}"
-            )
-        unknown = sorted(set(config) - {"vm_host"})
-        if unknown:
-            raise ConfigError(f"{owner}: unknown lima platform field(s): {', '.join(unknown)}")
+    @property
+    def config(self) -> LimaConfig:
+        """This site's validated lima config."""
+        return self._config_as(LimaConfig)
 
     @classmethod
     def legacy_platform_metadata(cls, row: Mapping[str, Any], legacy: Mapping[str, Any]) -> dict[str, str]:
@@ -144,13 +285,19 @@ class LimaPlatform(VMPlatform):
         return {"instance_name": str(row["name"])}
 
     @property
-    def _vm_host_ssh(self) -> str | None:
-        vm_host = self.platform_config.get("vm_host")
-        return str(vm_host) if vm_host else None
+    def _remote_host(self) -> str | None:
+        """The SSH host ``limactl`` runs on, or ``None`` for a local site.
+
+        Read off the placement ARM rather than off a nullable field, so
+        "there is no host" and "this site is local" are the same fact
+        rather than two that could disagree.
+        """
+        placement = self.config.placement
+        return placement.host if isinstance(placement, LimaSshPlacement) else None
 
     @property
     def is_remote(self) -> bool:
-        return self._vm_host_ssh is not None
+        return self._remote_host is not None
 
     def _instance_name(self, vm: VMRow) -> str:
         name = vm.platform_metadata.get("instance_name")
@@ -162,30 +309,35 @@ class LimaPlatform(VMPlatform):
             )
         return str(name)
 
-    def _run_lima(self, command: str, *, check: bool = True) -> str:
-        """Run a limactl command, locally or on the site's vm_host."""
+    def _run_lima(self, command: str, *, check: bool = True, input_text: str | None = None) -> str:
+        """Run a limactl command, locally or on the site's placement host."""
         if self.is_remote:
-            assert self._vm_host_ssh is not None
-            target = SSHTarget(host=self._vm_host_ssh, user=None, login_shell=True)
-            result = ssh_run(target, command, check=check)
+            assert self._remote_host is not None
+            target = SSHTarget(host=self._remote_host, user=None, login_shell=True)
+            result = ssh_run(target, command, check=check, input_text=input_text)
             return result.stdout
         else:
             import subprocess
 
             proc = subprocess.run(
                 shlex.split(command),
+                input=input_text,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
             )
             if check and proc.returncode != 0:
+                if input_text is not None:
+                    # A parser may echo template lines to stderr. Keep the
+                    # secret-bearing stdin out of this diagnostic boundary.
+                    raise SSHError(f"limactl stdin command failed (exit {proc.returncode}): {command}")
                 raise SSHError(f"limactl failed: {proc.stderr.strip()}")
             return proc.stdout
 
     def preflight(self, ctx: RunContext) -> None:
         """Local sites: ``limactl`` must be on PATH. Remote sites defer
-        to the ops (probing the vm_host over SSH is a real round trip;
+        to the ops (probing the placement host over SSH is a real round trip;
         the first op's error is already clear). No config secrets, so
         the operation sweep's central prediction has nothing to check.
 
@@ -209,7 +361,11 @@ class LimaPlatform(VMPlatform):
             # than a state mismatch on a managed entity.
             raise ConnectivityError(
                 "'limactl' not found. Lima is not installed on this machine.",
-                hint=("For remote Lima VMs, declare a vm-site with platform_config.vm_host and pass it via --site."),
+                hint=(
+                    "For remote Lima VMs, declare a vm-site whose "
+                    "`platform: {name: lima, placement: {mode: ssh, host: ...}}` "
+                    "names the host, and pass it via --site."
+                ),
             )
 
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
@@ -219,10 +375,10 @@ class LimaPlatform(VMPlatform):
             # error clear for direct callers.
             self._ensure_limactl()
 
-        cpus = request.cpus if request.cpus is not None else 4
-        memory = request.memory_gib if request.memory_gib is not None else 8
-        disk = request.disk_gib if request.disk_gib is not None else 50
-        swap = request.swap_gib if request.swap_gib is not None else 0
+        cpus = request.cpus
+        memory = request.memory_gib
+        disk = request.disk_gib
+        swap = request.swap_gib
 
         # The platform owns the backend-side name; the slug is
         # the namespacing token. Pre-flight collision check (lima
@@ -232,14 +388,14 @@ class LimaPlatform(VMPlatform):
         if self._instance_exists(instance_name):
             raise StateError(
                 f"a Lima instance named '{instance_name}' already exists"
-                + (f" on '{self._vm_host_ssh}'" if self.is_remote else ""),
+                + (f" on '{self._remote_host}'" if self.is_remote else ""),
                 entity_kind="vm",
                 entity_name=request.vm_name,
                 hint=("delete it first (limactl delete) or pick a different VM name"),
             )
 
         if self.is_remote:
-            output.info(f"Connecting to VM host '{self._vm_host_ssh}'...")
+            output.info(f"Connecting to VM host '{self._remote_host}'...")
         output.info(f"Creating Lima VM '{instance_name}' ({'remote' if self.is_remote else 'local'})...")
         output.detail(f"Resources: {cpus} CPUs, {memory} GiB memory, {disk} GiB disk")
         if swap > 0:
@@ -283,7 +439,8 @@ class LimaPlatform(VMPlatform):
         try:
             try:
                 if self.is_remote:
-                    self._create_remote(instance_name, rendered)
+                    redactions = (request.tailscale_auth_key,) if request.tailscale_auth_key else ()
+                    self._create_remote(instance_name, rendered, redactions=redactions)
                 else:
                     self._create_local(instance_name, rendered)
 
@@ -385,32 +542,33 @@ class LimaPlatform(VMPlatform):
 
     def _transport_for(self, instance_name: str) -> Transport:
         if self.is_remote:
-            assert self._vm_host_ssh is not None
-            return RemoteLimaTransport(vm_name=instance_name, vm_host_ssh=self._vm_host_ssh)
+            assert self._remote_host is not None
+            return RemoteLimaTransport(vm_name=instance_name, vm_host_ssh=self._remote_host)
         return LimaTransport(vm_name=instance_name)
 
     def _create_local(self, instance_name: str, lima_yaml: str) -> None:
-        """Create and start a Lima VM locally."""
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            f.write(lima_yaml)
-            template_path = f.name
-
+        """Create and start a local Lima VM without persisting its template."""
         try:
-            self._run_lima(f"limactl create --name {instance_name} --tty=false {template_path}")
+            # Lima's documented ``-`` template source consumes stdin. The
+            # secret-bearing YAML therefore never needs a local filesystem
+            # path, including on Windows where unlinking an open temp file is
+            # not reliable.
+            self._run_lima(
+                f"limactl create --name {instance_name} --tty=false -",
+                input_text=lima_yaml,
+            )
             self._run_lima(f"limactl start {instance_name}")
         except SSHError:
             self._log_provision_errors(instance_name)
             raise
-        finally:
-            Path(template_path).unlink(missing_ok=True)
 
     def _host_transport(self, logger: SSHLogger | None = None) -> SSHTransport:
-        """An exec transport to the site's vm_host (remote sites only):
+        """An exec transport to the site's placement host (remote sites only):
         the create path's run_detached target, and the interrupt
         rollback's kill target."""
-        assert self._vm_host_ssh is not None
+        assert self._remote_host is not None
         return SSHTransport(
-            host=self._vm_host_ssh,
+            host=self._remote_host,
             user=None,
             login_shell=True,
             logger=logger,
@@ -423,80 +581,157 @@ class LimaPlatform(VMPlatform):
         limactl before deleting the instance."""
         return f"/tmp/agentworks-lima-{instance_name}"
 
-    def _create_remote(self, instance_name: str, lima_yaml: str) -> None:
-        """Create and start a Lima VM on the site's vm_host."""
-        assert self._vm_host_ssh is not None
-        target = SSHTarget(host=self._vm_host_ssh, user=None)
+    def _create_remote(
+        self,
+        instance_name: str,
+        lima_yaml: str,
+        *,
+        redactions: tuple[str, ...],
+    ) -> None:
+        """Create and start a Lima VM on the site's placement host.
 
-        # Write Lima YAML locally and copy to VM Host
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            f.write(lima_yaml)
-            local_template = f.name
+        ``lima_yaml`` can embed bootstrap secrets. The caller supplies the
+        complete set before the incremental operation logger writes anything.
+        """
+        assert self._remote_host is not None
+        target = SSHTarget(host=self._remote_host, user=None)
 
-        remote_template = f"/tmp/agentworks-{instance_name}.yaml"
+        remote_template_dir = self._allocate_remote_template_dir(target)
+        remote_template = f"{remote_template_dir}/template.yaml"
+        operation_failure: BaseException | None = None
         try:
-            copy_to(target, local_template, remote_template)
-        finally:
-            Path(local_template).unlink(missing_ok=True)
-
-        # Run limactl create + start as a single detached operation
-        from agentworks.remote_exec import run_detached
-        from agentworks.ssh import SSHLogger
-
-        ssh_logger = SSHLogger(instance_name, "vm-provision")
-        host_target = self._host_transport(logger=ssh_logger)
-        lima_cmd = (
-            f"limactl create --name {instance_name} --tty=false {remote_template} && limactl start {instance_name}"
-        )
-        output.detail("Starting and provisioning VM via Lima (this may take several minutes)...")
-        try:
-            # reuse_completed=False: creation is one-shot, so a leftover
-            # status file can only be stale garbage from an interrupted
-            # attempt; consuming it would report a phantom result for a
-            # limactl run that never happened.
-            result = run_detached(
-                host_target,
-                lima_cmd,
-                label=f"Lima ({instance_name})",
-                base_path=self._remote_base_path(instance_name),
-                timeout=600,
-                quiet=True,
-                reuse_completed=False,
+            # Stream directly into the private directory allocated above.
+            # ``umask 077`` creates mode 0600. The input is carried only on
+            # subprocess stdin and is never included in argv or logger
+            # surfaces.
+            ssh_run(
+                target,
+                f"umask 077 && cat > {shlex.quote(remote_template)}",
+                input_text=lima_yaml,
             )
-            if result.exit_code != 0:
-                # Parse structured markers from provision script output if present
-                bootstrap = parse_bootstrap_output(result.output, result.exit_code)
-                for step in bootstrap.steps:
-                    if step.error:
-                        ssh_logger.log_error(f"Provision step '{step.name}': {step.error}")
 
-                ssh_logger.log_error(f"limactl failed (exit {result.exit_code})")
-                ssh_logger.log_error(result.output)
-                raise SSHError(
-                    f"limactl create/start failed (exit {result.exit_code})\n"
-                    f"SSH log: {ssh_logger.path}\n"
-                    f"Last output:\n{result.output[-1000:]}"
+            # Run limactl create + start as a single detached operation
+            from agentworks.remote_exec import run_detached
+            from agentworks.ssh import SSHLogger
+
+            ssh_logger = SSHLogger(instance_name, "vm-provision", redactions=redactions)
+            host_target = self._host_transport(logger=ssh_logger)
+            lima_cmd = (
+                f"limactl create --name {instance_name} --tty=false {remote_template} && limactl start {instance_name}"
+            )
+            output.detail("Starting and provisioning VM via Lima (this may take several minutes)...")
+            try:
+                # reuse_completed=False: creation is one-shot, so a leftover
+                # status file can only be stale garbage from an interrupted
+                # attempt; consuming it would report a phantom result for a
+                # limactl run that never happened.
+                result = run_detached(
+                    host_target,
+                    lima_cmd,
+                    label=f"Lima ({instance_name})",
+                    base_path=self._remote_base_path(instance_name),
+                    timeout=600,
+                    quiet=True,
+                    reuse_completed=False,
                 )
-        finally:
-            # Exactly-once close, covering the paths where run_detached
-            # itself raises (a transport failure, or the interrupt from
-            # the poll) that used to skip it and leave the per-op log
-            # without its footer. close() is not idempotent (each call
-            # appends a footer), hence one call here rather than one per
-            # branch; called with an exception in flight it also lands
-            # the traceback in the per-op log (its documented behavior).
-            # Suppressed so a local log-write failure (disk full,
-            # permissions) cannot skip the remote rm below or mask the
-            # original error.
-            with contextlib.suppress(OSError):
-                ssh_logger.close()
-            # Clean up the remote temp file on success, failure, AND
-            # interrupt (these were accumulating in /tmp on the VM host
-            # after failures; an interrupt inside run_detached used to
-            # skip this entirely). Suppressed so a transport hiccup on
-            # the unwind can never mask the original error or interrupt.
-            with contextlib.suppress(SSHError):
-                ssh_run(target, f"rm -f {remote_template}", check=False)
+                if result.exit_code != 0:
+                    # Parse structured markers from provision script output if present
+                    bootstrap = parse_bootstrap_output(result.output, result.exit_code)
+                    for step in bootstrap.steps:
+                        if step.error:
+                            ssh_logger.log_error(f"Provision step '{step.name}': {step.error}")
+
+                    ssh_logger.log_error(f"limactl failed (exit {result.exit_code})")
+                    ssh_logger.log_error(result.output)
+                    raise SSHError(
+                        f"limactl create/start failed (exit {result.exit_code})\n"
+                        f"Sanitized output is in SSH log: {ssh_logger.display_path}"
+                    )
+            finally:
+                # Exactly-once close, covering the paths where run_detached
+                # itself raises (a transport failure, or the interrupt from
+                # the poll) that used to skip it and leave the per-op log
+                # without its footer. close() is not idempotent (each call
+                # appends a footer), hence one call here rather than one per
+                # branch; called with an exception in flight it also lands
+                # the traceback in the per-op log (its documented behavior).
+                # An OSError cannot skip the remote cleanup. A second Ctrl-C
+                # during close also cannot replace a provisioning failure or
+                # the operator's first Ctrl-C, but remains visible when close
+                # itself is the operation that was interrupted.
+                active_failure = sys.exc_info()[1]
+                try:
+                    ssh_logger.close()
+                except OSError:
+                    pass
+                except KeyboardInterrupt:
+                    if active_failure is None:
+                        raise
+        except BaseException as exc:
+            operation_failure = exc
+
+        cleanup_failure: SensitiveDataCleanupError | None = None
+        try:
+            self._remove_remote_template_dir(target, remote_template_dir)
+        except SensitiveDataCleanupError as exc:
+            cleanup_failure = exc
+
+        if cleanup_failure is not None:
+            if operation_failure is None:
+                raise cleanup_failure
+            # Residue risk takes precedence over the earlier failure. Do not
+            # chain provider or transport text into the diagnostic: the safe
+            # combined error tells the operator both facts and how to remove
+            # the sensitive path.
+            raise self._remote_template_cleanup_error(remote_template_dir, operation_failed=True) from None
+
+        if operation_failure is not None:
+            raise operation_failure
+
+    def _allocate_remote_template_dir(self, target: SSHTarget) -> str:
+        """Atomically allocate and validate a private remote staging directory."""
+        path_template = f"{_REMOTE_TEMPLATE_ROOT}/{_REMOTE_TEMPLATE_PREFIX}{'X' * _REMOTE_TEMPLATE_RANDOM_LENGTH}"
+        result = ssh_run(target, f"umask 077 && mktemp -d {shlex.quote(path_template)}")
+        remote_template_dir = result.stdout.strip()
+        expected = (
+            rf"{re.escape(_REMOTE_TEMPLATE_ROOT)}/{re.escape(_REMOTE_TEMPLATE_PREFIX)}"
+            rf"[A-Za-z0-9]{{{_REMOTE_TEMPLATE_RANDOM_LENGTH}}}"
+        )
+        if re.fullmatch(expected, remote_template_dir) is None:
+            raise ProvisioningError(
+                "VM host returned an invalid temporary directory for Lima provisioning",
+                entity_kind="vm",
+            )
+        return remote_template_dir
+
+    def _remove_remote_template_dir(self, target: SSHTarget, remote_template_dir: str) -> None:
+        """Retry and verify removal of the remote secret-bearing directory."""
+        quoted_dir = shlex.quote(remote_template_dir)
+        command = f"rm -rf -- {quoted_dir} && test ! -e {quoted_dir}"
+        for _attempt in range(_REMOTE_TEMPLATE_CLEANUP_ATTEMPTS):
+            try:
+                ssh_run(target, command)
+                return
+            except (SSHError, OSError, KeyboardInterrupt):
+                continue
+        raise self._remote_template_cleanup_error(remote_template_dir, operation_failed=False) from None
+
+    def _remote_template_cleanup_error(
+        self,
+        remote_template_dir: str,
+        *,
+        operation_failed: bool,
+    ) -> SensitiveDataCleanupError:
+        prefix = "Lima provisioning failed and " if operation_failed else ""
+        assert self._remote_host is not None
+        return SensitiveDataCleanupError(
+            prefix + "removal of sensitive Lima provisioning input could not be confirmed",
+            entity_kind="vm",
+            hint=(
+                f"On VM host '{self._remote_host}', recursively remove directory "
+                f"'{remote_template_dir}' before retrying. It may contain credentials."
+            ),
+        )
 
     def _cleanup_partial_create(self, instance_name: str) -> None:
         """Best-effort teardown of the instance a failed ``create`` made
@@ -508,6 +743,15 @@ class LimaPlatform(VMPlatform):
         second Ctrl-C (``KeyboardInterrupt``) deliberately escapes so
         :meth:`_rollback_create_on_interrupt` can abandon the cleanup.
         """
+        if self.is_remote:
+            # A failed or interrupted run_detached may still be alive on the
+            # VM host and never reached its normal artifact cleanup. Stop it
+            # and erase its output, wrapper, PID, and status before deleting
+            # the instance it was mutating.
+            from agentworks.remote_exec import kill_detached
+
+            with contextlib.suppress(Exception):
+                kill_detached(self._host_transport(), self._remote_base_path(instance_name))
         try:
             self._delete_instance(instance_name)
         except Exception as e:
@@ -529,22 +773,6 @@ class LimaPlatform(VMPlatform):
             "please wait (Ctrl-C again to abandon it)..."
         )
         try:
-            if self.is_remote:
-                # This locally raised interrupt stopped nothing on the
-                # vm_host: run_detached nohups the remote limactl
-                # precisely so it survives this process. Kill the
-                # detached wrapper before deleting, or the delete races
-                # a create/start still mutating the same instance. The
-                # kill targets the wrapper PID, not the process group,
-                # so an in-flight limactl child may briefly survive it;
-                # severing the wrapper stops the && chain from
-                # advancing, and the limactl delete --force below stops
-                # the instance's own processes. (Local creates need no
-                # equivalent: the terminal delivers the SIGINT to the
-                # foreground limactl itself.)
-                from agentworks.remote_exec import kill_detached
-
-                kill_detached(self._host_transport(), self._remote_base_path(instance_name))
             self._cleanup_partial_create(instance_name)
         except KeyboardInterrupt:
             output.warn(
@@ -553,7 +781,7 @@ class LimaPlatform(VMPlatform):
             )
 
     def _manual_removal_hint(self, instance_name: str) -> str:
-        where = f" on '{self._vm_host_ssh}'" if self.is_remote else ""
+        where = f" on '{self._remote_host}'" if self.is_remote else ""
         return f"remove it manually with 'limactl delete --force {instance_name}'{where}."
 
     def _log_provision_errors(self, instance_name: str) -> None:
@@ -608,7 +836,7 @@ class LimaPlatform(VMPlatform):
     def display_backend_name(self, vm: VMRow) -> str:
         instance = str(vm.platform_metadata.get("instance_name", vm.name))
         if self.is_remote:
-            return f"{instance}@{self._vm_host_ssh}"
+            return f"{instance}@{self._remote_host}"
         return instance
 
     def native_transport(
@@ -618,7 +846,7 @@ class LimaPlatform(VMPlatform):
         *,
         config: Config | None = None,
     ) -> Transport | None:
-        # ctx is unused: limactl (local or over the vm_host SSH hop)
+        # ctx is unused: limactl (local or over the placement host SSH hop)
         # needs no backend credential.
         return self._transport_for(self._instance_name(vm))
 

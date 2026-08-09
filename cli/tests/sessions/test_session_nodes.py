@@ -6,13 +6,14 @@ graph, and the relocated ephemeral teardown bodies.
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Annotated, Literal, cast
 
 import pytest
 
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
 from agentworks.capabilities.harness_integration import HarnessIntegration
 from agentworks.errors import ConfigError, StateError
+from agentworks.schema import AgwModel, NonEmptyStr, SecretRef
 from agentworks.sessions.nodes import pending_session_node
 from agentworks.sessions.templates import ResolvedSessionTemplate
 from agentworks.vms.nodes import LiveVMNode, VMSiteNode
@@ -303,6 +304,16 @@ def test_session_create_graph_shares_one_vm_node(db: Database) -> None:
 # -- the harness_integration_config secret references (#305) -----------------
 
 
+class _ScannerConfig(AgwModel):
+    """A harness config that NAMES a secret, with a constant default."""
+
+    name: Literal["scanner"]
+    api_key: Annotated[
+        NonEmptyStr,
+        SecretRef(usage="the scanner API key", default_template="scanner-api-key"),
+    ]
+
+
 class _SecretHarnessIntegration(HarnessIntegration):
     """A registered secret-declaring harness integration double: both built-ins
     declare no secrets, so pinning the reference derivation and the
@@ -310,16 +321,8 @@ class _SecretHarnessIntegration(HarnessIntegration):
 
     name = "scanner"
     description = "test double harness that declares a config secret"
-
-    @classmethod
-    def dependencies(cls, owner, config):  # type: ignore[no-untyped-def]
-        from agentworks.resources.reference import ConfigReference
-
-        return (ConfigReference(kind="secret", name="scanner-api-key", usage="the scanner API key"),)
-
-    @classmethod
-    def validate(cls, owner, config):  # type: ignore[no-untyped-def]
-        return None
+    contract_version = 1
+    config_model = _ScannerConfig
 
     def start(self, ctx):  # type: ignore[no-untyped-def]
         return ""
@@ -331,7 +334,12 @@ class _SecretHarnessIntegration(HarnessIntegration):
         return None
 
 
-_EXPECTED_USAGE = "the scanner API key, from the harness_integration_config of session-template 'scan'"
+_EXPECTED_USAGE = "the scanner API key, from the harness_integration of session-template 'scan'"
+"""The usage text a harness integration's declared secret carries.
+
+It named ``harness_integration_config`` until the row started carrying one
+tagged ``harness_integration`` table; there is no such field now, so the
+old text pointed an operator at a key they cannot write."""
 
 
 def _scanner_session(db: Database, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN202
@@ -840,8 +848,8 @@ def test_agent_template_node_derives_credential_edges(tmp_path, monkeypatch: pyt
     cfg.write_text(f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n')
     write_manifests(
         tmp_path,
-        ManifestDoc("git-credential", "gh", {"provider": "github"}),
-        ManifestDoc("git-credential", "gh2", {"provider": "github"}),
+        ManifestDoc("git-credential", "gh", {"provider": {"name": "github"}}),
+        ManifestDoc("git-credential", "gh2", {"provider": {"name": "github"}}),
         ManifestDoc("agent-template", "default", {"git_credentials": ["gh", "gh2"]}),
     )
     config = load_config(cfg, warn_issues=False, warn_deprecations=False)
@@ -869,9 +877,16 @@ def _toy_harness_integration(harness_integration_name: str) -> type:
 
     from agentworks.capabilities.harness_integration import HarnessIntegration
 
+    class _ToyConfig(AgwModel):
+        """The toy integration takes no config beyond its own tag."""
+
+        name: str
+
     class _ToyIntegration(HarnessIntegration):
         name: ClassVar[str] = harness_integration_name
         description: ClassVar[str] = "toy"
+        contract_version: ClassVar[int] = 1
+        config_model: ClassVar[type[AgwModel]] = _ToyConfig
 
         def start(self, ctx: RunContext) -> str:
             self._state["session_id"] = f"{harness_integration_name}-id"

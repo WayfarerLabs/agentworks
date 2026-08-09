@@ -8,7 +8,7 @@ from agentworks.env import EnvEntry, effective_env
 
 
 def _e(key: str, value: str) -> EnvEntry:
-    return EnvEntry(key=key, value=value)
+    return EnvEntry({"value": value})
 
 
 def test_vm_only() -> None:

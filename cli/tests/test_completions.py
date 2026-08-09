@@ -127,6 +127,57 @@ class TestDynamicCompletionsMapping:
                 f"Completer '{completer_id}' from ({command_path}, {param_name}) has no bash snippet mapping"
             )
 
+    def test_guide_topics_use_names_only_in_every_shell(self) -> None:
+        from agentworks.completions.bash import DYNAMIC_SNIPPETS as BASH_SNIPPETS
+        from agentworks.completions.powershell import DYNAMIC_SNIPPETS as POWERSHELL_SNIPPETS
+        from agentworks.completions.zsh import DYNAMIC_FUNCTIONS
+
+        assert DYNAMIC_COMPLETIONS[("guide", "topics")] == "guide_topics"
+        assert "agw guide --names-only" in BASH_SNIPPETS["guide_topics"]
+        assert "agw guide --names-only" in POWERSHELL_SNIPPETS["guide_topics"]
+        assert "agw guide --names-only" in DYNAMIC_FUNCTIONS["guide_topics"]
+
+    def test_guide_topic_completion_stream_keeps_schema_targets_when_config_is_broken(self) -> None:
+        from agentworks.errors import ConfigError
+        from agentworks.guide import GuideMode
+        from agentworks.guide.service import render_guide
+
+        def broken_config() -> object:
+            raise ConfigError("broken config")
+
+        response = render_guide((), GuideMode.AGENT, names_only=True, load_config_fn=broken_config)
+
+        assert response.exit_code == 0
+        assert "vm-template" in response.names
+        assert "vm-platform/wsl2" in response.names
+
+    def test_guide_topic_completion_stream_omits_rejected_schema_target(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from dataclasses import replace
+
+        from agentworks.guide import GuideMode
+        from agentworks.guide.service import render_guide
+        from agentworks.manifests.reference import reference_for
+
+        def invalid_reference(target: str):
+            reference = reference_for(target)
+            if target == "vm-template":
+                return replace(reference, summary="Untrusted ${SCHEMA_PAYLOAD}")
+            return reference
+
+        monkeypatch.setattr("agentworks.guide.service.reference_for", invalid_reference)
+        response = render_guide(
+            (),
+            GuideMode.AGENT,
+            names_only=True,
+            load_config_fn=lambda: object(),  # type: ignore[arg-type,return-value]
+            load_registry_fn=lambda _config: None,  # type: ignore[arg-type,return-value]
+        )
+
+        assert response.exit_code == 0
+        assert "agent-template" in response.names
+        assert "vm-template" not in response.names
+        assert "SCHEMA_PAYLOAD" not in response.markdown
+
 
 class TestOptionFlagsInSpec:
     """Pin option flags that must (or must not) reach the completion tree.
@@ -610,14 +661,13 @@ class TestStaticChoiceCompletion:
     every Choice-typed option silently loses static completion (the
     generators' choices branches were dead code)."""
 
-    def test_migrate_option_choices_extracted(self) -> None:
+    def test_shell_option_choices_extracted(self) -> None:
         from agentworks.cli import app
         from agentworks.completions.spec import build_spec
 
-        migrate = build_spec(app).subcommands["resource"].subcommands["migrate"]
-        by_name = {p.name: p.choices for p in migrate.params}
-        assert by_name["layout"] == ["per-kind", "single", "per-resource"]
-        assert by_name["toml"] == ["comment", "delete"]
+        show = build_spec(app).subcommands["completion"].subcommands["show"]
+        by_name = {p.name: p.choices for p in show.params}
+        assert by_name["shell"] == ["bash", "zsh", "powershell", "pwsh"]
 
     def test_sample_kind_completes_dynamically(self) -> None:
         # The sample-kind argument is a plain string (no click.Choice: any
@@ -633,7 +683,21 @@ class TestStaticChoiceCompletion:
         assert not kind.choices
         assert kind.dynamic_completer == "resource_kinds"
 
-    def test_all_shells_emit_toml_choices(self) -> None:
+    def test_schema_kind_completes_dynamically(self) -> None:
+        # `resource schema` takes its kind the same way `resource sample`
+        # does, and for the same reason: a plain string, so a capability
+        # kind or a typo reaches the service layer and gets a clean domain
+        # error instead of a click.Choice parse failure.
+        from agentworks.cli import app
+        from agentworks.completions.spec import build_spec
+
+        schema = build_spec(app).subcommands["resource"].subcommands["schema"]
+        (kind,) = [p for p in schema.params if p.name == "kind"]
+        assert not kind.choices
+        assert kind.dynamic_completer == "resource_kinds"
+        assert [opt for param in schema.params for opt in param.opts] == ["--write"]
+
+    def test_all_shells_emit_shell_choices(self) -> None:
         from agentworks.cli import app
         from agentworks.completions.bash import generate_bash
         from agentworks.completions.powershell import generate_powershell
@@ -641,11 +705,11 @@ class TestStaticChoiceCompletion:
         from agentworks.completions.zsh import generate_zsh
 
         spec = build_spec(app)
-        # Shell-specific emission shapes (the zsh/bash forms put both
-        # choices on one line; powershell emits one CompletionResult per
+        # Shell-specific emission shapes (the zsh/bash forms put every
+        # choice on one line; powershell emits one CompletionResult per
         # choice).
-        assert ":toml:(comment delete)" in generate_zsh(spec, "t")
-        assert 'compgen -W "comment delete"' in generate_bash(spec, "t")
+        assert ":shell:(bash zsh powershell pwsh)" in generate_zsh(spec, "t")
+        assert 'compgen -W "bash zsh powershell pwsh"' in generate_bash(spec, "t")
         ps = generate_powershell(spec, "t")
-        assert "::new('comment', 'comment'" in ps
-        assert "::new('delete', 'delete'" in ps
+        assert "::new('bash', 'bash'" in ps
+        assert "::new('pwsh', 'pwsh'" in ps

@@ -274,3 +274,79 @@ is now settings only: `[azure]` and `[proxmox]` no longer load as deprecated vm-
 they hard-error at config load. Migrate them to `vm-site` manifests with
 `agw resource migrate vm-site` (they still migrate as vm-site). ADR 0016's dual-path stance is
 superseded by [ADR 0022](../../adrs/0022-single-resource-declaration-frontend.md).
+
+## Addendum: 2026-08-06 (schema-registration for capability config has landed)
+
+This SDD's deferral, recorded above under scoped-out work as "**Schema-registration for capability
+config.** Uses the shipped invoked-validation API as-is; the declarative-schema upgrade is future
+work", is resolved. That upgrade shipped in the declarative-schema effort's phase 2; the permanent
+record is [ADR 0023](../../adrs/0023-declared-schemas-and-the-kind-descriptor.md).
+
+A `vm-platform` now DECLARES its config as a model (`config_model`) and the core derives validation,
+reference extraction, defaulting, JSON Schema emission, `agw resource sample`, and
+`agw resource describe-kind` from it, invoking no platform code. Concretely for the surfaces this
+SDD designed:
+
+- **The capability-config secret machinery this SDD built stays**, and is now declared rather than
+  computed: proxmox's `token_secret` is a `SecretRef`-marked field with `proxmox-token` as its
+  owner-templated default, and the same marker is what authorizes the op to read that secret through
+  the context. The AWS platform this SDD anticipated ("AWS-credentials-by-secret needs no new
+  design") landed as `aws-ec2` on exactly that shape, with a nested `credentials` table.
+- **A vm-site's `spec.platform` is one tagged table**, not the `platform` / `platform_config`
+  sibling pair this SDD shipped. The sibling pair is a hard error; `agw resource migrate --all`
+  folds it in place.
+- **Unknown keys inside a platform's config are hard errors**, and so are wrong types. That is a
+  break for proxmox specifically, which previously coerced `template_vmid` through `int(str(...))`
+  and read `verify_ssl` through `bool(...)`, so a quoted `"9000"` loaded and a `"no"` meant true.
+  The operator upgrade note is in `docs/guides/resources.md`.
+- **`ProvisionRequest` arrives fully resolved.** Its `cpus` / `memory_gib` / `disk_gib` / `swap_gib`
+  are required and non-optional, and the per-platform consumer-side re-defaulting this SDD's
+  platforms each carried is gone; the defaults are declared once on the template model.
+
+The vm-site / vm-platform model itself, the readiness and enablement axes, the bundled-site
+mechanism, the reserved names, and the exposure and rollback contracts recorded above are all
+unchanged.
+
+## Addendum: 2026-08-07 (`defaults.site` checking moved out of the vm subsystem)
+
+`vms.validate_sites(config, registry)`, which this SDD's HLA specifies by name as the composition-
+boundary check that `defaults.site` resolves, is gone. The check itself is not: it is now one row in
+`agentworks/config/references.py`'s table of settings that name resources, run from
+`bootstrap.build_registry` at the same point in the same order. Nothing about it was vm-specific (it
+looked a name up in the registry), and it was one of three hand-written answers to a single
+question, so the declarative-schema effort collapsed it per the operator ruling of 2026-08-07 that
+config errors are hard errors.
+
+**The severity did not change, and the SDD's recorded behavior did not need reversing.** The ruling
+that prompted this work was written believing that a `defaults.site` naming a nonexistent site was
+only a `doctor` warning and that this SDD had recorded that degradation deliberately. It had not.
+`validate_sites` has hard-errored on an unknown name since it landed in `fd69f8a0`, exactly as the
+HLA specifies. The misreading is worth recording because the wording that caused it is still in this
+SDD: the FRD and the plan both say references to a site (VM rows, `defaults.site`) "are doctor
+WARNINGS, never command failures", and in context that is about a site that EXISTS but is DISABLED
+or NOT-READY. It was never about a name that resolves to nothing. Those two cases still have the two
+different answers this SDD gave them:
+
+- A name that resolves to NOTHING is a hard `ConfigError` at registry build. Unchanged in severity.
+- A name that resolves to a site that cannot run HERE stays loadable: `agw doctor` warns on the
+  reference (`defaults.site: names 'lima-local', which is not ready: limactl not installed`) and
+  using it is a typed `StateError` at `resolve_site`. Unchanged entirely, and now pinned by a test
+  that fails if the reference check is tightened to require availability.
+
+What DID change is the operator-facing text, which no longer uses site-specific vocabulary:
+
+```console
+# before
+Configuration error: defaults.site names an unknown site 'lima-locale'
+  Hint: declare a vm-site named 'lima-locale' (see `agw resource sample vm-site`) or point
+        defaults.site at a declared site (`agw resource list --kind vm-site`)
+
+# after
+Configuration error: defaults.site references unknown vm-site 'lima-locale'
+  Hint: declared vm-site resources: ['lima-local', 'wsl2']. Point defaults.site at one of them,
+        or declare 'lima-locale' (`agw resource sample vm-site --write vm-sites.yaml`).
+```
+
+"references unknown vm-site" is the wording a dangling reference from a MANIFEST already gets at
+finalize, which is the point of the collapse: one mistake, one phrasing, wherever it is made. The
+hint gained the declared set, since for this setting the mistake is nearly always a typo.

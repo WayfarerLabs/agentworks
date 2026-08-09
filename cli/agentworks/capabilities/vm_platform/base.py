@@ -37,6 +37,15 @@ class ProvisionRequest:
     it doesn't use. Adding a platform-specific input means adding a
     field here, not changing the protocol. Units match the rest of the
     codebase (GiB), so there is no conversion seam.
+
+    The hardware fields are REQUIRED and non-optional, which is FR15
+    made structural: the vm-template's model layer resolves them (see
+    ``ResolvedVMTemplate``, which declares the defaults exactly once),
+    so by the time a platform reads one it is a number. Nothing here
+    carries a default of its own, because a default here would be a
+    second declaration of the same value, free to drift from the first;
+    the ``swap`` fallbacks this replaced had already drifted, each
+    platform substituting 0 against the template layer's 4.
     """
 
     vm_name: str
@@ -53,10 +62,10 @@ class ProvisionRequest:
     # None: the platform defers Tailscale bootstrap to Phase A (wsl2
     # always; lima/azure/proxmox when no key was resolvable).
     tailscale_auth_key: str | None
-    cpus: int | None = None
-    memory_gib: int | None = None
-    disk_gib: int | None = None
-    swap_gib: int | None = None
+    cpus: int
+    memory_gib: int
+    disk_gib: int
+    swap_gib: int
 
 
 @dataclass
@@ -81,16 +90,18 @@ class VMPlatform(Capability):
     Registered in ``VM_PLATFORM_REGISTRY`` and published as a read-only
     ``vm-platform`` capability resource; invoked only through site
     resolution (``agentworks.vms.sites``). Instances are constructed by
-    the site layer as ``cls(site_name, platform_config)``: the platform
+    the site layer as ``cls(site_name, platform_config)``, which the
+    base validates into this platform's declared model: the platform
     bound to one declared site, never resolved secret values (see the
     ``Capability`` lifecycle). The declared config secrets join an
     operation's boundary union through the holding node's
     ``secret_refs`` and their values arrive per op call through the
     context (``ctx.secret``).
 
-    Class-level contract (consumed by the vm-site kind decoder, the
-    capability publisher, and the DB migration): ``name``,
-    ``description``, ``dependencies`` / ``validate``, and
+    Class-level contract (consumed by registration conformance, the
+    capability publisher, the core's config validation and reference
+    extraction, and the DB migration): ``name``, ``description``,
+    ``contract_version``, ``config_model``, and
     ``legacy_platform_metadata``.
 
     Idempotency: ops flagged with ``@idempotent_op`` (``start``,
@@ -121,7 +132,7 @@ class VMPlatform(Capability):
         configured site ready" (that is preflight) and not "is a tool merely
         missing but installable" (that is the config-dependent
         :meth:`Capability.not_ready`: lima the platform is supported
-        everywhere because remote sites run ``limactl`` on the vm_host over
+        everywhere because ssh-placed sites run ``limactl`` on the placement host over
         SSH, but a local-Lima site without a local ``limactl`` is not-ready).
         Default: supported everywhere.
         """
@@ -147,12 +158,6 @@ class VMPlatform(Capability):
         """The bound site's name (the capability-generic ``owner_name``,
         under the domain's vocabulary)."""
         return self.owner_name
-
-    @property
-    def platform_config(self) -> Mapping[str, object]:
-        """The bound site's validated config blob (the
-        capability-generic ``config``, under the domain's vocabulary)."""
-        return self.config
 
     @classmethod
     def legacy_platform_metadata(cls, row: Mapping[str, Any], legacy: Mapping[str, Any]) -> dict[str, str]:

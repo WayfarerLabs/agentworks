@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.capabilities.base import RunContext
-from agentworks.config import MAX_VM_NAME_LENGTH, validate_admin_username, validate_name
+from agentworks.config import validate_admin_username
 from agentworks.db import SYSTEM_SLUG_KEY, InitStatus, ProvisioningStatus
 from agentworks.errors import (
     AlreadyExistsError,
@@ -32,6 +32,7 @@ from agentworks.errors import (
     UserAbort,
     unknown_template_error,
 )
+from agentworks.naming import MAX_VM_NAME_LENGTH, validate_name
 
 from ._helpers import _require_vm
 
@@ -641,9 +642,11 @@ def reinit_vm(
         # Build Tailscale SSH target with logging
         from agentworks.ssh import SSHLogger
 
-        logger = SSHLogger(name, "vm-reinit")
-        for token in git_tokens.values():
-            logger.add_redaction(token)
+        # The activation gate and any conditional Tailscale rejoin finish
+        # before this logger exists. The rejoin path separately enforces that
+        # its auth-key-bearing transport has no logger, so this operation log's
+        # complete secret set is exactly the git tokens used by initialization.
+        logger = SSHLogger(name, "vm-reinit", redactions=tuple(git_tokens.values()))
         ts_target = transport(vm, config, default_timeout=60, logger=logger)
 
         home = f"/home/{vm.admin_username}"
@@ -670,11 +673,11 @@ def reinit_vm(
             except KeyboardInterrupt:
                 output.warn(
                     f"Cancelling vm reinit '{name}'. The VM may be in a partial state. "
-                    f"Re-run 'vm reinit {name}' to retry. Log: {logger.path}"
+                    f"Re-run 'vm reinit {name}' to retry. Log: {logger.display_path}"
                 )
                 raise
             except Exception:
-                output.warn(f"Log: {logger.path}")
+                output.warn(f"Log: {logger.display_path}")
                 raise
         finally:
             logger.close()
@@ -684,6 +687,6 @@ def reinit_vm(
     # Terminal outcome line at column 0 via result().
     if refreshed_vm.init_status == InitStatus.PARTIAL.value:
         output.result(f"VM '{name}' reinitialized (with warnings, see above)")
-        output.info(f"Log: {logger.path}")
+        output.info(f"Log: {logger.display_path}")
     else:
         output.result(f"VM '{name}' reinitialized successfully!")

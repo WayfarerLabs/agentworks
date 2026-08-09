@@ -1,7 +1,8 @@
 """Base interface for session harness integrations.
 
-A harness integration is a capability (see ``capabilities/README.md``): it validates
-its own ``harness_integration_config`` block (``validate``), owns the
+A harness integration is a capability (see ``capabilities/README.md``): it DECLARES
+the shape of its own config block as a model
+(``config_model``, which the core validates against), owns the
 session's launch-target readiness (the required-commands probe and the
 skip/defer/probe/error fork), and produces the tmux pane command string
 that runs the workload as its ops (``start`` / ``resume``). Unlike the
@@ -137,7 +138,7 @@ class HarnessIntegration(Capability):
     def __init__(
         self,
         owner_name: str,  # the session-template name (config owner)
-        config: Mapping[str, object],  # the merged harness_integration_config blob
+        config: Mapping[str, object],  # the merged harness config, without the tag
         *,
         session_name: str,  # the session's own name (addresses the tool)
         vm_name: str,  # the session's VM ancestor
@@ -172,9 +173,9 @@ class HarnessIntegration(Capability):
         return self._state
 
     def config_secret_refs(self) -> tuple[ResourceReference, ...]:
-        """The full config-secret references this harness integration declares (the
-        secret-kind references :meth:`dependencies` returned, bound at
-        construct into ``self._secret_refs``), sourced to the owning
+        """The full config-secret references this harness integration declares
+        (the secret-kind references the core extracted from its declared
+        model, bound at construct into ``self._secret_refs``), sourced to the owning
         session-template, for the holding session node to expose as its
         own ``config_secret_refs`` (what the preflight sweep predicts
         resolvability over) and to derive its bare-name ``secret_refs``
@@ -185,8 +186,8 @@ class HarnessIntegration(Capability):
         config secret gets (issue #305). The usage is the capability's
         own prose plus the declaration site: the sweep frames its error
         with the NODE's key (``session/<name>``), which names the
-        session but not the template whose ``harness_integration_config`` named the
-        secret, so the reference carries that locating info itself. A
+        session but not the template whose ``harness_integration`` table
+        named the secret, so the reference carries that locating info itself. A
         public accessor, so the node never reaches into the base
         ``Capability._secret_refs`` private field. Empty for every
         shipped harness integration (none declares a secret); the
@@ -199,7 +200,7 @@ class HarnessIntegration(Capability):
         enriched = tuple(
             replace(
                 ref,
-                usage=f"{ref.usage}, from the harness_integration_config of {self.owner_kind} '{self.owner_name}'",
+                usage=f"{ref.usage}, from the harness_integration of {self.owner_kind} '{self.owner_name}'",
             )
             for ref in self._secret_refs
         )
@@ -229,8 +230,9 @@ class HarnessIntegration(Capability):
         pair (FRD R5). Default: shallow child-wins. Overridden per
         capability where a key needs richer combination (``shell`` unions
         ``required_commands``). Runs classmethod-side from the resolver's
-        ``_merge_pair`` walk with no instance yet, exactly as
-        :meth:`validate` does.
+        ``_merge_pair`` walk with no instance yet, over RAW declared blobs:
+        merging is inheritance semantics, not validation, and it runs
+        before the merged blob is validated.
         """
         return {**base, **child}
 

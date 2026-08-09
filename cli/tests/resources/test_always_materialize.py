@@ -15,49 +15,23 @@ reserved names that *aren't* in the registry by the time finalize starts.
 from __future__ import annotations
 
 from pathlib import Path
-from textwrap import dedent
 
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
-from agentworks.sessions.template import NamedConsoleConfig
-from agentworks.vms.admin import AdminConfig
-from tests.conftest import ManifestDoc, write_manifests
+from tests.conftest import ManifestDoc, write_cfg, write_manifests
 
 
 def _write_minimal(path: Path) -> Path:
-    pub = path.parent / "id.pub"
-    priv = path.parent / "id"
-    pub.write_text("ssh-ed25519 AAAA...")
-    priv.write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
-    path.write_text(
-        dedent(f"""\
-        [operator]
-        ssh_public_key = "{pub.as_posix()}"
-        ssh_private_key = "{priv.as_posix()}"
-        """),
-    )
-    return path
+    """``write_cfg`` under this file's path-taking spelling."""
+    return write_cfg(path.parent, filename=path.name)
 
 
-def test_admin_and_named_console_defaults_present_in_minimal_config(
-    tmp_path: Path,
-) -> None:
-    """A config with no ``[admin.*]`` or ``[named_console]`` blocks still
-    produces ``admin-template:default`` and ``named-console-template:default``
-    in the registry. Today Config publishes synthesize-on-omit instances
-    with operator-declared origins, so the always-materialize pre-step
-    short-circuits; the rows are present either way.
-    """
-    cfg = load_config(_write_minimal(tmp_path / "config.toml"), warn_issues=False)
-    registry = build_registry(cfg)
-
-    admin = registry.lookup("admin-template", "default")
-    assert isinstance(admin, AdminConfig)
-    assert admin.origin is not None
-
-    nc = registry.lookup("named-console-template", "default")
-    assert isinstance(nc, NamedConsoleConfig)
-    assert nc.origin is not None
+# The loader path is not re-asserted here. That a minimal config still
+# produces both singleton defaults is
+# ``test_singleton_publishing.py``'s subject, one test per kind, and both
+# of those assert strictly more than a presence check does. What is left
+# below is the half only a naked registry can show: that the
+# always-materialize pre-step fires with no publisher contributing at all.
 
 
 def test_unreferenced_default_lands_with_framework_source(tmp_path: Path) -> None:
@@ -74,24 +48,14 @@ def test_unreferenced_default_lands_with_framework_source(tmp_path: Path) -> Non
     admin = registry.lookup("admin-template", "default")
     assert admin.origin.variant == "auto-declared"
     assert admin.origin.source == ALWAYS_MATERIALIZE_SOURCE
-
-
-def test_always_materialized_row_gets_empty_usage_tuple_in_finalize(
-    tmp_path: Path,
-) -> None:
-    """Unreferenced default goes through finalize's usage-attachment
-    pass with ``usage=()``. AdminConfig has no ``description`` field so
-    the polish is a no-op for it; the empty-usage description format is
-    exercised against the helper directly in
-    ``test_polish_empty_usage_format`` below.
-    """
-    from agentworks.resources import Registry
-
-    registry = Registry.empty()
-    registry.finalize()
-
-    registry.lookup("admin-template", "default")
+    # And it went through the usage-attachment pass like any other row,
+    # with nothing depending on it.
     assert registry.graph.dependents_of("admin-template", "default") == ()
+
+
+# The empty-usage half of that same finalize pass is asserted on the
+# row above, which builds the identical naked registry; what needs a
+# test of its own is the description FORMAT the polish produces, below.
 
 
 def test_polish_empty_usage_format() -> None:

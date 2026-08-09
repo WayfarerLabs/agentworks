@@ -57,6 +57,12 @@ def _request() -> ProvisionRequest:
         ssh_private_key=None,
         # wsl2 always defers Tailscale to Phase A.
         tailscale_auth_key=None,
+        # The vm-template layer's resolved defaults, which is the only
+        # shape a platform ever sees (the hardware fields are required).
+        cpus=4,
+        memory_gib=8,
+        disk_gib=50,
+        swap_gib=4,
     )
 
 

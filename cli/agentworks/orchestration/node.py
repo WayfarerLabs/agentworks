@@ -121,7 +121,7 @@ class Node(Readiness, Protocol):
         today ``vm-site`` (its platform's API credential),
         ``git-credential`` (its provider's token), ``vm-template`` (its
         Tailscale auth key), and the session nodes (their harness integration's
-        ``harness_integration_config`` secrets) are the ones that do.
+        ``harness_integration`` config secrets) are the ones that do.
         """
         ...
 

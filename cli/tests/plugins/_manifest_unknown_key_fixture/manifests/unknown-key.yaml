@@ -1,0 +1,16 @@
+# A CONTRIBUTED manifest with a misspelled field (`key_dearmour` for
+# `key_dearmor`). Valid in every other respect, so what it exercises is
+# exactly one thing: a plugin's bundle validates through the same model
+# regime an operator's manifest does, and an unknown key is a hard error
+# there too.
+apiVersion: agentworks/v1
+kind: apt-source
+metadata:
+  name: fixture-unknown-key
+  description: a contributed source with a misspelled field
+spec:
+  key_url: https://example.invalid/keys/fixture.gpg
+  key_path: /etc/apt/keyrings/fixture.gpg
+  source: "deb [arch={arch} signed-by=/etc/apt/keyrings/fixture.gpg] https://example.invalid/apt stable main"
+  source_file: fixture.list
+  key_dearmour: true

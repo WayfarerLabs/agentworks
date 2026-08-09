@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 from agentworks.errors import ConfigError, NotFoundError, unknown_template_error
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from agentworks.env import EnvEntry
     from agentworks.resources.registry import Registry
     from agentworks.workspaces.template import WorkspaceTemplate
@@ -88,55 +90,40 @@ def resolve_ws_template_env_or_empty(
         return {}
 
 
-def _resolve(
-    templates: dict[str, WorkspaceTemplate],
-    name: str,
-    _visiting: tuple[str, ...] = (),
-) -> ResolvedTemplate:
-    """Depth-first, left-to-right resolution of a template.
+def effective_template(templates: Mapping[str, WorkspaceTemplate], name: str) -> ResolvedTemplate:
+    """The effective (merged) declaration of ``name``, for the finalize
+    passes. TOTAL; see ``vms/templates.effective_template`` for why the
+    degradation on a cyclic chain is never observed."""
+    from agentworks.errors import InheritanceCycleError
 
-    ``_visiting`` carries the chain of in-progress resolves so cycles
-    raise ``ConfigError`` instead of ``RecursionError``. The framework's
-    cycle pass at build_registry time is the canonical check; this guard
-    is the safety net for callers that resolve without going through
-    build_registry.
-    """
-    if name in _visiting:
-        path = " -> ".join((*_visiting, name))
-        raise ConfigError(f"workspace_templates inheritance cycle detected: {path}")
-
-    if name not in templates:
+    try:
+        return _resolve(templates, name)
+    except InheritanceCycleError:
         return ResolvedTemplate(name=name)
 
-    tmpl = templates[name]
+
+def _resolve(
+    templates: Mapping[str, WorkspaceTemplate],
+    name: str,
+) -> ResolvedTemplate:
+    """Resolve ``name``'s chain, defaults applied: one accumulator folded
+    over the chain's declarations, last one wins. See
+    ``vms.templates._resolve_from_dict`` for why the fold reads the
+    DECLARATIONS rather than each parent's resolved template.
+    """
+    # Imported here, not at module level: ``agentworks.resources``'s package
+    # init loads every kind module, and every kind module reaches this one.
+    from agentworks.resources.inheritance import resolution_layers
+
     result = ResolvedTemplate(name=name)
-    next_visiting = (*_visiting, name)
-
-    # Walk parents first
-    for parent_name in tmpl.inherits:
-        parent = _resolve(templates, parent_name, next_visiting)
-        _merge(result, parent)
-
-    # Apply this template's own values (last-one-wins)
-    _merge_template(result, tmpl)
-    result.name = name  # always use the originally requested name
+    for layer in resolution_layers(templates, name, "workspace-template"):
+        _merge_template(result, layer)
     return result
 
 
-def _merge(target: ResolvedTemplate, source: ResolvedTemplate) -> None:
-    """Merge source into target (source wins for scalars)."""
-    if source.repo is not None:
-        target.repo = source.repo
-    target.tmuxinator = source.tmuxinator
-    if source.git_user_name is not None:
-        target.git_user_name = source.git_user_name
-    if source.git_user_email is not None:
-        target.git_user_email = source.git_user_email
-    target.env = {**target.env, **source.env}
-
-
 def _merge_template(target: ResolvedTemplate, tmpl: WorkspaceTemplate) -> None:
-    """Merge a raw WorkspaceTemplate into a ResolvedTemplate."""
+    """Fold one declared WorkspaceTemplate into the accumulator. None =
+    not set, skip. The only writer of a ``ResolvedTemplate``'s fields."""
     if tmpl.repo is not None:
         target.repo = tmpl.repo
     if tmpl.tmuxinator is not None:

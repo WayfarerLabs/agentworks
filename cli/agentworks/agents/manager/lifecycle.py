@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING
 
 import agentworks.agents.manager as _mgr
 from agentworks import output
-from agentworks.config import validate_name
 from agentworks.errors import (
     AlreadyExistsError,
     ExternalError,
@@ -19,6 +18,7 @@ from agentworks.errors import (
     StateError,
     UserAbort,
 )
+from agentworks.naming import validate_name
 from agentworks.vms.manager import gated_vm_boundary
 
 from ._common import MAX_AGENT_NAME_LENGTH, _require_vm, agent_scope
@@ -510,7 +510,7 @@ def reinit_agent(
             from agentworks.agents.initializer import create_agent_on_vm
             from agentworks.ssh import SSHLogger
 
-            ssh_logger = SSHLogger(vm.name, "agent-reinit")
+            ssh_logger = SSHLogger(vm.name, "agent-reinit", redactions=tuple(git_tokens.values()))
             try:
                 try:
                     create_agent_on_vm(
@@ -602,7 +602,7 @@ def reinit_agent(
                 except KeyboardInterrupt:
                     output.warn(
                         f"Cancelling agent reinit '{name}'. The agent may be in a partial state. "
-                        f"Re-run 'agent reinit {name}' to retry. SSH log: {ssh_logger.path}"
+                        f"Re-run 'agent reinit {name}' to retry. SSH log: {ssh_logger.display_path}"
                     )
                     raise
                 except Exception as e:
@@ -610,7 +610,7 @@ def reinit_agent(
                         f"reinitializing agent: {e}",
                         entity_kind="agent",
                         entity_name=name,
-                        hint=f"SSH log: {ssh_logger.path}",
+                        hint=f"SSH log: {ssh_logger.display_path}",
                     ) from e
             finally:
                 ssh_logger.close()

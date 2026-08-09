@@ -1,6 +1,7 @@
 """Framework strategies for the ``"secret"`` and ``"secret-backend"``
-kinds, plus the ``SECRET_KIND_NAME`` identifier and the
-``SecretBackendEntry`` capability row.
+kinds, plus the ``SECRET_KIND_NAME`` identifier, the
+``SecretBackendEntry`` capability row, and the secret-backend kind's
+``CapabilityKindDescriptor``.
 
 Both live in the ``secrets`` domain package next to the code that
 implements secrets and backends; ``agentworks.resources.kinds.__init__``
@@ -26,21 +27,31 @@ manifest-declarable (ADR 0016).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
+from agentworks.capabilities.descriptor import (
+    CapabilityKindDescriptor,
+    ConfigContract,
+    RegistryPolicy,
+)
+from agentworks.origin import Origin
 from agentworks.resources.kind import (
     KIND_REGISTRY,
     InstanceRef,
     NoUnreferencedDefaultError,
 )
-from agentworks.resources.origin import Origin
 from agentworks.resources.walk import collect_secrets_for
+from agentworks.schema import AgwRootModel
+from agentworks.secrets.backends import SecretBackend
 from agentworks.secrets.base import SecretDecl
+from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
     from agentworks.db import Database, SessionRow, VMRow
+    from agentworks.declared_resource import DeclaredResource
+    from agentworks.resources.graph import Readiness
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
 
@@ -77,7 +88,27 @@ class _SecretKind:
     """
 
     kind: str = SECRET_KIND_NAME
+    model: type[DeclaredResource] = SecretDecl
     description: str = "Declared secrets and their backend mappings"
+    prose: TopicProse = TopicProse(
+        title="Secrets",
+        overview="""
+        A secret is a NAME, not a value. Declaring one says a value by that name exists,
+        what it is for, and (optionally) what each backend calls it; the value itself is
+        produced by a secret-backend at command time and never stored by agentworks.
+
+        Anything that needs a secret refers to it by name: an `env` table writes
+        `{secret: npm-token}`, and a capability config field that names a secret (a git
+        credential's token, a platform's client secret) takes the name too. A referenced
+        secret that nothing declared is auto-declared, so declaring one is how you give
+        it a description and a hint, which are the text an operator reads when they are
+        asked to type the value in.
+
+        `backend_mappings` overrides what one backend calls this secret, or opts out of
+        that backend entirely with `false`. Run
+        `agw resource describe-kind secret-backend` to see which backends this host has.
+        """,
+    )
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = None  # None = any name accepted
     category: Literal["declarable", "capability"] = "declarable"
@@ -110,7 +141,10 @@ class _SecretKind:
         return SecretDecl(
             name=first.name,
             description="",
-            origin=Origin.auto_declared(source=first.source),
+            # The DECLARER: an inheriting template publishes its merged
+            # declaration's secrets, so the row that WROTE the name is the
+            # provenance an operator can act on.
+            origin=Origin.auto_declared(source=first.declarer),
         )
 
     def instances(self, db: Database, registry: Registry, resource: Any) -> Iterable[InstanceRef]:
@@ -125,14 +159,15 @@ class _SecretKind:
         emitted. See ``_secrets_reachable_from_session`` for the full
         env-and-secrets layering rationale.
 
-        The walk uses ``collect_secrets_for`` (the same helper
-        ``vm create`` / ``agent create`` etc. use for eager-resolve), so
-        the "what secrets would this session need?" answer is exactly
-        the answer the orchestrator would compute at runtime -- modulo
-        per-command scoping (e.g. ``vm reinit`` walks only the VM's
-        subgraph). The result is *per current config*: edits to config
-        change the projection immediately, even for sessions that were
-        provisioned against a different config.
+        The walk uses ``collect_secrets_for``, the framework's
+        runtime-need closure over the graph, so the "what secrets would
+        this session need?" answer is derived from the same edges every
+        other structural surface reads rather than from a second walk of
+        its own. The orchestrator's runtime union is computed differently
+        (off a plan's already-resolved nodes), which is why this is a
+        projection rather than a prediction. The result is *per current
+        config*: edits to config change it immediately, even for sessions
+        that were provisioned against a different config.
         """
         target_name = resource.name
         for session in db.list_sessions():
@@ -204,6 +239,19 @@ class _SecretBackendKind:
 
     kind: str = "secret-backend"
     description: str = "Capability for resolving secret values"
+    prose: TopicProse = TopicProse(
+        title="Secret backends",
+        overview="""
+        A secret-backend produces a secret's VALUE at command time. Backends are tried
+        in order, and the first one that has a value for the secret wins, so a host can
+        read most secrets from a vault and fall back to prompting for the rest.
+
+        A backend is code, not config: it registers itself, and a secret opts one in or
+        out through `backend_mappings.<backend>` in the secret's own document. What that
+        mapping may hold differs per backend (an env var name, an `op://` reference),
+        which is why each backend documents its own.
+        """,
+    )
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
     category: Literal["declarable", "capability"] = "capability"
@@ -217,3 +265,67 @@ class _SecretBackendKind:
 
 KIND_REGISTRY[SECRET_KIND_NAME] = _SecretKind()
 KIND_REGISTRY["secret-backend"] = _SecretBackendKind()
+
+
+def _backend_registry() -> dict[str, Any]:
+    from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
+
+    return SECRET_BACKEND_REGISTRY
+
+
+def _backend_entry(name: str, impl: Any, origin: Origin | None) -> SecretBackendEntry:
+    return SecretBackendEntry(name=name, description=impl.description, origin=origin)
+
+
+def _backend_readiness(name: str, impl: Any) -> Readiness:
+    """Ask the backend INSTANCE (this is the one kind whose registry holds
+    one). Config-independent by contract: a backend's host tool is present
+    or not, irrespective of any per-secret mapping."""
+    return cast("Readiness", impl.not_ready())
+
+
+SECRET_BACKEND_DESCRIPTOR = CapabilityKindDescriptor(
+    kind="secret-backend",
+    contract_version=1,
+    implementation_contract=SecretBackend,
+    # The interim exception, and the only place it is recorded: this kind's
+    # registry holds a constructed instance rather than the class. It flips
+    # to CLASS_BY_NAME once the graph stamping and the resolve loop stop
+    # consuming constructed backends.
+    registry_policy=RegistryPolicy.CONSTRUCTED_SINGLETON,
+    registry=_backend_registry,
+    required_operations=frozenset(
+        {
+            "not_ready",
+            "would_attempt",
+            "describe_lookup",
+            "batch_get",
+        },
+    ),
+    # A Protocol declares these but cannot supply them, and the framework
+    # reads both without constructing (the resolve loop reads ``interactive``
+    # on every chain pass; the core reads ``config_model`` to validate a
+    # mapping), so their presence is checked rather than assumed.
+    required_attributes=frozenset({"interactive", "config_model"}),
+    entry_factory=_backend_entry,
+    kind_strategy=KIND_REGISTRY["secret-backend"],
+    readiness=_backend_readiness,
+    # The publisher label is the PACKAGE, not the module that used to
+    # hold this kind's publisher (``secrets/backends.py``, fronted by
+    # ``secrets/__init__.py``): the built-in rows have always carried
+    # ``"agentworks.secrets"`` and operators read it as provenance.
+    publisher_source="agentworks.secrets",
+    # No host surface: no declarable kind selects a backend. The per-secret
+    # ``backend_mappings`` map key already names the capability, so there is
+    # no naming/config sibling pair to fold.
+    manifest_section=None,
+    # The one kind whose config is NOT mapping-shaped: a per-secret mapping
+    # may be a bare string (env-var's is an env var name) or a
+    # string-or-table union (onepassword's), neither of which a
+    # ``BaseModel`` can be. And no discriminator: ``backend_mappings``'s map
+    # key already names the backend, so a tag inside the value would say the
+    # same thing twice and could disagree.
+    config_schema=ConfigContract(base=AgwRootModel, discriminator=None),
+)
+"""The secret-backend record in the capability-kind descriptor table
+(``agentworks.capabilities.descriptor``)."""

@@ -1,18 +1,45 @@
 """Framework-layer rendering helpers shared by every kind's CLI describe
-view. ``format_origin_line`` and ``format_file_path`` live here (not in
-any kind module) because the cross-kind ``agw resource describe`` and
-the per-kind commands (``agw secret describe``, future ``agw vm
-describe`` ...) all render the same ``Origin`` shape; defining the
-renderer next to ``Origin`` keeps the layer correct.
+view. ``format_origin_line`` lives here (not in any kind module) because
+the cross-kind ``agw resource describe`` and the per-kind commands
+(``agw secret describe``, future ``agw vm describe`` ...) all render the
+same ``Origin`` shape; defining the renderer next to ``Origin`` keeps the
+layer correct.
+
+The host paths these renderers embed are spelled by
+``agentworks.path_rendering.format_host_path``, the repo-wide rule, which
+lives in its own top-level leaf so the schema error bridge can render a
+path the same way without importing this package: importing anything
+under ``agentworks.resources`` runs that package's ``__init__``, which
+loads every kind module. Import it from there rather than from here.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
+from agentworks.path_rendering import format_host_path
+
 if TYPE_CHECKING:
-    from agentworks.resources.origin import Origin
+    from agentworks.origin import Origin
+    from agentworks.resources.reference import ReferenceEntry
+
+
+def format_reference_entry(entry: ReferenceEntry) -> str:
+    """One "Referenced by:" line: who points here, what for, and where the
+    name was actually written when those differ.
+
+    An inheriting row publishes the runtime needs of its MERGED
+    declaration (FR17), so "vm-template/kid: the BASE env var" can be
+    entirely true and still send an operator to a file with no such env
+    var in it. The tail names the template that wrote it.
+
+    Shared by ``agw resource describe`` and ``agw secret describe``, which
+    render the same list and must not drift.
+    """
+    line = f"{entry.source[0]}/{entry.source[1]}: {entry.usage}"
+    if entry.declared_by is None or entry.declared_by == entry.source:
+        return line
+    return f"{line} (inherited from {entry.declared_by[0]}/{entry.declared_by[1]})"
 
 
 def format_origin_line(origin: Origin | None) -> str:
@@ -30,7 +57,7 @@ def format_origin_line(origin: Origin | None) -> str:
         return "unknown"
     if origin.variant == "operator-declared":
         if origin.file is not None and origin.line:
-            return f"operator-declared ({format_file_path(origin.file)}:{origin.line})"
+            return f"operator-declared ({format_host_path(origin.file)}:{origin.line})"
         return "operator-declared"
     if origin.variant == "auto-declared":
         source = origin.source
@@ -46,29 +73,4 @@ def format_origin_line(origin: Origin | None) -> str:
     raise AssertionError(f"unhandled Origin variant: {origin.variant!r}")
 
 
-def format_origin_location(origin: Origin | None) -> str:
-    """Render an ``Origin`` as a bare source location for inline error
-    framing, dropping the variant prefix ``format_origin_line`` carries
-    for the describe / doctor views. An operator-declared row renders as
-    ``~/path:42`` (an operator reading a config error already knows it is
-    their config, so the ``operator-declared`` prefix is redundant noise
-    inside the message). Other variants fall back to the full
-    ``format_origin_line`` rendering: a built-in ``source`` or an
-    auto-declared ``kind/name`` carries no bare file location, so the
-    labelled form stays the informative one.
-    """
-    if origin is not None and origin.variant == "operator-declared" and origin.file is not None and origin.line:
-        return f"{format_file_path(origin.file)}:{origin.line}"
-    return format_origin_line(origin)
-
-
-def format_file_path(file: Path) -> str:
-    """Render a file path operator-friendly: ``~/path`` when under
-    ``$HOME``, else the bare absolute path. Relative paths render as-is.
-    """
-    if file.is_absolute():
-        try:
-            return f"~/{file.relative_to(Path.home())}"
-        except ValueError:
-            return str(file)
-    return str(file)
+__all__ = ["format_origin_line"]

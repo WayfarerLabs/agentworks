@@ -3,6 +3,11 @@
 How agentworks models the things you declare: secrets, templates, git credentials, apt /
 install-command entries, and how to work with them day to day.
 
+This guide describes the system as it stands. If you are moving a host from 0.13 to 0.14, the
+one-time rewrite that release asks for (retired TOML resource sections, the capabilities that became
+opt-in plugins, the manifest validation that tightened) is in
+[upgrading-to-0.14.md](upgrading-to-0.14.md).
+
 ## The split: config vs resources
 
 `~/.config/agentworks/config.toml` is for **settings**: your identity (SSH keys), paths, CLI
@@ -51,30 +56,146 @@ spec:
 - `kind` is the lower-kebab resource kind (`secret`, `vm-template`, `session-template`,
   `git-credential`, `apt-package`, ...).
 - `metadata` carries the framework-uniform fields: `name` (required; `/` is not allowed in resource
-  names) and `description` (stored and shown for every declarable kind). One kind accepts only
+  names), `description` (stored and shown for every declarable kind), and `expires` (optional, a
+  date or an RFC 3339 timestamp; validated but not yet acted on). One kind accepts only
   `name: default` for now: `named-console-template` is an ordinary multi-instance kind in the
   framework, but no command can select a named instance yet, so a named declaration would be dead
   config (issue #165 adds the selector).
-- `spec` carries the kind-specific fields, validated by the manifest decoder for that kind.
+- `spec` carries the kind-specific fields, validated against that kind's declared model. The split
+  is strict in both directions: a metadata field written inside `spec` is refused (it would silently
+  override the envelope), and a `spec` key the kind does not declare is refused too, with a message
+  naming the fields it does.
 - Multiple documents per file are separated with `---`.
 
 `agw resource sample vm-template` prints a commented starter for one kind (`--all` for every kind);
-`--write <file>` saves it under the resources directory instead. Samples are fully commented out --
-delete one leading `#` per line to activate. `agw resource edit KIND/NAME` opens the manifest
-declaring a resource in `$EDITOR`.
+`--write <file>` saves it under the resources directory instead. Samples are fully commented out:
+delete one leading `#` from each DOCUMENT line to activate the parts you want. A saved file also
+opens with a `# yaml-language-server:` line, which is an ordinary comment and stays one;
+uncommenting that would turn it into a key the loader rejects. Writing a second kind into a file
+that already has content appends it under a commented `#---`, which is a document line like any
+other: uncomment that too, or the new document's keys merge into whatever precedes them.
+
+The sample is rendered from the same declaration the loader validates against, so it always matches
+what the kind actually accepts. Everything in it is commented, but at two depths, and the one `#`
+you delete is what tells them apart: a required field carries a single `#` and becomes a live
+document line, while an optional field carries two and stays an ordinary comment at its own indent,
+with its type, its default or an example, and what it is for. So one uncomment pass over the file
+gives you a document that loads, carrying exactly the required fields; then delete a second `#` from
+each optional field you actually want. Where a field selects a capability (a vm-site's `platform`),
+one implementation is written out and the rest are named beside it.
+
+`agw resource describe-kind` is the same information without a document to edit:
+
+```bash
+agw resource describe-kind vm-site               # every field of a kind
+agw resource describe-kind vm-platform           # the platforms this build has
+agw resource describe-kind vm-platform/aws-ec2   # one platform's own config
+```
+
+It reads no config and builds no registry, so it answers on a host whose `config.toml` does not
+load, and it documents a capability whose plugin is not enabled yet.
+
+It also answers for every arm of a tagged table, which a sample cannot: where the arms are
+capabilities it names each one and gives its address
+(`agw resource describe-kind vm-platform/wsl2`), and where they are not (a lima site's
+`placement: {mode: local}` against `{mode: ssh, host: ...}`) it shows each arm's own fields under
+that arm, because no other command reaches them.
+
+`agw resource edit KIND/NAME` opens the manifest declaring a resource in `$EDITOR`.
+
+## Editing manifests with schema support
+
+Agentworks emits JSON Schema (draft 2020-12) for manifests, so a schema-aware editor gives you
+completions, hover documentation, and live diagnostics as you type, including for kinds and
+capabilities a plugin contributed.
+
+```bash
+agw resource schema                    # the any-kind schema, to stdout
+agw resource schema vm-template        # one kind's
+agw resource schema --write            # the whole set, into resources/.schema/
+```
+
+Files that agentworks writes for you already carry the association, as a modeline on their first
+line:
+
+```yaml
+# yaml-language-server: $schema=.schema/vm-template.schema.json
+```
+
+`agw resource sample --write` stamps it on the files it CREATES, and writes the schemas alongside so
+the reference resolves. Writing into a file that already exists never INSERTS a line, and what
+happens depends on whether one is there already:
+
+- **No modeline?** Nothing is added. A modeline has to be the first line, and inserting one would
+  shift every line number you already know. To get the association on a manifest you wrote by hand,
+  add that line yourself (`agw resource schema --write` first, so the file it names exists).
+- **A modeline already there?** It is rewritten in place, which moves no line at all. A file created
+  for one kind names that kind's schema; append a second kind to it and it is no longer a one-kind
+  file, so the line is restamped to `manifest.schema.json`, the any-kind schema. Leaving it on the
+  first kind's would have your editor check the new document against the wrong shape and underline
+  configuration that loads, which is the failure this association exists to prevent.
+
+The schema describes THIS host: a capability from a plugin appears in it once the plugin is
+installed, so re-run `agw resource schema --write` after installing one. The schemas are generated
+artifacts; `.schema/` is a dot-directory, so the manifest loader never reads what is in it.
+
+**Setting up an editor.** In VS Code (or any editor with a YAML language server), install the
+[YAML extension](https://marketplace.visualstudio.com/items?itemName=redhat.vscode-yaml), open a
+manifest under `~/.config/agentworks/resources/`, and you should see completions on `spec` keys and
+hover text on each field. To confirm it is really working: change a `spec` key to a name the kind
+does not declare, and the editor should underline it immediately. If nothing happens, check that the
+first line of the file is the modeline and that the path it names exists.
+
+What the editor checks is a deliberate subset of what loading checks. Everything it flags is a real
+error, but agentworks also applies rules the emitted schema does not carry (cross-field validators,
+name character rules, whether a capability is registered on this host at all), so a manifest with no
+editor diagnostics can still fail to load. The direction is on purpose: a schema that under-reports
+costs you a squiggle, while one that over-reports would underline valid configuration.
+
+**The schemas target YAML 1.2**, because that is the version every schema-aware editor parses. The
+loader is PyYAML, which is YAML 1.1, and the two versions disagree about three things a manifest can
+hold:
+
+- **`yes` / `no` / `on` / `off` are booleans to the loader and plain strings under 1.2.** The
+  emitted schemas accept both, so `verify_ssl: no` is not underlined. The cost is that a QUOTED
+  `"no"` is accepted by the schema too, and the loader refuses it: once parsed, the two are the same
+  string and nothing in the schema can tell them apart. That is the under-reporting direction, so it
+  is a squiggle you do not get rather than one you get wrongly. `describe-kind` warns about the
+  quoted spelling on every boolean field.
+- **1.1 knows more integer spellings than 1.2 does.** Underscore separators (`memory: 8_192`),
+  sexagesimal (`1:30`), binary (`0b1010`) and signed hex (`+0x1F`) are integers to the loader and
+  plain strings under 1.2. The emitted schemas accept both, so none of them is underlined. Two edges
+  are worth knowing about, because neither is something a schema can reach:
+  - A LEADING ZERO means octal to the loader and nothing at all to your editor: `memory: 010` loads
+    as 8 while your editor reads 10. Both are integers, so no squiggle is possible in either
+    direction. Write `10` or `8`; there is no reason to lead with a zero here.
+  - `0o17` and `1e3` go the other way. Your editor reads them as numbers, the loader reads them as
+    strings, and values are not coerced, so loading fails on a line the editor was happy with.
+- **A bare `expires: 2027-01-01` is a date to the loader and a string under 1.2.** This one is not
+  expressible: JSON Schema's types are JSON's, and a date is not among them, so no schema can be
+  written that a YAML 1.1 checker would accept here. Under 1.2 it is a string and validates cleanly,
+  so it costs nothing in a real editor. Quote it (`expires: "2027-01-01"`) if you ever point a 1.1
+  validator at your manifests; the loader takes the quoted form too.
 
 ## Scoped GitHub credentials (fine-grained PATs)
 
 A `git-credential`'s `spec.provider` is one tagged table: its `name` key selects the provider
-capability (`github`, or `azdo` from the `azure` plugin) and the remaining keys are that provider's
-configuration. (The old sibling shape, a `provider:` string plus a `provider_config:` table, still
-loads unchanged but is deprecated and will be removed; fold the pair into the tagged table.) A
-github credential may carry a scope there: `repos: ["owner/name", ...]` pins the credential to
-specific repositories (always a list, even for one, matching a fine-grained PAT's selected repos),
-while `owner: "org"` covers every repository under that user or org, including repos an agent clones
-ad hoc that no workspace ever declared. The two are mutually exclusive; a credential with neither is
-the unscoped fallback. Scopes are a manifest feature (the removed flat TOML shape never had GitHub
-fields).
+capability and the remaining keys are that provider's configuration, which
+`agw resource describe-kind git-credential-provider/<name>` documents.
+
+A provider's `token` field is itself a tagged acquisition choice. Today it has one arm:
+`token: {mode: stored, secret: my-github-token}` names a secret holding a stored token. Omitting
+`token` selects that arm and defaults its secret to `git-token-<credential name>`, while the
+existing `token: my-github-token` scalar remains shorthand for the same stored arm. Token minting is
+not implemented. When it arrives it will be another acquisition arm; repositories, scopes,
+permissions, and other minting parameters remain credential configuration, not secret mappings.
+
+A github credential may carry a scope there, and the choice is the part worth explaining:
+`repos: ["owner/name", ...]` pins the credential to specific repositories (always a list, even for
+one, matching a fine-grained PAT's selected repos), while `owner: "org"` covers every repository
+under that user or org, including repos an agent clones ad hoc that no workspace ever declared.
+Writing both takes the union: every exact repository in `repos`, plus every repository under
+`owner`. A credential with neither is the unscoped fallback.
 
 Selection lives in the agentworks credential helper: initialization sets `credential.useHttpPath`
 (via the managed include `~/.agentworks-git-scopes.gitconfig`), so git hands the helper the remote's
@@ -96,44 +217,6 @@ if git stops sending repository paths (a local git config overriding `useHttpPat
 warns and serves the host default. The credential's resource name appears as the username on scoped
 store lines and in provider-side logs; remotes are never rewritten.
 
-## TOML resource sections: removed
-
-Declaring resources in `config.toml` is no longer supported. `config.toml` is settings only. The
-classic TOML resource sections (`[secrets.*]`, `[vm_templates.*]`, `[git_credentials.*]`, the legacy
-flat `[azure]` / `[proxmox]` vm-site sections, `[apt_sources.*]`, and the rest) no longer load: a
-`config.toml` that still carries any of them is a hard error at load, naming the offending sections
-and pointing you at `agw resource migrate`. This was deprecated with a load-time warning in an
-earlier release and is now removed. Resources are declared as YAML manifests (see "Declaring
-resources" above); settings sections load exactly as before.
-
-**Upgrading.** This is a breaking change. If your `config.toml` still declares resources, migrate
-them to YAML manifests before (or right after) upgrading, so no command hits the hard error:
-
-```bash
-agw resource migrate --all             # move every TOML resource declaration to YAML
-agw resource migrate secret            # or one kind at a time
-agw resource migrate vm-template/dev   # or one resource
-agw resource migrate --all --dry-run   # see the plan first (--full for the diff)
-```
-
-`agw resource migrate` still reads the legacy TOML directly and can run even against a `config.toml`
-the app would otherwise refuse to load (it loads with resources skipped, the settings-only escape
-hatch), so you can migrate on either side of the upgrade. Once every resource section is moved, the
-hard error is gone. Any section you have not moved stays a hard error until you migrate or delete
-it.
-
-The migrator handles TOML-declared resources, which become new YAML documents appended without
-rewriting existing YAML content; migrated TOML sections are commented out in place with a
-`# migrated to ...` marker (or removed with `--toml delete`).
-
-Every real run backs up `config.toml`; a run that modifies an existing YAML file also stores its
-original as a recovery copy under `paths.backups`. Digest guards refuse to replace files changed
-after planning, writes are atomic, and rollback restores only outputs that still match the run's
-digest, so concurrent edits are not overwritten. Finally, the command verifies that the migrated
-resources still decode to exactly what they declared in TOML, rolling back on a mismatch and
-reporting any recovery copy needed for manual repair. Use `--dry-run --full` to inspect generated
-documents, in-place YAML diffs, and the TOML diff before writing.
-
 ## VM sites and platforms
 
 Where VMs are created is declared as `vm-site` resources: "a configured place to create VMs". A site
@@ -151,40 +234,49 @@ spec:
     subscription_id: "..."
     resource_group: agentworks-vms
     region: eastus2
+    auth: { mode: ambient }
 ```
 
-- `spec.platform` is one table: its `name` key names a `vm-platform` capability row (`lima`, `wsl2`;
-  `proxmox` and `azure-vm` ship as the opt-in `proxmox` and `azure` system plugins, see
-  [System plugins](#system-plugins)), and the remaining keys are that platform's configuration,
-  validated by it (unknown keys are errors). A platform needing no config is just
-  `platform: {name: wsl2}`. Remote Lima is just a lima site with a `vm_host: user@host` key. The old
-  sibling shape (`platform: azure-vm` as a string plus a `platform_config:` table) still loads
-  unchanged but is deprecated and will be removed; fold the pair into the tagged table.
-- The `lima-local` and `wsl2` sites ship built in with empty config. Like every site they register
-  on every host and report not-ready where this host lacks what they need (wsl2 is Windows-only; a
-  local Lima site needs `limactl`); a not-ready site still lists and describes with its reason, and
-  using it is an error. Their names are reserved. A site named after a platform must declare that
-  platform.
+- `spec.platform` is one table: its `name` key names a `vm-platform` capability row and the
+  remaining keys are that platform's configuration, validated by it (unknown keys are errors).
+  `agw resource describe-kind vm-platform` lists the platforms this build has, including any that
+  arrive with an opt-in [system plugin](#system-plugins);
+  `agw resource describe-kind vm-platform/<name>` documents one platform's own fields. A platform
+  needing no config is just `platform: {name: wsl2}`. A lima site says where `limactl` runs:
+  `placement: {mode: local}` on this machine, or `placement: {mode: ssh, host: user@host}` over SSH.
+- The `lima-local` and `wsl2` sites ship built in, `lima-local` on `placement: {mode: local}` and
+  `wsl2` on no config at all. Like every site they register on every host and report not-ready where
+  this host lacks what they need (wsl2 is Windows-only; a local Lima site needs `limactl`); a
+  not-ready site still lists and describes with its reason, and using it is an error. Their names
+  are reserved. A site named after a platform must declare that platform.
 - Consumers name sites: `agw vm create --site`, `defaults.site` in config.toml, and each VM row's
   `site`. Templates deliberately carry no site: placement is per-host, never template state.
-- Site config secrets ride the standard secret machinery: a Proxmox site references its API token as
-  the `proxmox-token` secret (override with the `token_secret` key), auto-declared and resolved
-  through the backend chain like any other. An Azure site can do the same, optionally: it
-  authenticates with ambient credentials (`az login`, `AZURE_*` env vars, managed identity, browser
-  fallback) unless a `service_principal` table inside the platform table declares an explicit one,
-  in which case its `tenant_id` / `client_id` are plain config and its `secret` field names the
-  secret holding the client secret (default `azure-client-secret`). A site with a service principal
-  uses that identity and only that one: a rejected or expired client secret fails the command rather
-  than falling back to ambient credentials. `agw resource sample vm-site` shows the block. The
-  `proxmox` platform ships as the opt-in `proxmox` system plugin, so a proxmox site (declared or
-  legacy) is not-ready with an "enable plugin `proxmox`" hint and refused at use until you set
-  `[plugins] system = ["proxmox"]`. The `azure-vm` platform likewise ships as the opt-in `azure`
-  system plugin (which also provides the `azdo` git-credential provider and the `az-cli`
-  install-command), so the `azure-dev` example above is not-ready with an "enable plugin `azure`"
-  hint until you set `[plugins] system = ["azure"]`.
-- The legacy flat `[azure]` / `[proxmox]` TOML sections no longer load: like every resource section,
-  they are a hard error in `config.toml` now. Run `agw resource migrate vm-site` to move them to
-  vm-site manifests (they migrate as vm-site, unchanged).
+- Site config secrets ride the standard secret machinery: a platform that needs a credential names
+  the secret holding it in its own config, defaulting to a well-known name when you leave the field
+  out (a Proxmox site's API token is the `proxmox-token` secret unless `token_secret` says
+  otherwise). Those secrets are auto-declared and resolved through the backend chain like any other,
+  and `agw resource describe-kind vm-platform/<name>` shows each platform's secret fields with their
+  default names.
+- **Azure and AWS sites say how they authenticate, in a tagged `auth` table that defaults to
+  ambient.** `auth: {mode: ambient}` is the declared default, so omitting the table means it: the
+  host's own credential chain (for Azure, `az login` / `AZURE_*` / managed identity / browser
+  fallback; for AWS, environment, shared config, instance profile, SSO), which is what each wrapped
+  SDK does when told nothing. `auth: {mode: service-principal, ...}` and
+  `auth: {mode: access-key, ...}` name an explicit identity. An explicit identity is used and only
+  it, so a rejected or expired credential fails the command rather than falling back to the ambient
+  chain. The same shape reads back out: an `ambient` site declares no secret and shows no secret
+  edge, a credential arm declares exactly the one secret it names, and `agw doctor`'s site row shows
+  the resolved mode (`platform azure-vm (auth: ambient)`) whether it was written or defaulted.
+  Lima's `placement` works the same way, defaulting to `{mode: local}`. Proxmox has no mode selector
+  at all: it has one authentication shape, so it keeps its required token fields, which is the
+  pattern (a default where the underlying tool has an ambient notion, required fields where it does
+  not).
+- The cloud and datacenter platforms ship as opt-in system plugins, so a site that names one is
+  not-ready with an "enable plugin `<name>`" hint, and refused at use, until you list that plugin in
+  `[plugins] system`. The `azure-dev` example above is not-ready until you set
+  `[plugins] system = ["azure"]`. `agw doctor` lists every installed plugin and whether it is
+  enabled, and `agw resource describe-kind vm-platform/<name>` says which plugin a platform arrives
+  with.
 
 ## Harness integrations
 
@@ -210,17 +302,20 @@ spec:
   row, and the remaining keys are the config block that integration owns and validates (unknown keys
   are errors). A template that names no integration resolves to the built-in `shell` integration (a
   plain login shell, or an operator command), which is the built-in `default` template.
-- The `shell` integration's config vocabulary is `command` (the pane command; empty is a login
-  shell), `resume_command` (used by `session resume`, falling back to `command`), and
-  `required_commands` (executables checked on the launch target before any state mutation).
-  `command` / `resume_command` support the `{{session_name}}` and `{{workspace_name}}` variables.
+- `agw resource describe-kind harness-integration` lists the integrations this build has, and
+  `agw resource describe-kind harness-integration/<name>` documents one integration's config field
+  by field. That is the reference; what follows is what an operator wants to know beyond the fields
+  themselves.
+- Command strings support the `{{session_name}}` and `{{workspace_name}}` variables. This holds
+  wherever an integration takes a command or raw arguments (`shell`'s `command` and
+  `resume_command`, the `extra_args` escape hatch on `claude-code` and `codex`).
 - The integration-plus-config pair inherits as a unit: a child restating the same integration merges
-  its config keys into the parent's (child wins per key; `shell` unions `required_commands`), while
-  a child naming a _different_ integration starts fresh. `env`, `inherits`, and the description
-  merge as usual.
-- YAML manifests spell `command` / `resume_command` / `required_commands` inside the
-  `harness_integration` table. `agw resource describe harness-integration/shell` shows the
-  integration row and the templates that reference it.
+  its config keys into the parent's (child wins per key), while a child naming a _different_
+  integration starts fresh. `env`, `inherits`, and the description merge as usual. A few list fields
+  union across the chain rather than replacing, so a child adding one entry never silently drops the
+  parent's; the field reference marks which.
+- `agw resource describe harness-integration/<name>` is the other half: the integration's registry
+  row and the templates that reference it, rather than the fields it accepts.
 
 The `claude-code` integration runs Claude Code as the session. It ships as the opt-in `claude`
 system plugin (see "System plugins" below), so a `session-template` naming it still lists ready, but
@@ -244,13 +339,12 @@ spec:
     extra_args: [--append-system-prompt, "session {{session_name}}"] # optional escape hatch
 ```
 
-- Its config is three optional fields: `permission_mode` and `model` forward verbatim to
-  `claude --permission-mode` / `--model` (their choice sets are Claude's, not validated here: an
-  invalid value fails at launch with the tool's own error, which `session create` / `session resume`
-  capture into their error message when the workload exits immediately), and `extra_args` is a list
-  of raw argv tokens appended last, the escape hatch for any flag the integration does not model.
-  Unknown fields are errors. `extra_args` elements support the `{{session_name}}` /
-  `{{workspace_name}}` variables.
+- Its config is all optional, and every field is documented by
+  `agw resource describe-kind harness-integration/claude-code`. What the reference cannot tell you:
+  the fields that forward a value verbatim to `claude` are not validated here, because the valid
+  choices are Claude's and they move between its releases. An invalid one fails at launch with the
+  tool's own error, which `session create` / `session resume` capture into their error message when
+  the workload exits immediately.
 - The only requirement checked on the launch target is that `claude` is installed. The chosen action
   (resume vs new session) is announced in the pane on start, so it is never silent.
 
@@ -280,27 +374,27 @@ one) rather than discovering it later. Overriding `notify` yourself through `ext
 recording off (yours wins, because `extra_args` is appended last), which leaves resume relying on
 that fallback.
 
-Its config is ten optional fields: `model`, `sandbox`, `approval_policy`, and `profile` forward
-verbatim to `codex -m` / `-s` / `-a` / `-p` (their choice sets are Codex's, not validated here);
-`network` (bool) forwards to Codex's `sandbox_workspace_write.network_access` config key (Codex
-sandboxes network OFF by default even in `workspace-write`, so a coding session that needs
-`npm install` or `git push` wants `network: true`); `approvals_reviewer` (string) forwards to
-Codex's `approvals_reviewer` config key and selects who adjudicates approval escalations (sandbox
-escapes, blocked network access): Codex documents `user` (the default: escalations prompt the human
-in the pane) and `auto_review` (Codex's risk-based reviewer subagent approves or denies instead,
-with the sandbox still enforcing the outer boundary), so unattended-leaning "auto" templates usually
-want `auto_review`; `writable_dirs` (list) grants extra writable directories alongside the workspace
-(one `codex --add-dir` each; union-merged across template inheritance; entries are passed literally,
-so use absolute paths: `~` and `$HOME` are not expanded); `web_search` (bool) enables Codex's live
-web-search tool (`codex --search`, distinct from sandbox network access); `extra_args` is the same
-appended-last escape hatch; and `disable_strict_config` (bool) is the strictness off-switch
-described next. The integration always passes `--strict-config` so a Codex config mistake (or a
-Codex-renamed config key) fails loudly at launch instead of being silently ignored;
-`disable_strict_config: true` turns that off when strictness itself is the problem: a target whose
-`config.toml` Codex must tolerate (for example one written by a newer Codex than the target runs),
-or a target Codex old enough to not know the flag (it was verified against codex-cli 0.146.0, and an
-older binary rejects it as an unknown argument at launch). The only launch-target requirement is
-that `codex` is installed:
+Its config is all optional, and `agw resource describe-kind harness-integration/codex` documents
+every field. Four things the field reference does not say, because they are Codex's behavior rather
+than facts about the fields:
+
+- **Codex sandboxes network access OFF by default**, even under `workspace-write`. A coding session
+  that needs `npm install` or `git push` has to turn it on.
+- **Who adjudicates an approval escalation** (a sandbox escape, a blocked network call) is a choice.
+  Codex documents `user`, the default, where escalations prompt the human in the pane, and
+  `auto_review`, where Codex's risk-based reviewer subagent approves or denies instead with the
+  sandbox still enforcing the outer boundary. Unattended-leaning "auto" templates usually want
+  `auto_review`.
+- **Extra writable directories are passed literally**, so use absolute paths: `~` and `$HOME` are
+  not expanded.
+- **The integration always passes `--strict-config`**, so a Codex config mistake (or a Codex-renamed
+  config key) fails loudly at launch instead of being silently ignored. Turning that off is for when
+  strictness itself is the problem: a target whose `config.toml` Codex must tolerate (one written by
+  a newer Codex than the target runs), or a target Codex old enough not to know the flag (it was
+  verified against codex-cli 0.146.0, and an older binary rejects it as an unknown argument at
+  launch).
+
+The only launch-target requirement is that `codex` is installed:
 
 ```yaml
 apiVersion: agentworks/v1
@@ -337,12 +431,11 @@ policy is per kind:
   this host lacks what they need (`agw resource list` marks the row; `describe` and `agw doctor`
   carry the reason); using a not-ready site is an error naming the requirement. A site naming an
   UNKNOWN platform (a typo, or an uninstalled plugin) is a hard error at load, not a self-disable.
-- **Secret backends** (`env-var`, `prompt`; `onepassword` ships as an opt-in system plugin, see
-  below), **VM platforms** (`lima`, `wsl2`; `proxmox` and `azure-vm` ship as the opt-in `proxmox`
-  and `azure` system plugins, see below), **git-credential providers** (`github`; `azdo` ships in
-  the opt-in `azure` system plugin), and **harness integrations** (`shell`; `claude-code` and
-  `codex` ship as the opt-in `claude` and `codex` system plugins, see below): registered
-  capabilities, shown as read-only rows. You cannot declare or override them; secrets customize per
+- **The four capability kinds** (`secret-backend`, `vm-platform`, `git-credential-provider`,
+  `harness-integration`): registered code, shown as read-only rows. You cannot declare or override
+  one. `agw resource describe-kind <capability-kind>` lists the implementations this build has, and
+  naming one (`agw resource describe-kind vm-platform/proxmox`) says which system plugin it arrives
+  with, if any. Configuration is per consumer rather than per capability: secrets customize per
   secret via `backend_mappings`, platforms configure per site via the `spec.platform` table, and
   integrations configure per session-template via the `spec.harness_integration` table. Every
   installed platform publishes a row regardless of host support: a platform whose host requirements
@@ -386,60 +479,50 @@ installed plugin, its description, and whether it is enabled. Note the axis dist
 is the opt-in state and hides the row, while a **not-ready** resource (enabled but unable to run on
 this host) still lists with its reason.
 
-The shipped build installs the `onepassword` (1Password secret backend), `claude` (Claude Code
-harness integration and its `claude` CLI install-command), `codex` (Codex harness integration and
-its `codex` CLI install-command), `proxmox` (Proxmox VE VM platform), and `azure` (Azure VM
-platform, `azdo` git-credential provider, and `az-cli` install-command) plugins, all disabled until
-opted in. Authoring a system plugin is documented in the plugins package README
+Every plugin the build installs is disabled until you opt in. `agw doctor`'s **System plugins**
+roster is the list for this build, with each plugin's description and its opt-in state;
+`agw resource describe-kind <capability-kind>/<name>` says which plugin a given capability arrives
+with. Authoring a system plugin is documented in the plugins package README
 (`cli/agentworks/plugins/README.md`).
 
-**Config errors in a not-enabled plugin's resources surface only once you enable it.** Validation
-runs over enabled, reachable resources, so a mistake in a disabled plugin's config (for example a
-typo in the platform config of a proxmox `vm-site` manifest while the `proxmox` plugin is not
-enabled) is not reported until you add the plugin to `[plugins].system`. The first thing you see is
-the actionable "enable plugin `<name>`" hint; the config error surfaces on the next build once
-enabled, still before any real work runs. This is the same rule that defers validation for any
-not-ready resource, applied to the opt-in axis.
+**A capability's config is validated whether or not you can use it here.** Enablement and readiness
+gate USE, not validation: a `vm-site` naming the `proxmox` platform has its platform config checked
+when the manifest loads, even on a host where the `proxmox` plugin is not enabled, and the same
+holds for a resource that is merely not-ready (a `wsl2` site validates off Windows). So a misspelled
+key is a hard error naming the fields the capability declares, on every host, rather than something
+that lies dormant until you opt in. That is deliberate: a typo that only surfaced on the one machine
+that had the plugin turned on would be a configuration error you carry around unnoticed. What
+enablement and readiness DO defer is the consequence, not the check: a resource whose capability is
+disabled is not-ready with an "enable plugin `<name>`" hint and is refused at use, never misreported
+as a config mistake.
 
-**Upgrading: Azure, Proxmox, 1Password, and Claude Code are now opt-in.** These vendor- and
-tool-specific capabilities used to be built in and always available; they now ship as the `azure`,
-`proxmox`, `onepassword`, and `claude` system plugins, disabled by default. If your config used any
-of them, add the plugin to `[plugins].system` to restore it:
-
-```toml
-[plugins]
-system = ["azure", "proxmox", "onepassword", "claude"]  # only the ones you use
-```
-
-Concretely, enable `onepassword` if a secret maps the `onepassword` backend; `proxmox` if a
-`vm-site` uses the `proxmox` platform; `azure` if you use the `azure-vm` platform, the `azdo` (Azure
-DevOps) git-credential provider, or the `az-cli` install-command; and `claude` if a
-`session-template` uses the `claude-code` integration or a template installs the `claude` CLI. Until
-you do, a resource that references one is not-ready (or refused at use) with an "enable plugin
-`<name>`" hint, never a silent failure. The default local path (the `lima` / `wsl2` platforms, the
-`shell` harness integration, the `env-var` / `prompt` secret backends, and the `github`
-git-credential provider) is unchanged and needs no `[plugins]` entry. `agw doctor` lists every
-installed plugin and whether it is enabled.
+**Which plugins you need follows from what your resources reference.** Enable `onepassword` if a
+secret maps the `onepassword` backend; `proxmox` if a `vm-site` uses the `proxmox` platform; `azure`
+if you use the `azure-vm` platform, the `azdo` (Azure DevOps) git-credential provider, or the
+`az-cli` install-command; and `claude` if a `session-template` uses the `claude-code` integration or
+a template installs the `claude` CLI. Until you do, a resource that references one is not-ready (or
+refused at use) with an "enable plugin `<name>`" hint, never a silent failure. The default local
+path (the `lima` / `wsl2` platforms, the `shell` harness integration, the `env-var` / `prompt`
+secret backends, and the `github` git-credential provider) needs no `[plugins]` entry at all.
+`agw doctor` lists every installed plugin and whether it is enabled.
 
 ## Secrets: backends and the chain
 
 Two layers, one rule each:
 
 - A **secret backend** is a capability resource: a read-only `secret-backend` row whose
-  implementation is registered code (`env-var`, `prompt`; `onepassword` ships as a system plugin;
-  later plugins, ...). You cannot declare one (the app, and plugins, register them), but they list
-  and describe like every other resource. Per-secret behavior (identifier overrides, structured
-  store addressing like `{ account = "my.1password.com", reference = "op://Work/npm/password" }`,
-  and opt-outs) lives in each secret's `backend_mappings.<backend>`. The `onepassword` backend now
-  ships as the opt-in `onepassword` system plugin (see [System plugins](#system-plugins)): its row
-  is present but disabled until you add `onepassword` to `[plugins].system`, so a secret mapped only
-  to it stays inert (and, if it is the sole path, fails resolve with an "enable plugin
-  `onepassword`" hint) until you opt in. Once enabled it reads via the 1Password CLI
-  (`op read op://vault/item/field`); it needs a per-secret `backend_mappings.onepassword` address in
-  one of two forms: a bare `op://vault/item/field` string (using op's default account, or
-  `OP_ACCOUNT`), or a `{ account, reference }` table when a specific account must be pinned. `op`
-  must be able to read at command time, meaning either the 1Password app's CLI integration is
-  enabled or you have run `op signin`.
+  implementation is registered code. You cannot declare one (the app, and plugins, register them),
+  but they list and describe like every other resource. `agw resource describe-kind secret-backend`
+  lists the backends this build has, and naming one
+  (`agw resource describe-kind secret-backend/onepassword`) documents the address it expects and
+  what it needs on this host. Per-secret behavior (identifier overrides, structured store
+  addressing, and opt-outs) lives in each secret's `backend_mappings.<backend>`. A backend that
+  arrives with a system plugin is present but disabled until you name that plugin in
+  `[plugins].system`, so a secret mapped only to it stays inert, and fails resolve with an "enable
+  plugin `<name>`" hint if it is the sole path. For `onepassword` specifically, the address is
+  either a bare `op://vault/item/field` string or a `{ account, reference }` table when a specific
+  account must be pinned, and `op` has to be able to read at command time: either the 1Password
+  app's CLI integration is enabled, or you have run `op signin`.
 - The **chain** is a setting: `[secret_config].backends` in `config.toml` lists the active backends
   in precedence order (default `["env-var", "prompt"]`). Registered backends absent from the chain
   are dormant.
@@ -485,6 +568,11 @@ never probe an interaction to answer readiness.
 (mappings flagged not-ready where they apply, and a resolution preview that skips not-ready
 backends); `agw doctor` has a **Secret backends** group (one readiness row per backend) plus one row
 per secret with the runtime outcome.
+
+Use `agw secret verify <name>` when you need proof rather than a preview. It performs one real
+resolution pass without printing or retaining the value. Interactive backends are excluded by
+default. Add `--allow-interactive` only when you consent to a prompt, biometric check, or backend
+authentication; that opt-in is incompatible with the global `--non-interactive` flag.
 
 ## Inspecting the whole picture
 

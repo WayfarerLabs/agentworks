@@ -42,7 +42,7 @@ from tests._azure_platform_support import _install_fakes
 if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
 
-_CONFIG = {"subscription_id": "sub-A", "resource_group": "rg1", "region": "eastus"}
+_CONFIG = {"subscription_id": "sub-A", "resource_group": "rg1", "region": "eastus", "auth": {"mode": "ambient"}}
 
 
 @pytest.fixture(autouse=True)
@@ -69,6 +69,12 @@ def _request(*, tailscale: bool) -> ProvisionRequest:
         ssh_public_key="ssh-ed25519 AAAA test",
         ssh_private_key=None,
         tailscale_auth_key="tskey-test" if tailscale else None,
+        # The vm-template layer's resolved defaults, which is the only
+        # shape a platform ever sees (the hardware fields are required).
+        cpus=4,
+        memory_gib=8,
+        disk_gib=50,
+        swap_gib=4,
     )
 
 

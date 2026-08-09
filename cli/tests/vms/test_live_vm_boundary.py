@@ -122,7 +122,7 @@ def test_env_targets_join_the_site_secret_pass(
     )
     registry = build_registry(config)
     target = SecretTarget(
-        vm={"API_KEY": EnvEntry(key="API_KEY", secret="api-key")},
+        vm={"API_KEY": EnvEntry({"secret": "api-key"})},
         label="test-shell",
     )
     with vm_manager.gated_vm_boundary(db, config, registry, _seed_vm(db, "proxmox"), targets=[target]) as (

@@ -100,12 +100,11 @@ _agentworks_resource_refs() {
     refs=(${(f)"$(agw resource list --names-only 2>/dev/null)"})
     _describe 'resource' refs
 }""",
-    "migrate_selectors": """\
-_agentworks_migrate_selectors() {
-    local -a selectors
-    selectors=(${(f)"$(agw resource list --origin operator --names-only 2>/dev/null |
-        awk -F/ '{print $1; print $0}' | sort -u)"})
-    _describe 'selector' selectors
+    "guide_topics": """\
+_agentworks_guide_topics() {
+    local -a topics
+    topics=(${(f)"$(agw guide --names-only 2>/dev/null)"})
+    _describe 'guide topic' topics
 }""",
 }
 
@@ -126,7 +125,7 @@ COMPLETER_FUNC_NAMES: dict[str, str] = {
     "secrets": "_agentworks_secrets",
     "resource_kinds": "_agentworks_resource_kinds",
     "resource_refs": "_agentworks_resource_refs",
-    "migrate_selectors": "_agentworks_migrate_selectors",
+    "guide_topics": "_agentworks_guide_topics",
 }
 
 

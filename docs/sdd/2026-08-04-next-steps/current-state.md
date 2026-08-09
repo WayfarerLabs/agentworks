@@ -1,8 +1,10 @@
 # Current State
 
-- Snapshot date: 2026-08-05, post-wave-1 (update at wave boundaries)
-- Baseline: Agentworks 0.13.0 plus the phase 1 TOML sunset (PR #316) and the 0.14 expired-compat
-  removals (PR #406); the 0.14.0 release itself is pending
+- Snapshot date: 2026-08-08, post-variant-rework (update at wave boundaries)
+- Baseline: Agentworks 0.13.0 plus the phase 1 TOML sunset (PR #316), the 0.14 expired-compat
+  removals (PR #406), declarative-schema phase 2 through the descriptor (PR #414), and the
+  onboarding guide first slice (PR #428); the 0.14.0 release itself is pending per the `phasing.md`
+  release mapping
 
 This document records where the system actually is, verified by code reconnaissance rather than
 assumed from the perspectives. It is the ground truth the phasing rests on; when a wave lands,
@@ -12,38 +14,77 @@ The immutable origin snapshot is `starting-state.md`; the journey is the diff fr
 
 ## Declarative schema
 
-Phase 1 (TOML sunset) is merged to `main` via PR #316: the TOML resource path hard-errors, the
-legacy loaders are relocated into the migrator as its independent verification oracle, and the
-fixture suite is converted. The `2026-07-31-declarative-schema` SDD stays unlocked with phase 2 held
-at its phase gate until this roadmap settles the capability-kind descriptor and the 0.14 removal
-ordering (see `phasing.md`). Phase 2 is fully specified but deliberately unimplemented; its settled
-contracts are recorded in `target-state.md`.
+Both phases are on `main`, and the `2026-07-31-declarative-schema` SDD is locked: phase 1 landed via
+PR #316, phase 2 via PR #414 (2026-08-07). Every schema fact is authored once in a registration-time
+Pydantic model: validation, reference extraction (`agentworks/schema/`, a total two-walker split
+with shared iterative traversal in `agentworks/traversal.py`), JSON Schema emission with `x-agw-ref`
+markers, live samples, and `describe-kind` all derive from the models. The error bridge is the
+single framing choke point. `agw resource migrate` was deleted before release per the
+remediation-posture ruling; the operator path is precise hard errors plus
+`docs/guides/upgrading-to-0.14.md`. Settings that name resources (`defaults.site`,
+`[secret_config].backends`) are shape-checked at load and resolved once at the composition boundary
+as hard errors. The config deprecation channel is kept deliberately as the warn-window carrier.
+`capabilities/facets.py` was removed pending its wave 4 consumer; the `config_for(facet)` contract
+stays settled in the docs and this saga's contracts.
+
+The vm-platform mode contract landed post-lock (PR #444, 2026-08-08, recorded on that SDD's
+lockfile): azure and aws carry an `auth` union (`ambient` or their credential arm), lima carries
+`placement` (`local` or `ssh`), each union defaulting to the mode omission historically selected,
+with extraction reading declared defaults as if written so an omitted union produces the same graph
+edges as the written spelling. Written old shapes hard-error with the exact rewrite; manifests that
+never wrote the retired blocks cross without edits. The variant-modeling rule (one arm per
+required-field shape; the discriminator tracks shape, not concept) lives permanently in
+`cli/agentworks/capabilities/README.md`.
+
+The variant rework landed the same day (PR #455, 2026-08-08): git-credential token acquisition is a
+defaulted one-arm discriminated union (provider contract v2, `token: null` retired with the exact
+rewrite), env entries are a selector-free structural union whose legacy null-companion spellings
+canonicalize at one shared selector consumed by validation, extraction, and fill, github `repos` and
+`owner` combine as a scope union, and install commands accept multiple test predicates with all-pass
+semantics (zero declared tests always runs). The three-tier rule and its companion tests live
+permanently in `cli/agentworks/capabilities/README.md`, backed by the structural-union and
+scalar-shorthand machinery in `agentworks/schema/`.
+
+## Guide and onboarding
+
+The guide first slice is on `main` (onboarding phase 1, PR #428, 2026-08-08): the `agw guide`
+command core with package-owned topic contributions, `concept-onboarding`, safe anchored projection
+(`build_guide_view` materializes global inventories only for concept roots the traversal plan
+permits; denied data is never constructed), verification surfaces with typed evidence, and the
+`guide-contributions` always-on rule requiring topic updates to ride the changes that make them
+true. Later phases (machine-readable output contract, bootstraps, schema-derived depth) proceed per
+that effort's per-phase PR plan.
 
 ## Deprecation removal targets
 
 Cleared by wave 1 (PR #406, 2026-08-05): every in-scope expired surface is removed, including the
 session restart vocabulary, the legacy harness selectors, the older configuration aliases, the
-legacy VM console module, and the dead Python surfaces. The generic deprecation framework survives
-with only live registrations; the remaining deprecated shape is the generic capability discriminator
-compatibility, which wave 2 removes with its tagged-union hardening.
+legacy VM console module, and the dead Python surfaces. Wave 2 finished the job: the generic
+capability discriminator compatibility is a hard error, the config deprecation channel currently
+carries nothing and is kept deliberately as the warn-window carrier (operator ruling, 2026-08-07),
+and the manifest surface has no warn-window channel (the standing consequence recorded in
+`target-state.md`).
 
 ## Capability framework
 
-- Exactly four capability kinds exist, and the switchboard is real: the kind set is independently
-  enumerated in at least six places (adapter table, graph kind set and readiness dispatch, registry
-  loaders, bootstrap publication, plugin snapshot/restore, manifest kind sections), plus a
-  five-method adapter class, a publisher, an entry dataclass, and a `ResourceKind` strategy repeated
-  per kind. A guard test makes a fifth kind fail loudly, but every site still needs hand-extension.
-  This is the concrete duplication surface the descriptor collapses.
-- The secret-source direction goes with the grain of the code: the backend module's own docstring
-  already names the graduation signal ("when a backend needs config shared across many secrets...
-  graduate the backend to a declarable instance kind, the secret-backend analog of vm-site").
-- There is no Pydantic anywhere in `cli/` today, and the tagged-union `{name: ...}` config shape
-  already works for three surfaces (vm-site, git-credential, the session harness selector),
-  implemented three times independently. Phase 2 consolidates an existing pattern behind one
-  contract rather than introducing a new one.
-- One irregularity worth fixing during descriptor work: `_VMPlatformKind` lives in `vms/kinds.py`,
-  outside `capabilities/`, unlike its three siblings.
+- The switchboard is gone (wave 2, PR #414): one frozen, core-owned `CapabilityKindDescriptor` per
+  kind in a single table is the only capability-kind enumeration, with the seven former
+  hand-enumerated sites (adapter, graph kind set and readiness dispatch, registry loaders, bootstrap
+  publication, snapshot/restore, decode sections) derived from it and a guard test asserting
+  derivation. Registration-time conformance (contract, metadata, constructibility, operations,
+  config-model contract, `contract_version`) replaced the type-and-cast seam, with atomic seating
+  preserved.
+- Each capability implementation registers exactly one config model; validation is one blob at a
+  time against the tagged union assembled at the registration boundary, cached on its arms. The
+  secret-backend constructed-singleton policy is a descriptor-carried interim exception for wave 3
+  to remove. `_VMPlatformKind` moved into `capabilities/` with its siblings.
+- The secret-source direction still goes with the grain: the backend/source split is specified in
+  `target-state.md`, and the descriptor contract records the open readiness-shape choice for the
+  `secret-source` kind as wave 3's call, which the descriptor must record once made.
+- The map-keyed `backend_mappings` escalation from the wave 2 closeout is ruled (saga, 2026-08-07,
+  recorded in `capability-descriptor-contract.md`): the descriptor gains a field recording where a
+  map-keyed capability is hosted, schema emission as first consumer, landing with wave 3 (its seed's
+  R8); the `onepassword` trigger has fired.
 
 ## Session runtime (observability groundwork)
 
@@ -61,13 +102,13 @@ compatibility, which wave 2 removes with its tagged-union hardening.
 - The Claude integration only probes for its transcript file's existence to decide
   resume-versus-launch; nothing reads transcript content yet.
 
-## Open SDD ledger (pre-roadmap efforts)
+## Open SDD ledger (pre-saga efforts)
 
-Cleared by wave 1 (PR #406): all five pre-roadmap SDDs are locked (`2026-08-03-harness-integration`,
+Cleared by wave 1 (PR #406): all five pre-saga SDDs are locked (`2026-08-03-harness-integration`,
 `2026-08-04-session-resume`, `2026-03-29-proxmox-provider`, `2026-05-03-session-enhancements`, and
 `2026-03-26-mise-integration` with its plan reconciled against evidence). The
 `2026-07-29-harness-transcripts` draft is harvested into `inputs/harness-transcripts-harvest.md` and
-its branch is deleted. Remaining unmerged drafts on remote branches, both out of roadmap scope:
+its branch is deleted. Remaining unmerged drafts on remote branches, both out of saga scope:
 `2026-07-29-herdr-integration` (spike-gated) and `2026-07-19-named-console-template-selector`
 (ready, standalone).
 

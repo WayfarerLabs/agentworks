@@ -11,14 +11,15 @@ module retains the small set of bare-``SSHTarget`` helpers that aren't
   shared data shapes still used across the codebase (and by
   ``SSHTransport`` itself).
 - ``SSHLogger`` / ``LOG_DIR``: the unified command logger.
-- Module-level ``run`` / ``copy_to``: called from
-  ``capabilities/vm_platform/lima.py`` (the remote-Lima vm_host control plane)
-  where the caller has a bare ``SSHTarget`` and doesn't want to
-  construct a full ``SSHTransport``.
+- Module-level ``run``: called from ``capabilities/vm_platform/lima.py``
+  (the SSH-placed Lima control plane), where the caller has a bare
+  ``SSHTarget`` and doesn't want to construct a full ``SSHTransport``.
+- Module-level ``copy_to``: retained as the bare-``SSHTarget`` scp primitive.
 """
 
 from __future__ import annotations
 
+import logging
 import shlex
 import subprocess
 from dataclasses import dataclass
@@ -26,6 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ConnectivityError
+from agentworks.path_rendering import format_host_path
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -81,6 +83,13 @@ class SSHError(ConnectivityError):
 LOG_DIR = Path.home() / ".config" / "agentworks" / "logs"
 
 
+class _PropagatingFileHandler(logging.FileHandler):
+    """File handler that preserves the logger's write-failure contract."""
+
+    def handleError(self, record: logging.LogRecord) -> None:  # noqa: N802, ARG002
+        raise
+
+
 class SSHLogger:
     """Incremental command logger. Writes to disk on every call.
 
@@ -89,30 +98,60 @@ class SSHLogger:
     written incrementally so partial logs survive crashes.
 
     Usage:
-        logger = SSHLogger("myvm", "vm-create")
+        logger = SSHLogger("myvm", "vm-create", redactions=(auth_key,))
         logger.step("Installing packages")
         run(target, "apt-get install ...", logger=logger)
         logger.warning("package X failed")
         logger.close()
     """
 
-    def __init__(self, vm_name: str, command_stem: str) -> None:
+    def __init__(
+        self,
+        vm_name: str,
+        command_stem: str,
+        *,
+        redactions: tuple[str, ...] = (),
+    ) -> None:
         from datetime import UTC, datetime
 
         timestamp = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%SZ")
         self.vm_name = vm_name
         self.path = LOG_DIR / f"{vm_name}-{timestamp}-{command_stem}.log"
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._redact: list[str] = []
+        self._active_handler: _PropagatingFileHandler | None = None
+        normalized: list[str] = []
+        for secret in redactions:
+            if not secret:
+                continue
+            for representation in (secret, shlex.quote(secret)):
+                if representation not in normalized:
+                    normalized.append(representation)
+        # Prefer the longest representation so an overlapping shorter token
+        # cannot rewrite part of it before the complete value is matched.
+        self._redact = tuple(sorted(normalized, key=len, reverse=True))
         self._warnings: list[str] = []
 
         ts = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
         self._write(f"# Log: {vm_name} ({command_stem})\n# Started: {ts}\n\n")
 
-    def add_redaction(self, secret: str) -> None:
-        """Register a secret to be redacted from all output."""
-        if secret:
-            self._redact.append(secret)
+    @property
+    def display_path(self) -> str:
+        """``path`` spelled the way an operator reads it (``~/...``).
+
+        Separate from ``path`` because the two have different jobs: ``path``
+        is opened and written to, ``display_path`` is interpolated into
+        messages. Every caller that says "SSH log: ..." wants this one; a
+        dozen of them used to say ``{logger.path}`` and print an absolute
+        path next to a home-relative one from the same screen.
+
+        This is about naming the log, not about what goes INSIDE it. The
+        log body stays absolute throughout: it is a verbatim transcript,
+        its command lines are the literal argv that ran, and abbreviating
+        the prose lines while the ``$ ssh -i /home/you/...`` lines beside
+        them stayed absolute would recreate the mixed rendering one level
+        down.
+        """
+        return format_host_path(self.path)
 
     def _sanitize(self, text: str) -> str:
         for secret in self._redact:
@@ -152,9 +191,12 @@ class SSHLogger:
         self._write(f"[{ts}] TIMEOUT (attempt {attempt}/{retries}): {command}\n")
 
     def warning(self, msg: str) -> None:
-        """Record a warning (also written to the log)."""
+        """Record warning text in memory and persist its sanitized form."""
+        from datetime import UTC, datetime
+
         self._warnings.append(msg)
-        self._write(f"WARNING: {msg}\n")
+        ts = datetime.now(tz=UTC).strftime("%H:%M:%S")
+        self._write(f"[{ts}] WARNING: {msg}\n")
 
     def log_error(self, msg: str) -> None:
         """Log an error message."""
@@ -196,19 +238,44 @@ class SSHLogger:
         lines = [f"\n# Finished: {ts}"]
         if self._warnings:
             lines.append(f"# Warnings: {len(self._warnings)}")
-            for w in self._warnings:
-                lines.append(f"#   - {w}")
         self._write("\n".join(lines) + "\n")
 
     def _write(self, text: str) -> None:
-        # The single sanitizing choke point: every byte that reaches the
-        # log file passes through redaction HERE, so the no-secrets-in-
-        # logs property holds regardless of caller discipline (a caller
-        # composing a message from raw values cannot bypass it, and
-        # redactions registered mid-operation cover everything written
-        # afterwards). Callers therefore never pre-sanitize.
-        with open(self.path, "a", encoding="utf-8", errors="replace") as f:
-            f.write(self._sanitize(text))
+        # Every byte that reaches the file handler passes through this choke
+        # point. The guarantee covers the complete redaction set supplied at
+        # construction, even when a caller passes those values in raw text.
+        # It cannot cover a secret the caller failed to register before the
+        # first incremental write. Raw and shell-quoted forms are registered
+        # together, and late registration is intentionally unsupported.
+        #
+        # Keep the sanitized LogRecord and transient FileHandler together in
+        # this function. CodeQL's clear-text-storage query recognizes this
+        # local data flow; moving either side behind a helper reopens the alert
+        # even though the runtime behavior would be equivalent.
+        record = logging.LogRecord(
+            name="agentworks.ssh.operation",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg=self._sanitize(text),
+            args=(),
+            exc_info=None,
+        )
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        handler = _PropagatingFileHandler(self.path, mode="a", encoding="utf-8", errors="replace")
+        self._active_handler = handler
+        try:
+            handler.setFormatter(logging.Formatter("%(message)s"))
+            handler.terminator = ""
+            handler.handle(record)
+        finally:
+            self._close_active_handler()
+
+    def _close_active_handler(self) -> None:
+        handler = self._active_handler
+        self._active_handler = None
+        if handler is not None:
+            handler.close()
 
 
 SSH_CONNECT_TIMEOUT = 30
@@ -278,6 +345,7 @@ def run(
     on_retry: Callable[[int, int], None] | None = None,
     logger: SSHLogger | None = None,
     env: dict[str, str] | None = None,
+    input_text: str | None = None,
 ) -> SSHResult:
     """Execute a command on a remote host via SSH.
 
@@ -296,10 +364,18 @@ def run(
             into a single ``-o SetEnv="K1=V1" "K2=V2" ...`` argument (see
             ``_set_env_args``); agentworks-managed VMs accept these via
             the ``AcceptEnv *`` directive deployed by VM init.
+        input_text: Optional text streamed to the remote command on stdin.
+            Cannot be combined with ``logger``. The input value is never
+            serialized into argv or an error diagnostic. The returned stdout
+            and stderr are empty because an arbitrary command may reflect the
+            input through either stream.
 
     Returns:
         SSHResult with exit code, stdout, and stderr.
     """
+    if input_text is not None and logger is not None:
+        raise ValueError("SSH stdin input cannot be combined with command logging")
+
     args = _ssh_base_args(target, env=env)
     # Fence the remote command from ssh's option parser. See
     # ``SSHTransport.run`` in ``transports/ssh.py`` for the rationale.
@@ -316,6 +392,7 @@ def run(
         try:
             result = subprocess.run(
                 args,
+                input=input_text,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -324,12 +401,16 @@ def run(
             )
             ssh_result = SSHResult(
                 returncode=result.returncode,
-                stdout=result.stdout,
-                stderr=result.stderr,
+                stdout="" if input_text is not None else result.stdout,
+                stderr="" if input_text is not None else result.stderr,
             )
             if logger is not None:
                 logger.log_command(command, ssh_result)
             if check and not ssh_result.ok:
+                if input_text is not None:
+                    # Remote stderr can reflect stdin for an arbitrary command.
+                    # Omit it at this sensitive-input boundary.
+                    raise SSHError(f"SSH stdin command failed (exit {result.returncode}): {command}")
                 raise SSHError(
                     f"SSH command failed (exit {result.returncode}): {command}\nstderr: {result.stderr.strip()}"
                 )

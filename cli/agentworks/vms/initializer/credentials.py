@@ -91,19 +91,19 @@ def resolve_git_credential_providers(
                 entity_name=name,
                 hint="`agw doctor` lists each git-credential's state; enable the required plugin or use a ready one",
             )
-        provider_cls = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(cred_config.provider)
+        provider_cls = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(cred_config.provider.name)
         if provider_cls is None:
             # Unknown provider names are caught by the framework's
             # git-credential-provider miss policy at build_registry; this
             # guards direct callers that bypass that path.
             raise NotFoundError(
-                f"git credential '{name}' names unknown provider {cred_config.provider!r}",
+                f"git credential '{name}' names unknown provider {cred_config.provider.name!r}",
                 entity_kind="git-credential-provider",
-                entity_name=cred_config.provider,
+                entity_name=cred_config.provider.name,
             )
         providers[name] = provider_cls(
             name,
-            cred_config.provider_config,
+            cred_config.provider.config,
             description=cred_config.description,
         )
     return providers
@@ -157,7 +157,6 @@ def _join_tailscale(
     exec_target: Transport,
     *,
     auth_key: str,
-    logger: SSHLogger | None = None,
 ) -> str:
     """Join Tailscale, update DB. Returns the Tailscale IP.
 
@@ -172,12 +171,6 @@ def _join_tailscale(
     # /etc/default/tailscaled, set during bootstrap. `tailscale up` is the
     # client and only takes client-side flags.
     ts_cmd = f"tailscale up --auth-key {quoted_key}"
-
-    # Redact the auth key from any attached loggers before it appears in logs.
-    if exec_target.logger is not None:
-        exec_target.logger.add_redaction(auth_key)
-    if logger is not None:
-        logger.add_redaction(auth_key)
 
     exec_target.run(ts_cmd, sudo=True)
     result = exec_target.run("tailscale ip -4", sudo=True)

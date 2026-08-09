@@ -11,8 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from agentworks.config import MAX_FREEFORM_NAME_LENGTH, validate_name
 from agentworks.errors import ConnectivityError, NotFoundError, ValidationError
+from agentworks.naming import MAX_FREEFORM_NAME_LENGTH, validate_name
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -205,6 +205,6 @@ def _shell_summary(shells: list[ShellEntry]) -> str:
     parts = []
     for s in shells:
         cwd = s.get("cwd") or "<workspace>"
-        user_tag = "admin" if s.get("admin", False) else "agent"
+        user_tag = "admin" if s["admin"] else "agent"
         parts.append(f"{user_tag}:{cwd}")
     return f"{len(shells)} shell(s): " + ", ".join(parts)

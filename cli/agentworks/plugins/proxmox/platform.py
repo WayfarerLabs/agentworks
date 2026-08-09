@@ -6,20 +6,24 @@ from __future__ import annotations
 import sys
 import time
 import urllib.parse
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
+
+from pydantic import Field
 
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.db import VMStatus
-from agentworks.errors import ConfigError, ProvisioningError, StateError
+from agentworks.errors import ProvisioningError, StateError
 from agentworks.plugins.proxmox.api import ProxmoxAPI, ProxmoxAPIError
 from agentworks.plugins.proxmox.teardown import (
     rollback_create_on_interrupt,
     rollback_partial_create,
     stop_and_delete_vm,
 )
+from agentworks.schema import AgwModel, NonEmptyStr, SecretRef
+from agentworks.topics import TopicProse
 from agentworks.transports import SSHTransport
 
 if TYPE_CHECKING:
@@ -27,25 +31,78 @@ if TYPE_CHECKING:
 
     from agentworks.capabilities.base import RunContext
     from agentworks.db import VMRow
-    from agentworks.resources.reference import ConfigReference
 
 
-# The well-known secret name the token_secret field defaults to. The
-# site emits the reference (auto-declared at finalize); the default
-# env-var backend convention reads AW_SECRET_PROXMOX_TOKEN. Not
-# "proxmox-token-secret": the kind is already secret/ and the env-var
-# prefix already says SECRET, so the suffix was pure redundancy.
-DEFAULT_TOKEN_SECRET = "proxmox-token"
+class ProxmoxConfig(AgwModel):
+    """A Proxmox VE cluster, as one vm-site points at it."""
 
-_REQUIRED_KEYS = ("api_url", "node", "token_id", "template_vmid")
-_OPTIONAL_KEYS = ("storage", "bridge", "pool", "verify_ssl", "token_secret")
+    name: Literal["proxmox"]
+    """The platform this config is for."""
+
+    api_url: NonEmptyStr = Field(examples=["https://pve.example.net:8006"])
+    """The cluster's API endpoint (e.g. ``https://pve.example:8006``)."""
+
+    node: NonEmptyStr = Field(examples=["pve1"])
+    """The cluster node new VMs are cloned on."""
+
+    token_id: NonEmptyStr = Field(examples=["agentworks@pam!agw"])
+    """The API token's id (``user@realm!tokenname``)."""
+
+    template_vmid: int = Field(examples=[9000])
+    """The VMID of the template new VMs clone from. An integer: a quoted
+    number is an operator mistake, not a value to convert."""
+
+    token_secret: Annotated[
+        NonEmptyStr,
+        SecretRef(usage="the Proxmox API token", default_template="proxmox-token"),
+    ]
+    """The secret holding the API token's value. Never the value itself:
+    the field NAMES a secret in the framework's secret system. The
+    default env-var convention reads ``AW_SECRET_PROXMOX_TOKEN``."""
+
+    storage: NonEmptyStr = "local-lvm"
+    """The storage new VMs' disks are created on."""
+
+    bridge: NonEmptyStr | None = None
+    """The network bridge new VMs attach to. Omit for the cluster's own
+    default."""
+
+    pool: NonEmptyStr = "agentworks"
+    """The resource pool new VMs join."""
+
+    verify_ssl: bool = True
+    """Whether to verify the cluster's TLS certificate. A boolean,
+    written unquoted: ``false`` and YAML's ``no`` both read as false. A
+    QUOTED ``"no"`` is a string, refused now, and it used to mean TRUE,
+    the opposite of what it reads as."""
 
 
 class ProxmoxPlatform(VMPlatform):
     """Runs VMs on a Proxmox VE cluster."""
 
+    contract_version: ClassVar[int] = 1
     name: ClassVar[str] = "proxmox"
     description: ClassVar[str] = "Proxmox VE cluster VMs (clone + cloud-init)"
+    config_model: ClassVar[type[ProxmoxConfig]] = ProxmoxConfig
+    prose: ClassVar[TopicProse | None] = TopicProse(
+        title="Proxmox VE",
+        overview="""
+        Clones a prepared template VM on a Proxmox VE cluster and configures it through
+        cloud-init. The template (`template_vmid`) has to exist on the node already;
+        agentworks does not build it.
+
+        The API token value is a secret, `proxmox-token` unless the site names another,
+        resolved through the backend chain like any other secret. The token id is not a
+        secret and is written in the document.
+
+        There is no native interactive transport: the QEMU guest agent's exec interface
+        is one-shot and non-interactive, so the Proxmox web UI's serial console is the
+        equivalent escape hatch.
+
+        Ships as the opt-in `proxmox` system plugin, so a site stays not-ready until
+        `[plugins] system` lists it.
+        """,
+    )
     no_native_transport_hint: ClassVar[str] = (
         "The QEMU guest agent exec interface is one-shot and "
         "non-interactive, so use the Proxmox web UI's serial console "
@@ -59,49 +116,10 @@ class ProxmoxPlatform(VMPlatform):
         # for the instance's remaining ops.
         self._api_cached: ProxmoxAPI | None = None
 
-    @classmethod
-    def dependencies(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
-        """The API-token secret reference the site's ``platform_config``
-        implies: ``token_secret`` names it (default
-        ``proxmox-token``). The owning site attaches itself as source
-        (whoever hosts the config that names the secret emits the edge).
-
-        Total and non-throwing: the edge's identity is the token secret
-        name, so a malformed ``token_secret`` (present but not a
-        non-empty string) omits the edge rather than raising; ``validate``
-        is where that shape error surfaces.
-        """
-        token_secret = config.get("token_secret", DEFAULT_TOKEN_SECRET)
-        if not isinstance(token_secret, str) or not token_secret:
-            return ()
-        from agentworks.resources.reference import ConfigReference
-
-        return (
-            ConfigReference(
-                kind="secret",
-                name=token_secret,
-                usage="the Proxmox API token",
-            ),
-        )
-
-    @classmethod
-    def validate(cls, owner: str, config: Mapping[str, object]) -> None:
-        for key in _REQUIRED_KEYS:
-            if key not in config:
-                raise ConfigError(f"{owner}.{key} is required for the proxmox platform")
-        try:
-            int(str(config["template_vmid"]))
-        except ValueError:
-            raise ConfigError(f"{owner}.template_vmid must be an integer, got {config['template_vmid']!r}") from None
-        token_secret = config.get("token_secret", DEFAULT_TOKEN_SECRET)
-        if not isinstance(token_secret, str) or not token_secret:
-            raise ConfigError(
-                f"{owner}.token_secret must be a bare secret name (string); "
-                f"omit the key to use the default '{DEFAULT_TOKEN_SECRET}'"
-            )
-        unknown = sorted(set(config) - set(_REQUIRED_KEYS) - set(_OPTIONAL_KEYS))
-        if unknown:
-            raise ConfigError(f"{owner}: unknown proxmox platform field(s): {', '.join(unknown)}")
+    @property
+    def config(self) -> ProxmoxConfig:
+        """This site's validated proxmox config."""
+        return self._config_as(ProxmoxConfig)
 
     @classmethod
     def legacy_platform_metadata(cls, row: Mapping[str, Any], legacy: Mapping[str, Any]) -> dict[str, str]:
@@ -116,18 +134,15 @@ class ProxmoxPlatform(VMPlatform):
             metadata["node"] = str(proxmox_section["node"])
         return metadata
 
-    def _cfg(self, key: str, default: object | None = None) -> Any:
-        return self.platform_config.get(key, default)
-
     def _build_api(self, token_value: str) -> ProxmoxAPI:
         """Construct an API client for a resolved token. Shared by the op
         client and ``runup``, so the two stages build the client the same
         way from the same value."""
         return ProxmoxAPI(
-            api_url=str(self._cfg("api_url")),
-            token_id=str(self._cfg("token_id")),
+            api_url=self.config.api_url,
+            token_id=self.config.token_id,
             token_secret=token_value,
-            verify_ssl=bool(self._cfg("verify_ssl", True)),
+            verify_ssl=self.config.verify_ssl,
         )
 
     def _api(self, ctx: RunContext) -> ProxmoxAPI:
@@ -141,7 +156,7 @@ class ProxmoxPlatform(VMPlatform):
         refusal."""
         api = self._api_cached
         if api is None:
-            token_secret = str(self._cfg("token_secret", DEFAULT_TOKEN_SECRET))
+            token_secret = self.config.token_secret
             api = self._build_api(ctx.secret(token_secret))
             self._api_cached = api
         return api
@@ -165,7 +180,7 @@ class ProxmoxPlatform(VMPlatform):
         from agentworks import output
         from agentworks.errors import TokenRejectedError
 
-        token_secret = str(self._cfg("token_secret", DEFAULT_TOKEN_SECRET))
+        token_secret = self.config.token_secret
         # Read the token before announcing the check, so a context with
         # no resolved secrets fails before the banner (the old guard's
         # error-path ordering).
@@ -190,7 +205,7 @@ class ProxmoxPlatform(VMPlatform):
         # Prefer the recorded node (decouples existing VMs from config
         # edits); fall back to the site's node for rows migrated without
         # a parseable legacy [proxmox] section.
-        node = vm.platform_metadata.get("node") or self._cfg("node")
+        node = vm.platform_metadata.get("node") or self.config.node
         if not node:
             raise StateError(
                 f"VM '{vm.name}' has no proxmox node in its platform metadata or site configuration",
@@ -210,10 +225,10 @@ class ProxmoxPlatform(VMPlatform):
         return int(vmid)
 
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
-        node = str(self._cfg("node"))
-        template_vmid = int(str(self._cfg("template_vmid")))
-        pool = str(self._cfg("pool", "agentworks"))
-        storage = str(self._cfg("storage", "local-lvm"))
+        node = self.config.node
+        template_vmid = self.config.template_vmid
+        pool = self.config.pool
+        storage = self.config.storage
 
         # The platform owns the backend-side name. PVE names are
         # soft (the vmid identifies), but a duplicate name is operator
@@ -266,11 +281,10 @@ class ProxmoxPlatform(VMPlatform):
                 output.detail("Clone complete")
 
                 # 3. Configure VM resources
-                vm_config: dict[str, object] = {}
-                if request.cpus is not None:
-                    vm_config["cores"] = request.cpus
-                if request.memory_gib is not None:
-                    vm_config["memory"] = request.memory_gib * 1024  # GiB -> MiB
+                vm_config: dict[str, object] = {
+                    "cores": request.cpus,
+                    "memory": request.memory_gib * 1024,  # GiB -> MiB
+                }
 
                 # Cloud-init: user, SSH key, network
                 vm_config["ciuser"] = request.admin_username
@@ -286,10 +300,9 @@ class ProxmoxPlatform(VMPlatform):
                 output.detail("Configuring VM...")
                 self._api(ctx).configure_vm(node, newid, **vm_config)
 
-                # 4. Resize disk if requested
-                if request.disk_gib is not None:
-                    output.detail(f"Resizing disk to {request.disk_gib}G...")
-                    self._api(ctx).resize_disk(node, newid, "scsi0", f"{request.disk_gib}G")
+                # 4. Resize the clone's disk to the template's size
+                output.detail(f"Resizing disk to {request.disk_gib}G...")
+                self._api(ctx).resize_disk(node, newid, "scsi0", f"{request.disk_gib}G")
 
                 # 5. Start VM
                 output.detail("Starting VM...")
@@ -317,7 +330,7 @@ class ProxmoxPlatform(VMPlatform):
                         provisioning_packages=PROVISIONING_PACKAGES,
                         tailscale_auth_key=request.tailscale_auth_key,
                         hostname=request.hostname,
-                        swap=request.swap_gib if request.swap_gib is not None else 0,
+                        swap=request.swap_gib,
                     )
                     tailscale_ip = self._run_bootstrap_via_agent(node, newid, bootstrap, ctx)
                     bootstrap_complete = tailscale_ip is not None
@@ -398,7 +411,7 @@ class ProxmoxPlatform(VMPlatform):
 
     def display_backend_name(self, vm: VMRow) -> str:
         vmid = vm.platform_metadata.get("vmid", "?")
-        node = vm.platform_metadata.get("node") or self._cfg("node", "?")
+        node = vm.platform_metadata.get("node") or self.config.node
         return f"{vmid}@{node}"
 
     # native_transport: inherited None default. One-shot QEMU guest-agent

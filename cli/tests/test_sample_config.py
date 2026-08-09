@@ -86,8 +86,8 @@ def test_sample_config_examples_uncomment_cleanly() -> None:
 def test_sample_config_declares_no_resources() -> None:
     """The sample is settings-only: even fully uncommented it declares no
     resources in TOML. The detection set is ``KIND_SECTIONS``, the same
-    shared table the migrator and the load-time deprecation warning use,
-    so a resource example sneaking back into the sample trips this test.
+    table the load-time resource-section refusal sweeps, so a resource
+    example sneaking back into the sample trips this test.
     Resources are YAML manifests; the sample points at
     `agw resource sample <kind>` instead."""
     from agentworks.manifests.decode import KIND_SECTIONS

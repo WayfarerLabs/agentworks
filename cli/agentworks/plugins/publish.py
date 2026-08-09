@@ -41,12 +41,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol, cast
 
 from agentworks.errors import ConfigError
-from agentworks.manifests.package import publish_manifest_package
-from agentworks.plugins.adapters import CAPABILITY_ADAPTERS
+from agentworks.manifests.package import load_manifest_package, publish_manifest_package
+from agentworks.plugins.adapters import capability_adapters
 from agentworks.resources import Origin
 
 if TYPE_CHECKING:
     from agentworks.config import Config
+    from agentworks.plugins.base import Plugin
     from agentworks.resources.registry import Registry
 
 
@@ -82,6 +83,18 @@ class _NamedImpl(Protocol):
     name: str
 
 
+def plugin_manifest_resource_owners(plugin: Plugin) -> tuple[tuple[str, str, str], ...]:
+    """Return declarable resource ownership from one plugin's manifest bundle."""
+    if plugin.manifests is None:
+        return ()
+    manifests = load_manifest_package(
+        anchor=plugin.manifests,
+        subdir="manifests",
+        allowed_kinds=PLUGIN_MANIFEST_KINDS,
+    )
+    return tuple((plugin.name, entry.kind, entry.name) for entry in manifests.entries)
+
+
 def publish_plugins(registry: Registry, config: Config) -> None:
     """Publish every shipped plugin's capability rows (unconditionally) and
     the enabled plugins' bundled manifests into ``registry``.
@@ -114,10 +127,11 @@ def publish_plugins(registry: Registry, config: Config) -> None:
     # enablement source (LLD b) marks a not-opted-in plugin's rows disabled at
     # finalize; a row exists only for an actually-seated impl, since build_row
     # reads the seated occupant.
+    adapters = capability_adapters()
     for plugin in SYSTEM_PLUGINS.values():
         origin = Origin.system_plugin(plugin=plugin.name, source=f"agentworks.plugins.{plugin.name}")
         for kind, impls in plugin.capabilities.items():
-            adapter = CAPABILITY_ADAPTERS[kind]
+            adapter = adapters[kind]
             for impl in impls:
                 name = cast("_NamedImpl", impl).name
                 registry.add(kind, name, adapter.build_row(name, origin), origin)

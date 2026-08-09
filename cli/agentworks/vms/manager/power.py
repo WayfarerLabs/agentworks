@@ -11,13 +11,13 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.capabilities.base import RunContext
-from agentworks.config import MAX_VM_NAME_LENGTH
 from agentworks.db import SYSTEM_SLUG_KEY, VMStatus
 from agentworks.errors import (
     AgentworksError,
     StateError,
     UserAbort,
 )
+from agentworks.naming import MAX_VM_NAME_LENGTH
 
 from ._helpers import (
     _guard_failed_vm,
@@ -125,7 +125,7 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
         site_decl = lookup_site(vm.site, registry)
         # Known as soon as the declaration resolves: keep it alive even
         # if the boundary below degrades.
-        site_platform = site_decl.platform
+        site_platform = site_decl.platform.name
         vm_node, ops_ctx = _live_vm_boundary(db, config, vm, registry=registry)
         platform = vm_node.site.platform
     except UserAbort:

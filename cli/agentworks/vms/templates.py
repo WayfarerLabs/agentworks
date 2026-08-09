@@ -10,12 +10,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from agentworks.errors import ConfigError, unknown_template_error
+from agentworks.errors import unknown_template_error
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from agentworks.env import EnvEntry
-    from agentworks.resources.graph import BuildContext
-    from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
     from agentworks.vms.template import VMTemplate
 
@@ -43,19 +43,6 @@ class ResolvedVMTemplate:
     # Inheritance applies like other scalar fields: child overrides parent.
     tailscale_auth_key: str = "tailscale-auth-key"
 
-    def dependencies(self, context: BuildContext) -> list[ResourceReference]:
-        """Emit the resolved template's references: env-block secret
-        refs (with inheritance applied via the merged ``env`` dict) plus
-        the Tailscale auth-key secret. Used by ``vm create`` / ``vm     reinit``
-        for the eager-resolve subgraph walk.
-        """
-        from agentworks.env.entry import env_references
-        from agentworks.vms.template import tailscale_secret_reference
-
-        refs: list[ResourceReference] = list(env_references(self.env, ("vm-template", self.name)))
-        refs.append(tailscale_secret_reference(self.tailscale_auth_key, self.name))
-        return refs
-
 
 def resolve_from_dict(
     templates: dict[str, VMTemplate],
@@ -82,40 +69,52 @@ def resolve_from_dict(
 
 
 def _resolve_from_dict(
-    templates: dict[str, VMTemplate],
+    templates: Mapping[str, VMTemplate],
     name: str,
-    _visiting: tuple[str, ...] = (),
 ) -> ResolvedVMTemplate:
-    """Depth-first resolution using a templates dict.
+    """Resolve ``name``'s chain, defaults applied.
 
-    ``_visiting`` carries the chain of in-progress resolves so cycles
-    raise a clean ``ConfigError`` (matching the framework's cycle-pass
-    error shape) instead of crashing with ``RecursionError``. This is
-    the resolver's internal safety net; the canonical cycle check
-    lives in ``Registry.finalize`` at build_registry time, but this
-    resolver is also called eagerly by ``load_config`` before any
-    registry is built, so it needs its own
-    guard.
+    ONE accumulator, folded over the chain's declarations. That is what
+    keeps a silent parent silent: every write goes through
+    :func:`_merge_template`, which skips an undeclared field, so there is
+    never a second defaults-applied template for a later parent to
+    overwrite an earlier one's real value with. Resolving each parent to
+    its own ``ResolvedVMTemplate`` first would destroy that distinction
+    before the merge could read it, since a resolved template cannot say
+    which of its values it was given and which it defaulted to.
+
+    A name with no row resolves to the built-in defaults, via an empty
+    chain.
     """
-    if name in _visiting:
-        path = " -> ".join((*_visiting, name))
-        raise ConfigError(f"vm_templates inheritance cycle detected: {path}")
+    # Imported here, not at module level: ``agentworks.resources``'s package
+    # init loads every kind module, and every kind module reaches this one.
+    from agentworks.resources.inheritance import resolution_layers
 
-    if name not in templates:
-        # Implicit default: return built-in defaults
-        return ResolvedVMTemplate(name=name)
-
-    tmpl = templates[name]
     result = ResolvedVMTemplate(name=name)
-    next_visiting = (*_visiting, name)
-
-    for parent_name in tmpl.inherits:
-        parent = _resolve_from_dict(templates, parent_name, next_visiting)
-        _merge(result, parent)
-
-    _merge_template(result, tmpl)
-    result.name = name
+    for layer in resolution_layers(templates, name, "vm-template"):
+        _merge_template(result, layer)
     return result
+
+
+def effective_template(templates: Mapping[str, VMTemplate], name: str) -> ResolvedVMTemplate:
+    """The effective (merged) declaration of ``name``, for the finalize
+    passes.
+
+    Distinct from :func:`resolve_from_dict` in exactly one way, which is
+    the reason it exists: it is TOTAL. ``dependencies`` must never raise
+    (the graph is built before anything is validated), and the only thing
+    the merge can raise on is a cyclic chain, which has no effective
+    declaration to compute. Degrading to the kind's defaults is safe
+    because the value is provably never observed: a degraded row implies a
+    loop among present nodes, and finalize's cycle pass raises on it
+    before the graph is built, let alone read.
+    """
+    from agentworks.errors import InheritanceCycleError
+
+    try:
+        return _resolve_from_dict(templates, name)
+    except InheritanceCycleError:
+        return ResolvedVMTemplate(name=name)
 
 
 def resolve_template(registry: Registry, template_name: str | None = None) -> ResolvedVMTemplate:
@@ -142,23 +141,14 @@ def _append_dedupe(target: list[str], source: list[str]) -> list[str]:
     return result
 
 
-def _merge(target: ResolvedVMTemplate, source: ResolvedVMTemplate) -> None:
-    """Merge source into target. Scalars: source wins. Lists: append with dedupe."""
-    target.cpus = source.cpus
-    target.memory = source.memory
-    target.disk = source.disk
-    target.swap = source.swap
-    target.apt = _append_dedupe(target.apt, source.apt)
-    target.apt_packages = _append_dedupe(target.apt_packages, source.apt_packages)
-    target.snap = _append_dedupe(target.snap, source.snap)
-    target.system_install_commands = _append_dedupe(target.system_install_commands, source.system_install_commands)
-    target.env = {**target.env, **source.env}
-    target.tailscale_auth_key = source.tailscale_auth_key
-
-
 def _merge_template(target: ResolvedVMTemplate, tmpl: VMTemplate) -> None:
-    """Merge a raw VMTemplate into a ResolvedVMTemplate. None = not set, skip.
-    Scalars: child overrides. Lists: append with dedupe.
+    """Fold one declared VMTemplate into the accumulator. None = not set,
+    skip. Scalars: later layer overrides. Lists: append with dedupe.
+
+    The ONLY writer of a ``ResolvedVMTemplate``'s fields, which is what
+    makes "a layer that declares nothing changes nothing" hold by
+    construction rather than by two parallel field lists agreeing about
+    every field forever.
     """
     if tmpl.cpus is not None:
         target.cpus = tmpl.cpus

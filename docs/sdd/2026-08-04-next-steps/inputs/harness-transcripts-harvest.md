@@ -16,7 +16,7 @@ multi-source, integration-owned, best-effort event stream rather than a single w
 channel. Per the operator ruling recorded in `../target-state.md`, the FRD and its branch are
 deleted once everything useful has been verifiably extracted. This document is that extraction.
 
-It exists to feed two efforts on the next-steps roadmap:
+It exists to feed two efforts on the next-steps saga:
 
 - **Wave 5, observability phase 1**: the event vocabulary, harness contract, and inspection surface
   that the FRD specified for transcripts, now expressed against the newer multi-source model.
@@ -25,8 +25,8 @@ It exists to feed two efforts on the next-steps roadmap:
   noting it was dropped when the observability perspective reframed the collection mechanism.
   Distillation was never superseded; only its substrate was.
 
-Below, each topic notes where it lands in the roadmap and, where the newer perspective changed a
-claim rather than simply carrying it forward, says so explicitly.
+Below, each topic notes where it lands in the saga and, where the newer perspective changed a claim
+rather than simply carrying it forward, says so explicitly.
 
 ## Harvested content
 
@@ -313,7 +313,7 @@ without separate tracking.
   not tracked separately.
 - **The FRD's own "resolved direction (maintainer, 2026-07-29)" framing language and terminology
   section.** Superseded by `../target-state.md`'s destination 6, which restates the same substance
-  (topic 1) in the roadmap's current vocabulary. The underlying decision is preserved; the specific
+  (topic 1) in the saga's current vocabulary. The underlying decision is preserved; the specific
   wording and standalone terminology list are not reproduced verbatim here.
 - **Migration notes (topic 14) as a tracked decision.** A generic, low-stakes rollout posture rather
   than new information; recorded for completeness only.

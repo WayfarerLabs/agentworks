@@ -9,7 +9,11 @@ field off each resource dataclass:
 - ``edges_of``: a node's outbound reference edges (who it points at).
 - ``dependents_of``: a node's inbound references (who points at it), the
   replacement for the removed per-resource ``references`` field.
-- ``reachable_from``: the transitive closure of ``edges_of`` from a node.
+- ``runtime_reachable_from`` / ``composed_from``: the two transitive closures of
+  ``edges_of`` from a node, over what it NEEDS and over what it is MADE OF
+  (FR17: an inheritance edge is source composition, not a runtime need). There
+  is deliberately no closure over both: a caller has to say which question it
+  is asking, because getting it wrong is a wrong answer rather than a crash.
 - ``readiness_of`` / ``is_ready``: the node's stored readiness verdict.
 - ``impl_of``: a capability node's stamped implementation (for secret
   resolution to reach a backend off the graph, not the live registry).
@@ -26,22 +30,23 @@ vm-platform / harness-integration / git-credential-provider, an instance for
 secret-backend) so consumers reach a capability's code off the graph rather
 than the live registry. ``readiness_of`` / ``enablement_of`` return stored
 verdicts; ``edges_of`` / ``dependents_of`` are the two edge directions;
-``reachable_from`` is the transitive closure. The retention was introduced by
-the 2026-07 registry-readiness refactor.
+``runtime_reachable_from`` and ``composed_from`` are the two transitive
+closures. The retention was introduced by the 2026-07 registry-readiness
+refactor.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from functools import cache
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
-    from agentworks.capabilities.vm_platform import VMPlatform
-    from agentworks.resources.reference import ReferenceEntry, ResourceReference
+    from agentworks.resources.reference import ReferenceEntry, RefRelationship, ResourceReference
     from agentworks.secrets.backends import SecretBackend
 
 
@@ -121,13 +126,13 @@ class Readiness:
     """A node's readiness verdict: can it run on this host, and if not, why.
 
     ``reason is None`` means ready; a string is the operator-facing reason it is
-    not. Construct via ``Readiness.ready()`` / ``Readiness.blocked(reason)``
-    rather than the raw constructor so call sites read as verdicts, not as
-    ``str | None`` bookkeeping (the double-negative ``readiness_of`` exists to
-    spare consumers, R10).
+    not. ``is_available`` distinguishes an observed not-ready verdict from a
+    deliberately omitted host check. Construct through the named classmethods
+    so call sites read as verdicts, not as ``str | None`` bookkeeping.
     """
 
     reason: str | None = None
+    is_available: bool = True
 
     @property
     def is_ready(self) -> bool:
@@ -140,6 +145,11 @@ class Readiness:
     @classmethod
     def blocked(cls, reason: str) -> Readiness:
         return cls(reason)
+
+    @classmethod
+    def unavailable(cls, reason: str) -> Readiness:
+        """Return a non-ready verdict whose host check was deliberately omitted."""
+        return cls(reason, is_available=False)
 
 
 @dataclass(frozen=True)
@@ -209,16 +219,58 @@ class DependencyGraph:
         Raises ``KeyError`` on an unknown key."""
         return self._nodes[(kind, name)].inbound
 
-    def reachable_from(self, kind: str, name: str) -> list[tuple[str, str]]:
-        """The transitive closure of ``outbound`` from this node: every node
-        reachable by following edges, excluding the start node, deduped, in
-        first-encountered order.
+    def runtime_reachable_from(self, kind: str, name: str) -> list[tuple[str, str]]:
+        """The transitive closure over RUNTIME-NEED edges: what this node
+        needs to have resolved for it to work.
 
-        A graph-owned DFS over the frozen ``outbound`` edges, so consumers stop
+        Crosses ``USES`` and stops at everything else, which today means
+        it stops at inheritance (FR17). Inheritance is source composition:
+        the parent's declaration is merged into this node's, and this node
+        already publishes the merged result's needs as edges of its own,
+        so crossing the edge as well would attribute the parent's
+        STANDALONE needs (the secret name the child overrode, say) to the
+        child and prompt for a secret it does not use.
+
+        Excludes the start node, deduped, in first-encountered order. A
+        graph-owned DFS over the frozen ``outbound`` edges, so consumers stop
         hand-rolling one. Cycle-safe via a visited set (the graph is acyclic
         after finalize's cycle pass, but this query may be called on a graph
         built before that pass in tests). Returns keys; callers resolve rows via
         ``registry.lookup``.
+        """
+        from agentworks.resources.reference import RefRelationship
+
+        return self._closure(kind, name, crossing=frozenset({RefRelationship.USES}))
+
+    def composed_from(self, kind: str, name: str) -> list[tuple[str, str]]:
+        """The transitive closure over SOURCE-COMPOSITION edges: the
+        declarations this node is assembled out of, nearest first.
+
+        The other half of the FR17 split, and the answer to a different
+        question: not "what does this need" but "whose declarations am I".
+        Its caller is the recipe use-gate, which must refuse a lineage
+        whose parent is turned off even though the child's own needs are
+        all satisfiable.
+
+        Same walk contract as :meth:`runtime_reachable_from`.
+        """
+        from agentworks.resources.reference import RefRelationship
+
+        return self._closure(kind, name, crossing=frozenset({RefRelationship.INHERITS}))
+
+    def _closure(
+        self,
+        kind: str,
+        name: str,
+        *,
+        crossing: frozenset[RefRelationship],
+    ) -> list[tuple[str, str]]:
+        """The closure over the edges whose relationship is in ``crossing``.
+
+        The set is EXPLICIT rather than a "everything but X" filter so a
+        new ``RefRelationship`` cannot join a closure by default: it stays
+        out of both until someone decides, and
+        ``test_every_relationship_has_a_closure`` fails until they do.
         """
         start = (kind, name)
         visited: set[tuple[str, str]] = {start}
@@ -229,6 +281,8 @@ class DependencyGraph:
             if node is None:
                 continue
             for ref in node.outbound:
+                if ref.relationship not in crossing:
+                    continue
                 target = (ref.kind, ref.name)
                 if target not in visited:
                     visited.add(target)
@@ -269,27 +323,83 @@ class DependencyGraph:
 
 
 @dataclass(frozen=True)
-class BuildContext:
-    """The controlled context the graph builder threads to each resource's
-    :meth:`~agentworks.declared_resource.DeclaredResource.dependencies` during
-    the finalize walk.
+class FinalizeContext:
+    """The controlled context finalize threads to each resource, at both of
+    the passes that hand a resource control:
+    :meth:`~agentworks.declared_resource.DeclaredResource.dependencies` in
+    the build walk and
+    :meth:`~agentworks.declared_resource.DeclaredResource.validate` in the
+    validate pass.
 
-    Today its one load-bearing field is ``available_backends``: the present
-    ``secret-backend`` nodes (name + impl), which a ``secret`` reads to decide
-    (via each backend's pure ``would_attempt``) which ``secret -> secret-backend``
-    edges to emit. Every other resource ignores the context. This is a BUILDER
-    INPUT supplied during the build, not a consumer reaching into a live
-    registry, so the R11 guard whitelists the builder's own call (LLD b). A
-    default-empty context (tests pass one) yields no
-    present backends, so a secret under it emits only its explicit mapping-key
-    edges.
+    Named for the phase rather than for the build because it serves both:
+    a resource that has to see its inheritance chain has to see it in both
+    places (its edges and its shape check are two readings of one merged
+    declaration), and there is nothing in it a build reads that a validate
+    should not.
+
+    Two load-bearing fields, both FRAMEWORK INPUTS supplied during
+    finalize rather than a consumer reaching into a live registry, which is
+    why the R11 guard whitelists the builder's own call (LLD b):
+
+    - ``available_backends``: the present ``secret-backend`` nodes (name +
+      impl), which a ``secret`` reads to decide (via each backend's pure
+      ``would_attempt``) which ``secret -> secret-backend`` edges to emit.
+    - ``rows``: every published resource, by kind and name, which an
+      INHERITING resource reads to resolve its own ``inherits`` chain
+      before emitting edges (FR17: a resource's runtime dependencies come
+      from its EFFECTIVE declaration, so a child that overrides a parent's
+      secret name depends on the override alone).
+
+    A default-empty context (tests pass one) yields no present backends,
+    so a secret under it emits only its explicit mapping-key edges, and no
+    rows, so an inheriting resource under it resolves to its own
+    declaration alone. See :meth:`rows_of` for why that degradation is the
+    honest one.
     """
 
     available_backends: tuple[tuple[str, SecretBackend], ...] = ()
+    # The builder's live row map, read-only by contract (hence the
+    # ``Mapping`` annotation): the rows do not change between the build
+    # walk and the late-materialization walk that shares this context, and
+    # the resources it holds are heterogeneous by kind, which is what the
+    # ``Any`` value type says honestly.
+    rows: Mapping[str, Mapping[str, Any]] = MappingProxyType({})
+
+    def rows_of(self, kind: str) -> Mapping[str, Any]:
+        """Every published resource of ``kind``, by name; empty when the
+        kind has none.
+
+        The seam an inheriting resource resolves its chain over. A caller
+        merges ITSELF into the result before resolving
+        (``{**context.rows_of(kind), self.name: self}``), which is a no-op
+        during the real walk (the registry already holds it) and is what
+        makes a bare ``FinalizeContext()`` degrade to "this declaration
+        alone" rather than to "nothing at all": an empty answer for a
+        template that declares an env secret would be a wrong answer, not
+        an obviously-missing one.
+
+        An unregistered ``kind`` is REFUSED rather than answered with an
+        empty mapping, because that degradation is indistinguishable from
+        the legitimate one above: a typo in a future emitter would quietly
+        stop merging its own chain, and the row would go on publishing
+        plausible edges off its declaration alone. The values stay ``Any``
+        because the rows genuinely are heterogeneous (the registry holds
+        every kind's own dataclass) and the caller narrows; the KEY is the
+        part that can be wrong with nothing noticing.
+        """
+        from agentworks.errors import StateError
+        from agentworks.resources.kind import KIND_REGISTRY
+
+        if kind not in KIND_REGISTRY:
+            raise StateError(
+                f"no resource kind {kind!r} is registered, so there are no rows to resolve a chain over "
+                f"(known kinds: {', '.join(sorted(KIND_REGISTRY))})"
+            )
+        return self.rows.get(kind, {})
 
 
-def build_context(resources: Mapping[str, Mapping[str, object]]) -> BuildContext:
-    """Assemble the :class:`BuildContext` the finalize walk threads to every
+def build_context(resources: Mapping[str, Mapping[str, object]]) -> FinalizeContext:
+    """Assemble the :class:`FinalizeContext` the finalize walk threads to every
     resource's ``dependencies``.
 
     Reads each present ``secret-backend`` node's impl off the code registry via
@@ -298,11 +408,18 @@ def build_context(resources: Mapping[str, Mapping[str, object]]) -> BuildContext
     registry probe. The backend nodes are published before finalize and never
     materialize later, so the context is assembled once at the start of the
     build.
+
+    ``resources`` is carried through as ``rows`` rather than snapshotted:
+    the late-materialization pass walks new nodes against this same
+    context, and a snapshot would hand them a row map from before pass 0.
+    Only inheriting kinds read it, and no template is ever materialized
+    late (reserved defaults are seeded in pass 0), so the two views agree
+    either way; carrying the live map means they cannot stop agreeing.
     """
     backends = tuple(
         (name, cast("SecretBackend", _impl_for("secret-backend", name))) for name in resources.get("secret-backend", {})
     )
-    return BuildContext(available_backends=backends)
+    return FinalizeContext(available_backends=backends, rows=resources)
 
 
 def build_graph(
@@ -340,7 +457,9 @@ def build_graph(
     inbound: dict[tuple[str, str], list[ReferenceEntry]] = {}
     for target, refs in all_refs.items():
         for ref in refs:
-            inbound.setdefault(target, []).append(ReferenceEntry(source=ref.source, usage=ref.usage))
+            inbound.setdefault(target, []).append(
+                ReferenceEntry(source=ref.source, usage=ref.usage, declared_by=ref.declared_by)
+            )
 
     nodes: dict[tuple[str, str], _Node] = {}
     for kind, kind_dict in resources.items():
@@ -360,14 +479,29 @@ def build_graph(
 
 # -- The readiness fold (LLD c) ---------------------------------------------
 
-# The four capability kinds whose node readiness comes from their impl (a
-# config-independent host-support check), not from a resource-level
-# ``not_ready`` hook. The fold dispatches per kind here because the impl is
-# heterogeneous (a class for platform/harness-integration/provider, an instance for
-# secret-backend) and each kind's host-support source differs (LLD c's table).
-_CAPABILITY_KINDS = frozenset(
-    {"vm-platform", "harness-integration", "git-credential-provider", "secret-backend"},
-)
+
+@cache
+def _capability_kinds() -> frozenset[str]:
+    """The kinds whose node readiness comes from their IMPL (a
+    config-independent host-support check) rather than from a resource-level
+    ``not_ready`` hook: the capability kinds, which the descriptor table
+    enumerates.
+
+    Cached and lazily collected for the same reason as
+    :func:`_capability_registry_loaders`, which it shares its key set with by
+    construction. The two stay separate accessors because they answer
+    different questions of the table: which kinds the fold dispatches on, and
+    where each kind's impl lives.
+    """
+    from agentworks.capabilities.descriptor import capability_descriptors
+
+    return frozenset(descriptor.kind for descriptor in capability_descriptors())
+
+
+# These capability kinds invoke host-readiness code. Guide registry builds
+# consult this shared policy to suppress every such invocation. Keep the set
+# next to the dispatch below until capability descriptors own the policy.
+HOST_PROBING_CAPABILITY_KINDS = frozenset({"vm-platform", "secret-backend"})
 
 
 @runtime_checkable
@@ -385,6 +519,8 @@ def fold_readiness(
     all_outbound: Mapping[tuple[str, str], Sequence[ResourceReference]],
     enablement: Mapping[tuple[str, str], Enablement] | None = None,
     disabled_marks: Mapping[tuple[str, str], DisabledMark] | None = None,
+    *,
+    probe_host: bool = True,
 ) -> dict[tuple[str, str], Readiness]:
     """Compute each present node's readiness verdict, dependency-first.
 
@@ -413,7 +549,9 @@ def fold_readiness(
     present = {(kind, name) for kind, kind_dict in resources.items() for name in kind_dict}
     readiness: dict[tuple[str, str], Readiness] = {}
     for key in _reverse_topo_order(present, all_outbound):
-        readiness[key] = node_readiness(key, resources, all_outbound, readiness, enablement, disabled_marks)
+        readiness[key] = node_readiness(
+            key, resources, all_outbound, readiness, enablement, disabled_marks, probe_host=probe_host
+        )
     return readiness
 
 
@@ -424,6 +562,8 @@ def node_readiness(
     readiness: Mapping[tuple[str, str], Readiness],
     enablement: Mapping[tuple[str, str], Enablement] | None = None,
     disabled_marks: Mapping[tuple[str, str], DisabledMark] | None = None,
+    *,
+    probe_host: bool = True,
 ) -> Readiness:
     """One node's readiness verdict, given the verdicts of its dependencies.
 
@@ -445,11 +585,15 @@ def node_readiness(
     if opt_in.get(key, Enablement.enabled) is Enablement.disabled:
         return Readiness.ready()  # placeholder; enablement answers for a disabled node
     kind, name = key
-    if kind in _CAPABILITY_KINDS:
+    if kind in _capability_kinds():
+        if not probe_host and kind in HOST_PROBING_CAPABILITY_KINDS:
+            return Readiness.unavailable("host readiness unavailable: guide does not inspect the workstation")
         return _capability_node_readiness(kind, name)
     resource = resources[kind][name]
     if not isinstance(resource, _ReadinessResource):
         return Readiness.ready()
+    if not probe_host:
+        return Readiness.unavailable("host readiness unavailable: guide does not inspect the workstation")
     deps: dict[tuple[str, str], DependencyState] = {}
     for ref in all_outbound.get(key, ()):
         target = (ref.kind, ref.name)
@@ -471,26 +615,23 @@ def node_readiness(
 
 def _capability_node_readiness(kind: str, name: str) -> Readiness:
     """A capability node's own readiness: its impl's config-independent
-    host-support check (LLD c's table). ``vm-platform`` wraps
-    ``unsupported_reason``; ``secret-backend`` asks the backend instance;
-    ``harness-integration`` / ``git-credential-provider`` have no host-support concept and
-    are always ready.
+    host-support check (LLD c's table).
+
+    The verdict is the kind's own, so it comes from the kind's descriptor
+    rather than from an if-chain here. Each ``readiness`` callable lives
+    beside the capability it interrogates: ``vm-platform`` wraps
+    ``unsupported_reason`` into the host-support sentence, ``secret-backend``
+    asks the backend instance, and ``harness-integration`` /
+    ``git-credential-provider`` have no host-support concept and are always
+    ready. The fold's job is to know WHEN to ask, not WHAT the answer is.
+
+    Distinct from the config-dependent ``Capability.not_ready(config)`` a
+    CONSUMING resource (``vm-site``) uses; this is the capability node's own
+    verdict, which such a consumer then propagates.
     """
-    impl = _impl_for(kind, name)
-    if kind == "vm-platform":
-        reason = cast("type[VMPlatform]", impl).unsupported_reason()
-        # Store the readiness-vocabulary host-support sentence (R9.1/R6): the
-        # platform row's own projection renders it directly, and the vm-site
-        # that depends on it propagates this same verdict (LLD c target string).
-        # "unsupported here" is the readiness phrasing; "disabled" is reserved
-        # for the opt-in axis and never used for host support.
-        if reason is None:
-            return Readiness.ready()
-        return Readiness.blocked(f"platform '{name}' is unsupported here: {reason}")
-    if kind == "secret-backend":
-        return cast("SecretBackend", impl).not_ready()
-    # harness-integration, git-credential-provider: no host-support, no override.
-    return Readiness.ready()
+    from agentworks.capabilities.descriptor import descriptor_for
+
+    return descriptor_for(kind).readiness(name, _impl_for(kind, name))
 
 
 def _reverse_topo_order(
@@ -538,6 +679,9 @@ def _impl_for(kind: str, name: str) -> object | None:
     instance for secret-backend); the node just stores whatever the kind's
     registry holds.
 
+    A kind with no descriptor is not a capability kind, which is what makes the
+    ``None`` return total: the table IS the capability-kind enumeration.
+
     A published capability row whose name has no registered implementation is a
     framework/publisher invariant violation (the capability resources mirror the
     code registry), not a config error, so this fails fast with ``StateError``
@@ -545,7 +689,7 @@ def _impl_for(kind: str, name: str) -> object | None:
     the phase-3 fold or phase-4 resolution. The build stays total for malformed
     *config* (R1); this is a different failure class.
     """
-    registry = _CAPABILITY_REGISTRY_LOADERS.get(kind)
+    registry = _capability_registry_loaders().get(kind)
     if registry is None:
         return None
     impl = registry().get(name)
@@ -556,36 +700,21 @@ def _impl_for(kind: str, name: str) -> object | None:
     return impl
 
 
-def _load_vm_platform_registry() -> Mapping[str, object]:
-    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+@cache
+def _capability_registry_loaders() -> Mapping[str, Callable[[], Mapping[str, object]]]:
+    """Each capability kind's lazy code-registry accessor, which IS its
+    descriptor's ``registry`` field.
 
-    return VM_PLATFORM_REGISTRY
+    Everything here stays lazy for the same reason it always was: this module
+    is imported by ``agentworks.resources`` before the capability packages, so
+    neither the table nor the registries may be reached at module load. The
+    descriptor table is collected on first call and cached; each value is
+    still a callable that imports its own registry when invoked.
 
+    Read-only, because the cache means every caller for the life of the
+    process shares this one object: a plain dict here would let any of them
+    reshape the loader map for all the others.
+    """
+    from agentworks.capabilities.descriptor import capability_descriptors
 
-def _load_harness_integration_registry() -> Mapping[str, object]:
-    from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
-
-    return HARNESS_INTEGRATION_REGISTRY
-
-
-def _load_git_credential_provider_registry() -> Mapping[str, object]:
-    from agentworks.capabilities.git_credential import GIT_CREDENTIAL_PROVIDER_REGISTRY
-
-    return GIT_CREDENTIAL_PROVIDER_REGISTRY
-
-
-def _load_secret_backend_registry() -> Mapping[str, object]:
-    from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
-
-    return SECRET_BACKEND_REGISTRY
-
-
-# The four capability kinds and the (lazily-imported) code registry each reads
-# its impl from. Lazy loaders avoid an import cycle at module load: this module
-# is imported by ``agentworks.resources`` before the capability packages.
-_CAPABILITY_REGISTRY_LOADERS: dict[str, Callable[[], Mapping[str, object]]] = {
-    "vm-platform": _load_vm_platform_registry,
-    "harness-integration": _load_harness_integration_registry,
-    "git-credential-provider": _load_git_credential_provider_registry,
-    "secret-backend": _load_secret_backend_registry,
-}
+    return MappingProxyType({descriptor.kind: descriptor.registry for descriptor in capability_descriptors()})

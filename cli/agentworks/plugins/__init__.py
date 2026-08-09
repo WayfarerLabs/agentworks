@@ -28,7 +28,7 @@ from agentworks.plugins import claude as _claude
 from agentworks.plugins import codex as _codex
 from agentworks.plugins import onepassword as _onepassword
 from agentworks.plugins import proxmox as _proxmox
-from agentworks.plugins.adapters import CAPABILITY_ADAPTERS, CapabilityAdapter
+from agentworks.plugins.adapters import CapabilityAdapter, capability_adapters
 from agentworks.plugins.base import Plugin, PluginCommand, PluginError
 from agentworks.plugins.enablement import plugin_enablement_source
 from agentworks.plugins.publish import publish_plugins
@@ -38,12 +38,12 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 __all__ = [
-    "CAPABILITY_ADAPTERS",
     "SYSTEM_PLUGINS",
     "CapabilityAdapter",
     "Plugin",
     "PluginCommand",
     "PluginError",
+    "capability_adapters",
     "plugin_enablement_source",
     "publish_plugins",
     "register_plugin",

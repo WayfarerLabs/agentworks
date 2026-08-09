@@ -70,8 +70,8 @@ def test_load_valid_config(config_dir: Path) -> None:
     assert registry.lookup("workspace-template", "gruntweave").repo == "https://example.com/org/repo.git"
     assert registry.lookup("workspace-template", "child").inherits == ["gruntweave"]
     assert registry.lookup("workspace-template", "child").tmuxinator is False
-    assert registry.lookup("git-credential", "github").provider == "github"
-    assert registry.lookup("git-credential", "azdo").provider_config == {"org": "my-org"}
+    assert registry.lookup("git-credential", "github").provider.name == "github"
+    assert registry.lookup("git-credential", "azdo").provider.config == {"org": "my-org"}
     assert admin.git_credentials == ["github"]
 
 
@@ -173,7 +173,7 @@ def test_git_credential_provider_key(tmp_path: Path) -> None:
         ManifestDoc("git-credential", "gh", {"provider": {"name": "github"}}),
     )
     registry = build_registry(load_config(config_file))
-    assert registry.lookup("git-credential", "gh").provider == "github"
+    assert registry.lookup("git-credential", "gh").provider.name == "github"
 
 
 def test_git_credential_nonconforming_name_warns_and_loads(tmp_path: Path) -> None:
@@ -187,9 +187,9 @@ def test_git_credential_nonconforming_name_warns_and_loads(tmp_path: Path) -> No
     )
     # Warn-only, non-breaking: the credential is present and unchanged.
     registry = build_registry(load_config(config_file, warn_issues=False))
-    assert registry.lookup("git-credential", "GITHUB").provider == "github"
+    assert registry.lookup("git-credential", "GITHUB").provider.name == "github"
     issues = _manifest_issues(config_file)
-    assert any("git_credentials.GITHUB" in issue and "git-token-GITHUB" in issue for issue in issues), issues
+    assert any("git-credential/GITHUB" in issue and "git-token-GITHUB" in issue for issue in issues), issues
 
 
 def test_git_credential_conforming_name_no_warning(tmp_path: Path) -> None:
@@ -213,15 +213,15 @@ def test_git_credential_nonconforming_name_with_explicit_token_no_derived_warnin
     )
     registry = build_registry(load_config(config_file, warn_issues=False))
     cred = registry.lookup("git-credential", "GITHUB")
-    assert cred.provider == "github"
-    assert cred.provider_config["token"] == "git-token-github"
+    assert cred.provider.name == "github"
+    assert cred.provider.config["token"] == "git-token-github"
     assert not any("does not follow the naming rules" in issue for issue in _manifest_issues(config_file))
 
 
 def test_git_credential_name_deriving_secret_at_length_cap_no_warning(tmp_path: Path) -> None:
     """A credential name whose derived ``git-token-<name>`` lands exactly at
     MAX_SECRET_NAME_LENGTH emits no warning: the cap is inclusive (issue #308)."""
-    from agentworks.config.validation import MAX_SECRET_NAME_LENGTH
+    from agentworks.naming import MAX_SECRET_NAME_LENGTH
 
     # 'git-token-' is 10 chars, so a name of (cap - 10) makes the derived
     # secret name exactly the cap.
@@ -240,7 +240,7 @@ def test_git_credential_name_conforming_but_derived_over_cap_warns(tmp_path: Pat
     subtle property that the fix validates the DERIVED string, not the bare
     name (issue #308): a future edit validating the bare name would pass this
     name and silently regress."""
-    from agentworks.config.validation import MAX_SECRET_NAME_LENGTH, validate_name
+    from agentworks.naming import MAX_SECRET_NAME_LENGTH, validate_name
 
     # One char past the cap once the 10-char 'git-token-' prefix is added.
     name = "a" * (MAX_SECRET_NAME_LENGTH - len("git-token-") + 1)
@@ -252,7 +252,7 @@ def test_git_credential_name_conforming_but_derived_over_cap_warns(tmp_path: Pat
     )
     issues = _manifest_issues(config_file)
     assert any(
-        f"git_credentials.{name}" in issue and "does not follow the naming rules" in issue for issue in issues
+        f"git-credential/{name}" in issue and "does not follow the secret naming rules" in issue for issue in issues
     ), issues
 
 
@@ -494,8 +494,8 @@ _PROXMOX_TEST_CASES: list[dict[str, Any]] = [
         },
         "expect_error": None,
         "check": lambda registry: (
-            registry.lookup("vm-site", "proxmox").platform == "proxmox"
-            and registry.lookup("vm-site", "proxmox").platform_config
+            registry.lookup("vm-site", "proxmox").platform.name == "proxmox"
+            and registry.lookup("vm-site", "proxmox").platform.config
             == {
                 "api_url": "https://pve.example.com:8006",
                 "node": "pve",
@@ -520,33 +520,33 @@ _PROXMOX_TEST_CASES: list[dict[str, Any]] = [
         # platform applies its own defaults (storage local-lvm, bridge
         # vmbr0, verify_ssl True) at use.
         "check": lambda registry: (
-            "storage" not in registry.lookup("vm-site", "proxmox").platform_config
-            and "bridge" not in registry.lookup("vm-site", "proxmox").platform_config
-            and "verify_ssl" not in registry.lookup("vm-site", "proxmox").platform_config
+            "storage" not in registry.lookup("vm-site", "proxmox").platform.config
+            and "bridge" not in registry.lookup("vm-site", "proxmox").platform.config
+            and "verify_ssl" not in registry.lookup("vm-site", "proxmox").platform.config
         ),
     },
     {
         "id": "missing_api_url",
         "platform_config": {"node": "pve", "token_id": "u@p!t", "template_vmid": 9000},
-        "expect_error": r"vm-site/proxmox\.api_url is required",
+        "expect_error": r"vm-site/proxmox\.api_url: is required",
         "check": None,
     },
     {
         "id": "missing_node",
         "platform_config": {"api_url": "https://pve:8006", "token_id": "u@p!t", "template_vmid": 9000},
-        "expect_error": r"vm-site/proxmox\.node is required",
+        "expect_error": r"vm-site/proxmox\.node: is required",
         "check": None,
     },
     {
         "id": "missing_token_id",
         "platform_config": {"api_url": "https://pve:8006", "node": "pve", "template_vmid": 9000},
-        "expect_error": r"vm-site/proxmox\.token_id is required",
+        "expect_error": r"vm-site/proxmox\.token_id: is required",
         "check": None,
     },
     {
         "id": "missing_template_vmid",
         "platform_config": {"api_url": "https://pve:8006", "node": "pve", "token_id": "u@p!t"},
-        "expect_error": r"vm-site/proxmox\.template_vmid is required",
+        "expect_error": r"vm-site/proxmox\.template_vmid: is required",
         "check": None,
     },
 ]
@@ -724,7 +724,7 @@ def test_claude_marketplaces_rejects_string(tmp_path: Path) -> None:
         tmp_path,
         ManifestDoc("admin-template", "default", {"claude_marketplaces": "https://github.com/example/tools"}),
     )
-    with pytest.raises(ConfigError, match="must be a list of strings"):
+    with pytest.raises(ConfigError, match=r"claude_marketplaces: must be a list"):
         build_registry(load_config(config_file, warn_issues=False))
 
 
@@ -790,16 +790,18 @@ def test_named_console_tmux_layout_rejects_unknown(tmp_path: Path) -> None:
     (the decoder's spec-level error surfaces as ConfigError at build_registry)."""
     config_file = _minimal_config(tmp_path)
     write_manifests(tmp_path, ManifestDoc("named-console-template", "default", {"tmux_layout": "tabbed"}))
-    with pytest.raises(ConfigError, match="named_console.tmux_layout must be one of"):
+    with pytest.raises(ConfigError, match="tmux_layout: must be one of"):
         build_registry(load_config(config_file))
 
 
-def test_named_console_section_unexpected_keys_warn(tmp_path: Path) -> None:
-    """Unknown keys on the named-console-template manifest surface as
-    warnings on the manifest issues channel, not silent ignores."""
+def test_named_console_section_unexpected_keys_are_refused(tmp_path: Path) -> None:
+    """FR12's warn-to-error flip: an unknown key on the
+    named-console-template surface is a hard error naming the fields that
+    ARE valid, not a warning beside a config that loaded anyway."""
     config_file = _minimal_config(tmp_path)
     write_manifests(
         tmp_path,
         ManifestDoc("named-console-template", "default", {"tmux_layout": "tiled", "unknown_key": "x"}),
     )
-    assert any("unknown_key" in issue for issue in _manifest_issues(config_file))
+    with pytest.raises(ConfigError, match="unknown_key: unknown field; expected one of: tmux_layout"):
+        _manifest_issues(config_file)
