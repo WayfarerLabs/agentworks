@@ -80,27 +80,29 @@ introducing a framework, remote asset, hidden critical content, or onboarding de
 
 ## Phase 2: selected assets and custom 404
 
-- [ ] Delegate implementation to an `agentworks-dev` subagent with ownership of the selected
+- [x] Delegate implementation to an `agentworks-dev` subagent with ownership of the selected
       permanent SVG assets, 404 HTML/CSS/JavaScript, the narrow 404-only builder seam, focused game
       tests, and package-free manual browser checklist. The subagent is not alone in the codebase
       and must preserve concurrent changes.
-- [ ] Promote the selected original twin-plume geometry into a self-contained permanent SVG under
+- [x] Promote the selected original twin-plume geometry into a self-contained permanent SVG under
       `website/`; do not make permanent code depend on numbered SDD concepts.
-- [ ] Build a useful semantic no-JavaScript 404 with a visible path home and no preflight visual
+- [x] Build a useful semantic no-JavaScript 404 with a visible path home and no preflight visual
       control hints. The standard-library builder must render it with a validated root site base for
       the local operator demo; no deployment workflow or public host is added in this phase.
-- [ ] Implement the under-five-second plume cue, reduced-motion static state, deliberate Space or
+- [x] Implement the under-five-second plume cue, reduced-motion static state, deliberate Space or
       activation start, arrow/vi keyboard controls, tap/hold/drag pointer controls, and scoped event
       suppression and cleanup.
-- [ ] Implement deterministic bounded-step flight, collective and differential plume response,
+- [x] Implement deterministic bounded-step flight, collective and differential plume response,
       landing/crash/restart/exit states, G-bay agent deployment, persistent-per-run NOC power-up,
       lander departure, and the exact success status.
-- [ ] Add deterministic unit/state tests, source-contract tests, and a package-free manual browser
+- [x] Add deterministic unit/state tests, source-contract tests, and a package-free manual browser
       checklist for input equivalence, physics vectors, landing thresholds, hidden-until-start
       controls, lifecycle pause, reduced motion, pointer capture cleanup, powered-NOC reset
       boundaries, no-JavaScript fallback, and responsive scene bounds.
-- [ ] `agentworks-reviewer` and a fresh-eyes reviewer inspect the slice; valid findings return to
+- [x] `agentworks-reviewer` and a fresh-eyes reviewer inspect the slice; valid findings return to
       the implementing subagent and are resolved before re-review.
+- [ ] Complete the checklist's pending Firefox, WebKit, screen-reader, and human touch/motion rows
+      on available surfaces before declaring Phase 2 fully accepted.
 
 Definition of done: the brand and 404 game are review-clean and locally demonstrable from PR #439,
 but are not deployed or merged as a partial website.

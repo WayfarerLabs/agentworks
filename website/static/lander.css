@@ -1,0 +1,327 @@
+:root {
+    color: #292b30;
+    background: #f5f2e8;
+    font-family: ui-monospace, "Cascadia Code", "Liberation Mono", Menlo, monospace;
+    font-synthesis: none;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html {
+    overflow-x: hidden;
+}
+
+body {
+    min-width: 0;
+    margin: 0;
+    padding: clamp(1rem, 4vw, 3rem);
+}
+
+header,
+main,
+footer {
+    width: min(100%, 60rem);
+    margin-inline: auto;
+}
+
+.site-name,
+.error-code {
+    margin: 0;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.error-copy {
+    margin-block: clamp(2rem, 8vw, 5rem) 2rem;
+}
+
+h1 {
+    max-width: 18ch;
+    margin-block: 0.35rem 0.75rem;
+    font-family: system-ui, sans-serif;
+    font-size: clamp(2rem, 7vw, 4.5rem);
+    line-height: 1;
+}
+
+#not-found-message {
+    max-width: 60ch;
+    line-height: 1.6;
+}
+
+a {
+    color: #292b30;
+    font-weight: 700;
+    text-underline-offset: 0.25em;
+}
+
+a:focus-visible,
+#lander-scene-shell:focus-visible {
+    outline: 3px solid #d94a1e;
+    outline-offset: 2px;
+}
+
+#lander-game {
+    --lander-x: 300px;
+    --lander-y: 228px;
+    --lander-angle: 0deg;
+    --left-plume-scale: 0.08;
+    --right-plume-scale: 0.08;
+    --left-plume-opacity: 0.25;
+    --right-plume-opacity: 0.25;
+    --agent-x: 0px;
+    --agent-y: 0px;
+    margin-block: 2rem;
+}
+
+#lander-scene-shell {
+    position: relative;
+    width: min(100%, 60rem);
+    aspect-ratio: 25 / 16;
+    overflow: hidden;
+}
+
+#lander-scene {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+#scene-sky {
+    fill: #f5f2e8;
+}
+
+#scene-stars {
+    fill: none;
+    stroke: #8a867c;
+    stroke-linecap: round;
+    stroke-width: 4;
+}
+
+#scene-terrain {
+    fill: #d7d2c4;
+    stroke: #4b4e55;
+    stroke-width: 2;
+}
+
+#landing-zone {
+    stroke: #d94a1e;
+    stroke-width: 2;
+}
+
+#landing-zone-markers {
+    fill: none;
+    stroke: #4b4e55;
+    stroke-width: 3;
+}
+
+#noc-west,
+#noc-server,
+#noc-east,
+#noc-entry {
+    fill: #20232a;
+    stroke: #4b4e55;
+    stroke-width: 2;
+}
+
+#noc-west-window rect,
+#noc-east-window rect {
+    fill: #3b3f47;
+}
+
+#noc-west-window path,
+#noc-east-window path,
+#noc-server-bars path {
+    fill: none;
+    stroke: #20232a;
+    stroke-width: 2;
+}
+
+#noc-server-bars path,
+#noc-server-bars circle {
+    stroke: #3b3f47;
+}
+
+#noc-server-bars circle {
+    fill: #3b3f47;
+}
+
+#noc-antenna,
+#noc-signals {
+    fill: none;
+    stroke: #d94a1e;
+    stroke-linecap: round;
+    stroke-width: 3;
+}
+
+#noc-signals {
+    opacity: 0;
+}
+
+#lander-game[data-noc-stage="1"] #noc-west-window rect,
+#lander-game[data-noc-stage="2"] #noc-west-window rect,
+#lander-game[data-noc-stage="3"] #noc-west-window rect,
+#lander-game[data-noc-stage="4"] #noc-west-window rect {
+    fill: #ffe09a;
+}
+
+#lander-game[data-noc-stage="2"] #noc-server-bars path,
+#lander-game[data-noc-stage="3"] #noc-server-bars path,
+#lander-game[data-noc-stage="4"] #noc-server-bars path {
+    stroke: #7de2c5;
+}
+
+#lander-game[data-noc-stage="2"] #noc-server-bars circle,
+#lander-game[data-noc-stage="3"] #noc-server-bars circle,
+#lander-game[data-noc-stage="4"] #noc-server-bars circle {
+    fill: #7de2c5;
+    stroke: #7de2c5;
+}
+
+#lander-game[data-noc-stage="3"] #noc-east-window rect,
+#lander-game[data-noc-stage="4"] #noc-east-window rect {
+    fill: #ffe09a;
+}
+
+#lander-game[data-noc-stage="4"] #noc-signals {
+    opacity: 1;
+}
+
+#mission-lander {
+    transform: translate(var(--lander-x), var(--lander-y)) rotate(var(--lander-angle)) scale(0.16)
+        translate(-120px, -415px);
+}
+
+#mission-left-engine {
+    opacity: var(--left-plume-opacity);
+    transform-origin: 82px 401px;
+    transform: translate(0, 401px) scale(1, var(--left-plume-scale)) translate(0, -401px);
+}
+
+#mission-right-engine {
+    opacity: var(--right-plume-opacity);
+    transform-origin: 158px 401px;
+    transform: translate(0, 401px) scale(1, var(--right-plume-scale)) translate(0, -401px);
+}
+
+#lander-game[data-cue="running"] #mission-left-engine,
+#lander-game[data-cue="running"] #mission-right-engine {
+    animation: agw-preflight-cue 0.8s ease-in-out 3;
+}
+
+#mission-bay-lip {
+    display: none;
+    fill: none;
+    stroke: #292b30;
+    stroke-width: 8;
+}
+
+#lander-game[data-mission-state="landed"] #mission-bay-lip,
+#lander-game[data-mission-state="deploying"] #mission-bay-lip,
+#lander-game[data-mission-state="powering"] #mission-bay-lip,
+#lander-game[data-mission-state="departing"] #mission-bay-lip,
+#lander-game[data-mission-state="succeeded"] #mission-bay-lip {
+    display: block;
+}
+
+#lander-game[data-mission-state="succeeded"] #mission-lander {
+    display: none;
+}
+
+#mission-agent {
+    display: none;
+    fill: #292b30;
+    stroke: #f5f2e8;
+    stroke-linecap: square;
+    stroke-width: 1.5;
+    transform: translate(var(--agent-x), var(--agent-y)) scale(1.8);
+}
+
+#mission-agent path {
+    fill: none;
+}
+
+#lander-game[data-mission-state="deploying"] #mission-agent {
+    display: block;
+    animation: agw-agent-route 2.2s linear 1;
+}
+
+#lander-game[data-mission-state="flying"] #lander-scene-shell {
+    touch-action: none;
+    user-select: none;
+}
+
+#lander-start {
+    position: absolute;
+    top: 31.7625%;
+    left: 30%;
+    width: max(44px, 2.816%);
+    height: max(44px, 12.525%);
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    transform: translate(-50%, -50%);
+}
+
+#lander-start:focus {
+    outline: 0;
+}
+
+#lander-start:focus-visible {
+    outline: 3px solid #d94a1e;
+    outline-offset: 2px;
+}
+
+[hidden] {
+    display: none !important;
+}
+
+#lander-controls,
+#lander-status {
+    max-width: 72ch;
+    min-height: 1.5em;
+    line-height: 1.5;
+}
+
+footer {
+    padding-top: 1rem;
+    border-top: 1px solid #8a867c;
+    color: #4b4e55;
+}
+
+#lander-game[data-paused="true"] * {
+    animation-play-state: paused !important;
+}
+
+@keyframes agw-preflight-cue {
+    0%,
+    100% {
+        transform: translate(0, 401px) scale(1, 0.08) translate(0, -401px);
+    }
+
+    50% {
+        transform: translate(0, 401px) scale(1, 0.28) translate(0, -401px);
+    }
+}
+
+@keyframes agw-agent-route {
+    from {
+        opacity: 0.98;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation: none !important;
+        transition: none !important;
+    }
+}
