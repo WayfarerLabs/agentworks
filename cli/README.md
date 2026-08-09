@@ -1448,10 +1448,12 @@ Completions include dynamic VM, vm-site, workspace, session, and template name l
 
 All state is stored in `~/.config/agentworks/agentworks.db` (SQLite). Schema migrations are
 forward-only and run automatically when a normal Agentworks command opens state. `agw doctor`
-inspects schema and current contents without opening the original files through SQLite: a cleanly
-closed WAL database uses an immutable main-file view, while an active WAL set is read from private
-temporary copies. It reports a pending migration without applying it and does not create or change
-the database, WAL, or shared-memory files.
+resolves the real database identity and inspects schema and current contents without opening an
+active original through SQLite. A cleanly closed WAL database uses an immutable main-file view. An
+active database/WAL/shared-memory set is stream-copied to private storage, accepted only when a
+second source fingerprint proves the complete set stayed unchanged, and validated there by SQLite;
+concurrent transitions are retried. Doctor reports a pending migration without applying it and does
+not create or change the original database, WAL, or shared-memory files.
 
 ## Environment Variables
 

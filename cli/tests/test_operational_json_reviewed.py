@@ -243,6 +243,117 @@ def test_doctor_active_wal_snapshot_preserves_sidecars_and_reads_uncheckpointed_
     assert after == before
 
 
+def test_inspection_snapshot_retries_concurrent_checkpoint_after_main_copy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A checkpoint transition cannot produce a mixed or silently stale copy."""
+    import agentworks.db.database as database_module
+    from agentworks.db import Database
+
+    db_path = tmp_path / "checkpoint.db"
+    writer = Database(db_path)
+    writer.set_setting("system_slug", "committed-before-checkpoint")
+    paths = _database_files(db_path)
+    original_fingerprint = database_module._fingerprint_stream
+    checkpointed: tuple[bytes | None, ...] | None = None
+
+    def checkpoint_after_main_copy(
+        source: Path,
+        destination: Path | None = None,
+    ):  # noqa: ANN202
+        nonlocal checkpointed
+        fingerprint = original_fingerprint(source, destination)
+        if source == db_path and destination is not None and checkpointed is None:
+            writer.close()
+            checkpointed = _file_bytes(paths)
+        return fingerprint
+
+    monkeypatch.setattr(database_module, "_fingerprint_stream", checkpoint_after_main_copy)
+
+    with Database.inspection_snapshot(db_path) as (exists, current, latest, snapshot):
+        assert exists and current == latest and snapshot is not None
+        assert snapshot.get_setting("system_slug") == "committed-before-checkpoint"
+
+    assert checkpointed is not None
+    assert checkpointed[1:] == (None, None)
+    assert _file_bytes(paths) == checkpointed
+
+
+def test_inspection_snapshot_resolves_symlink_before_active_sidecars(
+    tmp_path: Path,
+) -> None:
+    """A database alias discovers WAL state beside the real database identity."""
+    from agentworks.db import Database
+
+    real_directory = tmp_path / "real"
+    alias_directory = tmp_path / "alias"
+    real_directory.mkdir()
+    alias_directory.mkdir()
+    db_path = real_directory / "state.db"
+    alias_path = alias_directory / "agentworks.db"
+    writer = Database(db_path)
+    writer.set_setting("system_slug", "resolved-active-wal")
+    alias_path.symlink_to(db_path)
+    paths = _database_files(db_path)
+    before = _file_bytes(paths)
+    try:
+        with Database.inspection_snapshot(alias_path) as (exists, current, latest, snapshot):
+            assert exists and current == latest and snapshot is not None
+            assert snapshot.get_setting("system_slug") == "resolved-active-wal"
+        after = _file_bytes(paths)
+    finally:
+        writer.close()
+
+    assert after == before
+    assert not Path(f"{alias_path}-wal").exists()
+    assert not Path(f"{alias_path}-shm").exists()
+
+
+def test_inspection_snapshot_retry_exhaustion_is_clean_and_path_free(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A continuously changing source fails closed without residue or paths."""
+    import agentworks.db.database as database_module
+    from agentworks.db import Database
+    from agentworks.errors import StateError
+
+    db_path = tmp_path / "operator-private-name.db"
+    writer = Database(db_path)
+    writer.set_setting("system_slug", "busy")
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    real_temporary_directory = database_module.tempfile.TemporaryDirectory
+    created: list[Path] = []
+    attempts = 0
+
+    def tracked_temporary_directory(*, prefix: str):  # noqa: ANN202
+        temporary = real_temporary_directory(prefix=prefix, dir=scratch)
+        created.append(Path(temporary.name))
+        return temporary
+
+    def always_changes(source_db: Path, snapshot_db: Path) -> None:
+        nonlocal attempts
+        del source_db, snapshot_db
+        attempts += 1
+        raise database_module._SnapshotChanged
+
+    monkeypatch.setattr(database_module.tempfile, "TemporaryDirectory", tracked_temporary_directory)
+    monkeypatch.setattr(database_module, "_copy_verified_file_set", always_changes)
+    try:
+        with pytest.raises(StateError) as raised, Database.inspection_snapshot(db_path):
+            pytest.fail("an unstable snapshot must not be yielded")
+    finally:
+        writer.close()
+
+    message = str(raised.value)
+    assert message == "state database inspection snapshot could not be created"
+    assert str(db_path) not in message and str(scratch) not in message
+    assert attempts == database_module._INSPECTION_SNAPSHOT_ATTEMPTS
+    assert created and not any(path.exists() for path in created)
+
+
 def test_vm_event_enum_covers_every_literal_producer() -> None:
     """A new production event producer must update the closed v1 vocabulary."""
     import agentworks

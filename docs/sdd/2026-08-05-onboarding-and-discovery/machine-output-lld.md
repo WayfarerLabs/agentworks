@@ -280,11 +280,15 @@ renderer path.
 
 Doctor is inspection-only at both schema states. A stale schema yields the System, VM sites, and
 Database pending-migration rows without opening the original database through SQLite. A current,
-cleanly closed WAL database is read through an immutable main-file connection, which cannot create
-sidecars. When WAL/SHM sidecars exist, doctor copies the main database and existing sidecars to a
-private writable temporary directory and opens only the disposable copies, preserving active-WAL
-visibility without modifying the originals. Each snapshot is cleaned up after the group reads its
-facts; doctor neither migrates nor creates or changes the original database, WAL, or SHM files.
+cleanly closed WAL database is resolved to its real identity and read through an immutable main-file
+connection, which cannot create sidecars. When resolved WAL/SHM sidecars exist, doctor stream-copies
+the complete main/WAL/SHM set into a private writable directory while recording file identity, size,
+modification time, and content fingerprints. It re-reads and re-stats the complete source set and
+accepts only an exact match, then validates and opens only the disposable copy through SQLite. A
+concurrent checkpoint, replacement, or sidecar transition discards the candidate and retries a small
+bounded number of times; exhaustion is a path-free inspection-unavailable error. Each snapshot is
+cleaned up after the group reads its facts; doctor neither migrates nor creates or changes the
+original database, WAL, or SHM files.
 
 --names-only remains completion plumbing and is mutually exclusive with --output json on every
 covered list or kinds command that already has it. Validate that conflict before service work. It

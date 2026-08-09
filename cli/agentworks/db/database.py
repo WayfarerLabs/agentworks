@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
-import shutil
+import os
 import sqlite3
 import tempfile
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -46,6 +48,102 @@ if TYPE_CHECKING:
 
 DatabaseDriverError = sqlite3.DatabaseError
 """Driver failure type exposed so read-only consumers need no SQLite import."""
+
+_INSPECTION_SNAPSHOT_ATTEMPTS = 3
+_SNAPSHOT_CHUNK_SIZE = 1024 * 1024
+
+
+class _SnapshotChanged(Exception):
+    """The source file set changed while an inspection copy was made."""
+
+
+@dataclass(frozen=True)
+class _FileFingerprint:
+    device: int
+    inode: int
+    size: int
+    mtime_ns: int
+    digest: bytes
+
+
+def _metadata(stat: os.stat_result) -> tuple[int, int, int, int]:
+    return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns
+
+
+def _fingerprint_stream(source: Path, destination: Path | None = None) -> _FileFingerprint:
+    """Hash one stable source identity, optionally copying it as it is read."""
+    try:
+        path_before = source.stat()
+        digest = hashlib.sha256()
+        with source.open("rb") as source_file:
+            descriptor_before = os.fstat(source_file.fileno())
+            if _metadata(descriptor_before) != _metadata(path_before):
+                raise _SnapshotChanged
+            destination_file = destination.open("wb") if destination is not None else None
+            try:
+                while chunk := source_file.read(_SNAPSHOT_CHUNK_SIZE):
+                    digest.update(chunk)
+                    if destination_file is not None:
+                        destination_file.write(chunk)
+            finally:
+                if destination_file is not None:
+                    destination_file.close()
+            descriptor_after = os.fstat(source_file.fileno())
+        path_after = source.stat()
+    except FileNotFoundError:
+        raise _SnapshotChanged from None
+
+    expected = _metadata(path_before)
+    if _metadata(descriptor_after) != expected or _metadata(path_after) != expected:
+        raise _SnapshotChanged
+    return _FileFingerprint(*expected, digest.digest())
+
+
+def _file_metadata(path: Path) -> tuple[int, int, int, int] | None:
+    try:
+        return _metadata(path.stat())
+    except FileNotFoundError:
+        return None
+
+
+def _copy_verified_file_set(source_db: Path, snapshot_db: Path) -> None:
+    """Copy one byte-stable database/WAL/SHM set or request a retry."""
+    source_paths = (
+        source_db,
+        source_db.with_name(f"{source_db.name}-wal"),
+        source_db.with_name(f"{source_db.name}-shm"),
+    )
+    snapshot_paths = (
+        snapshot_db,
+        snapshot_db.with_name(f"{snapshot_db.name}-wal"),
+        snapshot_db.with_name(f"{snapshot_db.name}-shm"),
+    )
+    initial = tuple(_file_metadata(path) for path in source_paths)
+    if initial[0] is None or initial[1:] == (None, None):
+        raise _SnapshotChanged
+
+    copied: list[_FileFingerprint | None] = []
+    for source, destination, expected in zip(source_paths, snapshot_paths, initial, strict=True):
+        if expected is None:
+            copied.append(None)
+            continue
+        fingerprint = _fingerprint_stream(source, destination)
+        if _metadata_tuple(fingerprint) != expected:
+            raise _SnapshotChanged
+        copied.append(fingerprint)
+
+    verified = tuple(
+        None if expected is None else _fingerprint_stream(source)
+        for source, expected in zip(source_paths, initial, strict=True)
+    )
+    if tuple(copied) != verified:
+        raise _SnapshotChanged
+    if tuple(_file_metadata(path) for path in source_paths) != initial:
+        raise _SnapshotChanged
+
+
+def _metadata_tuple(fingerprint: _FileFingerprint) -> tuple[int, int, int, int]:
+    return fingerprint.device, fingerprint.inode, fingerprint.size, fingerprint.mtime_ns
 
 
 class Database:
@@ -101,42 +199,76 @@ class Database:
         A cleanly closed WAL database has no sidecars, so an immutable SQLite
         connection can read its checkpointed main file without creating
         ``-wal``/``-shm``. When sidecars exist, immutable mode would ignore
-        uncheckpointed rows; copy the database and its current sidecars into a
-        private writable directory and let SQLite coordinate only those
-        disposable copies. The source files are never opened by SQLite.
+        uncheckpointed rows. Stream-copy a byte-stable database/WAL/SHM set,
+        verify the resolved source set a second time, and let SQLite coordinate
+        only the disposable private copy. The active source files are never
+        opened by SQLite.
         """
-        db_path = path or _db.DB_PATH
-        if not db_path.exists():
+        requested_path = path or _db.DB_PATH
+        if not requested_path.exists():
             yield False, 0, LATEST_VERSION, None
             return
 
-        wal_path = db_path.with_name(f"{db_path.name}-wal")
-        shm_path = db_path.with_name(f"{db_path.name}-shm")
         temporary: tempfile.TemporaryDirectory[str] | None = None
-        immutable = not wal_path.exists() and not shm_path.exists()
-        snapshot_path = db_path
         connection: sqlite3.Connection | None = None
         database: Database | None = None
         try:
-            if not immutable:
-                temporary = tempfile.TemporaryDirectory(prefix="agentworks-db-inspection-")
-                snapshot_path = Path(temporary.name) / db_path.name
+            try:
+                source_path = requested_path.resolve(strict=True)
+            except (OSError, RuntimeError):
+                raise StateError("state database inspection snapshot could not be created") from None
+
+            wal_path = source_path.with_name(f"{source_path.name}-wal")
+            shm_path = source_path.with_name(f"{source_path.name}-shm")
+            snapshot_path = source_path
+            immutable = False
+            for attempt in range(_INSPECTION_SNAPSHOT_ATTEMPTS):
+                if not wal_path.exists() and not shm_path.exists():
+                    immutable = True
+                    break
+                candidate_connection: sqlite3.Connection | None = None
                 try:
-                    shutil.copyfile(db_path, snapshot_path)
-                    for source in (wal_path, shm_path):
-                        # A writer may remove a sidecar between the existence
-                        # check and the copy. SQLite can still inspect the
-                        # coherent files that remain in the private snapshot.
-                        with suppress(FileNotFoundError):
-                            shutil.copyfile(source, Path(temporary.name) / source.name)
+                    if temporary is None:
+                        temporary = tempfile.TemporaryDirectory(prefix="agentworks-db-inspection-")
+                    attempt_directory = Path(temporary.name) / str(attempt)
+                    attempt_directory.mkdir()
+                    candidate = attempt_directory / source_path.name
+                    _copy_verified_file_set(source_path, candidate)
+                    candidate_connection = sqlite3.connect(
+                        f"{candidate.resolve().as_uri()}?mode=ro",
+                        uri=True,
+                    )
+                    if candidate_connection.execute("PRAGMA quick_check").fetchall() != [("ok",)]:
+                        candidate_connection.close()
+                        continue
+                except _SnapshotChanged:
+                    if candidate_connection is not None:
+                        candidate_connection.close()
+                    continue
+                except sqlite3.DatabaseError:
+                    if candidate_connection is not None:
+                        candidate_connection.close()
+                    continue
                 except OSError:
                     raise StateError("state database inspection snapshot could not be created") from None
+                snapshot_path = candidate
+                connection = candidate_connection
+                break
+            else:
+                raise StateError("state database inspection snapshot could not be created")
 
-            immutable_query = "&immutable=1" if immutable else ""
-            connection = sqlite3.connect(
-                f"{snapshot_path.resolve().as_uri()}?mode=ro{immutable_query}",
-                uri=True,
-            )
+            if connection is None:
+                immutable_query = "&immutable=1" if immutable else ""
+                try:
+                    connection = sqlite3.connect(
+                        f"{snapshot_path.resolve().as_uri()}?mode=ro{immutable_query}",
+                        uri=True,
+                    )
+                    valid = connection.execute("PRAGMA quick_check").fetchall() == [("ok",)]
+                except (OSError, sqlite3.DatabaseError):
+                    raise StateError("state database inspection snapshot could not be created") from None
+                if not valid:
+                    raise StateError("state database inspection snapshot could not be created")
             try:
                 row = connection.execute("SELECT MAX(version) FROM schema_version").fetchone()
                 current = row[0] or 0
