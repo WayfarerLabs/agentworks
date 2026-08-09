@@ -102,8 +102,9 @@ source is enabled and target is disabled. The error names:
 - the enabled referrer and declaration location when available
 - the disabled target
 - every disable cause
-- the exact actions to re-enable the shipped target, stop declaring the reference, or declare an
-  operator provider under the same name
+- the exact actions to re-enable the shipped target or stop declaring the reference
+- for a declarable app-shipped target only, the additional option to declare an operator provider
+  under the same name after explicitly disabling the shipped provider
 
 A disabled source is inert and does not activate or validate the availability of its dependencies.
 This lets an entirely disabled plugin cohort contain internal references without breaking unrelated
@@ -188,7 +189,9 @@ Three errors remain distinct:
 
 2. **Resource explicitly disabled.** An enabled resource references a selector disabled by
    `resource_policy.disabled`. The error names both ends and tells the operator to remove the
-   selector, remove the reference, or declare an operator provider under the same name.
+   selector or remove the reference. For a declarable target only, it also offers declaring an
+   operator provider under the same name. Capability kinds cannot be operator-declared and never
+   receive that impossible remediation.
 3. **Provider collision.** An operator and app-shipped provider claim one name without explicit
    authorization. The error names both origins and tells the operator to rename the operator row or
    add the exact disable selector and keep the name.

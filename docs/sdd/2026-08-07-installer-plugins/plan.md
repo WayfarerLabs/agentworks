@@ -33,10 +33,10 @@ contracts with no open blocking decision.
 
 ## Phase 1: resource policy and retained provenance
 
-- [ ] Write `resource-disable-lld.md` for complete provider-claim collection, policy injection,
+- [x] Write `resource-disable-lld.md` for complete provider-claim collection, policy injection,
       publication-order-independent resolution, selector matching, retained disable marks,
       substitutions, and graph projections.
-- [ ] Independently review the LLD before implementation.
+- [x] Independently review the LLD before implementation.
 - [ ] Add typed config models and parsing for `[resource_policy].disabled` with canonical selector
       validation and sample-config coverage.
 - [ ] Replace first-source enablement loss with deterministic retention of all disable marks on the
@@ -66,8 +66,9 @@ contract matches the code.
 
 - [ ] Reject enabled resource-to-resource edges to disabled targets during finalize, including exact
       source, target, location, cause, and remediation text.
-- [ ] Cover all three explicit-disable remediations: re-enable the shipped row, remove the
-      reference, or declare an operator provider under the same name.
+- [ ] Cover re-enable and remove-reference remediations for every disabled target, plus the paired
+      explicit-disable and same-name declaration alternative for declarable targets only. Prove
+      capability errors never offer an operator declaration.
 - [ ] Prove disabled sources are inert and settings references keep presence-not-availability
       semantics.
 - [ ] Make resource-derived guide names read stored graph enablement while conceptual plugin topics

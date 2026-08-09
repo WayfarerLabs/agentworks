@@ -49,8 +49,10 @@ dotfiles, tmuxinator, and Claude setup remain core. This boundary is an operator
   (operator ruling, 2026-08-07). A disabled resource leaves the normal views (lists, completions,
   guide topics), retrievable in listings behind a flag; `describe` and `doctor` always surface
   enablement provenance; and a disabled resource that is still referenced by another resource is a
-  finalize-time hard error naming both ends and the remediation (re-enable it, or declare your own
-  under the name). Wave 2's reference extraction is what makes this safe: references to disabled
+  finalize-time hard error naming both ends and the remediation (re-enable it, stop declaring the
+  reference, or, for a declarable app-shipped target, explicitly disable and declare your own under
+  the name). Capability kinds have no operator declaration surface, so they never offer the last
+  alternative. Wave 2's reference extraction is what makes this safe: references to disabled
   resources are detectable at finalize by construction. Scope: R7 governs resource-to-resource
   references; settings references keep the presence-not-availability contract wave 2 landed
   (`config/references.py`), with `doctor` surfacing the disabled state. R3's plugin-enablement error
@@ -98,9 +100,10 @@ dotfiles, tmuxinator, and Claude setup remain core. This boundary is an operator
   `apt` or `install-command` plugin with unchanged names and specs. Core initializer execution is
   unchanged.
 - AC4. `agw guide` teaches the new plugins through their own topic contributions.
-- AC5. Disabling a plugin-provided resource and declaring an operator resource under the same name
-  yields the operator's resource, with the substitution shown by `describe`; the same config without
-  the disable is a hard error naming both remediations.
+- AC5. Disabling a plugin-provided declarable resource and declaring an operator resource under the
+  same name yields the operator's resource, with the substitution shown by `describe`; the same
+  config without the disable is a hard error naming both remediations. Capability resources support
+  disable but not operator replacement.
 - AC6. A disabled resource still referenced by another resource fails finalize with an error naming
   the reference and the remediation; the same disabled resource unreferenced simply leaves the
   normal views.
