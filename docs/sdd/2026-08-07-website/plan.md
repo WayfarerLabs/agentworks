@@ -1,6 +1,6 @@
 # Plan: The agentworks.build Website
 
-- Status: Staged interim release approved; implementation in progress
+- Status: Interim implementation complete; release acceptance in progress
 - Date: 2026-08-07
 - Last revised: 2026-08-09
 - FRD: `frd.md`
@@ -200,26 +200,26 @@ review-clean, deterministic interim artifact that is ready to publish but makes 
 
 ## Phase 5: CI and default Pages deployment
 
-- [ ] Delegate workflow implementation to an `agentworks-dev` subagent with ownership of the Pages
+- [x] Delegate workflow implementation to an `agentworks-dev` subagent with ownership of the Pages
       workflow and the website job in existing CI. It must preserve existing workflow conventions
       and the `ci-success` umbrella.
-- [ ] Verify current stable major releases of official checkout, configure-pages,
+- [x] Verify current stable major releases of official checkout, configure-pages,
       upload-pages-artifact, and deploy-pages actions at implementation time and pin them.
-- [ ] Add the website build/test job to pull-request CI and to `ci-success` so branch protection
+- [x] Add the website build/test job to pull-request CI and to `ci-success` so branch protection
       cannot omit it.
-- [ ] Add the Pages workflow: build and upload from a clean checkout, deploy on `main`, least
+- [x] Add the Pages workflow: build and upload from a clean checkout, deploy on `main`, least
       permissions, `github-pages` environment, and safe concurrency.
-- [ ] Keep the publishing workflow free of path filters so authoritative inputs outside `website/`
+- [x] Keep the publishing workflow free of path filters so authoritative inputs outside `website/`
       always rebuild and verify the deployed artifact.
-- [ ] Ensure pull requests exercise the build without deploying or acquiring Pages write/OIDC
+- [x] Ensure pull requests exercise the build without deploying or acquiring Pages write/OIDC
       permissions; verify the uploaded artifact contains only intended files and identifies the
       source commit.
 - [ ] Before merge, obtain operator approval to enable GitHub Actions as this repository's Pages
       source and restrict the `github-pages` environment to `main`; record the non-secret setting
       evidence in `website/README.md` and PR #439.
-- [ ] Run workflow syntax checks, focused site tests, full repository CI-equivalent gates,
+- [x] Run workflow syntax checks, focused site tests, full repository CI-equivalent gates,
       locked-SDD checks, and file-quality lint.
-- [ ] `agentworks-reviewer` and a fresh-eyes reviewer inspect permissions, triggers, artifact
+- [x] `agentworks-reviewer` and a fresh-eyes reviewer inspect permissions, triggers, artifact
       boundaries, and failure modes; resolve valid findings and re-review.
 - [ ] Mark PR #439 ready only when the complete interim release is review-clean. Triage Copilot
       comments, request the saga lead's standalone-effort review, resolve valid findings, and hand

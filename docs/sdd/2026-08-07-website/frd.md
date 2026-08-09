@@ -1,6 +1,6 @@
 # FRD: The agentworks.build Website
 
-- Status: Staged interim release approved; implementation in progress
+- Status: Interim implementation complete; release acceptance in progress
 - Date: 2026-08-07
 - Last revised: 2026-08-09
 - Seeded by: the saga lead, at operator request. This is a standalone effort, deliberately NOT a

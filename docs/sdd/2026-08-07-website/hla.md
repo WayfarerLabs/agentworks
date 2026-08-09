@@ -1,6 +1,6 @@
 # HLA: The agentworks.build Website
 
-- Status: Staged interim release approved; implementation in progress
+- Status: Interim implementation complete; release acceptance in progress
 - Date: 2026-08-07
 - Last revised: 2026-08-09
 - FRD: `frd.md`
