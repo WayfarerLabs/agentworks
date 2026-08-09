@@ -16,11 +16,12 @@ the finished artifact, and fails when a content contract required by the current
 unavailable or ambiguous.
 
 Delivery has two honest stages over the same URLs and architecture. The interim release publishes
-the complete home and security shells, repository-derived product/security passages, stable links,
-selected brand, custom 404, pipeline, and domain while canonical onboarding is unavailable. It
-contains a small semantic availability notice and no bootstrap-shaped substitute. After onboarding
-Phase 3 lands on `main`, a second release replaces that notice with the canonical bootstrap and its
-copy enhancement. This is a delivery sequence, not a runtime mode or parallel site.
+the complete Home, Manifesto, and Security shells, repository-derived product/security passages,
+stable links, selected brand, custom 404, pipeline, and domain while canonical onboarding is
+unavailable. It contains a small semantic availability notice and no bootstrap-shaped substitute.
+After onboarding Phase 3 lands on `main`, a second release replaces that notice with the canonical
+bootstrap and its copy enhancement. This is a delivery sequence, not a runtime mode or parallel
+site.
 
 The content pages use HTML and CSS for their full experience. A small local script adds the
 nonessential custom-404 lander game. The later onboarding release adds focused copy-button behavior,
