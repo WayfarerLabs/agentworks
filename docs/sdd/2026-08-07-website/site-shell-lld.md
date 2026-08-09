@@ -433,11 +433,13 @@ No source write, output escape, inherited unknown file, timestamp, commit ID, en
 prose, or nondeterministic ordering enters output bytes. For the same input bytes and arguments,
 every generated and copied file is byte-identical.
 
-Every local URL in HTML is `SITE_BASE` plus a root-relative artifact path without a leading slash.
-Root navigation is exactly `SITE_BASE`; security navigation is `SITE_BASE + "security/"`. Canonical
-and approved external anchors are absolute HTTPS URLs and are not base-prefixed. Full build
-verification resolves every local reference against the output manifest for both `/` and
-`/agentworks/`.
+Every cross-document local URL in HTML is `SITE_BASE` plus a root-relative artifact path without a
+leading slash. Root navigation is exactly `SITE_BASE`; security navigation is
+`SITE_BASE + "security/"`. Each skip link is the same-document fragment `#main-content`, so the 404
+served for an arbitrary missing URL does not reload through `/404.html`; the builder verifies that
+the fragment resolves in its owning document. Canonical and approved external anchors are absolute
+HTTPS URLs and are not base-prefixed. Full build verification resolves every cross-document local
+reference against the output manifest for both `/` and `/agentworks/`.
 
 ## 10. Interim verification matrix
 
