@@ -137,7 +137,7 @@ class TyperHandler:
         # has one definition.
         prompt_on_stderr = presentation_suppressed()
         prompt_stream = sys.stderr if prompt_on_stderr else sys.stdout
-        if prompt_stream.isatty() and not non_interactive():
+        if prompt_stream.isatty() and not non_interactive() and not machine_readable():
             typer.echo(MOUSE_TRACKING_DISABLE, nl=False, err=prompt_on_stderr)
         try:
             confirm = click.confirm if prompt_on_stderr else typer.confirm

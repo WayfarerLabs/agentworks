@@ -145,59 +145,102 @@ def test_doctor_stale_schema_is_inspection_only_in_human_and_json(
     assert constructor_modes == []
 
 
-def test_doctor_current_schema_reads_full_contents_without_changing_database(
+def _database_files(db_path: Path) -> tuple[Path, Path, Path]:
+    return db_path, Path(f"{db_path}-wal"), Path(f"{db_path}-shm")
+
+
+def _file_bytes(paths: tuple[Path, ...]) -> tuple[bytes | None, ...]:
+    return tuple(path.read_bytes() if path.exists() else None for path in paths)
+
+
+def _doctor_database_checks(machine_stdout: bytes) -> dict[str, list[dict[str, object]]]:
+    document = cast("dict[str, object]", json.loads(machine_stdout))
+    data = cast("dict[str, object]", document["data"])
+    groups = cast("list[dict[str, object]]", data["groups"])
+    return {cast("str", group["name"]): cast("list[dict[str, object]]", group["checks"]) for group in groups}
+
+
+def test_doctor_clean_closed_wal_database_is_sidecar_free_and_directory_read_only(
     tmp_path: Path,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Current-schema human and JSON doctor use closed read-only handles."""
+    """Immutable inspection reads a clean WAL main file without sidecars."""
     import agentworks.db as db_module
     from agentworks.db import Database
 
     db_path = tmp_path / "current.db"
     database = Database(db_path)
+    database.set_setting("system_slug", "closed-visible")
     database.close()
-    connection = sqlite3.connect(db_path)
-    assert connection.execute("PRAGMA journal_mode = DELETE").fetchone() == ("delete",)
-    connection.close()
-    before_schema = Database.check_schema(db_path)
-    before = db_path.read_bytes()
-    sidecars = [Path(f"{db_path}-wal"), Path(f"{db_path}-shm")]
-    assert not any(path.exists() for path in sidecars)
+    paths = _database_files(db_path)
+    assert _file_bytes(paths)[1:] == (None, None)
+    before = _file_bytes(paths)
 
     monkeypatch.setattr(db_module, "DB_PATH", db_path)
     _stub_full_doctor_environment(monkeypatch, make_config())
-    constructor_modes: list[bool] = []
-    original_init = Database.__init__
+    db_path.chmod(0o444)
+    tmp_path.chmod(0o555)
+    try:
+        human = CliRunner().invoke(app, ["doctor", "--output", "human"])
+        machine = CliRunner().invoke(app, ["doctor", "--output", "json"])
+        after = _file_bytes(paths)
+    finally:
+        tmp_path.chmod(0o755)
+        db_path.chmod(0o644)
 
-    def recording_init(self: Database, *args: object, **kwargs: object) -> None:
-        constructor_modes.append(cast("bool", kwargs.get("read_only", False)))
-        original_init(self, *args, **kwargs)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(Database, "__init__", recording_init)
-
-    human = CliRunner().invoke(app, ["doctor", "--output", "human"])
-    machine = CliRunner().invoke(app, ["doctor", "--output", "json"])
-
-    assert human.exit_code == machine.exit_code == 0
+    assert human.exit_code == machine.exit_code == 0, human.output
+    assert b"System slug: closed-visible" in human.stdout_bytes
     assert b"Contents: 0 VMs, 0 workspaces" in human.stdout_bytes
-    document = cast("dict[str, object]", json.loads(machine.stdout_bytes))
-    data = cast("dict[str, object]", document["data"])
-    groups = cast("list[dict[str, object]]", data["groups"])
-    database_group = next(group for group in groups if group["name"] == "Database")
-    assert database_group["checks"] == [
+    checks = _doctor_database_checks(machine.stdout_bytes)
+    assert checks["System"] == [{"name": "System slug", "status": "ok", "message": None, "hint": None}]
+    assert checks["Database"] == [
         {"name": "Schema", "status": "ok", "message": None, "hint": None},
         {"name": "Contents", "status": "ok", "message": None, "hint": None},
     ]
-    assert constructor_modes == [True, True, True, True, True, True]
-    assert db_path.read_bytes() == before
-    assert Database.check_schema(db_path) == before_schema
-    connection = sqlite3.connect(db_path)
+    assert after == before
+
+
+def test_doctor_active_wal_snapshot_preserves_sidecars_and_reads_uncheckpointed_row(
+    tmp_path: Path,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Active WAL facts are read from disposable copies, never originals."""
+    import agentworks.db as db_module
+    from agentworks.db import Database
+
+    db_path = tmp_path / "active.db"
+    writer = Database(db_path)
+    writer.set_setting("system_slug", "active-wal-visible")
+    paths = _database_files(db_path)
     try:
-        assert connection.execute("PRAGMA journal_mode").fetchone() == ("delete",)
+        assert all(path.exists() for path in paths)
+        before = _file_bytes(paths)
+        monkeypatch.setattr(db_module, "DB_PATH", db_path)
+        _stub_full_doctor_environment(monkeypatch, make_config())
+        for path in paths:
+            path.chmod(0o444)
+        tmp_path.chmod(0o555)
+        human = CliRunner().invoke(app, ["doctor", "--output", "human"])
+        machine = CliRunner().invoke(app, ["doctor", "--output", "json"])
+        after = _file_bytes(paths)
     finally:
-        connection.close()
-    assert not any(path.exists() for path in sidecars)
+        tmp_path.chmod(0o755)
+        for path in paths:
+            if path.exists():
+                path.chmod(0o644)
+        writer.close()
+
+    assert human.exit_code == machine.exit_code == 0, human.output
+    assert b"System slug: active-wal-visible" in human.stdout_bytes
+    checks = _doctor_database_checks(machine.stdout_bytes)
+    assert checks["System"] == [{"name": "System slug", "status": "ok", "message": None, "hint": None}]
+    assert checks["Database"] == [
+        {"name": "Schema", "status": "ok", "message": None, "hint": None},
+        {"name": "Contents", "status": "ok", "message": None, "hint": None},
+    ]
+    assert after == before
 
 
 def test_vm_event_enum_covers_every_literal_producer() -> None:
@@ -458,30 +501,148 @@ def test_machine_config_and_domain_errors_sanitize_untrusted_terminal_text(
 
 
 def test_prompt_sanitization_is_machine_only_and_preserves_human_text() -> None:
-    """The shared prompt boundary leaves the legacy human transcript alone."""
+    """Every shared prompt boundary sanitizes machine text and only it."""
     from agentworks import output
     from agentworks.machine_output import OutputFormat, select_request_output
 
     label = "label\x1b[31m\x00\x7f\x85"
     hint = "hint\x1b[2J\x07\x9f"
     handler = MagicMock()
+    handler.confirm.return_value = True
+    handler.choose.return_value = 1
+    handler.prompt.return_value = "answer"
     handler.prompt_secret.return_value = "resolved"
     previous = output.get_handler()
     output.set_handler(handler)
     try:
         with output.request_output_state():
             select_request_output(OutputFormat.HUMAN)
+            assert output.confirm(label, default=True)
+            assert output.choose(label, [hint, label]) == 1
+            output.pause(label)
+            assert output.prompt(label, default=hint) == "answer"
             assert output.prompt_secret(label, hint) == "resolved"
         with output.request_output_state():
             select_request_output(OutputFormat.JSON)
+            assert output.confirm(label, default=True)
+            assert output.choose(label, [hint, label]) == 1
+            output.pause(label)
+            assert output.prompt(label, default=hint) == "answer"
             assert output.prompt_secret(label, hint) == "resolved"
     finally:
         output.set_handler(previous)
 
+    assert handler.confirm.call_args_list == [call(label, 0, True), call("label[31m", 0, True)]
+    assert handler.choose.call_args_list == [
+        call(label, [hint, label], 0),
+        call("label[31m", ["hint[2J", "label[31m"], 0),
+    ]
+    assert handler.pause.call_args_list == [call(label, 0), call("label[31m", 0)]
+    assert handler.prompt.call_args_list == [
+        call(label, 0, hint),
+        call("label[31m", 0, "hint[2J"),
+    ]
     assert handler.prompt_secret.call_args_list == [
         call(label, 0, hint),
         call("label[31m", 0, "hint[2J"),
     ]
+
+
+def test_machine_confirm_on_tty_emits_no_mouse_reset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Machine prompt routing never writes terminal-control setup bytes."""
+    import click
+
+    from agentworks import output
+    from agentworks.cli._typer_output import TyperHandler
+    from agentworks.machine_output import OutputFormat, select_request_output
+
+    stdout_bytes = io.BytesIO()
+    stderr_bytes = io.BytesIO()
+    stdout = _FakeTTY(stdout_bytes, encoding="utf-8", write_through=True)
+    stderr = _FakeTTY(stderr_bytes, encoding="utf-8", write_through=True)
+    confirm = MagicMock(return_value=True)
+    monkeypatch.setattr(click, "confirm", confirm)
+    monkeypatch.setattr(sys, "stdout", stdout)
+    monkeypatch.setattr(sys, "stderr", stderr)
+    previous = output.get_handler()
+    output.set_handler(TyperHandler())
+    try:
+        with output.request_output_state():
+            select_request_output(OutputFormat.JSON)
+            with output.suppress_presentation():
+                assert output.confirm("confirm\x1b[31m\x7f")
+    finally:
+        output.set_handler(previous)
+
+    stdout.flush()
+    stderr.flush()
+    assert stdout_bytes.getvalue() == stderr_bytes.getvalue() == b""
+    confirm.assert_called_once_with("confirm[31m", default=False, err=True)
+
+
+@pytest.mark.parametrize("debug_source", ["flag", "environment"])
+@pytest.mark.parametrize("failure_kind", ["external", "unexpected"])
+def test_machine_debug_traceback_is_full_but_terminal_safe(
+    debug_source: str,
+    failure_kind: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Machine debug preserves traceback evidence through the sanitizer."""
+    from agentworks.cli.commands import vm
+    from agentworks.errors import ExternalError
+    from agentworks.vms import manager
+
+    monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: object())
+    monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(vm, "get_db", lambda: object())
+    record = MagicMock()
+    monkeypatch.setattr("agentworks.cli._entry.record_unhandled_error", record)
+
+    def fail_debug(*_args: object, **_kwargs: object) -> object:
+        try:
+            raise ValueError("DEBUG_CHAIN_MARKER")
+        except ValueError as cause:
+            error_type = ExternalError if failure_kind == "external" else RuntimeError
+            raise error_type("DEBUG_FRAME\x1b[31m\x00\x7f\x85") from cause
+
+    monkeypatch.setattr(manager, "vm_description", fail_debug)
+    arguments = ["vm", "describe", "box", "--output=json"]
+    if debug_source == "flag":
+        arguments.insert(0, "--debug")
+        monkeypatch.delenv("AGW_DEBUG", raising=False)
+    else:
+        monkeypatch.setenv("AGW_DEBUG", "1")
+
+    code, stdout, stderr = _invoke_main_tty(monkeypatch, arguments)
+
+    assert code == 1 and stdout == b""
+    _assert_terminal_safe(stderr)
+    assert b"Traceback (most recent call last)" in stderr
+    assert b"fail_debug" in stderr
+    assert b"DEBUG_CHAIN_MARKER" in stderr
+    assert b"DEBUG_FRAME[31m" in stderr
+    record.assert_not_called()
+
+
+def test_human_debug_still_reraises_raw_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The machine-safe debug renderer does not weaken human debugging."""
+    from agentworks import cli
+    from agentworks.cli.commands import vm
+
+    monkeypatch.setattr("agentworks.config.load_config", lambda **_kwargs: object())
+    monkeypatch.setattr(vm, "get_db", lambda: object())
+
+    def fail(*_args: object, **_kwargs: object) -> object:
+        raise RuntimeError("human debug stays raw\x1b[31m")
+
+    monkeypatch.setattr("agentworks.vms.manager.describe_vm", fail)
+    monkeypatch.setattr(sys, "argv", ["agw", "--debug", "vm", "describe", "box", "--output=human"])
+
+    with pytest.raises(RuntimeError, match="human debug stays raw"):
+        cli.main()
 
 
 @pytest.mark.parametrize("stage", ["walk", "secret_union"])

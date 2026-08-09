@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import traceback
 from io import StringIO
 from typing import TYPE_CHECKING
 
@@ -70,6 +71,14 @@ def main() -> None:
 
     with request_output_state():
         _main_in_request()
+
+
+def _render_machine_debug_traceback(exception: BaseException) -> None:
+    """Render a full debug traceback without replaying terminal controls."""
+    from agentworks.output import machine_stderr_text
+
+    rendered = "".join(traceback.format_exception(type(exception), exception, exception.__traceback__))
+    typer.echo(machine_stderr_text(rendered), nl=False, err=True)
 
 
 def _main_in_request() -> None:
@@ -148,7 +157,10 @@ def _main_in_request() -> None:
         error(f"{type(e).__name__}: {e}")
         echo_hint(e)
         if debug_enabled():
-            raise
+            if not machine_readable():
+                raise
+            _render_machine_debug_traceback(e)
+            raise SystemExit(1) from None
         log_path = record_unhandled_error(e)
         if log_path is not None:
             typer.echo(
@@ -238,7 +250,10 @@ def _main_in_request() -> None:
         # traceback to the error log for post-hoc debugging, and exit non-zero.
         # Re-raise under --debug / AGW_DEBUG=1 so devs/CI see the traceback.
         if debug_enabled():
-            raise
+            if not machine_readable():
+                raise
+            _render_machine_debug_traceback(e)
+            raise SystemExit(1) from None
         log_path = record_unhandled_error(e)
         error(f"{type(e).__name__}: {e}")
         if log_path is not None:

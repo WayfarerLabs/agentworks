@@ -551,22 +551,27 @@ def error(message: str) -> None:
 
 def confirm(message: str, default: bool = False) -> bool:
     """Present a yes/no question. Returns True for yes, False for no."""
-    return _handler.confirm(message, _current_level(), default)
+    return _handler.confirm(machine_stderr_text(message), _current_level(), default)
 
 
 def choose(message: str, options: list[str]) -> int:
     """Present a list of options. Returns the index of the selected option."""
-    return _handler.choose(message, options, _current_level())
+    return _handler.choose(
+        machine_stderr_text(message),
+        [machine_stderr_text(option) for option in options],
+        _current_level(),
+    )
 
 
 def pause(message: str) -> None:
     """Wait for user acknowledgment (press Enter)."""
-    _handler.pause(message, _current_level())
+    _handler.pause(machine_stderr_text(message), _current_level())
 
 
 def prompt(label: str, default: str | None = None) -> str:
     """Collect a string value. Returns default if user enters nothing."""
-    return _handler.prompt(label, _current_level(), default)
+    safe_default = None if default is None else machine_stderr_text(default)
+    return _handler.prompt(machine_stderr_text(label), _current_level(), safe_default)
 
 
 def prompt_secret(label: str, hint: str | None = None) -> str:

@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
-from contextlib import contextmanager
+import tempfile
+from contextlib import contextmanager, suppress
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import agentworks.db as _db
@@ -20,10 +23,10 @@ from agentworks.db.converters import (
     _to_workspace,
 )
 from agentworks.db.migrations import LATEST_VERSION, MIGRATIONS, MigrationContext
+from agentworks.errors import StateError
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-    from pathlib import Path
 
     from agentworks.db.models import (
         AgentGrantRow,
@@ -86,6 +89,74 @@ class Database:
 
     def close(self) -> None:
         self._conn.close()
+
+    @classmethod
+    @contextmanager
+    def inspection_snapshot(
+        cls,
+        path: Path | None = None,
+    ) -> Iterator[tuple[bool, int, int, Database | None]]:
+        """Open a sidecar-free, non-migrating snapshot for inspection.
+
+        A cleanly closed WAL database has no sidecars, so an immutable SQLite
+        connection can read its checkpointed main file without creating
+        ``-wal``/``-shm``. When sidecars exist, immutable mode would ignore
+        uncheckpointed rows; copy the database and its current sidecars into a
+        private writable directory and let SQLite coordinate only those
+        disposable copies. The source files are never opened by SQLite.
+        """
+        db_path = path or _db.DB_PATH
+        if not db_path.exists():
+            yield False, 0, LATEST_VERSION, None
+            return
+
+        wal_path = db_path.with_name(f"{db_path.name}-wal")
+        shm_path = db_path.with_name(f"{db_path.name}-shm")
+        temporary: tempfile.TemporaryDirectory[str] | None = None
+        immutable = not wal_path.exists() and not shm_path.exists()
+        snapshot_path = db_path
+        connection: sqlite3.Connection | None = None
+        database: Database | None = None
+        try:
+            if not immutable:
+                temporary = tempfile.TemporaryDirectory(prefix="agentworks-db-inspection-")
+                snapshot_path = Path(temporary.name) / db_path.name
+                try:
+                    shutil.copyfile(db_path, snapshot_path)
+                    for source in (wal_path, shm_path):
+                        # A writer may remove a sidecar between the existence
+                        # check and the copy. SQLite can still inspect the
+                        # coherent files that remain in the private snapshot.
+                        with suppress(FileNotFoundError):
+                            shutil.copyfile(source, Path(temporary.name) / source.name)
+                except OSError:
+                    raise StateError("state database inspection snapshot could not be created") from None
+
+            immutable_query = "&immutable=1" if immutable else ""
+            connection = sqlite3.connect(
+                f"{snapshot_path.resolve().as_uri()}?mode=ro{immutable_query}",
+                uri=True,
+            )
+            try:
+                row = connection.execute("SELECT MAX(version) FROM schema_version").fetchone()
+                current = row[0] or 0
+            except sqlite3.OperationalError:
+                current = 0
+            if current == LATEST_VERSION:
+                connection.row_factory = sqlite3.Row
+                connection.execute("PRAGMA foreign_keys = ON")
+                database = cls.__new__(cls)
+                database._conn = connection
+                database._tx_depth = 0
+                connection = None
+            yield True, current, LATEST_VERSION, database
+        finally:
+            if database is not None:
+                database.close()
+            if connection is not None:
+                connection.close()
+            if temporary is not None:
+                temporary.cleanup()
 
     @contextmanager
     def transaction(self) -> Iterator[None]:

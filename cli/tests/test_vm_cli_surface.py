@@ -6,6 +6,7 @@ removed `--vm-host` / `vm-host` group, and the doctor VM-sites group.
 from __future__ import annotations
 
 import re
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
@@ -168,15 +169,14 @@ def test_doctor_vm_sites_defers_on_pending_migration(db: Database, monkeypatch: 
     publish_capability_rows(registry, descriptor_for("vm-platform"))
     registry.finalize()
 
-    class _DbFactory:
-        @staticmethod
-        def check_schema(path: object = None) -> tuple[bool, int, int]:
-            return (True, 26, 27)  # pending migration
+    from agentworks.db import Database
 
-        def __new__(cls) -> Database:  # type: ignore[misc]
-            raise AssertionError("Database() must not open (would auto-migrate)")
+    @contextmanager
+    def pending_snapshot(path: object = None):  # noqa: ANN202
+        del path
+        yield True, 26, 27, None
 
-    monkeypatch.setattr("agentworks.db.Database", _DbFactory)
+    monkeypatch.setattr(Database, "inspection_snapshot", staticmethod(pending_snapshot))
     # Deterministic site preflights: lima/wsl2 check their local
     # binary; pretend both are present regardless of the host.
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
@@ -199,23 +199,12 @@ def test_doctor_system_group(db: Database, monkeypatch: pytest.MonkeyPatch, tmp_
     """The install slug leads the report under its own System header
     (it namespaces install-wide, not per-site): a set slug is ok,
     unset and declined are informational."""
+    import agentworks.db as db_module
     from agentworks import doctor
-    from agentworks.db import Database as _Database
 
     path = tmp_path / "test.db"
 
-    class _DbFactory:
-        @staticmethod
-        def check_schema(p: object = None) -> tuple[bool, int, int]:
-            return (True, 27, 27)
-
-        # _check_system opens and closes its own handle; hand it a
-        # fresh one each call so the fixture's connection stays open.
-        def __new__(cls, *, read_only: bool = False) -> Database:  # type: ignore[misc]
-            assert read_only
-            return _Database(path, read_only=True)
-
-    monkeypatch.setattr("agentworks.db.Database", _DbFactory)
+    monkeypatch.setattr(db_module, "DB_PATH", path)
 
     unset = {c.name: c for c in doctor._check_system().checks}["System slug"]
     assert unset.status is doctor.Status.INFO
@@ -233,7 +222,7 @@ def test_doctor_system_group(db: Database, monkeypatch: pytest.MonkeyPatch, tmp_
 
     # No database at all (fresh install): nothing has ever set the
     # slug, so the same unset row renders without opening the DB.
-    monkeypatch.setattr(_DbFactory, "check_schema", staticmethod(lambda p=None: (False, 0, 0)))
+    monkeypatch.setattr(db_module, "DB_PATH", tmp_path / "missing.db")
     fresh = {c.name: c for c in doctor._check_system().checks}["System slug"]
     assert fresh.status is doctor.Status.INFO
     assert "will ask" in (fresh.message or "")
@@ -258,16 +247,9 @@ def test_doctor_vm_sites_group(db: Database, monkeypatch: pytest.MonkeyPatch, tm
     db.insert_vm("good", site="lima-local", hostname="good")
     db.insert_vm("lost", site="gone-box", hostname="lost")
 
-    class _DbFactory:
-        @staticmethod
-        def check_schema(path: object = None) -> tuple[bool, int, int]:
-            return (True, 27, 27)
+    import agentworks.db as db_module
 
-        def __new__(cls, *, read_only: bool = False) -> Database:  # type: ignore[misc]
-            assert read_only
-            return type(db)(tmp_path / "test.db", read_only=True)
-
-    monkeypatch.setattr("agentworks.db.Database", _DbFactory)
+    monkeypatch.setattr(db_module, "DB_PATH", tmp_path / "test.db")
     # Deterministic bundled-site preflights: lima/wsl2 check their local
     # binary; pretend both are present regardless of the host.
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
@@ -333,16 +315,9 @@ def test_doctor_vm_sites_not_ready_and_preflight_rows(
     )
     registry.finalize()
 
-    class _DbFactory:
-        @staticmethod
-        def check_schema(path: object = None) -> tuple[bool, int, int]:
-            return (True, 27, 27)
+    import agentworks.db as db_module
 
-        def __new__(cls, *, read_only: bool = False) -> Database:  # type: ignore[misc]
-            assert read_only
-            return type(db)(tmp_path / "test.db", read_only=True)
-
-    monkeypatch.setattr("agentworks.db.Database", _DbFactory)
+    monkeypatch.setattr(db_module, "DB_PATH", tmp_path / "test.db")
 
     # The remote mybox site stays ready but its live preflight fails; wsl2
     # stays fully healthy. preflight is live (not folded), so it patches here.
@@ -395,16 +370,9 @@ def test_doctor_warns_on_references_to_not_ready_sites(
 
     db.insert_vm("boxed", site="lima-local", hostname="boxed")
 
-    class _DbFactory:
-        @staticmethod
-        def check_schema(path: object = None) -> tuple[bool, int, int]:
-            return (True, 27, 27)
+    import agentworks.db as db_module
 
-        def __new__(cls, *, read_only: bool = False) -> Database:  # type: ignore[misc]
-            assert read_only
-            return type(db)(tmp_path / "test.db", read_only=True)
-
-    monkeypatch.setattr("agentworks.db.Database", _DbFactory)
+    monkeypatch.setattr(db_module, "DB_PATH", tmp_path / "test.db")
 
     group = doctor._check_vm_sites(_config_stub("lima-local"), registry)
 

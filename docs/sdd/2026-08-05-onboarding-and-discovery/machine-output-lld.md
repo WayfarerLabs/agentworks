@@ -266,8 +266,10 @@ Doctor is the only report-with-failure exception. A successful VM inspection tha
 after a bounded attempted read uses null for unavailable facts and a closed vm_issue; it is not a
 business-error envelope. JSON contains no ANSI on either output stream. Request-local machine stderr
 rendering removes C0 controls other than ordinary line feeds and tabs, DEL, and C1 controls from
-prompt prose, exception messages, hints, and native Click/Typer usage that may repeat argv; human
-rendering remains unchanged. Covered callbacks record their parsed output mode in request-local
+every prompt form's prose/default/options, exception messages, hints, and native Click/Typer usage
+that may repeat argv; machine prompts emit no terminal-mode reset sequences. Machine debug formats
+its full traceback through this sanitizer, while human debug keeps its raw re-raise. Human rendering
+otherwise remains unchanged. Covered callbacks record their parsed output mode in request-local
 state before mutex, config, database, or service work, and that state remains active while errors
 unwind. A closed pre-parsing detector recognizes only the 16 supported command paths, including
 after leading root option tokens, and the two JSON option spellings before a literal `--`; it
@@ -277,9 +279,12 @@ so the ambient handler cannot add presentation. --output human executes the exac
 renderer path.
 
 Doctor is inspection-only at both schema states. A stale schema yields the System, VM sites, and
-Database pending-migration rows without opening the database. A current schema is opened only with
-read-only handles, which are closed after each group reads its facts; doctor neither migrates nor
-changes the database journal mode.
+Database pending-migration rows without opening the original database through SQLite. A current,
+cleanly closed WAL database is read through an immutable main-file connection, which cannot create
+sidecars. When WAL/SHM sidecars exist, doctor copies the main database and existing sidecars to a
+private writable temporary directory and opens only the disposable copies, preserving active-WAL
+visibility without modifying the originals. Each snapshot is cleaned up after the group reads its
+facts; doctor neither migrates nor creates or changes the original database, WAL, or SHM files.
 
 --names-only remains completion plumbing and is mutually exclusive with --output json on every
 covered list or kinds command that already has it. Validate that conflict before service work. It

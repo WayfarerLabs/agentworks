@@ -374,8 +374,10 @@ workspace, agent, session, and console lists or resource kinds. An unknown outpu
 conflict are usage errors before config, registry, database, network, or service work. For the
 ordinary covered commands, domain and configuration errors write no JSON to stdout; they retain the
 normal stderr message and nonzero exit status. For a JSON request, untrusted stderr payloads from
-prompts, exceptions, hints, and native Click/Typer usage have C0 controls (other than ordinary line
-feeds and tabs), DEL, and C1 controls removed; human-mode transcripts are unchanged. Doctor is the
+every prompt form, exceptions, hints, and native Click/Typer usage have C0 controls (other than
+ordinary line feeds and tabs), DEL, and C1 controls removed; machine prompts emit no terminal-mode
+reset sequences. Human-mode transcripts are unchanged. Machine-mode debug retains the full traceback
+after applying the same sanitizer, while human debug retains its raw re-raise. Doctor is the
 exception: it converts checkable failures into its complete report, emits that JSON document, then
 exits 1.
 
@@ -1446,8 +1448,10 @@ Completions include dynamic VM, vm-site, workspace, session, and template name l
 
 All state is stored in `~/.config/agentworks/agentworks.db` (SQLite). Schema migrations are
 forward-only and run automatically when a normal Agentworks command opens state. `agw doctor`
-inspects schema and current contents through read-only database handles; it reports a pending
-migration without applying it or changing the database journal mode.
+inspects schema and current contents without opening the original files through SQLite: a cleanly
+closed WAL database uses an immutable main-file view, while an active WAL set is read from private
+temporary copies. It reports a pending migration without applying it and does not create or change
+the database, WAL, or shared-memory files.
 
 ## Environment Variables
 

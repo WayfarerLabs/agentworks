@@ -314,24 +314,21 @@ def _check_system() -> HealthGroup:
 
     g = HealthGroup("System")
     try:
-        db_exists, current, latest = Database.check_schema()
-        if not db_exists:
-            # No database means nothing has ever set the slug.
-            g.info("System slug", "unset (will ask at first vm create)")
-            return g
-        if current != latest:
-            # Opening the DB would auto-migrate mid-report; defer to the
-            # Database group's deliberate migration row.
-            g.info(
-                "System slug",
-                "pending database migration (see the Database group)",
-            )
-            return g
-        db = Database(read_only=True)
-        try:
+        with Database.inspection_snapshot() as (db_exists, current, latest, db):
+            if not db_exists:
+                # No database means nothing has ever set the slug.
+                g.info("System slug", "unset (will ask at first vm create)")
+                return g
+            if current != latest:
+                # Opening the DB would auto-migrate mid-report; defer to the
+                # Database group's deliberate migration row.
+                g.info(
+                    "System slug",
+                    "pending database migration (see the Database group)",
+                )
+                return g
+            assert db is not None
             slug = db.get_setting(SYSTEM_SLUG_KEY)
-        finally:
-            db.close()
         if slug:
             g.ok("System slug", slug)
         elif slug == "":
@@ -539,22 +536,21 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
         )
 
     try:
-        db_exists, current, latest = Database.check_schema()
-        if not db_exists:
-            # No VMs recorded yet; nothing to cross-check.
-            return g
-        if current != latest:
-            # Opening the DB would auto-migrate mid-report (interleaving
-            # the migration's own output into this group and stealing
-            # the Database group's deliberate migration row); defer.
-            g.info(
-                "VM sites",
-                "pending database migration (see the Database group); "
-                "re-run doctor after migrating for the full report",
-            )
-            return g
-        db = Database(read_only=True)
-        try:
+        with Database.inspection_snapshot() as (db_exists, current, latest, db):
+            if not db_exists:
+                # No VMs recorded yet; nothing to cross-check.
+                return g
+            if current != latest:
+                # Opening the DB would auto-migrate mid-report (interleaving
+                # the migration's own output into this group and stealing
+                # the Database group's deliberate migration row); defer.
+                g.info(
+                    "VM sites",
+                    "pending database migration (see the Database group); "
+                    "re-run doctor after migrating for the full report",
+                )
+                return g
+            assert db is not None
             for vm in db.list_vms():
                 if vm.site in not_ready:
                     g.warn(
@@ -567,8 +563,6 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
                         f"site '{vm.site}' is not declared",
                         hint=site_manifest_hint(vm.site),
                     )
-        finally:
-            db.close()
     except Exception as e:
         g.warn(
             "VM sites",
@@ -922,24 +916,21 @@ def _check_database() -> HealthGroup:
     g = HealthGroup("Database")
 
     try:
-        exists, current, latest = Database.check_schema()
-        if not exists:
-            g.ok("Database", "does not exist yet (will be created on first use)")
-        elif current == latest:
-            g.ok("Schema", f"up to date (version {current})")
-            db = Database(read_only=True)
-            try:
+        with Database.inspection_snapshot() as (exists, current, latest, db):
+            if not exists:
+                g.ok("Database", "does not exist yet (will be created on first use)")
+            elif current == latest:
+                g.ok("Schema", f"up to date (version {current})")
+                assert db is not None
                 _report_db_contents(g, db)
-            finally:
-                db.close()
-        elif current < latest:
-            g.warn(
-                "Schema",
-                f"at version {current}, latest is {latest}; "
-                "a normal Agentworks command that opens state will migrate it",
-            )
-        else:
-            g.fail("Schema", f"version {current} is newer than latest {latest} (downgrade?)")
+            elif current < latest:
+                g.warn(
+                    "Schema",
+                    f"at version {current}, latest is {latest}; "
+                    "a normal Agentworks command that opens state will migrate it",
+                )
+            else:
+                g.fail("Schema", f"version {current} is newer than latest {latest} (downgrade?)")
     except Exception as e:
         g.fail("Database", str(e), machine_diagnostic=MachineDiagnostic.DATABASE_UNAVAILABLE)
 
