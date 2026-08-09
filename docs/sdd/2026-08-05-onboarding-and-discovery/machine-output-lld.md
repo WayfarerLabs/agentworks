@@ -291,29 +291,30 @@ The complete acquisition protocol requires non-blocking and no-follow flags plus
 open and directory-only support. A host lacking any required primitive raises a distinct typed
 protocol-unavailable result before inspecting a database or sidecar entry; it never substitutes a
 check-then-open sequence. After the static capability gate, preflight forms a rooted absolute
-lexical requested path, rejecting drive-relative forms, then strictly resolves only its parent. It
-pins that resolved parent through the component-by-component descriptor walk and performs a
-directory-only, no-follow open of `.` relative to the resulting fd. This exercises the actual
-requested-parent filesystem protocol before any access to or resolution of the final database entry.
-Runtime errors that report an unsupported or unimplemented operation, including `EOPNOTSUPP` and
-`ENOSYS`, take the same closed path. Doctor projects that result as fixed, path-free `unavailable`
-rows in the System, applicable VM sites, and Database groups. It is non-failing and an otherwise
-healthy report exits 0. Unsupported source entries, copy or retry failures, and malformed schema
-versions remain the path-free database-inspection failure path and make the Database row fail.
-Resolving only the parent preserves supported stable component and final database symlinks. After
-resolving the final database entry, doctor opens the filesystem anchor, then walks each parent
-component with directory-only, no-follow opens relative to the previously pinned fd. The final
-parent fd supplies every main, WAL, and SHM open. The same bounded protocol handles main-only and
-active sets. A main-only candidate requires sidecar absence to remain stable throughout copying and
-verification. Doctor reopens and re-fingerprints the complete source set and accepts only an exact
-match, then validates and opens only the disposable copy through SQLite. A concurrent
-clean-to-active transition, checkpoint, replacement, or sidecar transition discards the candidate
-and retries a small bounded number of times; exhaustion is the same path-free error. The
-report-scoped snapshot is cleaned up after all database facts are collected; doctor neither migrates
-nor creates or changes the original database, WAL, or SHM files. The schema-version boundary accepts
-only SQLite null as version 0 or an exact nonnegative integer. Text, bytes, floating-point, boolean,
-and negative values are malformed state and fail closed before any version comparison or public
-diagnostic can expose the raw value.
+lexical requested path and rejects drive-relative forms. It strictly resolves the nearest existing
+ancestor of the requested parent, pins that resolved ancestor through the component-by-component
+descriptor walk, and performs a directory-only, no-follow open of `.` relative to the resulting fd.
+This preserves healthy absent state when a fresh install's database parent does not exist and never
+creates that parent. If a final database entry exists, doctor retains the metadata access required
+to resolve supported final symlinks, then separately pins and probes the resolved target parent
+before acquiring any main, WAL, or SHM content. Runtime errors that report an unsupported or
+unimplemented operation, including `EOPNOTSUPP` and `ENOSYS`, take the same closed path. Doctor
+projects that result as fixed, path-free `unavailable` rows in the System, applicable VM sites, and
+Database groups. It is non-failing and an otherwise healthy report exits 0. Unsupported source
+entries, copy or retry failures, and malformed schema versions remain the path-free
+database-inspection failure path and make the Database row fail. Stable component and final database
+symlinks remain supported. Snapshot acquisition then repeats the filesystem-anchor walk for the
+resolved target parent, and the resulting pinned fd supplies every main, WAL, and SHM open. The same
+bounded protocol handles main-only and active sets. A main-only candidate requires sidecar absence
+to remain stable throughout copying and verification. Doctor reopens and re-fingerprints the
+complete source set and accepts only an exact match, then validates and opens only the disposable
+copy through SQLite. A concurrent clean-to-active transition, checkpoint, replacement, or sidecar
+transition discards the candidate and retries a small bounded number of times; exhaustion is the
+same path-free error. The report-scoped snapshot is cleaned up after all database facts are
+collected; doctor neither migrates nor creates or changes the original database, WAL, or SHM files.
+The schema-version boundary accepts only SQLite null as version 0 or an exact nonnegative integer.
+Text, bytes, floating-point, boolean, and negative values are malformed state and fail closed before
+any version comparison or public diagnostic can expose the raw value.
 
 --names-only remains completion plumbing and is mutually exclusive with --output json on every
 covered list or kinds command that already has it. Validate that conflict before service work. It

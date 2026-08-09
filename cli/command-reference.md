@@ -244,12 +244,14 @@ through SQLite. Broken or looping symlinks, FIFOs, devices, directories, sockets
 unsupported entries fail closed with path-free diagnostics. The original database and sidecars are
 never opened through SQLite, migrated, created, or changed. Hosts without non-blocking, no-follow,
 directory-only, and directory-relative open support report secure database inspection as
-`unavailable` before any database or sidecar entry is inspected. Those rows do not count as warnings
-or failures, and an otherwise healthy report exits 0. An invalid source or malformed schema version
-remains a failure and makes doctor exit 1. After resolving supported requested-path symlinks,
-Agentworks walks each parent component from its filesystem anchor with directory-only, no-follow
-relative opens. The resulting pinned fd supplies every database and sidecar open. No path check
-followed by an unsafe open is substituted.
+`unavailable` without acquiring database or sidecar content. Those rows do not count as warnings or
+failures, and an otherwise healthy report exits 0. An invalid source or malformed schema version
+remains a failure and makes doctor exit 1. The initial live protocol probe uses the nearest existing
+requested-parent ancestor, so a fresh install whose state directory does not yet exist remains
+healthy and absent. If the final database entry exists, Agentworks resolves its link metadata and
+preflights the resolved target parent before opening the database, WAL, or SHM. Each preflight and
+source acquisition walks from a filesystem anchor with directory-only, no-follow relative opens. No
+path check followed by an unsafe open is substituted.
 
 #### Errors and compatibility
 

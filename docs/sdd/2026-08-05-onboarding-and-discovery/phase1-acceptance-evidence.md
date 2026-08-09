@@ -305,12 +305,11 @@ Runtime preflight and migration completion correction validation passed:
 
 ## Resolved requested-parent preflight correction
 
-The final narrow correction moves the live probe from the lexical root to the requested parent's
+The narrow correction moves the initial live probe from the lexical root to the requested parent's
 actual filesystem. It roots the lexical request without resolving its final component, rejects
-drive-relative forms, strictly resolves only the requested parent, pins that resolved parent through
-the component-by-component descriptor walk, and opens `.` relative to the resulting fd. The probe
-runs before any final-entry lstat, resolution, or read. Runtime `EOPNOTSUPP` and `ENOSYS` at the
-target probe become the same path-free protocol-unavailable result for absent and active databases,
+drive-relative forms, pins the resolved requested parent through the component-by-component
+descriptor walk, and opens `.` relative to the resulting fd. Runtime `EOPNOTSUPP` and `ENOSYS` at
+that probe become the same path-free protocol-unavailable result for absent and active databases,
 and every acquired directory descriptor is closed. Stable component and final database symlinks
 remain supported.
 
@@ -318,6 +317,25 @@ Resolved requested-parent correction validation passed:
 
 - focused adversarial snapshot boundary suite: 43 passed;
 - wider doctor and machine-output slice: 125 passed;
+- Ruff check and format check: 626 files clean;
+- full mypy: 626 source files clean;
+- Rulesync generated-output check and locked-SDD validation: clean;
+- mandatory file lint: clean.
+
+## Fresh-install and resolved-target preflight correction
+
+The consolidated correction preserves fresh-install behavior by resolving and probing the nearest
+existing ancestor when the requested database parent is missing. The established requested-entry
+check then reports absent state without creating a directory or database. For an existing final
+entry, including a symlink whose target is on another filesystem, required link metadata is resolved
+first. Doctor then pins and probes the resolved target parent before any database, WAL, or SHM
+content acquisition. Runtime `EOPNOTSUPP` and `ENOSYS` at that target probe produce the same fixed,
+path-free unavailable result with no source content read.
+
+Fresh-install and resolved-target correction validation passed:
+
+- focused adversarial snapshot boundary suite: 47 passed;
+- wider doctor and machine-output slice: 129 passed;
 - Ruff check and format check: 626 files clean;
 - full mypy: 626 source files clean;
 - Rulesync generated-output check and locked-SDD validation: clean;

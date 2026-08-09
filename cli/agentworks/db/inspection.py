@@ -168,18 +168,33 @@ def _rooted_lexical_requested_path(requested_path: Path) -> Path:
     return rooted_path
 
 
-def _preflight_snapshot_protocol(requested_path: Path) -> None:
-    """Exercise directory-relative acquisition on the source filesystem."""
-    _require_snapshot_protocol()
-    rooted_path = _rooted_lexical_requested_path(requested_path)
-    try:
-        resolved_parent = rooted_path.parent.resolve(strict=True)
-    except (OSError, RuntimeError):
-        raise _UnsupportedSnapshotEntry from None
+def _nearest_existing_resolved_parent(rooted_path: Path) -> Path:
+    """Resolve the closest existing ancestor of the requested parent."""
+    candidate = rooted_path.parent
+    while True:
+        try:
+            return candidate.resolve(strict=True)
+        except FileNotFoundError:
+            parent = candidate.parent
+            if parent == candidate:
+                raise _UnsupportedSnapshotEntry from None
+            candidate = parent
+        except (OSError, RuntimeError):
+            raise _UnsupportedSnapshotEntry from None
 
-    with _pinned_directory(resolved_parent) as directory_fd:
+
+def _probe_resolved_directory_protocol(directory: Path) -> None:
+    """Exercise directory-relative acquisition on one resolved directory."""
+    with _pinned_directory(directory) as directory_fd:
         probe_fd = _open_directory_component(".", directory_fd)
         os.close(probe_fd)
+
+
+def _preflight_snapshot_protocol(requested_path: Path) -> None:
+    """Exercise acquisition on the nearest existing requested-path ancestor."""
+    _require_snapshot_protocol()
+    rooted_path = _rooted_lexical_requested_path(requested_path)
+    _probe_resolved_directory_protocol(_nearest_existing_resolved_parent(rooted_path))
 
 
 @contextmanager
@@ -349,6 +364,12 @@ def inspection_snapshot(
         try:
             source_path = requested_path.resolve(strict=True)
         except (OSError, RuntimeError):
+            raise StateError(_SNAPSHOT_ERROR) from None
+        try:
+            _probe_resolved_directory_protocol(source_path.parent)
+        except DatabaseInspectionUnavailable:
+            raise
+        except (_UnsupportedSnapshotEntry, OSError):
             raise StateError(_SNAPSHOT_ERROR) from None
 
         temporary = tempfile.TemporaryDirectory(prefix="agentworks-db-inspection-")
