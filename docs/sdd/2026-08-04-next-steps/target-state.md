@@ -91,31 +91,35 @@ post-finalize immutability staying a registry/fold property rather than a model-
 and one instance-state store designed once for instance specs, integration applied-state, and
 artifact ownership records (three perspectives converge on that store).
 
-**The variant-modeling contract** (operator rulings, 2026-08-07 and 2026-08-08): config that has
-variants is a discriminated union on a string `Literal` discriminator (spelled `mode` on today's
-action-named fields; the README's grammar rule governs the key), one arm per required-field shape
-(the discriminator tracks shape, not concept), the union field named for what it selects (sibling
-capabilities may diverge, as `auth` versus `placement` do), and new variants added as arms, never by
-pre-grouped mechanism awaiting a consumer. A union may default only to the mode its omission
-historically selected, never to a new arm, and extraction reads declared defaults as if written so a
-defaulted choice is graph-visible exactly like a written one. Permanent homes: the shape rule in
-`cli/agentworks/capabilities/README.md`, the extraction invariant in `schema/extract.py`'s
-docstring, the default posture's reasoning at the union sites themselves; the retirement pattern for
-old shapes is the exact-rewrite hard error plus the upgrade guide.
+**The variant-modeling contract** (operator rulings, 2026-08-07 and 2026-08-08) has three tiers.
+First, config variants are explicit shapes: a genuine mechanism choice carries a discriminated union
+on a string `Literal` discriminator (spelled `mode` on today's action-named fields; the README's
+grammar rule governs the key), one arm per required-field shape (the discriminator tracks shape, not
+concept), the union field named for what it selects (sibling capabilities may diverge, as `auth`
+versus `placement` do), and new variants added as arms, never by pre-grouped mechanism awaiting a
+consumer; when distinct required-key shapes discriminate themselves, an untagged structural union
+emitted as plain `oneOf` is the sanctioned selector-free form. Second, anything that decides whether
+a secret reference or resource edge exists must be model-visible to the walkers: extraction reaches
+exactly what validation can select, a union may default only to the mode its omission historically
+selected (never a new arm), and extraction reads declared defaults as if written so a defaulted
+choice is graph-visible exactly like a written one. Third, cross-field validity among plain config
+fields, where the combination touches no graph edge (mutual exclusions, dependencies), may be
+enforced by validators failing loudly at load with the emitted schema under-constraining there; wave
+2's soundness rule, that the schema must never reject what the loader accepts, sanctions exactly
+that under-reporting.
 
-A refinement bounds the contract's reach (operator ruling, 2026-08-08). The union mandate governs
-mechanism selection, where required-field shapes differ. Facts that affect the resource graph must
-additionally be model-visible however they are spelled (the extraction-equals-validation invariant).
-But cross-field validity among plain config fields that touches no graph edge (mutual exclusions,
-dependencies) may instead be enforced by validators failing loudly at load, with the emitted schema
-under-constraining there; wave 2's soundness rule, that the schema must never reject what the loader
-accepts, sanctions exactly that under-reporting. Two tests accompany the tiers: a restructure that
-makes the common spelling heavier fails its own test (defaults, scalar shorthands, and untagged
-structural unions are the mitigations), and before encoding an exclusion at all, prefer dissolving
-it by giving the forbidden combination a meaning. One dissolution is ruled (operator, 2026-08-08):
-install-command entries accept multiple test predicates with AND semantics, skipping the install
-only when at least one test is declared and every declared test passes; zero declared tests always
-runs, and previously invalid documents become valid, a pure widening.
+Three tests precede any restructure. First, try dissolving the constraint by giving the forbidden
+combination a meaning; one dissolution is ruled (operator, 2026-08-08): install-command entries
+accept multiple test predicates with AND semantics, the install skipped only when at least one test
+is declared and every declared test passes, so with zero declared tests the command always runs, and
+previously invalid documents become valid, a pure widening. Second, the common spelling must not get
+heavier; defaults, scalar shorthands, and untagged structural unions are the mitigations, and a
+restructure that makes the common case more verbose fails its own test. Third, weigh who is actually
+affected against what the payoff buys; an editor-validation gain does not justify heavier manifests
+for everyone. Permanent homes: the complete rule in `cli/agentworks/capabilities/README.md`, the
+extraction invariant in `schema/extract.py`'s docstring, the default posture's reasoning at the
+union sites themselves; the retirement pattern for old shapes is the exact-rewrite hard error plus
+the upgrade guide.
 
 Two companion rulings (operator, 2026-08-08): **secret sources are simple KV stores with shared
 config**; creation specifications (a minted credential's scopes, repos, permissions) belong to the

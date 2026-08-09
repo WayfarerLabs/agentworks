@@ -89,6 +89,8 @@ is locked.
 - [ ] Picked up by an effort lead (HLA, plan)
 - [ ] Implementation complete (two-level model, synthesized sources, resolution API, singleton
       exception removed, map-keyed hosting, relocation)
+- [ ] Breaking reference slice ships in 0.14.0 (direct backend references hard-error; gates the cut
+      per `phasing.md` release mapping)
 - [ ] Locked
 
 ### Installer plugins (pre-0.14 core slimming): 2026-08-07-installer-plugins
@@ -102,6 +104,18 @@ is locked.
 - [ ] Implementation complete (moves, disabled errors, guide topics, upgrade-guide step)
 - [ ] Ships in 0.14.0 (gates the cut per `phasing.md` release mapping)
 - [ ] Locked
+
+### Dispatched task (not a child SDD): git-credential variant restructure
+
+Dispatched via branch-seeded task brief rather than an SDD (the sdd skill's message-passing
+mechanism); tracked here because its outcome gates the 0.14.0 cut per `phasing.md`.
+
+- [x] Ruled and dispatched (operator ruling 2026-08-08: git-credential joins the variant contract
+      before the cut; brief seeded on the task branch, 2026-08-08)
+- [x] Survey delivered and re-evaluated under the three-tier refinement (2026-08-08; dissolutions
+      and restructures proposed per item)
+- [ ] Implementation merged (PR #455 in review)
+- [ ] Ships in 0.14.0 (gates the cut per `phasing.md` release mapping)
 
 ### Not yet spawned
 
@@ -164,3 +178,7 @@ open-ended research placeholder.
     schema and the event vocabulary's first slice.
 11. Installer-plugins child seeded (PR #440, 2026-08-07). Launch its effort lead whenever; the R1
     inventory can start immediately.
+12. Pre-0.14 gates in flight (2026-08-08): the installer-plugins child (FRD PR #440 pending merge,
+    R1 inventory PR #451 in phased review), the git-credential restructure (PR #455 in review), the
+    wave 3 breaking slice (design PR #453 converged), and the onboarding README bootstrap (later
+    onboarding phase). The cut waits for all four.
