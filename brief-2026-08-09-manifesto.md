@@ -30,10 +30,16 @@ just-the-facts. Consumers choose whether to read the why.
   `docs/why-agentworks.md` and must not be conflicted underneath. Build and review freely meanwhile.
 - **Operator review gate**: the operator reviews the assembled manifesto text before this merges. It
   is their voice; request that review explicitly in the PR.
-- **Website coordination**: the website effort's extraction contract pins headings in the current
-  `why-agentworks.md` and their build fails closed on the move. When your PR is ready, deliver a
+- **Website coordination** (updated 2026-08-09, after the website effort's Phase 4B design landed):
+  the website now renders a generated `/manifesto/` page from `docs/why-agentworks.md` at build
+  time, selecting content by heading path and failing closed on missing or drifted source. CI runs
+  that build on every PR, so your rename PR goes red unless it updates the website's source
+  selection (source path, heading paths, and the source-link allowlist under `website/`) in the same
+  PR. If PR #439 has merged by the time you're ready (likely), `website/` is ordinary main-tree code
+  and you make that update directly, in lockstep with the rename. If #439 is still open, deliver a
   message file to `docs/sdd/2026-08-07-website/` (per the sdd skill's message-passing convention)
-  stating the new source path and heading map so their R14 repoint lands in one motion.
+  with the new source path and heading map, and hold the rename until you and the website lead agree
+  on landing order.
 - **No contact information** of any kind (email, social handles) is added anywhere; the operator has
   not released any for publication.
 - Saga vocabulary throughout; message-signatures and Agentworks-Session trailer rules apply; the
