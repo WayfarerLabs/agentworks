@@ -18,7 +18,11 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal
 import pytest
 
 from agentworks.bootstrap import build_registry
-from agentworks.capabilities.git_credential.base import GitCredentialProvider, HelperEntry
+from agentworks.capabilities.git_credential.base import (
+    GitCredentialProvider,
+    HelperEntry,
+    TokenAcquiringConfig,
+)
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
 from agentworks.plugins import SYSTEM_PLUGINS, Plugin, seated_plugin
@@ -270,7 +274,7 @@ def test_construct_time_validation_survives_the_flip(tmp_path: Path) -> None:
 # -- The dependencies half ---------------------------------------------------
 
 
-class _SigningConfig(AgwModel):
+class _SigningConfig(TokenAcquiringConfig):
     """A config that NAMES a secret, with a constant default. The whole
     of what used to be a hand-rolled ``dependencies`` plus its guard."""
 
@@ -284,7 +288,7 @@ class _SigningCredentialProvider(GitCredentialProvider):
 
     name = "test-signing"
     description = "signs with a declared secret"
-    contract_version = 1
+    contract_version = 2
     config_model = _SigningConfig
 
     def _verify_token(self, token: str) -> None: ...

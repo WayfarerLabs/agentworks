@@ -111,14 +111,17 @@ class ModelDoc:
 
 @dataclass(frozen=True, kw_only=True)
 class UnionArm:
-    """One alternative of a discriminated union field.
+    """One alternative of a model union field.
 
     Carries the arm's :class:`ModelDoc` rather than a bare class so a
     presenter can list the alternatives WITH their one-line descriptions
-    without digging docstrings out itself.
+    without digging docstrings out itself. :attr:`tag` distinguishes a
+    tagged arm from a structural one.
     """
 
-    tag: str
+    tag: str | None
+    """The operator-written selector for a tagged arm, or ``None`` for
+    an untagged structural arm."""
     doc: ModelDoc
 
 
@@ -208,14 +211,16 @@ class FieldDoc:
     itself what kind of collection a rendered type string describes."""
 
     union_arms: tuple[UnionArm, ...]
-    """The alternatives, when this field is a discriminated union. Not
+    """The alternatives, when this field is a model union. Not
     expanded inline: the presenter decides whether to render one arm, all
-    of them, or a table, by recursing with ``iter_field_docs``."""
+    of them, or a table, by recursing with ``iter_field_docs``. Tagged
+    arms carry their tag; structural arms carry no tag and are named from
+    their model in presentation."""
 
     item_union_arms: tuple[UnionArm, ...]
     """:attr:`union_arms` one level down: the alternatives ONE ELEMENT of
-    a collection may be, when the elements are a discriminated union of
-    models (``list[Annotated[A | B, Discriminator("kind")]]``).
+    a collection may be, when the elements are a tagged or structural
+    union of models.
 
     Kept apart from :attr:`union_arms` for the reason :attr:`item_model`
     is kept apart from :attr:`nested_model`: one says what the FIELD is,
@@ -382,8 +387,11 @@ def _field_doc(path: tuple[str, ...], field: FieldInfo, shape: FieldShape) -> Fi
         nested_model=shape.block,
         item_model=shape.item_block,
         item_segment=_segment_of(shape),
-        union_arms=_documented(shape.arms),
-        item_union_arms=_documented(shape.item_arms),
+        union_arms=(*_documented(shape.arms), *_documented_structural(shape.structural_arms)),
+        item_union_arms=(
+            *_documented(shape.item_arms),
+            *_documented_structural(shape.item_structural_arms),
+        ),
     )
 
 
@@ -392,6 +400,11 @@ def _documented(arms: tuple[UnionArmType, ...]) -> tuple[UnionArm, ...]:
     by. One conversion for both depths, so a field's arms and its
     elements' cannot come to different answers about the same model."""
     return tuple(UnionArm(tag=arm.tag, doc=model_doc(arm.model)) for arm in arms)
+
+
+def _documented_structural(arms: tuple[type[BaseModel], ...]) -> tuple[UnionArm, ...]:
+    """Untagged arms as presentation handles, without inventing a tag."""
+    return tuple(UnionArm(tag=None, doc=model_doc(arm)) for arm in arms)
 
 
 def _default_of(field: FieldInfo) -> object:

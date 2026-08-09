@@ -44,7 +44,7 @@ def test_every_vm_template_field_round_trips() -> None:
     assert row == VMTemplate(
         name="big",
         declared_at=WHERE,
-        **{**_VM_FULL, "env": {"EDITOR": EnvEntry(value="nvim")}},  # type: ignore[arg-type]
+        **{**_VM_FULL, "env": {"EDITOR": EnvEntry({"value": "nvim"})}},  # type: ignore[arg-type]
     )
 
 

@@ -75,14 +75,13 @@ def test_empty_token_string_rejected(tmp_path: Path) -> None:
         ManifestDoc("git-credential", "github", {"provider": {"name": "github", "token": ""}}),
     )
     config = load_config(cfg, warn_issues=False)
-    with pytest.raises(ConfigError, match="token: must not be empty"):
+    with pytest.raises(ConfigError, match="token.secret: must not be empty"):
         build_registry(config)
 
 
-def test_non_string_token_rejected(tmp_path: Path) -> None:
-    """``token`` must be a bare string; the decoder rejects inline
-    tables (``{ secret = "..." }`` polymorphism not permitted).
-    """
+def test_a_token_table_requires_its_union_tag(tmp_path: Path) -> None:
+    """The long token spelling is a real tagged union, so an untagged
+    table is refused rather than inferred as the sole arm."""
     from agentworks.errors import ConfigError
 
     cfg = _write_cfg(
@@ -90,5 +89,5 @@ def test_non_string_token_rejected(tmp_path: Path) -> None:
         ManifestDoc("git-credential", "github", {"provider": {"name": "github", "token": {"secret": "x"}}}),
     )
     config = load_config(cfg, warn_issues=False)
-    with pytest.raises(ConfigError, match="token: must be a string"):
+    with pytest.raises(ConfigError, match="token: mode is required; registered: 'stored'"):
         build_registry(config)

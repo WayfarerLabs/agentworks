@@ -205,20 +205,23 @@ def _build_test_command(
     shell: str,
     home: str,
 ) -> str | None:
-    """Build a shell command to check if an install command's tool is present.
+    """Build a shell command that passes when every declared test passes.
 
     test_exec uses a login shell (-l) with interactive flag (-i) to ensure
     all profile/rc files are sourced, matching a real login session.
+    Empty tests are ignored. Returning ``None`` when none remain prevents
+    an empty conjunction from vacuously skipping the install.
     """
+    commands: list[str] = []
     if entry.test_exec:
-        return f"{shell} -lic {shlex.quote(f'command -v {shlex.quote(entry.test_exec)}')} > /dev/null 2>&1"
+        commands.append(f"{shell} -lic {shlex.quote(f'command -v {shlex.quote(entry.test_exec)}')} > /dev/null 2>&1")
     if entry.test_file:
         path = entry.test_file.replace("~", home, 1) if entry.test_file.startswith("~") else entry.test_file
-        return f"test -f {shlex.quote(path)}"
+        commands.append(f"test -f {shlex.quote(path)}")
     if entry.test_dir:
         path = entry.test_dir.replace("~", home, 1) if entry.test_dir.startswith("~") else entry.test_dir
-        return f"test -d {shlex.quote(path)}"
-    return None
+        commands.append(f"test -d {shlex.quote(path)}")
+    return " && ".join(commands) or None
 
 
 def _run_install_commands(

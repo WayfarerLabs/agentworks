@@ -183,11 +183,19 @@ A `git-credential`'s `spec.provider` is one tagged table: its `name` key selects
 capability and the remaining keys are that provider's configuration, which
 `agw resource describe-kind git-credential-provider/<name>` documents.
 
+A provider's `token` field is itself a tagged acquisition choice. Today it has one arm:
+`token: {mode: stored, secret: my-github-token}` names a secret holding a stored token. Omitting
+`token` selects that arm and defaults its secret to `git-token-<credential name>`, while the
+existing `token: my-github-token` scalar remains shorthand for the same stored arm. Token minting is
+not implemented. When it arrives it will be another acquisition arm; repositories, scopes,
+permissions, and other minting parameters remain credential configuration, not secret mappings.
+
 A github credential may carry a scope there, and the choice is the part worth explaining:
 `repos: ["owner/name", ...]` pins the credential to specific repositories (always a list, even for
 one, matching a fine-grained PAT's selected repos), while `owner: "org"` covers every repository
-under that user or org, including repos an agent clones ad hoc that no workspace ever declared. The
-two are mutually exclusive; a credential with neither is the unscoped fallback.
+under that user or org, including repos an agent clones ad hoc that no workspace ever declared.
+Writing both takes the union: every exact repository in `repos`, plus every repository under
+`owner`. A credential with neither is the unscoped fallback.
 
 Selection lives in the agentworks credential helper: initialization sets `credential.useHttpPath`
 (via the managed include `~/.agentworks-git-scopes.gitconfig`), so git hands the helper the remote's

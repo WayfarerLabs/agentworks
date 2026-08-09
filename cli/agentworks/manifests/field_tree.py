@@ -65,7 +65,7 @@ class _Implementation:
 @dataclass(frozen=True, kw_only=True)
 class Alternative:
     """One of the several things that could go where one thing goes: an
-    implementation of a capability kind, or an arm of any other tagged
+    implementation of a capability kind, or an arm of any other model
     union.
 
     **Every alternative is READABLE**, and at least one of the three
@@ -78,7 +78,8 @@ class Alternative:
     """
 
     name: str
-    """The tag that selects it (``"azure-vm"``)."""
+    """The tag that selects it, or a descriptive model title for an
+    untagged structural arm."""
 
     summary: str | None
     """Its one-line description, so a list of alternatives says what each
@@ -132,7 +133,7 @@ class FieldEntry:
     rather than to it: see :attr:`alternatives` and :attr:`contents`."""
 
     alternatives: tuple[Alternative, ...]
-    """The arms of a discriminated union, when this field is one. Each
+    """The arms of a model union, when this field is one. Each
     carries its own fields where this reference shows them."""
 
     @property
@@ -277,7 +278,7 @@ def _tree(
             raise StateError(f"the field stream reached {'.'.join(doc.path)} before its parent block")
         siblings.append(FieldEntry(doc=doc, children=(), alternatives=()))
         by_path[doc.path] = []
-        _open_tagged_element(doc, by_path)
+        _open_union_element(doc, by_path)
     expanding = (*expanding, model)
     return tuple(_resolved(entry, by_path, capability_kind, expanding) for entry in roots)
 
@@ -345,9 +346,9 @@ def _open_element(path: tuple[str, ...], by_path: dict[tuple[str, ...], list[Fie
     )
 
 
-def _open_tagged_element(doc: FieldDoc, by_path: dict[tuple[str, ...], list[FieldEntry]]) -> None:
+def _open_union_element(doc: FieldDoc, by_path: dict[tuple[str, ...], list[FieldEntry]]) -> None:
     """Add the node standing for one element of a collection whose
-    ELEMENTS are a discriminated union of models.
+    ELEMENTS are a tagged or structural union of models.
 
     Driven by the holder's own doc, because such an element streams no
     fields to be driven by: whose fields those would be is the arm
@@ -456,11 +457,16 @@ def _collapsed(entry: FieldEntry) -> FieldEntry:
     inner = entry.children[0]
     if inner.name != "root":
         return entry
-    # The parent keeps its own path, description, and requiredness (they
-    # are the field's); the wrapped value supplies what it IS.
+    # The parent keeps the annotation an operator actually supplies. That
+    # includes wrappers outside the RootModel (notably ``| None``); only
+    # the root child's structural detail moves up for presentation.
     return replace(
         entry,
-        doc=replace(entry.doc, union_arms=inner.doc.union_arms, choices=inner.doc.choices),
+        doc=replace(
+            entry.doc,
+            union_arms=inner.doc.union_arms,
+            choices=inner.doc.choices,
+        ),
         children=inner.children,
     )
 
@@ -470,7 +476,7 @@ def _expanded(
     capability_kind: str | None,
     expanding: tuple[type[BaseModel], ...],
 ) -> FieldEntry:
-    """A discriminated union as its arms, each one readable.
+    """A model union as its arms, each one readable.
 
     Every arm is named, and naming an arm raises exactly the question
     :func:`_shows_fields` answers: what do I write if I pick that one. An
@@ -499,16 +505,17 @@ def _alternative(
 ) -> Alternative:
     """One arm, with whichever of the three ways of being readable it
     has. See :class:`Alternative`."""
-    impl = implementations.get(arm.tag)
+    name = arm.tag or arm.doc.title
+    impl = implementations.get(name) if arm.tag is not None else None
     if impl is not None and impl.model is not arm.doc.model:
         # A tag COLLISION, not an implementation: some other union in this
         # tree happens to have an arm spelled like a seated one. See
         # :func:`_implementations` for why identity is the question.
         impl = None
-    target = f"{kind}/{arm.tag}" if impl is not None else None
+    target = f"{kind}/{name}" if impl is not None else None
     recurring = arm.doc.model in expanding
     return Alternative(
-        name=arm.tag,
+        name=name,
         # The IMPLEMENTATION's one-liner where the arm is one (what lima
         # IS), falling back to the arm model's own docstring (what its
         # config is) for a union that is not a capability. Off the same

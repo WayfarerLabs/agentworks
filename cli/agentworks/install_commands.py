@@ -64,16 +64,16 @@ class _InstallCommandEntry(DeclaredResource):
     """Directories prepended to ``PATH`` for the duration of the command."""
 
     test_exec: str | None = Field(default=None, examples=["my-tool"])
-    """Skip the install when this command is already on ``PATH``. At most
-    one of the three ``test_*`` fields may be set."""
+    """Check whether this command is already on ``PATH``. When multiple
+    non-empty ``test_*`` fields are set, all must pass to skip the install."""
 
     test_file: str | None = None
-    """Skip the install when this file already exists. ``~`` resolves to
-    the target user's home."""
+    """Check whether this file already exists. ``~`` resolves to the target
+    user's home."""
 
     test_dir: str | None = None
-    """Skip the install when this directory already exists. ``~`` resolves
-    to the target user's home."""
+    """Check whether this directory already exists. ``~`` resolves to the
+    target user's home."""
 
     @model_validator(mode="before")
     @classmethod
@@ -83,48 +83,6 @@ class _InstallCommandEntry(DeclaredResource):
         if isinstance(data, dict) and "test" in data:
             raise ValueError("'test' is not a valid field. Use 'test_exec', 'test_file', or 'test_dir'.")
         return data
-
-    @model_validator(mode="after")
-    def _at_most_one_test(self) -> _InstallCommandEntry:
-        """At most one of the three may be set.
-
-        Counted on ``is not None``, so an EMPTY string counts as set. The
-        loader this replaces normalized ``""`` to ``None`` before counting,
-        which made ``test_exec: ""`` beside a real ``test_file`` legal; it
-        is an error now. That follows from strict mode dropping the
-        normalization, but it does not follow from it automatically, so it
-        is said here rather than left to be discovered.
-
-        Which is also why the message names the fields it FOUND set, and
-        calls out an empty one. "at most one of test_exec, test_file,
-        test_dir may be set" gives an operator whose file says
-        ``test_exec: ""`` beside a real ``test_file`` no reason to think
-        the empty string is the newly-counted one, so deleting the
-        meaningful field is exactly as plausible a reading.
-        """
-        found = [
-            (name, value)
-            for name, value in (
-                ("test_exec", self.test_exec),
-                ("test_file", self.test_file),
-                ("test_dir", self.test_dir),
-            )
-            if value is not None
-        ]
-        if len(found) <= 1:
-            return self
-        listed = ", ".join(f"{name} (empty string)" if value == "" else name for name, value in found)
-        message = f"at most one of test_exec, test_file, test_dir may be set; this one sets {listed}"
-        empty = [name for name, value in found if value == ""]
-        if len(empty) < len(found):
-            # An empty one beside a real one: say which to delete, because
-            # that is the whole ambiguity. All-empty has no such answer.
-            message += (
-                f". An empty string counts as set, so delete {' and '.join(empty)} rather than blanking it"
-                if empty
-                else ""
-            )
-        raise ValueError(message)
 
 
 class SystemInstallCommandEntry(_InstallCommandEntry):
@@ -145,16 +103,13 @@ class _TestFields(TypedDict):
 
 
 def _load_test_fields(data: dict[str, object], ctx: str) -> _TestFields:
-    """Load and validate test_exec/test_file/test_dir fields. At most one may be set."""
+    """Load the optional test_exec/test_file/test_dir fields."""
     if "test" in data:
         raise ConfigError(f"{ctx}: 'test' is not a valid field. Use 'test_exec', 'test_file', or 'test_dir'.")
     fields: _TestFields = {"test_exec": None, "test_file": None, "test_dir": None}
     for key in ("test_exec", "test_file", "test_dir"):
         raw = str(data[key]).strip() if key in data else None
         fields[key] = raw if raw else None  # type: ignore[literal-required,unused-ignore]
-    set_count = sum(1 for v in fields.values() if v is not None)
-    if set_count > 1:
-        raise ConfigError(f"{ctx}: at most one of test_exec, test_file, test_dir may be set")
     return fields
 
 
@@ -228,9 +183,10 @@ class _SystemInstallCommandKind:
         runs as root during `agw vm create` and again on `agw vm reinit`, so write it to
         be safe to run twice.
 
-        A vm-template refers to it by name through `system_install_commands`. Give it
-        exactly one of `test_exec`, `test_file`, or `test_dir` and init skips the
-        command when the tool is already there.
+        A vm-template refers to it by name through `system_install_commands`. Declare
+        any combination of `test_exec`, `test_file`, and `test_dir`; init skips the
+        command only when every non-empty declared test passes. With no non-empty
+        tests, the command always runs.
         """,
     )
     model: type[DeclaredResource] = SystemInstallCommandEntry
@@ -258,8 +214,9 @@ class _UserInstallCommandKind:
         on reinit, so write it to be safe to run twice.
 
         An admin-template or agent-template refers to it by name through
-        `user_install_commands`. Give it exactly one of `test_exec`, `test_file`, or
-        `test_dir` to make it skippable; in `test_file` and `test_dir`, `~` is the
+        `user_install_commands`. Declare any combination of `test_exec`, `test_file`,
+        and `test_dir`; init skips the command only when every non-empty declared test
+        passes. With no non-empty tests, it always runs. In path tests, `~` is the
         target user's home, not the operator's.
         """,
     )

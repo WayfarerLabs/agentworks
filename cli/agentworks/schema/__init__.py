@@ -8,6 +8,8 @@ hand-validated lives here:
 - :class:`ScalarShorthand`, the model-level declaration that a table may
   also be written as one bare scalar, from which validation, emitted
   schema, and the field-reference stream all derive.
+- :class:`UnionScalarShorthand`, the explicit field-level declaration
+  that a discriminated union dispatches a scalar spelling to one arm.
 - :class:`SecretRef` / :class:`ResourceRef`, the ``Annotated`` markers
   that say what a field means about another Resource, and their
   ``x-agw-ref`` JSON Schema encoding. :func:`reference_marker_error` is
@@ -23,6 +25,8 @@ hand-validated lives here:
 - :func:`iter_field_docs`, the ordered field-reference stream every human
   presentation of a model derives from, and :func:`render_type` beside
   it for the presenters that want our type rendering.
+- :class:`StructuralUnion`, the declaration that an untagged union of
+  closed model arms is addressed by each arm's required and allowed keys.
 - :func:`config_error_from`, the bridge from a pydantic
   ``ValidationError`` to the owner-framed, located text an operator
   reads.
@@ -49,7 +53,13 @@ sit at top level for.
 
 from __future__ import annotations
 
-from agentworks.schema._shape import element_annotation, marker_of, model_is_complete
+from agentworks.schema._shape import (
+    element_annotation,
+    marker_of,
+    model_is_complete,
+    structural_union_error,
+    union_scalar_shorthand_error,
+)
 from agentworks.schema.base import (
     AgwModel,
     AgwRootModel,
@@ -84,7 +94,8 @@ from agentworks.schema.markers import (
     ResourceRef,
     SecretRef,
 )
-from agentworks.schema.shorthand import ScalarShorthand
+from agentworks.schema.shorthand import ScalarShorthand, UnionScalarShorthand
+from agentworks.schema.structural import StructuralUnion
 
 __all__ = [
     "MAPPING_KEY",
@@ -104,6 +115,8 @@ __all__ = [
     "ResourceRef",
     "ScalarShorthand",
     "SecretRef",
+    "StructuralUnion",
+    "UnionScalarShorthand",
     "UnionArm",
     "config_error_from",
     "element_annotation",
@@ -117,4 +130,6 @@ __all__ = [
     "model_is_complete",
     "reference_marker_error",
     "render_type",
+    "structural_union_error",
+    "union_scalar_shorthand_error",
 ]

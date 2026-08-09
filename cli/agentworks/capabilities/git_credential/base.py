@@ -16,15 +16,37 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated, ClassVar
+from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
+
+from pydantic import Field
 
 from agentworks.capabilities.base import Capability
-from agentworks.schema import AgwModel, NonEmptyStr, SecretRef
+from agentworks.schema import (
+    AgwModel,
+    NonEmptyStr,
+    ScalarShorthand,
+    SecretRef,
+    UnionScalarShorthand,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.capabilities.base import RunContext
+
+
+class TokenSourcedConfig(AgwModel):
+    """Version 1 provider config, retained only for registration errors.
+
+    Third-party version 1 providers may still import this formerly public
+    base. Keeping the old shape importable lets registration reject their
+    declared contract version with the migration message. The version 2
+    descriptor refuses this base, so a provider cannot claim version 2
+    while retaining the outer scalar/null token contract.
+    """
+
+    token: Annotated[NonEmptyStr, SecretRef(usage="the auth token", default_template="git-token-{owner_name}")]
+    """The version 1 secret-name field."""
 
 
 def _http_probe(url: str, headers: dict[str, str], *, timeout: float = 5.0) -> tuple[int, bytes, dict[str, str]]:
@@ -49,24 +71,43 @@ def _http_probe(url: str, headers: dict[str, str], *, timeout: float = 5.0) -> t
         return (exc.code, body, {k.lower(): v for k, v in exc.headers.items()})
 
 
-class TokenSourcedConfig(AgwModel):
-    """The config every PAT-sourcing git credential provider shares.
+class StoredToken(AgwModel):
+    """Obtain this credential's token from a stored secret.
 
-    The ``token`` field NAMES the secret holding the personal access
-    token; it never holds the token's value. Absent, it resolves to
-    ``git-token-<credential name>`` from the owner template, which is the
-    whole of the derivation the four hand-rolled helpers used to perform
-    between them: the marker says what the field means and the model
-    layer applies it, at validation and at reference extraction alike.
-
-    A future MINTING provider sources no token, so it extends
-    :class:`~agentworks.schema.AgwModel` directly and declares
-    whatever bootstrap secrets it needs; :attr:`GitCredentialProvider.secret_name`
-    is the part of the base that assumes this shape.
+    This is deliberately one arm of a real tagged union even though it is
+    the only arm today. Minting arrives later as an additive arm; its
+    scopes, repositories, permissions, and other creation parameters
+    belong to the credential domain, never to this secret reference.
     """
 
-    token: Annotated[NonEmptyStr, SecretRef(usage="the auth token", default_template="git-token-{owner_name}")]
+    scalar_shorthand: ClassVar = ScalarShorthand(annotation=str, field="secret")
+    """A bare ``token: <name>`` is this arm with ``secret`` filled."""
+
+    mode: Literal["stored"]
+    """Selects stored-secret token acquisition."""
+
+    secret: Annotated[NonEmptyStr, SecretRef(usage="the auth token", default_template="git-token-{owner_name}")]
     """The secret holding this credential's personal access token."""
+
+
+TokenAcquisition = Annotated[
+    StoredToken,
+    UnionScalarShorthand(discriminator="mode", arm=StoredToken),
+]
+"""How a git credential obtains its token, as a one-arm tagged union."""
+
+
+class TokenAcquiringConfig(AgwModel):
+    """The config every token-acquiring git credential provider shares."""
+
+    # Stored is the only legal default because omission historically
+    # sourced a stored secret. A future arm must be operator-selected and
+    # must never replace this default. Raw data is intentional: the owner
+    # boundary fills the stored arm's templated ``secret`` before pydantic
+    # validates it, which a constructed instance could not express.
+    token: TokenAcquisition = Field(default={"mode": "stored"})  # type: ignore[assignment]
+    """How this credential obtains its token. Defaults to the stored arm;
+    a bare secret name is that arm's shorthand."""
 
 
 @dataclass(frozen=True)
@@ -126,9 +167,9 @@ class GitCredentialProvider(Capability):
         self._description = description
 
     @property
-    def config(self) -> TokenSourcedConfig:
+    def config(self) -> TokenAcquiringConfig:
         """This credential's validated provider config."""
-        return self._config_as(TokenSourcedConfig)
+        return self._config_as(TokenAcquiringConfig)
 
     @property
     def secret_name(self) -> str:
@@ -141,7 +182,7 @@ class GitCredentialProvider(Capability):
         fallback this replaced was the last consumer-side defaulting of a
         modeled field on this path (FR15).
         """
-        return self.config.token
+        return self.config.token.secret
 
     @property
     def store_username(self) -> str:
