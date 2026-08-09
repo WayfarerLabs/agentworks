@@ -24,14 +24,8 @@ about something else. One renderer for the frame, so the sentinels
 (``line == 0``, the synthesized path) are honored the same way
 everywhere and no call site invents a second spelling of a path.
 
-A diagnostic surface wanting the same text WITHOUT an exception in hand
-(a doctor row, ``describe``) reads :func:`_problems`, the shared core the
-framing is built over, and frames the problems its own way. That is why
-the core is factored out under a name of its own despite having one
-caller today. A pure public wrapper over it shipped for a while and was
-retired never having gained one: the reusable-text property lives in
-``_problems``, so a wrapper is four lines whenever a real consumer turns
-up.
+A diagnostic surface wanting the same text without an exception in hand
+can read :func:`_problems` and apply its own framing.
 
 **Normalization is an explicit table and nothing else.** An error type
 the table does not cover falls through to pydantic's own message
@@ -689,11 +683,8 @@ def _missing_union_block(address: _Address) -> str | None:
     keystroke apart (the block absent, and the block present without its
     tag), so they answer with the same list.
 
-    The three ``retired_shapes`` unions no longer reach this at all:
-    each carries a declared default now, so their absent case loads
-    instead of erroring. What lands here is any REQUIRED tagged union,
-    which the mode unions were for one revision and another field may
-    be again.
+    Only required tagged unions reach this path; a union with a declared
+    default loads its absent case.
     """
     if not address.arms or not address.discriminator:
         return None

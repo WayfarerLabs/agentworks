@@ -222,12 +222,8 @@ def _build_service_principal_credential(sp: AzureServicePrincipalAuth, client_se
     return cred
 
 
-# Why an arm with no fields but its tag exists at all: it gives
-# borrowing the host's identity a DECLARED form, which the old optional
-# ``service_principal`` block never had. A site can now write the choice
-# down and a reviewer can read it, and the union's default is this arm,
-# carried in ``describe-kind`` and the emitted schema rather than
-# implied by a missing key.
+# Ambient authentication is an explicit arm so every identity mechanism
+# has a declared shape.
 class AzureAmbientAuth(AgwModel):
     """Authenticate with the ambient chain: ``az login``, ``AZURE_*``, or a managed identity.
 
@@ -236,14 +232,8 @@ class AzureAmbientAuth(AgwModel):
     """
 
     mode: Literal["ambient"]
-    """Selects this arm."""
 
 
-# A tagged arm rather than an optional block on the config: a future
-# certificate-based service principal, or a managed-identity mode with
-# fields of its own, is a new arm beside these two rather than another
-# nullable table whose presence has to be cross-checked against the
-# others.
 class AzureServicePrincipalAuth(AgwModel):
     """Authenticate as an explicit Entra ID service principal.
 
@@ -253,7 +243,6 @@ class AzureServicePrincipalAuth(AgwModel):
     """
 
     mode: Literal["service-principal"]
-    """Selects this arm."""
 
     tenant_id: NonEmptyStr
     """The Entra ID tenant the principal lives in."""
@@ -265,44 +254,12 @@ class AzureServicePrincipalAuth(AgwModel):
         NonEmptyStr,
         SecretRef(usage="the Azure service-principal client secret", default_template="azure-client-secret"),
     ]
-    """The secret holding the principal's client secret. Never the value:
-    the field NAMES a secret in the framework's secret system, which is
-    why it is ``secret`` and not ``client_secret``. The default env-var
-    convention reads ``AW_SECRET_AZURE_CLIENT_SECRET``."""
+    """The secret containing the principal's client secret. The default
+    maps to ``AW_SECRET_AZURE_CLIENT_SECRET`` in the env-var backend."""
 
 
-#: How an azure-vm site authenticates, as a tagged union DEFAULTING to
-#: the ambient arm.
-#:
-#: An earlier revision made this required with no default, and that
-#: reasoning is in the history, so here is why it reversed (operator
-#: ruling): the defect the union fixed was never "absence selects a
-#: mechanism", it was that there was no way to DECLARE the choice at all.
-#: The union fixes the second, and once an explicit form exists, a
-#: default is an ordinary default, carried in the emitted schema and in
-#: ``describe-kind`` like any other. Ambient is the right one because it
-#: is what the wrapped SDK already does: ``DefaultAzureCredential`` is
-#: ambient-first, so requiring explicit auth would make this site
-#: stricter than the tool it wraps, which is surprising in the other
-#: direction. The general pattern: ambient where the underlying tool has
-#: an ambient notion, required where it does not, which is why proxmox
-#: has no union at all rather than being an exception to one.
-#:
-#: The tag is a string ``Literal`` rather than a boolean for the same
-#: reason it is a union rather than an ``auth_mode`` field beside nullable
-#: blocks: each mode carries its OWN fields, and azure has further modes
-#: worth naming later (a user-assigned managed identity, a certificate
-#: credential) that a boolean could not grow into. Pydantic emits this
-#: directly as ``oneOf`` with a ``discriminator`` mapping, so the loader
-#: and the emitted schema agree by construction, which a cross-field
-#: validator over nullable blocks could not achieve. Not because JSON
-#: Schema cannot state the constraint (it can, as ``oneOf`` over closed
-#: arms or as ``if``/``then`` on the tag), but because pydantic does not
-#: derive a validator's body into the schema it emits, so the emitted
-#: schema would go silent about it and accept mixed-arm configs the
-#: loader rejects. That is sanctioned under-approximation under
-#: ``manifests/emit.py``, not a breach of it; what it forfeits is the
-#: editor DIAGNOSTIC.
+#: Authentication mechanisms have distinct tagged shapes. Ambient is the
+#: default because it is ``DefaultAzureCredential``'s standard behavior.
 AzureAuth = Annotated[AzureAmbientAuth | AzureServicePrincipalAuth, Field(discriminator="mode")]
 
 
@@ -336,15 +293,13 @@ class AzureVMConfig(AgwModel):
 
     vm_sizes: Annotated[list[AzureVMSize], Field(min_length=1)] | None = None
     """An override of the built-in B-series catalog ``vm create`` picks
-    from. Need not be sorted: selection takes the smallest entry that
-    satisfies the request. Non-empty when present, because an empty
-    catalog is a site on which no VM can be created."""
+    from. Order does not matter; selection uses the smallest matching
+    entry. Must contain at least one entry."""
 
     auth: AzureAuth = AzureAmbientAuth(mode="ambient")
     """How this site authenticates to Azure: ``{mode: ambient}`` for the
     ambient credential chain, or ``{mode: service-principal, ...}`` for an
-    explicit principal. Defaults to ambient, matching what
-    ``DefaultAzureCredential`` does when told nothing."""
+    explicit principal. Defaults to ambient."""
 
 
 class _VMSize(NamedTuple):

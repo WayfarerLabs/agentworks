@@ -30,12 +30,7 @@ def _check_env_var_name(value: str) -> str:
 
 
 EnvVarName = Annotated[str, AfterValidator(_check_env_var_name)]
-"""An env table's KEY: a POSIX-shaped variable name.
-
-A validator rather than ``Field(pattern=...)`` because the bridge reads a
-validator's own exception out of the error context, so this reproduces
-the message the hand-rolled loader gave verbatim, naming the offending
-key rather than making the operator parse a regex."""
+"""An env table key, using a POSIX-shaped variable name."""
 
 
 class PlaintextEnvEntry(AgwModel):
@@ -66,33 +61,16 @@ class EnvEntry(
         ]
     ]
 ):
-    """One env var declaration, as a structural plaintext-or-secret union.
+    """One env var declaration, as plaintext or a secret reference.
 
-    ``PlaintextEnvEntry`` and ``SecretEnvEntry`` are distinct closed arms.
-    Their required and allowed fields select the arm for validation,
-    reference extraction, and owner-default filling; no cross-field
-    validator carries that choice.
-
-    Three spellings, one type: an operator writes ``FOO: a value`` or
-    ``FOO: {value: a value}`` for plaintext, and
-    ``FOO: {secret: my-secret}`` for the other. The shorthand declared
-    below makes the first spelling the plaintext arm's short form. The KEY is
-    the env var's name and lives in the table that holds this entry; it is
-    deliberately not a field here, because two places to say one thing is
-    two places that can disagree (nothing ever enforced that a table's key
-    matched its entry's).
+    Plaintext may be written as ``FOO: a value`` or
+    ``FOO: {value: a value}``; a secret uses
+    ``FOO: {secret: my-secret}``. The containing table key is the variable
+    name.
     """
 
     scalar_shorthand: ClassVar = PlaintextEnvEntry.scalar_shorthand
-    """``FOO: a value`` is the plaintext form, and it is the shape
-    operators write for all but a handful of entries.
-
-    One declaration, three derivations: the fold, the emitted schema's
-    string arm, and the "string or table" every human surface renders.
-    Both of the first two were written by hand here once, which is how the
-    third came to be missing: ``describe-kind`` documented the table form
-    alone for a field whose emitted schema had offered both since it was
-    written."""
+    """Treat ``FOO: a value`` as the plaintext form."""
 
     @property
     def value(self) -> str | None:
@@ -150,11 +128,7 @@ class EnvEntry(
 
 
 EnvTable = dict[EnvVarName, EnvEntry]
-"""The shared env-table field type every env-bearing kind declares.
-
-One authored type is what lets the load-time env hygiene checks find
-their subject by ANNOTATION rather than by a list of env-bearing kinds,
-which is the list the sixth such kind would not be on."""
+"""The shared env-table field type used by every env-bearing kind."""
 
 
 def env_references(

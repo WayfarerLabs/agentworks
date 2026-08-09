@@ -1,19 +1,7 @@
-"""The generic built-in capability publisher, derived from the descriptor
-table.
+"""Publish built-in capability implementations as read-only resource rows.
 
-Every capability kind mirrors its code registry into the resource Registry
-as read-only rows, so references to a capability (a ``vm-site``'s
-``spec.platform``, the ``[secret_config].backends`` chain) resolve through
-the framework's uniform miss policy and the capabilities list and describe
-like every other resource. That was four hand-written copies of one idiom,
-differing only in which registry they read, which row type they built, and
-which source label they stamped: exactly the three things a descriptor
-carries. :func:`publish_capability_rows` is the idiom, once.
-
-The kind's ``publisher_source`` is preserved per kind rather than derived
-from a module path, because the labels are operator-visible provenance
-(``secret-backend`` publishes as ``agentworks.secrets``, the package, not
-the ``backends`` module that used to front it).
+Each kind's descriptor supplies its registry, row type, and operator-visible
+provenance label.
 """
 
 from __future__ import annotations

@@ -1,8 +1,7 @@
 # Idempotency
 
-Agentworks init, reinit, and repair operations are designed to be safe to re-run. The general goal
-was to be as idempotent as possible but that was not always achievable. This document describes what
-is and is not idempotent across `vm reinit`, `agent reinit`, and `workspace repair`.
+Agentworks init, reinit, and repair operations are safe to re-run where listed below. This document
+states the guarantees and limitations for `vm reinit`, `agent reinit`, and `workspace repair`.
 
 ## Re-pointing the bound template
 
@@ -30,7 +29,7 @@ failures produce warnings and a `partial` status.
 | Step                   | Notes                                                                        |
 | ---------------------- | ---------------------------------------------------------------------------- |
 | Apt sources            | Key downloaded if missing, source list overwritten                           |
-| SSH host key preserve  | cloud-init drop-in written so host keys survive stop/start (repairs old VMs) |
+| SSH host key preserve  | cloud-init drop-in written so host keys survive stop/start                   |
 | Shell                  | Overwritten from config                                                      |
 | SSH authorized keys    | Overwritten from config                                                      |
 | Git credentials        | Overwritten from config                                                      |
@@ -41,7 +40,7 @@ failures produce warnings and a `partial` status.
 | Tailscale DNS          | Startup-ordering drop-in rewritten only when content differs                 |
 | sshd AcceptEnv         | Drop-in overwritten; sshd reloaded                                           |
 | sudoers env_keep       | Fragment overwritten, staged and `visudo -cf` validated before promotion     |
-| sudoers console setenv | Same; scoped to the VM's admin user (repairs old VMs, see ADR 0017)          |
+| sudoers console setenv | Same; scoped to the VM's admin user                                          |
 
 ### Additive only
 

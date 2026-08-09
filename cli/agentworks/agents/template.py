@@ -68,10 +68,8 @@ class AgentTemplate(DeclaredResource):
     """The command run inside the checkout to install the dotfiles."""
 
     mise_activate: bool | None = None
-    """Whether to activate mise in the agent user's shell. A boolean, written unquoted:
-    ``false`` and YAML's ``no`` both read as false. A QUOTED ``"no"`` is
-    a string, refused now, and it used to mean TRUE, the opposite of
-    what it reads as."""
+    """Whether to activate mise in the agent user's shell. Write booleans
+    unquoted; quoted strings such as ``"no"`` are invalid."""
 
     mise_packages: list[str] | None = None
     """Tools to install with mise, each as ``name@version``."""
@@ -81,24 +79,16 @@ class AgentTemplate(DeclaredResource):
 
     mise_allow_unlocked: bool | None = None
     """Whether to install ``mise_packages`` with no lockfile present.
-    A boolean, written unquoted:
-    ``false`` and YAML's ``no`` both read as false. A QUOTED ``"no"`` is
-    a string, refused now, and it used to mean TRUE, the opposite of
-    what it reads as."""
+    Write booleans unquoted; quoted strings such as ``"no"`` are invalid."""
 
     mise_install_before: str | None = None
-    """How OLD a tool version must be before mise will install it, as
-    supply-chain defense against a freshly published one: a positive
-    duration such as ``7d``, or an ISO date. Only fuzzy requests
-    (``latest``, ``node@20``) are filtered; an explicitly pinned version
-    installs regardless."""
+    """Minimum age for fuzzy mise versions such as ``latest`` or ``node@20``:
+    a positive duration such as ``7d``, or an ISO date. Explicitly pinned
+    versions install regardless."""
 
     mise_prune_on_reinit: bool | None = None
     """Whether re-running init removes mise tools no longer declared.
-    A boolean, written unquoted:
-    ``false`` and YAML's ``no`` both read as false. A QUOTED ``"no"`` is
-    a string, refused now, and it used to mean TRUE, the opposite of
-    what it reads as."""
+    Write booleans unquoted; quoted strings such as ``"no"`` are invalid."""
 
     claude_marketplaces: list[str] | None = None
     """Claude Code marketplaces to register for the agent user."""
