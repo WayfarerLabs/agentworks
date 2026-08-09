@@ -207,13 +207,20 @@ def _machine_health_check_data(check: HealthCheck) -> JsonObject:
     }
 
 
-def run_checks(*, completion_version: str | None = None) -> HealthReport:
+def run_checks(
+    *,
+    completion_version: str | None = None,
+    machine_safe_config_load: bool = False,
+) -> HealthReport:
     """Run all health checks and return structured results.
 
     Args:
         completion_version: current completion spec version for staleness check.
             Computed by the CLI layer and passed in to avoid coupling doctor
             to the CLI module. Omit to skip completion checks.
+        machine_safe_config_load: Raise typed config-load errors instead of
+            writing legacy diagnostics to stderr. The JSON CLI surface uses
+            this so its only output is the closed report envelope.
     """
     report = HealthReport()
 
@@ -222,7 +229,10 @@ def run_checks(*, completion_version: str | None = None) -> HealthReport:
     # dependent group renders wherever it reads best. Identity first,
     # then the environment, then the VM stack, then everything the
     # config graph drives.
-    config_group, config, registry = _check_config()
+    if machine_safe_config_load:
+        config_group, config, registry = _check_config(raise_errors=True)
+    else:
+        config_group, config, registry = _check_config()
 
     report.groups.append(_check_system())
     report.groups.append(_check_python())
@@ -603,8 +613,8 @@ def _check_tailscale() -> HealthGroup:
     return g
 
 
-def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
-    """Returns (group, config_or_none, registry_or_none)."""
+def _check_config(*, raise_errors: bool = False) -> tuple[HealthGroup, Config | None, Registry | None]:
+    """Return the config group and facts, optionally suppressing legacy stderr."""
     from agentworks.config import CONFIG_PATH, ConfigError
     from agentworks.errors import ValidationError
 
@@ -635,7 +645,7 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     try:
         from agentworks.config import load_config
 
-        config = load_config(warn_issues=False)
+        config = load_config(warn_issues=False, raise_errors=True) if raise_errors else load_config(warn_issues=False)
     except (ConfigError, ValidationError) as e:
         # ValidationError is a SIBLING of ConfigError under AgentworksError,
         # not a subclass, so it must be named explicitly. Catching it here
@@ -660,7 +670,10 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
         from agentworks.config import load_config as _load_settings_only
 
         try:
-            config = _load_settings_only(warn_issues=False, resources=False)
+            if raise_errors:
+                config = _load_settings_only(warn_issues=False, resources=False, raise_errors=True)
+            else:
+                config = _load_settings_only(warn_issues=False, resources=False)
         except (ConfigError, ValidationError):
             return g, None, None
     except SystemExit:

@@ -30,7 +30,10 @@ def doctor(
     from agentworks.completions.spec import build_spec, completion_version
     from agentworks.doctor import Status, health_report_data, run_checks
 
-    report = run_checks(completion_version=completion_version(build_spec(app)))
+    report = run_checks(
+        completion_version=completion_version(build_spec(app)),
+        machine_safe_config_load=output_format is OutputFormat.JSON,
+    )
 
     if output_format is OutputFormat.JSON:
         from click import get_binary_stream
