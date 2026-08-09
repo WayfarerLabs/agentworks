@@ -51,14 +51,14 @@ class Database:
     def __init__(self, path: Path | None = None, *, read_only: bool = False) -> None:
         db_path = path or _db.DB_PATH
         if read_only:
+            from agentworks.db.inspection import _schema_version_from_history
             from agentworks.errors import StateError
 
             connection: sqlite3.Connection | None = None
             try:
                 connection = sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True)
-                row = connection.execute("SELECT MAX(version) FROM schema_version").fetchone()
-                current = row[0] or 0
-            except sqlite3.DatabaseError as error:
+                current = _schema_version_from_history(connection)
+            except (sqlite3.DatabaseError, StateError) as error:
                 if connection is not None:
                     connection.close()
                 raise StateError(
@@ -142,12 +142,11 @@ class Database:
         db_path = path or _db.DB_PATH
         if not db_path.exists():
             return (False, 0, LATEST_VERSION)
+        from agentworks.db.inspection import _schema_version_from_history
+
         conn = sqlite3.connect(str(db_path))
         try:
-            row = conn.execute("SELECT MAX(version) FROM schema_version").fetchone()
-            current = row[0] or 0
-        except sqlite3.OperationalError:
-            current = 0
+            current = _schema_version_from_history(conn)
         finally:
             conn.close()
         return (True, current, LATEST_VERSION)

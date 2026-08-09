@@ -170,8 +170,9 @@ collections retain chain order.
 
 vm.list.data is {vms}. Each VM is {name, site, template, provisioning_status, initialization_status,
 workspace_count, agent_count, session_count, tailscale_host, created_at}. template and
-tailscale_host are nullable. Provisioning is one of pending, in_progress, complete, failed;
-initialization is one of pending, in_progress, complete, partial, failed. VMs sort by name.
+tailscale_host are nullable. Provisioning is one of pending, in_progress, complete, failed, unknown;
+initialization is one of pending, in_progress, complete, partial, failed, unknown. Invalid persisted
+values project to the stable unknown sentinel without exposing stored text. VMs sort by name.
 
 vm.describe.data is {vm, issues}. vm field order is:
 
@@ -199,8 +200,9 @@ provisioning_complete, provisioning_failed, init_started, init_complete, init_pa
 backup_started, backup_completed, backup_failed, rekey, or unknown. Unknown or historical raw names
 project to the stable unknown sentinel and never echo stored text. detail is reserved and ALWAYS
 null in JSON v1: persisted event detail is unbounded historical diagnostic text, and v1 defines no
-safe non-null grammar. mode is admin or agent; agent_name is nullable. These arrays retain current
-DB ordering. issues[] uses vm_issue in encounter order.
+safe non-null grammar. mode is admin, agent, or unknown; agent_name is nullable. Unknown closes an
+invalid persisted mode without echoing it. These arrays retain current DB ordering. issues[] uses
+vm_issue in encounter order.
 
 ### Workspaces and agents
 
@@ -209,7 +211,8 @@ nullable. It preserves current post-filter workspace-name order.
 
 workspace.describe.data is {workspace}. workspace is {name, vm_name, template, path, created_at,
 sessions, agents}. sessions[] is {name, template, mode, agent_name}; agents[] is {name, linux_user}.
-template and agent_name are nullable; mode is admin or agent. Collections retain current DB order.
+template and agent_name are nullable; mode is admin, agent, or unknown. Collections retain current
+DB order.
 
 agent.list.data is {agents} with {name, vm_name, template, grant_all, grants} entries. template is
 nullable and grant_all is boolean. grants[] is {workspace_name, grant_type}, where grant_type is
@@ -224,18 +227,23 @@ sessions[] is {name, template, workspace_name}. Both retain current service orde
 
 session.list.data is {sessions}. Each session is {name, workspace_name, vm_name, template,
 harness_integration, mode, agent_name, status}. harness_integration is a nullable string. mode is
-admin or agent; agent_name is nullable. A broken config or unresolvable template produces null for
-harness_integration, matching the current human display fallback without exposing an error string.
-status is exactly running, stopped, broken, unknown, or unavailable. unavailable represents current
---no-status behavior or a current status probe without a result, rather than a human display
-sentinel. Ordering remains workspace name then session name. Existing human warnings for broken and
-unknown state stay on stderr only.
+admin, agent, or unknown; agent_name is nullable. Unknown is the closed sentinel for an invalid
+persisted mode. A broken config or unresolvable template produces null for harness_integration,
+matching the current human display fallback without exposing an error string. status is exactly
+running, stopped, broken, unknown, or unavailable. unavailable represents current --no-status
+behavior or a current status probe without a result, rather than invalid persisted state or a human
+display sentinel. Ordering remains workspace name then session name. Existing human warnings for
+broken and unknown state stay on stderr only.
 
 session.describe.data is {session}. session is {name, workspace_name, vm_name, template,
 harness_integration, mode, agent_name, status, pid, created_at, updated_at}. harness_integration,
 agent_name, and pid are nullable. pid is a positive integer or null only. The stored PID_STOPPED
 sentinel is rendered as null, never as a negative number. Opaque harness state, boot identifier, and
 socket path are excluded.
+
+The shared VM, workspace, and session fact builders close these persisted enum values before either
+renderer receives them. Valid values preserve existing human bytes. A corrupt value renders as
+unknown in human and JSON output, and its raw or control-bearing text is never forwarded.
 
 console.list.data is {consoles}, where entries are {name, vm_name, session_count} in current name
 order after filter validation. console.describe.data is {console}. console is {name, vm_name,
@@ -305,18 +313,23 @@ path. Doctor projects that result as fixed, path-free `unavailable` rows in the 
 VM sites, and Database groups. It is non-failing and an otherwise healthy report exits 0.
 Unsupported source entries, copy or retry failures, and malformed schema versions remain the
 path-free database-inspection failure path and make the Database row fail. Stable component and
-final database symlinks remain supported. Snapshot acquisition then repeats the filesystem-anchor
-walk for the resolved target parent, and the resulting pinned fd supplies every main, WAL, and SHM
-open. The same bounded protocol handles main-only and active sets. A main-only candidate requires
-sidecar absence to remain stable throughout copying and verification. Doctor reopens and
-re-fingerprints the complete source set and accepts only an exact match, then validates and opens
-only the disposable copy through SQLite. A concurrent clean-to-active transition, checkpoint,
-replacement, or sidecar transition discards the candidate and retries a small bounded number of
-times; exhaustion is the same path-free error. The report-scoped snapshot is cleaned up after all
-database facts are collected; doctor neither migrates nor creates or changes the original database,
-WAL, or SHM files. The schema-version boundary accepts only SQLite null as version 0 or an exact
-nonnegative integer. Text, bytes, floating-point, boolean, and negative values are malformed state
-and fail closed before any version comparison or public diagnostic can expose the raw value.
+final database symlinks remain supported. Snapshot acquisition walks to the resolved target parent
+once. The resulting pinned fd supplies every main, WAL, and SHM metadata read, copy, second
+fingerprint, and retry until collection finishes, then closes before facts are yielded. No retry
+reacquires the source parent by pathname. The same bounded protocol handles main-only and active
+sets. A main-only candidate requires sidecar absence to remain stable throughout copying and
+verification. Doctor reopens and re-fingerprints the complete source set and accepts only an exact
+match, then validates and opens only the disposable copy through SQLite. A concurrent
+clean-to-active transition, checkpoint, replacement, or sidecar transition discards the candidate
+and retries a small bounded number of times; exhaustion is the same path-free error. The
+report-scoped snapshot is cleaned up after all database facts are collected; doctor neither migrates
+nor creates or changes the original database, WAL, or SHM files. The schema-version boundary treats
+an absent table or an empty accepted table as legacy version 0. It recognizes the maintained
+one-column table, whose history may be 0..N or 1..N, and the canonical version-plus-applied-at
+table, whose history is 1..N. Nonempty histories require exact SQLite integer storage, uniqueness,
+and contiguity. Wrong columns or constraints, gaps, duplicates, rogue lower rows, and text, blob, or
+floating-point storage are malformed state and fail closed before a public diagnostic can expose the
+raw value. The same validator protects snapshot, read-only database, and schema-check callers.
 
 --names-only remains completion plumbing and is mutually exclusive with --output json on every
 covered list or kinds command that already has it. Validate that conflict before service work. It

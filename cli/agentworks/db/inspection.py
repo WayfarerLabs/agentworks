@@ -5,6 +5,7 @@ from __future__ import annotations
 import errno
 import hashlib
 import os
+import re
 import sqlite3
 import stat
 import tempfile
@@ -25,6 +26,16 @@ if TYPE_CHECKING:
 _INSPECTION_SNAPSHOT_ATTEMPTS = 3
 _SNAPSHOT_CHUNK_SIZE = 1024 * 1024
 _SNAPSHOT_ERROR = "state database inspection snapshot could not be created"
+_SCHEMA_VERSION_TABLE_SQL = (
+    "CREATE TABLE schema_version (version INTEGER NOT NULL, "
+    "applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')))"
+)
+_SCHEMA_VERSION_COLUMNS = [
+    (0, "version", "INTEGER", 1, None, 0),
+    (1, "applied_at", "TEXT", 1, "strftime('%Y-%m-%dT%H:%M:%SZ', 'now')", 0),
+]
+_LEGACY_SCHEMA_VERSION_TABLE_SQL = "CREATE TABLE schema_version (version INTEGER NOT NULL)"
+_LEGACY_SCHEMA_VERSION_COLUMNS = [(0, "version", "INTEGER", 1, None, 0)]
 
 
 class _SnapshotChanged(Exception):
@@ -294,52 +305,88 @@ def _current_metadata(
     return tuple(_file_metadata(name, directory_fd) for name in names)
 
 
-def _copy_verified_file_set(source_db: Path, snapshot_db: Path) -> None:
+def _copy_verified_file_set(source_name: str, directory_fd: int, snapshot_db: Path) -> None:
     """Copy one byte-stable database/WAL/SHM set or request a retry."""
-    source_directory = source_db.parent
-    source_names = (source_db.name, f"{source_db.name}-wal", f"{source_db.name}-shm")
+    source_names = (source_name, f"{source_name}-wal", f"{source_name}-shm")
     snapshot_paths = (
         snapshot_db,
         snapshot_db.with_name(f"{snapshot_db.name}-wal"),
         snapshot_db.with_name(f"{snapshot_db.name}-shm"),
     )
 
-    with _pinned_directory(source_directory) as directory_fd:
-        initial = _current_metadata(source_names, directory_fd)
-        if initial[0] is None:
+    initial = _current_metadata(source_names, directory_fd)
+    if initial[0] is None:
+        raise _SnapshotChanged
+
+    copied: list[_FileFingerprint | None] = []
+    for name, destination, expected in zip(source_names, snapshot_paths, initial, strict=True):
+        if expected is None:
+            copied.append(None)
+            continue
+        copied.append(
+            _fingerprint_stream(
+                name,
+                directory_fd,
+                expected=expected,
+                destination=destination,
+            )
+        )
+        if _current_metadata(source_names, directory_fd) != initial:
             raise _SnapshotChanged
 
-        copied: list[_FileFingerprint | None] = []
-        for name, destination, expected in zip(source_names, snapshot_paths, initial, strict=True):
-            if expected is None:
-                copied.append(None)
-                continue
-            copied.append(
-                _fingerprint_stream(
-                    name,
-                    directory_fd,
-                    expected=expected,
-                    destination=destination,
-                )
+    verified: list[_FileFingerprint | None] = []
+    for name, expected in zip(source_names, initial, strict=True):
+        verified.append(
+            None
+            if expected is None
+            else _fingerprint_stream(
+                name,
+                directory_fd,
+                expected=expected,
             )
-            if _current_metadata(source_names, directory_fd) != initial:
-                raise _SnapshotChanged
-
-        verified: list[_FileFingerprint | None] = []
-        for name, expected in zip(source_names, initial, strict=True):
-            verified.append(
-                None
-                if expected is None
-                else _fingerprint_stream(
-                    name,
-                    directory_fd,
-                    expected=expected,
-                )
-            )
-            if _current_metadata(source_names, directory_fd) != initial:
-                raise _SnapshotChanged
-        if tuple(copied) != tuple(verified):
+        )
+        if _current_metadata(source_names, directory_fd) != initial:
             raise _SnapshotChanged
+    if tuple(copied) != tuple(verified):
+        raise _SnapshotChanged
+
+
+def _schema_version_from_history(connection: sqlite3.Connection) -> int:
+    """Validate the authoritative table shape and contiguous migration history."""
+    table = connection.execute(
+        "SELECT name, type, sql FROM sqlite_schema WHERE name = 'schema_version' COLLATE NOCASE"
+    ).fetchone()
+    if table is None:
+        return 0
+    table_name, table_type, table_sql = table
+    if table_name != "schema_version" or table_type != "table" or not isinstance(table_sql, str):
+        raise StateError(_SNAPSHOT_ERROR)
+    normalized_sql = re.sub(r"\s+", "", table_sql)
+    canonical_shape = normalized_sql == re.sub(r"\s+", "", _SCHEMA_VERSION_TABLE_SQL)
+    legacy_shape = normalized_sql == re.sub(r"\s+", "", _LEGACY_SCHEMA_VERSION_TABLE_SQL)
+    if not canonical_shape and not legacy_shape:
+        raise StateError(_SNAPSHOT_ERROR)
+    columns = [tuple(row) for row in connection.execute("PRAGMA table_info(schema_version)").fetchall()]
+    if columns != (_SCHEMA_VERSION_COLUMNS if canonical_shape else _LEGACY_SCHEMA_VERSION_COLUMNS):
+        raise StateError(_SNAPSHOT_ERROR)
+    if connection.execute("PRAGMA index_list(schema_version)").fetchall():
+        raise StateError(_SNAPSHOT_ERROR)
+    if connection.execute("PRAGMA foreign_key_list(schema_version)").fetchall():
+        raise StateError(_SNAPSHOT_ERROR)
+
+    rows = connection.execute("SELECT version, typeof(version) FROM schema_version ORDER BY rowid").fetchall()
+    if not rows:
+        return 0
+    versions: list[int] = []
+    for version, storage in rows:
+        if type(version) is not int or storage != "integer":
+            raise StateError(_SNAPSHOT_ERROR)
+        versions.append(version)
+    current = max(versions)
+    first = 0 if legacy_shape and 0 in versions else 1
+    if current < first or sorted(versions) != list(range(first, current + 1)):
+        raise StateError(_SNAPSHOT_ERROR)
+    return current
 
 
 def _requested_entry_exists(requested_path: Path) -> bool:
@@ -379,49 +426,47 @@ def inspection_snapshot(
         except (OSError, RuntimeError):
             raise StateError(_SNAPSHOT_ERROR) from None
         try:
-            _probe_resolved_directory_protocol(source_path.parent)
+            with _pinned_directory(source_path.parent) as directory_fd:
+                probe_fd = _open_directory_component(".", directory_fd)
+                os.close(probe_fd)
+                temporary = tempfile.TemporaryDirectory(prefix="agentworks-db-inspection-")
+                for attempt in range(_INSPECTION_SNAPSHOT_ATTEMPTS):
+                    candidate_connection: sqlite3.Connection | None = None
+                    try:
+                        attempt_directory = Path(temporary.name) / str(attempt)
+                        attempt_directory.mkdir()
+                        candidate = attempt_directory / source_path.name
+                        _copy_verified_file_set(source_path.name, directory_fd, candidate)
+                        candidate_connection = sqlite3.connect(
+                            f"{candidate.resolve().as_uri()}?mode=ro",
+                            uri=True,
+                        )
+                        if candidate_connection.execute("PRAGMA quick_check").fetchall() != [("ok",)]:
+                            candidate_connection.close()
+                            continue
+                    except _SnapshotChanged:
+                        if candidate_connection is not None:
+                            candidate_connection.close()
+                        continue
+                    except sqlite3.DatabaseError:
+                        if candidate_connection is not None:
+                            candidate_connection.close()
+                        continue
+                    connection = candidate_connection
+                    break
+                else:
+                    raise StateError(_SNAPSHOT_ERROR)
         except DatabaseInspectionUnavailable:
             raise
         except (_UnsupportedSnapshotEntry, OSError):
             raise StateError(_SNAPSHOT_ERROR) from None
 
-        temporary = tempfile.TemporaryDirectory(prefix="agentworks-db-inspection-")
-        for attempt in range(_INSPECTION_SNAPSHOT_ATTEMPTS):
-            candidate_connection: sqlite3.Connection | None = None
-            try:
-                attempt_directory = Path(temporary.name) / str(attempt)
-                attempt_directory.mkdir()
-                candidate = attempt_directory / source_path.name
-                _copy_verified_file_set(source_path, candidate)
-                candidate_connection = sqlite3.connect(
-                    f"{candidate.resolve().as_uri()}?mode=ro",
-                    uri=True,
-                )
-                if candidate_connection.execute("PRAGMA quick_check").fetchall() != [("ok",)]:
-                    candidate_connection.close()
-                    continue
-            except _SnapshotChanged:
-                if candidate_connection is not None:
-                    candidate_connection.close()
-                continue
-            except sqlite3.DatabaseError:
-                if candidate_connection is not None:
-                    candidate_connection.close()
-                continue
-            except (_UnsupportedSnapshotEntry, OSError):
-                raise StateError(_SNAPSHOT_ERROR) from None
-            connection = candidate_connection
-            break
-        else:
-            raise StateError(_SNAPSHOT_ERROR)
-
         if connection is None:
             raise StateError(_SNAPSHOT_ERROR)
         try:
-            row = connection.execute("SELECT MAX(version) FROM schema_version").fetchone()
-            current = _validated_schema_version(row[0])
-        except sqlite3.OperationalError:
-            current = 0
+            current = _schema_version_from_history(connection)
+        except sqlite3.DatabaseError:
+            raise StateError(_SNAPSHOT_ERROR) from None
         if current == LATEST_VERSION:
             connection.row_factory = sqlite3.Row
             connection.execute("PRAGMA foreign_keys = ON")
@@ -437,12 +482,3 @@ def inspection_snapshot(
             connection.close()
         if temporary is not None:
             temporary.cleanup()
-
-
-def _validated_schema_version(value: object) -> int:
-    """Accept only SQLite null or an exact nonnegative integer version."""
-    if value is None:
-        return 0
-    if type(value) is int and value >= 0:
-        return value
-    raise StateError(_SNAPSHOT_ERROR)

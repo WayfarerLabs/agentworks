@@ -96,10 +96,10 @@ def test_inspection_snapshot_retries_clean_to_active_transition_after_main_copy(
     writer: Database | None = None
     committed_files: tuple[bytes | None, ...] | None = None
 
-    def counted_copy(source_db: Path, snapshot_db: Path) -> None:
+    def counted_copy(source_name: str, directory_fd: int, snapshot_db: Path) -> None:
         nonlocal attempts
         attempts += 1
-        original_copy(source_db, snapshot_db)
+        original_copy(source_name, directory_fd, snapshot_db)
 
     def activate_after_main_copy(
         name: str,
@@ -203,7 +203,6 @@ def test_inspection_snapshot_rejects_intermediate_ancestor_symlink_swap(
     """An ancestor replaced after resolve cannot redirect snapshot acquisition."""
     import agentworks.db.inspection as inspection_module
     from agentworks.db import Database
-    from agentworks.errors import StateError
 
     container = tmp_path / "container"
     original_ancestor = container / "mutable-ancestor"
@@ -226,26 +225,24 @@ def test_inspection_snapshot_rejects_intermediate_ancestor_symlink_swap(
     original_copy = inspection_module._copy_verified_file_set
     swapped = False
 
-    def swap_before_directory_walk(source_db: Path, snapshot_db: Path) -> None:
+    def swap_after_directory_pin(source_name: str, directory_fd: int, snapshot_db: Path) -> None:
         nonlocal swapped
         if not swapped:
             original_ancestor.rename(moved_ancestor)
             original_ancestor.symlink_to(replacement_ancestor, target_is_directory=True)
             swapped = True
-        original_copy(source_db, snapshot_db)
+        original_copy(source_name, directory_fd, snapshot_db)
 
-    monkeypatch.setattr(inspection_module, "_copy_verified_file_set", swap_before_directory_walk)
+    monkeypatch.setattr(inspection_module, "_copy_verified_file_set", swap_after_directory_pin)
     try:
-        with pytest.raises(StateError) as raised, Database.inspection_snapshot(original_db):
-            pytest.fail("an ancestor replacement must not be yielded")
+        with Database.inspection_snapshot(original_db) as (exists, current, latest, snapshot):
+            assert exists and current == latest and snapshot is not None
+            assert snapshot.get_setting("system_slug") == "original-target"
     finally:
         original_writer.close()
         replacement_writer.close()
 
     assert swapped
-    assert str(raised.value) == "state database inspection snapshot could not be created"
-    assert "operator-private" not in str(raised.value)
-    assert "replacement-must-not-be-read" not in str(raised.value)
 
 
 def test_inspection_snapshot_retry_exhaustion_is_clean_and_path_free(
@@ -271,9 +268,9 @@ def test_inspection_snapshot_retry_exhaustion_is_clean_and_path_free(
         created.append(Path(temporary.name))
         return temporary
 
-    def always_changes(source_db: Path, snapshot_db: Path) -> None:
+    def always_changes(source_name: str, directory_fd: int, snapshot_db: Path) -> None:
         nonlocal attempts
-        del source_db, snapshot_db
+        del source_name, directory_fd, snapshot_db
         attempts += 1
         raise inspection_module._SnapshotChanged
 
@@ -572,15 +569,8 @@ def test_installed_entrypoint_propagates_failing_json_doctor_status(tmp_path: Pa
 
 @pytest.mark.parametrize("value", ["operator-private-version", b"7", 7.5, -1])
 def test_inspection_snapshot_rejects_malformed_schema_versions(tmp_path: Path, value: object) -> None:
-    import agentworks.db.inspection as inspection_module
-    from agentworks.db import LATEST_VERSION, Database
+    from agentworks.db import Database
     from agentworks.errors import StateError
-
-    assert inspection_module._validated_schema_version(None) == 0
-    assert inspection_module._validated_schema_version(0) == 0
-    assert inspection_module._validated_schema_version(LATEST_VERSION) == LATEST_VERSION
-    with pytest.raises(StateError, match="^state database inspection snapshot could not be created$"):
-        inspection_module._validated_schema_version(True)
 
     db_path = tmp_path / "malformed-version.db"
     database = Database(db_path)

@@ -375,3 +375,37 @@ Final integrated validation passed:
 - Rulesync generated-output check, locked-SDD validation, and mandatory file lint: clean;
 - GitHub Python 3.12, 3.13, and 3.14 tests, python-checks, CodeQL, lint-files, Rulesync, locked-SDD,
   and the aggregate CI success check: all passed.
+
+## Descriptor pin, schema history, and closed persisted-enum correction
+
+The final accepted feedback round keeps one resolved target-parent directory descriptor for the
+entire database snapshot attempt set. Main, WAL, and SHM metadata reads, copies, second
+fingerprints, and retries use that exact descriptor. A deterministic adversarial test renames the
+real target directory, installs another real directory at its path, changes the requested final
+symlink, and forces a retry. Both attempts use the same descriptor, the replacement database is
+never accepted, and the descriptor closes before facts are yielded.
+
+Schema inspection now validates the complete authoritative history instead of selecting only its
+maximum. An absent table or empty accepted shape is version 0. The maintained one-column shape
+accepts contiguous 0..N and 1..N histories; the canonical version-plus-applied-at shape accepts
+contiguous 1..N. Exact SQLite integer storage, uniqueness, table columns, and constraints are
+required. Wrong columns or constraints, gaps, duplicates, rogue negative or lower rows, and mixed
+storage types take the fixed path-free failure. Snapshot, read-only database, and schema-check
+callers share the validator. Existing guide migration fixtures remain compatible.
+
+VM provisioning and initialization state plus every nested VM, workspace, and session mode JSON
+surface now use closed persisted-enum projection. Invalid strings, bytes, and control-bearing values
+become the stable `unknown` sentinel before rendering and never echo their raw value. Valid human
+bytes remain unchanged. Computed session status retains exactly running, stopped, broken, unknown,
+and unavailable, with unavailable reserved for skipped or inconclusive live inspection.
+
+Descriptor, schema-history, and persisted-enum correction validation passed:
+
+- focused adversarial snapshot, schema, JSON, human, and guide read-only suite: 98 passed;
+- full non-integration suite: 6,750 passed and 3 deselected;
+- Ruff check and format check: 629 files clean;
+- full mypy: 629 source files clean;
+- Rulesync generated-output check and locked-SDD validation: clean;
+- mandatory file lint: clean.
+
+No CLI option or command shape changed, so completions and sample configuration require no update.

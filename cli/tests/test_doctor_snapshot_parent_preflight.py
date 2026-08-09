@@ -392,6 +392,79 @@ def test_final_symlink_target_is_preflighted_before_database_content(
     assert open_directory_fds == set()
 
 
+def test_retry_keeps_pinned_target_after_directory_and_final_symlink_replacement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every retry stays on one pinned target parent after names are replaced."""
+    from contextlib import contextmanager
+
+    import agentworks.db.inspection as inspection_module
+    from agentworks.db import Database
+
+    requested_parent = tmp_path / "requested"
+    requested_parent.mkdir()
+    target_parent = tmp_path / "target"
+    target_parent.mkdir()
+    original_db = target_parent / "state.db"
+    original_writer = Database(original_db)
+    original_writer.set_setting("system_slug", "pinned-original")
+
+    replacement_parent = tmp_path / "replacement"
+    replacement_parent.mkdir()
+    replacement_db = replacement_parent / original_db.name
+    replacement_writer = Database(replacement_db)
+    replacement_writer.set_setting("system_slug", "replacement-must-not-be-read")
+    assert all(path.exists() for path in _database_files(original_db))
+    assert all(path.exists() for path in _database_files(replacement_db))
+
+    requested_path = requested_parent / "agentworks.db"
+    requested_path.symlink_to(original_db)
+    moved_parent = tmp_path / "moved-original"
+    original_copy = inspection_module._copy_verified_file_set
+    original_pinned_directory = inspection_module._pinned_directory
+    copy_directory_fds: list[int] = []
+    pinned_target_fd: int | None = None
+    target_fd_closed = False
+
+    @contextmanager
+    def tracked_pinned_directory(directory: Path):  # noqa: ANN202
+        nonlocal pinned_target_fd, target_fd_closed
+        with original_pinned_directory(directory) as directory_fd:
+            if directory == target_parent.resolve():
+                pinned_target_fd = directory_fd
+            yield directory_fd
+        if directory == target_parent.resolve():
+            with pytest.raises(OSError) as raised:
+                os.fstat(directory_fd)
+            assert raised.value.errno == errno.EBADF
+            target_fd_closed = True
+
+    def replace_then_retry(source_name: str, directory_fd: int, destination: Path) -> None:
+        copy_directory_fds.append(directory_fd)
+        if len(copy_directory_fds) == 1:
+            target_parent.rename(moved_parent)
+            replacement_parent.rename(target_parent)
+            requested_path.unlink()
+            requested_path.symlink_to(target_parent / replacement_db.name)
+            raise inspection_module._SnapshotChanged
+        original_copy(source_name, directory_fd, destination)
+
+    monkeypatch.setattr(inspection_module, "_pinned_directory", tracked_pinned_directory)
+    monkeypatch.setattr(inspection_module, "_copy_verified_file_set", replace_then_retry)
+    try:
+        with Database.inspection_snapshot(requested_path) as (exists, current, latest, snapshot):
+            assert exists and current == latest and snapshot is not None
+            assert snapshot.get_setting("system_slug") == "pinned-original"
+            assert target_fd_closed
+    finally:
+        original_writer.close()
+        replacement_writer.close()
+
+    assert pinned_target_fd is not None
+    assert copy_directory_fds == [pinned_target_fd, pinned_target_fd]
+
+
 def test_drive_relative_requested_path_is_rejected() -> None:
     """A drive-relative path cannot be rooted safely against the process cwd."""
     import agentworks.db.inspection as inspection_module

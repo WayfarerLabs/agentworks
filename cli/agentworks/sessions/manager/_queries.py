@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
 from agentworks import output
-from agentworks.db import PID_STOPPED, SessionStatus
+from agentworks.db import PID_STOPPED, SessionMode, SessionStatus
+from agentworks.db.projections import project_persisted_enum, project_session_status
 from agentworks.errors import (
     BrokenStateError,
     ExternalError,
@@ -68,9 +69,9 @@ def session_listing_data(listing: SessionListing) -> JsonObject:
                 "vm_name": session.vm_name,
                 "template": session.template,
                 "harness_integration": session.harness_integration,
-                "mode": session.mode,
+                "mode": project_persisted_enum(session.mode, SessionMode),
                 "agent_name": session.agent_name,
-                "status": session.status,
+                "status": project_session_status(session.status, allow_unavailable=True),
             }
             for session in listing.sessions
         ],
@@ -86,9 +87,9 @@ def session_description_data(description: SessionDescription) -> JsonObject:
             "vm_name": description.vm_name,
             "template": description.template,
             "harness_integration": description.harness_integration,
-            "mode": description.mode,
+            "mode": project_persisted_enum(description.mode, SessionMode),
             "agent_name": description.agent_name,
-            "status": description.status,
+            "status": project_session_status(description.status, allow_unavailable=False),
             "pid": description.pid,
             "created_at": description.created_at,
             "updated_at": description.updated_at,
@@ -410,7 +411,7 @@ def session_description(
             vm_name=vm.name,
             template=session.template,
             harness_integration=None if harness_integration == "-" else harness_integration,
-            mode=session.mode,
+            mode=project_persisted_enum(session.mode, SessionMode),
             agent_name=session.agent_name,
             status={
                 SessionStatus.OK: "running",
@@ -426,12 +427,16 @@ def session_description(
 
 def render_session_description(description: SessionDescription) -> None:
     """Render session detail facts with the legacy human layout."""
-    status_label = description.status
-    if description.status == "running" and description.pid is not None:
+    status = project_session_status(description.status, allow_unavailable=False)
+    status_label = status
+    if status == "running" and description.pid is not None:
         status_label = f"running (PID {description.pid})"
-    elif description.status == "broken" and description.pid is not None:
+    elif status == "broken" and description.pid is not None:
         status_label = f"broken (PID {description.pid} alive, tmux unreachable)"
-    mode_label = f"agent ({description.agent_name})" if description.agent_name else "admin"
+    mode = project_persisted_enum(description.mode, SessionMode)
+    mode_label = (
+        mode if mode == "unknown" else f"agent ({description.agent_name})" if description.agent_name else "admin"
+    )
     output.info(f"Name:       {description.name}")
     output.info(f"Workspace:  {description.workspace_name}")
     output.info(f"VM:         {description.vm_name}")
@@ -561,7 +566,7 @@ def session_listing(
                 vm_name=resolved_vm_name,
                 template=session.template,
                 harness_integration=harness_for(session.template),
-                mode=session.mode,
+                mode=project_persisted_enum(session.mode, SessionMode),
                 agent_name=session.agent_name,
                 status=status,
             )
@@ -580,7 +585,8 @@ def render_session_listing(listing: SessionListing) -> None:
     unknown_names: list[str] = []
     for session in listing.sessions:
         status = "-" if session.status == "unavailable" else session.status
-        mode_label = f"agent ({session.agent_name})" if session.agent_name else "admin"
+        mode = project_persisted_enum(session.mode, SessionMode)
+        mode_label = mode if mode == "unknown" else f"agent ({session.agent_name})" if session.agent_name else "admin"
         rows.append(
             (
                 session.name,

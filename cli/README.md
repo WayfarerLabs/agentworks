@@ -139,7 +139,10 @@ conventional SIGINT exit code (130).
 ## Commands
 
 The complete command surface, machine-readable JSON v1 contract, guide behavior, and session/tmux
-details live in the focused [CLI command reference](command-reference.md).
+details live in the focused [CLI command reference](command-reference.md). Persisted provisioning,
+initialization, and session-mode values use closed JSON vocabularies. Valid values retain their
+existing human bytes; a corrupt value renders as the stable `unknown` sentinel through shared facts
+and never echoes its stored text in either human or JSON output.
 
 ## Configuration
 
@@ -483,18 +486,22 @@ original through SQLite. Every existing database is stream-copied to private sto
 the WAL and shared-memory sidecars when present. A main-only source is accepted only when sidecar
 absence remains stable through copying and verification. A second source fingerprint must prove the
 complete set stayed unchanged before SQLite validates the private copy; concurrent transitions are
-retried. Doctor reports a pending migration without applying it and does not create or change the
-original database, WAL, or shared-memory files. If the host cannot provide every primitive required
-for secure descriptor-first inspection, the System, applicable VM sites, and Database rows report
-`[unavailable]`. The VM sites row applies when configuration and the registry load; otherwise its
-existing informational skip remains. That state is neither a warning nor a failure, so it does not
-by itself change the exit status. Invalid database entries and malformed schema versions still fail
-closed and make doctor exit nonzero. A genuinely missing state directory is treated as healthy,
-absent state and is not created by doctor; an existing dangling parent or component symlink remains
-invalid state. For an existing final database symlink, doctor resolves the link metadata and
-preflights the resolved target parent before acquiring database or sidecar content. See the
+retried through the same pinned resolved-parent descriptor, so a directory rename or final-link
+target change cannot redirect a later attempt. Doctor reports a pending migration without applying
+it and does not create or change the original database, WAL, or shared-memory files. If the host
+cannot provide every primitive required for secure descriptor-first inspection, the System,
+applicable VM sites, and Database rows report `[unavailable]`. The VM sites row applies when
+configuration and the registry load; otherwise its existing informational skip remains. That state
+is neither a warning nor a failure, so it does not by itself change the exit status. Invalid
+database entries and malformed schema versions still fail closed and make doctor exit nonzero. A
+genuinely missing state directory is treated as healthy, absent state and is not created by doctor;
+an existing dangling parent or component symlink remains invalid state. For an existing final
+database symlink, doctor resolves the link metadata and preflights the resolved target parent before
+acquiring database or sidecar content. See the
 [doctor JSON contract](command-reference.md#doctor-json-schema) for the matching machine-readable
-status and count shape.
+status and count shape. Schema history validation accepts an absent table or empty accepted table as
+legacy version 0, then requires an exact maintained table shape and unique contiguous integer
+history; malformed columns, types, gaps, duplicates, or lower rogue rows fail closed.
 
 ## Environment Variables
 

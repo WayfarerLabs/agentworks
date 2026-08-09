@@ -130,7 +130,8 @@ rules as resource describe.
 ```
 
 `template` and `tailscale_host` are nullable. VMs retain name order. Provisioning is `pending`,
-`in_progress`, `complete`, or `failed`; initialization additionally permits `partial`.
+`in_progress`, `complete`, `failed`, or `unknown`; initialization additionally permits `partial`.
+`unknown` is the stable sentinel for an invalid persisted value and never echoes that stored value.
 
 `agw vm describe NAME --output json` uses command `vm.describe` and data `{vm, issues}`. `vm` has
 this ordered shape:
@@ -161,10 +162,11 @@ nullable integers. `live_resources` is null or this record:
 `backup_started`, `backup_completed`, `backup_failed`, `rekey`, or `unknown`. Historical or future
 raw names outside that closed set project as `unknown` and never echo their stored text. `detail` is
 reserved and always JSON `null` in v1 because persisted event detail is unbounded diagnostic text;
-no non-null detail grammar exists. `agent_name` is nullable, and mode is `admin` or `agent`. These
-arrays retain database order. `issues[]` is `{source, code}` in encounter order: source is
-`site_lookup`, `preflight`, `secret_resolution`, or `platform_status`, and code is always
-`unavailable`. Issues do not carry backend text or exception details.
+no non-null detail grammar exists. `agent_name` is nullable, and mode is `admin`, `agent`, or
+`unknown`. The sentinel closes invalid persisted modes without echoing them. These arrays retain
+database order. `issues[]` is `{source, code}` in encounter order: source is `site_lookup`,
+`preflight`, `secret_resolution`, or `platform_status`, and code is always `unavailable`. Issues do
+not carry backend text or exception details.
 
 ```bash
 agw vm list --output json
@@ -179,7 +181,8 @@ workspace name order after filtering. `agw workspace describe NAME --output json
 `workspace.describe` and `{workspace}`; workspace is
 `{name, vm_name, template, path, created_at, sessions, agents}`. Session entries are
 `{name, template, mode, agent_name}` and agent entries are `{name, linux_user}`. `template` and
-`agent_name` are nullable, and mode is `admin` or `agent`.
+`agent_name` are nullable, and mode is `admin`, `agent`, or `unknown`. An invalid persisted mode
+maps to `unknown` without exposing its raw value.
 
 `agw agent list --output json` uses `agent.list` and
 `{agents: [{name, vm_name, template, grant_all, grants}]}`. `template` is nullable, `grant_all` is
@@ -193,11 +196,12 @@ nullable `template` and session entries `{name, template, workspace_name}`.
 
 `agw session list --output json` uses `session.list` and `{sessions}`. Each session is
 `{name, workspace_name, vm_name, template, harness_integration, mode, agent_name, status}`.
-`harness_integration` and `agent_name` are nullable; mode is `admin` or `agent`; status is exactly
-`running`, `stopped`, `broken`, `unknown`, or `unavailable`. `unavailable` represents skipped or
-inconclusive status work, not a human display sentinel. Rows retain workspace then session name
-order. `agw session describe NAME --output json` uses `session.describe` and `{session}`. Session is
-this record:
+`harness_integration` and `agent_name` are nullable; mode is `admin`, `agent`, or `unknown`; status
+is exactly `running`, `stopped`, `broken`, `unknown`, or `unavailable`. A bad persisted mode maps to
+`unknown` without exposing its raw value. `unavailable` is reserved for skipped or inconclusive live
+status work, not invalid persisted state or a human display sentinel. Rows retain workspace then
+session name order. `agw session describe NAME --output json` uses `session.describe` and
+`{session}`. Session is this record:
 
 ```text
 {name, workspace_name, vm_name, template, harness_integration, mode, agent_name,
@@ -252,7 +256,13 @@ healthy and absent. An existing parent or component symlink that cannot resolve 
 not a missing directory. If the final database entry exists, Agentworks resolves its link metadata
 and preflights the resolved target parent before opening the database, WAL, or SHM. Each preflight
 and source acquisition walks from a filesystem anchor with directory-only, no-follow relative opens.
-No path check followed by an unsafe open is substituted.
+After final resolution, one pinned target-parent descriptor supplies every main, WAL, and SHM
+metadata read, copy, second fingerprint, and retry. Renaming that directory or retargeting the final
+symlink cannot redirect a later attempt. No path check followed by an unsafe open is substituted.
+Schema inspection treats an absent table or an empty accepted table as legacy version 0. It accepts
+the maintained one-column legacy history and the canonical two-column history only when versions
+have exact SQLite integer storage, are unique, and form the permitted contiguous sequence. A wrong
+shape, duplicate, gap, rogue lower row, or mixed storage type remains a path-free failure.
 
 #### Errors and compatibility
 
