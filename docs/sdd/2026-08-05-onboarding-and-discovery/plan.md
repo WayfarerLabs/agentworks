@@ -183,7 +183,7 @@ to `main`. It has no provisional branch dependency.
 - [x] Reconcile schema rendering and migration teaching with the final PR #444 union surfaces,
       confirm PR #446's context-free validation boundary adds no guide-side filling, then rerun the
       full Phase 1 and CI gates before requesting roadmap-lead re-review.
-- [ ] Revalidate schema rendering and migration teaching after PR #455's structural-union and git
+- [x] Revalidate schema rendering and migration teaching after PR #455's structural-union and git
       credential token-acquisition contracts land, including the retained shorthand/default paths,
       exact outer-null rewrite, stored arm, and absence of a minted arm.
 - [x] Round-3 performance follow-up: materialize global kind and implementation inventories only for
