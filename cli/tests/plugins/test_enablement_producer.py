@@ -49,7 +49,7 @@ from agentworks.resources.graph import (
 from agentworks.resources.registry import Registry
 from agentworks.schema import AgwModel, AgwRootModel, CapabilityBlock, NonEmptyStr, SecretRef
 from agentworks.secrets.base import SecretDecl
-from agentworks.secrets.resolve import active_backends
+from agentworks.secrets.resolve import active_sources
 from agentworks.secrets.sources import SecretSourceDecl
 from agentworks.sessions.manager._env import _display_harness_integration
 from agentworks.sessions.template import SessionTemplate
@@ -371,7 +371,7 @@ def test_a_valid_mapping_to_a_disabled_backend_builds_and_stays_inert() -> None:
             "Config",
             SimpleNamespace(secret_config_data=SimpleNamespace(backends=("fixture-source", "prompt"))),
         )
-        chain = active_backends(config, registry)
+        chain = active_sources(config, registry)
         assert [source.name for source in chain] == ["fixture-source", "prompt"]
         assert not chain[0].readiness.is_ready
 

@@ -6,6 +6,7 @@ import contextlib
 from typing import TYPE_CHECKING
 
 from agentworks.capabilities.base import RunContext
+from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 
 from ._helpers import _vm_scope
 
@@ -56,6 +57,7 @@ def gated_vm_boundary(
     *,
     targets: Sequence[SecretTarget] = (),
     scope: OperationScope | None = None,
+    interaction: InteractionPolicy,
 ) -> Iterator[tuple[LiveVMNode, Resolver, RunContext]]:
     """The gate-opening commands' shared composition root (vm/agent
     shell and exec, console attach, the workspace lifecycle ops):
@@ -94,6 +96,7 @@ def gated_vm_boundary(
     changes the composition's shape rather than adding a flag to it.
 
     """
+    interaction = validate_interaction_policy(interaction)
     from agentworks.orchestration.activation import (
         activation_gate,
         gate_secret_resolver,
@@ -104,7 +107,7 @@ def gated_vm_boundary(
     from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import live_vm_node
 
-    resolver = Resolver(config, registry)
+    resolver = Resolver(config, registry, interaction=interaction)
     vm_node = live_vm_node(db, config, registry, vm)
     nodes = walk(vm_node)
     for secret_name in secret_union(nodes):
@@ -114,7 +117,12 @@ def gated_vm_boundary(
     if scope is None:
         scope = _vm_scope(db, vm.name)
     with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
-        preflight_all(nodes, RunContext(config=config, operation_scope=scope), registry=registry)
+        preflight_all(
+            nodes,
+            RunContext(config=config, operation_scope=scope),
+            registry=registry,
+            interaction=interaction,
+        )
         resolver.resolve()
         yield vm_node, resolver, _platform_ops_ctx(config, scope, vm_node, resolver)
 
@@ -125,6 +133,7 @@ def _live_vm_boundary(
     vm: VMRow,
     *,
     registry: Registry | None = None,
+    interaction: InteractionPolicy,
 ) -> tuple[LiveVMNode, RunContext]:
     """The no-gate commands' shared composition root (``start_vm`` /
     ``stop_vm`` / ``delete_vm`` / ``describe_vm``, whose graphs are
@@ -146,6 +155,7 @@ def _live_vm_boundary(
     exists to clean up), and describe only READS state (a status
     probe is its op; inspecting a stopped VM must never start it).
     """
+    interaction = validate_interaction_policy(interaction)
     from agentworks.bootstrap import load_request_registry
     from agentworks.orchestration.readiness import preflight_all
     from agentworks.orchestration.secrets import secret_union
@@ -155,12 +165,17 @@ def _live_vm_boundary(
 
     if registry is None:
         registry = load_request_registry(config)
-    resolver = Resolver(config, registry)
+    resolver = Resolver(config, registry, interaction=interaction)
     vm_node = live_vm_node(db, config, registry, vm)
     nodes = walk(vm_node)
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
     scope = _vm_scope(db, vm.name)
-    preflight_all(nodes, RunContext(config=config, operation_scope=scope), registry=registry)
+    preflight_all(
+        nodes,
+        RunContext(config=config, operation_scope=scope),
+        registry=registry,
+        interaction=interaction,
+    )
     resolver.resolve()
     return vm_node, _platform_ops_ctx(config, scope, vm_node, resolver)

@@ -130,7 +130,7 @@ def test_successful_live_rendering_uses_no_denied_power(monkeypatch: pytest.Monk
     from agentworks.db import Database
 
     monkeypatch.setattr(output, "prompt", denied)
-    monkeypatch.setattr(secrets, "resolve_secrets", denied)
+    monkeypatch.setattr(secrets, "resolve_batch", denied)
     monkeypatch.setattr(transports, "transport", denied)
     monkeypatch.setattr(Database, "_migrate", denied)
     registry = _ExactRegistry()
@@ -194,8 +194,7 @@ def test_live_render_guide_denies_probes_secrets_capabilities_writes_and_mutatio
     monkeypatch.setattr(subprocess, "run", denied)
     monkeypatch.setattr(output, "prompt", denied)
     monkeypatch.setattr(output, "prompt_secret", denied)
-    monkeypatch.setattr(secrets, "resolve_secrets", denied)
-    monkeypatch.setattr(secrets, "resolve_secrets_quiet", denied)
+    monkeypatch.setattr(secrets, "resolve_batch", denied)
     monkeypatch.setattr(transports, "transport", denied)
     monkeypatch.setattr(LimaPlatform, "unsupported_reason", denied)
     for backend in SECRET_BACKEND_REGISTRY.values():

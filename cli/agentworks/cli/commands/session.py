@@ -7,7 +7,8 @@ from typing import Annotated
 import typer
 
 from agentworks.cli._app import app
-from agentworks.cli._helpers import get_db, parse_csv_filter
+from agentworks.cli._helpers import get_db, ordinary_interaction_policy, parse_csv_filter
+from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 
 session_app = typer.Typer(
     name="session",
@@ -48,6 +49,7 @@ def session_create(
     agent_template: Annotated[str | None, typer.Option("--agent-template", help="Template for new agent")] = None,
 ) -> None:
     """Create and start a session in a workspace."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.config import load_config
     from agentworks.sessions.manager import create_session
 
@@ -66,6 +68,7 @@ def session_create(
         agent_template=agent_template,
         admin=admin,
         vm_name=vm,
+        interaction=interaction,
     )
 
 
@@ -74,10 +77,11 @@ def session_describe(
     name: Annotated[str, typer.Argument(help="Session name")],
 ) -> None:
     """Show session details."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.config import load_config
     from agentworks.sessions.manager import describe_session
 
-    describe_session(get_db(), load_config(), name=name)
+    describe_session(get_db(), load_config(), name=name, interaction=interaction)
 
 
 @session_app.command("list")
@@ -100,6 +104,7 @@ def session_list(
     ] = False,
 ) -> None:
     """List sessions. Filters compose with AND; name filters accept comma-separated values for OR-within-filter."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.config import load_config
     from agentworks.sessions.manager import list_sessions
 
@@ -119,6 +124,7 @@ def session_list(
         admin_only=admin,
         no_status=no_status,
         names_only=names_only,
+        interaction=interaction,
     )
 
 
@@ -141,6 +147,7 @@ def session_stop(
     accept a single value or a comma-separated list (e.g.
     ``--vm vm1,vm2``); commas within a filter are OR-ed together.
     """
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.config import load_config
     from agentworks.sessions.manager import stop_all_sessions, stop_session
 
@@ -163,9 +170,16 @@ def session_stop(
             agent_name=parsed_agent,
             admin_only=admin,
             force=force,
+            interaction=interaction,
         )
     elif name:
-        stop_session(get_db(), load_config(), name=name, force=force)
+        stop_session(
+            get_db(),
+            load_config(),
+            name=name,
+            force=force,
+            interaction=interaction,
+        )
     else:
         raise typer.BadParameter("provide a session name or use --all")
 
@@ -181,8 +195,10 @@ def _resume_sessions(
     admin: bool,
     force: bool,
     yes: bool,
+    interaction: InteractionPolicy,
 ) -> None:
     """Validate and execute the single or batch session resume operation."""
+    interaction = validate_interaction_policy(interaction)
     from agentworks.config import load_config
     from agentworks.sessions.manager import resume_all_sessions, resume_session
 
@@ -242,9 +258,17 @@ def _resume_sessions(
             admin_only=admin,
             include_running=include_running,
             force=force,
+            interaction=interaction,
         )
     elif name:
-        resume_session(get_db(), load_config(), name=name, force=force, yes=yes)
+        resume_session(
+            get_db(),
+            load_config(),
+            name=name,
+            force=force,
+            yes=yes,
+            interaction=interaction,
+        )
     else:
         raise typer.BadParameter("provide a session name, --all-stopped, or --all")
 
@@ -276,6 +300,7 @@ def session_resume(
     accept a single value or a comma-separated list (e.g.
     ``--vm vm1,vm2``); commas within a filter are OR-ed together.
     """
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     _resume_sessions(
         name,
         all_stopped=all_stopped,
@@ -286,6 +311,7 @@ def session_resume(
         admin=admin,
         force=force,
         yes=yes,
+        interaction=interaction,
     )
 
 
@@ -294,10 +320,18 @@ def session_attach(
     name: Annotated[str, typer.Argument(help="Session name")],
 ) -> None:
     """Attach to a session."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.config import load_config
     from agentworks.sessions.manager import attach_session
 
-    raise typer.Exit(attach_session(get_db(), load_config(), name=name))
+    raise typer.Exit(
+        attach_session(
+            get_db(),
+            load_config(),
+            name=name,
+            interaction=interaction,
+        )
+    )
 
 
 @session_app.command("delete")
@@ -307,10 +341,18 @@ def session_delete(
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
 ) -> None:
     """Delete a session."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.config import load_config
     from agentworks.sessions.manager import delete_session
 
-    delete_session(get_db(), load_config(), name=name, force=force, yes=yes)
+    delete_session(
+        get_db(),
+        load_config(),
+        name=name,
+        force=force,
+        yes=yes,
+        interaction=interaction,
+    )
 
 
 @session_app.command("logs")
@@ -319,7 +361,14 @@ def session_logs(
     lines: Annotated[int | None, typer.Option("--lines", "-n", help="Number of lines")] = None,
 ) -> None:
     """Dump the scrollback buffer for a session."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.config import load_config
     from agentworks.sessions.manager import session_logs as _session_logs
 
-    _session_logs(get_db(), load_config(), name=name, lines=lines)
+    _session_logs(
+        get_db(),
+        load_config(),
+        name=name,
+        lines=lines,
+        interaction=interaction,
+    )

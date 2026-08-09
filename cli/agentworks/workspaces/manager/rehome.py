@@ -15,6 +15,7 @@ from agentworks.errors import (
     ValidationError,
 )
 from agentworks.path_rendering import format_host_path
+from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.manager._common import _guard_vm_status, _workspace_scope
 from agentworks.workspaces.manager.repair import _rehome_partial_state_hint
@@ -32,8 +33,10 @@ def rehome_workspace(
     target_path: str | None = None,
     remove_old: bool = False,
     yes: bool = False,
+    interaction: InteractionPolicy,
 ) -> None:
     """Move a workspace to a new directory path."""
+    interaction = validate_interaction_policy(interaction)
     ws = db.get_workspace(name)
     if ws is None:
         raise NotFoundError(
@@ -92,7 +95,15 @@ def rehome_workspace(
                 hint="Stop or delete the listed sessions first.",
             )
 
-    _rehome_vm(db, config, ws, new_path, remove_old=remove_old, yes=yes)
+    _rehome_vm(
+        db,
+        config,
+        ws,
+        new_path,
+        remove_old=remove_old,
+        yes=yes,
+        interaction=interaction,
+    )
 
 
 def _rehome_vm(
@@ -103,6 +114,7 @@ def _rehome_vm(
     *,
     remove_old: bool,
     yes: bool,
+    interaction: InteractionPolicy,
 ) -> None:
     """Rehome a VM workspace.
 
@@ -117,6 +129,7 @@ def _rehome_vm(
     the operator confirms.
     """
 
+    interaction = validate_interaction_policy(interaction)
     from agentworks.bootstrap import load_request_registry
     from agentworks.ssh import SSHError, SSHLogger
     from agentworks.transports import transport
@@ -137,7 +150,14 @@ def _rehome_vm(
 
     _guard_vm_status(vm)
     registry = load_request_registry(config)
-    with gated_vm_boundary(db, config, registry, vm, scope=_workspace_scope(db, vm, ws_name)):
+    with gated_vm_boundary(
+        db,
+        config,
+        registry,
+        vm,
+        scope=_workspace_scope(db, vm, ws_name),
+        interaction=interaction,
+    ):
         target = transport(vm, config)
 
         # Verify source exists

@@ -73,9 +73,10 @@ value. NUL, carriage return, and newline are rejected before a value can become 
 
 Complete command resolution checks for doomed secrets before every allowed interactive turn, so it
 does not prompt or trigger biometric authentication when another requested secret is already known
-to fail. Partial inspection may still resolve independent secrets. Cleanup always runs after entry;
-cleanup failure warns with fixed source-only text and never masks the primary result, timeout, or
-interruption.
+to fail. The explicit `agw env show --resolve` partial-reveal path may still resolve independent
+secrets; list, describe, doctor, schema, guide, and completion never do. Cleanup always runs after
+entry; cleanup failure warns with fixed source-only text and never masks the primary result,
+timeout, or interruption.
 
 Use `agw secret list` and `agw secret describe NAME` for value-free inspection. Use
 `agw secret verify NAME` for one real proof; it refuses interaction by default and requires

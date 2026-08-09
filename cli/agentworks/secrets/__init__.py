@@ -9,8 +9,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from agentworks.capabilities.secret_backend.env_var import env_var_name_for
-
 if TYPE_CHECKING:
     from agentworks.guide.contract import TopicContribution
 
@@ -23,14 +21,14 @@ from agentworks.secrets.orchestration import (
     compute_needed_secrets,
     resolve_for_command,
 )
-from agentworks.secrets.resolve import (
-    ActiveBackend,
-    ActiveSource,
-    active_backends,
-    active_sources,
-    resolve_secrets,
-    validate_chain,
+from agentworks.secrets.outcomes import (
+    ResolutionCategory,
+    ResolutionDetail,
+    ResolutionOutcome,
+    ResolutionRemediation,
 )
+from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.resolve import validate_chain
 from agentworks.secrets.sources import SecretSourceDecl, publish_builtin_secret_sources
 
 
@@ -48,19 +46,18 @@ guide_contributions = _load_guide_contributions
 
 
 __all__ = [
-    "ActiveBackend",
-    "ActiveSource",
+    "InteractionPolicy",
+    "ResolutionCategory",
+    "ResolutionDetail",
+    "ResolutionOutcome",
+    "ResolutionRemediation",
     "SecretConfig",
     "SecretDecl",
     "SecretSourceDecl",
     "SecretTarget",
-    "active_backends",
-    "active_sources",
     "compute_needed_secrets",
-    "env_var_name_for",
     "guide_contributions",
     "publish_builtin_secret_sources",
     "resolve_for_command",
-    "resolve_secrets",
     "validate_chain",
 ]

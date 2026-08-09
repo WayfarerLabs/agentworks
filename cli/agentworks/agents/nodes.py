@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks.errors import StateError
+from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -152,12 +153,16 @@ class PendingAgentNode:
         name: str,
         template: AgentTemplateNode,
         vm: LiveVMNode,
+        *,
+        interaction: InteractionPolicy,
     ) -> None:
+        interaction = validate_interaction_policy(interaction)
         self._db = db
         self._config = config
         self._name = name
         self._template = template
         self._vm = vm
+        self._interaction = interaction
         self._realized = False
 
     @property
@@ -213,6 +218,7 @@ class PendingAgentNode:
         self._realized = True
 
     def teardown(self) -> None:
+        interaction = validate_interaction_policy(self._interaction)
         from agentworks.agents.manager import delete_agent
 
         try:
@@ -223,6 +229,7 @@ class PendingAgentNode:
                 force=True,
                 yes=True,
                 vm_node=self._vm,
+                interaction=interaction,
             )
         except Exception as exc:
             # The teardown contract: name the artifact left standing.
@@ -278,6 +285,8 @@ def pending_agent_node(
     name: str,
     template: AgentTemplateNode,
     vm: LiveVMNode,
+    *,
+    interaction: InteractionPolicy,
 ) -> PendingAgentNode:
     """Build the pending ``agent/<name>`` node with its edges attached.
 
@@ -285,4 +294,12 @@ def pending_agent_node(
     dep, any readiness that watches the target) must receive this same
     object, so the orchestrator's ``mark_realized`` flip is observed by
     all of them."""
-    return PendingAgentNode(db, config, name, template, vm)
+    interaction = validate_interaction_policy(interaction)
+    return PendingAgentNode(
+        db,
+        config,
+        name,
+        template,
+        vm,
+        interaction=interaction,
+    )

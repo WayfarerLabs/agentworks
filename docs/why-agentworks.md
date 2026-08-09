@@ -146,8 +146,9 @@ over time.
 
 Environment variables and secrets are first-class in the configuration: env tables can be declared
 at vm, workspace, admin, agent, or session scope and merge in a defined precedence order. Secret
-references (`{ secret: name }`) resolve through a configurable backend chain (`env-var` reads from
-an `AW_SECRET_*` env var; `prompt` asks interactively at run time). Use `agw env show` to inspect
-the merged result for any context. See
+references (`{ secret: name }`) resolve through a precedence-ordered chain of named sources. The
+built-in `env-var` source reads from an `AW_SECRET_*` env var and `prompt` asks interactively;
+additional source declarations select and configure registered backend implementations. Use
+`agw env show` to inspect the merged result for any context. See
 [cli/README.md](../cli/README.md#environment-variables-and-secrets) for the shape, and
 `agw resource describe-kind secret` for the full reference.

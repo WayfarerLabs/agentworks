@@ -17,6 +17,7 @@ import pytest
 from typer.testing import CliRunner
 
 from agentworks.cli import app
+from agentworks.secrets.policy import InteractionPolicy
 from agentworks.sessions import manager as session_manager
 
 # Typer renders error messages through rich, which inserts ANSI color
@@ -199,9 +200,7 @@ def test_stop_all_sessions_passes_agent_name_to_filter(
     monkeypatch.setattr(session_manager, "filter_sessions", _capture_filter)
 
     session_manager.stop_all_sessions(  # type: ignore[arg-type]
-        db=None,
-        config=None,
-        agent_name="a1",
+        db=None, config=None, agent_name="a1", interaction=InteractionPolicy.REFUSE
     )
     assert captured.get("agent_name") == "a1"
 
@@ -220,9 +219,7 @@ def test_resume_all_sessions_passes_agent_name_to_filter(
     monkeypatch.setattr(session_manager, "filter_sessions", _capture_filter)
 
     session_manager.resume_all_sessions(  # type: ignore[arg-type]
-        db=None,
-        config=None,
-        agent_name="a1",
+        db=None, config=None, agent_name="a1", interaction=InteractionPolicy.REFUSE
     )
     assert captured.get("agent_name") == "a1"
 
@@ -338,9 +335,7 @@ def test_stop_all_sessions_passes_admin_only_to_filter(
     monkeypatch.setattr(session_manager, "filter_sessions", _capture_filter)
 
     session_manager.stop_all_sessions(  # type: ignore[arg-type]
-        db=None,
-        config=None,
-        admin_only=True,
+        db=None, config=None, admin_only=True, interaction=InteractionPolicy.REFUSE
     )
     assert captured.get("admin_only") is True
 
@@ -359,8 +354,6 @@ def test_resume_all_sessions_passes_admin_only_to_filter(
     monkeypatch.setattr(session_manager, "filter_sessions", _capture_filter)
 
     session_manager.resume_all_sessions(  # type: ignore[arg-type]
-        db=None,
-        config=None,
-        admin_only=True,
+        db=None, config=None, admin_only=True, interaction=InteractionPolicy.REFUSE
     )
     assert captured.get("admin_only") is True

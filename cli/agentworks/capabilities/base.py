@@ -513,7 +513,7 @@ class Capability(ABC):
         preflight sweep (:func:`~agentworks.orchestration.readiness
         .preflight_all`). Whether a declared secret can be resolved is a
         property of the runtime world the operation is running in (the
-        active backend chain, this run's interactivity), not of the
+        active source chain and this run's exact interaction policy), not of the
         resource that named it, and a resource must not assume a concern
         that is not its own. An unresolvable secret still fails the sweep
         with the same owner/usage framing, without this instance or its

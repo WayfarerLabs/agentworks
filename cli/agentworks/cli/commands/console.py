@@ -7,7 +7,13 @@ from typing import Annotated
 import typer
 
 from agentworks.cli._app import app
-from agentworks.cli._helpers import get_db, parse_csv_filter, prompt_vm
+from agentworks.cli._helpers import (
+    get_db,
+    ordinary_interaction_policy,
+    parse_csv_filter,
+    prompt_vm,
+)
+from agentworks.secrets.policy import validate_interaction_policy
 
 console_app = typer.Typer(
     name="console",
@@ -152,6 +158,7 @@ def console_attach(
     ] = False,
 ) -> None:
     """Attach to a named console (creating its tmux state on first attach)."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.config import load_config
     from agentworks.sessions.multi_console import attach_console
 
@@ -162,6 +169,7 @@ def console_attach(
             name=name,
             recreate=recreate,
             allow_nesting=allow_nesting,
+            interaction=interaction,
         )
     )
 
@@ -187,10 +195,17 @@ def console_add_sessions(
     ],
 ) -> None:
     """Append sessions to an existing console."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.config import load_config
     from agentworks.sessions.multi_console import add_sessions
 
-    add_sessions(get_db(), load_config(), console_name=name, session_specs=sessions)
+    add_sessions(
+        get_db(),
+        load_config(),
+        console_name=name,
+        session_specs=sessions,
+        interaction=interaction,
+    )
 
 
 @console_app.command("remove-sessions")
@@ -248,6 +263,7 @@ def console_add_shell(
     ] = False,
 ) -> None:
     """Add a shell pane to a session window in a console."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.config import load_config
     from agentworks.sessions.multi_console import add_shell
 
@@ -258,6 +274,7 @@ def console_add_shell(
         session_name=session,
         cwd=cwd,
         admin=admin,
+        interaction=interaction,
     )
 
 
@@ -276,6 +293,7 @@ def console_restore_session(
     `console attach --recreate`. Consoles created before pane-tagging existed
     require `attach --recreate` once to retag from scratch.
     """
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.config import load_config
     from agentworks.sessions.multi_console import restore_session
 
@@ -284,4 +302,5 @@ def console_restore_session(
         load_config(),
         console_name=name,
         session_name=session,
+        interaction=interaction,
     )

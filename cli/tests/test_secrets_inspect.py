@@ -11,8 +11,8 @@ from agentworks.config import load_config
 from agentworks.secrets.inspect import (
     _BACKEND_CELL_WIDTH,
     _NAME_CELL_WIDTH,
-    SecretCell,
     SecretRow,
+    SecretSourceCell,
     SecretTable,
     build_secret_table,
     render_secret_table,
@@ -77,7 +77,7 @@ def test_no_operator_secrets_still_shows_auto_declared(tmp_path: Path) -> None:
     _write_base(cfg_file)
 
     table = _build_table(cfg_file)
-    assert table.backends == ("env-var", "prompt")
+    assert table.sources == ("env-var", "prompt")
     names = [r.name for r in table.rows]
     assert "tailscale-auth-key" in names
     # The auto-declared row carries a synthesized description so the
@@ -123,7 +123,7 @@ def test_env_var_cell_shows_default_convention_identifier(tmp_path: Path) -> Non
     )
     table = _build_table(cfg_file)
     row = table.rows[0]
-    env_var_cell = next(c for c in row.cells if c.backend == "env-var")
+    env_var_cell = next(c for c in row.cells if c.source == "env-var")
     assert env_var_cell.would_attempt is True
     assert env_var_cell.identifier == "AW_SECRET_GITHUB_TOKEN"
 
@@ -145,7 +145,7 @@ def test_env_var_cell_shows_mapping_override(tmp_path: Path) -> None:
         ],
     )
     table = _build_table(cfg_file)
-    env_var_cell = next(c for c in table.rows[0].cells if c.backend == "env-var")
+    env_var_cell = next(c for c in table.rows[0].cells if c.source == "env-var")
     assert env_var_cell.identifier == "GITHUB_TOKEN"
 
 
@@ -166,7 +166,7 @@ def test_env_var_cell_when_opted_out_reports_wont_attempt(tmp_path: Path) -> Non
         ],
     )
     table = _build_table(cfg_file)
-    env_var_cell = next(c for c in table.rows[0].cells if c.backend == "env-var")
+    env_var_cell = next(c for c in table.rows[0].cells if c.source == "env-var")
     assert env_var_cell.would_attempt is False
     assert env_var_cell.identifier is None
 
@@ -181,7 +181,7 @@ def test_prompt_cell_has_no_static_identifier(tmp_path: Path) -> None:
         manifests=[ManifestDoc("secret", "any", description="any")],
     )
     table = _build_table(cfg_file)
-    prompt_cell = next(c for c in table.rows[0].cells if c.backend == "prompt")
+    prompt_cell = next(c for c in table.rows[0].cells if c.source == "prompt")
     assert prompt_cell.would_attempt is True
     assert prompt_cell.identifier is None
 
@@ -200,7 +200,7 @@ def test_column_order_matches_backend_chain_precedence(tmp_path: Path) -> None:
         manifests=[ManifestDoc("secret", "x", description="x")],
     )
     table = _build_table(cfg_file)
-    assert table.backends == ("prompt", "env-var")
+    assert table.sources == ("prompt", "env-var")
 
 
 def test_names_only_lists_every_registry_secret(tmp_path: Path, monkeypatch) -> None:
@@ -252,7 +252,7 @@ def test_empty_backend_chain_yields_no_columns(tmp_path: Path) -> None:
         """,
     )
     table = _build_table(cfg_file)
-    assert table.backends == ()
+    assert table.sources == ()
     # Auto-declared rows still appear (each with empty cells, since
     # there are no backend columns).
     assert all(r.cells == () for r in table.rows)
@@ -269,14 +269,14 @@ def test_render_secret_table_caps_long_backend_identifier(
     long_ident = "my.1password.com: op://Employee/Registry/token"
     assert len(long_ident) > _BACKEND_CELL_WIDTH
     table = SecretTable(
-        backends=("onepassword",),
+        sources=("onepassword",),
         rows=(
             SecretRow(
                 name="reg",
                 description="registry token",
                 cells=(
-                    SecretCell(
-                        backend="onepassword",
+                    SecretSourceCell(
+                        source="onepassword",
                         would_attempt=True,
                         identifier=long_ident,
                         not_ready_reason=None,
@@ -310,14 +310,14 @@ def test_render_secret_table_caps_long_name(
     long_name = "rse-" + "x" * 80
     assert len(long_name) > _NAME_CELL_WIDTH
     table = SecretTable(
-        backends=("env-var",),
+        sources=("env-var",),
         rows=(
             SecretRow(
                 name=long_name,
                 description="long-named secret",
                 cells=(
-                    SecretCell(
-                        backend="env-var",
+                    SecretSourceCell(
+                        source="env-var",
                         would_attempt=True,
                         identifier=None,
                         not_ready_reason=None,
@@ -386,7 +386,7 @@ def test_grid_cell_not_ready_wins_over_identifier(tmp_path: Path, monkeypatch) -
     monkeypatch.setattr("shutil.which", lambda name: None)
     table = _build_table(_readiness_grid_config(tmp_path))
     row = next(r for r in table.rows if r.name == "mapped-op")
-    op = next(c for c in row.cells if c.backend == "onepassword")
+    op = next(c for c in row.cells if c.source == "onepassword")
     assert op.would_attempt is True  # has a mapping
     assert op.identifier == "op://Vault/item/field"  # the ref is still known
     assert op.not_ready_reason == "op CLI not installed"  # but readiness wins at render
@@ -399,7 +399,7 @@ def test_grid_cell_wont_attempt_wins_over_not_ready(tmp_path: Path, monkeypatch)
     monkeypatch.setattr("shutil.which", lambda name: None)
     table = _build_table(_readiness_grid_config(tmp_path))
     row = next(r for r in table.rows if r.name == "unmapped-op")
-    op = next(c for c in row.cells if c.backend == "onepassword")
+    op = next(c for c in row.cells if c.source == "onepassword")
     assert op.would_attempt is False
     assert op.not_ready_reason == "op CLI not installed"  # backend is not-ready...
     # ...but the rendered cell is won't-attempt (checked below), not not-ready.

@@ -30,7 +30,7 @@ def ssh_keys(tmp_path: Path) -> tuple[Path, Path]:
 
 def _write_api_key_cfg(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> Path:
     """Write a config with one operator secret (``api-key``) declared as a
-    YAML manifest and the env-var/prompt backend chain."""
+    YAML manifest and the env-var/prompt source chain."""
     pub, priv = ssh_keys
     p = tmp_path / "c.toml"
     p.write_text(
@@ -49,24 +49,19 @@ def _write_api_key_cfg(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> Path:
     return p
 
 
-def test_describe_secret_never_resolves_through_interactive_backends(
+def test_describe_secret_never_opens_interactive_sources(
     tmp_path: Path,
     ssh_keys: tuple[Path, Path],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Monkeypatch the prompt client's factory to fail loudly if
-    anything calls it during describe. The resolution PREVIEW may probe
-    non-interactive backends (env-var); an interactive backend must be
-    reported on ``would_attempt`` alone -- probing it would BE the
-    prompt.
-    """
+    """Pure preview uses metadata only and never creates a prompt client."""
     cfg = _write_api_key_cfg(tmp_path, ssh_keys)
     config = load_config(cfg, warn_issues=False)
 
     def _fail_batch_get(*args: object, **kwargs: object) -> None:
         raise AssertionError(
             "describe_secret invoked the prompt provider; interactive "
-            "backends must be previewed via would_attempt alone (FRD R10)"
+            "sources must be previewed via metadata alone (FRD R10)"
         )
 
     from agentworks.capabilities.secret_backend import SECRET_BACKEND_REGISTRY
@@ -74,7 +69,7 @@ def test_describe_secret_never_resolves_through_interactive_backends(
     registry = build_registry(config)
     monkeypatch.setattr(SECRET_BACKEND_REGISTRY["prompt"], "create_client", _fail_batch_get)
 
-    # Should complete without invoking the prompt provider.
+    # Should complete without invoking the prompt source's client factory.
     describe_secret(config, registry, "api-key")
 
 
@@ -83,18 +78,18 @@ def test_describe_secret_does_not_run_the_resolve_loop(
     ssh_keys: tuple[Path, Path],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``resolve_secrets`` is the command resolution path. Describe must
-    never route through it (its per-backend probe calls the backend's
-    ``resolve`` directly, one non-interactive backend at a time).
+    """``resolve_batch`` is the command resolution path. Describe must
+    never route through it; pure preview reads source projection and
+    readiness metadata without probing any current value.
     """
     cfg = _write_api_key_cfg(tmp_path, ssh_keys)
     config = load_config(cfg, warn_issues=False)
 
-    def _fail_resolve_secrets(*args: object, **kwargs: object) -> None:
-        raise AssertionError("describe_secret ran the resolve loop; inspection must ask the backends directly")
+    def _fail_resolve_batch(*args: object, **kwargs: object) -> None:
+        raise AssertionError("describe_secret ran the resolve loop; inspection must remain non-probing")
 
     registry = build_registry(config)
-    monkeypatch.setattr("agentworks.secrets.resolve.resolve_secrets", _fail_resolve_secrets)
+    monkeypatch.setattr("agentworks.secrets.resolve.resolve_batch", _fail_resolve_batch)
 
     describe_secret(config, registry, "api-key")
 

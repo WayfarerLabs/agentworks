@@ -25,28 +25,28 @@ from agentworks.capabilities.secret_backend.client import (
     SecretLookupRequest,
     SecretSourceClient,
 )
-from agentworks.errors import SecretUnavailableError, StateError
+from agentworks.errors import ExternalError, SecretUnavailableError, StateError
 from agentworks.plugins import Plugin, seated_plugin
 from agentworks.resources.graph import Readiness
 from agentworks.schema import AgwModel, AgwRootModel, CapabilityBlock
 from agentworks.secrets import SecretDecl, SecretSourceDecl
-from agentworks.secrets.resolve import (
-    _BATCH_TOKEN,
-    _OUTCOME_RULES,
-    ActiveSource,
-    CompletionPolicy,
-    InteractionPolicy,
-    ResolutionBatch,
+from agentworks.secrets.outcomes import (
+    OUTCOME_RULES,
     ResolutionCategory,
     ResolutionDetail,
     ResolutionOutcome,
-    ResolutionPolicy,
     ResolutionRemediation,
+)
+from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.resolve import (
+    _BATCH_TOKEN,
+    ActiveSource,
+    CompletionPolicy,
+    ResolutionBatch,
+    ResolutionPolicy,
     _drive_source,
-    _inspection_projection,
     _SourceContextDriver,
     resolve_batch,
-    resolve_secrets,
 )
 
 
@@ -348,20 +348,6 @@ def test_exact_drive_source_boundaries_clear_mapping_client_and_context(source_l
     assert "sentinel-provider-context" not in retained
 
 
-def test_output_handler_interrupt_clears_legacy_wrapper_values(monkeypatch: pytest.MonkeyPatch) -> None:
-    _Backend.values = {"token": "sentinel-wrapper-value"}
-    monkeypatch.setattr(output, "is_interactive", lambda: False)
-    monkeypatch.setattr(output, "info", lambda message: (_ for _ in ()).throw(KeyboardInterrupt()))
-
-    with pytest.raises(KeyboardInterrupt) as caught:
-        resolve_secrets(
-            [SecretDecl(name="token", description="token")],
-            [_source()],
-        )
-
-    assert "sentinel-wrapper-value" not in _recursive_agentworks_traceback_text(caught.value)
-
-
 def test_explicit_json_null_mapping_reaches_nullable_mapping_model() -> None:
     _NullableBackend.events = []
     _NullableBackend.values = {"token": "resolved-from-null"}
@@ -509,9 +495,9 @@ def test_exact_five_categories_and_exhaustive_detail_table() -> None:
         "timeout",
         "resolution-failure",
     }
-    assert set(_OUTCOME_RULES) == set(ResolutionDetail)
-    for detail, (category, remediation, source_required, identifier_allowed) in _OUTCOME_RULES.items():
-        outcome = __import__("agentworks.secrets.resolve", fromlist=["ResolutionOutcome"]).ResolutionOutcome(
+    assert set(OUTCOME_RULES) == set(ResolutionDetail)
+    for detail, (category, remediation, source_required, identifier_allowed) in OUTCOME_RULES.items():
+        outcome = ResolutionOutcome(
             name="token",
             category=category,
             detail=detail,
@@ -523,8 +509,6 @@ def test_exact_five_categories_and_exhaustive_detail_table() -> None:
 
 
 def test_illegal_outcome_tuple_is_rejected() -> None:
-    from agentworks.secrets.resolve import ResolutionOutcome
-
     with pytest.raises(ValueError, match="category or remediation"):
         ResolutionOutcome(
             name="token",
@@ -722,7 +706,7 @@ def test_hostile_provider_mapping_traversal_is_sanitized_and_value_free(phase: s
     )
 
     assert batch.outcomes[0].detail is ResolutionDetail.UNEXPECTED
-    with pytest.raises(SecretUnavailableError) as caught:
+    with pytest.raises(ExternalError) as caught:
         batch.complete_or_raise()
     traceback_text: list[str] = []
     traceback = caught.value.__traceback__
@@ -795,50 +779,6 @@ def test_exact_batch_return_interrupt_clears_constructed_batch_values() -> None:
         )
 
     assert "sentinel-batch-return-value" not in _recursive_agentworks_traceback_text(caught.value)
-
-
-class _InterruptingErrors(dict[str, str]):
-    def __setitem__(self, key: str, value: str) -> None:
-        del key, value
-        raise KeyboardInterrupt
-
-
-def test_partial_legacy_error_projection_interrupt_clears_plaintext_values(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _Backend.values = {"resolved": "sentinel-partial-errors-value"}
-    monkeypatch.setattr(output, "is_interactive", lambda: False)
-
-    with pytest.raises(KeyboardInterrupt) as caught:
-        resolve_secrets(
-            [
-                SecretDecl(name="resolved", description="resolved"),
-                SecretDecl(name="missing", description="missing"),
-            ],
-            [_source()],
-            errors=_InterruptingErrors(),
-        )
-
-    assert "sentinel-partial-errors-value" not in _recursive_agentworks_traceback_text(caught.value)
-
-
-def test_actual_partial_legacy_projection_return_interrupt_clears_plaintext_values(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _Backend.values = {"token": "sentinel-inspection-return-value"}
-    monkeypatch.setattr(output, "is_interactive", lambda: False)
-
-    with (
-        pytest.raises(KeyboardInterrupt) as caught,
-        _interrupt_exact_line(_inspection_projection, "        return values, outcomes"),
-    ):
-        resolve_secrets(
-            [SecretDecl(name="token", description="token")],
-            [_source()],
-            errors={},
-        )
-
-    assert "sentinel-inspection-return-value" not in _recursive_agentworks_traceback_text(caught.value)
 
 
 @pytest.mark.parametrize("value", ["\0x", "x\0", "\rx", "x\r", "\nx", "x\n", "x\ny"])

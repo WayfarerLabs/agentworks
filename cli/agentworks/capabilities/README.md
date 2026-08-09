@@ -79,17 +79,18 @@ present, while Agentworks owns the tmux session, the user, and the workspace aro
 [`harness_integration/README.md`](harness_integration/README.md) for the integration contract and
 the shipped options.
 
-### Secret Backend
+### Secret Backend and Source
 
-The `secret-backend` capability is the source of a secret's value when Agentworks needs one,
+The `secret-backend` capability implements how a configured `secret-source` can obtain a value,
 avoiding any need to hand-carry credentials onto a VM. A secret can be read from an `env-var`,
 requested interactively at a `prompt`, pulled from `onepassword`, or sourced from another backend,
-and any secret can map to the backend that matches its storage policy. This lets a single resource
-definition travel between an operator who keeps tokens in a vault and one who supplies them by
-environment variable. A backend resolves a mapping to its value (or reports it absent so the next
-backend in the chain gets a turn), describes the lookup for inspection without ever exposing the
-value, and never logs it; Agentworks handles where each secret applies and injects it there.
-`secret-backend` is a nominal `Capability` subclass registered and published by exact class
+and any secret can map to the named source that matches its storage policy. This lets a single
+resource definition travel between an operator who keeps tokens in a vault and one who supplies them
+by environment variable. A source selects one backend implementation plus its configuration and
+precedence position. Its operation-scoped client resolves a mapping to its value (or reports it
+absent so the next source gets a turn), while pure inspection describes lookup applicability without
+exposing the value, and never logs it; Agentworks handles where each secret applies and injects it
+there. `secret-backend` is a nominal `Capability` subclass registered and published by exact class
 identity. Its ordinary `preflight` and `runup` hooks are fixed no-ops because source resolution runs
 before that lifecycle; operation-scoped clients own bounded provider work instead. See
 [`secret_backend/README.md`](secret_backend/README.md) for the author contract and
@@ -372,11 +373,11 @@ trivial (empty) preflight. Its defining property is that it is **read-only and s
 
 - **Secret resolvability is predicted without prompting** at this stage, but centrally, not by the
   instance or its holding node: the operation's preflight sweep (`preflight_all`) predicts over each
-  node's declared references (`orchestration.secrets`), so a declared secret with no mapping at all
-  is fatal and knowable here, without prompting for the others, and neither the instance nor the
-  node touches the secret machinery. Value checks defer to the op, uniformly. (An earlier draft let
-  preflight read-and-verify "non-interactively resolvable" values; that was ruled out: it forks
-  readiness on where a secret happens to come from.)
+  node's declared references (`orchestration.secrets`), so a declaration with no ready, permitted
+  source that would attempt it is fatal and knowable here, without prompting for the others, and
+  neither the instance nor the node touches the secret machinery. Value checks defer to the op,
+  uniformly. (An earlier draft let preflight read-and-verify "non-interactively resolvable" values;
+  that was ruled out: it forks readiness on where a secret happens to come from.)
 - It checks the rest of the world that needs **no credentials**: required tools present on the
   target, an unauthenticated endpoint reachable.
 - It does **not** mutate. In particular it does **not** mint or create anything.
@@ -403,10 +404,10 @@ spending the operator's time on a prompt for an op that was never going to run.
 **Doctor runs preflight, not runup.** Doctor is a passive, non-interactive scan, so it never
 prompts; an authenticated check under it could only ever reach the non-interactively-resolvable
 secrets, which is the exact source-asymmetry runup exists to avoid. So doctor stays preflight-only
-and uniform, and a secret's resolvability (is it mapped at all?) is already its own doctor row via
-the secret backends. On-demand authenticated checking is an explicit, interactive escalation of the
-same surface (`doctor --runup`: allowed to prompt, therefore allowed to run runup), tracked
-separately; it is not something doctor's passive pass does.
+and uniform, and whether a secret has a source that can be tried is already its own doctor row
+alongside the source and backend status groups. On-demand authenticated checking is an explicit,
+interactive escalation of the same surface (`doctor --runup`: allowed to prompt, therefore allowed
+to run runup), tracked separately; it is not something doctor's passive pass does.
 
 When does it run? Every command runs preflight on all the resources it will use before doing
 anything real: before any mutation, and before any secret prompt. That is what lets the cheap fatal

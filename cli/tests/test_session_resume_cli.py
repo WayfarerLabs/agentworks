@@ -8,6 +8,7 @@ import pytest
 from typer.testing import CliRunner
 
 from agentworks.cli import app
+from agentworks.secrets.policy import InteractionPolicy
 from agentworks.sessions import manager as session_manager
 
 
@@ -24,7 +25,18 @@ def command_calls(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, 
 @pytest.mark.parametrize(
     "arguments, expected",
     [
-        (["coding", "--force", "--yes"], ("single", {"name": "coding", "force": True, "yes": True})),
+        (
+            ["coding", "--force", "--yes"],
+            (
+                "single",
+                {
+                    "name": "coding",
+                    "force": True,
+                    "yes": True,
+                    "interaction": InteractionPolicy.REFUSE,
+                },
+            ),
+        ),
         (
             ["--all-stopped", "--vm", "vm1", "--workspace", "ws1", "--agent", "agent1"],
             (
@@ -36,6 +48,7 @@ def command_calls(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, 
                     "admin_only": False,
                     "include_running": False,
                     "force": False,
+                    "interaction": InteractionPolicy.REFUSE,
                 },
             ),
         ),

@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks.db import Database
+from agentworks.secrets.policy import InteractionPolicy
 from agentworks.sessions.multi_console import (
     add_shell,
     create_console,
@@ -267,7 +268,7 @@ def test_attach_console_focuses_session_pane_per_window(db: Database, fake_targe
         returncode=0, stdout="_PLACEHOLDER\nalpha\nbeta\n"
     )
 
-    attach_console(db, _StubConfig(), name="con", allow_nesting=True)
+    attach_console(db, _StubConfig(), name="con", allow_nesting=True, interaction=InteractionPolicy.REFUSE)
 
     selects = [c for c in fake_target.commands if "select-pane" in c]
     assert "tmux select-pane -t aw-console-con:alpha.0" in selects
@@ -288,7 +289,7 @@ def test_restore_session_focuses_session_pane(db: Database, fake_target: _FakeTa
     # split-window must return a fresh pane id so the tag step succeeds.
     fake_target.responses["split-window -t aw-console-con:a"] = _FakeResult(stdout="%9\n")
 
-    restore_session(db, _StubConfig(), console_name="con", session_name="a")
+    restore_session(db, _StubConfig(), console_name="con", session_name="a", interaction=InteractionPolicy.REFUSE)
 
     assert "tmux select-pane -t aw-console-con:a.0" in fake_target.commands
 
@@ -302,7 +303,7 @@ def test_add_shell_does_not_focus_session_pane(db: Database, fake_target: _FakeT
 
     fake_target.commands.clear()
     fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
-    add_shell(db, _StubConfig(), console_name="con", session_name="a")
+    add_shell(db, _StubConfig(), console_name="con", session_name="a", interaction=InteractionPolicy.REFUSE)
 
     assert not any("select-pane" in c for c in fake_target.commands)
     # But the layout still re-applies for the new pane count.
@@ -328,6 +329,7 @@ def test_attach_console_aw_session_vertical_layout(db: Database, fake_target: _F
         _StubVerticalLayoutConfig(),
         name="con",
         allow_nesting=True,  # type: ignore[arg-type]
+        interaction=InteractionPolicy.REFUSE,
     )
 
     # One select-layout with the hand-computed string for 1-shell case

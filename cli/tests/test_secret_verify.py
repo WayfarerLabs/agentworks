@@ -1,47 +1,31 @@
-"""Named-secret verification remains a value-free typed-core adapter."""
+"""One-name CLI checkpoint over the shared multi-name verification service."""
 
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import ClassVar
 
 import pytest
 from typer.testing import CliRunner
 
 from agentworks import output
-from agentworks.capabilities.secret_backend.client import (
-    SecretClientFailure,
-    SecretClientFailureKind,
-    SecretClientRemediation,
-    SecretClientTimeout,
-)
 from agentworks.cli import app
-from agentworks.errors import (
-    ConfigError,
-    ConnectivityError,
-    ExternalError,
-    NotFoundError,
-    SecretMappingError,
-    SecretUnavailableError,
-    ValidationError,
-)
+from agentworks.errors import NotFoundError, StateError, ValidationError
 from agentworks.secrets import SecretDecl
-from agentworks.secrets.verification import (
-    SecretInteractionPolicy,
-    SecretVerification,
-    verify_named_secret,
-)
+from agentworks.secrets.outcomes import ResolutionCategory, ResolutionDetail
+from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.verification import verify_secrets
 from tests.secrets.test_resolution_lifecycle import _Backend, _source
 
 
 class _Registry:
-    def __init__(self, decl: SecretDecl | None) -> None:
-        self.decl = decl
+    def __init__(self, declarations: dict[str, SecretDecl]) -> None:
+        self.declarations = declarations
 
     def lookup(self, kind: str, name: str) -> SecretDecl:
-        if self.decl is None:
-            raise KeyError(name)
-        return self.decl
+        try:
+            return self.declarations[name]
+        except KeyError:
+            raise KeyError(name) from None
 
 
 @pytest.fixture(autouse=True)
@@ -54,148 +38,91 @@ def _reset() -> object:
     output.set_non_interactive(False)
 
 
-def test_verify_returns_only_named_proof(monkeypatch: pytest.MonkeyPatch) -> None:
+def _verify(monkeypatch: pytest.MonkeyPatch, *names: str):
+    monkeypatch.setattr("agentworks.secrets.resolve.active_sources", lambda config, registry: [_source()])
+    registry = _Registry({name: SecretDecl(name=name, description=name) for name in names})
+    return verify_secrets(
+        SimpleNamespace(),  # type: ignore[arg-type]
+        registry,  # type: ignore[arg-type]
+        names,
+        interaction=InteractionPolicy.REFUSE,
+    )
+
+
+def test_verify_returns_value_free_shared_outcomes(monkeypatch: pytest.MonkeyPatch) -> None:
     _Backend.values = {"token": "sentinel-secret-value"}
-    monkeypatch.setattr("agentworks.secrets.resolve.active_backends", lambda config, registry: [_source()])
+    outcomes = _verify(monkeypatch, "token")
+    assert len(outcomes) == 1
+    assert outcomes[0].category is ResolutionCategory.RESOLVED
+    assert outcomes[0].detail is ResolutionDetail.RESOLVED
+    assert "sentinel" not in repr(outcomes)
 
-    result = verify_named_secret(SimpleNamespace(), _Registry(SecretDecl(name="token", description="token")), "token")
 
-    assert result == SecretVerification(name="token")
-    assert "sentinel" not in repr(result)
+def test_verify_preserves_first_order_dedupe_in_one_batch(monkeypatch: pytest.MonkeyPatch) -> None:
+    _Backend.values = {"a": "one", "b": "two"}
+    monkeypatch.setattr("agentworks.secrets.resolve.active_sources", lambda config, registry: [_source()])
+    registry = _Registry(
+        {
+            "a": SecretDecl(name="a", description="a"),
+            "b": SecretDecl(name="b", description="b"),
+        }
+    )
+    outcomes = verify_secrets(
+        SimpleNamespace(),  # type: ignore[arg-type]
+        registry,  # type: ignore[arg-type]
+        ["b", "a", "b"],
+        interaction=InteractionPolicy.REFUSE,
+    )
+    assert [outcome.name for outcome in outcomes] == ["b", "a"]
+    assert _Backend.events == ["factory", "enter", "prepare", "resolve", "exit"]
 
 
-def test_verify_missing_name_is_typed_not_found() -> None:
+def test_verify_returns_soft_miss_instead_of_raising(monkeypatch: pytest.MonkeyPatch) -> None:
+    (outcome,) = _verify(monkeypatch, "token")
+    assert outcome.category is ResolutionCategory.UNAVAILABLE
+    assert outcome.detail is ResolutionDetail.SOFT_MISS
+
+
+def test_verify_missing_name_is_typed_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("agentworks.secrets.resolve.active_sources", lambda config, registry: [_source()])
     with pytest.raises(NotFoundError, match="secret 'missing' not found"):
-        verify_named_secret(SimpleNamespace(), _Registry(None), "missing")
-
-
-def test_verify_soft_miss_raises_value_free_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("agentworks.secrets.resolve.active_backends", lambda config, registry: [_source()])
-    with pytest.raises(SecretUnavailableError) as caught:
-        verify_named_secret(SimpleNamespace(), _Registry(SecretDecl(name="token", description="token")), "token")
-    assert "token" in str(caught.value)
-
-
-def test_verify_rejects_invalid_policy() -> None:
-    with pytest.raises(ValidationError, match="explicit interaction policy"):
-        verify_named_secret(
-            SimpleNamespace(),
-            _Registry(SecretDecl(name="token", description="token")),
-            "token",
-            interaction_policy=object(),  # type: ignore[arg-type]
+        verify_secrets(
+            SimpleNamespace(),  # type: ignore[arg-type]
+            _Registry({}),  # type: ignore[arg-type]
+            ["missing"],
+            interaction=InteractionPolicy.REFUSE,
         )
 
 
-def test_global_non_interactive_overrides_explicit_allow() -> None:
-    output.set_non_interactive(True)
-    with pytest.raises(ValidationError, match="global non-interactive"):
-        verify_named_secret(
-            SimpleNamespace(),
-            _Registry(SecretDecl(name="token", description="token")),
-            "token",
-            interaction_policy=SecretInteractionPolicy.ALLOW_INTERACTIVE,
+@pytest.mark.parametrize("names", [[], [""], ["--bad"], ["bad\nname"]])
+def test_verify_rejects_empty_or_unsafe_names_without_echo(names: list[str]) -> None:
+    with pytest.raises(ValidationError) as caught:
+        verify_secrets(
+            SimpleNamespace(),  # type: ignore[arg-type]
+            _Registry({}),  # type: ignore[arg-type]
+            names,
+            interaction=InteractionPolicy.REFUSE,
+        )
+    assert "bad\nname" not in str(caught.value)
+    assert caught.value.__cause__ is None
+
+
+def test_verify_rejects_non_exact_policy_before_other_work() -> None:
+    with pytest.raises(StateError, match="exact InteractionPolicy"):
+        verify_secrets(
+            SimpleNamespace(),  # type: ignore[arg-type]
+            _Registry({}),  # type: ignore[arg-type]
+            [],
+            interaction="refuse",  # type: ignore[arg-type]
         )
 
 
-@pytest.mark.parametrize(
-    ("failure", "error_type"),
-    [
-        (
-            SecretClientFailure(
-                kind=SecretClientFailureKind.HARD_MAPPING,
-                remediation=SecretClientRemediation.CHECK_MAPPING,
-            ),
-            SecretMappingError,
-        ),
-        (
-            SecretClientFailure(
-                kind=SecretClientFailureKind.AUTHENTICATION,
-                remediation=SecretClientRemediation.SIGN_IN,
-            ),
-            ConnectivityError,
-        ),
-        (
-            SecretClientFailure(
-                kind=SecretClientFailureKind.CONNECTIVITY,
-                remediation=SecretClientRemediation.CHECK_CONNECTIVITY,
-            ),
-            ConnectivityError,
-        ),
-        (
-            SecretClientFailure(
-                kind=SecretClientFailureKind.EXTERNAL,
-                remediation=SecretClientRemediation.RETRY,
-            ),
-            ExternalError,
-        ),
-        (SecretClientTimeout(), ExternalError),
-        (RuntimeError("provider exposed sentinel-secret"), ExternalError),
-    ],
-)
-def test_verify_preserves_safe_error_categories_without_provider_text(
-    monkeypatch: pytest.MonkeyPatch,
-    failure: BaseException,
-    error_type: type[Exception],
-) -> None:
-    _Backend.failure = failure
-    monkeypatch.setattr("agentworks.secrets.resolve.active_backends", lambda config, registry: [_source()])
-    with pytest.raises(error_type) as caught:
-        verify_named_secret(SimpleNamespace(), _Registry(SecretDecl(name="token", description="token")), "token")
-    assert str(caught.value) == "secret verification failed"
-    assert caught.value.__context__ is None
-    assert "sentinel-secret" not in repr(caught.value)
-
-
-class _InteractiveBackend(_Backend):
-    interactive: ClassVar[bool] = True
-    events: ClassVar[list[str]] = []
-    values: ClassVar[dict[str, str]] = {}
-    failure: ClassVar[BaseException | None] = None
-
-
-class _RegularBackend(_Backend):
-    events: ClassVar[list[str]] = []
-    values: ClassVar[dict[str, str]] = {}
-    failure: ClassVar[BaseException | None] = None
-
-
-def test_verify_default_refuses_interactive_source_and_falls_through(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _InteractiveBackend.events = []
-    _InteractiveBackend.values = {"token": "interactive-sentinel"}
-    _RegularBackend.events = []
-    _RegularBackend.values = {"token": "regular-sentinel"}
-    monkeypatch.setattr(
-        "agentworks.secrets.resolve.active_backends",
-        lambda config, registry: [
-            _source(name="interactive", backend_class=_InteractiveBackend),
-            _source(name="regular", backend_class=_RegularBackend),
-        ],
-    )
-    result = verify_named_secret(SimpleNamespace(), _Registry(SecretDecl(name="token", description="token")), "token")
-    assert result == SecretVerification(name="token")
-    assert _InteractiveBackend.events == []
-    assert _RegularBackend.events == ["factory", "enter", "prepare", "resolve", "exit"]
-
-
-def test_verify_preserves_first_party_chain_diagnostic(monkeypatch: pytest.MonkeyPatch) -> None:
-    failure = ConfigError("unknown source in configured chain")
-    monkeypatch.setattr(
-        "agentworks.secrets.resolve.active_backends",
-        lambda config, registry: (_ for _ in ()).throw(failure),
-    )
-    with pytest.raises(ConfigError) as caught:
-        verify_named_secret(SimpleNamespace(), _Registry(SecretDecl(name="token", description="token")), "token")
-    assert caught.value is failure
-
-
-def test_secret_verify_cli_emits_exactly_one_value_free_success_line(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_secret_verify_cli_emits_one_value_free_success_line(monkeypatch: pytest.MonkeyPatch) -> None:
     _Backend.values = {"token": "sentinel-secret-value"}
-    registry = _Registry(SecretDecl(name="token", description="token"))
+    registry = _Registry({"token": SecretDecl(name="token", description="token")})
     monkeypatch.setattr("agentworks.config.load_config", lambda: SimpleNamespace())
     monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda config: registry)
-    monkeypatch.setattr("agentworks.secrets.resolve.active_backends", lambda config, candidate: [_source()])
+    monkeypatch.setattr("agentworks.secrets.resolve.active_sources", lambda config, candidate: [_source()])
 
     result = CliRunner().invoke(app, ["secret", "verify", "token"])
 
@@ -203,3 +130,10 @@ def test_secret_verify_cli_emits_exactly_one_value_free_success_line(monkeypatch
     assert result.stdout == "Secret 'token' verified.\n"
     assert result.stderr == ""
     assert "sentinel-secret-value" not in result.output
+
+
+def test_secret_verify_cli_global_refusal_wins(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("agentworks.config.load_config", lambda: SimpleNamespace())
+    result = CliRunner().invoke(app, ["--non-interactive", "secret", "verify", "token", "--allow-interactive"])
+    assert result.exit_code != 0
+    assert "--allow-interactive cannot be used with --non-interactive" in str(result.exception)

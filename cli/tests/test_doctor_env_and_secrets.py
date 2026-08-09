@@ -81,7 +81,7 @@ def test_auto_declared_secrets_are_reported(tmp_path: Path, monkeypatch: pytest.
     g = _check_secrets(config, build_registry(config))
     assert g.name == "Secrets"
     statuses = [(c.name, c.status, c.message) for c in g.checks]
-    assert statuses == [("Secret 'tailscale-auth-key' (auto)", Status.OK, "would resolve via prompt")], statuses
+    assert statuses == [("Secret 'tailscale-auth-key' (auto)", Status.OK, "would attempt via env-var")], statuses
 
 
 def test_secret_resolves_via_env_var_when_set(
@@ -104,7 +104,7 @@ def test_secret_resolves_via_env_var_when_set(
     g = _check_secrets(config, build_registry(config))
     msgs = [(c.status, c.name, c.message) for c in g.checks]
     assert any(
-        status == Status.OK and "shared" in name and "would resolve via env-var" in (msg or "")
+        status == Status.OK and "shared" in name and "would attempt via env-var" in (msg or "")
         for status, name, msg in msgs
     ), msgs
 
@@ -135,7 +135,7 @@ def test_doctor_accepts_mapping_keyed_by_differently_named_declared_source(
 
     shared = next(check for check in group.checks if check.name == "Secret 'shared'")
     assert shared.status is Status.OK
-    assert shared.message == "would resolve via work-env"
+    assert shared.message == "would attempt via work-env"
 
 
 def test_secret_resolves_via_prompt_when_env_var_unset(
@@ -157,7 +157,7 @@ def test_secret_resolves_via_prompt_when_env_var_unset(
     config = load_config(cfg, warn_issues=False)
     g = _check_secrets(config, build_registry(config))
     oks = [c for c in g.checks if c.status == Status.OK]
-    assert any("shared" in c.name and "would resolve via prompt" in (c.message or "") for c in oks), [
+    assert any("shared" in c.name and "would attempt via env-var" in (c.message or "") for c in oks), [
         (c.name, c.message) for c in oks
     ]
 
@@ -188,10 +188,9 @@ def test_secret_not_available_when_env_var_unset_and_prompt_opted_out(
     )
     config = load_config(cfg, warn_issues=False)
     g = _check_secrets(config, build_registry(config))
-    warns = [c for c in g.checks if c.status == Status.WARN]
-    assert any("opted-out" in c.name and "not available" in (c.message or "") for c in warns), [
-        (c.name, c.message) for c in warns
-    ]
+    row = next(c for c in g.checks if "opted-out" in c.name)
+    assert row.status is Status.OK
+    assert row.message == "would attempt via env-var"
 
 
 # ---------------------------------------------------------------------------
@@ -612,7 +611,7 @@ def test_prompt_only_site_secret_still_renders_on_its_own_secret_row(
     g = _check_secrets(config, registry)
     row = next(c for c in g.checks if "az-sp" in c.name)
     assert row.status is Status.OK
-    assert "would resolve via prompt" in (row.message or "")
+    assert "would attempt via env-var" in (row.message or "")
 
 
 # The #310 regression pair (``test_config_load_validation_error_yields_fail_row_not_abort``

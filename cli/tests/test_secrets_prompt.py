@@ -16,12 +16,11 @@ from agentworks.errors import StateError, UserAbort
 from agentworks.resources.graph import Readiness
 from agentworks.schema import CapabilityBlock
 from agentworks.secrets import SecretDecl, SecretSourceDecl
+from agentworks.secrets.outcomes import ResolutionCategory, ResolutionDetail
+from agentworks.secrets.policy import InteractionPolicy
 from agentworks.secrets.resolve import (
     ActiveSource,
     CompletionPolicy,
-    InteractionPolicy,
-    ResolutionCategory,
-    ResolutionDetail,
     ResolutionPolicy,
     resolve_batch,
 )

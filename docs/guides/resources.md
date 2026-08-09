@@ -254,9 +254,9 @@ spec:
 - Site config secrets ride the standard secret machinery: a platform that needs a credential names
   the secret holding it in its own config, defaulting to a well-known name when you leave the field
   out (a Proxmox site's API token is the `proxmox-token` secret unless `token_secret` says
-  otherwise). Those secrets are auto-declared and resolved through the backend chain like any other,
-  and `agw resource describe-kind vm-platform/<name>` shows each platform's secret fields with their
-  default names.
+  otherwise). Those secrets are auto-declared and resolved through the configured source chain like
+  any other, and `agw resource describe-kind vm-platform/<name>` shows each platform's secret fields
+  with their default names.
 - **Azure and AWS sites say how they authenticate, in a tagged `auth` table that defaults to
   ambient.** `auth: {mode: ambient}` is the declared default, so omitting the table means it: the
   host's own credential chain (for Azure, `az login` / `AZURE_*` / managed identity / browser

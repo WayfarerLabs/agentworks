@@ -15,12 +15,11 @@ from agentworks.capabilities.secret_backend.env_var import EnvVarBackend, EnvVar
 from agentworks.resources.graph import Readiness
 from agentworks.schema import CapabilityBlock
 from agentworks.secrets import SecretDecl, SecretSourceDecl
+from agentworks.secrets.outcomes import ResolutionCategory, ResolutionOutcome
+from agentworks.secrets.policy import InteractionPolicy
 from agentworks.secrets.resolve import (
     ActiveSource,
     CompletionPolicy,
-    InteractionPolicy,
-    ResolutionCategory,
-    ResolutionOutcome,
     ResolutionPolicy,
     resolve_batch,
 )

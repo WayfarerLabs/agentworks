@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks.errors import TokenRejectedError
+from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -28,7 +29,13 @@ if TYPE_CHECKING:
     from .node import Node, Readiness
 
 
-def preflight_all(nodes: Iterable[Node], ctx: RunContext, *, registry: Registry) -> None:
+def preflight_all(
+    nodes: Iterable[Node],
+    ctx: RunContext,
+    *,
+    registry: Registry,
+    interaction: InteractionPolicy,
+) -> None:
     """The preflight-all sweep: every participating node, against the
     one command-start context, before any prompt or mutation (the
     walk-away invariant's first half).
@@ -62,10 +69,17 @@ def preflight_all(nodes: Iterable[Node], ctx: RunContext, *, registry: Registry)
     ``registry`` is what prediction reads declarations from; every
     caller builds its nodes from one already.
     """
+    interaction = validate_interaction_policy(interaction)
     from agentworks.orchestration.secrets import require_predicted_refs
 
     for node in nodes:
-        require_predicted_refs(node.key, node.config_secret_refs(), ctx.config, registry)
+        require_predicted_refs(
+            node.key,
+            node.config_secret_refs(),
+            ctx.config,
+            registry,
+            interaction=interaction,
+        )
         node.preflight(ctx)
 
 

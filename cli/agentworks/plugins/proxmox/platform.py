@@ -92,7 +92,7 @@ class ProxmoxPlatform(VMPlatform):
         agentworks does not build it.
 
         The API token value is a secret, `proxmox-token` unless the site names another,
-        resolved through the backend chain like any other secret. The token id is not a
+        resolved through the configured source chain like any other secret. The token id is not a
         secret and is written in the document.
 
         There is no native interactive transport: the QEMU guest agent's exec interface

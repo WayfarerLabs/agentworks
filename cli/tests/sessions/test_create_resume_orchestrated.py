@@ -33,6 +33,7 @@ from agentworks.output import Role
 from agentworks.secrets.orchestration import (
     resolve_for_command as _real_resolve_for_command,
 )
+from agentworks.secrets.policy import InteractionPolicy
 
 from ..conftest import ManifestDoc, stub_build_registry, stub_session_resolvers, stub_vm_gates
 from ..orchestrated_fixtures import PLUGINS_ENABLED, proxmox_site, write_operator_config
@@ -187,7 +188,13 @@ def test_resume_probe_fires_at_preflight_before_the_kill(tmp_path: Path, monkeyp
 
     db, events = _resume_fixture(tmp_path, monkeypatch)
 
-    resume_session(db, SimpleNamespace(session=SimpleNamespace(history_limit=1)), name="s1", yes=True)  # type: ignore[arg-type]
+    resume_session(
+        db,
+        SimpleNamespace(session=SimpleNamespace(history_limit=1)),
+        name="s1",
+        yes=True,
+        interaction=InteractionPolicy.REFUSE,
+    )  # type: ignore[arg-type]
 
     assert "probe" in events and "kill" in events
     assert events.index("probe") < events.index("kill"), f"the probe must fire BEFORE the kill; got {events}"
@@ -210,7 +217,13 @@ def test_resume_missing_binary_aborts_with_the_old_session_running(
     db, events = _resume_fixture(tmp_path, monkeypatch, missing={"claude"})
 
     with pytest.raises(StateError, match="requires 'claude'") as exc:
-        resume_session(db, SimpleNamespace(session=SimpleNamespace(history_limit=1)), name="s1", yes=True)  # type: ignore[arg-type]
+        resume_session(
+            db,
+            SimpleNamespace(session=SimpleNamespace(history_limit=1)),
+            name="s1",
+            yes=True,
+            interaction=InteractionPolicy.REFUSE,
+        )  # type: ignore[arg-type]
 
     assert "agent 'a1'" in str(exc.value)
     assert events == ["probe"]  # no resolve, no kill, no create
@@ -236,7 +249,12 @@ def test_resume_broken_without_force_refuses_before_the_resolve(
     monkeypatch.setattr(session_manager, "check_session_status", lambda *a, **k: SessionStatus.BROKEN)
 
     with pytest.raises(BrokenStateError):
-        resume_session(db, SimpleNamespace(session=SimpleNamespace(history_limit=1)), name="s1")  # type: ignore[arg-type]
+        resume_session(
+            db,
+            SimpleNamespace(session=SimpleNamespace(history_limit=1)),
+            name="s1",
+            interaction=InteractionPolicy.REFUSE,
+        )  # type: ignore[arg-type]
 
     # Preflight probed, but neither secret pass ran and nothing was
     # killed: pass 1 (graph-union boundary) and pass 2 (env chain) both
@@ -260,7 +278,13 @@ def test_resume_declined_confirm_refuses_before_the_resolve(tmp_path: Path, monk
     monkeypatch.setattr(output, "confirm", lambda *a, **k: False)
 
     with pytest.raises(UserAbort):
-        resume_session(db, SimpleNamespace(session=SimpleNamespace(history_limit=1)), name="s1", yes=False)  # type: ignore[arg-type]
+        resume_session(
+            db,
+            SimpleNamespace(session=SimpleNamespace(history_limit=1)),
+            name="s1",
+            yes=False,
+            interaction=InteractionPolicy.REFUSE,
+        )  # type: ignore[arg-type]
 
     # Both secret passes stayed behind the declined confirm.
     assert "resolve" not in events
@@ -318,6 +342,7 @@ def test_create_ephemeral_agent_defers_probe_until_realized(tmp_path: Path, monk
         name="s1",
         workspace="ws1",
         new_agent=True,
+        interaction=InteractionPolicy.REFUSE,
     )
 
     assert events == ["realize_agent", "probe", "tmux_create"], (
@@ -351,6 +376,7 @@ def test_create_existing_agent_probes_at_preflight(tmp_path: Path, monkeypatch: 
         name="s1",
         workspace="ws1",
         agent="a1",
+        interaction=InteractionPolicy.REFUSE,
     )
 
     assert events == ["probe", "resolve", "tmux_create"], f"a realized target probes pre-resolve; got {events}"
@@ -422,6 +448,7 @@ def test_create_failure_cleans_session_slice_then_unwinds_ephemerals(
             new_workspace=True,
             new_agent=True,
             vm_name="vm1",
+            interaction=InteractionPolicy.REFUSE,
         )
 
     cleanup = [e for e in events if e not in ("probe", "realize_agent")]
@@ -463,6 +490,7 @@ def test_session_scope_reaches_the_harness_integration(tmp_path: Path, monkeypat
         name="s1",
         workspace="ws1",
         agent="a1",
+        interaction=InteractionPolicy.REFUSE,
     )
 
     (scope,) = scopes
@@ -534,6 +562,7 @@ def test_create_pane_command_is_the_harness_integration_output_substituted(
         name="s1",
         workspace="ws1",
         agent="a1",
+        interaction=InteractionPolicy.REFUSE,
     )
 
     assert captured["command"] == "claude s1 in ws1"
@@ -558,7 +587,13 @@ def test_resume_pane_command_uses_resume_command_and_session_workspace(
     captured: dict[str, str] = {}
     _capture_pane_command(monkeypatch, captured)
 
-    resume_session(db, SimpleNamespace(session=SimpleNamespace(history_limit=1)), name="s1", yes=True)  # type: ignore[arg-type]
+    resume_session(
+        db,
+        SimpleNamespace(session=SimpleNamespace(history_limit=1)),
+        name="s1",
+        yes=True,
+        interaction=InteractionPolicy.REFUSE,
+    )  # type: ignore[arg-type]
 
     assert captured["command"] == "resume s1 ws1"
     db.close()
@@ -632,6 +667,7 @@ def _stop_the_vm(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
         lambda self, row, ctx: events.append("status") or VMStatus.STOPPED,
     )
     monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start"))
+    monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", lambda *a, **k: True)
     monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale"))
 
 
@@ -674,7 +710,7 @@ def test_create_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
     _stop_the_vm(monkeypatch, events)
     _patch_session_ops(monkeypatch, events, captured_env)
 
-    create_session(db, config, name="s1", workspace="ws1", admin=True)
+    create_session(db, config, name="s1", workspace="ws1", admin=True, interaction=InteractionPolicy.REFUSE)
 
     # Exactly two backend passes: the gate's (API token, pre-boundary),
     # then the boundary's (the env-chain remainder). Nothing twice,
@@ -742,7 +778,15 @@ def test_create_new_agent_on_disabled_plugin_recipe_refuses_before_any_work(
     _patch_session_ops(monkeypatch, events, captured_env)  # transports must never be reached
 
     with pytest.raises(StateError, match="enable plugin `decl-plugin`"):
-        create_session(db, config, name="s1", workspace="ws1", new_agent=True, agent_template="fixture-agent-tmpl")
+        create_session(
+            db,
+            config,
+            name="s1",
+            workspace="ws1",
+            new_agent=True,
+            agent_template="fixture-agent-tmpl",
+            interaction=InteractionPolicy.REFUSE,
+        )
 
     assert db.get_session("s1") is None  # refused before any session-row write
     assert "tmux_create" not in events  # refused before any transport work
@@ -775,7 +819,7 @@ def test_resume_stopped_vm_gate_seeds_and_env_pass_is_the_only_other(
     monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, **k: session)
     monkeypatch.setattr(session_manager, "check_session_status", lambda *a, **k: SessionStatus.STOPPED)
 
-    resume_session(db, config, name="s1", yes=True)
+    resume_session(db, config, name="s1", yes=True, interaction=InteractionPolicy.REFUSE)
 
     # Two backend passes total: the gate's token resolve, then the
     # env chain's post-confirm pass. The boundary itself contributed no
@@ -823,6 +867,7 @@ def test_resume_broken_force_kill_warning_nests_under_starting_session(
         SimpleNamespace(session=SimpleNamespace(history_limit=1)),  # type: ignore[arg-type]
         name="s1",
         force=True,
+        interaction=InteractionPolicy.REFUSE,
     )
 
     assert (Role.HEADER, 0, "Starting Session") in captured_output.lines

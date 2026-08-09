@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.capabilities.base import RunContext
 from agentworks.errors import StateError, ValidationError
+from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 
 from ._helpers import (
     _credential_line_key,
@@ -39,6 +40,7 @@ def shell_vm(
     *,
     platform_transport: bool = False,
     workspace_name: str | None = None,
+    interaction: InteractionPolicy,
 ) -> int:
     """Open a shell on a VM as the admin user.
 
@@ -64,6 +66,7 @@ def shell_vm(
     just-in-time values seed the boundary resolver), and the
     held-active span covers the whole interactive session.
     """
+    interaction = validate_interaction_policy(interaction)
     import shlex
 
     import agentworks.vms.manager as _mgr
@@ -120,6 +123,7 @@ def shell_vm(
                 registry,
                 vm,
                 targets=[_mgr._vm_secret_target(scopes, label=f"vm-shell={vm.name}")],
+                interaction=interaction,
             )
         )
 
@@ -163,6 +167,7 @@ def exec_vm(
     command: list[str],
     *,
     workspace_name: str | None = None,
+    interaction: InteractionPolicy,
 ) -> int:
     """Execute a command on a VM as the admin user via direct admin SSH.
 
@@ -177,6 +182,7 @@ def exec_vm(
     :func:`shell_vm`: the gate opens before the preflight sweep and
     the held-active span covers the streamed remote command.
     """
+    interaction = validate_interaction_policy(interaction)
     import shlex
 
     import agentworks.vms.manager as _mgr
@@ -223,6 +229,7 @@ def exec_vm(
         registry,
         vm,
         targets=[_mgr._vm_secret_target(scopes, label=f"vm-exec={vm.name}")],
+        interaction=interaction,
     ) as (_vm_node, resolver, _ops_ctx):
         from agentworks.vms.sites import site_platform_name
 
@@ -249,7 +256,14 @@ def exec_vm(
         return target.call_streaming(remote_cmd, env=env)
 
 
-def add_git_credential(db: Database, config: Config, name: str, credential_name: str) -> None:
+def add_git_credential(
+    db: Database,
+    config: Config,
+    name: str,
+    credential_name: str,
+    *,
+    interaction: InteractionPolicy,
+) -> None:
     """Add or update a git credential on a VM.
 
     This is the first ORCHESTRATED command: its graph is DERIVED from
@@ -269,6 +283,7 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     context (``ctx.secret``, with the gate's scoped reader as the
     source for gate-driven ops).
     """
+    interaction = validate_interaction_policy(interaction)
     from agentworks.bootstrap import load_request_registry
     from agentworks.git_credentials.nodes import git_credential_node
     from agentworks.orchestration.activation import (
@@ -298,7 +313,7 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
 
     from agentworks.secrets.resolver import Resolver
 
-    resolver = Resolver(config, registry)
+    resolver = Resolver(config, registry, interaction=interaction)
 
     # BUILD: the command names its direct resources (this VM, this
     # credential); everything else enters through the derived graph
@@ -332,7 +347,12 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
         # PREFLIGHT-ALL against the one command-start context, then the
         # boundary resolve: the walk-away point.
-        preflight_all(nodes, RunContext(config=config, operation_scope=scope), registry=registry)
+        preflight_all(
+            nodes,
+            RunContext(config=config, operation_scope=scope),
+            registry=registry,
+            interaction=interaction,
+        )
         resolver.resolve()
 
         def scoped_ctx(node_secret_refs: tuple[str, ...]) -> RunContext:

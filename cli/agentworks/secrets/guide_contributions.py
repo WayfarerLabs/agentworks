@@ -27,7 +27,7 @@ def guide_contributions() -> tuple[TopicContribution, ...]:
         TopicContribution(
             TopicSlug("concept-secrets"),
             "Secrets",
-            "Understand secret declarations and backends without exposing secret values.",
+            "Understand secret declarations, sources, and typed proof without exposing secret values.",
             ConceptAnchor("concept-secrets"),
             (
                 Overview(BlockId("overview"), _markdown("overview")),

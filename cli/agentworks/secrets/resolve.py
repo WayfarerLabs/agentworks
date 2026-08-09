@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from contextlib import AbstractContextManager, suppress
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Literal, Self, cast
+from typing import TYPE_CHECKING, Literal, Self
 
 from agentworks import output
 from agentworks.capabilities.secret_backend.client import (
@@ -21,8 +21,16 @@ from agentworks.capabilities.secret_backend.client import (
     SecretLookupRequest,
     SecretSourceClient,
 )
-from agentworks.errors import AgentworksError, ConfigError, SecretUnavailableError, StateError, UserAbort
+from agentworks.errors import ConfigError, StateError, UserAbort
 from agentworks.schema import AgwModel, RefOwner
+from agentworks.secrets.outcomes import (
+    OUTCOME_RULES,
+    ResolutionCategory,
+    ResolutionDetail,
+    ResolutionOutcome,
+    complete_resolution_error,
+)
+from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -61,16 +69,6 @@ class ActiveSource:
         return self.source.name
 
     @property
-    def registered_name(self) -> str:
-        """Temporary spelling retained for the existing verification caller."""
-        return self.name
-
-    @property
-    def capability(self) -> type[SecretBackend]:
-        """Temporary spelling retained for existing inspection callers."""
-        return self.backend_class
-
-    @property
     def interactive(self) -> bool:
         return self.backend_class.interactive
 
@@ -99,16 +97,6 @@ class ActiveSource:
         return None if request is None else identifier
 
 
-# Existing consumers migrate in Phase 7. This is a name-only boundary: the
-# runtime object is source-shaped and never interprets a backend name as a source.
-ActiveBackend = ActiveSource
-
-
-class InteractionPolicy(StrEnum):
-    ALLOW = "allow"
-    REFUSE = "refuse"
-
-
 class CompletionPolicy(StrEnum):
     COMPLETE = "complete"
     PARTIAL = "partial"
@@ -119,157 +107,10 @@ class ResolutionPolicy:
     interaction: InteractionPolicy
     completion: CompletionPolicy
 
-
-class ResolutionCategory(StrEnum):
-    RESOLVED = "resolved"
-    UNAVAILABLE = "unavailable"
-    REFUSED_INTERACTION = "refused-interaction"
-    TIMEOUT = "timeout"
-    RESOLUTION_FAILURE = "resolution-failure"
-
-
-class ResolutionDetail(StrEnum):
-    RESOLVED = "resolved"
-    NO_ACTIVE_SOURCE = "no-active-source"
-    NO_ATTEMPTABLE_SOURCE = "no-attemptable-source"
-    SOURCE_NOT_READY = "source-not-ready"
-    SOFT_MISS = "soft-miss"
-    INTERACTION_REFUSED = "interaction-refused"
-    BATCH_DOOMED = "batch-doomed-before-interaction"
-    DEADLINE_EXCEEDED = "deadline-exceeded"
-    HARD_MAPPING = "hard-mapping"
-    AUTHENTICATION = "authentication"
-    CONNECTIVITY = "connectivity"
-    EXTERNAL = "external"
-    MALFORMED_VALUE = "malformed-value"
-    BACKEND_PROTOCOL = "backend-protocol"
-    UNEXPECTED = "unexpected"
-
-
-class ResolutionRemediation(StrEnum):
-    NONE = "none"
-    CONFIGURE_SOURCE = "configure-source"
-    ENABLE_SOURCE = "enable-source"
-    ALLOW_INTERACTION = "allow-interaction"
-    RESOLVE_BLOCKING_SECRETS = "resolve-blocking-secrets"
-    CHECK_MAPPING = "check-mapping"
-    SIGN_IN = "sign-in"
-    CHECK_CONNECTIVITY = "check-connectivity"
-    INCREASE_TIMEOUT = "increase-timeout"
-    REMOVE_CONTROL_CHARACTERS = "remove-control-characters"
-    RETRY = "retry"
-    REPORT_BACKEND = "report-backend"
-
-
-_OUTCOME_RULES: dict[
-    ResolutionDetail,
-    tuple[ResolutionCategory, ResolutionRemediation, bool, bool],
-] = {
-    ResolutionDetail.RESOLVED: (ResolutionCategory.RESOLVED, ResolutionRemediation.NONE, True, True),
-    ResolutionDetail.NO_ACTIVE_SOURCE: (
-        ResolutionCategory.UNAVAILABLE,
-        ResolutionRemediation.CONFIGURE_SOURCE,
-        False,
-        False,
-    ),
-    ResolutionDetail.NO_ATTEMPTABLE_SOURCE: (
-        ResolutionCategory.UNAVAILABLE,
-        ResolutionRemediation.CONFIGURE_SOURCE,
-        False,
-        False,
-    ),
-    ResolutionDetail.SOURCE_NOT_READY: (
-        ResolutionCategory.UNAVAILABLE,
-        ResolutionRemediation.ENABLE_SOURCE,
-        True,
-        True,
-    ),
-    ResolutionDetail.SOFT_MISS: (
-        ResolutionCategory.UNAVAILABLE,
-        ResolutionRemediation.CONFIGURE_SOURCE,
-        True,
-        True,
-    ),
-    ResolutionDetail.INTERACTION_REFUSED: (
-        ResolutionCategory.REFUSED_INTERACTION,
-        ResolutionRemediation.ALLOW_INTERACTION,
-        True,
-        True,
-    ),
-    ResolutionDetail.BATCH_DOOMED: (
-        ResolutionCategory.UNAVAILABLE,
-        ResolutionRemediation.RESOLVE_BLOCKING_SECRETS,
-        False,
-        False,
-    ),
-    ResolutionDetail.DEADLINE_EXCEEDED: (
-        ResolutionCategory.TIMEOUT,
-        ResolutionRemediation.INCREASE_TIMEOUT,
-        True,
-        True,
-    ),
-    ResolutionDetail.HARD_MAPPING: (
-        ResolutionCategory.RESOLUTION_FAILURE,
-        ResolutionRemediation.CHECK_MAPPING,
-        True,
-        True,
-    ),
-    ResolutionDetail.AUTHENTICATION: (
-        ResolutionCategory.RESOLUTION_FAILURE,
-        ResolutionRemediation.SIGN_IN,
-        True,
-        True,
-    ),
-    ResolutionDetail.CONNECTIVITY: (
-        ResolutionCategory.RESOLUTION_FAILURE,
-        ResolutionRemediation.CHECK_CONNECTIVITY,
-        True,
-        True,
-    ),
-    ResolutionDetail.EXTERNAL: (
-        ResolutionCategory.RESOLUTION_FAILURE,
-        ResolutionRemediation.RETRY,
-        True,
-        True,
-    ),
-    ResolutionDetail.MALFORMED_VALUE: (
-        ResolutionCategory.RESOLUTION_FAILURE,
-        ResolutionRemediation.REMOVE_CONTROL_CHARACTERS,
-        True,
-        True,
-    ),
-    ResolutionDetail.BACKEND_PROTOCOL: (
-        ResolutionCategory.RESOLUTION_FAILURE,
-        ResolutionRemediation.REPORT_BACKEND,
-        True,
-        False,
-    ),
-    ResolutionDetail.UNEXPECTED: (
-        ResolutionCategory.RESOLUTION_FAILURE,
-        ResolutionRemediation.REPORT_BACKEND,
-        True,
-        True,
-    ),
-}
-
-
-@dataclass(frozen=True, slots=True)
-class ResolutionOutcome:
-    name: str
-    category: ResolutionCategory
-    detail: ResolutionDetail
-    remediation: ResolutionRemediation
-    source: str | None = None
-    identifier: str | None = None
-
     def __post_init__(self) -> None:
-        category, remediation, source_required, identifier_allowed = _OUTCOME_RULES[self.detail]
-        if self.category is not category or self.remediation is not remediation:
-            raise ValueError("invalid resolution outcome category or remediation")
-        if (self.source is not None) is not source_required:
-            raise ValueError("invalid resolution outcome source")
-        if not identifier_allowed and self.identifier is not None:
-            raise ValueError("invalid resolution outcome identifier")
+        validate_interaction_policy(self.interaction)
+        if type(self.completion) is not CompletionPolicy:
+            raise StateError("completion must be an exact CompletionPolicy") from None
 
 
 class ResolutionBatch:
@@ -338,7 +179,19 @@ class ResolutionBatch:
             return dict(self._values)
         outcomes = self._outcomes
         self._values.clear()
-        raise _compatibility_error(outcomes) from None
+        raise complete_resolution_error(outcomes) from None
+
+    def discard_values(self) -> tuple[ResolutionOutcome, ...]:
+        try:
+            outcomes = self._outcomes
+            self._values.clear()
+            return outcomes
+        except BaseException:
+            self._values.clear()
+            raise
+
+    def scrub_values(self) -> None:
+        self._values.clear()
 
     def __repr__(self) -> str:
         outcomes = getattr(self, "_outcomes", ())
@@ -497,11 +350,6 @@ def active_sources(config: Config, registry: Registry) -> tuple[ActiveSource, ..
     return tuple(active)
 
 
-def active_backends(config: Config, registry: Registry) -> list[ActiveSource]:
-    """Temporary caller-shape adapter for the source-first active chain."""
-    return list(active_sources(config, registry))
-
-
 def _identifier_safe(identifier: str) -> bool:
     return all(unicodedata.category(char) not in {"Cc", "Cf"} for char in identifier)
 
@@ -557,7 +405,7 @@ def _outcome(
     source: str | None = None,
     identifier: str | None = None,
 ) -> ResolutionOutcome:
-    category, remediation, _source_required, _identifier_allowed = _OUTCOME_RULES[detail]
+    category, remediation, _source_required, _identifier_allowed = OUTCOME_RULES[detail]
     return ResolutionOutcome(
         name=name,
         category=category,
@@ -905,142 +753,53 @@ def resolve_batch(
         raise
 
 
-def _compatibility_error(outcomes: Sequence[ResolutionOutcome]) -> SecretUnavailableError:
-    failed = [outcome for outcome in outcomes if outcome.category is not ResolutionCategory.RESOLVED]
-    names = [outcome.name for outcome in failed]
-    details = "; ".join(
-        f"{outcome.name}: {outcome.category.value}/{outcome.detail.value} ({outcome.remediation.value})"
-        for outcome in failed
-    )
-    return SecretUnavailableError(
-        f"no active secret source could resolve secret(s): {', '.join(names)}",
-        hint=details,
-    )
+@dataclass(slots=True)
+class PartialResolution:
+    """Explicit partial reveal result with values separate from diagnostics."""
+
+    values: dict[str, str]
+    outcomes: tuple[ResolutionOutcome, ...]
+
+    def __repr__(self) -> str:
+        return f"PartialResolution(outcomes={len(self.outcomes)}, values=<redacted>)"
+
+    __str__ = __repr__
 
 
-def _inspection_projection(batch: ResolutionBatch) -> tuple[dict[str, str], tuple[ResolutionOutcome, ...]]:
-    values: dict[str, str] = {}
-    try:
-        values = dict(batch._values)
-        outcomes = batch.outcomes
-        return values, outcomes
-    except BaseException:
-        values.clear()
-        batch = cast("ResolutionBatch", None)
-        raise
+def _copy_partial_values(batch: ResolutionBatch) -> dict[str, str]:
+    return dict(batch._values)
 
 
-def _resolve_complete_for_legacy_callers(
+def resolve_partial_for_reveal(
     secrets: Sequence[SecretDecl],
     sources: Sequence[ActiveSource],
     *,
-    interaction_broker: InteractionBroker | None,
     interaction: InteractionPolicy,
-) -> tuple[dict[str, str], tuple[ResolutionOutcome, ...]]:
+) -> PartialResolution:
+    """Resolve independent values for the explicit env reveal surface."""
+    interaction = validate_interaction_policy(interaction)
+    broker = _OutputInteractionBroker(secrets) if interaction is InteractionPolicy.ALLOW else None
+    projected: dict[str, str] = {}
+    result = PartialResolution(values={}, outcomes=())
     batch = resolve_batch(
         secrets,
         sources,
-        policy=ResolutionPolicy(interaction=interaction, completion=CompletionPolicy.COMPLETE),
-        interaction_broker=interaction_broker,
-    )
-    outcomes = batch.outcomes
-    return batch.complete_or_raise(), outcomes
-
-
-def resolve_secrets(
-    secrets: list[SecretDecl],
-    backends: Sequence[ActiveSource],
-    *,
-    errors: dict[str, str] | None = None,
-    registry: Registry | None = None,
-) -> dict[str, str]:
-    """Temporary dict/error adapter around the one typed source core."""
-    del registry
-    interaction = InteractionPolicy.ALLOW if output.is_interactive() else InteractionPolicy.REFUSE
-    broker = _OutputInteractionBroker(secrets) if interaction is InteractionPolicy.ALLOW else None
-    if errors is None:
-        values: dict[str, str] = {}
-        try:
-            values, outcomes = _resolve_complete_for_legacy_callers(
-                secrets,
-                backends,
-                interaction_broker=broker,
-                interaction=interaction,
-            )
-            for outcome in outcomes:
-                if outcome.category is ResolutionCategory.RESOLVED:
-                    suffix = f" ({outcome.identifier})" if outcome.identifier else ""
-                    output.info(f"Resolved {outcome.name} via {outcome.source}{suffix}")
-            return values
-        except BaseException:
-            values.clear()
-            raise
-    batch: ResolutionBatch | None = None
-    values = {}
-    try:
-        batch = resolve_batch(
-            secrets,
-            backends,
-            policy=ResolutionPolicy(interaction=interaction, completion=CompletionPolicy.PARTIAL),
-            interaction_broker=broker,
-        )
-        values, outcomes = _inspection_projection(batch)
-        for outcome in outcomes:
-            if outcome.category is not ResolutionCategory.RESOLVED:
-                errors[outcome.name] = (
-                    f"secret resolution {outcome.category.value}: {outcome.detail.value}; "
-                    f"remediation: {outcome.remediation.value}"
-                )
-        return values
-    except BaseException:
-        values.clear()
-        if batch is not None:
-            batch._values.clear()
-        batch = None
-        raise
-
-
-def resolve_secrets_quiet(
-    secrets: list[SecretDecl],
-    backends: Sequence[ActiveSource],
-    *,
-    registry: Registry | None = None,
-    interactive_available: bool,
-) -> dict[str, str]:
-    """Resolve named-secret verification without provider-authored rendering."""
-    del registry
-    interaction = InteractionPolicy.ALLOW if interactive_available else InteractionPolicy.REFUSE
-    broker = _OutputInteractionBroker(secrets) if interactive_available else None
-    batch = resolve_batch(
-        secrets,
-        backends,
-        policy=ResolutionPolicy(interaction=interaction, completion=CompletionPolicy.COMPLETE),
+        policy=ResolutionPolicy(interaction=interaction, completion=CompletionPolicy.PARTIAL),
         interaction_broker=broker,
     )
-    if all(outcome.category is ResolutionCategory.RESOLVED for outcome in batch.outcomes):
-        return batch.complete_or_raise()
-    outcomes = batch.outcomes
-    batch._values.clear()
-    raise _verification_compatibility_error(outcomes) from None
-
-
-def _verification_compatibility_error(outcomes: Sequence[ResolutionOutcome]) -> AgentworksError:
-    """Map safe typed outcomes onto the existing verification error taxonomy."""
-    from agentworks.errors import ConnectivityError, ExternalError, SecretMappingError
-
-    failed = tuple(outcome for outcome in outcomes if outcome.category is not ResolutionCategory.RESOLVED)
-    first = failed[0]
-    if first.detail is ResolutionDetail.HARD_MAPPING:
-        error_type: type[SecretUnavailableError] = SecretMappingError
-    elif first.detail in {ResolutionDetail.AUTHENTICATION, ResolutionDetail.CONNECTIVITY}:
-        # Authentication was historically reported as connectivity because
-        # both mean the configured provider cannot be reached for this proof.
-        return ConnectivityError("secret verification failed", entity_kind="secret")
-    elif first.category in {ResolutionCategory.TIMEOUT, ResolutionCategory.RESOLUTION_FAILURE}:
-        return ExternalError("secret verification failed", entity_kind="secret")
-    else:
-        return _compatibility_error(outcomes)
-    return error_type("secret verification failed", entity_kind="secret")
+    try:
+        result.outcomes = batch.outcomes
+        projected = _copy_partial_values(batch)
+        batch.scrub_values()
+        result.values = projected
+        projected = {}
+        projected.clear()
+        return result
+    except BaseException:
+        projected.clear()
+        result.values.clear()
+        batch.scrub_values()
+        raise
 
 
 def validate_chain(config: Config, registry: Registry) -> None:
@@ -1068,53 +827,3 @@ def validate_chain(config: Config, registry: Registry) -> None:
                 "remove a false opt-out, or remove the unused declaration."
             ),
         )
-
-
-def disabled_plugin_backends(registry: Registry) -> dict[str, str]:
-    """Retained inspection helper for disabled plugin backend rows."""
-    from agentworks.resources.graph import Enablement
-
-    disabled: dict[str, str] = {}
-    for name, row in registry.iter_kind_items("secret-backend"):
-        origin = getattr(row, "origin", None)
-        if origin is None or origin.variant != "system-plugin":
-            continue
-        if registry.graph.enablement_of("secret-backend", name) is Enablement.disabled:
-            disabled[name] = cast("str", origin.plugin)
-    return disabled
-
-
-def preview_resolution(
-    secret: SecretDecl,
-    backends: Sequence[ActiveSource],
-    *,
-    interactive_available: bool,
-) -> str | None:
-    """Return the first source that would resolve without prompting here."""
-    for source in backends:
-        if not source.readiness.is_ready:
-            continue
-        try:
-            request, _identifier = _lookup_projection(secret, source)
-        except _BackendProtocolError:
-            continue
-        if request is None:
-            continue
-        if source.interactive:
-            if interactive_available:
-                return source.name
-            continue
-        batch = resolve_batch(
-            [secret],
-            [source],
-            policy=ResolutionPolicy(
-                interaction=InteractionPolicy.REFUSE,
-                completion=CompletionPolicy.PARTIAL,
-            ),
-            interaction_broker=None,
-        )
-        outcome = batch.outcomes[0]
-        if outcome.category is ResolutionCategory.RESOLVED:
-            batch._values.clear()
-            return source.name
-    return None

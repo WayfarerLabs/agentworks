@@ -19,6 +19,7 @@ from agentworks.errors import (
     UserAbort,
 )
 from agentworks.naming import validate_name
+from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 from agentworks.vms.manager import gated_vm_boundary
 
 from ._common import MAX_AGENT_NAME_LENGTH, _require_vm, agent_scope
@@ -47,6 +48,7 @@ def create_agent(
     vm_name: str,
     template: str | None = None,
     grant_all_workspaces: bool = False,
+    interaction: InteractionPolicy,
 ) -> None:
     """Create an agent on a VM.
 
@@ -63,6 +65,7 @@ def create_agent(
     realization log exists here.
     """
 
+    interaction = validate_interaction_policy(interaction)
     from agentworks.agents.templates import resolve_template
     from agentworks.bootstrap import load_request_registry
 
@@ -122,12 +125,19 @@ def create_agent(
     from agentworks.vms.initializer import announce_git_credentials
     from agentworks.vms.nodes import live_vm_node
 
-    resolver = Resolver(config, registry)
+    resolver = Resolver(config, registry, interaction=interaction)
 
     vm_node = live_vm_node(db, config, registry, vm)
     tmpl_node = agent_template_node(registry, agent_tmpl)
 
-    pending_agent = pending_agent_node(db, config, name, tmpl_node, vm_node)
+    pending_agent = pending_agent_node(
+        db,
+        config,
+        name,
+        tmpl_node,
+        vm_node,
+        interaction=interaction,
+    )
     nodes = walk(pending_agent)
     # The walk supplies the boundary union (the credential tokens plus
     # the site's config secrets). Provisioning is hermetic: no
@@ -151,7 +161,12 @@ def create_agent(
         with output.section("Preflight"):
             output.info(f"Checking agent-template/{agent_tmpl.name}...")
             announce_git_credentials(providers)
-            preflight_all(nodes, RunContext(config=config, operation_scope=scope), registry=registry)
+            preflight_all(
+                nodes,
+                RunContext(config=config, operation_scope=scope),
+                registry=registry,
+                interaction=interaction,
+            )
 
         with output.section("Resolving Secrets"):
             resolver.resolve()
@@ -202,6 +217,7 @@ def delete_agent(
     force: bool = False,
     yes: bool = False,
     vm_node: LiveVMNode | None = None,
+    interaction: InteractionPolicy,
 ) -> None:
     """Delete an agent from a VM.
 
@@ -226,6 +242,7 @@ def delete_agent(
     platform) is what keeps a teardown from silently falling into the
     boundary-building standalone branch.
     """
+    interaction = validate_interaction_policy(interaction)
     agent = db.get_agent(name)
     if agent is None:
         raise NotFoundError(
@@ -267,7 +284,12 @@ def delete_agent(
 
         registry = load_request_registry(config)
         boundary: AbstractContextManager[object] = gated_vm_boundary(
-            db, config, registry, vm, scope=agent_scope(db, vm.name, name)
+            db,
+            config,
+            registry,
+            vm,
+            scope=agent_scope(db, vm.name, name),
+            interaction=interaction,
         )
     else:
         # The nested-teardown path: the caller's composition already
@@ -376,6 +398,7 @@ def reinit_agent(
     *,
     name: str,
     update_template: str | None = None,
+    interaction: InteractionPolicy,
 ) -> None:
     """Re-run agent setup using the stored template.
 
@@ -396,6 +419,7 @@ def reinit_agent(
     before.
     """
 
+    interaction = validate_interaction_policy(interaction)
     from agentworks.agents.templates import resolve_template
     from agentworks.bootstrap import load_request_registry
 
@@ -468,7 +492,7 @@ def reinit_agent(
     from agentworks.vms.initializer import announce_git_credentials
     from agentworks.vms.nodes import live_vm_node
 
-    resolver = Resolver(config, registry)
+    resolver = Resolver(config, registry, interaction=interaction)
 
     vm_node = live_vm_node(db, config, registry, vm)
     agent_node = live_agent_node(agent, vm_node)
@@ -492,7 +516,12 @@ def reinit_agent(
         with output.section("Preflight"):
             output.info(f"Checking agent-template/{agent_tmpl.name}...")
             announce_git_credentials(providers)
-            preflight_all(nodes, RunContext(config=config, operation_scope=scope), registry=registry)
+            preflight_all(
+                nodes,
+                RunContext(config=config, operation_scope=scope),
+                registry=registry,
+                interaction=interaction,
+            )
 
         with output.section("Resolving Secrets"):
             resolver.resolve()

@@ -14,7 +14,7 @@ from agentworks.capabilities.secret_backend import SECRET_BACKEND_REGISTRY
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
 from agentworks.schema import RefOwner
-from agentworks.secrets import active_sources
+from agentworks.secrets.resolve import active_sources
 
 
 def _config(tmp_path: Path, body: str = "") -> Any:

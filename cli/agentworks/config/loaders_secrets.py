@@ -44,7 +44,7 @@ def _load_secret_config(
 
     Absence of the [secret_config] table OR absence of the ``backends`` key
     within it falls back to ``SecretConfig()``'s default chain
-    (``DEFAULT_BACKEND_CHAIN``). An explicit ``backends = []`` is respected
+    (``DEFAULT_SOURCE_CHAIN``). An explicit ``backends = []`` is respected
     as "no sources" (operator opts out of resolution entirely).
     """
     declared_at = decls.lookup("secret_config")

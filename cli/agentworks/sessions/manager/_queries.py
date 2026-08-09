@@ -14,6 +14,7 @@ from agentworks.errors import (
     StateError,
     UserAbort,
 )
+from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 from agentworks.sessions._resource_cleanup import cleanup_now_empty_resource
 from agentworks.sessions.tmux import AGENT_SOCKET_ROOT
 
@@ -30,10 +31,18 @@ def delete_session(
     name: str,
     force: bool = False,
     yes: bool = False,
+    interaction: InteractionPolicy,
 ) -> None:
     """Delete a session. Prompts if running/unknown (--yes to skip). --force for BROKEN."""
+    interaction = validate_interaction_policy(interaction)
     session = _mgr._require_session(db, name)
-    with _mgr._prepare_vm(db, config, session, operation="session-delete") as (
+    with _mgr._prepare_vm(
+        db,
+        config,
+        session,
+        operation="session-delete",
+        interaction=interaction,
+    ) as (
         ws,
         vm,
         _run_command,
@@ -184,8 +193,20 @@ def delete_session(
         # deleted" line has already printed. ``session`` was snapshotted before
         # ``db.delete_session``, so its workspace_name / agent_name / created_*
         # fields are still readable here.
-        _cleanup_now_empty_workspace(db, config, session, yes=yes)
-        _cleanup_now_empty_agent(db, config, session, yes=yes)
+        _cleanup_now_empty_workspace(
+            db,
+            config,
+            session,
+            yes=yes,
+            interaction=interaction,
+        )
+        _cleanup_now_empty_agent(
+            db,
+            config,
+            session,
+            yes=yes,
+            interaction=interaction,
+        )
 
 
 def _cleanup_now_empty_workspace(
@@ -194,6 +215,7 @@ def _cleanup_now_empty_workspace(
     session: SessionRow,
     *,
     yes: bool,
+    interaction: InteractionPolicy,
 ) -> None:
     """Handle the deleted session's workspace when it now has no sessions.
 
@@ -217,6 +239,7 @@ def _cleanup_now_empty_workspace(
     rows are blanket policy, not per-workspace intent); implicit grants never
     count. See :func:`workspace_external_explicit_granters`.
     """
+    interaction = validate_interaction_policy(interaction)
     from agentworks.workspaces.manager import (
         delete_workspace,
         workspace_external_explicit_granters,
@@ -244,7 +267,13 @@ def _cleanup_now_empty_workspace(
         # (the grant is preserved) while the interactive offer still fires with
         # the disclosing empty_clause above.
         created=session.created_workspace and not granters,
-        delete=lambda: delete_workspace(db, config, name, yes=True),
+        delete=lambda: delete_workspace(
+            db,
+            config,
+            name,
+            yes=True,
+            interaction=interaction,
+        ),
         manual_command=f"agw workspace delete {name}",
         yes=yes,
         empty_clause=empty_clause,
@@ -258,6 +287,7 @@ def _cleanup_now_empty_agent(
     session: SessionRow,
     *,
     yes: bool,
+    interaction: InteractionPolicy,
 ) -> None:
     """Handle the deleted session's agent when it becomes a cleanup candidate.
 
@@ -273,6 +303,7 @@ def _cleanup_now_empty_agent(
     report-but-keep any other candidate agent. A follow-on ``delete_agent``
     failure warns rather than aborts.
     """
+    interaction = validate_interaction_policy(interaction)
     from agentworks.agents.manager import agent_is_unused, delete_agent
 
     name = session.agent_name
@@ -288,7 +319,13 @@ def _cleanup_now_empty_agent(
         kind="agent",
         name=agent_name,
         created=session.created_agent,
-        delete=lambda: delete_agent(db, config, name=agent_name, yes=True),
+        delete=lambda: delete_agent(
+            db,
+            config,
+            name=agent_name,
+            yes=True,
+            interaction=interaction,
+        ),
         manual_command=f"agw agent delete {agent_name}",
         yes=yes,
         empty_clause="now has no sessions",
@@ -301,6 +338,7 @@ def describe_session(
     config: Config,
     *,
     name: str,
+    interaction: InteractionPolicy,
 ) -> None:
     """Show session details.
 
@@ -309,6 +347,7 @@ def describe_session(
     superset is a no-op everywhere but WSL2, where it anchors the
     status probes against the idle timer.
     """
+    interaction = validate_interaction_policy(interaction)
     session = _mgr._require_session(db, name)
     # Resolve the harness_integration for the display block (config-only, no
     # vm/target dependency) before entering the boundary span.
@@ -319,7 +358,13 @@ def describe_session(
     # registry aborts describe there regardless. The "-" fallback here
     # is thus defensive, not a graceful-degrade path describe can reach.
     harness_integration_label = _mgr._display_harness_integration(_mgr._display_registry(config), session.template)
-    with _mgr._prepare_vm(db, config, session, operation=None) as (
+    with _mgr._prepare_vm(
+        db,
+        config,
+        session,
+        operation=None,
+        interaction=interaction,
+    ) as (
         _ws,
         vm,
         _run_command,
@@ -366,6 +411,7 @@ def list_sessions(
     admin_only: bool = False,
     no_status: bool = False,
     names_only: bool = False,
+    interaction: InteractionPolicy,
 ) -> None:
     """List sessions with batched status checks (one SSH call per VM, parallel).
 
@@ -377,6 +423,7 @@ def list_sessions(
     shell completion (see issue #147); the order matches the table's
     workspace-grouped order so completion stays stable.
     """
+    interaction = validate_interaction_policy(interaction)
     sessions = _mgr.filter_sessions(
         db,
         workspace_name=workspace_name,
@@ -408,7 +455,12 @@ def list_sessions(
     status_keepalive_vms: list[VMRow] = [] if no_status else _mgr._distinct_vms_for_sessions(db, sessions)
 
     status_map: dict[str, SessionStatus] = {}
-    with _mgr._batch_vm_boundary(db, config, status_keepalive_vms):
+    with _mgr._batch_vm_boundary(
+        db,
+        config,
+        status_keepalive_vms,
+        interaction=interaction,
+    ):
         if not no_status:
             sessions = _mgr.ensure_pids_batch(sessions, db=db, config=config)
             status_map = _mgr.batch_check_all_sessions(sessions, db=db, config=config)
@@ -501,6 +553,7 @@ def attach_session(
     config: Config,
     *,
     name: str,
+    interaction: InteractionPolicy,
 ) -> int:
     """Attach to a session's tmux session (interactive).
 
@@ -508,10 +561,17 @@ def attach_session(
     translation to process exit (check 9: no sys.exit in the service),
     mirroring :func:`agentworks.vms.manager.exec_vm`.
     """
+    interaction = validate_interaction_policy(interaction)
     from agentworks.sessions.tmux import tmux_cmd
 
     session = _mgr._require_session(db, name)
-    with _mgr._prepare_vm(db, config, session, operation="session-attach") as (
+    with _mgr._prepare_vm(
+        db,
+        config,
+        session,
+        operation="session-attach",
+        interaction=interaction,
+    ) as (
         _ws,
         _vm,
         _run_command,

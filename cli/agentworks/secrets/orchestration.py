@@ -16,6 +16,7 @@ cache exists to hit or miss).
 Usage at a manager entry point:
 
     from agentworks.secrets.orchestration import SecretTarget, resolve_for_command
+    from agentworks.secrets.policy import InteractionPolicy
 
     targets = [
         SecretTarget(
@@ -25,7 +26,12 @@ Usage at a manager entry point:
             session=session_template.env,
         ),
     ]
-    values = resolve_for_command(targets, config, registry)  # raises on non-interactive miss
+    values = resolve_for_command(
+        targets,
+        config,
+        registry,
+        interaction=InteractionPolicy.REFUSE,
+    )  # raises on non-interactive miss
     # ... thread `values` down to every compose_env(values=...) site.
 
 The orchestrator is generic: it doesn't know about VMs, workspaces, or
@@ -42,9 +48,9 @@ only rewrites ``EnvEntry.value`` (plaintext), never ``EnvEntry.secret``
 targets from un-substituted template env dicts.
 
 **Non-interactive errors:** ``resolve_for_command`` raises
-``SecretUnavailableError`` if the active backends can't satisfy a
+``SecretUnavailableError`` if the active sources cannot satisfy a
 secret (e.g. ``--non-interactive`` + no ``AW_SECRET_<NAME>`` set). The
-error carries a per-secret hint listing the backends tried. Manager-
+error carries a per-secret hint listing the sources tried. Manager-
 layer callers may catch and re-raise with command-level context
 (``entity_kind`` / ``entity_name``) if useful, but the default error
 shape is already operator-actionable.
@@ -57,6 +63,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.env.merge import effective_env
 from agentworks.errors import StateError
+from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -169,23 +176,24 @@ def resolve_for_command(
     registry: Registry,
     *,
     extra_decls: Iterable[SecretDecl] = (),
+    interaction: InteractionPolicy,
 ) -> dict[str, str]:
     """Resolve every secret referenced by the candidate targets: THE
     command's one resolve call.
 
     Computes the union of needed ``SecretDecl``s via
     ``compute_needed_secrets`` and runs the resolve loop over the active
-    backends once. The returned ``{secret_name: value}`` mapping is the
+    sources once. The returned ``{secret_name: value}`` mapping is the
     ONLY channel -- there is no cache. The command threads the values
     down to its ``compose_env`` sites (the same scope-dict discipline
     that keeps the eager-resolve set and the render set from drifting);
     "prompt-once" holds by construction because this is called once per
     command. Empty target union returns ``{}`` without consulting any
-    backend.
+    source.
 
     In non-interactive mode, missing secrets surface as
     ``SecretUnavailableError`` with a per-secret breakdown of which
-    backends were tried. The error is raised before any state mutation
+    sources were tried. The error is raised before any state mutation
     so the operator can recover (set ``AW_SECRET_<NAME>``, add a
     ``backend_mappings`` entry, narrow the static filter, etc.) and
     re-run.
@@ -196,14 +204,35 @@ def resolve_for_command(
     call it -- they inherit the env captured at shell-create time and
     consume no secrets.
     """
+    interaction = validate_interaction_policy(interaction)
     decls = compute_needed_secrets(targets, registry, extra_decls=extra_decls)
     if not decls:
         return {}
-    from agentworks.secrets.resolve import active_backends, resolve_secrets
+    from agentworks.secrets.resolve import (
+        CompletionPolicy,
+        ResolutionPolicy,
+        _OutputInteractionBroker,
+        active_sources,
+        resolve_batch,
+    )
 
-    # ``registry`` powers the disabled-plugin failure hint (LLD b): a secret
-    # whose only mapping targets a disabled plugin backend (e.g. onepassword,
-    # plugin not enabled) fails naming the plugin to enable, not generically
-    # unreachable. Computed lazily in ``_fail_unavailable``, so the success path
-    # is untouched.
-    return resolve_secrets(decls, active_backends(config, registry), registry=registry)
+    projected: dict[str, str] = {}
+    result: dict[str, str] = {}
+    broker = _OutputInteractionBroker(decls) if interaction is InteractionPolicy.ALLOW else None
+    batch = resolve_batch(
+        decls,
+        active_sources(config, registry),
+        policy=ResolutionPolicy(interaction=interaction, completion=CompletionPolicy.COMPLETE),
+        interaction_broker=broker,
+    )
+    try:
+        projected = batch.complete_or_raise()
+        batch.scrub_values()
+        result.update(projected)
+        projected.clear()
+        return result
+    except BaseException:
+        projected.clear()
+        result.clear()
+        batch.scrub_values()
+        raise

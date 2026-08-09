@@ -181,7 +181,7 @@ def test_disabled_secret_backend_makes_its_active_source_not_ready() -> None:
     from agentworks.capabilities.publish import publish_capability_rows
     from agentworks.config import Config
     from agentworks.plugins import publish_plugins
-    from agentworks.secrets.resolve import active_backends
+    from agentworks.secrets.resolve import active_sources
     from agentworks.secrets.sources import SecretSourceDecl, publish_builtin_secret_sources
 
     registry = Registry.empty()
@@ -228,7 +228,7 @@ def test_disabled_secret_backend_makes_its_active_source_not_ready() -> None:
     assert registry.graph.readiness_of("secret-backend", "onepassword").is_ready
 
     config = cast("Config", SimpleNamespace(secret_config_data=SimpleNamespace(backends=("onepassword", "prompt"))))
-    chain = active_backends(config, registry)
+    chain = active_sources(config, registry)
     assert [source.name for source in chain] == ["onepassword", "prompt"]
     assert not chain[0].readiness.is_ready  # retained so typed resolution can report why it was skipped
 

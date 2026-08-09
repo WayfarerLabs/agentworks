@@ -39,7 +39,13 @@ import pytest
 from agentworks.bootstrap import build_registry
 from agentworks.config import ConfigError, load_config
 from agentworks.manifests import RESOURCES_DIRNAME, load_manifests
-from agentworks.secrets import active_backends, resolve_secrets
+from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.resolve import (
+    CompletionPolicy,
+    ResolutionPolicy,
+    active_sources,
+    resolve_batch,
+)
 from tests.conftest import ManifestDoc, write_manifests
 
 if TYPE_CHECKING:
@@ -105,10 +111,19 @@ def test_no_secrets_section_loads_with_default_chain(tmp_path: Path) -> None:
     # declares one (only the ever-present auto-declared tailscale-auth-key
     # remains).
     assert all(decl.origin.variant != "operator-declared" for _name, decl in registry.iter_kind_items("secret"))
-    backends = active_backends(cfg, registry)
-    assert [b.name for b in backends] == ["env-var", "prompt"]
+    sources = active_sources(cfg, registry)
+    assert [source.name for source in sources] == ["env-var", "prompt"]
     # No declared secrets => nothing to resolve; the loop is a no-op.
-    assert resolve_secrets([], backends) == {}
+    batch = resolve_batch(
+        [],
+        sources,
+        policy=ResolutionPolicy(
+            interaction=InteractionPolicy.REFUSE,
+            completion=CompletionPolicy.COMPLETE,
+        ),
+        interaction_broker=None,
+    )
+    assert batch.complete_or_raise() == {}
 
 
 def test_secret_config_absent_uses_default_chain(tmp_path: Path) -> None:
@@ -446,7 +461,7 @@ def test_active_backends_stand_up_when_configured(tmp_path: Path) -> None:
     )
     cfg = load_config(cfg_file, warn_issues=False)
     registry = build_registry(cfg)
-    backends = active_backends(cfg, registry)
+    backends = active_sources(cfg, registry)
     # Smoke-check the chain: the first attempting backend is env-var.
     decl = registry.lookup("secret", "shared")
     first = next((b for b in backends if b.would_attempt(decl)), None)

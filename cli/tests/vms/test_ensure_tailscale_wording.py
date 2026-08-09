@@ -27,6 +27,7 @@ from agentworks.capabilities.base import RunContext
 from agentworks.db import VMStatus
 from agentworks.errors import StateError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
+from agentworks.secrets.policy import InteractionPolicy
 from agentworks.vms import manager as vm_manager
 
 if TYPE_CHECKING:
@@ -43,6 +44,12 @@ class _ReachableTarget:
 
     def run(self, command: str, **kwargs: object) -> object:
         return None
+
+
+class _AuthKeys:
+    def get(self, name: str) -> str:
+        assert name == "tailscale-auth-key"
+        return "tskey-test"
 
 
 def _seed_vm(db: Database) -> VMRow:
@@ -80,7 +87,7 @@ def test_already_running_probe_says_verifying_not_reconnect(
     vm = _seed_vm(db)
     _reachable(monkeypatch)
 
-    vm_manager._ensure_tailscale(db, config, vm, _bound_platform(db, config, vm), RunContext(), already_running=True)
+    assert not vm_manager._tailscale_rejoin_required(db, config, vm, already_running=True)
 
     assert any("Verifying Tailscale connectivity" in line for line in captured_output.detail)
     assert any("Tailscale SSH reachable" in line for line in captured_output.detail)
@@ -100,7 +107,7 @@ def test_cold_start_probe_keeps_reconnect_wording(
     vm = _seed_vm(db)
     _reachable(monkeypatch)
 
-    vm_manager._ensure_tailscale(db, config, vm, _bound_platform(db, config, vm), RunContext())
+    assert not vm_manager._tailscale_rejoin_required(db, config, vm, already_running=False)
 
     assert any("Waiting for Tailscale to reconnect" in line for line in captured_output.detail)
     assert any("several minutes" in line for line in captured_output.detail)
@@ -135,7 +142,8 @@ def test_rejoin_rejects_a_redaction_free_operation_logger(
             vm,
             platform,
             RunContext(),
-            auth_key_source=lambda: "tskey-test",
+            auth_keys=_AuthKeys(),
+            auth_key_name="tailscale-auth-key",
         )
 
 
@@ -159,13 +167,9 @@ def test_start_vm_threads_already_running_from_status(
 
     monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, row, ctx: status)
     monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: None)
-    monkeypatch.setattr(
-        vm_manager,
-        "_ensure_tailscale",
-        lambda *a, **k: captured.update(k),
-    )
+    monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", lambda *a, **k: captured.update(k) or False)
 
-    vm_manager.start_vm(db, config, "box")
+    vm_manager.start_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
 
     assert captured["already_running"] is expected_flag
 
@@ -213,7 +217,7 @@ def test_start_vm_through_wsl2_shaped_hold_verifies_exactly_once(
     monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: None)
     monkeypatch.setattr(ProxmoxPlatform, "vm_active", _wsl2_shaped_hold)
 
-    vm_manager.start_vm(db, config, "box")
+    vm_manager.start_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
 
     verifying = [line for line in captured_output.detail if "Verifying Tailscale connectivity" in line]
     assert len(verifying) == 1, f"expected exactly one verify line, got {verifying}"

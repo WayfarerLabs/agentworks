@@ -7,7 +7,13 @@ from typing import Annotated
 import typer
 
 from agentworks.cli._app import app
-from agentworks.cli._helpers import get_db, parse_csv_filter, prompt_vm
+from agentworks.cli._helpers import (
+    get_db,
+    ordinary_interaction_policy,
+    parse_csv_filter,
+    prompt_vm,
+)
+from agentworks.secrets.policy import validate_interaction_policy
 
 workspace_app = typer.Typer(
     name="workspace",
@@ -25,6 +31,7 @@ def workspace_create(
     open_vscode: Annotated[bool, typer.Option("--open-vscode", help="Open in VS Code")] = False,
 ) -> None:
     """Create a workspace on a VM."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.config import load_config
     from agentworks.workspaces.manager import create_workspace
 
@@ -38,6 +45,7 @@ def workspace_create(
         vm_name=resolved_vm.name,
         template_name=template,
         open_vscode=open_vscode,
+        interaction=interaction,
     )
 
 
@@ -85,10 +93,19 @@ def workspace_rehome(
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
 ) -> None:
     """Move a workspace to a new directory path."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.config import load_config
     from agentworks.workspaces.manager import rehome_workspace
 
-    rehome_workspace(get_db(), load_config(), name, target_path=target, remove_old=remove_old, yes=yes)
+    rehome_workspace(
+        get_db(),
+        load_config(),
+        name,
+        target_path=target,
+        remove_old=remove_old,
+        yes=yes,
+        interaction=interaction,
+    )
 
 
 @workspace_app.command("repair")
@@ -103,10 +120,11 @@ def workspace_repair(
     analog of the `vm reinit` / `agent reinit` convergence, named `repair`
     because reconciling that on-VM infrastructure is what it does.
     """
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.config import load_config
     from agentworks.workspaces.manager import repair_workspace
 
-    repair_workspace(get_db(), load_config(), name)
+    repair_workspace(get_db(), load_config(), name, interaction=interaction)
 
 
 @workspace_app.command("delete")
@@ -116,10 +134,18 @@ def workspace_delete(
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
 ) -> None:
     """Delete a workspace."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.config import load_config
     from agentworks.workspaces.manager import delete_workspace
 
-    delete_workspace(get_db(), load_config(), name, force=force, yes=yes)
+    delete_workspace(
+        get_db(),
+        load_config(),
+        name,
+        force=force,
+        yes=yes,
+        interaction=interaction,
+    )
 
 
 @workspace_app.command("copy")
@@ -129,6 +155,7 @@ def workspace_copy(
     vm: Annotated[str | None, typer.Option("--vm", help="Target VM")] = None,
 ) -> None:
     """Copy a workspace to a new VM workspace."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.config import load_config
     from agentworks.workspaces.manager import copy_workspace
 
@@ -138,4 +165,5 @@ def workspace_copy(
         source,
         dest_name=name,
         vm_name=vm,
+        interaction=interaction,
     )

@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.errors import NotFoundError
+from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.acls import apply_workspace_acls
 from agentworks.workspaces.manager._common import _workspace_scope
@@ -27,6 +28,8 @@ def repair_workspace(
     db: Database,
     config: Config,
     name: str,
+    *,
+    interaction: InteractionPolicy,
 ) -> None:
     """Repair a workspace by converging its live VM state to the DB.
 
@@ -74,6 +77,7 @@ def repair_workspace(
     not-found checks stay pre-boundary: a refusal costs zero prompts,
     zero resolves, and zero gate events.
     """
+    interaction = validate_interaction_policy(interaction)
     from agentworks.agents.manager import AGENT_PREFIX
     from agentworks.bootstrap import load_request_registry
     from agentworks.ssh import SSHError
@@ -99,7 +103,14 @@ def repair_workspace(
             entity_name=ws.vm_name,
         )
 
-    with gated_vm_boundary(db, config, registry, vm, scope=_workspace_scope(db, vm, name)):
+    with gated_vm_boundary(
+        db,
+        config,
+        registry,
+        vm,
+        scope=_workspace_scope(db, vm, name),
+        interaction=interaction,
+    ):
         target = transport(vm, config)
         ws_group = ws.linux_group
         quoted_ws = shlex.quote(ws.workspace_path)

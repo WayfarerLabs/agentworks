@@ -8,7 +8,8 @@ from typing import Annotated
 import typer
 
 from agentworks.cli._app import app
-from agentworks.cli._helpers import get_db
+from agentworks.cli._helpers import get_db, ordinary_interaction_policy
+from agentworks.secrets.policy import validate_interaction_policy
 
 vm_app = typer.Typer(
     name="vm",
@@ -54,6 +55,7 @@ def vm_create(
     To deviate otherwise, declare a new template rather than overriding on
     the command line.
     """
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.config import load_config
     from agentworks.vms.manager import create_vm
 
@@ -65,6 +67,7 @@ def vm_create(
         template=template,
         admin_template=admin_template,
         site=site,
+        interaction=interaction,
     )
 
 
@@ -90,10 +93,11 @@ def vm_backup(
     name: Annotated[str, typer.Argument(help="VM name")],
 ) -> None:
     """Create a full backup of a VM: metadata, agents, workspaces, and files."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.config import load_config
     from agentworks.vms.backup import backup_vm
 
-    backup_vm(get_db(), load_config(), name)
+    backup_vm(get_db(), load_config(), name, interaction=interaction)
 
 
 @vm_app.command("describe")
@@ -101,10 +105,11 @@ def vm_describe(
     name: Annotated[str, typer.Argument(help="VM name")],
 ) -> None:
     """Show detailed information about a VM."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.config import load_config
     from agentworks.vms.manager import describe_vm
 
-    describe_vm(get_db(), load_config(), name)
+    describe_vm(get_db(), load_config(), name, interaction=interaction)
 
 
 @vm_app.command("verify-connection")
@@ -128,10 +133,11 @@ def vm_start(
     name: Annotated[str, typer.Argument(help="VM name")],
 ) -> None:
     """Start a stopped VM."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.config import load_config
     from agentworks.vms.manager import start_vm
 
-    start_vm(get_db(), load_config(), name)
+    start_vm(get_db(), load_config(), name, interaction=interaction)
 
 
 @vm_app.command("stop")
@@ -139,10 +145,11 @@ def vm_stop(
     name: Annotated[str, typer.Argument(help="VM name")],
 ) -> None:
     """Stop a running VM."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.config import load_config
     from agentworks.vms.manager import stop_vm
 
-    stop_vm(get_db(), load_config(), name)
+    stop_vm(get_db(), load_config(), name, interaction=interaction)
 
 
 @vm_app.command("delete")
@@ -152,10 +159,18 @@ def vm_delete(
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
 ) -> None:
     """Delete a VM and clean up all resources."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.config import load_config
     from agentworks.vms.manager import delete_vm
 
-    delete_vm(get_db(), load_config(), name, force=force, yes=yes)
+    delete_vm(
+        get_db(),
+        load_config(),
+        name,
+        force=force,
+        yes=yes,
+        interaction=interaction,
+    )
 
 
 @vm_app.command("rekey")
@@ -178,10 +193,18 @@ def vm_rekey(
     ] = False,
 ) -> None:
     """Assign a new Tailscale auth key to a VM (logout + rejoin)."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.config import load_config
     from agentworks.vms.manager import rekey_vm
 
-    rekey_vm(get_db(), load_config(), name, wait_for_share=wait_for_share, ignore_env=ignore_env)
+    rekey_vm(
+        get_db(),
+        load_config(),
+        name,
+        wait_for_share=wait_for_share,
+        ignore_env=ignore_env,
+        interaction=interaction,
+    )
 
 
 @vm_app.command("reinit")
@@ -189,10 +212,11 @@ def vm_reinit(
     name: Annotated[str, typer.Argument(help="VM name")],
 ) -> None:
     """Re-run initialization on a provisioned VM."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.config import load_config
     from agentworks.vms.manager import reinit_vm
 
-    reinit_vm(get_db(), load_config(), name)
+    reinit_vm(get_db(), load_config(), name, interaction=interaction)
 
 
 @vm_app.command("exec", context_settings={"allow_extra_args": True, "allow_interspersed_args": False})
@@ -205,13 +229,23 @@ def vm_exec(
     ] = None,
 ) -> None:
     """Execute a command on a VM as the admin user."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.config import load_config
     from agentworks.vms.manager import exec_vm
 
     if not ctx.args:
         typer.echo("Error: missing command", err=True)
         raise typer.Exit(1)
-    raise typer.Exit(exec_vm(get_db(), load_config(), name, ctx.args, workspace_name=workspace))
+    raise typer.Exit(
+        exec_vm(
+            get_db(),
+            load_config(),
+            name,
+            ctx.args,
+            workspace_name=workspace,
+            interaction=interaction,
+        )
+    )
 
 
 @vm_app.command("shell")
@@ -235,6 +269,7 @@ def vm_shell(
     ] = None,
 ) -> None:
     """Open a shell on a VM as the admin user."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.config import load_config
     from agentworks.vms.manager import shell_vm
 
@@ -245,6 +280,7 @@ def vm_shell(
             name,
             platform_transport=platform,
             workspace_name=workspace,
+            interaction=interaction,
         )
     )
 
@@ -257,10 +293,21 @@ def vm_port_forward(
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Verbose SSH output")] = False,
 ) -> None:
     """Forward local port(s) to a VM (like kubectl port-forward)."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.config import load_config
     from agentworks.vms.manager import port_forward_vm
 
-    raise typer.Exit(port_forward_vm(get_db(), load_config(), name, ports, address=address, verbose=verbose))
+    raise typer.Exit(
+        port_forward_vm(
+            get_db(),
+            load_config(),
+            name,
+            ports,
+            address=address,
+            verbose=verbose,
+            interaction=interaction,
+        )
+    )
 
 
 @vm_app.command("add-git-credential")
@@ -269,10 +316,17 @@ def vm_add_git_credential(
     credential: Annotated[str, typer.Argument(help="Git credential name from config")],
 ) -> None:
     """Add or update a git credential on a VM."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.config import load_config
     from agentworks.vms.manager import add_git_credential
 
-    add_git_credential(get_db(), load_config(), name, credential)
+    add_git_credential(
+        get_db(),
+        load_config(),
+        name,
+        credential,
+        interaction=interaction,
+    )
 
 
 @vm_app.command("logs")

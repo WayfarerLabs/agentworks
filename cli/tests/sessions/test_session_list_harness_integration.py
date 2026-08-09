@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks.db import SessionMode
+from agentworks.secrets.policy import InteractionPolicy
 from agentworks.sessions import manager as session_manager
 from tests.conftest import ManifestDoc
 
@@ -71,7 +72,7 @@ def test_list_shows_harness_integration_column_between_template_and_mode(
     _seed_session(db, "s-shell", "ws-box", "default")
     _seed_session(db, "s-claude", "ws-box", "claude")
 
-    session_manager.list_sessions(db, config, no_status=True)
+    session_manager.list_sessions(db, config, no_status=True, interaction=InteractionPolicy.REFUSE)
 
     header, rows = _header_and_rows(captured_output.info)
     # Column order: NAME, WORKSPACE, VM, TEMPLATE, HARNESS INTEGRATION, MODE, STATUS.
@@ -95,7 +96,7 @@ def test_list_unresolvable_template_shows_dash_and_still_renders(
     _seed_session(db, "s-good", "ws-box", "default")
     _seed_session(db, "s-bad", "ws-box", "ghost-template")
 
-    session_manager.list_sessions(db, config, no_status=True)
+    session_manager.list_sessions(db, config, no_status=True, interaction=InteractionPolicy.REFUSE)
 
     _header, rows = _header_and_rows(captured_output.info)
     by_name = {row.split()[0]: row.split() for row in rows}
@@ -114,7 +115,7 @@ def test_list_truncates_over_cap_values_with_ellipsis(
     _seed_vm(db, "box", "ws-box")
     _seed_session(db, long_name, "ws-box", "default")
 
-    session_manager.list_sessions(db, config, no_status=True)
+    session_manager.list_sessions(db, config, no_status=True, interaction=InteractionPolicy.REFUSE)
 
     _header, rows = _header_and_rows(captured_output.info)
     assert rows[0].startswith(long_name[:17] + "...")
@@ -132,7 +133,7 @@ def test_list_no_status_still_shows_harness_integration(
     _seed_vm(db, "box", "ws-box")
     _seed_session(db, "s1", "ws-box", "default")
 
-    session_manager.list_sessions(db, config, no_status=True)
+    session_manager.list_sessions(db, config, no_status=True, interaction=InteractionPolicy.REFUSE)
 
     header, rows = _header_and_rows(captured_output.info)
     assert "HARNESS" in header
@@ -162,7 +163,7 @@ def test_list_resolves_each_distinct_template_at_most_once(
 
     monkeypatch.setattr(session_manager, "_display_harness_integration", _counting)
 
-    session_manager.list_sessions(db, config, no_status=True)
+    session_manager.list_sessions(db, config, no_status=True, interaction=InteractionPolicy.REFUSE)
 
     assert seen == ["default"]
 
@@ -189,7 +190,7 @@ def test_list_bad_registry_degrades_harness_integration_to_dash_and_still_render
 
     monkeypatch.setattr(bootstrap, "build_registry", _boom)
 
-    session_manager.list_sessions(db, config, no_status=True)
+    session_manager.list_sessions(db, config, no_status=True, interaction=InteractionPolicy.REFUSE)
 
     header, rows = _header_and_rows(captured_output.info)
     assert "HARNESS" in header
@@ -216,6 +217,6 @@ def test_names_only_stays_pure_and_pays_no_registry_cost(
 
     monkeypatch.setattr(bootstrap, "build_registry", _boom)
 
-    session_manager.list_sessions(db, config, no_status=True, names_only=True)
+    session_manager.list_sessions(db, config, no_status=True, names_only=True, interaction=InteractionPolicy.REFUSE)
 
     assert captured_output.info == ["s1"]

@@ -88,7 +88,7 @@ opens after build and **before** the preflight sweep, and stays open as a span t
 command (platforms with idle shutdown are held active; unwind runs inside the span). The node is the
 authority on auto-start: an operator-stopped VM refuses with a typed error, including a re-read of
 the intent flag to close the concurrent-stop race. In this gate-first shape, gate secrets (the
-platform API credential) resolve just-in-time through the normal backend chain, the one sanctioned
+platform API credential) resolve just-in-time through the normal source chain, the one sanctioned
 resolution outside the boundary pass: narrow known names, entirely before the walk-away point,
 skipped on the fast path, and **seeded** into the boundary pass so no secret ever resolves or
 prompts twice in one command.
@@ -100,22 +100,23 @@ directly. Compositions whose boundary resolve runs before their gate (`vm rekey`
 ops, which run one boundary over the whole batch and then per-VM gates) hand the gate a callback
 that **serves the already-cached boundary values** instead of resolving, so the no-double-resolve
 property holds from the other direction. The Tailscale rejoin key keeps its conditional-need late
-resolve on the repair path in every shape (whether a rejoin is needed is only knowable after a start
-fails to reconnect); it reads through the gate's scoped reader, and after a boundary has already run
-it resolves late without seeding.
+acquisition (whether a rejoin is needed is only knowable after a start fails to reconnect). An
+explicit `vm start` owns one standalone resolution inside its active hold; gate-driven auto-start
+passes the unchanged gate reader inside its hold. The ensure helper accepts only that explicit
+reader and auth-key name and never resolves or consults ambient policy itself.
 
 ### Secrets: declare, union, predict centrally, resolve once, deliver scoped
 
 The path end to end: capabilities and nodes **declare** secret references; the command's union is
-computed from the walked plan's `secret_refs` (never from construction side effects); resolvability
-is **predicted centrally** over declarations, by the node holding the instance, with doctor
-consuming the same computation; the union resolves in **one boundary pass per composition root**,
-after preflight passes and before anything mutates (the walk-away point); and values are **delivered
-scoped**: `ctx.secret(name)` hands a node or instance only the names it declared, refusing anything
-else with a typed error. Capability construction binds `(name, config)` and touches no secret
-machinery at all; scoped delivery through the context is the only way an instance ever sees a secret
-value. The per-instance resolver object is retired; what remains is an orchestrator-owned boundary
-resolver at each composition root.
+computed from the walked plan's `secret_refs` (never from construction side effects); source
+availability is **predicted centrally and purely** over declarations by the operation, while doctor
+uses the inspection form without probing; the union resolves in **one boundary pass per composition
+root**, after preflight passes and before anything mutates (the walk-away point); and values are
+**delivered scoped**: `ctx.secret(name)` hands a node or instance only the names it declared,
+refusing anything else with a typed error. Capability construction binds `(name, config)` and
+touches no secret machinery at all; scoped delivery through the context is the only way an instance
+ever sees a secret value. The per-instance resolver object is retired; what remains is an
+orchestrator-owned boundary resolver at each composition root.
 
 ### Unwind
 

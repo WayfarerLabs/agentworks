@@ -22,6 +22,7 @@ from agentworks import output
 from agentworks.errors import AlreadyExistsError, NotFoundError, ValidationError
 from agentworks.naming import MAX_FREEFORM_NAME_LENGTH, validate_name
 from agentworks.resources.access import named_console_template
+from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 from agentworks.sessions.multi_console_layout import (
     _apply_layout,
     _reorder_session_windows,
@@ -126,10 +127,12 @@ def add_sessions(
     *,
     console_name: str,
     session_specs: list[str],
+    interaction: InteractionPolicy,
 ) -> None:
     """Append sessions to an existing console in argument order. Atomic at the
     DB layer; if the console's tmux session is live, also adds the windows
     immediately (best-effort)."""
+    interaction = validate_interaction_policy(interaction)
     from agentworks.bootstrap import load_request_registry
 
     console = _require_console(db, console_name)
@@ -194,7 +197,12 @@ def add_sessions(
                 # unions per secret name).
                 new_shell_targets.append(pane)
         if new_shell_targets:
-            secret_values = resolve_for_command(new_shell_targets, config, registry)
+            secret_values = resolve_for_command(
+                new_shell_targets,
+                config,
+                registry,
+                interaction=interaction,
+            )
 
     with db.transaction():
         for spec in specs:
@@ -400,9 +408,11 @@ def add_shell(
     session_name: str,
     cwd: str | None = None,
     admin: bool = False,
+    interaction: InteractionPolicy,
 ) -> None:
     """Append a single shell entry to a session's window in a console. If the
     console is live, also splits the pane immediately (best-effort)."""
+    interaction = validate_interaction_policy(interaction)
     from agentworks.bootstrap import load_request_registry
 
     _validate_cwd(cwd)
@@ -446,7 +456,12 @@ def add_shell(
         if pane_target is not None:
             from agentworks.secrets import resolve_for_command
 
-            secret_values = resolve_for_command([pane_target], config, registry)
+            secret_values = resolve_for_command(
+                [pane_target],
+                config,
+                registry,
+                interaction=interaction,
+            )
 
     new_shell: ShellEntry = {"cwd": cwd, "admin": admin}
     new_shells = [*cs.shells, new_shell]

@@ -510,7 +510,7 @@ def test_real_views_compose_snapshot_and_render_target_scoped_evidence(
         raise AssertionError("denied power invoked")
 
     monkeypatch.setattr("agentworks.output.prompt", denied)
-    monkeypatch.setattr("agentworks.secrets.resolve.resolve_secrets", denied)
+    monkeypatch.setattr("agentworks.secrets.resolve.resolve_batch", denied)
     monkeypatch.setattr("agentworks.transports.transport", denied)
     evidence = (
         _evidence("verify-named-secret", "secret", "tailscale-auth-key", VerificationOutcome.VERIFIED),

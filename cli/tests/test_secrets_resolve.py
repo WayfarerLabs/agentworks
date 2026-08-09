@@ -19,12 +19,11 @@ from agentworks.capabilities.secret_backend.prompt import PromptBackend, PromptS
 from agentworks.resources.graph import Readiness
 from agentworks.schema import AgwModel, CapabilityBlock
 from agentworks.secrets import SecretDecl
+from agentworks.secrets.outcomes import ResolutionCategory, ResolutionDetail
+from agentworks.secrets.policy import InteractionPolicy
 from agentworks.secrets.resolve import (
     ActiveSource,
     CompletionPolicy,
-    InteractionPolicy,
-    ResolutionCategory,
-    ResolutionDetail,
     ResolutionPolicy,
     resolve_batch,
 )

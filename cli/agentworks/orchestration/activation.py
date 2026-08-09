@@ -34,7 +34,7 @@ Three properties are load-bearing:
   credential (the common case) or the Tailscale auth key (the rejoin
   repair case). This is the one sanctioned resolution outside the
   boundary pass: narrow, known names, resolved through the normal
-  backend chain, entirely pre-walk-away, and skipped altogether on the
+  source chain, entirely pre-walk-away, and skipped altogether on the
   fast path (a confirmed-active VM costs no resolution and no
   interaction). Resolving here, ahead of the preflight sweep, is
   INHERENT rather than a resolve/preflight-ordering gap (issue #202):
@@ -199,7 +199,7 @@ def ensure_active(target: GateTarget, resolve_secret: Callable[[str], str]) -> d
 def gate_secret_resolver(config: Config, registry: Registry, resolver: Resolver) -> Callable[[str], str]:
     """The gate's just-in-time resolve callback, shared by every
     command whose gate opens BEFORE its boundary resolve: resolve
-    through the normal backend chain and SEED the boundary resolver as
+    through the normal source chain and SEED the boundary resolver as
     each value lands (``Resolver.seed``), so the boundary pass skips
     the gate-resolved names and no secret resolves or prompts twice in
     one command. (The ops themselves read the gate's scoped reader,
@@ -207,25 +207,7 @@ def gate_secret_resolver(config: Config, registry: Registry, resolver: Resolver)
     property.)"""
 
     def resolve_gate_secret(secret_name: str) -> str:
-        from agentworks.orchestration.secrets import secret_declarations
-        from agentworks.secrets.resolve import active_backends, resolve_secrets
-
-        # Ordering note (issue #202): gate secrets resolve BEFORE preflight
-        # by necessity, not as a resolve/preflight-ordering gap. On-target
-        # preflight requires a live, active target, and activating a
-        # stopped target can require exactly these gate secrets, so the
-        # gate must open (and resolve) ahead of the preflight sweep. It is
-        # inherent, not an oversight. And it is a SINGLE-declaration
-        # resolve (``[decl]``), so the multi-secret "prompt for A, then
-        # fail on an already-doomed B" class the before-interactive doom
-        # check guards against cannot arise here: there is only ever one
-        # secret in flight per call.
-        (decl,) = secret_declarations([secret_name], registry)
-        # ``registry`` powers the disabled-plugin failure hint (LLD b) if this
-        # gate secret's only backend is a disabled plugin.
-        value = resolve_secrets([decl], active_backends(config, registry), registry=registry)[secret_name]
-        resolver.seed({secret_name: value})
-        return value
+        return resolver.resolve_gate(secret_name)
 
     return resolve_gate_secret
 

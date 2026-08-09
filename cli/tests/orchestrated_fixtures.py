@@ -13,7 +13,7 @@ keep a local ``make_config`` built on :func:`write_operator_config`.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -110,11 +110,13 @@ def resolve_counter(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
     from agentworks.secrets import resolve as secrets_resolve
 
     calls: list[list[str]] = []
-    real = secrets_resolve.resolve_secrets
+    from agentworks.secrets.resolve import ResolutionBatch
 
-    def _counting(secrets: list[object], *args: object, **kwargs: object) -> dict[str, str]:
+    real = secrets_resolve.resolve_batch
+
+    def _counting(secrets: list[object], *args: Any, **kwargs: Any) -> ResolutionBatch:
         calls.append([getattr(s, "name", str(s)) for s in secrets])
-        return real(secrets, *args, **kwargs)  # type: ignore[arg-type]
+        return real(secrets, *args, **kwargs)
 
-    monkeypatch.setattr(secrets_resolve, "resolve_secrets", _counting)
+    monkeypatch.setattr(secrets_resolve, "resolve_batch", _counting)
     return calls

@@ -954,10 +954,12 @@ simple default stays behavior-identical without a manifest:
   all prompting happens before the command starts changing anything.
 
 **Resolve before any mutation:** a command resolves all the secrets its plan needs up front, before
-it starts changing anything. A secret that cannot be resolved by any active source fails at
-preflight with a hint (`agw secret describe <name>` shows how each source looks it up), before any
-prompt and before any VM is started. The set of secrets is computed from the command's static
-filters (positional targets, `--vm`, `--workspace`, `--agent`, etc.) -- dynamic predicates like
+it starts changing anything. Preflight first performs a pure applicability screen: a declaration
+with no ready, permitted source that would even attempt it fails with a hint
+(`agw secret describe <name>` shows how each source maps it), before any prompt and before any VM is
+started. Actual presence, authentication, transport, and provider failures remain the typed
+resolution boundary's job. The set of secrets is computed from the command's static filters
+(positional targets, `--vm`, `--workspace`, `--agent`, etc.) -- dynamic predicates like
 `--all-stopped` apply later, so the prompted set may over-approximate. Non-interactive mode (no TTY
 or `--non-interactive`) surfaces missing secrets as `SecretUnavailableError` with a per-secret hint
 naming which sources were tried. Commands that join existing shells (`session attach`,
@@ -980,7 +982,7 @@ agw env show --vm my-vm --resolve              # resolves through the active sou
 (The flag was formerly spelled `--reveal-secrets`; it was renamed to `--resolve` as a breaking
 change, the old spelling no longer works.)
 
-Inspect how each active source would resolve each declared or auto-declared secret (e.g. "which env
+Inspect how each active source would attempt each declared or auto-declared secret (e.g. "which env
 var name does this secret read from?") with `agw secret list`:
 
 ```bash
@@ -989,10 +991,10 @@ agw secret list
 #
 # NAME                 DESCRIPTION                                                                env-var                       prompt
 # ----                 -----------                                                                -------                       ------
-# api-key              OpenAI key for the operator's service                                      OPENAI_API_KEY                enabled
-# force-prompt         Always prompted at command time                                            disabled                      enabled
-# git-token-github     (auto) the auth token for git_credentials:github                           AW_SECRET_GIT_TOKEN_GITHUB    enabled
-# tailscale-auth-key   (auto) the Tailscale auth key for vm-template:default (and 1 more)   AW_SECRET_TAILSCALE_AUTH_KEY  enabled
+# api-key              OpenAI key for the operator's service                                      OPENAI_API_KEY                would attempt
+# force-prompt         Always prompted at command time                                            won't attempt                 would attempt
+# git-token-github     (auto) the auth token for git_credentials:github                           AW_SECRET_GIT_TOKEN_GITHUB    would attempt
+# tailscale-auth-key   (auto) the Tailscale auth key for vm-template:default (and 1 more)          AW_SECRET_TAILSCALE_AUTH_KEY  would attempt
 ```
 
 Columns are the active sources in `[secret_config].backends` precedence order. Cells show each
@@ -1019,16 +1021,16 @@ agw secret describe tailscale-auth-key
 #   - vm-template:heavy -- the Tailscale auth key
 #
 # Backend mappings:
-#   - env-var: AW_SECRET_TAILSCALE_AUTH_KEY
-#   - prompt: (prompt at resolution time)
+#   - env-var (env-var, synthesized default): AW_SECRET_TAILSCALE_AUTH_KEY
+#   - prompt (prompt, synthesized default): (prompt at resolution time)
 #
 # Resolution preview:
-#   would resolve via env-var
+#   would attempt via env-var
 ```
 
-`describe` never prompts or displays a secret value. Its current preview may perform a real lookup
-against a ready non-interactive source such as `env-var`, immediately discarding the returned value;
-interactive sources are reported optimistically without being opened.
+`describe` never prompts, opens a source client, reads the environment, or displays a secret value.
+Its preview is mapping applicability, not proof: it reports `would attempt via`, and verification or
+the command's resolution boundary determines whether a value is actually present.
 
 To prove that a declared secret resolves through the configured source chain, use `verify`:
 
@@ -1050,15 +1052,18 @@ agw secret verify tailscale-auth-key --allow-interactive
 unavailable mappings, source timeouts, typed provider failures, and configuration failures use the
 normal framed CLI error categories without provider-authored values or diagnostics.
 
-`agw doctor`'s Secrets group emits exactly one row per registry secret -- operator-declared and
-auto-declared alike (auto-declared rows, e.g. `tailscale-auth-key` and the `git-token-*` family,
-carry an `(auto)` marker; they are exactly the secrets most likely to prompt at command time):
+`agw doctor` keeps three adjacent secret groups. `Secret backends` reports implementation readiness;
+`Secret sources` shows every declared source with its selected backend, active/inactive,
+enabled/disabled, provenance, and folded readiness; `Secrets` emits exactly one row per registry
+secret -- operator-declared and auto-declared alike (auto-declared rows, e.g. `tailscale-auth-key`
+and the `git-token-*` family, carry an `(auto)` marker; they are exactly the secrets most likely to
+prompt at command time):
 
-- **OK** when at least one active source would resolve the secret at runtime
-  (`would resolve via env-var`, `would resolve via prompt`, ...). `would resolve via prompt` is the
-  heads-up that the next command needing this secret will ask for it interactively.
-- **WARN** when nothing in the chain would resolve it (config-valid but no path to a value, e.g.
-  env-var has no matching env var set and `prompt` is opted out via
+- **OK** when at least one active source would attempt the secret (`would attempt via env-var`,
+  `would attempt via prompt`, ...). `would attempt via prompt` is the heads-up that the next command
+  needing this secret will ask for it interactively.
+- **WARN** when nothing in the chain is attemptable (config-valid but no mapping path, e.g. a
+  mapping-required source has no mapping and `prompt` is opted out via
   `backend_mappings.prompt = false`). An unknown `backend_mappings` source name fails Registry
   construction first, so doctor reports it under Configuration and does not construct the Secrets
   group.

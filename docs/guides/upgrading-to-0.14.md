@@ -388,8 +388,8 @@ Configuration:
   [ok]   Config is valid
 
 Secrets:
-  [ok]   Secret 'gh-pat' (auto): would resolve via prompt
-  [ok]   Secret 'npm-token': would resolve via prompt
+  [ok]   Secret 'gh-pat' (auto): would attempt via env-var
+  [ok]   Secret 'npm-token': would attempt via env-var
 
 Results: 18 ok, 11 info, 0 warn, 0 fail
 ```
@@ -994,5 +994,5 @@ find the other is the easy mistake here.
 A harness integration's declared secrets carry usage text that used to name
 `harness_integration_config`, a key that can no longer be written; it now reads
 `harness_integration`. The text appears only in the preflight error for a secret that no active
-backend can resolve, and no shipped integration declares a secret, so this is here for completeness
+source can resolve, and no shipped integration declares a secret, so this is here for completeness
 rather than because it will reach you.

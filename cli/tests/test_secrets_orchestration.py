@@ -15,7 +15,7 @@ Pins:
 from __future__ import annotations
 
 from textwrap import dedent
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -28,6 +28,8 @@ from agentworks.secrets import (
     compute_needed_secrets,
     resolve_for_command,
 )
+from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.resolve import ResolutionBatch
 from tests.conftest import ManifestDoc, write_manifests
 
 if TYPE_CHECKING:
@@ -332,7 +334,7 @@ def test_resolve_for_command_returns_resolved_values(
     )
     config = load_config(cfg, warn_issues=False)
     target = SecretTarget(vm={"K": EnvEntry({"secret": "api-key"})})
-    resolved = resolve_for_command([target], config, build_registry(config))
+    resolved = resolve_for_command([target], config, build_registry(config), interaction=InteractionPolicy.REFUSE)
     assert resolved == {"api-key": "from-env"}
 
 
@@ -355,7 +357,7 @@ def test_resolved_values_are_plain_data(
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
     target = SecretTarget(vm={"K": EnvEntry({"secret": "api-key"})})
-    values = resolve_for_command([target], config, registry)
+    values = resolve_for_command([target], config, registry, interaction=InteractionPolicy.REFUSE)
     assert values == {"api-key": "first"}
 
     monkeypatch.setenv("AW_SECRET_API_KEY", "second")
@@ -383,17 +385,17 @@ def test_resolve_for_command_skips_loop_when_no_secrets(
 
     called = {"count": 0}
 
-    def _spy(*args: object, **kwargs: object) -> dict[str, str]:
+    def _spy(*args: object, **kwargs: object) -> ResolutionBatch:
         called["count"] += 1
-        return {}
+        raise AssertionError("empty resolution must not call the core")
 
-    monkeypatch.setattr("agentworks.secrets.resolve.resolve_secrets", _spy)
+    monkeypatch.setattr("agentworks.secrets.resolve.resolve_batch", _spy)
 
-    resolve_for_command([], config, registry)
+    resolve_for_command([], config, registry, interaction=InteractionPolicy.REFUSE)
     assert called["count"] == 0
 
     plaintext_target = SecretTarget(vm={"K": EnvEntry({"value": "plain"})})
-    resolve_for_command([plaintext_target], config, registry)
+    resolve_for_command([plaintext_target], config, registry, interaction=InteractionPolicy.REFUSE)
     assert called["count"] == 0
 
 
@@ -415,17 +417,19 @@ def test_resolve_for_command_passes_extra_decls_through(
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
 
-    from agentworks.secrets.resolve import resolve_secrets as _real
+    from agentworks.secrets.resolve import resolve_batch as _real
 
     calls: list[list[str]] = []
 
-    def _spy(decls: list[SecretDecl], backends: list[object], **kwargs: object) -> dict[str, str]:
+    def _spy(decls: list[SecretDecl], backends: list[object], **kwargs: Any) -> ResolutionBatch:
         calls.append([d.name for d in decls])
         return _real(decls, backends, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr("agentworks.secrets.resolve.resolve_secrets", _spy)
+    monkeypatch.setattr("agentworks.secrets.resolve.resolve_batch", _spy)
 
-    resolve_for_command([], config, registry, extra_decls=[registry.lookup("secret", "external")])
+    resolve_for_command(
+        [], config, registry, extra_decls=[registry.lookup("secret", "external")], interaction=InteractionPolicy.REFUSE
+    )
     assert calls == [["external"]]
 
 

@@ -21,6 +21,7 @@ import agentworks.sessions.multi_console as _mc
 from agentworks import output
 from agentworks.errors import ExternalError, NotFoundError, StateError
 from agentworks.resources.access import named_console_template
+from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 from agentworks.sessions.multi_console_layout import (
     _apply_layout,
     _focus_session_pane,
@@ -43,6 +44,7 @@ def restore_session(
     *,
     console_name: str,
     session_name: str,
+    interaction: InteractionPolicy,
 ) -> None:
     """Reconcile a single session window's live tmux state against its configured
     shell list. Additive only: it rebuilds the window if it is gone entirely and
@@ -62,6 +64,7 @@ def restore_session(
       every live shell pane in it with it (plus, for a single-member console,
       the console's last window, and with it the whole tmux session).
     """
+    interaction = validate_interaction_policy(interaction)
     from agentworks.bootstrap import load_request_registry
 
     console = _require_console(db, console_name)
@@ -79,7 +82,13 @@ def restore_session(
     # base.VMPlatform.vm_active's docstring). The gate's held-active span
     # wraps the SSH-heavy body so a freshly booted WSL2 distro doesn't
     # idle out between the window probe and the pane reconciliation.
-    with _mc._prepare_vm_target_for_attach(db, config, console.vm_name, registry=registry) as (vm, target):
+    with _mc._prepare_vm_target_for_attach(
+        db,
+        config,
+        console.vm_name,
+        registry=registry,
+        interaction=interaction,
+    ) as (vm, target):
         if not _mc._console_tmux_exists(target, console_name):
             raise StateError(
                 f"console '{console_name}' has no live tmux session on VM '{console.vm_name}'.",
@@ -159,6 +168,7 @@ def restore_session(
                     ),
                     config,
                     registry,
+                    interaction=interaction,
                 )
             result = _mc._add_session_window(
                 target,
@@ -347,6 +357,7 @@ def restore_session(
             ),
             config,
             registry,
+            interaction=interaction,
         )
 
         output.info(f"Restoring {len(missing)} shell pane(s) in '{session_name}': config indices {missing}.")

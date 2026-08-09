@@ -19,6 +19,7 @@ from agentworks.path_rendering import format_host_path
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.resources.registry import Registry
+    from agentworks.secrets.sources import SourceProvenance
     from agentworks.vms.sites import VMSiteDecl
 
 
@@ -91,6 +92,18 @@ class HealthReport:
         return self.counts()[Status.FAIL] > 0
 
 
+@dataclass(frozen=True, slots=True)
+class SecretSourceStatus:
+    """Value-free doctor projection for one declared secret source."""
+
+    name: str
+    backend: str
+    provenance: SourceProvenance
+    active: bool
+    enabled: bool
+    not_ready_reason: str | None
+
+
 def run_checks(*, completion_version: str | None = None) -> HealthReport:
     """Run all health checks and return structured results.
 
@@ -140,6 +153,10 @@ def run_checks(*, completion_version: str | None = None) -> HealthReport:
         report.groups.append(_check_secret_backends(registry))
     else:
         report.groups.append(_skipped_group("Secret backends", "Registered backends"))
+    if config is not None and registry is not None:
+        report.groups.append(_check_secret_sources(config, registry))
+    else:
+        report.groups.append(_skipped_group("Secret sources", "Declared sources"))
     if config is not None and registry is not None:
         report.groups.append(_check_secrets(config, registry))
     else:
@@ -350,8 +367,8 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
     what lets doctor call it.
 
     What that row does NOT cover is whether the site's declared secrets
-    would RESOLVE. That prediction belongs to an operation's runtime
-    world (which backends are active, whether this run can prompt), so
+    have an attemptable source. That prediction belongs to an operation's runtime
+    world (which sources are active, whether this run can prompt), so
     it lives in the operation's preflight sweep
     (:func:`~agentworks.orchestration.readiness.preflight_all`), which
     doctor does not run: doctor invokes ``node.preflight`` per row,
@@ -674,35 +691,57 @@ def _check_secret_backends(registry: Registry) -> HealthGroup:
     return g
 
 
+def _secret_source_statuses(config: Config, registry: Registry) -> tuple[SecretSourceStatus, ...]:
+    """Project every source row without invoking a capability operation."""
+    from agentworks.resources.graph import Enablement
+    from agentworks.secrets.sources import SecretSourceDecl, source_provenance
+
+    active_names = set(config.secret_config_data.backends)
+    statuses: list[SecretSourceStatus] = []
+    for name, row in sorted(registry.iter_kind_items("secret-source"), key=lambda item: item[0]):
+        if not isinstance(row, SecretSourceDecl):
+            continue
+        statuses.append(
+            SecretSourceStatus(
+                name=name,
+                backend=row.backend.name,
+                provenance=source_provenance(row),
+                active=name in active_names,
+                enabled=registry.graph.enablement_of("secret-source", name) is not Enablement.disabled,
+                not_ready_reason=registry.graph.readiness_of("secret-source", name).reason,
+            )
+        )
+    return tuple(statuses)
+
+
+def _check_secret_sources(config: Config, registry: Registry) -> HealthGroup:
+    """Explain participation and readiness for every declared source row."""
+    from agentworks.secrets.sources import SourceProvenance
+
+    provenance_labels = {
+        SourceProvenance.OPERATOR_OVERRIDE: "operator override of synthesized default",
+        SourceProvenance.SYNTHESIZED_DEFAULT: "synthesized default",
+        SourceProvenance.DECLARED: "declared",
+    }
+    group = HealthGroup("Secret sources")
+    statuses = _secret_source_statuses(config, registry)
+    if not statuses:
+        group.info("Declared sources", "none")
+        return group
+    for status in statuses:
+        participation = "active" if status.active else "inactive"
+        enablement = "enabled" if status.enabled else "disabled"
+        readiness = f"not ready: {status.not_ready_reason}" if status.not_ready_reason is not None else "ready"
+        group.info(
+            status.name,
+            f"backend {status.backend}; {participation}; {enablement}; "
+            f"{provenance_labels[status.provenance]}; {readiness}",
+        )
+    return group
+
+
 def _check_secrets(config: Config, registry: Registry) -> HealthGroup:
-    """Check every registry secret for a runtime-resolvable value.
-
-    One row per secret -- operator-declared AND auto-declared alike
-    (the auto-declared ones, e.g. ``tailscale-auth-key`` and the
-    ``git-token-*`` family, are exactly the secrets most likely to
-    prompt or fail at command time, so a doctor that hides them cannot
-    predict the next command). Auto-declared rows carry an ``(auto)``
-    marker.
-
-    - OK: at least one active source in the chain would resolve the
-      secret at runtime (the message says which -- "would resolve via
-      prompt" is the heads-up that a prompt is coming).
-    - WARN: no active source would resolve it (config is valid but
-      there's no path to a value -- e.g. env-var has no matching env
-      var set and prompt is opted out, or the only attempting source is
-      not-ready on this host so resolution would skip it, R9.6).
-
-    Source-applicability detail (per-source soft-skip reasons,
-    inactive mappings) lives in ``agw secret list``; unused declarations
-    surface in ``agw secret describe``'s ``Referenced by:`` section.
-    Doctor stays one row per secret so the summary line stays scannable.
-
-    Unknown mapping source names never reach this group: Registry finalize
-    rejects them first, and doctor reports that failure in Configuration.
-    Preview is value-free at the rendering boundary, not operation-free: it
-    may probe a ready non-interactive source and immediately discard the
-    returned value. Interactive sources remain optimistic and are not opened.
-    """
+    """Predict each declared secret's attempt path without probing a source."""
     from agentworks.resources.access import secret_decls
 
     g = HealthGroup("Secrets")
@@ -712,41 +751,26 @@ def _check_secrets(config: Config, registry: Registry) -> HealthGroup:
         g.info("Declared secrets", "none")
         return g
 
-    from agentworks.secrets.resolve import active_backends, preview_resolution
+    from agentworks.secrets.preview import PreviewCategory, preview_resolution
+    from agentworks.secrets.resolve import active_sources
 
-    backends = active_backends(config, registry)
+    sources = active_sources(config, registry)
 
     for name, decl in sorted(secrets.items()):
         auto = getattr(decl.origin, "variant", None) == "auto-declared"
         label = f"Secret {name!r} (auto)" if auto else f"Secret {name!r}"
-        # Doctor's value-free preview may probe ready non-interactive sources
-        # and immediately discards their values. It stays optimistic about
-        # interactive availability
-        # (``interactive_available=True``): it reports the secret's
-        # configured capability, not whether this doctor run has a TTY.
-        # Preflight prediction is the caller that gates on the run's mode
-        # (issue #202).
-        resolved_by = preview_resolution(decl, backends, interactive_available=True)
-        if resolved_by is not None:
-            g.ok(label, f"would resolve via {resolved_by}")
+        preview = preview_resolution(decl, sources)
+        if preview.category is PreviewCategory.ATTEMPTABLE:
+            g.ok(label, f"would attempt via {preview.source}")
         else:
-            # Readiness-aware (R9.6, in lockstep with the resolution skip): a
-            # secret whose only attempting backend is not-ready is at-risk, and
-            # the reason is the not-ready source, not "no source attempts it."
-            skipped: list[str] = []
-            for source in backends:
-                if source.readiness.is_ready:
-                    continue
-                try:
-                    attemptable = source.would_attempt(decl)
-                except Exception:
-                    attemptable = False
-                if attemptable:
-                    skipped.append(f"{source.name} ({source.readiness.reason})")
-            if skipped:
-                g.warn(label, f"no ready source would resolve it; not ready: {'; '.join(skipped)}")
+            if preview.skipped_not_ready:
+                skipped = "; ".join(f"{source.source} ({source.reason})" for source in preview.skipped_not_ready)
+                g.warn(
+                    label,
+                    f"not attemptable through any active source; not ready: {skipped}",
+                )
             else:
-                g.warn(label, "not available in any active source")
+                g.warn(label, "not attemptable through any active source")
 
     return g
 

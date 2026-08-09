@@ -246,11 +246,11 @@ def _mask_env_var_backend_for(
     """Mask the env-var backend's view of ``decl`` for the duration of
     the block when ``masked`` is True; pass-through otherwise.
 
-    Used by ``vm rekey --ignore-env`` to force the backend chain to
-    skip the env-var backend and fall through to the prompt backend.
+    Used by ``vm rekey --ignore-env`` to force the source chain to
+    skip the env-var source and fall through to the prompt source.
     The env-var source reads ``os.environ`` at ``would_attempt`` time,
     so popping the matching env vars during the resolve call makes the
-    backend silently skip; the next backend in the chain takes over.
+    source silently skips; the next source in the chain takes over.
 
     The masked names cover (a) the framework's default convention
     ``AW_SECRET_<UPPER_NAME>`` for ``decl.name``, plus (b) any
@@ -287,15 +287,14 @@ def _lookup_or_synthesize_secret(registry: Registry, name: str) -> SecretDecl:
     Registry, or synthesize a bare one matching the auto-declare shape
     if no Resource was published or auto-declared under that name.
 
-    Used by ``_ensure_tailscale``'s imperative-caller late resolve (the
-    orchestrated callers moved onto ``Resolver.register_name``, which
-    carries the same fallback). The semantics: an operator who omits
+    Used by ``start_vm``'s conditional standalone resolution and by operation
+    resolvers registering an undeclared repair name. The semantics: an operator who omits
     every ``[vm_templates.*]`` section AND every ``[secrets.*]``
     section leaves the registry empty under the ``secret`` kind, so a
     strict lookup raises ``KeyError``. Synthesizing a bare
     ``SecretDecl`` (the same shape ``_SecretKind.synthesize`` would
     produce, minus ``origin`` which resolution doesn't read) keeps the
-    backend chain callable.
+    source chain callable.
     """
     from agentworks.secrets.base import SecretDecl
     from agentworks.secrets.kinds import SECRET_KIND_NAME

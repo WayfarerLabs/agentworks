@@ -250,7 +250,7 @@ class SecretDecl(DeclaredResource):
         )
 
 
-DEFAULT_BACKEND_CHAIN: tuple[str, ...] = ("env-var", "prompt")
+DEFAULT_SOURCE_CHAIN: tuple[str, ...] = ("env-var", "prompt")
 """Default source chain when ``[secret_config].backends`` is absent.
 
 Resolves declared secrets from operator-side env (``AW_SECRET_<NAME>``) first,
@@ -266,17 +266,17 @@ class SecretConfig:
     the resource Registry: the chain is a SETTING that names resources
     (like a future active-plugins list would), consumed by the secrets
     subsystem when it validates (``validate_chain``, at
-    ``build_registry``) and when it resolves (``resolve_secrets``).
+    ``build_registry``) and when it resolves (the operation's typed resolution batch).
 
     ``backends`` retains its settings spelling but contains source names:
     presence activates the source and list order is the resolution precedence. A declared source absent from
     this list is dormant (never consulted).
 
-    Default value is ``DEFAULT_BACKEND_CHAIN`` (``env-var``, then ``prompt``).
+    Default value is ``DEFAULT_SOURCE_CHAIN`` (``env-var``, then ``prompt``).
     The default applies when the operator's TOML has no ``[secret_config]``
     table OR has the table without a ``backends`` key. An explicit
     ``backends = []`` disables resolution entirely.
     """
 
-    backends: tuple[str, ...] = DEFAULT_BACKEND_CHAIN
+    backends: tuple[str, ...] = DEFAULT_SOURCE_CHAIN
     declared_at: SourceLocation = field(default_factory=synthesized)

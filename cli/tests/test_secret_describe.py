@@ -15,6 +15,7 @@ import pytest
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.secrets.inspect import describe_secret
+from agentworks.secrets.preview import PreviewCategory, SkippedSource
 from tests.conftest import ManifestDoc, write_cfg
 
 if TYPE_CHECKING:
@@ -203,14 +204,14 @@ def test_backend_mappings_show_each_active_backend(tmp_path: Path) -> None:
     registry = build_registry(config)
     desc = describe_secret(config, registry, "api-key")
 
-    backends = [m.backend for m in desc.backend_mappings]
+    backends = [m.backend for m in desc.source_mappings]
     assert backends == ["env-var", "prompt"]
 
-    env_var = next(m for m in desc.backend_mappings if m.backend == "env-var")
+    env_var = next(m for m in desc.source_mappings if m.backend == "env-var")
     assert env_var.would_attempt
     assert env_var.identifier == "AW_SECRET_API_KEY"
 
-    prompt = next(m for m in desc.backend_mappings if m.backend == "prompt")
+    prompt = next(m for m in desc.source_mappings if m.backend == "prompt")
     assert prompt.would_attempt
     assert prompt.identifier is None
 
@@ -230,7 +231,7 @@ def test_backend_mapping_respects_operator_override(tmp_path: Path) -> None:
     registry = build_registry(config)
     desc = describe_secret(config, registry, "api-key")
 
-    env_var = next(m for m in desc.backend_mappings if m.backend == "env-var")
+    env_var = next(m for m in desc.source_mappings if m.backend == "env-var")
     assert env_var.identifier == "CUSTOM_API_KEY"
 
 
@@ -247,10 +248,10 @@ def test_backend_mapping_respects_opt_out(tmp_path: Path) -> None:
     registry = build_registry(config)
     desc = describe_secret(config, registry, "api-key")
 
-    env_var = next(m for m in desc.backend_mappings if m.backend == "env-var")
+    env_var = next(m for m in desc.source_mappings if m.backend == "env-var")
     assert env_var.would_attempt is False
     # Prompt still attempts.
-    prompt = next(m for m in desc.backend_mappings if m.backend == "prompt")
+    prompt = next(m for m in desc.source_mappings if m.backend == "prompt")
     assert prompt.would_attempt
 
 
@@ -272,19 +273,12 @@ def test_resolution_preview_picks_env_var_when_var_is_set(tmp_path: Path, monkey
     registry = build_registry(config)
     desc = describe_secret(config, registry, "api-key")
 
-    assert desc.resolution.available
-    assert desc.resolution.resolved_by == "env-var"
+    assert desc.resolution.category is PreviewCategory.ATTEMPTABLE
+    assert desc.resolution.source == "env-var"
 
 
-def test_resolution_preview_falls_through_when_env_var_is_unset(tmp_path: Path, monkeypatch) -> None:
-    """Env-var is configured (would_attempt is True) but the operator
-    hasn't set ``AW_SECRET_API_KEY`` in their shell. Preview must not
-    claim env-var would resolve -- it must fall through to the next
-    backend (prompt), matching what would actually happen at runtime.
-    Regression test: the prior implementation only checked
-    ``would_attempt`` and reported env-var as the resolver, misleading
-    operators whose shell didn't hold the value.
-    """
+def test_resolution_preview_is_pure_when_env_var_is_unset(tmp_path: Path, monkeypatch) -> None:
+    """Preview reports mapping applicability and never reads the environment."""
     cfg = _write_cfg(
         tmp_path,
         settings=_ENV_PROMPT,
@@ -295,8 +289,8 @@ def test_resolution_preview_falls_through_when_env_var_is_unset(tmp_path: Path, 
     registry = build_registry(config)
     desc = describe_secret(config, registry, "api-key")
 
-    assert desc.resolution.available
-    assert desc.resolution.resolved_by == "prompt"
+    assert desc.resolution.category is PreviewCategory.ATTEMPTABLE
+    assert desc.resolution.source == "env-var"
 
 
 def test_resolution_preview_falls_through_to_prompt(tmp_path: Path) -> None:
@@ -309,8 +303,8 @@ def test_resolution_preview_falls_through_to_prompt(tmp_path: Path) -> None:
     registry = build_registry(config)
     desc = describe_secret(config, registry, "api-key")
 
-    assert desc.resolution.available
-    assert desc.resolution.resolved_by == "prompt"
+    assert desc.resolution.category is PreviewCategory.ATTEMPTABLE
+    assert desc.resolution.source == "prompt"
 
 
 # -- Readiness-aware describe (R9.1 / R9.6) ---------------------------------
@@ -320,7 +314,7 @@ def test_not_ready_backend_annotated_and_skipped_in_preview(tmp_path: Path, monk
     """R9.1 / R9.6: a not-ready mapped backend (onepassword with no ``op`` on
     PATH) keeps its mapping shown but flagged ``(not ready: <reason>)`` in
     Backend mappings, is shown as skipped in the Resolution preview, and does
-    NOT count toward "would resolve via X": the chain falls through to prompt.
+    NOT count toward "would attempt via X": the chain falls through to prompt.
     Readiness is offline (no store probe)."""
     monkeypatch.setattr("shutil.which", lambda name: None)  # op absent -> not ready
     cfg = _write_cfg(
@@ -346,12 +340,12 @@ def test_not_ready_backend_annotated_and_skipped_in_preview(tmp_path: Path, monk
     registry = build_registry(config)
     desc = describe_secret(config, registry, "api-key")
 
-    op = next(m for m in desc.backend_mappings if m.backend == "onepassword")
+    op = next(m for m in desc.source_mappings if m.backend == "onepassword")
     assert op.would_attempt is True
     assert op.not_ready_reason == "op CLI not installed"
-    assert ("onepassword", "op CLI not installed") in desc.resolution.skipped_not_ready
-    assert desc.resolution.resolved_by == "prompt"  # not-ready op does not count
-    assert desc.resolution.available
+    assert SkippedSource(source="onepassword", reason="op CLI not installed") in desc.resolution.skipped_not_ready
+    assert desc.resolution.source == "prompt"  # not-ready op does not count
+    assert desc.resolution.category is PreviewCategory.ATTEMPTABLE
 
 
 def test_render_shows_not_ready_annotation_and_skip(
@@ -386,9 +380,9 @@ def test_render_shows_not_ready_annotation_and_skip(
     render_secret_description(describe_secret(config, registry, "api-key"))
 
     out = capsys.readouterr().out
-    assert "onepassword: op://Vault/api/field (not ready: op CLI not installed)" in out
+    assert ("onepassword (onepassword, declared): op://Vault/api/field (not ready: op CLI not installed)") in out
     assert "skipped onepassword: not ready: op CLI not installed" in out
-    assert "would resolve via prompt" in out
+    assert "would attempt via prompt" in out
 
 
 def test_interactive_optimism_preview_unchanged_under_readiness(tmp_path: Path, monkeypatch) -> None:
@@ -424,8 +418,8 @@ def test_interactive_optimism_preview_unchanged_under_readiness(tmp_path: Path, 
 
     # The prompt is previewed optimistically (describe passes
     # interactive_available=True), exactly as before this phase.
-    assert desc.resolution.resolved_by == "prompt"
-    assert desc.resolution.available
+    assert desc.resolution.source == "prompt"
+    assert desc.resolution.category is PreviewCategory.ATTEMPTABLE
 
 
 def test_resolution_preview_not_available_when_no_backend_attempts(tmp_path: Path) -> None:
@@ -475,8 +469,8 @@ def test_resolution_preview_not_available_when_no_backend_attempts(tmp_path: Pat
     registry.finalize()
 
     desc = describe_secret(config, registry, "api-key")
-    assert desc.resolution.available is False
-    assert desc.resolution.resolved_by is None
+    assert desc.resolution.category is PreviewCategory.UNAVAILABLE
+    assert desc.resolution.source is None
 
 
 # -- Renderer outputs the four sections -------------------------------------
@@ -496,7 +490,7 @@ def test_render_emits_header_usages_mappings_preview(
         manifests=[ManifestDoc("secret", "api-key", description="API key for the operator's service")],
     )
     # Resolution preview now reflects runtime presence -- set the var so
-    # the assertion ``would resolve via env-var`` is meaningful.
+    # the assertion ``would attempt via env-var`` is meaningful.
     monkeypatch.setenv("AW_SECRET_API_KEY", "from-shell")
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
@@ -518,11 +512,11 @@ def test_render_emits_header_usages_mappings_preview(
     assert "the ADMIN_KEY env var" in out
     # Backend mappings
     assert "Backend mappings:" in out
-    assert "env-var: AW_SECRET_API_KEY" in out
-    assert "prompt: (prompt at resolution time)" in out
+    assert "env-var (env-var, synthesized default): AW_SECRET_API_KEY" in out
+    assert "prompt (prompt, synthesized default): (prompt at resolution time)" in out
     # Resolution preview
     assert "Resolution preview:" in out
-    assert "would resolve via env-var" in out
+    assert "would attempt via env-var" in out
 
 
 # -- Used-by (Phase 3c dynamic dimension) -----------------------------------

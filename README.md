@@ -43,8 +43,8 @@ workloads:
   specific configuration, deeper integrations, ...).
 - Sessions can be organized into **named consoles**: curated tmux views that organize active
   sessions along with optional extra shell panes.
-- Both **config** and **secrets** (together with **secret backends**) can be managed and securely
-  injected at any level (VM, workspace, agent, session) to control access and behavior.
+- Both **config** and **secrets** (together with configured **secret sources**) can be managed and
+  securely injected at any level (VM, workspace, agent, session) to control access and behavior.
 
 And all of this is managed via a **declarative, idempotent configuration system** that makes it easy
 for operators to define, evolve, and scale their infrastructure over time.
@@ -238,9 +238,9 @@ these choices rather than work around them.
   provisioning and routine SSH access rides it. Azure and EC2 temporarily open TCP/22 on their
   public interfaces to the operator's detected public IPv4 address (as a `/32`), plus configured
   allow-list CIDRs, during bootstrap or explicit native-platform access, then close it again. The
-  `tailscale-auth-key` secret resolves through the backend chain on `vm create` (and re-joins on
-  `vm start`); ephemeral keys (append `?ephemeral=true`) are fully supported, with the node removed
-  from the tailnet when the VM goes offline. Generate auth keys at the
+  `tailscale-auth-key` secret resolves through the configured source chain on `vm create` (and
+  re-joins on `vm start`); ephemeral keys (append `?ephemeral=true`) are fully supported, with the
+  node removed from the tailnet when the VM goes offline. Generate auth keys at the
   [Tailscale admin console](https://login.tailscale.com/admin/settings/keys).
 - **[tmux](https://github.com/tmux/tmux)** is the persistence layer. Every session maps 1:1 to a
   tmux session on the VM with the same lifecycle (agent sessions on per-agent sockets for
