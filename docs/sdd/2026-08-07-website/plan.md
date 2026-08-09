@@ -238,31 +238,31 @@ security, 404, source-ownership, responsive, accessibility, or deterministic-bui
 
 ## Phase 4B: shared navigation and generated Manifesto
 
-- [ ] Revise `site-shell-lld.md` and the permanent website runbook to pin one responsive
+- [x] Revise `site-shell-lld.md` and the permanent website runbook to pin one responsive
       breadcrumb/header/footer shape across Home, Manifesto, Security, and 404, including exact link
       placement, labels, icon semantics, logo exceptions, and the 404 route-home replacement.
-- [ ] Move GitHub and PyPI to the header as single icon-and-text calls to action; move the sole
+- [x] Move GitHub and PyPI to the header as single icon-and-text calls to action; move the sole
       Agentworks Manifesto and security links to the footer beside the exact Wayfarer Labs ownership
       text.
-- [ ] Implement linked `Agentworks` plus non-linked current-page breadcrumb semantics for Home,
+- [x] Implement linked `Agentworks` plus non-linked current-page breadcrumb semantics for Home,
       Manifesto, Security, and 404; omit the small mark only on Home and remove the separate 404
       body return-home link.
-- [ ] Generate `/manifesto/` from the complete reviewed long-form argument in
+- [x] Generate `/manifesto/` from the complete reviewed long-form argument in
       `docs/why-agentworks.md`, explicitly map its allowed source-relative links, and add no second
       hand-maintained product or principle prose.
-- [ ] Retire the obsolete `--only 404`/`build_404` partial artifact and run all game builds and
+- [x] Retire the obsolete `--only 404`/`build_404` partial artifact and run all game builds and
       demos through `/404.html` in the complete linked artifact; remove every
       missing-local-reference exception and update permanent preview guidance.
-- [ ] Extend fail-closed template and generated-document tests to bind each destination, label,
+- [x] Extend fail-closed template and generated-document tests to bind each destination, label,
       location, icon, breadcrumb state, logo exception, footer ownership string, and no-duplicate
       invariant at both supported site bases.
-- [ ] Adversarially prove the shared-shell validator rejects missing or reordered landmark classes,
+- [x] Adversarially prove the shared-shell validator rejects missing or reordered landmark classes,
       hidden calls to action, extra or misplaced icons and rockets, and duplicate normalized local
       destinations introduced anywhere in a page.
-- [ ] Rebuild the served preview and run focused website/game, lint, locked-SDD, Rulesync, and diff
+- [x] Rebuild the served preview and run focused website/game, lint, locked-SDD, Rulesync, and diff
       gates without regressing no-JavaScript recovery, accessibility, reflow, or deterministic
       output.
-- [ ] Obtain `agentworks-reviewer` and fresh-eyes approval and resolve every valid finding before
+- [x] Obtain `agentworks-reviewer` and fresh-eyes approval and resolve every valid finding before
       considering the refinement complete.
 
 Definition of done: R15-R17 and AC16-AC18 hold, the revised navigation is conventional and
