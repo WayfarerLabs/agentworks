@@ -445,7 +445,10 @@ class ProxmoxPlatform(VMPlatform):
             except ProxmoxAPIError:
                 pass
             time.sleep(5)
-        raise ProvisioningError(f"Timed out waiting for cloud-init on Proxmox VMID {vmid}")
+        raise ProvisioningError(
+            f"Timed out waiting for cloud-init on Proxmox VMID {vmid}; "
+            "the template must have cloud-init and the QEMU guest agent installed and enabled"
+        )
 
     def _wait_for_guest_ip(self, node: str, vmid: int, ctx: RunContext, *, timeout: int = 120) -> str:
         """Poll the guest agent until it reports a non-loopback IPv4 address."""

@@ -214,7 +214,9 @@ For vm-platform contract version 2, `create()` receives a required Tailscale aut
 value-free bootstrap-progress sink in `ProvisionRequest`. It must finish the Tailscale join before
 returning or raise after rolling back partial backend state. A successful `ProvisionResult` may omit
 the Tailscale IP only when join succeeded but IP discovery did not; the manager then performs
-IP-only rediscovery and Tailscale SSH verification. There is no older-contract adapter.
+IP-only rediscovery and Tailscale SSH verification. There is no older-contract adapter. Platforms
+with multi-step in-create bootstrap use the required progress sink for observable steps and output;
+simple fixed-stdin join finishers may accept it without emitting a platform-specific transcript.
 
 A site then writes `platform: {name: example-cloud, region: us-west-2}`, and `api_token` resolves to
 the `example-cloud-token` secret because the field was omitted. An OMITTED reference field and an

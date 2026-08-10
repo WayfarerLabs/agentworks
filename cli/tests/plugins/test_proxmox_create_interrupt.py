@@ -308,9 +308,13 @@ class TestFailClosedBootstrap:
 
         monkeypatch.setattr(ProxmoxPlatform, "_wait_for_cloud_init", _immediate_timeout)
 
-        with pytest.raises(ProvisioningError, match="Timed out waiting for cloud-init") as caught:
+        with pytest.raises(ProvisioningError) as caught:
             platform.create(_request(tailscale=True), RunContext())
 
+        assert str(caught.value) == (
+            f"Timed out waiting for cloud-init on Proxmox VMID {_NEWID}; "
+            "the template must have cloud-init and the QEMU guest agent installed and enabled"
+        )
         assert ("stop_vm", "pve1", _NEWID) in fake.calls
         assert ("delete_vm", "pve1", _NEWID) in fake.calls
         assert fake.file_payloads == []
