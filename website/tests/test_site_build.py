@@ -55,7 +55,7 @@ class BuildAndInstallTests(RepositoryFixture):
     def test_unapproved_external_url_fails_before_output_changes(self) -> None:
         output = self.build()
         before = snapshot(output)
-        manifesto = self.root / "docs/why-agentworks.md"
+        manifesto = self.root / site_builder.MANIFESTO_CONTRACT.source
         source = manifesto.read_text(encoding="utf-8")
         manifesto.write_text(
             source + "\nAn [unapproved destination](https://example.com/unapproved).\n",
@@ -84,6 +84,24 @@ class BuildAndInstallTests(RepositoryFixture):
         )
         with self.assertRaisesRegex(ValueError, "local reference fragment is absent"):
             site_builder._validate_local_references(changed, manifest, "/agentworks/")
+
+    def test_source_heading_cannot_duplicate_a_shell_id(self) -> None:
+        manifesto = self.root / site_builder.MANIFESTO_CONTRACT.source
+        manifesto.write_text(
+            "# Synthetic document\n\nOpening paragraph.\n\n## Main content\n\nCollision witness.\n",
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ValueError, "duplicate element id"):
+            site_builder._render_artifact(self.root, "/")
+
+    def test_rendered_reference_validation_retains_duplicate_ids(self) -> None:
+        rendered, manifest = site_builder._render_artifact(self.root, "/")
+        changed = dict(rendered)
+        changed[Path("manifesto/index.html")] = changed[Path("manifesto/index.html")].replace(
+            b"</article>", b'<p id="main-content">Collision witness.</p></article>', 1
+        )
+        with self.assertRaisesRegex(ValueError, "duplicate element id"):
+            site_builder._validate_local_references(changed, manifest, "/")
 
     def test_manifest_without_root_index_cannot_suppress_root_reference_failure(
         self,

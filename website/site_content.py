@@ -13,6 +13,7 @@ HEADING_PATTERN = re.compile(r"^(#{1,6})[ \t]+(.*?)(?:[ \t]+#+[ \t]*)?$")
 FENCE_PATTERN = re.compile(r"^[ ]{0,3}(`{3,}|~{3,})(?:[^`~]*)$")
 REFERENCE_PATTERN = re.compile(r"^[ ]{0,3}\[([^]]+)]\:[ \t]*(\S*)[ \t]*$")
 REFERENCE_LINK_PATTERN = re.compile(r"\[([^\[\]\n]+)]\[([^\[\]\n]+)]")
+LIST_ITEM_PATTERN = re.compile(r"^[*+-][ \t]+(.+)$")
 UNSUPPORTED_BLOCK_PATTERN = re.compile(
     r"^(?:[ ]{4,}|[ ]{0,3}>[ \t]?|[ ]{0,3}\d+[.)][ \t]+|[ ]{0,3}(?:[-*_][ \t]*){3,}$)"
 )
@@ -273,8 +274,12 @@ def _render_inline(
     result: list[str] = []
     cursor = 0
     patterns = (
-        ("strong", re.compile(r"\*\*([^*\n]+)\*\*")),
-        ("emphasis", re.compile(r"_([^_\n]+)_")),
+        ("strong", re.compile(r"\*\*(?=\S)([^*\n]*?\S)\*\*")),
+        (
+            "underscore-emphasis",
+            re.compile(r"(?<![A-Za-z0-9_])_(?=\S)([^_\n]*?\S)_(?![A-Za-z0-9_])"),
+        ),
+        ("asterisk-emphasis", re.compile(r"(?<!\*)\*(?=\S)([^*\n]*?\S)\*(?!\*)")),
         ("code", re.compile(r"`([^`\n]+)`")),
         ("inline-link", re.compile(r"\[([^\[\]\n]+)]\(([^()\s]+)\)")),
         ("reference-link", REFERENCE_LINK_PATTERN),
@@ -288,7 +293,7 @@ def _render_inline(
         next_match = min(candidates, default=None)
         end = next_match[0] if next_match else len(value)
         plain = value[cursor:end]
-        if re.search(r"[<>]|!\[|\*\*|[`\[\]]|(?<![A-Za-z0-9])_(?![A-Za-z0-9])", plain):
+        if re.search(r"[<>\\~*]|!\[|[`\[\]]|(?<![A-Za-z0-9])_|_(?![A-Za-z0-9])", plain):
             raise ContractError(contract, "unsupported block or inline Markdown")
         result.append(html.escape(plain, quote=True))
         if next_match is None:
@@ -300,7 +305,7 @@ def _render_inline(
         escaped = html.escape(inner, quote=True)
         if kind == "strong":
             result.append(f"<strong>{escaped}</strong>")
-        elif kind == "emphasis":
+        elif kind in {"underscore-emphasis", "asterisk-emphasis"}:
             result.append(f"<em>{escaped}</em>")
         elif kind == "code":
             result.append(f"<code>{escaped}</code>")
@@ -397,7 +402,10 @@ def _document_blocks(
         if index in definition_lines or not lines[index].strip(" \t"):
             index += 1
             continue
-        line = lines[index].rstrip(" \t")
+        raw_line = lines[index]
+        if re.search(r" {2,}$", raw_line):
+            raise ContractError(contract, "unsupported block or inline Markdown: hard break")
+        line = raw_line.rstrip(" \t")
         heading = HEADING_PATTERN.match(line)
         if heading:
             level = len(heading.group(1))
@@ -422,19 +430,26 @@ def _document_blocks(
             raise ContractError(contract, "document must begin with its single h1")
         if UNSUPPORTED_BLOCK_PATTERN.match(line):
             raise ContractError(contract, "unsupported block or inline Markdown")
-        if line.startswith("- "):
+        if LIST_ITEM_PATTERN.match(line):
             items: list[str] = []
-            while index < len(lines) and index not in definition_lines and lines[index].rstrip(" \t").startswith("- "):
-                item = lines[index].rstrip(" \t")[2:]
-                if not item:
-                    raise ContractError(contract, "unsupported block or inline Markdown")
+            while index < len(lines) and index not in definition_lines:
+                item_line = lines[index]
+                if re.search(r" {2,}$", item_line):
+                    raise ContractError(contract, "unsupported block or inline Markdown: hard break")
+                item_match = LIST_ITEM_PATTERN.match(item_line.rstrip(" \t"))
+                if item_match is None:
+                    break
+                item = item_match.group(1)
                 index += 1
                 continuations: list[str] = []
                 while index < len(lines) and index not in definition_lines:
-                    continuation = lines[index].rstrip(" \t")
+                    continuation_line = lines[index]
+                    if re.search(r" {2,}$", continuation_line):
+                        raise ContractError(contract, "unsupported block or inline Markdown: hard break")
+                    continuation = continuation_line.rstrip(" \t")
                     if re.match(r"^[ ]{2,}\S", continuation):
                         stripped = continuation.lstrip(" ")
-                        if stripped.startswith("- "):
+                        if LIST_ITEM_PATTERN.match(stripped):
                             raise ContractError(contract, "unsupported block or inline Markdown")
                         continuations.append(stripped)
                         index += 1
@@ -447,8 +462,10 @@ def _document_blocks(
         index += 1
         while index < len(lines) and index not in definition_lines:
             continuation = lines[index].rstrip(" \t")
-            if not continuation or HEADING_PATTERN.match(continuation) or continuation.startswith("- "):
+            if not continuation or HEADING_PATTERN.match(continuation) or LIST_ITEM_PATTERN.match(continuation):
                 break
+            if re.search(r" {2,}$", lines[index]):
+                raise ContractError(contract, "unsupported block or inline Markdown: hard break")
             if FENCE_PATTERN.match(continuation) or UNSUPPORTED_BLOCK_PATTERN.match(continuation):
                 raise ContractError(contract, "unsupported block or inline Markdown")
             paragraph_lines.append(continuation)

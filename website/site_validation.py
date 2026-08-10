@@ -918,12 +918,12 @@ class _ReferenceParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
         self.references: list[str] = []
-        self.ids: set[str] = set()
+        self.ids: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attributes = _attribute_map(tag, attrs)
         if attributes.get("id"):
-            self.ids.add(str(attributes["id"]))
+            self.ids.append(str(attributes["id"]))
         for name in ("href", "src"):
             if attributes.get(name):
                 self.references.append(str(attributes[name]))
@@ -939,8 +939,9 @@ def _validate_local_references(rendered: dict[Path, bytes], manifest: frozenset[
             continue
         parser = _ReferenceParser()
         parser.feed(content.decode("utf-8"))
+        if len(parser.ids) != len(set(parser.ids)):
+            raise ValueError(f"{path}: duplicate element id in rendered document")
         parsed[path] = parser
-
     for path, parser in parsed.items():
         for reference in parser.references:
             if reference.startswith("https://"):
@@ -956,7 +957,6 @@ def _validate_local_references(rendered: dict[Path, bytes], manifest: frozenset[
                 not local.fragment or local.target not in parsed or local.fragment not in parsed[local.target].ids
             ):
                 raise ValueError(f"{path}: local reference fragment is absent: {reference}")
-
     for path, content in rendered.items():
         if path.suffix != ".js":
             continue

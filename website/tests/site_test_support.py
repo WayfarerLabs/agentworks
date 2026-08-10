@@ -170,9 +170,10 @@ class RepositoryFixture(unittest.TestCase):
         self.root = Path(self.temporary.name) / "repo"
         self.root.mkdir()
         shutil.copy2(REPO_ROOT / "README.md", self.root / "README.md")
-        shutil.copy2(REPO_ROOT / "SECURITY.md", self.root / "SECURITY.md")
-        (self.root / "docs").mkdir()
-        shutil.copy2(REPO_ROOT / "docs/why-agentworks.md", self.root / "docs/why-agentworks.md")
+        for contract in site_builder.DOCUMENT_CONTRACTS:
+            destination = self.root / contract.source
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(REPO_ROOT / contract.source, destination)
         shutil.copytree(WEBSITE / "templates", self.root / "website/templates")
         shutil.copytree(WEBSITE / "assets", self.root / "website/assets")
         shutil.copytree(WEBSITE / "static", self.root / "website/static")

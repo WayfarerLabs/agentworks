@@ -125,12 +125,16 @@ the same closed transform. Their templates supply only the shared shell and meta
 Supported document edits appear on the site without synchronized website prose, a source hash, a
 heading inventory, or selected-section configuration.
 
+The closed document subset supports ATX headings, paragraphs, unordered lists using `-`, `*`, or
+`+`, strong text, emphasis using `_` or `*`, inline code, and reviewed inline or reference links.
+Reserved Markdown syntax outside that subset fails the build instead of rendering as literal text.
+
 Repository content is escaped before rendering. Missing, unreadable, symlinked, byte-order-marked,
 or invalid UTF-8 input; a missing or duplicate `h1`; malformed heading structure; unsupported
-Markdown; an invalid or unexpected link; and a GitHub-only reporting violation all fail before
-output changes. The current Manifesto source path is exactly `docs/why-agentworks.md`. When that
-document is renamed, update the one configured path to `docs/manifesto.md` in the same reviewed
-rename. Do not add probing or a dual-path fallback.
+Markdown; duplicate identifiers in the complete rendered document; an invalid or unexpected link;
+and a GitHub-only reporting violation all fail before output changes. The current Manifesto source
+path is exactly `docs/why-agentworks.md`. When that document is renamed, update the one configured
+path to `docs/manifesto.md` in the same reviewed rename. Do not add probing or a dual-path fallback.
 
 The Manifesto maps only these source-relative links:
 

@@ -1,6 +1,117 @@
 # ruff: noqa: F405
 
+from html.parser import HTMLParser
+
 from site_test_support import *  # noqa: F403
+
+
+def plain_markdown(value: str) -> str:
+    protected: list[str] = []
+
+    def protect(match) -> str:  # noqa: ANN001
+        protected.append(match.group(1))
+        return f"\0{len(protected) - 1}\0"
+
+    value = re.sub(r"`([^`]+)`", protect, value)
+    value = re.sub(r"\[([^]]+)](?:\([^)]*\)|\[[^]]+])", r"\1", value)
+    value = re.sub(r"\*\*([^*]+)\*\*", r"\1", value)
+    value = re.sub(r"_([^_]+)_", r"\1", value)
+    value = re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)", r"\1", value)
+    for index, text_value in enumerate(protected):
+        value = value.replace(f"\0{index}\0", text_value)
+    return " ".join(value.split())
+
+
+def source_semantics(source: str) -> tuple[list[tuple[str, str]], list[str]]:
+    lines = source.splitlines()
+    definitions: dict[str, str] = {}
+    skipped: set[int] = set()
+    for index, line in enumerate(lines):
+        match = re.fullmatch(r"[ ]{0,3}\[([^]]+)]\:[ \t]*(\S*)[ \t]*", line)
+        if match is None:
+            continue
+        label, destination = match.groups()
+        skipped.add(index)
+        if not destination:
+            destination = lines[index + 1].strip()
+            skipped.add(index + 1)
+        definitions[label] = destination
+
+    blocks: list[tuple[str, str]] = []
+    links: list[str] = []
+    index = 0
+    while index < len(lines):
+        if index in skipped or not lines[index].strip():
+            index += 1
+            continue
+        line = lines[index].rstrip()
+        if heading := re.fullmatch(r"(#{1,6})[ \t]+(.*?)(?:[ \t]+#+[ \t]*)?", line):
+            blocks.append((f"h{len(heading.group(1))}", plain_markdown(heading.group(2))))
+            index += 1
+            continue
+        if item := re.fullmatch(r"[*+-][ \t]+(.+)", line):
+            while item is not None:
+                parts = [item.group(1)]
+                index += 1
+                while index < len(lines) and re.match(r"^[ ]{2,}\S", lines[index]):
+                    parts.append(lines[index].strip())
+                    index += 1
+                blocks.append(("li", plain_markdown(" ".join(parts))))
+                item = re.fullmatch(r"[*+-][ \t]+(.+)", lines[index].rstrip()) if index < len(lines) else None
+            continue
+        parts = [line]
+        index += 1
+        while index < len(lines) and index not in skipped:
+            continuation = lines[index].rstrip()
+            if (
+                not continuation
+                or re.fullmatch(r"#{1,6}[ \t]+(?:.*?)(?:[ \t]+#+[ \t]*)?", continuation)
+                or re.fullmatch(r"[*+-][ \t]+.+", continuation)
+            ):
+                break
+            parts.append(continuation)
+            index += 1
+        blocks.append(("p", plain_markdown(" ".join(parts))))
+
+    for match in re.finditer(r"\[[^]]+]\(([^)]+)\)|\[[^]]+]\[([^]]+)]", source):
+        destination, label = match.groups()
+        if label is not None:
+            links.append(definitions[label])
+        else:
+            links.append(site_builder.SOURCE_RELATIVE_URLS.get(destination, destination))
+    return blocks, links
+
+
+class LongFormSemantics(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.in_article = False
+        self.active_tag = ""
+        self.active_text: list[str] = []
+        self.blocks: list[tuple[str, str]] = []
+        self.links: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        if tag == "article" and attributes.get("class") == "long-form-content sourced-content":
+            self.in_article = True
+        elif self.in_article and tag in {"h1", "h2", "h3", "h4", "h5", "h6", "p", "li"}:
+            self.active_tag = tag
+            self.active_text = []
+        if self.in_article and tag == "a":
+            self.links.append(str(attributes["href"]))
+
+    def handle_endtag(self, tag: str) -> None:
+        if self.in_article and tag == self.active_tag:
+            self.blocks.append((tag, " ".join("".join(self.active_text).split())))
+            self.active_tag = ""
+            self.active_text = []
+        elif tag == "article":
+            self.in_article = False
+
+    def handle_data(self, data: str) -> None:
+        if self.active_tag:
+            self.active_text.append(data)
 
 
 class GeneratedDocumentTests(RepositoryFixture):
@@ -65,11 +176,7 @@ class GeneratedDocumentTests(RepositoryFixture):
         self.assertEqual(document.headings, ["Agentworks", "Guided onboarding"])
         self.assertNotIn("problem", document.ids)
         self.assertNotIn("principles", document.ids)
-        self.assertNotIn(
-            "Anyone who has had more than a few parallel agentic sessions",
-            self.pages["home"],
-        )
-        self.assertNotIn("A few convictions shape the whole design", self.pages["home"])
+        self.assertFalse(document.tags("article"))
         notice = " ".join(document.text_by_id["onboarding-availability"].split())
         self.assertEqual(notice, NOTICE)
         document_text = " ".join("".join(document.all_text).split())
@@ -168,56 +275,22 @@ class GeneratedDocumentTests(RepositoryFixture):
                 self.assertEqual(len(game_marks), 1)
                 self.assertEqual(game_marks[0].get("alt"), "")
 
-    def test_manifesto_is_complete_semantic_source_projection_with_mapped_links(
-        self,
-    ) -> None:
-        document = self.documents["manifesto"]
-        self.assertIn(
-            '<main id="main-content" class="manifesto-main detail-main">',
-            self.pages["manifesto"],
-        )
-        self.assertNotIn("Repository sourced / Long-form argument", self.pages["manifesto"])
-        source = (self.root / site_builder.MANIFESTO_CONTRACT.source).read_text(encoding="utf-8")
-        expected_headings = [
-            match.group(2).strip()
-            for line in source.splitlines()
-            if (match := re.fullmatch(r"(#{1,6})[ \t]+(.+?)", line))
-        ]
-        self.assertEqual(document.headings, expected_headings)
-        for passage in (
-            "Agentworks is opinionated",
-            "Anyone who has had more than a few parallel agentic sessions",
-            "A significant and growing part of the ecosystem",
-            "This gives agents two modes",
-            "Environment variables and secrets are first-class",
-        ):
-            self.assertIn(passage, self.pages["manifesto"])
-        for source, destination in site_builder.SOURCE_RELATIVE_URLS.items():
-            self.assertNotIn(f'href="{source}"', self.pages["manifesto"])
-            self.assertIn(f'href="{destination}"', self.pages["manifesto"])
-        self.assertFalse(document.tags("script"))
-
-    def test_security_outline_and_reporting_links_are_exact(self) -> None:
-        document = self.documents["security"]
-        self.assertIn('<main id="main-content" class="detail-main">', self.pages["security"])
-        self.assertNotIn("Security model / Repository sourced", self.pages["security"])
-        self.assertEqual(
-            document.headings,
-            [
-                "Security at Agentworks",
-                "Reporting a vulnerability",
-                "Threat model",
-                "Boundaries and current limitations",
-                "Operator posture",
-                "Credentials and secrets",
-                "Scope and upstream guidance",
-            ],
-        )
-        hrefs = [anchor.get("href") for anchor in document.tags("a")]
-        self.assertEqual(hrefs.count(site_builder.REPORTING_URL), 1)
-        self.assertIn("https://github.com/WayfarerLabs/agentworks/issues/224", hrefs)
+    def test_long_form_pages_are_complete_semantic_source_projections(self) -> None:
+        pages = {
+            "manifesto": site_builder.MANIFESTO_CONTRACT,
+            "security": site_builder.SECURITY_CONTRACT,
+        }
+        for name, contract in pages.items():
+            source = (self.root / contract.source).read_text(encoding="utf-8")
+            expected_blocks, expected_links = source_semantics(source)
+            rendered = LongFormSemantics()
+            rendered.feed(self.pages[name])
+            with self.subTest(name=name):
+                self.assertEqual(rendered.blocks, expected_blocks)
+                self.assertEqual(rendered.links, expected_links)
+                self.assertNotIn("Repository sourced", self.pages[name])
+                self.assertFalse(self.documents[name].tags("script"))
         self.assertNotIn("email", self.pages["security"].lower())
-        self.assertFalse(document.tags("script"))
 
     def test_404_retains_fallback_and_has_only_its_local_module(self) -> None:
         document = self.documents["404"]
