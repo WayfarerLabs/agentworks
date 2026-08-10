@@ -6,6 +6,7 @@ interrupt), status mapping, and the idempotent delete.
 
 from __future__ import annotations
 
+import gzip
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -18,13 +19,32 @@ from agentworks.db import VMStatus
 from agentworks.errors import ConfigError, StateError
 from agentworks.plugins.aws.network import EC2Error, poke_ssh_allow, remove_ssh_allow
 from agentworks.plugins.aws.platform import EC2Platform
+from agentworks.ssh import SSHError
+from agentworks.transports import SSHTransport
 from tests._aws_fakes import Controls, client_error, install_fakes, stub_egress, unreachable
 
 if TYPE_CHECKING:
     from tests._aws_fakes import Recorder
+    from tests.conftest import CapturedOutput
 
 _DETECTED = "203.0.113.9"
 _DETECTED_PREFIX = f"{_DETECTED}/32"
+_SENTINEL = "tskey-aws-readiness-'sentinel"
+
+
+def _assert_exception_graph_is_value_free(failure: BaseException) -> None:
+    pending = [failure]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        assert _SENTINEL not in repr(current)
+        if current.__cause__ is not None:
+            pending.append(current.__cause__)
+        if current.__context__ is not None:
+            pending.append(current.__context__)
 
 
 @pytest.fixture(autouse=True)
@@ -305,6 +325,56 @@ class TestCreateRollback:
         methods = rec.methods("ec2")
         assert "terminate_instances" in methods
         assert "delete_security_group" in methods
+
+    @pytest.mark.parametrize(
+        ("failure_command", "message", "expected_commands"),
+        [
+            ("echo ok", "SSH did not become ready", ["echo ok"] * 30),
+            (
+                "cloud-init status --wait",
+                "cloud-init did not complete",
+                ["echo ok", "cloud-init status --wait"],
+            ),
+        ],
+        ids=("ssh-readiness-exhaustion", "cloud-init-wait-failure"),
+    )
+    def test_readiness_failure_is_safe_and_rolls_back_before_key_delivery(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        captured_output: CapturedOutput,
+        failure_command: str,
+        message: str,
+        expected_commands: list[str],
+    ) -> None:
+        """Provider-retained user-data stays credential-free and readiness
+        failures remove the instance and security group without stdin join or
+        generated-script staging."""
+        rec = install_fakes(monkeypatch)
+        calls: list[tuple[str, dict[str, object]]] = []
+
+        def _readiness_failure(self: SSHTransport, command: str, **kwargs: object) -> object:
+            calls.append((command, kwargs))
+            if command == failure_command:
+                raise SSHError(f"safe failure for {command}")
+            return SimpleNamespace(stdout="", returncode=0)
+
+        monkeypatch.setattr(SSHTransport, "run", _readiness_failure)
+        monkeypatch.setattr("agentworks.capabilities.vm_platform.tailscale_join.time.sleep", lambda _seconds: None)
+
+        with pytest.raises(EC2Error, match=message) as caught:
+            _platform().create(_request(tailscale=_SENTINEL), RunContext(config=_config()))
+
+        assert [command for command, _kwargs in calls] == expected_commands
+        assert all("input_text" not in kwargs for _command, kwargs in calls)
+        assert not any("agentworks-bootstrap" in command for command, _kwargs in calls)
+        retained_user_data = gzip.decompress(rec.kwargs_for("run_instances")["UserData"]).decode()
+        assert _SENTINEL not in retained_user_data
+        assert _SENTINEL not in repr(calls)
+        methods = rec.methods("ec2")
+        assert "terminate_instances" in methods
+        assert "delete_security_group" in methods
+        _assert_exception_graph_is_value_free(caught.value)
+        assert _SENTINEL not in repr(captured_output.lines)
 
     def test_rolls_back_on_keyboard_interrupt(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """An operator Ctrl-C during the inline bootstrap wait rolls back the
