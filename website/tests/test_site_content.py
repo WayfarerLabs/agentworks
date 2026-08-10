@@ -27,13 +27,13 @@ class SourceContractTests(RepositoryFixture):
             },
         )
         self.assertIn("<strong>Durable agents</strong>", content["HOME_IDENTITY"])
+        self.assertIn("<strong>SSH-over-Tailscale control plane</strong>", content["HOME_IDENTITY"])
         self.assertTrue(content["HOME_META_DESCRIPTION"].startswith("A comprehensive toolkit"))
         for contract in site_builder.DOCUMENT_CONTRACTS:
             rendered = content[f"{contract.contract_id}_CONTENT"]
             self.assertEqual(rendered.count("<h1 "), 1)
             self.assertTrue(content[f"{contract.contract_id}_META_DESCRIPTION"])
         self.assertIn(site_builder.REPORTING_URL, content["SECURITY_CONTENT"])
-        self.assertNotIn("email", content["SECURITY_CONTENT"].lower())
 
     def test_supported_source_additions_render_without_contract_edits(self) -> None:
         addition = (
@@ -244,7 +244,6 @@ class SourceContractTests(RepositoryFixture):
             original.replace("[gh-private]:", "[renamed]:"),
             original + f"\n[gh-private]: {site_builder.REPORTING_URL}\n",
             original.replace("[private channel][gh-private]", "private reporting"),
-            original.replace("Opening paragraph.", "Opening email paragraph.", 1),
             original.replace("Opening paragraph.", "Contact security@example.test.", 1),
         )
         for changed in changes:
@@ -256,6 +255,13 @@ class SourceContractTests(RepositoryFixture):
                 ),
             ):
                 site_builder.extract_content(self.root)
+
+        policy.write_text(
+            original.replace("Opening paragraph.", "We do not accept email reports.", 1),
+            encoding="utf-8",
+        )
+        rendered = site_builder.extract_content(self.root)["SECURITY_CONTENT"]
+        self.assertIn("We do not accept email reports.", rendered)
 
     def test_reference_definition_is_consumed_but_not_rendered(self) -> None:
         policy = self.root / site_builder.SECURITY_CONTRACT.source

@@ -92,6 +92,11 @@ Operator evidence:
   screen-reader quality, physical mobile/touch hardware, and broader device coverage move to
   post-launch production validation; defects found there are follow-up work. Those rows remain
   explicit and must close before the final production-acceptance record and `locked.md`.
+- 2026-08-10: the operator confirms the forwarded preview is fine in current Chrome and Edge and
+  authorizes merge after two final presentation changes: make TOC entries slightly smaller than body
+  text and bold the complete `SSH-over-Tailscale control plane` phrase on Home. Exact browser build
+  strings were not supplied; the permanent checklist records that limitation and keeps the broader
+  post-launch engine/device rows open.
 - 2026-08-09: with operator approval, repository Pages is enabled with GitHub Actions as its source
   at the default project URL and HTTPS enforcement on. The automatically created `github-pages`
   environment uses custom deployment-branch policies and has exactly one policy, branch `main`; no
@@ -497,7 +502,7 @@ and honest for a vacuum, and runtime memory/DOM work remains bounded independent
       locked-SDD checks, and file-quality lint.
 - [x] `agentworks-reviewer` and a fresh-eyes reviewer inspect permissions, triggers, artifact
       boundaries, and failure modes; resolve valid findings and re-review.
-- [ ] Mark PR #439 ready only when the complete interim release is review-clean. Triage Copilot
+- [x] Mark PR #439 ready only when the complete interim release is review-clean. Triage Copilot
       comments, record the five-commit missing-session-trailer provenance exception, request the
       saga lead's standalone-effort review, and resolve valid findings. Re-run current Chromium
       no-JavaScript recovery, source-order focus, Escape/browser-key independence,
@@ -506,6 +511,18 @@ and honest for a vacuum, and runtime memory/DOM work remains bounded independent
       Edge pre-merge pass and merge decision. Firefox/WebKit, spoken screen-reader, physical mobile
       touch/human-motion, and broader device acceptance are post-launch gates for the final
       production-acceptance record, not blockers for this interim-release merge.
+
+Final readiness evidence (2026-08-10): the operator accepted the forwarded preview in current Chrome
+and Edge at `3bad34ab`. The final requested implementation delta at `a6f6522d` changes only TOC font
+sizing, the canonical README/Home emphasis, and three behavior-neutral review cleanups. It passes
+114 Python website tests, 22 Node model/controller tests, computed Chromium geometry, and exact
+eleven-file root and project-base builds. All PR timeline comments and review records were triaged:
+the blanket `email` word veto, dead `Block.markdown`, and dead build re-export were removed; the
+separately withdrawn Home-projection, dual URL-boundary, and exact Security-reference findings
+remain intentionally unchanged. The five historical trailer-less commits retain their recorded
+session provenance. This final draft handoff is approved to transition directly to ready after the
+evidence commit, PR-body refresh, and scoped exact-head comment, with no further source push.
+
 - [ ] After merge, verify the matching commit deploys automatically at the default Pages URL. Leave
       custom-domain, onboarding, and lock boxes unchecked.
 

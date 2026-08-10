@@ -322,6 +322,7 @@ code {
     padding: 1rem;
     border-left: 4px solid var(--accent);
     background: var(--panel);
+    font-size: 0.92rem;
 }
 
 .page-toc-title {
