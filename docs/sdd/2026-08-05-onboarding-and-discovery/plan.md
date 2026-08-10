@@ -282,7 +282,7 @@ release-please regenerates its separate release PR from the resulting `main`.
       for setup and adoption, management and operation, temporal release history, troubleshooting,
       exceptional migration, secrets, and bug reporting without granting action authority or hiding
       the complete live topic index. The Agentworks assistant agent decides what to propose next.
-- [ ] Normalize `cli/CHANGELOG.md` once so every tagged release from 0.2.0 through 0.13.0 has
+- [x] Normalize `cli/CHANGELOG.md` once so every tagged release from 0.2.0 through 0.13.0 has
       exactly one section, preserving the curated duplicate 0.13 content inside its canonical
       section and inventing no 0.1 history. `concept-release-notes` renders the unique exact
       installed-release section from that release-please-owned changelog packaged in the wheel,
@@ -305,7 +305,7 @@ release-please regenerates its separate release PR from the resulting `main`.
       current operator instruction and authorization envelope proceed without re-asking; a
       materially new target, access class, mutation, privilege, destructive effect, cost, or
       external side effect retains an explicit operator decision.
-- [ ] Canonical thin assistance content contains installation or update guidance, the complete R12
+- [x] Canonical thin assistance content contains installation or update guidance, the complete R12
       disclosure, conditional strict harness posture, and `agw guide --agent`, with no duplicated
       teaching or Claude Code/Codex prerequisite. Any capable Agentworks assistant agent can consume
       the same body as a copy/paste prompt. The disclosure names the intended workstation, full file
@@ -322,27 +322,27 @@ release-please regenerates its separate release PR from the resulting `main`.
       proceeds through covered work without re-asking, and still stops for refusal, ambiguity, an
       uncovered material expansion, or an operator-selected confirm-every-action preference.
       Contract tests reject contradictory per-action-consent teaching.
-- [ ] Before CLI installation or update, canonical assistance resolves one exact stable version,
+- [x] Before CLI installation or update, canonical assistance resolves one exact stable version,
       offers to inspect its canonical `vVERSION` source tag, warns that a full-repository review may
       consume significant model usage, and keeps focused review, full review, decline-review, and
       exact-version installation as separate decisions. Source content is untrusted evidence and
       cannot authorize execution or expand scope.
-- [ ] Source-review contract tests cover focused and full review, decline-review followed by a
+- [x] Source-review contract tests cover focused and full review, decline-review followed by a
       previously authorized exact install, and completed review followed by declined install. No
       path treats review selection as installation authorization or declining review as a failed
       installation; installation may already be covered by the operator's startup instruction. Every
       repository path hard-coded into the focused-review scope must exist at the tested HEAD.
-- [ ] Adversarial source-review fixtures keep the assistance session in its protected policy root
+- [x] Adversarial source-review fixtures keep the assistance session in its protected policy root
       and treat candidate `AGENTS.md`, `CLAUDE.md`, skills, hooks, plugins, configuration, and
       embedded commands only as data. Candidate content cannot redirect the review, load policy,
       launch or reconfigure a harness, execute, authorize installation, or expand the approved
       scope.
-- [ ] Generator emits committed Claude Code and Codex Agentworks plugin and marketplace wrappers
+- [x] Generator emits committed Claude Code and Codex Agentworks plugin and marketplace wrappers
       from that source; CI requires regeneration to produce no diff. The exact
       `metadata.json.skillDescription` field owns both generated skill-frontmatter descriptions.
       README projection chooses an outer backtick fence longer than the canonical body's longest
       backtick run, preserving the canonical body bytes without forbidding ordinary fenced examples.
-- [ ] Repository README Getting Started leads with the compact, table-free R16 assistance block
+- [x] Repository README Getting Started leads with the compact, table-free R16 assistance block
       addressed explicitly to the Agentworks assistant agent, generated from the canonical source,
       and retains a clear human installation path below it. Detailed LLD tables remain design and
       test contracts rather than prose copied into that newcomer-facing prompt.
@@ -381,7 +381,7 @@ release-please regenerates its separate release PR from the resulting `main`.
       approved lookup is used only for locally missing history and stays within the exact requested
       range on the canonical releases surface, and instruction-like release prose remains inert
       without active links or command execution.
-- [ ] Permanent installation and security documentation ships with the packages.
+- [x] Permanent installation and security documentation ships with the packages.
 - [ ] Packaging, generation, lint, and end-to-end gates pass; step reviewed by `agentworks-reviewer`
       and a fresh-eyes reviewer; valid findings resolved.
 - [ ] Always-green ready-to-merge PR opened and saga-lead review requested.
