@@ -247,18 +247,22 @@ Firewall creation and instance insertion are one guarded mutation region. Each i
 unique request UUID. A pre-response indeterminate firewall failure is retried once with that same
 UUID; a definite already-exists response is a collision. Success requires an operation whose
 `clientOperationId`, operation type, and target link match this attempt, and whose `targetId` equals
-the realized firewall provider ID. Rollback deletes only when that provider ID and the complete
-network, direction, target, priority, source, and allow/deny shape still match. A missing rule is
-absent; missing ownership proof or any mismatch is retained and reported as a collision. GCE has no
-firewall resource-ID precondition on name-based delete, so this closes the ordinary concurrent
-insert race but does not claim atomic protection against a hostile delete/recreate between the
-verification read and delete. Ordinary exceptions first close the scoped allow, then request bounded
-instance deletion even when allow close fails. The deny is deleted only after `instances.get` proves
-absence; deletion failure or indeterminate timeout retains it around the possible survivor. Cleanup
-raises an existing Agentworks error category where one fits, preserving secret-free diagnostics and
-exact retained identities. A first `KeyboardInterrupt` runs the same rollback and re-raises the
-original object. A second interrupt stops waiting, reports project/zone/instance and both firewall
-rules, retains the deny when needed, and preserves the first interrupt.
+the realized firewall provider ID. Operation ownership is retained before waiting so an interrupt
+during the wait can still reconcile safely. Rollback deletes only when that provider ID and the
+complete network, direction, target, priority, source, and allow/deny shape still match. A missing
+rule is absent; missing ownership proof or any mismatch is retained and reported as a collision. GCE
+has no firewall resource-ID precondition on name-based delete, so this closes the ordinary
+concurrent insert race but does not claim atomic protection against a hostile delete/recreate
+between the verification read and delete. Ordinary exceptions first close the scoped allow, then
+request bounded instance deletion even when allow close fails. The deny is deleted only after
+`instances.get` proves absence; deletion failure or indeterminate timeout retains it around the
+possible survivor. Cleanup raises an existing Agentworks error category where one fits, preserving
+secret-free diagnostics and exact retained identities. A first `KeyboardInterrupt` runs the same
+rollback and re-raises the original object. A second interrupt stops waiting, reports
+project/zone/instance and both firewall rules, retains the deny when needed, and preserves the first
+interrupt. Manual delete commands are emitted only for resources whose provider IDs still match the
+persisted owned IDs; collisions or unknown identities receive inspect/escalate guidance without a
+name-based delete recommendation.
 
 Google API authentication/permission, not-found, quota, collision, operation, readiness, and cleanup
 failures map to existing Agentworks error categories where one fits. Provider exceptions are

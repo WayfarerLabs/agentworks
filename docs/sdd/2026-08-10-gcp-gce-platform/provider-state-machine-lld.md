@@ -131,18 +131,21 @@ A deny/allow insert error or timeout is likewise a possible rule. Every insert c
 request UUID. A pre-response indeterminate call retries the same request once with the same UUID;
 definite `ALREADY_EXISTS` remains a collision. An accepted operation must match the UUID through
 `clientOperationId`, name an insert of the expected target link, and expose a nonzero `targetId`.
-The realized firewall's provider ID must equal that `targetId`, and its network, ingress direction,
-target tag, priority, source ranges, and complete allowed/denied protocol and port sets must match
-the request. That provider ID is retained for later cleanup. Not-found is absent. Missing ownership
-proof or any mismatch is a collision and is never deleted. Tests cover realized and absent
-indeterminate outcomes, a same-name/same-shape different-ID race, and mismatched concurrent
-replacement. GCE has no resource-ID precondition on firewall delete, so verification immediately
-before name-based delete addresses ordinary concurrent insertion but cannot make hostile
-delete/recreate replacement atomic.
+This operation ownership is retained before waiting, so an interrupt during the wait can still
+reconcile safely. The realized firewall's provider ID must equal that `targetId`, and its network,
+ingress direction, target tag, priority, source ranges, and complete allowed/denied protocol and
+port sets must match the request. That provider ID is retained for later cleanup. Not-found is
+absent. Missing ownership proof or any mismatch is a collision and is never deleted. Tests cover an
+interrupt during the operation wait, realized and absent indeterminate outcomes, a
+same-name/same-shape different-ID race, and mismatched concurrent replacement. GCE has no
+resource-ID precondition on firewall delete, so verification immediately before name-based delete
+addresses ordinary concurrent insertion but cannot make hostile delete/recreate replacement atomic.
 
 A second `KeyboardInterrupt` stops cleanup promptly. The original interrupt object remains the one
-re-raised. Output names project, zone, instance, allow, deny, and exact console/CLI deletion
-actions.
+re-raised. Output names project, zone, instance, allow, deny, and exact console/CLI deletion actions
+for resources whose provider IDs prove ownership. A same-name different-ID collision or an unknown
+provider ID receives inspect/escalate guidance only, never an unconditional name-based delete
+command.
 
 ## Native transient route
 
