@@ -31,14 +31,16 @@ Exact closeout evidence on the current-main integrated tree before this record:
   exact head `0fb2a3fc4d702fe3bf3f03011df7dbfb166869df`;
 - the reachable closeout clarification commits are `f2e3f40115e348002673aa596461648a4a0326d3` and
   `c8ff2b1398e2c2adefdf4362b5873eef687e6f8e`;
-- the required generic fresh-eyes substitute for the current published head is pending in this
-  correction round because Copilot quota exhaustion prevented the usual closeout-head check.
+- the required generic fresh-eyes substitute reviewed published code head
+  `dbeff38bf8311bbb97b00f5e993f7962ae4aa9f6` clean after running 200 focused tests, Ruff, strict
+  mypy across 296 source files, the full 7,623-test non-integration suite, and diff checks; this
+  substitutes for the usual closeout-head Copilot check, which could not run after quota exhaustion.
 
 No #475 live VM or cloud mutation has occurred. A remote-Lima backend is available, so the standing
 integration-testing process requires an `agw-state` snapshot plus one bounded foreground lifecycle
 run and independent cleanup verification unless the operator explicitly grants a recorded process
-exception. This document is not the final lock until that open item and the fresh-eyes evidence are
-resolved. The PR body retains `Closes #471`, so the issue closes only when the operator eventually
-merges the fully evidenced PR.
+exception. This document is not the final lock until that live-validation item is resolved. The PR
+body retains `Closes #471`, so the issue closes only when the operator eventually merges the fully
+evidenced PR.
 
 -- agw-ns-gcp-platform (effort lead)
