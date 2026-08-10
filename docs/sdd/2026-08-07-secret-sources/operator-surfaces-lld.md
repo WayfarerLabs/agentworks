@@ -2,7 +2,7 @@
 
 <!-- cspell:ignore isatty ljust onepassword proxmox repr unresolvable -->
 
-- Status: Reviewed and implemented; operator contract correction in progress
+- Status: Reviewed and implemented; final operator-gated validation pending
 - Scope: Phase 6 operator-surface contract, consumed by implementation Phases 7 and 8
 - Governing artifacts: [FRD](./frd.md), [HLA](./hla.md),
   [migration strategy](./migration-strategy.md), [source contract](./source-contract-lld.md), and
@@ -659,10 +659,12 @@ rollback-on-interrupt machinery, or intermediate owner graphs for in-memory eras
 process is trusted, and Python local/reference lifetime is best-effort only.
 
 VM providers may stage a bootstrap script containing a resolved credential only for the duration of
-the delivery operation. Any local, host-side, or guest-side staging file is private, is removed on
-success and every failure or interrupt path, and has verified failure-path coverage. This is durable
-file hygiene, not permission to add process-memory owners, traceback rewriting, or generic cleanup
-fences. Provider-retained configuration remains credential-free.
+the delivery operation. Any local, host-side, or guest-side staging file is private and receives one
+verified removal attempt on success and every failure or interrupt path. A removal failure surfaces
+standalone or produces one fixed warning without masking an active primary; it cannot honestly
+guarantee that no file remains. This is durable file hygiene, not permission to add process-memory
+owners, traceback rewriting, retry machinery, or generic cleanup fences. Provider-retained
+configuration remains credential-free.
 
 ### Explicit caller policy
 

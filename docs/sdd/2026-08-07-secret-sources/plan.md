@@ -1,6 +1,6 @@
 # Plan: Secret Sources
 
-- Status: Active: operator contract correction and unwind
+- Status: Active: final operator-gated validation pending
 - FRD: [frd.md](./frd.md)
 - Architecture: [hla.md](./hla.md)
 - Migration: [migration-strategy.md](./migration-strategy.md)
@@ -289,20 +289,21 @@ remain the immutable record of work performed, but frame-level memory erasure is
 workstation process is trusted, and verification must not expand the contract beyond persisted or
 externally observable disclosure boundaries.
 
-- [ ] Restore the pre-ratchet lifecycle, SSH, initializer, and unwind semantics using `f9381b46` as
+- [x] Restore the pre-ratchet lifecycle, SSH, initializer, and unwind semantics using `f9381b46` as
       the reference; remove every sensitive-state owner, operation fence, traceback rewrite,
       scrub-on-every-`BaseException` path, and frame-walking test introduced for memory erasure.
-- [ ] Preserve the actual Secret Sources fixes: key-free Lima/provider-retained configuration,
+- [x] Preserve the actual Secret Sources fixes: key-free Lima/provider-retained configuration,
       centralized stdin delivery, safe logs/diagnostics/exception objects, broker scoping,
       retired-module enforcement, plugin remediation, and the valid `str`-subclass attribution fix.
-- [ ] Remove plaintext Tailscale bootstrap files after every Proxmox and WSL2 delivery path. Use
+- [x] Remove plaintext Tailscale bootstrap files after every Proxmox and WSL2 delivery path. Use
       private staging and verify success, ordinary failure, timeout, and interrupt cleanup without
       reintroducing process-memory ownership or traceback machinery.
-- [ ] Align remote Lima provision-log identity with VM deletion so a successful delete removes the
+- [x] Align remote Lima provision-log identity with VM deletion so a successful delete removes the
       log created for that VM.
 - [ ] Prove the mistaken path is gone with structural deny-list scans and diff review against the
       reference, then run focused behavior tests, the full non-integration suite, static/repository
-      gates, independent review, and supported-version CI.
+      gates, independent review, and supported-version CI. The local scans, tests, gates, and review
+      are complete; supported-version CI remains pending on the corrected remote head.
 - [ ] Re-truth the prospective lock and acceptance counts. The pre-unwind live remote-Lima run
       passed with a rotated key; repeat it at the final post-unwind head and record the final
       evidence.
