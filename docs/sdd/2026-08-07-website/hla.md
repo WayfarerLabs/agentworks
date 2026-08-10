@@ -268,12 +268,14 @@ visible engines. It is not atmospheric drag; engine-off vehicle coasting and bal
 fragments remain undamped. Apart from the accepted preflight Space event, only active game controls
 prevent their ordinary browser behavior. A first pointer activation starts without also applying
 thrust. Thereafter, pointer down captures that pointer and starts collective thrust; movement
-applies a bounded horizontal differential after a dead zone; pointer up, cancel, lost capture, exit,
-or page hide cuts both engines and releases capture. A short press with little travel receives a
-pinned minimum impulse so a tap is useful; holding sustains thrust. Dragging left biases the right
-engine, and dragging right biases the left. `touch-action` and scroll suppression apply only inside
-the active game scene. Escape exits to the settled initial state, and `r` restarts a crashed mission
-from its last in-memory checkpoint.
+applies a bounded horizontal differential after a dead zone. A short pointer release with little
+travel records its completed pointer token before releasing capture and retains the remaining pinned
+minimum impulse; the browser's automatic lost-capture event for that completed token cannot cancel
+the pulse. Other cancel, lost-capture, exit, or page-hide paths cut both engines and release
+capture. Holding sustains thrust. Dragging left biases the right engine, and dragging right biases
+the left. `touch-action` and scroll suppression apply only inside the active game scene. Escape
+exits to the settled initial state, and `r` restarts a crashed mission from its last in-memory
+checkpoint.
 
 The 404 body begins directly with `Page not found` after the compact detail-page inset. It has no
 error-code, eyebrow, provenance, or other pre-title label; its explanatory copy remains below the
@@ -293,17 +295,19 @@ stall discards accumulated wall time and resumes from the last state rather than
 simulate unseen play. Each plume group scales independently from the commanded engine thrust.
 
 A new pure world module owns deterministic functions for the run seed, terrain chunks, site
-positions, landing-platform and building geometry, and the bounded rolling world projection. It owns
-no mutable singleton and imports no flight or controller module. The flight model imports those pure
-world functions, owns the immutable physics profile and reference-route calculation, and is the sole
-authority for the mutable run aggregate: vehicle physics, fuel, mission sequence, world cursor,
-retained site records and their can/power state, and the last successful checkpoint. The controller
-imports the flight model and remains the sole browser clock, input, camera, and DOM adapter. This
-one-way controller-to-flight-to-world dependency prevents a physics/world cycle and split-brain site
-state. The controller translates one stable nearby-world SVG group as the camera follows the lander
-and only regenerates terrain/site nodes when the rolling window changes. The runtime retains a fixed
-number of nearby chunks and sites, so an arbitrarily long forward expedition does not imply
-unbounded DOM or terrain history.
+positions, landing-platform and building geometry, camera position, offscreen targeting, and bounded
+rolling-world projection. It owns no mutable singleton and imports no flight or controller module.
+The flight model imports pure world functions, owns the immutable physics profile and
+reference-route calculation, and is the sole authority for the mutable run aggregate: vehicle
+physics, fuel, mission sequence, world cursor, retained site records and their can/power state, and
+the last successful checkpoint. The controller imports the flight model plus read-only
+camera/path/offscreen projection helpers directly from the pure world module and remains the sole
+browser clock, input, focus, and DOM adapter. This acyclic controller-to-model-and-world,
+model-to-world graph prevents a physics/world cycle and split-brain site state while avoiding
+duplicate projection math. The controller translates one stable nearby-world SVG group as the camera
+follows the lander and only regenerates terrain/site nodes when the rolling window changes. The
+runtime retains a fixed number of nearby chunks and sites, so an arbitrarily long forward expedition
+does not imply unbounded DOM or terrain history.
 
 Each deterministic site replaces a deliberately wide terrain span with one flat shelf carrying a
 slightly elevated platform exactly three lander widths long and one solid NOC building beside it.

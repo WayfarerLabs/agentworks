@@ -545,9 +545,9 @@ and honest for a vacuum, and runtime memory/DOM work remains bounded independent
 - [ ] Run focused Node and website suites, deterministic root/project builds, complete repository
       gates, module-size and bounded-DOM checks, then exercise the coherent preview in current
       Chrome and Edge. Browser acceptance must cover three sites, keyboard/vi/touch input, steering
-      feel, post-release stabilization, safe/crash boundaries, coarse terrain and flat shelves,
-      support appearance, every NOC stage, reduced motion, lifecycle/privacy, and long-run
-      performance.
+      feel, steer release while neutral collective visibly stabilizes rotation, separate release-all
+      vacuum coasting, safe/crash boundaries, coarse terrain and flat shelves, support appearance,
+      every NOC stage, reduced motion, lifecycle/privacy, and long-run performance.
 - [ ] Obtain fresh-eyes browser evidence and `agentworks-reviewer` code approval, resolve every
       valid finding through the implementing subagent, update the stacked PR evidence, rebase or
       merge the latest `main`, mark PR #486 ready, and monitor every required CI and CodeQL check.
