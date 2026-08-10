@@ -13,11 +13,13 @@ from agentworks.guide.assessment import OnboardingSnapshot
 from agentworks.guide.catalog import GuideCatalog, GuideCatalogIssue, _build_guide_catalog
 from agentworks.guide.contract import (
     BlockId,
+    ConceptAnchor,
     GuideContributionError,
     ImplementationAnchor,
     InstanceList,
     KindAnchor,
     Relationships,
+    ReleaseNotes,
     ResourceAnchor,
     State,
     TopicContribution,
@@ -31,6 +33,7 @@ from agentworks.guide.contributions import guide_contributions
 from agentworks.guide.render import framework_heading, render_index, render_topic, sanitize_terminal_output
 from agentworks.guide.view import GuideInstanceFact, GuideRelationship, build_guide_view
 from agentworks.manifests.reference import describable_targets, reference_for
+from agentworks.release_notes import ReleaseNotesError, read_release_history
 from agentworks.resources import KIND_REGISTRY
 
 if TYPE_CHECKING:
@@ -84,6 +87,29 @@ def build_authored_catalog(*, strict_trusted_taxonomy: bool = False) -> GuideCat
     from agentworks.plugins.publish import plugin_manifest_resource_owners
 
     trusted = tuple((f"core:{topic.topic}", topic) for topic in guide_contributions())
+    release_issue: GuideCatalogIssue | None = None
+    try:
+        release_topics = tuple(
+            TopicContribution(
+                TopicSlug(section.topic),
+                f"Agentworks release notes v{section.version}",
+                f"Packaged untrusted plain-text release evidence for exact version v{section.version}.",
+                ConceptAnchor(section.topic),
+                (ReleaseNotes(BlockId("release-notes")),),
+            )
+            for section in read_release_history().sections
+        )
+        trusted += tuple((f"core:{topic.topic}", topic) for topic in release_topics)
+    except ReleaseNotesError as error:
+        contribution_error = GuideContributionError(
+            f"invalid guide contribution from core:release-history: {error}",
+            source="core:release-history",
+            topic=None,
+            field_path="release-notes",
+        )
+        if strict_trusted_taxonomy:
+            raise contribution_error from None
+        release_issue = GuideCatalogIssue(contribution_error)
     plugins = tuple((plugin, tuple(plugin.guide_topics)) for _, plugin in sorted(SYSTEM_PLUGINS.items()))
     resource_owners: list[tuple[str, str, str]] = []
     unavailable_resource_owners: set[str] = set()
@@ -95,13 +121,16 @@ def build_authored_catalog(*, strict_trusted_taxonomy: bool = False) -> GuideCat
             # catalog rejects only that plugin's resource topics with an
             # accurate scoped issue while retaining unrelated contributions.
             unavailable_resource_owners.add(plugin.name)
-    return _build_guide_catalog(
+    catalog = _build_guide_catalog(
         trusted,
         plugins,
         tuple(resource_owners),
         strict_trusted_taxonomy=strict_trusted_taxonomy,
         unavailable_plugin_resource_owners=frozenset(unavailable_resource_owners),
     )
+    if release_issue is None:
+        return catalog
+    return GuideCatalog(catalog.topics, (*catalog.issues, release_issue))
 
 
 def _schema_topic(slug: str) -> TopicContribution:

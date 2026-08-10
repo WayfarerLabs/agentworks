@@ -882,16 +882,37 @@ and rewrite any that still live in `config.toml`; the
 ### Guide
 
 `agw guide [TOPIC]...` renders Markdown teaching together with safe facts from the current finalized
-resource registry. With no topic it prints a security disclosure, onboarding entry point, and topic
-index. Bare declarable-kind topics such as `vm-template` render current resources, a live field
-reference, and a generated sample from the same schema services the manifest loader uses.
-Capability-kind and implementation topics render their live alternatives or configuration fields,
-including implementations that are installed but disabled. Exact declared-resource topics describe
-current state and relationships and link back to their kind's shared schema. Core concepts use names
-such as `concept-onboarding`, `concept-migration`, `concept-secrets`, and `concept-reporting-bugs`.
-Schema literal values remain on one reference row: YAML-rendered backslashes, carriage returns, line
-feeds, and tabs appear as distinct visible escape sequences inside safe variable-backtick code
-spans.
+resource registry. With no topic it prints a security disclosure, an intent-to-topic entry point,
+and the complete topic index. Current capability and adoption questions point to
+`concept-onboarding`; temporal version-change questions point to `concept-release-notes`. Current
+facts are never presented as a version-to-version delta. Bare declarable-kind topics such as
+`vm-template` render current resources, a live field reference, and a generated sample from the same
+schema services the manifest loader uses. Capability-kind and implementation topics render their
+live alternatives or configuration fields, including implementations that are installed but
+disabled. Exact declared-resource topics describe current state and relationships and link back to
+their kind's shared schema. Core concepts use names such as `concept-onboarding`,
+`concept-migration`, `concept-secrets`, and `concept-reporting-bugs`. Schema literal values remain
+on one reference row: YAML-rendered backslashes, carriage returns, line feeds, and tabs appear as
+distinct visible escape sequences inside safe variable-backtick code spans.
+
+`concept-release-notes` reads only the canonical `CHANGELOG.md` packaged in the installed wheel. The
+base topic selects the exact installed distribution version. Strict dynamic topics such as
+`concept-release-notes/v0-13-0` expose one normalized historical section at a time and participate
+in Bash, Zsh, and PowerShell topic completion through `agw guide --names-only`. Multi-release
+questions use the ordered applicable exact-version topics; rendering never concatenates or emits the
+complete changelog.
+
+The changelog read is capped at 2 MiB and each selected section at 256 KiB. Missing, duplicate,
+malformed, oversized, control-bearing, expression-bearing, or reserved-delimiter content fails
+closed without partial notes. Valid release prose is visibly labeled as untrusted plain-text
+evidence with Markdown, HTML, and links inert. It cannot authorize commands, permission changes,
+link traversal, or scope expansion, and guide rendering performs no network request.
+
+Only locally missing history may use the inert `read-release-notes` fallback. The operator supplies
+exact `FROM_VERSION` and `TO_VERSION` ends for an inclusive range. Its authorization class is
+`read-canonical-release-notes`; its only allowed source is the canonical Agentworks GitHub releases
+page, it follows no embedded links, and refusal performs no network request or claimed summary. Use
+`concept-onboarding` for the separate live adoption assessment.
 
 Multiple topics render in the requested order and are validated atomically: one unknown topic
 prevents all output. Repeated topics render once at their first position. `--agent` and `--human`
@@ -958,6 +979,8 @@ workstation.
 | `agw guide`                                                           | Render the guide index and onboarding disclosure |
 | `agw guide TOPIC...`                                                  | Render one or more exact topics atomically       |
 | `agw guide TOPIC... --agent/--human`                                  | Override automatic presentation mode             |
+| `agw guide concept-release-notes`                                     | Render the installed release's packaged notes    |
+| `agw guide concept-release-notes/vMAJOR-MINOR-PATCH`                  | Render one exact packaged historical section     |
 | `agw guide concept-onboarding --evidence ACTION_ID:KIND/NAME=OUTCOME` | Replay caller-owned proof                        |
 | `agw guide --names-only`                                              | Emit topic names for shell completion            |
 
@@ -970,6 +993,8 @@ points:
 | ------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | Create or change a resource     | `concept-management`, then the bare kind and exact `kind/name` topic | The resource's owning command or canonical manifest                                         |
 | Adopt a capability              | `concept-management`, then the capability implementation topic       | `agw resource list --include-disabled` and the owning configuration surface                 |
+| Assess current adoption         | `concept-onboarding`                                                 | Live guide facts and JSON v1 inspection                                                     |
+| Review changes across versions  | `concept-release-notes`, then exact packaged version topics          | Offline packaged changelog; bounded canonical fallback only for missing local history       |
 | Resolve upgrade deprecations    | `concept-management`                                                 | Follow the emitted migration instruction before unrelated changes                           |
 | Migrate the 0.14 resource model | `concept-migration`, then each live kind or implementation topic     | Validate each manifest with doctor, cut over TOML once, then compare operator inventory     |
 | Troubleshoot                    | `concept-troubleshooting`                                            | Run `agw doctor` only with consent to examine the workstation; authorize repairs separately |

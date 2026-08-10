@@ -226,9 +226,9 @@
 * **plugins:** scope the opt-in to [plugins].system (not .enabled) ([bb5bc81](https://github.com/WayfarerLabs/agentworks/commit/bb5bc8145a927929f3bed871adeae4cf29d83b7d))
 * **vm-platform:** thread RunContext through the transport hooks ([bacacfe](https://github.com/WayfarerLabs/agentworks/commit/bacacfe14e836c2bf79e6c9dc97ca81069ed147d))
 
-## [0.13.0] (2026-08-04)
+### Curated session resume notes
 
-### Features
+#### Features
 
 * **sessions:** add `agw session resume` as the canonical lifecycle command. It continues the same
   logical Agentworks session and, when durable state permits, the same Claude Code or Codex
@@ -236,7 +236,7 @@
 * **harness-integration:** add `resume_command` as the canonical shell integration field. `agw
   resource migrate` rewrites the old field to the canonical YAML form.
 
-### Deprecations
+#### Deprecations
 
 * **sessions:** `agw session restart` remains as a one-release alias for `agw session resume`. It
   warns once per invocation unless `--no-deprecations` is set, and is removed in 0.14.0.
@@ -244,7 +244,7 @@
   deprecation warning. Replace it with `resume_command`; configurations that mix both names fail.
   The old field is removed in 0.14.0.
 
-### Downgrade notes
+#### Downgrade notes
 
 Configurations using `resume_command` require 0.13.0 or later. Before downgrading to 0.12.0, restore
 `restart_command`; no stored-session data migration or rollback is needed.

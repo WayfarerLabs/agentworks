@@ -59,6 +59,9 @@ build-backend = "hatchling.build"
 packages = ["agentworks"]
 exclude = ["**/guide-content/.markdownlint.jsonc"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"CHANGELOG.md" = "agentworks/CHANGELOG.md"
+
 [tool.ruff]
 target-version = "py312"
 line-length = 120

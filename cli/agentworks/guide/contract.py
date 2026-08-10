@@ -185,6 +185,11 @@ class Sample:
 
 
 @dataclass(frozen=True, slots=True)
+class ReleaseNotes:
+    id: BlockId
+
+
+@dataclass(frozen=True, slots=True)
 class ActionList:
     id: BlockId
     actions: tuple[GuideAction, ...]
@@ -204,6 +209,7 @@ type GuideBlock = (
     | Relationships
     | FieldReference
     | Sample
+    | ReleaseNotes
     | ActionList
     | TopicLinks
 )
@@ -226,6 +232,7 @@ class ConsentBoundary(Enum):
     RESOLVE_NAMED_SECRET = "resolve-named-secret"
     CONNECT_NAMED_VM = "connect-named-vm"
     MUTATE_AGENTWORKS = "mutate-agentworks"
+    READ_CANONICAL_RELEASE_NOTES = "read-canonical-release-notes"
 
 
 @dataclass(frozen=True, slots=True)
@@ -699,6 +706,7 @@ def _parse_block(value: object, source: str, topic: str, index: int) -> GuideBlo
         "relationships",
         "field-reference",
         "sample",
+        "release-notes",
         "action-list",
         "topic-links",
     }
@@ -811,6 +819,8 @@ def _parse_block(value: object, source: str, topic: str, index: int) -> GuideBlo
         return Relationships(BlockId(block_id))
     if discriminator == "sample":
         return Sample(BlockId(block_id))
+    if discriminator == "release-notes":
+        return ReleaseNotes(BlockId(block_id))
     return TopicLinks(BlockId(block_id))
 
 
@@ -876,6 +886,7 @@ def _record_value(value: TopicContribution, source: str) -> dict[str, object]:
         Relationships: "relationships",
         FieldReference: "field-reference",
         Sample: "sample",
+        ReleaseNotes: "release-notes",
         ActionList: "action-list",
         TopicLinks: "topic-links",
     }
@@ -976,11 +987,22 @@ def parse_topic_contribution(value: object, source: str) -> TopicContribution:
         Relationships: (ResourceAnchor, ImplementationAnchor),
         FieldReference: (KindAnchor, ImplementationAnchor),
         Sample: (KindAnchor,),
+        ReleaseNotes: (ConceptAnchor,),
     }
     for index, block in enumerate(blocks):
         supported = permitted.get(type(block))
         if supported is not None and not isinstance(anchor, supported):
             raise _error(InvalidBlockError, source, topic, f"blocks[{index}]", "is not supported by this anchor")
+        if isinstance(block, ReleaseNotes) and not (
+            topic == "concept-release-notes" or topic.startswith("concept-release-notes/v")
+        ):
+            raise _error(
+                InvalidBlockError,
+                source,
+                topic,
+                f"blocks[{index}]",
+                "is reserved for core release-note topics",
+            )
     raw_related = data.get("related_topics", ())
     if type(raw_related) not in {tuple, list}:
         raise _error(GuideContributionError, source, topic, "related_topics", "must be a sequence")
