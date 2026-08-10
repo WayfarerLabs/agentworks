@@ -35,10 +35,7 @@ README_SOURCE_URL: Final = f"{REPOSITORY_URL}/blob/main/README.md"
 IDEMPOTENCY_URL: Final = f"{REPOSITORY_URL}/blob/main/docs/guides/idempotency.md"
 CLI_SECRETS_URL: Final = f"{REPOSITORY_URL}/blob/main/cli/README.md#environment-variables-and-secrets"
 PYPI_URL: Final = "https://pypi.org/project/agentworks-cli/"
-REPORTING_URL: Final = (
-    "https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing-"
-    "information-about-vulnerabilities/privately-reporting-a-security-vulnerability"
-)
+REPORTING_URL: Final = f"{REPOSITORY_URL}/security/advisories/new"
 SOURCE_RELATIVE_URLS: Final = {
     "../README.md": README_SOURCE_URL,
     "guides/idempotency.md": IDEMPOTENCY_URL,
@@ -96,10 +93,8 @@ CONTRACTS: Final = (
         ((1, "Agentworks"),),
         (
             paragraph(
-                "A comprehensive toolkit for managing agentic workloads: VMs, workspaces, agents, sessions, "
-                "harnesses, secrets/config, and the supporting systems that glue them together. Built around "
-                "the conviction that autonomy, security, and control are not mutually exclusive: a good "
-                "platform makes it possible and straightforward to have it all."
+                "A toolkit for managing agentic workloads: VMs, workspaces, agents, sessions, harnesses, "
+                "configuration, secrets, and the systems that connect them."
             ),
             paragraph(
                 "Create and manage an agentic fleet from your own workstation. **Durable agents** run as "
@@ -113,7 +108,7 @@ CONTRACTS: Final = (
     ),
 )
 
-MANIFESTO_CONTRACT: Final = DocumentContract("MANIFESTO", Path("docs/why-agentworks.md"))
+MANIFESTO_CONTRACT: Final = DocumentContract("MANIFESTO", Path("docs/manifesto.md"))
 SECURITY_CONTRACT: Final = DocumentContract(
     "SECURITY",
     Path("SECURITY.md"),

@@ -21,11 +21,10 @@ cloning a Debian 12 cloud-init template that you prepare once on your Proxmox no
 - Root SSH access to the Proxmox host for one-time setup
 - A storage volume that supports VM disk images (e.g. `local-lvm`, `data`, or any LVM-thin/ZFS pool)
 
-We strongly recommend running Tailscale on your Proxmox host so that the API and provisioned VMs are
-accessible over your tailnet. This simplifies networking and avoids exposing the Proxmox API or VM
-SSH ports to the public internet. Setting up Tailscale on the Proxmox host is outside the scope of
-this guide -- see the [Tailscale Linux documentation](https://tailscale.com/kb/1031/install-linux)
-for instructions.
+Run Tailscale on the Proxmox host to keep the API and provisioned VMs accessible over the tailnet
+without exposing the Proxmox API or VM SSH ports to the public internet. Setting up Tailscale on the
+Proxmox host is outside the scope of this guide; see the
+[Tailscale Linux documentation](https://tailscale.com/kb/1031/install-linux) for instructions.
 
 ## Step 1: Run the setup script
 
