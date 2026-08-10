@@ -12,7 +12,7 @@ from google.cloud import compute_v1
 from agentworks.capabilities.base import RunContext
 from agentworks.errors import AlreadyExistsError, AuthorizationError, ConfigError
 from agentworks.plugins.gcp.config import GcpGCEConfig
-from agentworks.plugins.gcp.errors import GCEOperationError
+from agentworks.plugins.gcp.errors import GCEIndeterminateOperationError, GCEOperationError
 from agentworks.plugins.gcp.network import (
     FirewallInsertAttempt,
     FirewallOwnership,
@@ -69,6 +69,8 @@ class _Operation:
         target_id: int = 101,
         target_link: str = "projects/project-a/global/firewalls/allow",
         operation_type: str = "insert",
+        status: object = None,
+        error: object = None,
     ) -> None:
         self.failure = failure
         self.calls: list[float] = []
@@ -76,6 +78,8 @@ class _Operation:
         self.target_id = target_id
         self.target_link = target_link
         self.operation_type = operation_type
+        self.status = status
+        self.error = error
 
     def result(self, *, timeout: float) -> None:
         self.calls.append(timeout)
@@ -352,6 +356,10 @@ class _FirewallClient:
 
     def delete(self, **kwargs: object) -> _Operation:
         self.calls.append(("delete", kwargs))
+        request = cast("compute_v1.DeleteFirewallRequest", kwargs["request"])
+        self.operation.client_operation_id = request.request_id
+        self.operation.operation_type = "delete"
+        self.operation.target_link = f"projects/{request.project}/global/firewalls/{request.firewall}"
         return self.operation
 
 
@@ -401,6 +409,7 @@ def test_indeterminate_operation_reconciles_only_matching_resource_id_as_success
     assert insert_firewall_reconciled(
         client,
         project_id="project-a",
+        zone="us-central1-a",
         firewall=expected,
         attempt=attempt,
         timeout=17,
@@ -425,6 +434,7 @@ def test_wait_interrupt_leaves_operation_ownership_for_safe_rollback() -> None:
         insert_firewall_reconciled(
             client,
             project_id="project-a",
+            zone="us-central1-a",
             firewall=expected,
             attempt=attempt,
             timeout=17,
@@ -438,6 +448,7 @@ def test_wait_interrupt_leaves_operation_ownership_for_safe_rollback() -> None:
     result = delete_matching_firewall(
         rollback,
         project_id="project-a",
+        zone="us-central1-a",
         expected=expected,
         ownership=attempt.ownership,
         timeout=11,
@@ -457,6 +468,7 @@ def test_pre_response_timeout_retries_once_with_same_request_id() -> None:
     assert insert_firewall_reconciled(
         client,
         project_id="project-a",
+        zone="us-central1-a",
         firewall=expected,
         attempt=attempt,
         timeout=17,
@@ -469,16 +481,40 @@ def test_pre_response_timeout_retries_once_with_same_request_id() -> None:
 def test_indeterminate_insert_absence_preserves_sanitized_timeout() -> None:
     expected = _owned_rule("allow", priority=0, deny=False)
     client = _FirewallClient(states=iter([None]), operation=_Operation(TimeoutError("provider timeout")))
-    with pytest.raises(GCEOperationError) as caught:
+    with pytest.raises(GCEIndeterminateOperationError) as caught:
         insert_firewall_reconciled(
             client,
             project_id="project-a",
+            zone="us-central1-a",
             firewall=expected,
             attempt=FirewallInsertAttempt("allow", _REQUEST_ID),
             timeout=17,
         )
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
+
+
+def test_done_generic_failure_never_reconciles_matching_firewall_to_success() -> None:
+    expected = _owned_rule("allow", priority=0, deny=False)
+    operation = _Operation(
+        _api_error(api_exceptions.ServiceUnavailable, "provider-private-detail"),
+        status=compute_v1.Operation.Status.DONE,
+        error=compute_v1.Error(errors=[compute_v1.Errors(code="UNKNOWN_CODE")]),
+    )
+    client = _FirewallClient(states=iter([expected]), operation=operation)
+
+    with pytest.raises(GCEOperationError) as caught:
+        insert_firewall_reconciled(
+            client,
+            project_id="project-a",
+            zone="us-central1-a",
+            firewall=expected,
+            attempt=FirewallInsertAttempt("allow", _REQUEST_ID),
+            timeout=17,
+        )
+
+    assert type(caught.value) is GCEOperationError
+    assert [name for name, _kwargs in client.calls] == ["insert"]
 
 
 @pytest.mark.parametrize(
@@ -496,6 +532,7 @@ def test_indeterminate_insert_mismatch_is_collision_and_never_deleted(observed: 
         insert_firewall_reconciled(
             client,
             project_id="project-a",
+            zone="us-central1-a",
             firewall=expected,
             attempt=FirewallInsertAttempt("allow", _REQUEST_ID),
             timeout=17,
@@ -513,6 +550,7 @@ def test_definite_already_exists_is_collision_without_shape_reconciliation() -> 
         insert_firewall_reconciled(
             client,
             project_id="project-a",
+            zone="us-central1-a",
             firewall=expected,
             attempt=FirewallInsertAttempt("allow", _REQUEST_ID),
             timeout=17,
@@ -535,6 +573,7 @@ def test_same_request_retry_already_exists_remains_collision() -> None:
         insert_firewall_reconciled(
             client,
             project_id="project-a",
+            zone="us-central1-a",
             firewall=expected,
             attempt=FirewallInsertAttempt("allow", _REQUEST_ID),
             timeout=17,
@@ -552,6 +591,7 @@ def test_definite_permission_failure_is_not_retried_or_shape_reconciled() -> Non
         insert_firewall_reconciled(
             client,
             project_id="project-a",
+            zone="us-central1-a",
             firewall=expected,
             attempt=FirewallInsertAttempt("allow", _REQUEST_ID),
             timeout=17,
@@ -577,6 +617,7 @@ def test_incomplete_or_wrong_operation_identity_is_never_owned(operation: _Opera
         insert_firewall_reconciled(
             client,
             project_id="project-a",
+            zone="us-central1-a",
             firewall=expected,
             attempt=attempt,
             timeout=17,
@@ -592,6 +633,7 @@ def test_matching_firewall_delete_proves_absence_and_mismatch_is_retained() -> N
     result = delete_matching_firewall(
         client,
         project_id="project-a",
+        zone="us-central1-a",
         expected=expected,
         ownership=FirewallOwnership("allow", "101"),
         timeout=11,
@@ -605,6 +647,7 @@ def test_matching_firewall_delete_proves_absence_and_mismatch_is_retained() -> N
     result = delete_matching_firewall(
         collision,
         project_id="project-a",
+        zone="us-central1-a",
         expected=expected,
         ownership=FirewallOwnership("allow", "101"),
         timeout=11,
@@ -614,6 +657,30 @@ def test_matching_firewall_delete_proves_absence_and_mismatch_is_retained() -> N
     assert [name for name, _kwargs in collision.calls] == ["get"]
 
 
+def test_definitive_firewall_delete_wait_failure_still_accepts_verified_absence() -> None:
+    expected = _owned_rule("allow", priority=0, deny=False)
+    operation = _Operation(
+        _api_error(api_exceptions.ServiceUnavailable, "provider-private-detail"),
+        operation_type="delete",
+        status=compute_v1.Operation.Status.DONE,
+        error=compute_v1.Error(errors=[compute_v1.Errors(code="UNKNOWN_CODE")]),
+    )
+    client = _FirewallClient(states=iter([expected, None]), operation=operation)
+
+    result = delete_matching_firewall(
+        client,
+        project_id="project-a",
+        zone="us-central1-a",
+        expected=expected,
+        ownership=FirewallOwnership("allow", "101"),
+        timeout=11,
+    )
+
+    assert result.state is FirewallState.ABSENT
+    assert operation.calls == [11]
+    assert [name for name, _kwargs in client.calls] == ["get", "delete", "get"]
+
+
 def test_same_name_and_shape_but_different_resource_id_is_never_deleted() -> None:
     expected = _owned_rule("allow", priority=0, deny=False)
     concurrent_winner = _owned_rule("allow", priority=0, deny=False, resource_id=202)
@@ -621,6 +688,7 @@ def test_same_name_and_shape_but_different_resource_id_is_never_deleted() -> Non
     result = delete_matching_firewall(
         client,
         project_id="project-a",
+        zone="us-central1-a",
         expected=expected,
         ownership=FirewallOwnership("allow", "101"),
         timeout=11,
@@ -636,6 +704,7 @@ def test_rule_without_provider_ownership_is_indeterminate_and_never_deleted() ->
     result = delete_matching_firewall(
         client,
         project_id="project-a",
+        zone="us-central1-a",
         expected=expected,
         ownership=None,
         timeout=11,

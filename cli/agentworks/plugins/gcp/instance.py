@@ -24,6 +24,7 @@ from agentworks.plugins.gcp.compute import (
 )
 from agentworks.plugins.gcp.errors import (
     GCEError,
+    GCEIndeterminateOperationError,
     GCEOperationError,
     GCEQuotaError,
     call_google,
@@ -178,10 +179,10 @@ def insert_instance_reconciled(
 
     wait_failure: AgentworksError | None = None
     try:
-        wait_for_extended_operation(operation, label=f"instance {instance.name}", timeout=timeout)
+        wait_for_extended_operation(operation, label=f"instance {instance.name}", zone=zone, timeout=timeout)
     except (AlreadyExistsError, AuthorizationError, NotFoundError, TokenRejectedError, GCEQuotaError):
         raise
-    except GCEOperationError as exc:
+    except GCEIndeterminateOperationError as exc:
         wait_failure = exc
 
     realized = call_google_optional(

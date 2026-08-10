@@ -194,6 +194,11 @@ class GCEPlatform(VMPlatform):
         fixed-command stdin. The external IPv4 remains attached for outbound
         access but is read live and never persisted.
 
+        A definitive capacity failure names the selected zone. Retry later
+        or select another compatible zone. Indeterminate waits instead tell
+        the operator to inspect the named resource before retrying. Provider
+        diagnostics and credential material are never rendered.
+
         Ships as the opt-in `gcp` system plugin. Enable it explicitly before a
         `gcp-gce` vm-site becomes ready.
         """,
@@ -322,6 +327,8 @@ class GCEPlatform(VMPlatform):
         instance_possible = False
         transport: Transport | None = None
         tailscale_ip: str | None = None
+        ordinary_failure: Exception | None = None
+        operator_interrupt: KeyboardInterrupt | None = None
 
         def rollback() -> RollbackReport:
             return rollback_partial_create(
@@ -342,6 +349,7 @@ class GCEPlatform(VMPlatform):
             deny_ownership = insert_firewall_reconciled(
                 firewalls,
                 project_id=self.config.project_id,
+                zone=self.config.zone,
                 firewall=deny,
                 attempt=deny_attempt,
                 timeout=_OPERATION_TIMEOUT_SECONDS,
@@ -352,6 +360,7 @@ class GCEPlatform(VMPlatform):
             allow_ownership = insert_firewall_reconciled(
                 firewalls,
                 project_id=self.config.project_id,
+                zone=self.config.zone,
                 firewall=allow,
                 attempt=allow_attempt,
                 timeout=_OPERATION_TIMEOUT_SECONDS,
@@ -395,18 +404,23 @@ class GCEPlatform(VMPlatform):
             ).complete(request.tailscale_auth_key)
             request.progress.output("GCE credential-free bootstrap and Tailscale join completed")
         except KeyboardInterrupt as primary:
+            operator_interrupt = primary
+        except Exception as primary:
+            ordinary_failure = primary
+
+        if operator_interrupt is not None:
             rollback_after_interrupt(
-                primary,
+                operator_interrupt,
                 rollback,
                 coordinates,
                 instance_ownership=instance_attempt.ownership,
                 allow_ownership=allow_attempt.ownership,
                 deny_ownership=deny_attempt.ownership,
             )
-        except Exception as primary:
+        if ordinary_failure is not None:
             request.progress.log_error("GCE create failed; attempting provider-ID-owned rollback")
             rollback_then_raise(
-                primary,
+                ordinary_failure,
                 rollback,
                 coordinates,
                 instance_ownership=instance_attempt.ownership,
@@ -593,6 +607,7 @@ class GCEPlatform(VMPlatform):
             insert_firewall_reconciled(
                 firewalls,
                 project_id=identity.project_id,
+                zone=identity.zone,
                 firewall=route,
                 attempt=attempt,
                 timeout=_OPERATION_TIMEOUT_SECONDS,
@@ -602,6 +617,7 @@ class GCEPlatform(VMPlatform):
             result = delete_matching_firewall(
                 firewalls,
                 project_id=identity.project_id,
+                zone=identity.zone,
                 expected=route,
                 ownership=attempt.ownership,
                 timeout=_OPERATION_TIMEOUT_SECONDS,
@@ -663,7 +679,12 @@ class GCEPlatform(VMPlatform):
         )
         from agentworks.plugins.gcp.errors import wait_for_extended_operation
 
-        wait_for_extended_operation(operation, label=f"instance {identity.instance_name} {action}", timeout=300.0)
+        wait_for_extended_operation(
+            operation,
+            label=f"instance {identity.instance_name} {action}",
+            zone=identity.zone,
+            timeout=300.0,
+        )
 
     @staticmethod
     def _expected_stable_allow(identity: _VMIdentity) -> Any:
@@ -683,6 +704,7 @@ class GCEPlatform(VMPlatform):
             result = delete_matching_firewall(
                 firewalls,
                 project_id=identity.project_id,
+                zone=identity.zone,
                 expected=expected,
                 ownership=FirewallOwnership(identity.allow_rule, identity.allow_rule_id),
                 timeout=_OPERATION_TIMEOUT_SECONDS,

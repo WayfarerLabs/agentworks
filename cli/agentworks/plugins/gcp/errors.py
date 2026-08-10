@@ -27,7 +27,18 @@ class GCEQuotaError(GCEError):
 
 
 class GCEOperationError(GCEError):
-    """A bounded Compute Engine operation failed or did not finish."""
+    """A completed Compute Engine operation failed definitively."""
+
+
+class GCECapacityError(GCEOperationError):
+    """A completed Compute Engine operation failed for zonal capacity."""
+
+
+class GCEIndeterminateOperationError(GCEError):
+    """A bounded Compute Engine wait ended without a known outcome."""
+
+
+_ZONE_CAPACITY_CODE = "ZONE_RESOURCE_POOL_EXHAUSTED"
 
 
 def google_error(exc: Exception, *, operation: str, resource: str | None = None) -> AgentworksError:
@@ -114,27 +125,62 @@ def call_google_optional[T](call: Callable[[], T], *, operation: str, resource: 
     raise failure
 
 
-def wait_for_extended_operation(operation: Any, *, label: str, timeout: float) -> None:
+def wait_for_extended_operation(operation: Any, *, label: str, zone: str, timeout: float) -> None:
     """Wait once for a Compute extended operation and sanitize failure data."""
     failure: AgentworksError | None = None
     try:
         operation.result(timeout=timeout)
     except Exception as exc:
-        mapped = google_error(exc, operation=f"waiting for {label}", resource=label)
-        if isinstance(mapped, ConnectivityError) or type(mapped) is GCEError:
-            failure = GCEOperationError(
-                f"Google Cloud operation did not complete while waiting for {label}",
-                entity_kind="gcp-resource",
-                entity_name=label,
-                hint="inspect the named resource before retrying because the operation outcome is indeterminate",
-            )
+        if _cached_operation_is_done(operation):
+            failure = _completed_operation_failure(operation, label=label, zone=zone)
         else:
-            failure = mapped
+            mapped = google_error(exc, operation=f"waiting for {label}", resource=label)
+            if isinstance(mapped, ConnectivityError) or type(mapped) is GCEError:
+                failure = GCEIndeterminateOperationError(
+                    f"Google Cloud operation did not complete while waiting for {label}",
+                    entity_kind="gcp-resource",
+                    entity_name=label,
+                    hint=("inspect the named resource before retrying because the operation outcome is indeterminate"),
+                )
+            else:
+                failure = mapped
     if failure is not None:
         raise failure
-    if getattr(operation, "error_code", None):
-        raise GCEOperationError(
-            f"Google Cloud operation failed while waiting for {label}",
+
+
+def _cached_operation_is_done(operation: Any) -> bool:
+    """Read only the operation's cached status, never a refreshing predicate."""
+    from google.cloud import compute_v1
+
+    try:
+        return bool(operation.status == compute_v1.Operation.Status.DONE)
+    except Exception:
+        return False
+
+
+def _completed_operation_failure(operation: Any, *, label: str, zone: str) -> GCEOperationError:
+    """Classify one DONE failure from its allowlisted structured code only."""
+    if _has_zone_capacity_code(operation):
+        return GCECapacityError(
+            f"Google Cloud had insufficient capacity in zone '{zone}' while waiting for {label}",
             entity_kind="gcp-resource",
             entity_name=label,
+            hint=f"retry later or select another zone instead of '{zone}'",
         )
+    return GCEOperationError(
+        f"Google Cloud operation failed while waiting for {label}",
+        entity_kind="gcp-resource",
+        entity_name=label,
+    )
+
+
+def _has_zone_capacity_code(operation: Any) -> bool:
+    """Match the one safe capacity code without reading provider diagnostics."""
+    try:
+        details = operation.error.errors
+        for detail in details:
+            if detail.code == _ZONE_CAPACITY_CODE:
+                return True
+    except Exception:
+        return False
+    return False

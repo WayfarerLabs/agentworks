@@ -174,7 +174,12 @@ def delete_instance_and_verify(
             instance_name=coordinates.instance_name,
             expected_resource_id=None if ownership is None else ownership.resource_id,
         )
-        wait_for_extended_operation(operation, label=f"instance {coordinates.instance_name}", timeout=timeout)
+        wait_for_extended_operation(
+            operation,
+            label=f"instance {coordinates.instance_name}",
+            zone=coordinates.zone,
+            timeout=timeout,
+        )
     except AgentworksError:
         pass
     return _reconcile_instance(
@@ -219,6 +224,7 @@ def rollback_partial_create(
     allow_result = delete_matching_firewall(
         firewalls,
         project_id=coordinates.project_id,
+        zone=coordinates.zone,
         expected=expected_allow,
         ownership=allow_ownership,
         timeout=timeout,
@@ -237,6 +243,7 @@ def rollback_partial_create(
         deny_result = delete_matching_firewall(
             firewalls,
             project_id=coordinates.project_id,
+            zone=coordinates.zone,
             expected=expected_deny,
             ownership=deny_ownership,
             timeout=timeout,
@@ -270,10 +277,24 @@ def rollback_then_raise(
     """Run bounded cleanup without replacing an ordinary primary failure."""
     report: RollbackReport | None = None
     cleanup_failed = False
+    first_interrupt: KeyboardInterrupt | None = None
     try:
         report = rollback()
+    except KeyboardInterrupt as interrupt:
+        first_interrupt = interrupt
     except Exception:
         cleanup_failed = True
+    if first_interrupt is not None:
+        first_interrupt.__cause__ = None
+        first_interrupt.__context__ = None
+        rollback_after_interrupt(
+            first_interrupt,
+            rollback,
+            coordinates,
+            instance_ownership=instance_ownership,
+            allow_ownership=allow_ownership,
+            deny_ownership=deny_ownership,
+        )
     if cleanup_failed:
         output.warn(
             "GCE rollback failed unexpectedly. "
@@ -295,6 +316,8 @@ def rollback_then_raise(
                 deny_ownership=deny_ownership,
             )
         )
+    primary.__cause__ = None
+    primary.__context__ = None
     raise primary
 
 
@@ -352,6 +375,8 @@ def rollback_after_interrupt(
                 deny_ownership=deny_ownership,
             )
         )
+    primary.__cause__ = None
+    primary.__context__ = None
     raise primary
 
 

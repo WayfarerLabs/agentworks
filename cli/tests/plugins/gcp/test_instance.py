@@ -10,7 +10,7 @@ from google.api_core import exceptions as api_exceptions
 from google.cloud import compute_v1
 
 from agentworks.errors import AlreadyExistsError
-from agentworks.plugins.gcp.errors import GCEOperationError
+from agentworks.plugins.gcp.errors import GCECapacityError, GCEOperationError
 from agentworks.plugins.gcp.instance import (
     InstanceInsertAttempt,
     build_instance_resource,
@@ -37,12 +37,16 @@ class _Operation:
         target_link: str = "projects/project-a/zones/us-central1-a/instances/vm-a",
         operation_type: str = "insert",
         failure: BaseException | None = None,
+        status: object = None,
+        error: object = None,
     ) -> None:
         self.client_operation_id = request_id
         self.target_id = target_id
         self.target_link = target_link
         self.operation_type = operation_type
         self.failure = failure
+        self.status = status
+        self.error = error
         self.waits: list[float] = []
 
     def result(self, *, timeout: float) -> None:
@@ -169,6 +173,31 @@ def test_indeterminate_wait_reconciles_only_matching_provider_id() -> None:
             attempt=InstanceInsertAttempt("vm-a", _REQUEST_ID),
             timeout=17,
         )
+
+
+def test_done_capacity_failure_never_reconciles_matching_instance_to_success() -> None:
+    realized = _resource()
+    realized.id = 201
+    operation = _Operation(
+        failure=_api_error(api_exceptions.ServiceUnavailable, "provider-private-detail"),
+        status=compute_v1.Operation.Status.DONE,
+        error=compute_v1.Error(errors=[compute_v1.Errors(code="ZONE_RESOURCE_POOL_EXHAUSTED")]),
+    )
+    client = _Instances(iter([realized]), operation=operation)
+
+    with pytest.raises(GCECapacityError) as caught:
+        insert_instance_reconciled(
+            client,
+            project_id="project-a",
+            zone="us-central1-a",
+            instance=_resource(),
+            attempt=InstanceInsertAttempt("vm-a", _REQUEST_ID),
+            timeout=17,
+        )
+
+    assert "us-central1-a" in str(caught.value)
+    assert "retry later or select another zone" in (caught.value.hint or "")
+    assert [name for name, _kwargs in client.calls] == ["insert"]
 
 
 @pytest.mark.parametrize(

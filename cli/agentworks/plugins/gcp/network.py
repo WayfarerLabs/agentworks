@@ -20,6 +20,7 @@ from agentworks.errors import (
 from agentworks.plugins.gcp.compute import canonical_resource_url, provider_resource_id
 from agentworks.plugins.gcp.errors import (
     GCEError,
+    GCEIndeterminateOperationError,
     GCEOperationError,
     GCEQuotaError,
     call_google,
@@ -364,6 +365,7 @@ def insert_firewall_reconciled(
     client: Any,
     *,
     project_id: str,
+    zone: str,
     firewall: Any,
     attempt: FirewallInsertAttempt,
     timeout: float,
@@ -429,10 +431,15 @@ def insert_firewall_reconciled(
 
     wait_failure: AgentworksError | None = None
     try:
-        wait_for_extended_operation(operation, label=f"firewall rule {firewall.name}", timeout=timeout)
+        wait_for_extended_operation(
+            operation,
+            label=f"firewall rule {firewall.name}",
+            zone=zone,
+            timeout=timeout,
+        )
     except (AlreadyExistsError, AuthorizationError, NotFoundError, TokenRejectedError, GCEQuotaError):
         raise
-    except GCEOperationError as exc:
+    except GCEIndeterminateOperationError as exc:
         wait_failure = exc
 
     state = reconcile_firewall(
@@ -463,6 +470,7 @@ def delete_matching_firewall(
     client: Any,
     *,
     project_id: str,
+    zone: str,
     expected: Any,
     ownership: FirewallOwnership | None,
     timeout: float,
@@ -510,7 +518,12 @@ def delete_matching_firewall(
             rule_name=str(expected.name),
             expected_resource_id=None if ownership is None else ownership.resource_id,
         )
-        wait_for_extended_operation(operation, label=f"firewall rule {expected.name}", timeout=timeout)
+        wait_for_extended_operation(
+            operation,
+            label=f"firewall rule {expected.name}",
+            zone=zone,
+            timeout=timeout,
+        )
     except AgentworksError:
         pass
 

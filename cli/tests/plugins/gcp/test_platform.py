@@ -15,9 +15,17 @@ from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import BootstrapProgress, ProvisionRequest, ssh_exposure
 from agentworks.capabilities.vm_platform.tailscale_join import TAILSCALE_JOIN_STDIN_COMMAND
 from agentworks.db import VMRow, VMStatus
-from agentworks.errors import AlreadyExistsError, ConnectivityError, ProvisioningError, StateError
+from agentworks.errors import AlreadyExistsError, ConfigError, ConnectivityError, ProvisioningError, StateError
+from agentworks.guide import GuideMode
+from agentworks.guide.service import render_guide
 from agentworks.plugins.gcp.bootstrap import GCE_READINESS_COMMAND
-from agentworks.plugins.gcp.errors import GCEOperationError
+from agentworks.plugins.gcp.cleanup import InstanceState, RollbackReport
+from agentworks.plugins.gcp.errors import (
+    GCECapacityError,
+    GCEIndeterminateOperationError,
+    GCEOperationError,
+)
+from agentworks.plugins.gcp.network import FirewallState
 from agentworks.plugins.gcp.platform import GCEPlatform
 from agentworks.ssh import SSHError, SSHResult
 
@@ -354,6 +362,26 @@ def _vm(result_metadata: dict[str, str]) -> VMRow:
     )
 
 
+def test_rendered_gcp_guide_teaches_safe_selected_zone_capacity_recovery() -> None:
+    def unavailable_config() -> object:
+        raise ConfigError("configuration intentionally unavailable")
+
+    rendered = render_guide(
+        ("vm-platform/gcp-gce",),
+        GuideMode.AGENT,
+        load_config_fn=unavailable_config,
+    ).markdown
+
+    assert "A definitive capacity failure names the selected zone" in rendered
+    assert "Retry later\nor select another compatible zone" in rendered
+    assert "inspect the named resource before retrying" in rendered
+    assert "Provider\ndiagnostics and credential material are never rendered" in rendered
+    assert "ZONE_RESOURCE_POOL_EXHAUSTED" not in rendered
+    assert _TAILSCALE_SENTINEL not in rendered
+    assert _SERVICE_SENTINEL not in rendered
+    assert "gcloud compute instances create" not in rendered
+
+
 def test_full_create_retains_secret_free_request_and_joins_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -498,6 +526,42 @@ def test_first_interrupt_carries_operation_ownership_through_platform_rollback(
         assert len(cache.firewalls.delete_requests) == 2
 
 
+def test_ordinary_failure_cleanup_interrupt_reenters_idempotent_platform_rollback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = KeyboardInterrupt("first")
+    transport = _Transport(failures={TAILSCALE_JOIN_STDIN_COMMAND: [SSHError(_SERVICE_SENTINEL)]})
+    platform, cache = _platform(monkeypatch, transport)
+    rollback_calls = 0
+
+    def partial_then_complete_rollback(**kwargs: object) -> RollbackReport:
+        nonlocal rollback_calls
+        rollback_calls += 1
+        if rollback_calls == 1:
+            expected_allow = cast("compute_v1.Firewall", kwargs["expected_allow"])
+            cache.firewalls.resources.pop(str(expected_allow.name))
+            raise first
+        cache.instances.resource = None
+        cache.firewalls.resources.clear()
+        return RollbackReport(InstanceState.ABSENT, FirewallState.ABSENT, FirewallState.ABSENT)
+
+    monkeypatch.setattr(
+        "agentworks.plugins.gcp.platform.rollback_partial_create",
+        partial_then_complete_rollback,
+    )
+
+    with pytest.raises(KeyboardInterrupt) as caught:
+        platform.create(_request(), _ctx())
+
+    assert caught.value is first
+    assert first.__cause__ is None
+    assert first.__context__ is None
+    assert _SERVICE_SENTINEL not in repr(first)
+    assert rollback_calls == 2
+    assert cache.instances.resource is None
+    assert cache.firewalls.resources == {}
+
+
 def test_second_interrupt_abandons_platform_rollback_without_mutating_survivors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -557,6 +621,33 @@ def test_lifecycle_is_idempotent_live_ip_and_transient_routes_are_distinct(
     assert instances.resource is None
     assert firewalls.resources == {}
     assert len(instances.delete_requests) == 1
+
+
+@pytest.mark.parametrize(
+    "wait_failure",
+    [
+        GCEOperationError("definitive"),
+        GCECapacityError("capacity"),
+        GCEIndeterminateOperationError("indeterminate"),
+    ],
+    ids=("definitive", "capacity", "indeterminate"),
+)
+def test_power_operations_propagate_every_wait_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    wait_failure: GCEOperationError | GCECapacityError | GCEIndeterminateOperationError,
+) -> None:
+    platform, _cache = _platform(monkeypatch, _Transport())
+    vm = _vm(platform.create(_request(), _ctx()).platform_metadata)
+
+    def fail_wait(*_args: object, **_kwargs: object) -> None:
+        raise wait_failure
+
+    monkeypatch.setattr("agentworks.plugins.gcp.errors.wait_for_extended_operation", fail_wait)
+
+    with pytest.raises(type(wait_failure)) as caught:
+        platform.stop(vm, _ctx())
+
+    assert caught.value is wait_failure
 
 
 def test_join_failure_rolls_back_and_exception_graph_is_secret_free(

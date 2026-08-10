@@ -137,6 +137,13 @@ through fixed-command SSH stdin. The resulting VM row records the original canon
 source prefixes so later cleanup can reconstruct the create-time allow independently; it still does
 not store the VM's external IPv4.
 
+If Google Cloud reports insufficient capacity in the selected zone, Agentworks treats that completed
+operation as a definitive failure and rolls back the partial create. Retry later or select another
+zone that is compatible with the configured subnet, network, and machine type. This differs from an
+indeterminate wait: when Agentworks cannot establish the operation outcome, inspect the named
+resource before retrying. Agentworks does not render the provider's error message, details, or raw
+error code in either case.
+
 The external IPv4 is an outbound and recovery route, not standing inbound exposure. Agentworks reads
 it live after power transitions and never stores it. After Tailscale is ready, Agentworks closes the
 bootstrap allow; if closure cannot be proven, it retains and reports the rule. After a successful

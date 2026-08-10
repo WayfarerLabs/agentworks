@@ -38,8 +38,6 @@ def _api_error(kind: type[Exception], message: str) -> Exception:
 
 
 class _Operation:
-    error_code = None
-
     def __init__(
         self,
         log: list[str],
@@ -50,6 +48,8 @@ class _Operation:
         operation_type: str = "delete",
         target_id: int = 0,
         target_link: str = "",
+        status: object = None,
+        error: object = None,
     ) -> None:
         self.log = log
         self.name = name
@@ -58,6 +58,8 @@ class _Operation:
         self.operation_type = operation_type
         self.target_id = target_id
         self.target_link = target_link
+        self.status = status
+        self.error = error
 
     def result(self, *, timeout: float) -> None:
         self.log.append(f"wait:{self.name}:{timeout}")
@@ -66,14 +68,25 @@ class _Operation:
 
 
 class _Instances:
-    def __init__(self, states: Iterator[object | Exception | None], log: list[str]) -> None:
+    def __init__(
+        self,
+        states: Iterator[object | BaseException | None],
+        log: list[str],
+        *,
+        delete_failure: Exception | None = None,
+        delete_status: object = None,
+        delete_error: object = None,
+    ) -> None:
         self.states = states
         self.log = log
+        self.delete_failure = delete_failure
+        self.delete_status = delete_status
+        self.delete_error = delete_error
 
     def get(self, **_kwargs: object) -> object:
         self.log.append("instance:get")
         state = next(self.states)
-        if isinstance(state, Exception):
+        if isinstance(state, BaseException):
             raise state
         if state is None:
             raise _api_error(api_exceptions.NotFound, "gone")
@@ -85,16 +98,19 @@ class _Instances:
         return _Operation(
             self.log,
             "instance",
+            self.delete_failure,
             request_id=request.request_id,
             target_id=201,
             target_link=(f"projects/{request.project}/zones/{request.zone}/instances/{request.instance}"),
+            status=self.delete_status,
+            error=self.delete_error,
         )
 
 
 class _Firewalls:
     def __init__(
         self,
-        states: dict[str, Iterator[compute_v1.Firewall | Exception | None]],
+        states: dict[str, Iterator[compute_v1.Firewall | BaseException | None]],
         log: list[str],
     ) -> None:
         self.states = states
@@ -103,7 +119,7 @@ class _Firewalls:
     def get(self, *, firewall: str, **_kwargs: object) -> compute_v1.Firewall:
         self.log.append(f"firewall:get:{firewall}")
         state = next(self.states[firewall])
-        if isinstance(state, Exception):
+        if isinstance(state, BaseException):
             raise state
         if state is None:
             raise _api_error(api_exceptions.NotFound, "gone")
@@ -189,6 +205,40 @@ def test_total_rollback_closes_allow_before_instance_and_deny_after_absence() ->
         "wait:vm-a-deny:9",
         "firewall:get:vm-a-deny",
     ]
+
+
+def test_definitive_instance_delete_wait_failure_still_accepts_verified_absence() -> None:
+    log: list[str] = []
+    allow = _allow()
+    deny = _deny()
+    report = rollback_partial_create(
+        instances=_Instances(
+            iter([_instance(), None]),
+            log,
+            delete_failure=_api_error(api_exceptions.ServiceUnavailable, "provider-private-detail"),
+            delete_status=compute_v1.Operation.Status.DONE,
+            delete_error=compute_v1.Error(errors=[compute_v1.Errors(code="UNKNOWN_CODE")]),
+        ),
+        firewalls=_Firewalls(
+            {
+                allow.name: iter([None]),
+                deny.name: iter([deny, None]),
+            },
+            log,
+        ),
+        coordinates=_COORDINATES,
+        expected_allow=allow,
+        expected_deny=deny,
+        allow_ownership=_ALLOW_OWNERSHIP,
+        deny_ownership=_DENY_OWNERSHIP,
+        instance_ownership=_INSTANCE_OWNERSHIP,
+        instance_possible=True,
+        timeout=9,
+    )
+
+    assert report.clean
+    assert "wait:instance:9" in log
+    assert "firewall:delete:vm-a-deny" in log
 
 
 def test_surviving_instance_keeps_deny_and_reports_exact_state() -> None:
@@ -355,6 +405,116 @@ def test_ordinary_cleanup_cannot_replace_primary_failure(monkeypatch: pytest.Mon
     assert "firewall-rules describe vm-a-allow --project project-a" in message
     assert "firewall-rules describe vm-a-deny --project project-a" in message
     assert "firewall-rules delete" not in message
+
+
+def test_interrupt_after_partial_ordinary_rollback_converges_and_supersedes_primary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    log: list[str] = []
+    warnings: list[str] = []
+    monkeypatch.setattr("agentworks.plugins.gcp.cleanup.output.warn", warnings.append)
+    first = KeyboardInterrupt("first")
+    ordinary = RuntimeError("ordinary-provider-secret")
+    ordinary.__cause__ = RuntimeError("ordinary-provider-secret")
+    allow = _allow()
+    deny = _deny()
+    instances = _Instances(iter([first, _instance(), None]), log)
+    firewalls = _Firewalls(
+        {
+            allow.name: iter([allow, None, None]),
+            deny.name: iter([deny, None]),
+        },
+        log,
+    )
+
+    def rollback() -> RollbackReport:
+        return rollback_partial_create(
+            instances=instances,
+            firewalls=firewalls,
+            coordinates=_COORDINATES,
+            expected_allow=allow,
+            expected_deny=deny,
+            allow_ownership=_ALLOW_OWNERSHIP,
+            deny_ownership=_DENY_OWNERSHIP,
+            instance_ownership=_INSTANCE_OWNERSHIP,
+            instance_possible=True,
+            timeout=9,
+        )
+
+    with pytest.raises(KeyboardInterrupt) as caught:
+        rollback_then_raise(
+            ordinary,
+            rollback,
+            _COORDINATES,
+            instance_ownership=_INSTANCE_OWNERSHIP,
+            allow_ownership=_ALLOW_OWNERSHIP,
+            deny_ownership=_DENY_OWNERSHIP,
+        )
+
+    assert caught.value is first
+    assert first.__cause__ is None
+    assert first.__context__ is None
+    assert "ordinary-provider-secret" not in repr(first)
+    assert log.count("firewall:delete:vm-a-allow") == 1
+    assert log.count("instance:delete") == 1
+    assert log.count("firewall:delete:vm-a-deny") == 1
+    assert warnings == [
+        "Interrupted: cleaning up partial GCE resources for 'vm-a', please wait (Ctrl-C again to abandon cleanup)..."
+    ]
+
+
+def test_second_interrupt_after_partial_ordinary_rollback_is_only_abandon_signal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    log: list[str] = []
+    warnings: list[str] = []
+    monkeypatch.setattr("agentworks.plugins.gcp.cleanup.output.warn", warnings.append)
+    first = KeyboardInterrupt("first")
+    second = KeyboardInterrupt("second")
+    allow = _allow()
+    deny = _deny()
+    instances = _Instances(iter([first, second]), log)
+    firewalls = _Firewalls(
+        {
+            allow.name: iter([allow, None, None]),
+            deny.name: iter([deny]),
+        },
+        log,
+    )
+
+    def rollback() -> RollbackReport:
+        return rollback_partial_create(
+            instances=instances,
+            firewalls=firewalls,
+            coordinates=_COORDINATES,
+            expected_allow=allow,
+            expected_deny=deny,
+            allow_ownership=_ALLOW_OWNERSHIP,
+            deny_ownership=_DENY_OWNERSHIP,
+            instance_ownership=_INSTANCE_OWNERSHIP,
+            instance_possible=True,
+            timeout=9,
+        )
+
+    with pytest.raises(KeyboardInterrupt) as caught:
+        rollback_then_raise(
+            RuntimeError("ordinary"),
+            rollback,
+            _COORDINATES,
+            instance_ownership=_INSTANCE_OWNERSHIP,
+            allow_ownership=_ALLOW_OWNERSHIP,
+            deny_ownership=_DENY_OWNERSHIP,
+        )
+
+    assert caught.value is first
+    assert log.count("firewall:delete:vm-a-allow") == 1
+    assert "instance:delete" not in log
+    assert "firewall:delete:vm-a-deny" not in log
+    message = "\n".join(warnings)
+    assert "Cleanup abandoned" in message
+    assert "project 'project-a', zone 'us-central1-a', instance 'vm-a'" in message
+    assert "expected provider IDs: instance '201', allow '101', deny '102'" in message
+    assert "Manual cleanup" in message
 
 
 def test_first_interrupt_rolls_back_and_reraises_original_identity(monkeypatch: pytest.MonkeyPatch) -> None:
