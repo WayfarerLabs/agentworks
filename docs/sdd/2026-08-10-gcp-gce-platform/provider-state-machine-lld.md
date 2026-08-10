@@ -48,7 +48,7 @@ Create may enter mutation only after all of these succeed:
 4. operator IPv4 SSH-prefix resolution;
 5. `AFTER_CLASSIC_FIREWALL` network-policy order plus classic VPC priority-zero allow/deny conflict
    inspection;
-6. machine catalog selection plus live CPU/memory/architecture verification;
+6. machine catalog selection plus live CPU/memory and conditional architecture verification;
 7. `debian-cloud` Debian image-family and zonal `pd-balanced` disk-type resolution;
 8. instance, stable firewall-name, and normalized-name collision checks;
 9. credential-free startup request construction.
@@ -169,9 +169,10 @@ another route.
 
 ## Power and status
 
-Status maps live provider state. Not-found maps to deleted. Start reads status and no-ops when
-already running; stop reads status and no-ops when already terminated/stopped. Real transitions wait
-for their operation. The external IP is read live after start and never persisted.
+Status maps live provider state. Not-found maps to `UNKNOWN` because the shared status contract has
+no deleted member. Start reads status and no-ops when already running; stop reads status and no-ops
+when already terminated/stopped. Real transitions wait for their operation. The external IP is read
+live after start and never persisted.
 
 ## Explicit delete
 

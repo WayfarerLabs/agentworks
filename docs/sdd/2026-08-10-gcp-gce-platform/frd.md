@@ -159,13 +159,15 @@ transport, transient platform shell, `post_tailscale_ready`, and `secure_failed_
 idempotency and error taxonomy as Azure/AWS. Platform metadata contains stable GCP identifiers and
 owned firewall names, never credentials or a cached public IP.
 
-Create uses the smallest selected machine type, then verifies its provider-reported CPU, memory, and
-architecture before choosing the matching Debian 12 image. It creates a balanced persistent boot
-disk sized from the VM template and explicitly marked `auto_delete`, instance-metadata SSH keys with
-project keys blocked, and deterministic GCE-valid instance, tag, and firewall names. Exact bounded
-SHA-256-based derivations make every retained identity collision-safe for underscores, leading
-digits, case, invalid runs, suffix reservation, and truncation. Start/stop guard on live state to
-enforce idempotency, and public IP reads always use live provider state.
+Create uses the smallest selected machine type, then verifies its provider-reported CPU and memory
+before choosing the matching Debian 12 image. When GCE populates its optional output architecture,
+that value must also match the declaration; omission is unknown and leaves the declared catalog
+authoritative. Create uses a balanced persistent boot disk sized from the VM template and explicitly
+marked `auto_delete`, instance-metadata SSH keys with project keys blocked, and deterministic
+GCE-valid instance, tag, and firewall names. Exact bounded SHA-256-based derivations make every
+retained identity collision-safe for underscores, leading digits, case, invalid runs, suffix
+reservation, and truncation. Start/stop guard on live state to enforce idempotency, and public IP
+reads always use live provider state.
 
 ### R9: failure and interrupt semantics
 

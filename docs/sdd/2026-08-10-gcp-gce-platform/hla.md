@@ -173,8 +173,9 @@ The complete-or-raise sequence is:
 
 1. Select the smallest machine type satisfying `ProvisionRequest.cpus` and `memory_gib`, ordered by
    `(cpus, memory, type, arch)` so equal-shape catalogs remain order-independent; resolve the live
-   machine type and verify its CPU, memory, and architecture match the catalog declaration; resolve
-   `projects/debian-cloud/global/images/family/debian-12` or
+   machine type and verify its CPU and memory match the catalog declaration. If GCE populates the
+   output-only architecture field, it must also match; an omitted value is unknown and leaves the
+   declaration authoritative. Resolve `projects/debian-cloud/global/images/family/debian-12` or
    `projects/debian-cloud/global/images/family/debian-12-arm64` and the zonal `pd-balanced` disk
    request.
 2. Derive every retained identity from `request.hostname` with the exact formulas in the provider

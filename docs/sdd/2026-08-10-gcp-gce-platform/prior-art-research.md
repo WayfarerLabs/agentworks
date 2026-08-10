@@ -61,14 +61,16 @@ Decisions:
   constrains instance names to lowercase RFC1035 form, while Agentworks VM names may contain
   underscores and begin with digits.
 - [`MachineType.architecture`](https://docs.cloud.google.com/python/docs/reference/compute/latest/google.cloud.compute_v1.types.MachineType)
-  exposes the provider-reported architecture alongside guest CPU and memory fields.
+  is an output-only proto field alongside guest CPU and memory fields. Live GCE responses may omit
+  it, which the Python model exposes as an empty string.
 
 Decisions:
 
 - normalize invalid Agentworks names deterministically, prefix a leading non-letter, and append a
   stable original-name hash whenever normalization changes or truncates the input;
-- select from the declared catalog, then read the live machine type and verify CPU, memory, and
-  architecture before mutation;
+- select from the declared catalog, then read the live machine type and verify CPU and memory before
+  mutation; verify architecture only when the provider populates it, otherwise retain the declared
+  catalog value without deriving architecture from the machine-type name;
 - map `x86_64` to `debian-12` and `arm64` to `debian-12-arm64`.
 - resolve both families from the public `debian-cloud` image project, never the target project.
 
