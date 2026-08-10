@@ -11,6 +11,24 @@ compromised, or behave maliciously. Its security goal is not to establish that t
 trustworthy. It is to preserve operator control and limit what they can reach when something goes
 wrong. Prompt instructions are not a security boundary.
 
+### Harness Controls and Defense in Depth
+
+Harnesses and other applications can provide permission models, approval prompts, and their own
+sandboxes. These controls are valuable: they prevent many accidental actions, make intent visible,
+and can stop behavior that violates an operator's policy. Use them.
+
+They are also the first line of defense, not the only one. A bug, compromise, misconfiguration, or
+sandbox escape in the application layer can bypass the controls that layer provides. Fine-grained
+approval can also carry substantial usability cost, especially when useful autonomy requires a human
+to review every tool call.
+
+Agentworks adds an enforcement layer below the harness. Linux identities, group membership,
+filesystem permissions, credential scope, and VM boundaries constrain every process running as the
+workload, whether it is a supported harness, another application, or a plain shell. Those controls
+do not depend on the application recognizing or cooperating with them. They complement security at
+the application layer rather than replace it, and remain subject to lower-layer vulnerabilities such
+as kernel or hypervisor compromise.
+
 ### Isolation Model and Current Limitations
 
 A VM is the strongest isolation boundary Agentworks provides. Within a VM, agents run as separate
