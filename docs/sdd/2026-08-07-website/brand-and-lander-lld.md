@@ -21,10 +21,10 @@ one checkpoint or the initial approach to one target site. A **site** is one pla
 NOC. **Commanded thrust** is the post-input, post-assist, post-fuel engine value shared by physics
 and plumes. **Manual steer** is the normalized signed turn intent before angular assistance;
 negative is left and positive is right. **Thrust-vector angle** is the manual-steer-derived
-direction shared by both engine forces and both rendered plumes. **Mission time** excludes hidden
-time. A **demonstrated minimum** is the smallest fuel allowance, at the pinned fuel quantum, that
-completes one checked-in constructive reference schedule. It is not a global mathematical optimum
-over all possible controls.
+direction shared by both engine forces and both rendered plumes while effective thrust is nonzero;
+it is zero at zero effective thrust. **Mission time** excludes hidden time. A **demonstrated
+minimum** is the smallest fuel allowance, at the pinned fuel quantum, that completes one checked-in
+constructive reference schedule. It is not a global mathematical optimum over all possible controls.
 
 The semantic 404, breadcrumb home link, and dedicated Lander shell remain independent of the game
 subtree. Both shells render the same game fragment.
@@ -436,9 +436,12 @@ checkpoint, failureCause, crashOrdinal, crash
 ```
 
 `commanded` is exactly `{left,right,vectorAngle}`: post-assist/post-fuel effective engines plus the
-manual-steer-derived angle in degrees. It is the sole renderer input for plume length and direction;
-the controller never reconstructs steer from the assisted differential. Every non-flight, input
-teardown, failure, and zero-fuel transition sets all three values to zero.
+manual-steer-derived angle in degrees when their sum is nonzero. It is the sole renderer input for
+plume length and direction; the controller never reconstructs steer from the assisted differential.
+Whenever effective `left+right` is zero, including an idle or already-exhausted flight step,
+`vectorAngle` is exactly zero even though that step's physics may retain its pre-assist manual `s`.
+Every non-flight, input teardown, failure, and empty-fuel zero-force transition therefore sets all
+three values to zero.
 
 The object is replaced by pure model transitions; nested collections are copied on change. World
 descriptors returned by `lander-world.js` are immutable values. Fuel is an unbounded nonnegative
@@ -578,7 +581,9 @@ Engine-off flight retains both linear and angular velocity; crash fragments neve
 
 Fuel burn is `FUEL_FLOW*(assistedLeft+assistedRight)*STEP_SECONDS`. If reserve is smaller, scale
 both assisted engines by `fuel/requestedBurn`, exhausting it without favoring an engine. Effective
-engines drive physics and plume length. Zero fuel means zero thrust. Fuel has no mass effect.
+engines drive physics and plume length. Store `commanded.vectorAngle=MAX_THRUST_VECTOR*s` only when
+the effective engine sum is nonzero; otherwise store zero. Zero fuel means zero thrust and cannot
+leave an idle plume gimbaled. Fuel has no mass effect.
 
 Each step applies queued input through the step end, resolves effective thrust, stores the previous
 pose, then uses the pre-step angle and semi-implicit Euler:
@@ -624,22 +629,39 @@ difference `TURN_DIFFERENTIAL=0.375`. Turn-only rows have that same difference a
 Thus steering never obtains the former additive forward-thrust bonus.
 
 Primary pointer down starts at equal `.72` thrust. For horizontal displacement, retain the existing
-dead zone and full-bias distance, then let signed normalized `bias` be in `[-1,1]`, `m=abs(bias)`,
-and compute:
+dead zone and full-bias distance and let signed normalized `bias` be in `[-1,1]`. Resolve input
+sources as intents before producing an engine pair:
 
 ```text
-base = 0.72 - 0.12*m
-halfDifference = 0.1875*bias
-pointerLeft = base + halfDifference
-pointerRight = base - halfDifference
-final engine = max(keyboard engine, pointer engine)
+keyboardSteer = -1 for left only, 1 for right only, otherwise 0
+pointerSteer = bias while the pointer collective is active, otherwise 0
+s = keyboardSteer != 0 ? keyboardSteer : pointerSteer
+collectiveActive = keyboardCollective || pointerCollectiveActive
+
+if collectiveActive:
+    base = 0.72 - 0.12*abs(s)
+    halfDifference = 0.1875*s
+    rawLeft = base + halfDifference
+    rawRight = base - halfDifference
+else:
+    turnTotal = 0.375*abs(s)
+    rawLeft = s > 0 ? turnTotal : 0
+    rawRight = s < 0 ? turnTotal : 0
 ```
 
-At full drag, pointer requests are exactly the corresponding steered-collective row. Component-wise
-maximum remains the deterministic keyboard/pointer arbitration when both sources are active; the
-final raw pair then supplies `T` and `s` to section 8.1. Every input, gimbal, assist, and plume
-value is a pure consequence of the timestamped physical snapshot; the controller keeps no parallel
-physics state.
+`pointerCollectiveActive` is true during the captured primary pointer and the retained short-tap
+pulse. A nonzero keyboard steer owns the signed manual steer even while the pointer is active;
+opposing keyboard steers cancel and therefore allow an active pointer bias to own it. Pointer alone
+still yields exactly `(.72,.72)`, `(.75375,.56625)`, and `(.7875,.4125)` at rightward bias `0`,
+`.5`, and `1`, with leftward values mirrored. At full drag it yields the corresponding
+steered-collective row.
+
+This arbitration produces one pair rather than combining engine components from independent pairs.
+For collective input its total is exactly `1.44-0.24*abs(s)`, in `[1.20,1.44]`; without collective
+input its total is at most `.375`. Thus no simultaneous keyboard/pointer state exceeds the straight
+collective axial ceiling, and manual steer is never ambiguous. The final raw pair supplies `T` and
+`s` to section 8.1. Every input, gimbal, assist, and plume value is a pure consequence of the
+timestamped physical snapshot; the controller keeps no parallel physics state.
 
 The model retains the one immutable scheduler exported by `lander-model.js`. The first callback
 renders without stepping. A frame delta less than zero or greater than `0.1 s` discards the gap,
@@ -887,8 +909,8 @@ edges. Track aliases by physical code. Release accepted keys even after focus mo
 any active state only on the shell path. Unmodified `r` and native Restart work only in `failed`.
 Window blur, shell focusout, hide, exit, restart, contact, and destroy clear held input.
 
-In `flying`, primary pointer button 0 captures one pointer and commands equal `0.72`. Horizontal
-travel uses:
+In `flying`, primary pointer button 0 captures one pointer and activates pointer collective at equal
+`.72` thrust. Horizontal travel produces section 8.2's pointer steer intent from:
 
 ```text
 deadZone = max(10 px, scene width * 0.01)
@@ -899,6 +921,10 @@ base = 0.72 - 0.12*m
 pointerLeft = base + 0.1875*bias
 pointerRight = base - 0.1875*bias
 ```
+
+The last two values are the exact pointer-only result; they are not a second engine pair to merge.
+Section 8.2 arbitrates the pointer intent with the keyboard intent before producing the sole raw
+engine pair.
 
 A release within 180 ms and 10 CSS pixels retains a minimum 140 ms equal-thrust pulse. Pointer up,
 cancel, lost capture, stall discard, contact, blur, hide, exit, restart, and destroy use one
@@ -913,11 +939,12 @@ Never intercept Tab or trap focus. The header and breadcrumb remain available in
 ## 12. Plumes, direction cue, NOC, and reduced motion
 
 `plumeForThrust(u)` returns `scaleY=0.08+0.92*u` and `opacity=0.25+0.75*u`. The controller also
-projects section 8.1's exact `MAX_THRUST_VECTOR*s` as `--thrust-vector-angle`. CSS independently
-scales the external engine uses and rotates both force axes by that signed angle around their
-respective `(82,401)` and `(158,401)` engine anchors. Neutral-collective assistance leaves this
-angle at zero but produces visibly different plume lengths from its post-assist effective engines.
-Plumes affect no collision or layout.
+projects `commanded.vectorAngle` as `--thrust-vector-angle`: section 8.1's exact
+`MAX_THRUST_VECTOR*s` while effective thrust is nonzero and zero otherwise. CSS independently scales
+the external engine uses and rotates both force axes by that signed angle around their respective
+`(82,401)` and `(158,401)` engine anchors. Neutral-collective assistance leaves this angle at zero
+but produces visibly different plume lengths from its post-assist effective engines. Plumes affect
+no collision or layout.
 
 Scene tokens remain local and fixed: sky `#f5f2e8`, stars `#8a867c`, terrain `#d7d2c4`, outlines,
 platform, and solid riser `#4b4e55`, NOC shell `#20232a`, inactive battery `#3b3f47`, battery stages
@@ -999,6 +1026,10 @@ and serialized world descriptors are exact. Every schedule includes an explicit 
 | Vacuum coast          | One step, angle `0`, omega `15`, zero engines                          | omega remains `15`, angle `0.125`, `vy=-0.025`; no translational or angular damping                          |
 | Exhaustion            | Fuel `0.005`, one step, engines `(1,1)`                                | Effective engines `(0.3,0.3)`, fuel exactly `0`                                                              |
 | Pointer vectors       | Rightward normalized drag `m=0,0.5,1`                                  | `(.72,.72)`, `(.75375,.56625)`, `(.7875,.4125)`; leftward values mirror exactly                              |
+| Mixed input ceiling   | Keyboard collective plus pointer full right                            | pointer owns `s=1`; engines `(.7875,.4125)`, total `1.2`, never component-combined                           |
+| Keyboard steer owner  | Keyboard left plus pointer full right                                  | keyboard owns `s=-1`; engines `(.4125,.7875)`, total `1.2`                                                   |
+| Canceled steer owner  | Both keyboard steers plus pointer half right                           | keyboard cancels; pointer owns `s=.5`; engines `(.75375,.56625)`, total `1.32`                               |
+| Empty-fuel direction  | Fuel `0`, raw engines `(.7875,.4125)`, retained physics `s=1`          | effective engines `(0,0)` and stored/rendered `commanded.vectorAngle=0`                                      |
 | Plumes                | `u=0,0.5,1`                                                            | scales `0.08,0.54,1`; opacities `0.25,0.625,1`                                                               |
 | First site            | Any normalized seed                                                    | ID `0`, center `36`, width `9.6`, shelf `[31.2,49.8]`, top=`shelf-span native maximum+0.8`, NOC bottom=shelf |
 | Pad parity            | Static and dynamic site with platform top `p`                          | shelf `p-0.8`; deck underside `p-0.35`; one solid riser polygon spans full width and exact `.45 m` interval  |
@@ -1053,31 +1084,34 @@ static/lander-model.js
 static/lander-game.js
 ```
 
-| Layer                                                                   | Required coverage                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `node --test website/tests/lander-world.test.mjs`                       | Mixer/seeds; exact `10 m` samples, `50 m` shared chunk boundaries, boundary/motif/clamp vectors and diversity; every shelf/corridor pseudocode branch, global index, cap equality, relief, complete target replacement, both native blends and deduplication; zero-delta eligibility; exact geometry digest; static/dynamic shelf, riser, NOC foundation, can, window, retention, offscreen, and immutability                                  |
-| `node --test website/tests/lander-model.test.mjs`                       | State/events; 9.0/80 physics, all digital/pointer rows, true gimbal force/sign, neutral-collective assist, total/fuel preservation, manual override and undamped coast; carry/scheduler/overflow; closed-margin riser/terrain/NOC equality/tangency, unchanged precedence, exact top safe crossing and grazing failure, inclusive limits and `+1e-9`; v2 catalog/digests, two replays, ratio/checkpoint/generation error/launch/debris/ordinal |
-| Derivation CLI fixture verification                                     | Run section 10.2's command to a temporary output with `--verify website/tests/fixtures/lander-route-derived-v2.json`; exact v2 deriver/recipe/schema, per-template counts in `[2,2,000,000]`, all nine regenerated minima/success/failure literals, all 81 strict world descriptors/digests, deterministic bytes, finite-exhaustion failure and nonzero mismatch/usage exits; import closure proves independence                               |
-| `python -m unittest discover -s website/tests -p 'test_*.py'`           | Exact 12-file artifacts at both bases, excluding tools/fixtures; focused validation helper; local module closure; byte-equivalent static/dynamic shelf/riser and vertical battery subtree; transactional-init structure and hidden/disabled static Start; fuel/actions; local SVG/CSS; forbidden network, storage, audio, canvas, service-worker, navigation, cookie, and uncontrolled randomness                                              |
-| Manual Chrome and Edge pre-merge; Firefox and Safari/WebKit post-launch | Start/focus; injected initialization failures restore exact static DOM; Space/arrows/vi/touch, pointer vector direction, gimbaled plumes and visible assist; three sites across coarse rising/falling terrain; no pale pad aperture; flat pad/NOC shelves; bottom-to-top colored power stages; can/arrow/carry/empty fuel; relaxed boundary landings and over-bound crashes; checkpoint/Exit/hidden pause; zero game requests                  |
-| Manual responsive and accessibility acceptance                          | 320 CSS pixels, 400 percent zoom, touch landscape, and wide viewport; no overflow or clipped actions; 44-pixel targets; logical focus; no trap; useful no-CSS/no-JS order; named fuel value; restrained live announcements; solid direction cue; static reduced-motion cue; silent decorative SVG; fixed-token 4.5:1 text and 3:1 necessary-graphic contrast                                                                                   |
-| Performance and longevity witness                                       | 100-site deterministic run; no more than five terrain paths, three sites, eight fragments, or 80 world descendants; direct selection/shelf-corridor/exactly-two-replay timing recorded; hidden tab has no frame or mission progress; normal active frame p95 below 4 ms; teardown leaves no listener, timer, capture, frame, enabled dead action, or growing retained history                                                                  |
-| Permanent documentation and repository gates                            | `website/README.md` teaches the tuned controls/physics and v2 intentional-regeneration workflow; browser checklist pins the visual/input/vacuum witnesses; file lint, locked-SDD, Rulesync drift, diff check, and module-size report pass without linking permanent docs back to this SDD                                                                                                                                                      |
+| Layer                                                                   | Required coverage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `node --test website/tests/lander-world.test.mjs`                       | Mixer/seeds; exact `10 m` samples, `50 m` shared chunk boundaries, boundary/motif/clamp vectors and diversity; every shelf/corridor pseudocode branch, global index, cap equality, relief, complete target replacement, both native blends and deduplication; zero-delta eligibility; exact geometry digest; static/dynamic shelf, riser, NOC foundation, can, window, retention, offscreen, and immutability                                                                                                               |
+| `node --test website/tests/lander-model.test.mjs`                       | State/events; 9.0/80 physics, all digital/pointer rows, mixed-source steer ownership and axial ceiling, true gimbal force/sign, zero-effective vector reset, neutral-collective assist, total/fuel preservation, manual override and undamped coast; carry/scheduler/overflow; closed-margin riser/terrain/NOC equality/tangency, unchanged precedence, exact top safe crossing and grazing failure, inclusive limits and `+1e-9`; v2 catalog/digests, two replays, ratio/checkpoint/generation error/launch/debris/ordinal |
+| Derivation CLI fixture verification                                     | Run section 10.2's command to a temporary output with `--verify website/tests/fixtures/lander-route-derived-v2.json`; exact v2 deriver/recipe/schema, per-template counts in `[2,2,000,000]`, all nine regenerated minima/success/failure literals, all 81 strict world descriptors/digests, deterministic bytes, finite-exhaustion failure and nonzero mismatch/usage exits; import closure proves independence                                                                                                            |
+| `python -m unittest discover -s website/tests -p 'test_*.py'`           | Exact 12-file artifacts at both bases, excluding tools/fixtures; focused validation helper; local module closure; byte-equivalent static/dynamic shelf/riser and vertical battery subtree; transactional-init structure and hidden/disabled static Start; fuel/actions; local SVG/CSS; forbidden network, storage, audio, canvas, service-worker, navigation, cookie, and uncontrolled randomness                                                                                                                           |
+| Manual Chrome and Edge pre-merge; Firefox and Safari/WebKit post-launch | Start/focus; injected initialization failures restore exact static DOM; Space/arrows/vi/touch, simultaneous keyboard/pointer ownership and axial ceiling, pointer vector direction, gimbaled plumes, idle/exhausted vector reset, and visible assist; three sites across coarse rising/falling terrain; no pale pad aperture; flat pad/NOC shelves; bottom-to-top colored power stages; can/arrow/carry/empty fuel; relaxed boundary landings and over-bound crashes; checkpoint/Exit/hidden pause; zero game requests      |
+| Manual responsive and accessibility acceptance                          | 320 CSS pixels, 400 percent zoom, touch landscape, and wide viewport; no overflow or clipped actions; 44-pixel targets; logical focus; no trap; useful no-CSS/no-JS order; named fuel value; restrained live announcements; solid direction cue; static reduced-motion cue; silent decorative SVG; fixed-token 4.5:1 text and 3:1 necessary-graphic contrast                                                                                                                                                                |
+| Performance and longevity witness                                       | 100-site deterministic run; no more than five terrain paths, three sites, eight fragments, or 80 world descendants; direct selection/shelf-corridor/exactly-two-replay timing recorded; hidden tab has no frame or mission progress; normal active frame p95 below 4 ms; teardown leaves no listener, timer, capture, frame, enabled dead action, or growing retained history                                                                                                                                               |
+| Permanent documentation and repository gates                            | `website/README.md` teaches the tuned controls/physics and v2 intentional-regeneration workflow; browser checklist pins the visual/input/vacuum witnesses; file lint, locked-SDD, Rulesync drift, diff check, and module-size report pass without linking permanent docs back to this SDD                                                                                                                                                                                                                                   |
 
 Mutation tests reject duplicated/moved shared markup, a second scheduler/controller/site authority,
 game checks added to the near-limit validator, artifact count drift, a sixth retained chunk,
 pad-width/elevation drift, a visual-only support fill or non-solid riser collider, an extra support
 node, `10 m`/`50 m`/boundary/motif/clamp drift, a shelf ending before or after `platformRight+9`,
 native-derived NOC foundation, hidden shelf easing, fuel caps, can recollection, proof dependence on
-carried fuel, route proofs that omit launch, ratio recomputation from `completedSites`, any runtime
-planner/search/fuel scan or third proof replay, a catalog command outside the reachable table,
-passive damping, assist while coasting or steering, assist that changes total thrust/fuel, reversed
-or cosmetic-only gimbal, stale 8.4/70 integration, old landing limits, horizontal/reversed/mistimed
-battery fill, color-only battery meaning, production-derived expected fixtures, v1 derived output,
-partial route/world regeneration, derivation-tool imports, corridor or 81-descriptor digest drift,
-open or unmarginated unsafe collision, margin-expanded target top, partial initialization residue,
-retained-node growth, monotonic-furthest-X camera state, zero normal-motion debris, assist applied
-to fragments, animated-only direction, atmospheric crash effects, or a durable/network surface.
+carried fuel, component-wise keyboard/pointer engine merging, mixed-input thrust above `1.44`,
+pointer override of a nonzero keyboard steer, canceled keyboard steer blocking an active pointer, an
+idle or exhausted nonzero `commanded.vectorAngle`, route proofs that omit launch, ratio
+recomputation from `completedSites`, any runtime planner/search/fuel scan or third proof replay, a
+catalog command outside the reachable table, passive damping, assist while coasting or steering,
+assist that changes total thrust/fuel, reversed or cosmetic-only gimbal, stale 8.4/70 integration,
+old landing limits, horizontal/reversed/mistimed battery fill, color-only battery meaning,
+production-derived expected fixtures, v1 derived output, partial route/world regeneration,
+derivation-tool imports, corridor or 81-descriptor digest drift, open or unmarginated unsafe
+collision, margin-expanded target top, partial initialization residue, retained-node growth,
+monotonic-furthest-X camera state, zero normal-motion debris, assist applied to fragments,
+animated-only direction, atmospheric crash effects, or a durable/network surface.
 
 ## 16. Traceability
 
