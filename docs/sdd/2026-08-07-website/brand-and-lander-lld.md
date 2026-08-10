@@ -1,7 +1,8 @@
 # LLD: AGW Brand and Continuous Lunar Deployment Lander
 
 <!-- cspell:ignore focusout imul keyup pointerdown PRNG repower -->
-<!-- cspell:ignore nonfallback overspeed substep unitless uint32 quantized quantization -->
+<!-- cspell:ignore lerp Minkowski nonfallback overspeed subinterval unhashed unmarginated -->
+<!-- cspell:ignore substep unitless uint32 quantized quantization -->
 
 - Status: Continuous Lander refinement designed; implementation pending
 - Date: 2026-08-10
@@ -29,29 +30,32 @@ subtree. Both shells render the same game fragment.
 
 Implementation uses these permanent names:
 
-| File                                        | Responsibility                                                  |
-| ------------------------------------------- | --------------------------------------------------------------- |
-| `website/assets/agw-rocket.svg`             | Canonical selected A, G, W, and twin-plume geometry             |
-| `website/assets/agw-favicon.svg`            | Flame-free browser projection of the selected A/G/W mark        |
-| `website/templates/404.html`                | Semantic 404 shell with the shared game placeholder             |
-| `website/templates/lander.html`             | Dedicated Lander shell with the shared game placeholder         |
-| `website/templates/lander-game.html`        | Sole source for the complete reusable game subtree              |
-| `website/build.py`                          | Standard-library rendering, validation, and asset copying       |
-| `website/site_game_validation.py`           | Focused game DOM, module-closure, and manifest validation       |
-| `website/static/lander.css`                 | Scene layout, state selectors, focus, and SVG presentation      |
-| `website/static/lander-world.js`            | Pure seed, terrain, site, geometry, and window functions        |
-| `website/static/lander-model.js`            | Flight/run state, physics, contact, and constructive proofs     |
-| `website/static/lander-game.js`             | DOM, clock/input, camera, focus, lifecycle, and rendering       |
-| `website/tests/lander-world.test.mjs`       | Seeded world, window, site, and template vectors                |
-| `website/tests/lander-model.test.mjs`       | Scheduler, physics, mission, fuel, and checkpoint vectors       |
-| `website/tests/test_lander_404.py`          | Build, DOM, no-JS, and forbidden-surface checks                 |
-| `website/tests/lander-browser-checklist.md` | Package-free browser, performance, and accessibility acceptance |
+| File                                                   | Responsibility                                                  |
+| ------------------------------------------------------ | --------------------------------------------------------------- |
+| `website/assets/agw-rocket.svg`                        | Canonical selected A, G, W, and twin-plume geometry             |
+| `website/assets/agw-favicon.svg`                       | Flame-free browser projection of the selected A/G/W mark        |
+| `website/templates/404.html`                           | Semantic 404 shell with the shared game placeholder             |
+| `website/templates/lander.html`                        | Dedicated Lander shell with the shared game placeholder         |
+| `website/templates/lander-game.html`                   | Sole source for the complete reusable game subtree              |
+| `website/build.py`                                     | Standard-library rendering, validation, and asset copying       |
+| `website/site_game_validation.py`                      | Focused game DOM, module-closure, and manifest validation       |
+| `website/static/lander.css`                            | Scene layout, state selectors, focus, and SVG presentation      |
+| `website/static/lander-world.js`                       | Pure seed, terrain, site, geometry, and window functions        |
+| `website/static/lander-model.js`                       | Flight/run state, physics, contact, and constructive proofs     |
+| `website/static/lander-game.js`                        | DOM, clock/input, camera, focus, lifecycle, and rendering       |
+| `website/tools/derive_lander_routes.mjs`               | Independent, deterministic route-fixture derivation CLI         |
+| `website/tests/fixtures/lander-route-geometry-v1.json` | Canonical template geometry and envelope input                  |
+| `website/tests/fixtures/lander-route-derived-v1.json`  | Reviewed independent schedules and witness output               |
+| `website/tests/lander-world.test.mjs`                  | Seeded world, window, site, and template vectors                |
+| `website/tests/lander-model.test.mjs`                  | Scheduler, physics, mission, fuel, and checkpoint vectors       |
+| `website/tests/test_lander_404.py`                     | Build, DOM, no-JS, and forbidden-surface checks                 |
+| `website/tests/lander-browser-checklist.md`            | Package-free browser, performance, and accessibility acceptance |
 
-The shipped artifact grows by exactly one file, `static/lander-world.js`. Test files are not in the
-artifact. `lander-game.js` imports only `lander-model.js`. `lander-model.js` imports only pure
-exports from `lander-world.js`. `lander-world.js` imports neither production module, reads no DOM,
-clock, storage, or ambient randomness, and owns no mutable singleton. No other production module
-imports upward through this chain.
+The shipped artifact grows by exactly one file, `static/lander-world.js`. Tool and test files are
+not in the artifact. `lander-game.js` imports only `lander-model.js`. `lander-model.js` imports only
+pure exports from `lander-world.js`. `lander-world.js` imports neither production module, reads no
+DOM, clock, storage, or ambient randomness, and owns no mutable singleton. No other production
+module imports upward through this chain.
 
 The model is the sole mutable run authority. One run aggregate owns physics, fuel, mission state,
 seed, generator cursor, retained sites, active and target IDs, route proof, checkpoint, and crash
@@ -59,8 +63,8 @@ debris. The controller owns browser listeners, the animation frame, focus, point
 projection, and entropy acquisition. It must not keep a second site, fuel, checkpoint, or mission
 copy.
 
-Prefer each focused production or test module at or below 500 lines; every authored source must
-remain below 1,000. `website/site_validation.py` is already near the hard ceiling. It imports
+Prefer each focused production, tool, or test module at or below 500 lines; every authored source
+must remain below 1,000. `website/site_validation.py` is already near the hard ceiling. It imports
 `validate_game_contract` from `site_game_validation.py` and passes the rendered pages, asset
 manifest, and site base into that focused authority. The helper imports only the standard library,
 never imports `site_validation.py`, and owns all new game-subtree, game-module closure, and exact
@@ -179,13 +183,19 @@ Thrust: Space or Up. Turn: Left/H or Right/L. Tap or hold to thrust; drag to tur
 ```
 
 Preflight hides fuel, controls, actions, direction cue, crash presentation, and all instructions.
-Successful JavaScript initialization installs every listener, constructs and renders the preflight
-model, then reveals and enables the transparent Start control as its final step. Failed or absent
-initialization leaves Start hidden and disabled and preserves the static named-scene recovery. START
-reveals fuel, controls, and actions, with Exit enabled and Restart hidden. Only `failed` reveals and
-enables Restart. The live fuel output uses `fuel.toFixed(1)` for display but retains the unrounded
-number in the model. A status update does not redundantly announce fuel every frame; the named
-output changes only when its displayed tenth changes.
+Initialization is transactional. Before mutation, clone `#lander-game` as the pristine recovery
+snapshot; build the model and controller in locals; and register every listener, media query,
+animation frame, timer, and pointer-capture cleanup in one LIFO teardown registry. Render preflight,
+then reveal and enable Start as the final operation before publishing the controller reference. If
+any operation throws, run that same registry in reverse while catching each cleanup so later entries
+still run, replace any partially changed game root with the snapshot, leave the controller reference
+null, and report only to the console. The restored Start is hidden and disabled, static SVG
+naming/ARIA is exact, and no listener, model, timer, capture, or mission attribute survives.
+`destroy()` consumes the same idempotent registry. Absent JavaScript also preserves this static
+recovery. START reveals fuel, controls, and actions, with Exit enabled and Restart hidden. Only
+`failed` reveals and enables Restart. The live fuel output uses `fuel.toFixed(1)` for display but
+retains the unrounded number in the model. A status update does not redundantly announce fuel every
+frame; the named output changes only when its displayed tenth changes.
 
 On start, the controller hides and disables `#lander-start`, gives `#lander-scene-shell`
 `tabindex="0"`, `role="application"`, `aria-label="Lunar deployment game"`, and
@@ -274,17 +284,40 @@ eight constant-time eligibility checks, not route search. Every active deck is a
 so the final zero-delta template is always eligible. The preference retains seeded distance and
 elevation variety while continuity follows structurally for every seed, not from sampled seeds.
 
-Each template carries a collision-safe terrain envelope. Translate it by the origin deck, constrain
-ordinary seeded samples under the flight corridor with `min(nativeHeight,envelopeHeight)`, and use
-`0.15*sampleUnit(seed,4,sampleIndex)` metres of downward-only relief where the envelope constrains a
-sample. Linear interpolation uses those constrained samples. Under the target platform span, replace
-the collision surface so its maximum is exactly `targetTop-0.8 m`; blend the two boundary samples
-into the ordinary corridor without a discontinuity. This construction cannot intrude into the
-checked schedule, yet native motif, stream-4 relief, distance, and deck delta keep visible seeded
-variation. Section 10's two defensive replays validate the instantiated descriptor. The model passes
-the selected template's frozen geometry into the world's pure
+Each template carries collision-safe `clearanceKnots` relative to the origin center/deck. Relative
+knot heights are at least `-0.65 m`, so every eligible translation has absolute cap at least
+`0.9 m`. `lander-world.js` and the independent tool implement this exact construction separately:
+
+```text
+native(n):
+  x = 4*n; q = floor(n/5); k = n-5*q
+  if k == 0: raw = boundary(q)
+  else: raw = lerp(boundary(q),boundary(q+1),k/5) + orientation(q)*motif[k]
+  return clamp(raw,0.75,7.5)
+
+originRight = originCenter+4.8; targetLeft = targetCenter-4.8
+targetRight = targetCenter+4.8; padBase = targetTop-0.8
+leave all existing vertices at x < originRight unchanged
+begin the new ordered corridor with exactly (originRight,originTop-0.8)
+for every integer n with originRight < 4*n < targetLeft, in increasing n:
+  raw = native(n)
+  cap = originTop + piecewiseLinear(clearanceKnots,4*n-originCenter)
+  y = raw > cap ? max(0.75,cap-0.15*sampleUnit(seed,4,n>>>0)) : raw
+  emit (4*n,y)
+emit (targetLeft,padBase); discard every global sample in [targetLeft,targetRight]
+emit (targetRight,padBase)
+resume with the first native global sample strictly right of targetRight
+join every adjacent emitted vertex with one straight segment
+```
+
+`boundary`, `orientation`, and `motif` are exactly section 5.2; equality at the cap gets no relief.
+The explicit target-edge vertices make the entire replaced span flat with maximum `padBase`; the
+single straight segments before `targetLeft` and after `targetRight` are the complete blend, with no
+hidden easing or extra sample. Duplicate chunk-boundary vertices collapse to one identical value.
+The model passes frozen geometry to pure
 `instantiateTemplateSite(seed,siteIndex,originSite,templateGeometry)`; the world never imports or
-selects from the model-owned catalog.
+selects the model catalog. Exact serialized vertices for every template at multiple translations and
+the three pinned seeds catch predicate, index, clamp, relief, replacement, and blend drift.
 
 A catalog/schema or replay mismatch is an invariant error: site state is left unchanged, the run
 enters `generation-error`, and the live status becomes exactly
@@ -528,19 +561,31 @@ stepping. Hidden time advances neither physics, service, crash, cue, arrow blink
 
 ## 9. Swept collision and landing classification
 
-Collision uses previous and next poses from every physics step. Build the transformed hull at both
-ends and a swept broad-phase box against nearby terrain edges, the target platform rectangle and its
-`0.6 m`-wide pylons, every retained NOC/foundation/solid `0.5 m`-wide mast, and any retained
-non-target platform.
+Collision uses previous and next poses from every physics step. Broad phase includes nearby terrain,
+the target platform and its `0.6 m` pylons, every NOC/foundation/solid `0.5 m` mast, and non-target
+platforms. Interpolate position linearly and angle by the shortest arc. Set
+`COLLISION_MARGIN=0.02 m`, hull radius `R=hypot(1.6,6.5)`, and
+`travel=hypot(dx,dy)+R*abs(deltaAngleRadians)`. Use `N=ceil(travel/COLLISION_MARGIN)` equal-time
+intervals, at least one and at most 64; a larger N is unsafe `overspeed`.
 
-For each broad-phase candidate, interpolate position linearly and angle by the shortest normalized
-arc. Choose enough samples that maximum hull-vertex travel is at most `0.2 m` and angular travel is
-at most `1 degree`. Use at most 64 samples. If a step would require more, classify it immediately as
-unsafe `overspeed` rather than permitting tunneling. Find the first intersecting interval, then use
-12 bisections to pin contact time. Segment/polygon intersection and separating-axis rectangle tests
-include equality. Platform thickness `0.35 m`, pylon width `0.6 m`, and mast width `0.5 m` all
-exceed the `0.2 m` maximum hull-vertex sampling gap, so the adaptive sweep cannot step across one
-without an intersecting sample; the 64-sample overspeed result closes the remaining case.
+At every interval endpoint, test the hull against each unsafe feature's closed Euclidean Minkowski
+expansion by `COLLISION_MARGIN`, implemented as closed polygon/segment distance `<=` the margin.
+Every hull point moves at most the interval's translation plus `R` times its angular travel, which
+is at most the margin. Therefore any real crossing, equality touch, or tangential graze between
+samples must intersect the closed expansion at an adjacent endpoint. Take the first clear/hit
+interval and bisect its expanded-distance predicate 12 times. This can stop at most `0.02 m` before
+visible unsafe geometry but can never render through it; equality is a hit. Feature width is no
+longer the proof.
+
+Treat the target platform's top face separately so its upward normal is never margin-expanded into a
+valid approach. For each sample interval, recursively test the conservative swept-hull enclosure
+(the union of endpoint hull boxes expanded by that interval's motion bound) against the closed top
+segment, left half before right. Discard a subinterval only when those closed sets are disjoint. An
+endpoint penetration brackets a true top crossing and is bisected 12 times against unexpanded
+geometry. A tangential interval still unresolved after 20 subdivisions or `1e-7 s` is conservatively
+unsafe `grazing`; it cannot disappear through floating-point inequality. Platform ends, underside,
+and pylons remain margin-expanded unsafe geometry. Only a bracketed true top crossing proceeds to
+the safe-envelope test below, preserving ordinary pad landings without an early top hit.
 
 Classify the earliest contact, with equal-time precedence: building or mast, non-top platform
 surface, terrain, then target platform top. The target top is safe only when both transformed feet
@@ -609,15 +654,42 @@ synthetic engine values, and substep input changes are forbidden in a template.
 | 6     | `0.45`      | `0.45`       | Left/H + Right/L         |
 | 7     | `1`         | `1`          | Space + Left/H + Right/L |
 
-During implementation, derive all nine schedules, envelopes, minima, end states, and digests with a
-temporary standalone program that independently encodes the immutable section 8 physics and section
-9 collision contract; it must not import any production or test module. Review its output, then
-check the resulting literals into `lander-model.js` and independent expected copies into
-`lander-model.test.mjs`. The test expected values never call a production generator or compute a
-digest from the catalog under test. Delete the temporary derivation program before the
-implementation commit, but preserve its invocation, version, and output digest in the test fixture
-comment and implementation commit message so the derivation is auditable without becoming runtime
-code.
+### 10.2 Independent derivation tool
+
+Keep `website/tools/derive_lander_routes.mjs` permanently. It uses only Node built-ins and must not
+import production or test code; runtime, model, and tests must not import it. Version
+`agw-lander-route-deriver/v1` independently implements sections 5.3, 8, 9, and the reachable command
+table. Its versioned per-template constructive recipes give command phase order and finite integer
+step ranges; it exhausts at most `2,000,000` lexicographically ordered combinations per template and
+chooses by `(burn,totalSteps,RLE lexicographic)`, failing rather than emitting an incomplete route.
+
+The exact invocation is:
+
+```text
+node website/tools/derive_lander_routes.mjs \
+  --geometry website/tests/fixtures/lander-route-geometry-v1.json \
+  --output PATH [--verify PATH]
+```
+
+Unknown/missing flags exit 2; derivation or verification failure exits 1; success exits 0.
+`--geometry` contains schema `agw-lander-route-geometry/v1` and the nine IDs, deltas, and literal
+clearance knots. Output schema `agw-lander-route-derived/v1` contains `deriverVersion`,
+`physicsDigest`, `geometryDigest`, the ordered route records from section 10.1, and `outputDigest`.
+Canonical JSON recursively sorts object keys, preserves array order, uses `JSON.stringify` without
+whitespace, and hashes UTF-8 bytes with lowercase SHA-256. `geometryDigest` hashes the complete
+geometry object; `physicsDigest` hashes an object containing every named numeric constant in
+sections 8-10 plus the eight command rows; `outputDigest` hashes the output object with only
+`outputDigest` omitted. The file adds one unhashed trailing LF.
+
+The reviewed output is `website/tests/fixtures/lander-route-derived-v1.json`. The production model
+embeds byte-equivalent template/route arrays and the three literal digest strings. Tests project
+those arrays back to the two schemas, compare canonical bytes with both fixtures, and recompute all
+digests before replay. Thus the world and tool consume identical envelope values while independently
+implementing corridor construction, physics, and collision. Intentional regeneration writes to a
+temporary path, uses `--verify` against the checked fixture, reviews any mismatch, then deliberately
+updates geometry, derived fixture, and production literals together. Ordinary tests only verify
+checked data and never regenerate expectations. `website/README.md` will permanently teach this
+workflow. Neither fixture nor tool enters the 12-file artifact.
 
 Catalog tests replay every literal from an upright origin with `fuel=demonstratedMinimum`, using the
 exact production fixed-step physics and the translated corridor. Each must land at its literal
@@ -635,7 +707,7 @@ quantum less. Neither replay reads carried reserve or award ratio. The first mus
 and the second its checked-in failure. Any mismatch takes the defensive `generation-error` path;
 there is no runtime search, optimization, descent, retry, or alternate-template loop.
 
-### 10.2 Demonstrated minimum and award
+### 10.3 Demonstrated minimum and award
 
 Set `FUEL_QUANTUM=0.05`; every catalog minimum is greater than one quantum and is an exact integer
 multiple of it. Independent derivation sets it to
@@ -784,7 +856,8 @@ and serialized world descriptors are exact. Every schedule includes an explicit 
 | Ratio                 | Start at `3`; apply `nextAwardRatio` successively                      | `3`, `2.64`, `2.3448`, then strict decrease to constant `1+Number.EPSILON`; O(1) per call                         |
 | Safe inclusive edge   | Target top; `vx=1.4,vy=-2.2,angle=-8,omega=12`                         | safe contact                                                                                                      |
 | Unsafe epsilon        | Any one safe magnitude increased by `1e-9`                             | unsafe contact                                                                                                    |
-| Swept thin obstacle   | Hull crosses a `0.35 m` deck between step endpoints                    | first crossing detected, never tunnels                                                                            |
+| Swept unsafe equality | Hull only grazes a terrain/pylon/mast edge between step endpoints      | closed 0.02 m expansion detects it; no visual tunneling                                                           |
+| Target-top separation | Safe descent over deck center; then a separate exact tangential graze  | descent uses true top crossing and can be safe; unresolved graze is unsafe                                        |
 | Frame equivalence     | Initial approach, no input, callbacks to 1,000 ms at 30, 60, and 120Hz | 120 steps; `x=30.8`, `y=30.0875`, `vx=0.8`, `vy=-3.4`, fuel `30`                                                  |
 | Checkpoint replay     | Award, launch, crash, RESTART twice                                    | identical post-award fuel/site flags/next ratio; no can, award, ratio, or progress duplication                    |
 | Catalog quantum       | Every checked-in reference template                                    | allowance `minimum` matches literal safe contact; `minimum-0.05` matches literal failure                          |
@@ -831,22 +904,24 @@ static/lander-model.js
 static/lander-game.js
 ```
 
-| Layer                                                                   | Required coverage                                                                                                                                                                                                                                                                                                                                                                         |
-| ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `node --test website/tests/lander-world.test.mjs`                       | Mixer and injected seeds; exact terrain/site vectors; shared boundaries; diversity; template preference/eligibility; structural zero-delta guarantee; corridor envelope/relief; 9.6 m elevated replacement; one NOC/can; pose camera/window keys; fixed retention ceilings; target visibility; descriptor immutability                                                                    |
-| `node --test website/tests/lander-model.test.mjs`                       | State/event matrix; 8.4 authority vectors; fuel and uncapped carry; fixed scheduler and overflow snapshot; swept contacts including 0.6 m pylons/0.5 m mast; literal nine-template schema, reachable commands, independent success/failure fixtures, exactly two runtime replays, proof independence; O(1) ratio/checkpoint; generation error; launch burn; exact debris/ordinal          |
-| `python -m unittest discover -s website/tests -p 'test_*.py'`           | Exact 12-file artifacts at both bases; one-way validation-helper import; helper-owned game contract; local module closure; byte-equivalent subtree; exact DOM/order/data selectors; successful-init Start reveal/enable and failed/no-JS static recovery; fuel/actions; local SVG/CSS; and forbidden network, storage, audio, canvas, service-worker, navigation, cookie, random surfaces |
-| Manual Chrome and Edge pre-merge; Firefox and Safari/WebKit post-launch | Start/focus; Space hold; arrows/vi; touch tap/hold/drag; later braking feel; three successive sites; platform/NOC/can legibility; battery/antenna power; arrow enter-view boundary; excess carry; empty-fuel response; every crash surface; checkpoint replay; Exit fresh run; hidden pause; request log proving zero game-initiated requests                                             |
-| Manual responsive and accessibility acceptance                          | 320 CSS pixels, 400 percent zoom, touch landscape, and wide viewport; no overflow or clipped actions; 44-pixel targets; logical focus; no trap; useful no-CSS/no-JS order; named fuel value; restrained live announcements; solid direction cue; static reduced-motion cue; silent decorative SVG; fixed-token 4.5:1 text and 3:1 necessary-graphic contrast                              |
-| Performance and longevity witness                                       | 100-site deterministic run; ceilings in section 6 never exceeded; direct selection/corridor/two-replay timing recorded; hidden tab has no frame or mission progress; normal active frame p95 below 4 ms; teardown leaves no listener, timer, capture, frame, enabled dead action, or growing retained history                                                                             |
+| Layer                                                                   | Required coverage                                                                                                                                                                                                                                                                                                                                            |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `node --test website/tests/lander-world.test.mjs`                       | Mixer/seeds; exact terrain/site vectors; shared boundaries/diversity; every corridor pseudocode branch, global index, cap equality, relief/clamp, target replacement, boundary blend, chunk deduplication; template eligibility/zero-delta guarantee; exact geometry-fixture digest; pad/NOC/can; window/retention/offscreen/immutability                    |
+| `node --test website/tests/lander-model.test.mjs`                       | State/events; 8.4 physics, fuel/carry, scheduler/overflow; closed-margin crossing/equality/tangency, overspeed, exact top safe crossing and grazing failure; literal catalog/reachable commands; checked derivation digests, success/failure and exactly two replays; ratio/checkpoint/generation error/launch/debris/ordinal                                |
+| Derivation CLI fixture verification                                     | Run section 10.2's command to a temporary output with `--verify website/tests/fixtures/lander-route-derived-v1.json`; exact version/schema/digests, bounded recipe exhaustion, deterministic bytes, and nonzero mismatch/usage exits; import-closure tests prove the tool and production/test modules do not import one another                              |
+| `python -m unittest discover -s website/tests -p 'test_*.py'`           | Exact 12-file artifacts at both bases, excluding tools/fixtures; focused validation helper; local module closure; byte-equivalent DOM; transactional-init structure and hidden/disabled static Start; fuel/actions; local SVG/CSS; forbidden network, storage, audio, canvas, service-worker, navigation, cookie, and uncontrolled randomness                |
+| Manual Chrome and Edge pre-merge; Firefox and Safari/WebKit post-launch | Start/focus; injected exception after each initialization stage restores exact static DOM with no listener/timer/capture; Space/arrows/vi/touch; three sites; pad/NOC/can; power/arrow; carry/empty fuel; all collision/crash surfaces; checkpoint/Exit/hidden pause; request log proving zero game requests                                                 |
+| Manual responsive and accessibility acceptance                          | 320 CSS pixels, 400 percent zoom, touch landscape, and wide viewport; no overflow or clipped actions; 44-pixel targets; logical focus; no trap; useful no-CSS/no-JS order; named fuel value; restrained live announcements; solid direction cue; static reduced-motion cue; silent decorative SVG; fixed-token 4.5:1 text and 3:1 necessary-graphic contrast |
+| Performance and longevity witness                                       | 100-site deterministic run; ceilings in section 6 never exceeded; direct selection/corridor/two-replay timing recorded; hidden tab has no frame or mission progress; normal active frame p95 below 4 ms; teardown leaves no listener, timer, capture, frame, enabled dead action, or growing retained history                                                |
 
 Mutation tests reject duplicated/moved shared markup, a second scheduler/controller/site authority,
 game checks added to the near-limit validator, artifact count drift, pad-width drift, fuel caps, can
 recollection, proof dependence on carried fuel, route proofs that omit launch, ratio recomputation
 from `completedSites`, any runtime planner/search/fuel scan or third proof replay, a catalog command
-outside the reachable table, expected fixtures derived from production values, retained-node growth,
-monotonic-furthest-X camera state, non-swept contact, zero normal-motion debris, animated-only
-direction, atmospheric crash effects, or a durable/network surface.
+outside the reachable table, production-derived expected fixtures, derivation-tool imports, corridor
+algorithm/digest drift, open or unmarginated unsafe collision, margin-expanded target top, partial
+initialization residue, retained-node growth, monotonic-furthest-X camera state, zero normal-motion
+debris, animated-only direction, atmospheric crash effects, or a durable/network surface.
 
 ## 16. Traceability
 
@@ -856,7 +931,7 @@ direction, atmospheric crash effects, or a durable/network surface.
 | R7, AC5, AC19: hidden shared 404/Lander game and byte-equivalent DOM   | Sections 4, 11, and 15               |
 | R8, AC6: stronger physics, keyboard/vi/touch, independent plumes       | Sections 8, 11, 12, and 14           |
 | R9, AC8: no-JS, in-memory lifecycle, pause, focus, reduced motion      | Sections 4, 5.1, 8.2, 11, 12, and 15 |
-| R21, AC7: rolling terrain, exact elevated pad, NOC, can, repeated legs | Sections 5-7, 10.2, 12, and 15       |
+| R21, AC7: rolling terrain, exact elevated pad, NOC, can, repeated legs | Sections 5-7, 10.3, 12, and 15       |
 | R22, AC22: seeded target, demonstrated minimum, ratio, carryover       | Sections 5, 7.3, 10, 14, and 15      |
 | R22, AC23: offscreen target and motion-safe right cue                  | Sections 6, 8.2, 12, and 15          |
 | R23, AC24: vacuum crash and exact checkpoint restart                   | Sections 7.3, 9, 13-15               |
