@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, NoReturn
 
 from agentworks import output
 from agentworks.errors import AgentworksError
+from agentworks.plugins.gcp.compute import verify_zonal_operation
 from agentworks.plugins.gcp.errors import call_google, call_google_optional, wait_for_extended_operation
 from agentworks.plugins.gcp.network import (
     FirewallOwnership,
@@ -147,14 +149,30 @@ def delete_instance_and_verify(
     if state is not InstanceState.SURVIVING:
         return state, observed_id
     try:
+        from google.cloud import compute_v1
+
+        request_id = str(uuid.uuid4())
         operation = call_google(
             lambda: instances.delete(
-                project=coordinates.project_id,
-                zone=coordinates.zone,
-                instance=coordinates.instance_name,
+                request=compute_v1.DeleteInstanceRequest(
+                    project=coordinates.project_id,
+                    zone=coordinates.zone,
+                    instance=coordinates.instance_name,
+                    request_id=request_id,
+                ),
+                retry=None,
             ),
             operation="deleting the partial instance",
             resource=f"instance {coordinates.project_id}/{coordinates.zone}/{coordinates.instance_name}",
+        )
+        verify_zonal_operation(
+            operation,
+            request_id=request_id,
+            operation_type="delete",
+            project_id=coordinates.project_id,
+            zone=coordinates.zone,
+            instance_name=coordinates.instance_name,
+            expected_resource_id=None if ownership is None else ownership.resource_id,
         )
         wait_for_extended_operation(operation, label=f"instance {coordinates.instance_name}", timeout=timeout)
     except AgentworksError:
@@ -163,6 +181,24 @@ def delete_instance_and_verify(
         instances,
         coordinates=coordinates,
         ownership=ownership,
+    )
+
+
+def manual_cleanup_guidance(
+    coordinates: CleanupCoordinates,
+    report: RollbackReport | None,
+    *,
+    instance_ownership: InstanceOwnership | None,
+    allow_ownership: FirewallOwnership | None,
+    deny_ownership: FirewallOwnership | None,
+) -> str:
+    """Return provider-ID-gated recovery guidance for lifecycle callers."""
+    return _manual_guidance(
+        coordinates,
+        report,
+        instance_ownership=instance_ownership,
+        allow_ownership=allow_ownership,
+        deny_ownership=deny_ownership,
     )
 
 

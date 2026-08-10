@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from agentworks.errors import AlreadyExistsError, ConfigError
 from agentworks.plugins.gcp.config import IMAGE_PROJECT, MachineTypeSelection, image_family_for_arch
-from agentworks.plugins.gcp.errors import GCEError, call_google_optional
+from agentworks.plugins.gcp.errors import GCEError, GCEOperationError, call_google_optional
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
@@ -14,6 +14,55 @@ if TYPE_CHECKING:
     from agentworks.plugins.gcp.config import GcpGCEConfig
 
 EXTERNAL_ACCESS_CONFIG_NAME = "External NAT"
+
+
+def provider_resource_id(value: object) -> str | None:
+    """Normalize one positive uint64 provider ID without accepting zero."""
+    if isinstance(value, bool) or not isinstance(value, int | str):
+        return None
+    try:
+        normalized = int(value)
+    except ValueError:
+        return None
+    return str(normalized) if normalized > 0 else None
+
+
+def canonical_resource_url(value: str) -> str:
+    """Normalize absolute and project-relative Compute resource URLs."""
+    marker = "/projects/"
+    if marker in value:
+        return value[value.index(marker) + 1 :].rstrip("/")
+    return value.lstrip("/").rstrip("/")
+
+
+def verify_zonal_operation(
+    operation: Any,
+    *,
+    request_id: str,
+    operation_type: str,
+    project_id: str,
+    zone: str,
+    instance_name: str,
+    expected_resource_id: str | None,
+) -> str:
+    """Verify request, operation, target, and provider incarnation identity."""
+    expected_link = f"projects/{project_id}/zones/{zone}/instances/{instance_name}"
+    target_id = provider_resource_id(getattr(operation, "target_id", None))
+    if (
+        str(getattr(operation, "client_operation_id", "")) != request_id
+        or str(getattr(operation, "operation_type", "")).lower() != operation_type
+        or canonical_resource_url(str(getattr(operation, "target_link", ""))) != expected_link
+        or target_id is None
+        or (expected_resource_id is not None and target_id != expected_resource_id)
+    ):
+        raise GCEOperationError(
+            f"Google Cloud returned incomplete ownership identity for instance "
+            f"{project_id}/{zone}/{instance_name}",
+            entity_kind="gcp-instance",
+            entity_name=instance_name,
+            hint="retain the named instance until its provider identity can be established",
+        )
+    return target_id
 
 
 def get_project(clients: GcpClientCache, ctx: RunContext, project_id: str) -> Any:
@@ -111,6 +160,34 @@ def resolve_debian_image(
     if not str(image.self_link):
         raise GCEError(f"Debian image family '{IMAGE_PROJECT}/{family}' returned no self link")
     return image
+
+
+def resolve_balanced_disk_type(
+    clients: GcpClientCache,
+    ctx: RunContext,
+    config: GcpGCEConfig,
+) -> Any:
+    """Resolve the zonal balanced persistent-disk type before mutation."""
+    client = clients.client("disk-types", ctx)
+    disk_type = call_google_optional(
+        lambda: client.get(
+            project=config.project_id,
+            zone=config.zone,
+            disk_type="pd-balanced",
+        ),
+        operation="resolving the balanced persistent-disk type",
+        resource=f"disk type {config.project_id}/{config.zone}/pd-balanced",
+    )
+    if disk_type is None:
+        raise ConfigError(
+            f"GCE disk type 'pd-balanced' is not available in zone '{config.zone}'",
+            hint="select a zone that supports balanced persistent disks",
+        )
+    if not str(disk_type.self_link):
+        raise GCEError(
+            f"GCE disk type '{config.project_id}/{config.zone}/pd-balanced' returned no self link"
+        )
+    return disk_type
 
 
 def require_instance_name_available(

@@ -128,6 +128,44 @@ class FirewallInsertAttempt:
         return cls(rule_name=rule_name, request_id=str(uuid.uuid4()))
 
 
+def build_deny_firewall(*, rule_name: str, network_url: str, network_tag: str) -> Any:
+    """Build the stable priority-1 all-ingress deny baseline."""
+    from google.cloud import compute_v1
+
+    return compute_v1.Firewall(
+        name=rule_name,
+        network=network_url,
+        direction="INGRESS",
+        priority=1,
+        disabled=False,
+        target_tags=[network_tag],
+        source_ranges=["0.0.0.0/0"],
+        denied=[compute_v1.Denied(I_p_protocol="all")],
+    )
+
+
+def build_ssh_allow_firewall(
+    *,
+    rule_name: str,
+    network_url: str,
+    network_tag: str,
+    operator_prefixes: Sequence[str],
+) -> Any:
+    """Build one priority-0 TCP/22 allow scoped to operator IPv4 prefixes."""
+    from google.cloud import compute_v1
+
+    return compute_v1.Firewall(
+        name=rule_name,
+        network=network_url,
+        direction="INGRESS",
+        priority=0,
+        disabled=False,
+        target_tags=[network_tag],
+        source_ranges=list(operator_prefixes),
+        allowed=[compute_v1.Allowed(I_p_protocol="tcp", ports=["22"])],
+    )
+
+
 def zone_region(zone: str) -> str:
     """Derive the Compute region name from a validated zonal name."""
     region, separator, suffix = zone.rpartition("-")
@@ -373,11 +411,16 @@ def insert_firewall_reconciled(
     # Capture the provider incarnation before the first interruptible wait.
     # A KeyboardInterrupt from operation.result must leave rollback enough
     # identity to delete only this attempt's realized resource.
-    attempt.ownership = _ownership_from_operation(
+    attempt.ownership = FirewallOwnership(
+        rule_name=attempt.rule_name,
+        resource_id=_verify_firewall_operation(
         operation,
         request_id=attempt.request_id,
+        operation_type="insert",
         project_id=project_id,
         rule_name=attempt.rule_name,
+        expected_resource_id=None,
+        ),
     )
 
     wait_failure: AgentworksError | None = None
@@ -440,10 +483,28 @@ def delete_matching_firewall(
         return result
 
     try:
+        from google.cloud import compute_v1
+
+        request_id = str(uuid.uuid4())
         operation = call_google(
-            lambda: client.delete(project=project_id, firewall=expected.name),
+            lambda: client.delete(
+                request=compute_v1.DeleteFirewallRequest(
+                    project=project_id,
+                    firewall=expected.name,
+                    request_id=request_id,
+                ),
+                retry=None,
+            ),
             operation="deleting an owned firewall rule",
             resource=f"firewall rule {project_id}/{expected.name}",
+        )
+        _verify_firewall_operation(
+            operation,
+            request_id=request_id,
+            operation_type="delete",
+            project_id=project_id,
+            rule_name=str(expected.name),
+            expected_resource_id=None if ownership is None else ownership.resource_id,
         )
         wait_for_extended_operation(operation, label=f"firewall rule {expected.name}", timeout=timeout)
     except AgentworksError:
@@ -460,21 +521,24 @@ def delete_matching_firewall(
         return FirewallReconciliation(FirewallState.INDETERMINATE, None)
 
 
-def _ownership_from_operation(
+def _verify_firewall_operation(
     operation: Any,
     *,
     request_id: str,
+    operation_type: str,
     project_id: str,
     rule_name: str,
-) -> FirewallOwnership:
+    expected_resource_id: str | None,
+) -> str:
     """Verify the GCE operation belongs to this request and capture its target."""
     expected_link = f"projects/{project_id}/global/firewalls/{rule_name}"
     resource_id = _provider_resource_id(getattr(operation, "target_id", None))
     if (
         str(getattr(operation, "client_operation_id", "")) != request_id
-        or str(getattr(operation, "operation_type", "")).lower() != "insert"
+        or str(getattr(operation, "operation_type", "")).lower() != operation_type
         or _canonical_resource_url(str(getattr(operation, "target_link", ""))) != expected_link
         or resource_id is None
+        or (expected_resource_id is not None and resource_id != expected_resource_id)
     ):
         raise GCEOperationError(
             f"Google Cloud returned incomplete ownership identity for firewall rule {project_id}/{rule_name}",
@@ -482,7 +546,7 @@ def _ownership_from_operation(
             entity_name=rule_name,
             hint="retain the named rule until its provider identity can be established",
         )
-    return FirewallOwnership(rule_name=rule_name, resource_id=resource_id)
+    return resource_id
 
 
 def _provider_resource_id(value: object) -> str | None:

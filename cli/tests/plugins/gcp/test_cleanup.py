@@ -40,10 +40,24 @@ def _api_error(kind: type[Exception], message: str) -> Exception:
 class _Operation:
     error_code = None
 
-    def __init__(self, log: list[str], name: str, failure: Exception | None = None) -> None:
+    def __init__(
+        self,
+        log: list[str],
+        name: str,
+        failure: Exception | None = None,
+        *,
+        request_id: str = "",
+        operation_type: str = "delete",
+        target_id: int = 0,
+        target_link: str = "",
+    ) -> None:
         self.log = log
         self.name = name
         self.failure = failure
+        self.client_operation_id = request_id
+        self.operation_type = operation_type
+        self.target_id = target_id
+        self.target_link = target_link
 
     def result(self, *, timeout: float) -> None:
         self.log.append(f"wait:{self.name}:{timeout}")
@@ -65,9 +79,18 @@ class _Instances:
             raise _api_error(api_exceptions.NotFound, "gone")
         return state
 
-    def delete(self, **_kwargs: object) -> _Operation:
+    def delete(self, **kwargs: object) -> _Operation:
         self.log.append("instance:delete")
-        return _Operation(self.log, "instance")
+        request = cast("compute_v1.DeleteInstanceRequest", kwargs["request"])
+        return _Operation(
+            self.log,
+            "instance",
+            request_id=request.request_id,
+            target_id=201,
+            target_link=(
+                f"projects/{request.project}/zones/{request.zone}/instances/{request.instance}"
+            ),
+        )
 
 
 class _Firewalls:
@@ -88,9 +111,17 @@ class _Firewalls:
             raise _api_error(api_exceptions.NotFound, "gone")
         return state
 
-    def delete(self, *, firewall: str, **_kwargs: object) -> _Operation:
-        self.log.append(f"firewall:delete:{firewall}")
-        return _Operation(self.log, firewall)
+    def delete(self, **kwargs: object) -> _Operation:
+        request = cast("compute_v1.DeleteFirewallRequest", kwargs["request"])
+        self.log.append(f"firewall:delete:{request.firewall}")
+        target_id = 101 if request.firewall == _COORDINATES.allow_rule else 102
+        return _Operation(
+            self.log,
+            request.firewall,
+            request_id=request.request_id,
+            target_id=target_id,
+            target_link=f"projects/{request.project}/global/firewalls/{request.firewall}",
+        )
 
 
 def _allow(*, priority: int = 0) -> compute_v1.Firewall:
