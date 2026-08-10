@@ -38,6 +38,7 @@ def test_onboarding_authored_blocks_cover_durable_authorization_and_clean_setup(
     assert "authorization class" in contract
     assert "Guide output and action records are teaching, never authorization" in contract
     teaching = blocks[Teaching]
+    teaching_flat = " ".join(teaching.split())
     for required in (
         "`agw config init`",
         "refuses to overwrite an existing config",
@@ -48,10 +49,15 @@ def test_onboarding_authored_blocks_cover_durable_authorization_and_clean_setup(
         "provider identifiers, plugin choices, and secret references explicitly",
         "`agw doctor --output json`",
         "`create-first-vm` and `create-first-session`",
-        "configuration-through-session sequence under one\nexplicit setup envelope",
+        "configuration-through-session sequence under one explicit setup envelope",
         "skips present VMs and sessions",
     ):
-        assert required in teaching
+        assert required in teaching_flat
+    assert teaching_flat.index("presence of candidate public-key files") < teaching_flat.index("`agw config init`")
+    assert teaching_flat.index("`agw config init`") < teaching_flat.index("existing generated config")
+    assert teaching_flat.index("existing generated config") < teaching_flat.index("`agw doctor --output json`")
+    assert "run-doctor:onboarding/doctor-readiness=verified" in teaching_flat
+    assert "never retries the mutation automatically" in teaching_flat
 
 
 def test_action_contract_pins_authorization_refusal_and_first_resources() -> None:
@@ -77,6 +83,8 @@ def test_action_contract_pins_authorization_refusal_and_first_resources() -> Non
     assert "schema_version is the integer 1" in actions[0].expected_state
     assert "command is exactly doctor" in actions[0].expected_state
     assert "data is an object" in actions[0].expected_state
+    assert "data.counts.fail to be the integer 0" in actions[0].expected_state
+    assert "no applicable readiness check to report unavailable or not ready" in actions[0].expected_state
     assert actions[3].command == (
         "agw",
         "vm",
@@ -110,6 +118,11 @@ def test_action_contract_pins_authorization_refusal_and_first_resources() -> Non
         "$AGENT_TEMPLATE",
     )
     assert "provider cost" in actions[3].expected_state
+    assert "`agw vm create --help`" in actions[3].precondition
+    assert "normal secret-reference boundaries" in actions[3].expected_state
+    assert "make no VM or provider change" in actions[3].refusal_alternative
+    assert "`agw session create --help`" in actions[4].precondition
+    assert "provider network and SSH connectivity" in actions[4].expected_state
     assert "no attach, delete, or privilege elevation" in actions[4].expected_state
 
 
@@ -124,6 +137,9 @@ def test_rendered_disclosure_precedes_ordered_action_records() -> None:
     assert rendered.markdown.index("## Security disclosure") < rendered.markdown.index("### `verify-vm-connection`")
     assert "Authorization class: `connect-named-vm`" in rendered.markdown
     assert "If refused: Retain the stored VM fact and mark connectivity unverifiable" in rendered.markdown
+    action = rendered.markdown[rendered.markdown.index("### `verify-vm-connection`") :]
+    assert action.index("Precondition:") < action.index("Expected state:")
+    assert action.index("Expected state:") < action.index("Authorization class:") < action.index("Command:")
 
 
 def test_reporting_bugs_snapshot_forbids_general_feedback_and_auto_submission() -> None:

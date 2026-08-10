@@ -19,7 +19,7 @@ def _topic(slug: str):
 def test_migration_is_a_colocated_exception_topic_linked_without_teaching_duplication() -> None:
     migration = _topic("concept-migration")
     migration_teaching = next(block.markdown for block in migration.blocks if isinstance(block, Teaching))
-    assert "`data.counts.fail` to equal `0`" in migration_teaching
+    assert "`data.counts.fail` to equal `0`" in " ".join(migration_teaching.split())
     for slug in ("concept-onboarding", "concept-management"):
         topic = _topic(slug)
         assert "concept-migration" in topic.related_topics

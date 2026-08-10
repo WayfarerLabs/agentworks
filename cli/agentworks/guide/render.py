@@ -251,9 +251,9 @@ def _action_list(block: ActionList) -> str:
             f"### {_code(action.id)}\n\n"
             f"- Precondition: {_plain_description(action.precondition)}\n"
             f"- Required inputs: {inputs}\n"
+            f"- Expected state: {_plain_description(action.expected_state)}\n"
             f"- Authorization class: {_code(action.consent.value)}\n"
-            f"- {operation}\n"
-            f"- Expected state: {_plain_description(action.expected_state)}"
+            f"- {operation}"
             f"{verification}\n"
             f"- If refused: {_plain_description(action.refusal_alternative)}"
         )
@@ -362,9 +362,9 @@ def _onboarding_plan(
                 f"### `{action.id}`\n\n"
                 f"- Precondition: {action.precondition}\n"
                 f"- Required inputs: {inputs}\n"
+                f"- Expected state: {action.expected_state}\n"
                 f"- Authorization class: `{action.consent.value}`\n"
                 f"- Command: `{' '.join(action.command or ())}`\n"
-                f"- Expected state: {action.expected_state}\n"
                 + (f"- Verification: `{' '.join(action.verification)}`\n" if action.verification is not None else "")
                 + f"- If refused: {action.refusal_alternative}"
             )

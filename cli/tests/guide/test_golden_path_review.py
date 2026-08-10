@@ -32,8 +32,7 @@ def test_unavailable_readiness_renders_and_assesses_as_unverifiable() -> None:
 
     assert assessment.findings[0].status is OnboardingStatus.UNVERIFIABLE
     assert assessment.findings[0].reason == reason
-    assert ActionId("run-doctor") not in assessment.action_ids
-    assert assessment.action_ids[-2:] == (ActionId("create-first-vm"), ActionId("create-first-session"))
+    assert assessment.action_ids == (ActionId("run-doctor"),)
 
 
 def test_unavailable_readiness_is_explicit_in_dynamic_rendering() -> None:
