@@ -190,7 +190,12 @@ discipline pinned in the brief against the twin-correction failure mode; the CLI
 coordinates with the pending resource-CLI grammar decision.
 
 - [x] Ruled and brief seeded (2026-08-10)
-- [ ] SDD, implementation, review; lands before the 0.14.0 tag (gates the cut per `phasing.md`)
+- [x] SDD, implementation, review complete; merged before the 0.14.0 tag (design PR #472 and
+      implementation PR #478, both merged 2026-08-10 after multi-round saga-lead and integration
+      reviews: canonical version-shape qualification closing the late-inspector race, exact-shape
+      restore validation, mandatory suppression-surviving stderr notices, non-mutating completion
+      probes, and a mutation-pinned benign-contention witness; the effort's SDD locked at merge).
+      The safer-migrations release gate is satisfied
 
 ### Not yet spawned
 
@@ -220,16 +225,26 @@ Not children of this saga (explicitly out of scope, see `target-state.md`): the
 named-console-template selector SDD, the herdr effort, the companion-shell and resilient-attach
 wins, and the agentworks.build website (`docs/sdd/2026-08-07-website/`, seeded 2026-08-07; the saga
 lead seeds and reviews it like a child, but it does not gate the saga lock). They proceed
-standalone. Website status (2026-08-10): five-page topology (Home, generated Manifesto, Security,
-404, and the operator-authorized dedicated Lander page) implemented and convergence-verified;
-operator acceptance ruling moves the Firefox/WebKit/screen-reader/touch matrix to post-launch
-validation against the public host (rows explicit and unchecked, required before that effort's
-lock), with Chrome/Edge preview as the pre-merge browser gate.
+standalone. Also adjacent standalone (saga-lead-seeded and reviewed, not gating the lock): the `gcp`
+vendor-bundle platform effort (PR #479; standalone by its seed ruling; vendor plugins may grow
+beyond their first capability implementation per the operator ruling recorded in its FRD), the
+bootstrap-fallback-removal effort it spawned (PR #475, merged and locked 2026-08-10, closing
+[issue 471](https://github.com/WayfarerLabs/agentworks/issues/471): the generic secret-bearing Phase
+A fallback deleted and all platforms cut to contract v2), and the continuous-lander website feature
+(PR #486, stacked on #439). Website status (2026-08-10): five-page topology (Home, generated
+Manifesto, Security, 404, and the operator-authorized dedicated Lander page) implemented and
+convergence-verified; operator acceptance ruling moves the Firefox/WebKit/screen-reader/touch matrix
+to post-launch validation against the public host (rows explicit and unchecked, required before that
+effort's lock), with Chrome/Edge preview as the pre-merge browser gate.
 
 ## Standing process rulings
 
-Permanent homes landed via PRs #473/#474: the sdd skill's supersession paragraph, and the
-dev-process draft/ready handoff and review-requested label conventions.
+Permanent homes landed via PRs #473/#474/#477/#481: the sdd skill's supersession paragraph; the
+dev-process draft/ready handoff, author-owned review-requested label, exact handoff definition,
+subagent-review taxonomy, and commit/PR/stack layering with the cascade rule; and the saga-lead
+review triggers matching them. Enforcement calibration (operator, 2026-08-10): sessions predating a
+convention get reminders while work proceeds; review is withheld only for unaddressed substance,
+never for missing ceremony.
 
 - **Plan-history ruling (operator, 2026-08-10):** completed plan steps may never be removed — no
   exception for never-merged, superseded, or expunged work. Everything else strips clean under a
@@ -306,3 +321,8 @@ open-ended research placeholder.
     durable-surface inventory). The wave 3 lead owes the post-merge follow-up (enforcement-suite
     consolidation plus the unit-test runtime fix). Open 0.14 gates: installer-plugins
     implementation, the README bootstrap, safer migrations, and the test-consolidation soft gate.
+15. Safer migrations merged (2026-08-10): that gate is satisfied. Open 0.14 gates: the
+    installer-plugins implementation (design endorsed 2026-08-09; no implementation activity since —
+    the current long pole), the README bootstrap (the onboarding effort's Phase 3 design converging
+    on PR #480 under the operator's lifecycle-assistance lens), and the test-consolidation soft gate
+    (seeds when the hard gates land).
