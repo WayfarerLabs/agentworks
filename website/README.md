@@ -199,7 +199,8 @@ the publishing workflow first runs from a merged `main` commit.
 5. Set `agentworks.build` as this repository's custom domain. Do not mutate DNS yet.
 6. On the same already verified implementation merge-push workflow, use GitHub's **Re-run all
    jobs**. Prove the rerun checked out the same source SHA, normalized `site_base=/`, built and
-   uploaded the exact root-base ten-file artifact, and deployed that artifact successfully.
+   uploaded the exact root-base ten-file artifact, and deployed that artifact successfully. If the
+   deployment fails or cannot be verified, execute the activation rollback below.
 7. Re-inventory DNS. Only after the same-SHA root deployment is proven, obtain explicit operator
    approval for the exact cutover and then change only the identified parking records.
 8. Verify apex content, the `www` redirect, certificate hostname, and HTTPS enforcement.
@@ -214,6 +215,17 @@ Attaching the custom domain changes only the builder's site-base input from `/ag
 The required same-workflow rerun makes that root-base transition observable before DNS approval. It
 does not select different content or require a second artifact path. The artifact contains no
 `CNAME`; the repository setting is the custom-domain authority.
+
+The default project URL may be degraded between attaching the repository custom-domain setting and
+verifying the root-base rerun. The previous project-base artifact is not guaranteed to remain
+available during this interval. If the same-SHA root-base rerun or deployment fails or cannot be
+verified, leave all DNS records unchanged and detach the repository custom-domain setting. Preserve
+the WayfarerLabs organization verification and its TXT record, along with every unrelated DNS
+record. On the same latest verified `main` push workflow, use **Re-run all jobs** again. Verify that
+`configure-pages` selected `/agentworks/`, that the rerun checked out the same source SHA, and that
+the exact project-base ten-file artifact deployed successfully. Verify that same SHA at
+`https://wayfarerlabs.github.io/agentworks/`, then stop. Retry custom-domain activation only through
+the full reviewed sequence above.
 
 ## DNS cutover and verification
 
@@ -247,14 +259,15 @@ for that historical run, then verify its commit, exact manifest, and public resu
 window, land a reviewed revert or fix commit on `main` and let the ordinary publishing workflow
 deploy it. A fix or revert on `main` is the durable recovery path in either case.
 
-For a DNS or certificate problem, keep the last verified Pages deployment available at its default
-URL and compare live records with the saved before-state. Do not disable HTTPS or add forwarding
-machinery to work around propagation. Restore only the explicitly changed parking records if the
-approved cutover must be reversed.
+For a DNS or certificate problem, compare live records with the saved before-state. Do not assume
+that the previous project-base artifact remains available at the default URL after changing the
+custom-domain setting. Do not disable HTTPS or add forwarding machinery to work around propagation.
+Restore only the explicitly changed parking records if the approved cutover must be reversed.
 
-If Pages is disabled, the repository moves, or the custom domain is detached, promptly remove or
-repoint the public apex and `www` records so they cannot target an unclaimed Pages site. Restore
-organization domain verification before reconnecting the domain.
+If Pages is disabled, the repository moves, or the custom domain is detached after public DNS points
+to Pages, promptly remove or repoint the apex and `www` records so they cannot target an unclaimed
+Pages site. Keep organization domain verification intact; if it was lost, restore it before
+reconnecting the domain.
 
 For a hosting migration, deploy the exact generated directory to the replacement static host,
 validate it at a temporary hostname, and then move DNS using the same inventory, approval, and
