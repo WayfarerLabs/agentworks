@@ -14,10 +14,10 @@ offline gates, and operator-gated live acceptance are complete; the SDD is locke
       direct dependencies the implementation will import; actual dependency edits remain Phase 1.
 - [x] Review and approve `prior-art-research.md` plus `provider-state-machine-lld.md`, which pin the
       official provider semantics and bounded bootstrap/network/cleanup state machine.
-- [ ] Obtain saga-lead approval for the exact `gcp-gce` config schema in the HLA before code begins.
-- [ ] Include the narrow shared readiness-command seam in that pre-implementation review because GCP
+- [x] Obtain saga-lead approval for the exact `gcp-gce` config schema in the HLA before code begins.
+- [x] Include the narrow shared readiness-command seam in that pre-implementation review because GCP
       startup-script completion differs from Azure/AWS cloud-init readiness.
-- [ ] Resolve every schema or readiness-seam finding in the FRD/HLA/plan before delegation.
+- [x] Resolve every schema or readiness-seam finding in the FRD/HLA/plan before delegation.
 
 **DoD:** the public manifest shape and only shared seam are approved; implementation has a stable
 contract and no schema guesswork.
@@ -52,7 +52,8 @@ foundation is fully typed, secret-free, offline-tested, and the existing platfor
 - [ ] Implement machine/image/disk selection, metadata SSH identity, credential-free startup script,
       256 KiB encoded size gate, durable run-once marker, auto-deleted boot disk, empty guest
       service-account list, scoped priority-0 TCP/22 allow plus priority-1 all-ingress deny,
-      lifetime ephemeral external access, fixed stdin join, and optional Tailscale IP result.
+      lifetime ephemeral external access, observable secret-free progress, fixed stdin join, and
+      optional Tailscale IP result.
 - [ ] Implement `post_tailscale_ready`, `secure_failed_vm`, and concurrent-safe `transient_route` so
       provisioning/native scoped allows are bounded while lifetime external access keeps ordinary
       egress available.

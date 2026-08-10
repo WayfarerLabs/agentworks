@@ -181,6 +181,10 @@ This is the only new shared seam. It represents a real provider readiness differ
 add a delivery mode, callback framework, or GCP branch to the manager. The schema-review gate should
 approve this seam with the config shape before implementation begins.
 
+GCP's create path is a multi-step in-create bootstrap, so it actively uses the required progress
+sink for secret-free provider, readiness-marker, and stdin-join milestones and sanitized output. It
+does not treat the sink as an unused compatibility argument or emit raw SDK/request objects.
+
 ## Exposure lifecycle
 
 GCP's default network commonly contains priority-65534 broad SSH, RDP, ICMP, and internal ingress
