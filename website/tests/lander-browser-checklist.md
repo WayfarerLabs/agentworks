@@ -71,6 +71,20 @@ browser cache for request-log checks.
 - Human visual review of motion quality and touch hardware feel: pending; CDP verified state,
   geometry, computed styles, event behavior, and timing contracts.
 
+## Operator pre-merge acceptance
+
+- Date: 2026-08-10
+- Source viewed: `3bad34ab18194fe5a0acb54d187863dbed5ba8ad`
+- Browsers: current Google Chrome and Microsoft Edge on the operator's port-forward machine; exact
+  browser build strings were not supplied
+- Tester: operator
+- Outcome: PASS; the operator confirmed that the site is fine in both required pre-merge browsers
+- Final requested delta: `a6f6522d` only reduces the TOC list font to `0.92rem`, bolds the complete
+  `SSH-over-Tailscale control plane` phrase from its canonical README source, and removes three
+  behavior-neutral validation residues. The required computed-layout suite, complete website and
+  game suites, and both deterministic-base builds pass on that delta. Firefox/WebKit, spoken
+  screen-reader, physical mobile/touch, and additional-device acceptance remain post-launch work.
+
 Before merge, repeat the applicable preview checklist in current Chrome and Edge, the two browsers
 available to the operator on the machine with port-forward access. After the site is public, repeat
 the full engine and responsive rows in Firefox and Safari/WebKit and on physical touch hardware.
@@ -85,9 +99,10 @@ screen-reader quality and physical touch/motion feel require humans on those act
 the public host is reachable. Emulation and an accessibility-tree dump are useful evidence, but do
 not close those rows or the final production-acceptance record.
 
-- [ ] In current Chrome and Edge before merge, exercise `/lander/` and `/404.html` with JavaScript
+- [x] In current Chrome and Edge before merge, exercise `/lander/` and `/404.html` with JavaScript
       enabled and disabled, at normal and reduced motion, and at every responsive viewport below.
-      Record the exact browser version and source SHA.
+      Record the exact browser version and source SHA when available; otherwise record the explicit
+      evidence limitation with the operator's disposition.
 - [ ] After launch, in Firefox, repeat the complete keyboard, pointer, lifecycle, reflow,
       computed-style, and reduced-motion pass. Record the exact browser version and source SHA.
 - [ ] After launch, in Safari or another WebKit browser, repeat the same engine pass.
@@ -244,9 +259,9 @@ new run records the refined source.
 
 ## Responsive acceptance
 
-- [ ] At 320 CSS pixels wide, the page has no horizontal overflow, clipped controls, obscured
+- [x] At 320 CSS pixels wide, the page has no horizontal overflow, clipped controls, obscured
       breadcrumb, or start target smaller than the pinned full-silhouette bounds.
-- [ ] At 400 percent zoom, all detail headings, 404 content, home navigation, native actions, focus
+- [x] At 400 percent zoom, all detail headings, 404 content, home navigation, native actions, focus
       outlines, scene, and status remain reachable without two-dimensional page scrolling.
 - [x] In touch landscape, the scene fits its container, the active shell alone suppresses touch
       actions, and browser navigation and zoom remain available outside it.
@@ -255,16 +270,18 @@ new run records the refined source.
 
 ## Shared shell acceptance
 
-- [ ] Home shows the AGW rocket at the accepted historical-baseline size, repository-sourced
+- [x] Home shows the AGW rocket at the accepted historical-baseline size, repository-sourced
       identity, and onboarding availability. It has no small header mark. Home, Manifesto, Security,
       Lander, and 404 each show one GitHub and one PyPI icon-and-text link in the header and exactly
       three footer destinations: Manifesto, Security, then the icon-only Lander link. No destination
       is duplicated in the body.
-- [ ] In Chrome and Edge before merge, then Firefox and WebKit after launch, verify at 320 CSS
-      pixels, 400 percent zoom, touch landscape, and wide desktop that Home, Manifesto, Security,
-      Lander, and 404 have no page overflow, clipped text or navigation, overlap, or fixed-height
-      content loss. Record browser versions, viewport, date, and result.
-- [ ] With JavaScript disabled, Home, Manifesto, and Security retain all content and links, Lander
+- [x] In Chrome and Edge before merge, verify at 320 CSS pixels, 400 percent zoom, touch landscape,
+      and wide desktop that Home, Manifesto, Security, Lander, and 404 have no page overflow,
+      clipped text or navigation, overlap, or fixed-height content loss. Record browser versions,
+      viewport, date, and result when available, or record the explicit evidence limitation.
+- [ ] After launch, repeat that complete shared-shell matrix in Firefox and WebKit and record the
+      browser versions, viewport, date, and result.
+- [x] With JavaScript disabled, Home, Manifesto, and Security retain all content and links, Lander
       retains its heading and named scene, and 404 retains its message, named scene, and breadcrumb
       route-home action. No surface depends on terminal familiarity.
 - [ ] Keyboard-only traversal reaches each visible skip link, breadcrumb home crumb, GitHub, PyPI,
@@ -276,6 +293,6 @@ new run records the refined source.
 - [ ] With reduced motion enabled, Home, Manifesto, and Security remain motion-free and 404 follows
       the existing no-cue, direct-success contract. Human touch checks confirm page scroll outside
       the active scene and tap, hold, and drag behavior inside it.
-- [ ] In a clean context, a visitor identifies what Agentworks is, sees that guided onboarding is
+- [x] In a clean context, a visitor identifies what Agentworks is, sees that guided onboarding is
       not yet published, and can choose GitHub, PyPI, Manifesto, or Security without explanation.
       Record timing and any intervention.
