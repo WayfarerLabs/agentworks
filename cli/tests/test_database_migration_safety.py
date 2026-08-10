@@ -185,7 +185,7 @@ def test_two_process_safe_open_serializes_with_exactly_one_backup(tmp_path: Path
     assert _version(path) == LATEST_VERSION
 
 
-def test_late_inspector_refuses_partial_stale_observation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stale_inspector_waits_then_refuses_changed_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agentworks.db import backup as backup_module
 
     path = tmp_path / "state.db"
@@ -198,7 +198,7 @@ def test_late_inspector_refuses_partial_stale_observation(tmp_path: Path, monkey
     real_inspect = backup_module.inspect_schema
     calls = 0
 
-    def _inspect_then_overlap(database_path: Path, *, immutable: bool = False):
+    def _inspect_then_wait(database_path: Path, *, immutable: bool = False):
         nonlocal calls
         result = real_inspect(database_path, immutable=immutable)
         calls += 1
@@ -207,9 +207,9 @@ def test_late_inspector_refuses_partial_stale_observation(tmp_path: Path, monkey
             assert acquired.wait(timeout=5)
         return result
 
-    monkeypatch.setattr(backup_module, "inspect_schema", _inspect_then_overlap)
+    monkeypatch.setattr(backup_module, "inspect_schema", _inspect_then_wait)
 
-    with pytest.raises(StateError, match="overlapping migration attempt"):
+    with pytest.raises(StateError, match="changed before its stale state could be qualified"):
         prepare_database_open(path)
 
     writer.join(timeout=10)

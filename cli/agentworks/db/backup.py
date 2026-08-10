@@ -145,25 +145,17 @@ def prepare_database_open(database_path: Path) -> DatabaseOpenPlan:
     if initial.state is not SchemaState.STALE:
         return DatabaseOpenPlan(initial)
 
-    lock = _acquire_migration_lock(database_path, timeout=0.0)
-    overlapped = lock is None
+    lock = _acquire_migration_lock(database_path, timeout=MIGRATION_LOCK_TIMEOUT_SECONDS)
     if lock is None:
-        lock = _acquire_migration_lock(database_path, timeout=MIGRATION_LOCK_TIMEOUT_SECONDS)
-        if lock is None:
-            raise StateError(
-                "state database migration lock is busy",
-                hint="Retry after the other Agentworks command finishes.",
-            )
+        raise StateError(
+            "state database migration lock is busy",
+            hint="Retry after the other Agentworks command finishes.",
+        )
     try:
         qualified = inspect_schema(database_path)
         _raise_if_unopenable(qualified)
         if qualified.state is SchemaState.CURRENT:
             return DatabaseOpenPlan(qualified)
-        if overlapped:
-            raise StateError(
-                "state database remained outdated after an overlapping migration attempt",
-                hint="Inspect the database with `agw doctor` before retrying.",
-            )
         initial_tokens = (initial.current_version, initial.schema_cookie)
         qualified_tokens = (qualified.current_version, qualified.schema_cookie)
         if qualified.state is SchemaState.STALE and qualified_tokens != initial_tokens:
