@@ -116,7 +116,8 @@ _DOCTOR_READINESS_TARGET = GuideIdentity("onboarding", "doctor-readiness")
 _ACTION_RECORDS = (
     GuideAction(
         ActionId("run-doctor"),
-        "A projected resource is not ready and the stored reason needs host diagnosis.",
+        "First-resource creation needs explicit configured-readiness proof, or a projected resource is not ready "
+        "and its stored reason needs host diagnosis.",
         (),
         ConsentBoundary.EXAMINE_WORKSTATION,
         ("agw", "doctor", "--output", "json"),
@@ -125,7 +126,8 @@ _ACTION_RECORDS = (
         "data.counts.fail to be the integer 0, and no applicable readiness check to report unavailable or "
         "not ready. Agentworks reports configuration and host-readiness checks without applying repairs.",
         None,
-        "Keep the stored not-ready reason and troubleshoot manually without probing the workstation.",
+        "Run no diagnostic. Keep first-resource readiness unverified or retain the stored not-ready reason, and "
+        "troubleshoot manually without probing the workstation.",
     ),
     GuideAction(
         ActionId("verify-named-secret"),

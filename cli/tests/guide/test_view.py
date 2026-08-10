@@ -11,6 +11,7 @@ from agentworks.guide import (
     ConceptAnchor,
     GuideBlock,
     GuideInstanceFact,
+    GuideMode,
     GuideRoot,
     GuideTraversalError,
     ImplementationAnchor,
@@ -22,6 +23,7 @@ from agentworks.guide import (
     TopicSlug,
     build_guide_view,
 )
+from agentworks.guide.render import render_topic
 from agentworks.resources import KIND_REGISTRY, Origin, Registry, ResourceReference
 from agentworks.resources.graph import Enablement, Readiness
 from agentworks.resources.kind import InstanceRef
@@ -237,15 +239,24 @@ def test_concept_views_materialize_only_their_permitted_global_inventories(
 def test_management_concept_projects_deduplicated_kind_owned_live_instances(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(guide_view_module, "KIND_REGISTRY", {"guide-test": _InstanceHandler()})
+    monkeypatch.setattr(
+        guide_view_module,
+        "KIND_REGISTRY",
+        {"guide-test": _InstanceHandler(), "guide-capability": _CapabilityHandler()},
+    )
+    topic = _topic_for(ConceptAnchor("concept-management"), inventory=True)
 
     view = build_guide_view(
-        _topic_for(ConceptAnchor("concept-management"), inventory=True),
+        topic,
         _Registry(),  # type: ignore[arg-type]
         SimpleNamespace(),  # type: ignore[arg-type]
     )
 
     assert view.instances() == (GuideInstanceFact("vm", "alpha"), GuideInstanceFact("vm", "zeta"))
+    rendered = render_topic(topic, view, GuideMode.AGENT).markdown
+    assert "- `vm/alpha`" in rendered
+    assert "- `guide-test/guide-test` (ready)" in rendered
+    assert "- `guide-capability/demo` (ready)" in rendered
 
 
 def test_concept_roots_must_match_validated_block_plan() -> None:

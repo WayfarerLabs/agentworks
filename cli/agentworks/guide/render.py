@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import re
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -277,19 +278,17 @@ def _fenced_yaml(value: str) -> str:
 
 def _dynamic(block: GuideBlock, view: GuideView) -> str:
     if isinstance(block, InstanceList):
-        try:
-            instances = view.instances()
-            if instances:
-                return "\n".join(f"- `{item.kind}/{item.name}`" for item in instances)
-        except GuideTraversalError:  # traversal is deliberately retried through permitted concept roots
-            pass
+        lines: list[str] = []
+        with suppress(GuideTraversalError):
+            lines.extend(f"- `{item.kind}/{item.name}`" for item in view.instances())
         facts: tuple[GuideResourceFact, ...] = ()
         for root in (GuideRoot.KINDS, GuideRoot.IMPLEMENTATIONS):
             try:
                 facts += view.inventory(root)
             except GuideTraversalError:
                 continue
-        return "\n".join(_fact_line(fact) for fact in facts) or "No current items."
+        lines.extend(_fact_line(fact) for fact in facts)
+        return "\n".join(lines) or "No current items."
     if isinstance(block, State):
         return _fact_line(view.me())
     if isinstance(block, Relationships):
