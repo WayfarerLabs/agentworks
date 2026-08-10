@@ -1,0 +1,32 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 240 400"
+  role="img"
+  aria-labelledby="title description"
+>
+  <title id="title">Agentworks JetBrains Mono AGW rocket study</title>
+  <desc id="description">
+    Outlined JetBrains Mono ExtraBold letters A, G, and W overlap vertically to form a rocket.
+  </desc>
+  <metadata>Glyph outlines from JetBrains Mono ExtraBold 2.304, licensed under SIL OFL 1.1.</metadata>
+
+  <g fill="currentColor">
+    <path
+      data-letter="W"
+      transform="translate(45 392) scale(.25 -.18)"
+      d="M78 0 10 730H129L166 242Q167 228 168.5 202.5Q170 177 171.5 149.5Q173 122 173 100Q175 122 177.5 149.5Q180 177 182.5 202.5Q185 228 186 242L244 730H358L414 242Q416 228 418.5 202.5Q421 177 424 149.5Q427 122 429 100Q430 122 431 149.5Q432 177 433.5 202.5Q435 228 436 242L470 730H590L517 0H361L312 485Q311 502 308.5 529.5Q306 557 304 587Q302 617 300 640Q299 617 297 587Q295 557 293 529.5Q291 502 289 485L235 0Z"
+    />
+
+    <path
+      data-letter="G"
+      transform="translate(33.6 279.855) scale(.2875 -.207)"
+      d="M304-10Q231-10 176 17.5Q121 45 90.5 94.5Q60 144 60 210V520Q60 587 90.5 636Q121 685 176 712.5Q231 740 304 740Q378 740 432.5 712.5Q487 685 517.5 636Q548 587 548 520H398Q398 564 373.5 587Q349 610 304 610Q259 610 234.5 587Q210 564 210 520V210Q210 167 234.5 143.5Q259 120 304 120Q349 120 373.5 143.5Q398 167 398 210V278H290V405H548V210Q548 144 517.5 94.5Q487 45 432.5 17.5Q378-10 304-10Z"
+    />
+
+    <path
+      data-letter="A"
+      transform="translate(45 143) scale(.25 -.18)"
+      d="M25 0 204 730H394L575 0H422L387 165H213L178 0ZM238 285H361L326 461Q319 499 311.5 536.5Q304 574 300 595Q296 574 289.5 537Q283 500 275 462Z"
+    />
+  </g>
+</svg>

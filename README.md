@@ -14,7 +14,7 @@ Create and manage an agentic fleet from your own workstation. **Durable agents**
 Linux users in **VMs** on infrastructure you choose and control. They retain their own tools, git
 credentials, and accumulated application state (a coding assistant's context and memory, interactive
 logins). **Disposable sessions** spin up against them for a single piece of work and are thrown away
-when done. One `agw` CLI drives all of it declaratively via an SSH-over-Tailscale control plane.
+when done. One `agw` CLI drives all of it declaratively via an **SSH-over-Tailscale control plane**.
 
 ## Architecture at a Glance
 
@@ -258,9 +258,13 @@ admin user and agents).
 
 ## Components
 
-Today the repo contains a single component: [`cli/`](cli/), the Python CLI that is the operator's
-primary interface. The structure leaves room for additional clients (a web UI is anticipated) to
-land alongside it without relocating the CLI.
+The repository contains two operator-facing components:
+
+- [`cli/`](cli/) is the Python CLI and the operator's primary interface.
+- [`website/`](website/) is the package-free static source and builder for `agentworks.build`.
+
+They share permanent product and security documentation without maintaining independent copies of
+the same claims.
 
 ## Contributing
 
@@ -270,7 +274,7 @@ across the surface, and pairs well with AI coding assistants.
 
 ## Security
 
-Found a vulnerability? Please report it privately. See [SECURITY.md](SECURITY.md) for scope and
-reporting channels.
+Found a vulnerability? Please report it privately. See [SECURITY.md](SECURITY.md) for scope and the
+reporting channel.
 
 Licensed under [MIT](LICENSE).
