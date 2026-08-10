@@ -104,8 +104,10 @@ def test_prompt_secret_converts_real_click_abort_to_user_abort(monkeypatch: pyte
         raise click.exceptions.Abort()
 
     monkeypatch.setattr(click, "prompt", _raise)
-    with pytest.raises(UserAbort):
+    with pytest.raises(UserAbort) as caught:
         TyperHandler().prompt_secret("Token", level=0)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
 def test_prompt_secret_also_converts_vendored_abort_to_user_abort(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -115,5 +117,7 @@ def test_prompt_secret_also_converts_vendored_abort_to_user_abort(monkeypatch: p
         raise typer.Abort()
 
     monkeypatch.setattr(click, "prompt", _raise)
-    with pytest.raises(UserAbort):
+    with pytest.raises(UserAbort) as caught:
         TyperHandler().prompt_secret("Token", level=0)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None

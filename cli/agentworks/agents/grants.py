@@ -21,6 +21,7 @@ from agentworks import output
 from agentworks.agents.manager import agent_scope
 from agentworks.errors import NotFoundError, ValidationError
 from agentworks.naming import LINUX_GROUPNAME_MAX_LENGTH
+from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 from agentworks.transports import transport
 from agentworks.vms.manager import gated_vm_boundary
 
@@ -57,6 +58,7 @@ def grant_workspaces(
     agent_name: str,
     workspace_names: list[str],
     grant_all: bool = False,
+    interaction: InteractionPolicy,
 ) -> None:
     """Grant an agent explicit access to workspaces.
 
@@ -69,6 +71,7 @@ def grant_workspaces(
     empty-request and unknown-agent validations stay pre-gate: they
     fail with zero prompts and zero VM starts.
     """
+    interaction = validate_interaction_policy(interaction)
     if not grant_all and not workspace_names:
         raise ValidationError(
             f"grant for '{agent_name}' needs at least one workspace name or workspace_names empty + grant_all=True",
@@ -89,7 +92,14 @@ def grant_workspaces(
     from agentworks.bootstrap import load_request_registry
 
     registry = load_request_registry(config)
-    with gated_vm_boundary(db, config, registry, vm, scope=agent_scope(db, vm.name, agent_name)):
+    with gated_vm_boundary(
+        db,
+        config,
+        registry,
+        vm,
+        scope=agent_scope(db, vm.name, agent_name),
+        interaction=interaction,
+    ):
         if grant_all:
             db.update_agent_grant_all(agent_name, True)
             # Add to all existing workspace groups on this VM
@@ -119,6 +129,7 @@ def revoke_workspaces(
     agent_name: str,
     workspace_names: list[str],
     revoke_all: bool = False,
+    interaction: InteractionPolicy,
 ) -> None:
     """Revoke explicit workspace grants from an agent.
 
@@ -128,6 +139,7 @@ def revoke_workspaces(
     covering the group-membership SSH work, and the empty-request /
     unknown-agent validations pre-gate.
     """
+    interaction = validate_interaction_policy(interaction)
     if not revoke_all and not workspace_names:
         raise ValidationError(
             f"revoke for '{agent_name}' needs at least one workspace name or workspace_names empty + revoke_all=True",
@@ -148,7 +160,14 @@ def revoke_workspaces(
     from agentworks.bootstrap import load_request_registry
 
     registry = load_request_registry(config)
-    with gated_vm_boundary(db, config, registry, vm, scope=agent_scope(db, vm.name, agent_name)):
+    with gated_vm_boundary(
+        db,
+        config,
+        registry,
+        vm,
+        scope=agent_scope(db, vm.name, agent_name),
+        interaction=interaction,
+    ):
         if revoke_all:
             # Snapshot the granted workspaces BEFORE deleting any rows.
             # Taking it afterwards missed explicitly-granted-only

@@ -130,7 +130,7 @@ def test_successful_live_rendering_uses_no_denied_power(monkeypatch: pytest.Monk
     from agentworks.db import Database
 
     monkeypatch.setattr(output, "prompt", denied)
-    monkeypatch.setattr(secrets, "resolve_secrets", denied)
+    monkeypatch.setattr(secrets, "resolve_batch", denied)
     monkeypatch.setattr(transports, "transport", denied)
     monkeypatch.setattr(Database, "_migrate", denied)
     registry = _ExactRegistry()
@@ -154,11 +154,11 @@ def test_live_render_guide_denies_probes_secrets_capabilities_writes_and_mutatio
     import agentworks.output as output
     import agentworks.secrets.resolve as secrets
     import agentworks.transports as transports
+    from agentworks.capabilities.secret_backend import SECRET_BACKEND_REGISTRY
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
     from agentworks.config import load_config
     from agentworks.db import Database
     from agentworks.resources import Registry
-    from agentworks.secrets import SECRET_BACKEND_REGISTRY
 
     public_key = tmp_path / "id.pub"
     private_key = tmp_path / "id"
@@ -194,12 +194,11 @@ def test_live_render_guide_denies_probes_secrets_capabilities_writes_and_mutatio
     monkeypatch.setattr(subprocess, "run", denied)
     monkeypatch.setattr(output, "prompt", denied)
     monkeypatch.setattr(output, "prompt_secret", denied)
-    monkeypatch.setattr(secrets, "resolve_secrets", denied)
-    monkeypatch.setattr(secrets, "resolve_secrets_quiet", denied)
+    monkeypatch.setattr(secrets, "resolve_batch", denied)
     monkeypatch.setattr(transports, "transport", denied)
     monkeypatch.setattr(LimaPlatform, "unsupported_reason", denied)
     for backend in SECRET_BACKEND_REGISTRY.values():
-        monkeypatch.setattr(backend, "not_ready", denied)
+        monkeypatch.setattr(backend, "backend_readiness", denied)
     for name in dir(Database):
         if name.startswith(("insert_", "update_", "delete_", "set_", "remove_")):
             monkeypatch.setattr(Database, name, denied)

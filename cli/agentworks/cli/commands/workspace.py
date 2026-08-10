@@ -7,7 +7,14 @@ from typing import Annotated
 import typer
 
 from agentworks.cli._app import app
-from agentworks.cli._helpers import get_db, parse_csv_filter, prompt_vm
+from agentworks.cli._helpers import (
+    get_db,
+    ordinary_interaction_policy,
+    parse_csv_filter,
+    prompt_vm,
+)
+from agentworks.machine_output import OutputFormat
+from agentworks.secrets.policy import validate_interaction_policy
 
 workspace_app = typer.Typer(
     name="workspace",
@@ -25,6 +32,7 @@ def workspace_create(
     open_vscode: Annotated[bool, typer.Option("--open-vscode", help="Open in VS Code")] = False,
 ) -> None:
     """Create a workspace on a VM."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.config import load_config
     from agentworks.workspaces.manager import create_workspace
 
@@ -38,6 +46,7 @@ def workspace_create(
         vm_name=resolved_vm.name,
         template_name=template,
         open_vscode=open_vscode,
+        interaction=interaction,
     )
 
 
@@ -52,25 +61,58 @@ def workspace_list(
             "Used by shell completion; the order matches the table's row order.",
         ),
     ] = False,
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option("--output", help="Output format: human or json. Default: human."),
+    ] = OutputFormat.HUMAN,
 ) -> None:
     """List workspaces. --vm accepts comma-separated values for OR-within-filter."""
-    from agentworks.workspaces.manager import list_workspaces
+    if names_only and output_format is OutputFormat.JSON:
+        raise typer.BadParameter("cannot be used with --output json", param_hint="--names-only")
 
-    list_workspaces(
-        get_db(),
-        vm_name=parse_csv_filter(vm),
-        names_only=names_only,
-    )
+    from agentworks.workspaces.manager import render_workspace_listing, workspace_listing
+
+    listing = workspace_listing(get_db(), vm_name=parse_csv_filter(vm))
+    if output_format is OutputFormat.JSON:
+        from click import get_binary_stream
+
+        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+        from agentworks.workspaces.manager.create import workspace_listing_data
+
+        write_json_envelope(
+            MachineOutputCommand.WORKSPACE_LIST,
+            workspace_listing_data(listing),
+            get_binary_stream("stdout"),
+        )
+        return
+    render_workspace_listing(listing, names_only=names_only)
 
 
 @workspace_app.command("describe")
 def workspace_describe(
     name: Annotated[str, typer.Argument(help="Workspace name")],
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option("--output", help="Output format: human or json. Default: human."),
+    ] = OutputFormat.HUMAN,
 ) -> None:
     """Show workspace details, sessions, and agent access."""
-    from agentworks.workspaces.manager import describe_workspace
+    from agentworks.workspaces.manager import render_workspace_description, workspace_description
 
-    describe_workspace(get_db(), name)
+    description = workspace_description(get_db(), name)
+    if output_format is OutputFormat.JSON:
+        from click import get_binary_stream
+
+        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+        from agentworks.workspaces.manager.create import workspace_description_data
+
+        write_json_envelope(
+            MachineOutputCommand.WORKSPACE_DESCRIBE,
+            workspace_description_data(description),
+            get_binary_stream("stdout"),
+        )
+        return
+    render_workspace_description(description)
 
 
 @workspace_app.command("rehome")
@@ -85,10 +127,19 @@ def workspace_rehome(
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
 ) -> None:
     """Move a workspace to a new directory path."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.config import load_config
     from agentworks.workspaces.manager import rehome_workspace
 
-    rehome_workspace(get_db(), load_config(), name, target_path=target, remove_old=remove_old, yes=yes)
+    rehome_workspace(
+        get_db(),
+        load_config(),
+        name,
+        target_path=target,
+        remove_old=remove_old,
+        yes=yes,
+        interaction=interaction,
+    )
 
 
 @workspace_app.command("repair")
@@ -103,10 +154,11 @@ def workspace_repair(
     analog of the `vm reinit` / `agent reinit` convergence, named `repair`
     because reconciling that on-VM infrastructure is what it does.
     """
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.config import load_config
     from agentworks.workspaces.manager import repair_workspace
 
-    repair_workspace(get_db(), load_config(), name)
+    repair_workspace(get_db(), load_config(), name, interaction=interaction)
 
 
 @workspace_app.command("delete")
@@ -116,10 +168,18 @@ def workspace_delete(
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
 ) -> None:
     """Delete a workspace."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.config import load_config
     from agentworks.workspaces.manager import delete_workspace
 
-    delete_workspace(get_db(), load_config(), name, force=force, yes=yes)
+    delete_workspace(
+        get_db(),
+        load_config(),
+        name,
+        force=force,
+        yes=yes,
+        interaction=interaction,
+    )
 
 
 @workspace_app.command("copy")
@@ -129,6 +189,7 @@ def workspace_copy(
     vm: Annotated[str | None, typer.Option("--vm", help="Target VM")] = None,
 ) -> None:
     """Copy a workspace to a new VM workspace."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.config import load_config
     from agentworks.workspaces.manager import copy_workspace
 
@@ -138,4 +199,5 @@ def workspace_copy(
         source,
         dest_name=name,
         vm_name=vm,
+        interaction=interaction,
     )

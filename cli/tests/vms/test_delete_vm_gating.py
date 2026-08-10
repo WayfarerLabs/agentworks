@@ -26,6 +26,7 @@ import pytest
 from agentworks.db import VMStatus
 from agentworks.errors import AuthorizationError, UserAbort
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
+from agentworks.secrets.policy import InteractionPolicy
 from agentworks.vms import manager as vm_manager
 from tests._azure_platform_support import _RESOURCE_ID, _authorization_denied, _install_fakes
 from tests.conftest import ManifestDoc
@@ -85,7 +86,7 @@ def test_delete_never_gates(
     counts = _fake_backend(monkeypatch)
     monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
 
-    vm_manager.delete_vm(db, make_config(), "dvm", yes=True)
+    vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=InteractionPolicy.REFUSE)
 
     assert counts["status"] == 0
     assert counts["delete"] == 1
@@ -111,7 +112,7 @@ def test_hold_failure_does_not_skip_delete(
 
     monkeypatch.setattr(ProxmoxPlatform, "vm_active", _broken_hold)
 
-    vm_manager.delete_vm(db, make_config(), "dvm", yes=True)
+    vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=InteractionPolicy.REFUSE)
 
     assert counts["delete"] == 1
     assert db.get_vm("dvm") is None
@@ -132,7 +133,7 @@ def test_logout_failure_does_not_skip_delete(
 
     monkeypatch.setattr(vm_manager, "_tailscale_logout", _boom)
 
-    vm_manager.delete_vm(db, make_config(), "dvm", yes=True)
+    vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=InteractionPolicy.REFUSE)
 
     assert counts["delete"] == 1
     assert db.get_vm("dvm") is None
@@ -150,7 +151,7 @@ def test_stranded_site_warns_with_hint_and_still_deletes_row(
     rendered, no secret ever resolves, and the DB row still goes."""
     _seed(db, site="gone")
 
-    vm_manager.delete_vm(db, make_config(), "dvm", yes=True)
+    vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=InteractionPolicy.REFUSE)
 
     assert db.get_vm("dvm") is None
     assert resolve_counter == []
@@ -190,7 +191,7 @@ def test_backend_delete_failure_keeps_the_row(
     error = _failing_backend_delete(monkeypatch, counts)
 
     with pytest.raises(AuthorizationError) as exc:
-        vm_manager.delete_vm(db, make_config(), "dvm", yes=True)
+        vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=InteractionPolicy.REFUSE)
 
     assert exc.value is error
     assert counts["delete"] == 1
@@ -212,7 +213,7 @@ def test_force_does_not_suppress_backend_delete_failure(
     _failing_backend_delete(monkeypatch, counts)
 
     with pytest.raises(AuthorizationError):
-        vm_manager.delete_vm(db, make_config(), "dvm", force=True)
+        vm_manager.delete_vm(db, make_config(), "dvm", force=True, interaction=InteractionPolicy.REFUSE)
 
     assert db.get_vm("dvm") is not None
 
@@ -229,13 +230,13 @@ def test_user_abort_at_boundary_prompt_aborts_the_delete(
     _seed(db)
     _fake_backend(monkeypatch)
 
-    def _abort(*a: object, **k: object) -> dict[str, str]:
+    def _abort(*a: object, **k: object) -> None:
         raise UserAbort("cancelled at prompt")
 
-    monkeypatch.setattr("agentworks.secrets.resolve.resolve_secrets", _abort)
+    monkeypatch.setattr("agentworks.secrets.resolve.resolve_batch", _abort)
 
     with pytest.raises(UserAbort):
-        vm_manager.delete_vm(db, make_config(), "dvm", yes=True)
+        vm_manager.delete_vm(db, make_config(), "dvm", yes=True, interaction=InteractionPolicy.REFUSE)
 
     assert db.get_vm("dvm") is not None
 
@@ -262,7 +263,7 @@ def test_user_abort_inside_an_op_span_aborts_the_delete(
     monkeypatch.setattr(ProxmoxPlatform, "delete", _aborting_delete)
 
     with pytest.raises(UserAbort):
-        vm_manager.delete_vm(db, config, "dvm", yes=True)
+        vm_manager.delete_vm(db, config, "dvm", yes=True, interaction=InteractionPolicy.REFUSE)
     assert counts["delete"] == 1
     assert db.get_vm("dvm") is not None
 
@@ -275,7 +276,7 @@ def test_user_abort_inside_an_op_span_aborts_the_delete(
     monkeypatch.setattr(vm_manager, "_tailscale_logout", _abort_logout)
 
     with pytest.raises(UserAbort):
-        vm_manager.delete_vm(db, config, "dvm", yes=True)
+        vm_manager.delete_vm(db, config, "dvm", yes=True, interaction=InteractionPolicy.REFUSE)
     assert db.get_vm("dvm") is not None
     assert counts2["delete"] == 0  # aborted before the backend delete
 
@@ -322,7 +323,7 @@ def test_azure_rbac_delete_failure_keeps_the_row_end_to_end(
     fakes.compute.virtual_machines.delete_error = _authorization_denied()
 
     with pytest.raises(AuthorizationError) as exc:
-        vm_manager.delete_vm(db, config, "vm1", yes=True)
+        vm_manager.delete_vm(db, config, "vm1", yes=True, interaction=InteractionPolicy.REFUSE)
 
     assert "AuthorizationFailed" in str(exc.value)
     assert exc.value.hint is not None

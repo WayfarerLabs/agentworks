@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import contextlib
+import getpass
 from typing import TYPE_CHECKING
 
 import pytest
@@ -292,6 +293,22 @@ def test_default_handler_prompt_indents_label_with_level(
     monkeypatch.setattr("builtins.input", lambda text="": prompts.append(text) or "")
     output._DefaultHandler().prompt("Name", 2)
     assert prompts == ["    Name: "]
+
+
+@pytest.mark.parametrize("failure", [EOFError(), KeyboardInterrupt()])
+def test_default_secret_prompt_abort_is_context_free_user_abort(
+    monkeypatch: pytest.MonkeyPatch,
+    failure: BaseException,
+) -> None:
+    def abort(prompt: str) -> str:
+        del prompt
+        raise failure
+
+    monkeypatch.setattr(getpass, "getpass", abort)
+    with pytest.raises(output.UserAbort) as caught:
+        output._DefaultHandler().prompt_secret("Token", 0)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
 def test_default_handler_style_status_never_colorizes() -> None:

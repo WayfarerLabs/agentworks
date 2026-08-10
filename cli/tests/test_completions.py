@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -24,6 +25,26 @@ def _walk_commands(spec: CommandSpec, path: str = "") -> dict[str, CommandSpec]:
     for sub in spec.subcommands.values():
         result.update(_walk_commands(sub, current))
     return result
+
+
+def _generated_block(script: str, start_line: str, end_line: str) -> str:
+    """Return one generated handler without borrowing text from its neighbors."""
+    lines = script.splitlines()
+    start = lines.index(start_line)
+    end = lines.index(end_line, start + 1)
+    return "\n".join(lines[start : end + 1])
+
+
+def _generated_braced_block(script: str, start_line: str) -> str:
+    """Return one generated brace-delimited handler, including nested blocks."""
+    lines = script.splitlines()
+    start = lines.index(start_line)
+    depth = 0
+    for end in range(start, len(lines)):
+        depth += lines[end].count("{") - lines[end].count("}")
+        if depth == 0:
+            return "\n".join(lines[start : end + 1])
+    raise AssertionError(f"unterminated generated block: {start_line}")
 
 
 class TestTopLevelGroups:
@@ -137,6 +158,60 @@ class TestDynamicCompletionsMapping:
         assert "agw guide --names-only" in POWERSHELL_SNIPPETS["guide_topics"]
         assert "agw guide --names-only" in DYNAMIC_FUNCTIONS["guide_topics"]
 
+    def test_secret_verify_variadic_completion_contract_in_every_shell(self) -> None:
+        spec = build_spec(app)
+        verify = spec.subcommands["secret"].subcommands["verify"]
+        names = next(param for param in verify.params if param.name == "names")
+
+        assert ("secret.verify", "name") not in DYNAMIC_COMPLETIONS
+        assert DYNAMIC_COMPLETIONS[("secret.verify", "names")] == "secrets"
+        assert names.required
+        assert names.multiple
+        assert names.dynamic_completer == "secrets"
+
+        generated = {shell: generate(shell) for shell in ("bash", "zsh", "powershell")}
+        bash = _generated_block(
+            generated["bash"],
+            "                verify)",
+            "                    ;;",
+        )
+        zsh = _generated_block(
+            generated["zsh"],
+            "_agentworks_secret_verify() {",
+            "}",
+        )
+        powershell = _generated_braced_block(
+            generated["powershell"],
+            "                'verify' {",
+        )
+
+        bash_position = re.search(r"\$cword -(ge|eq) (\d+)", bash)
+        assert bash_position is not None
+        bash_operator, bash_threshold = bash_position.groups()
+        assert bash_operator == "ge"
+        assert all(position >= int(bash_threshold) for position in (3, 4, 8))
+        assert '"$cur" != -*' in bash
+        assert "agw secret list --names-only" in bash
+
+        assert "'*:names:_agentworks_secrets'" in zsh
+        zsh_position = re.search(r"'([^:]+):names:_agentworks_secrets'", zsh)
+        assert zsh_position is not None and zsh_position.group(1) == "*"
+        assert all(zsh_position.group(1) == "*" for _position in (1, 2, 6))
+        zsh_candidates = _generated_block(generated["zsh"], "_agentworks_secrets() {", "}")
+        assert "agw secret list --names-only" in zsh_candidates
+
+        powershell_position = re.search(r"\$tokenCount -(ge|eq) (\d+)", powershell)
+        assert powershell_position is not None
+        powershell_operator, powershell_threshold = powershell_position.groups()
+        assert powershell_operator == "ge"
+        assert all(position >= int(powershell_threshold) for position in (4, 5, 9))
+        assert "$wordToComplete -notlike '-*'" in powershell
+        assert "agw secret list --names-only" in powershell
+
+        for block in (bash, zsh, powershell):
+            assert "--allow-interaction" in block
+            assert "--allow-interactive" not in block
+
     def test_guide_topic_completion_stream_keeps_schema_targets_when_config_is_broken(self) -> None:
         from agentworks.errors import ConfigError
         from agentworks.guide import GuideMode
@@ -211,6 +286,35 @@ class TestOptionFlagsInSpec:
         resource_list = _walk_commands(spec)["agentworks.resource.list"]
         opts = [opt for param in resource_list.params for opt in param.opts]
         assert "--include-disabled" in opts
+
+    def test_machine_output_options_reach_every_shell_completion(self) -> None:
+        """Every JSON v1 command exposes the closed output choices to generated shells."""
+        spec = build_spec(app)
+        commands = _walk_commands(spec)
+        expected_paths = (
+            "agentworks.resource.list",
+            "agentworks.resource.kinds",
+            "agentworks.resource.describe",
+            "agentworks.secret.list",
+            "agentworks.secret.describe",
+            "agentworks.vm.list",
+            "agentworks.vm.describe",
+            "agentworks.workspace.list",
+            "agentworks.workspace.describe",
+            "agentworks.agent.list",
+            "agentworks.agent.describe",
+            "agentworks.session.list",
+            "agentworks.session.describe",
+            "agentworks.console.list",
+            "agentworks.console.describe",
+            "agentworks.doctor",
+        )
+        for path in expected_paths:
+            output_param = next(param for param in commands[path].params if "--output" in param.opts)
+            assert output_param.choices == ["human", "json"]
+
+        for shell in ("bash", "zsh", "powershell"):
+            assert "--output" in generate(shell)
 
     def test_session_resume_is_discoverable_and_restart_is_absent(self) -> None:
         spec = build_spec(app)

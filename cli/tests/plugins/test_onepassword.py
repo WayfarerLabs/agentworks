@@ -1,764 +1,257 @@
-"""Tests for the ``onepassword`` secret backend.
-
-The subprocess boundary is faked: every ``op`` call in the module goes
-through the module-level ``_run_op`` seam, which these tests monkeypatch
-so no real ``op`` binary is ever invoked. The only call the backend makes
-is ``op read`` (there is no ``op whoami`` sign-in pre-check; the read is
-the liveness probe), so the fake dispatches on the ``read`` argv.
-"""
+"""Final configured-source contract for the bundled 1Password backend."""
 
 from __future__ import annotations
 
-from pathlib import Path
-from textwrap import dedent
-from typing import TYPE_CHECKING, Any
+import subprocess
+from contextlib import AbstractContextManager
+from typing import cast
 
 import pytest
+from pydantic import ValidationError
 
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-from agentworks.bootstrap import build_registry
-from agentworks.capabilities.config import validate_capability_config
-from agentworks.config import load_config
-from agentworks.errors import (
-    ConfigError,
-    ConnectivityError,
-    ExternalError,
-    SecretMappingError,
+from agentworks.capabilities.secret_backend.client import (
+    SecretClientFailure,
+    SecretClientFailureKind,
+    SecretClientTimeout,
+    SecretLookupRequest,
+    SecretSourceClient,
 )
-from agentworks.plugins.onepassword import backend as op_mod
-from agentworks.plugins.onepassword.backend import _FORMS_HINT, OnePasswordBackend, _OpResult
-from agentworks.resources.graph import Readiness
-from agentworks.schema import RefOwner
-from agentworks.secrets import active_backends, resolve_secrets
-from agentworks.secrets.base import SecretDecl
-from agentworks.secrets.resolve import ActiveBackend, preview_resolution
-from tests.conftest import ManifestDoc, write_manifests
+from agentworks.plugins.onepassword.backend import (
+    OnePasswordBackend,
+    OnePasswordMapping,
+    OnePasswordSourceConfig,
+    _BoundedRead,
+)
 
 
-def _decl(name: str, **kw: Any) -> SecretDecl:
-    return SecretDecl(name=name, description=f"{name} description", **kw)
+def _request(reference: str = "op://Work/item/password") -> SecretLookupRequest:
+    return SecretLookupRequest(name="token", mapping=OnePasswordMapping.model_validate(reference))
 
 
-def _install_runner(monkeypatch: pytest.MonkeyPatch, runner: Any) -> None:
-    monkeypatch.setattr(op_mod, "_run_op", runner)
-
-
-def _fake_op(
+def _client(
     *,
-    values: dict[str, str] | None = None,
-    read_errors: dict[str, tuple[int, str]] | None = None,
-) -> Any:
-    """A ``_run_op`` double for ``op read``. ``read <uri>`` returns the
-    mapped value, or the mapped (returncode, stderr) failure, or a generic
-    not-found. The op:// reference is always the last argv element, in both
-    the bare and ``--account`` forms."""
-    values = values or {}
-    read_errors = read_errors or {}
-    calls: list[list[str]] = []
-
-    def run(args: list[str]) -> _OpResult:
-        calls.append(args)
-        # op read --no-newline [--account <acct>] <uri>
-        uri = args[-1]
-        if uri in read_errors:
-            code, stderr = read_errors[uri]
-            return _OpResult(code, "", stderr)
-        if uri in values:
-            return _OpResult(0, values[uri], "")
-        return _OpResult(1, "", f'"{uri}" isn\'t an item in the vault')
-
-    run.calls = calls  # type: ignore[attr-defined]
-    return run
-
-
-def _backend_chain() -> list[ActiveBackend]:
-    return [ActiveBackend(capability=OnePasswordBackend(), readiness=Readiness.ready(), registered_name="onepassword")]
-
-
-# -- would_attempt -----------------------------------------------------------
-
-
-# That this backend attempts a mapped secret and soft-skips an unmapped one
-# (no derive-from-name convention) is pinned in
-# ``tests/secrets/test_backends.py::test_would_attempt_is_pure_of_secret_and_mapping``,
-# which makes the same two calls with ``is True`` / ``is False`` and sets
-# them beside env-var's and prompt's answers, where the contrast is the
-# point.
-
-
-# -- mapping resolution / describe_lookup ------------------------------------
-
-
-def test_bare_string_resolves_without_account_flag(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    runner = _fake_op(values={"op://Work/npm/token": "secret-value"})
-    _install_runner(monkeypatch, runner)
-    backend = OnePasswordBackend()
-
-    uri = "op://Work/npm/token"
-    secret = _decl("s-str", backend_mappings={"onepassword": uri})
-    assert backend.describe_lookup(secret, secret.backend_mappings["onepassword"]) == uri
-    got = backend.batch_get([(secret, secret.backend_mappings["onepassword"])])
-    assert got == {"s-str": "secret-value"}
-    # The bare string uses op's default account: no --account flag anywhere.
-    assert all("--account" not in c for c in runner.calls)
-    read_calls = [c for c in runner.calls if c[0] == "read"]
-    assert read_calls == [["read", "--no-newline", uri]]
-
-
-def test_table_form_resolves_with_account_flag(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The {account, reference} table passes --account <acct> to `op read`
-    and reads the native op:// reference."""
-    uri = "op://Work/npm/token"
-    runner = _fake_op(values={uri: "secret-value"})
-    _install_runner(monkeypatch, runner)
-    backend = OnePasswordBackend()
-
-    mapping = {"account": "my.1password.com", "reference": uri}
-    secret = _decl("s-tbl", backend_mappings={"onepassword": mapping})
-    got = backend.batch_get([(secret, secret.backend_mappings["onepassword"])])
-    assert got == {"s-tbl": "secret-value"}
-    read_calls = [c for c in runner.calls if c[0] == "read"]
-    assert read_calls == [["read", "--no-newline", "--account", "my.1password.com", uri]]
-
-
-def test_section_bearing_reference_validates_and_resolves(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A reference carrying the optional section segment (which the removed
-    {vault, item, field} table could not express) validates and reads."""
-    uri = "op://Work/npm/section/token"
-    runner = _fake_op(values={uri: "sectioned-value"})
-    _install_runner(monkeypatch, runner)
-    backend = OnePasswordBackend()
-
-    _validate(uri)
-    secret = _decl("s-sec", backend_mappings={"onepassword": uri})
-    got = backend.batch_get([(secret, secret.backend_mappings["onepassword"])])
-    assert got == {"s-sec": "sectioned-value"}
-
-
-def test_describe_lookup_includes_account_when_set() -> None:
-    backend = OnePasswordBackend()
-    uri = "op://Work/npm/token"
-    with_account = _decl(
-        "s-acct",
-        backend_mappings={"onepassword": {"account": "my.1password.com", "reference": uri}},
+    account: str | None = None,
+    timeout: float = 30.0,
+    remaining: float = 12.0,
+) -> tuple[AbstractContextManager[SecretSourceClient], SecretSourceClient]:
+    context = OnePasswordBackend.create_client(
+        source_name="work",
+        config=OnePasswordSourceConfig(name="onepassword", account=account, timeout=timeout),
+        interaction_broker=None,
+        remaining_time=lambda: remaining,
     )
-    bare = _decl("s-bare", backend_mappings={"onepassword": uri})
-    # Account-first: "<account>: <reference>" (position conveys "account").
-    assert (
-        backend.describe_lookup(with_account, with_account.backend_mappings["onepassword"])
-        == f"my.1password.com: {uri}"
-    )
-    assert backend.describe_lookup(bare, bare.backend_mappings["onepassword"]) == uri
+    return context, context.__enter__()
 
 
-def test_describe_lookup_none_when_unmapped() -> None:
-    backend = OnePasswordBackend()
-    assert backend.describe_lookup(_decl("s"), None) is None
+def test_source_config_owns_account_and_positive_finite_timeout() -> None:
+    config = OnePasswordSourceConfig(name="onepassword", account="work.example.com", timeout=7)
+    assert config.account == "work.example.com"
+    assert config.timeout == 7.0
+    assert OnePasswordBackend.external_operation_timeout(config) == 7.0
+    for invalid in (0, -1, float("inf"), float("nan")):
+        with pytest.raises(ValidationError):
+            OnePasswordSourceConfig(name="onepassword", timeout=invalid)
 
 
-# -- Mapping validation ------------------------------------------------------
-#
-# Validation is the CORE's now, against the model this backend declares;
-# no backend code runs, which is why these go through the core entry
-# point rather than a method the backend no longer has.
+def test_mapping_is_only_a_scalar_op_reference() -> None:
+    assert OnePasswordMapping.model_validate("op://Work/item/password").root == "op://Work/item/password"
+    with pytest.raises(ValidationError):
+        OnePasswordMapping.model_validate({"account": "work.example.com", "reference": "op://Work/item/password"})
 
 
-def _validate(mapping: object) -> None:
-    validate_capability_config(
-        kind="secret-backend",
-        name="onepassword",
-        config=mapping,  # type: ignore[arg-type]
-        owner=RefOwner(kind="secret", name="s", label="secret/s.backend_mappings.onepassword"),
-    )
+def test_bounded_read_repr_never_contains_a_resolved_value() -> None:
+    bounded = _BoundedRead(value="sentinel-resolved")
+    assert repr(bounded) == "_BoundedRead(value=<redacted>)"
+    assert "sentinel-resolved" not in repr(bounded)
 
 
-@pytest.mark.parametrize(
-    "mapping",
-    [
-        pytest.param("op://Work/npm/token", id="string"),
-        pytest.param({"account": "my.1password.com", "reference": "op://Work/npm/token"}, id="table"),
-        # A section segment (4 parts) is allowed. Only the TABLE form here:
-        # the bare-string spelling is validated on the way in by
-        # ``test_section_bearing_reference_validates_and_resolves``, which
-        # goes on to read it.
-        pytest.param({"account": "acct", "reference": "op://Work/npm/section/token"}, id="table-with-section"),
-    ],
-)
-def test_mapping_accepts_valid_forms(mapping: Any) -> None:
-    """Parametrized rather than three calls in one body: the three are
-    independent claims, and unrolled they stop at the first failure, so a
-    regression in the table form hid behind one in the string form."""
-    _validate(mapping)
+def test_exact_argv_and_remaining_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[list[str], float]] = []
 
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append((args, cast("float", kwargs["timeout"])))
+        return subprocess.CompletedProcess(args, 0, stdout="resolved", stderr="")
 
-@pytest.mark.parametrize(
-    "mapping",
-    [
-        pytest.param(123, id="wrong-type"),
-        pytest.param("", id="empty-string"),
-        pytest.param("op://Work/token", id="too-few-segments"),
-        pytest.param("op://Work//token", id="blank-segment"),
-        pytest.param(
-            {"account": "", "reference": "op://Work/npm/token"},
-            id="table-blank-account",
-        ),
-        pytest.param({"account": "acct", "reference": ""}, id="table-blank-reference"),
-        pytest.param(
-            {"account": "acct", "reference": "not-a-ref"},
-            id="table-bad-reference",
-        ),
-    ],
-)
-def test_mapping_rejects_bad_forms(mapping: Any) -> None:
-    """The malformed spellings whose only claim is THAT they are refused.
+    monkeypatch.setattr(subprocess, "run", run)
+    context, client = _client(account="work.example.com", remaining=4.5)
+    try:
+        values = client.resolve((_request(),), remaining_time=lambda: 4.5)
+    finally:
+        context.__exit__(None, None, None)
 
-    Four more used to sit here (a schemeless string, a table missing
-    ``account``, a table missing ``reference``, a table with an extra key)
-    and are gone rather than kept: ``_BAD_MAPPINGS`` below carries the same
-    four inputs and asserts the whole message at both producing sites, so
-    each of them raised twice over and said less the first time.
-    """
-    with pytest.raises(ConfigError):
-        _validate(mapping)
-
-
-_BAD_MAPPINGS = [
-    pytest.param(
-        {"account": "acct"},
-        "secret/s.backend_mappings.onepassword.reference: is required",
-        id="table-the-string-arm-rejected",
-    ),
-    pytest.param(
-        {"reference": "op://Work/npm/token"},
-        "secret/s.backend_mappings.onepassword.account: is required",
-        id="table-missing-account",
-    ),
-    pytest.param(
-        {"account": "acct", "reference": "op://Work/npm/token", "x": 1},
-        "secret/s.backend_mappings.onepassword.x: unknown field; expected one of: account, reference",
-        id="table-unknown-key",
-    ),
-    pytest.param(
-        "Work/npm/token",
-        "secret/s.backend_mappings.onepassword: onepassword reference 'Work/npm/token' "
-        "must start with 'op://' (an 'op://vault/item/field' reference, optionally "
-        "with a section: 'op://vault/item/section/field')",
-        id="string-the-table-arm-rejected",
-    ),
-]
-
-
-@pytest.mark.parametrize(("mapping", "expected"), _BAD_MAPPINGS)
-def test_a_bad_mapping_reads_the_same_way_wherever_it_is_caught(mapping: Any, expected: str) -> None:
-    """One message for a bad mapping, from both places that produce one.
-
-    **What it says.** The mapping is the framework's one undiscriminated
-    union, so it is where an arm's shape rejection reaches an operator as
-    noise. Pinned as the WHOLE message rather than a substring, because
-    the defect this guards was never a wrong line, it was a true line with
-    an irrelevant one stapled to it: a malformed table led with "must be a
-    string" (the ``op://`` arm's report) and a malformed string trailed
-    with "must be a table". A substring assertion passes with either still
-    present, which is how the framing fix shipped over a batch that still
-    read wrong.
-
-    **Where it says it.** ``_resolved_ref`` re-validates defensively, and
-    what IT reports has to be what the operator would have been told at
-    load. It used to read ``exc.errors()[0]["msg"]``, whichever arm
-    pydantic tried first, from the single ``model_validate`` in the
-    project that skipped the error bridge. An operator has no way to know
-    which path they reached, so the two are asserted against one expected
-    string rather than in two tests with two expectations, which is what
-    let them drift.
-    """
-    with pytest.raises(ConfigError) as at_load:
-        _validate(mapping)
-    secret = _decl("s", backend_mappings={"onepassword": mapping})
-    with pytest.raises(ConfigError) as revalidated:
-        OnePasswordBackend().describe_lookup(secret, secret.backend_mappings["onepassword"])
-
-    assert str(at_load.value) == expected
-    assert str(revalidated.value) == expected
-
-
-def test_an_absent_mapping_is_framed_like_a_malformed_one() -> None:
-    """The other exit from ``_resolved_ref``. Same owner framing, and the
-    two accepted forms ride the ConfigError's ``hint`` rather than being
-    parenthesized into the message, which is where every other framed
-    config error puts its way forward."""
-    with pytest.raises(ConfigError) as exc:
-        OnePasswordBackend()._resolved_ref(_decl("s"), None)
-    assert "secret/s.backend_mappings.onepassword" in str(exc.value)
-    assert exc.value.hint == _FORMS_HINT
-
-
-def test_mapping_rejects_vault_item_field_table() -> None:
-    """A {vault, item, field} table is rejected as a plain unknown-field
-    ConfigError (naming the keys), with no migration language: those keys
-    never shipped, so there is nothing to migrate from."""
-    with pytest.raises(ConfigError, match="unknown field") as excinfo:
-        _validate({"vault": "Work", "item": "npm", "field": "token"})
-    message = str(excinfo.value)
-    for key in ("vault", "item", "field"):
-        assert f"{key}: unknown field; expected one of: account, reference" in message
-    for word in ("no longer", "migrat", "legacy"):
-        assert word not in message.lower()
-
-
-def _config(tmp_path: Path, body: str = "", *, manifests: Sequence[ManifestDoc | str] = ()) -> Any:
-    pub = tmp_path / "k.pub"
-    priv = tmp_path / "k"
-    pub.write_text("ssh-ed25519 AAAA test")
-    priv.write_text("key")
-    cfg = tmp_path / "config.toml"
-    cfg.write_text(
-        dedent(f"""\
-        [operator]
-        ssh_public_key = "{pub.as_posix()}"
-        ssh_private_key = "{priv.as_posix()}"
-        """)
-        + dedent(body)
-    )
-    if manifests:
-        write_manifests(tmp_path, *manifests)
-    return load_config(cfg, warn_issues=False)
-
-
-def test_validate_chain_surfaces_malformed_mapping_at_build_registry(
-    tmp_path: Path,
-) -> None:
-    """A malformed onepassword mapping on an active-chain secret fails at
-    build_registry (the load-time gate), not at first resolution."""
-    config = _config(
-        tmp_path,
-        """
-        [plugins]
-        system = ["onepassword"]
-
-        [secret_config]
-        backends = ["onepassword", "prompt"]
-        """,
-        manifests=[
-            ManifestDoc(
-                "secret",
-                "npm-token",
-                {"backend_mappings": {"onepassword": "not-a-valid-ref"}},
-                description="npm token",
-            )
-        ],
-    )
-    with pytest.raises(ConfigError, match="onepassword"):
-        build_registry(config)
-
-
-def test_valid_mapping_passes_build_registry(tmp_path: Path) -> None:
-    config = _config(
-        tmp_path,
-        """
-        [plugins]
-        system = ["onepassword"]
-
-        [secret_config]
-        backends = ["onepassword", "prompt"]
-        """,
-        manifests=[
-            ManifestDoc(
-                "secret",
-                "npm-token",
-                {"backend_mappings": {"onepassword": "op://Work/npm/token"}},
-                description="npm token",
-            )
-        ],
-    )
-    registry = build_registry(config)
-    names = [b.name for b in active_backends(config, registry)]
-    assert names == ["onepassword", "prompt"]
-
-
-# -- batch_get: miss / failure semantics -------------------------------------
-#
-# The HIT is ``test_bare_string_resolves_without_account_flag`` above: same
-# fake, same bare-string mapping, same ``{name: value}`` assertion, and it
-# goes on to pin the argv the value came out of. What is left for this
-# section is what happens when the read does not find one.
-
-
-def test_batch_get_absent_item_raises_secret_mapping_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _install_runner(monkeypatch, _fake_op(values={}))  # every read is not-found
-    backend = OnePasswordBackend()
-    secret = _decl("gone", backend_mappings={"onepassword": "op://Work/gone/token"})
-    with pytest.raises(SecretMappingError, match="op://Work/gone/token"):
-        backend.batch_get([(secret, secret.backend_mappings["onepassword"])])
-
-
-def test_hard_miss_halts_chain_before_prompt(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A mapped-but-absent 1Password secret raises SecretMappingError, which
-    the resolve loop re-raises: a later backend NEVER runs, so a stale
-    mapping cannot silently fall through to a prompt."""
-    _install_runner(monkeypatch, _fake_op(values={}))
-
-    class _ExplodingBackend:
-        name = "later"
-        interactive = False
-
-        def would_attempt(self, secret: Any, mapping: Any) -> bool:
-            return True
-
-        def describe_lookup(self, secret: Any, mapping: Any) -> str | None:
-            return None
-
-        def batch_get(self, wants: list[tuple[Any, Any]]) -> dict[str, str]:
-            raise AssertionError("later backend must not run after a hard miss")
-
-    op_chain = ActiveBackend(
-        capability=OnePasswordBackend(),
-        readiness=Readiness.ready(),
-        registered_name="onepassword",
-    )
-    later = ActiveBackend(
-        capability=_ExplodingBackend(),  # type: ignore[arg-type]
-        readiness=Readiness.ready(),
-        registered_name="later",
-    )
-    secret = _decl("gone", backend_mappings={"onepassword": "op://Work/gone/token"})
-    with pytest.raises(SecretMappingError):
-        resolve_secrets([secret], [op_chain, later])
-
-
-def _signed_out_read(uri: str) -> Any:
-    """A ``_run_op`` double whose `op read` for ``uri`` fails with a
-    signed-out marker (the real-world app-integration failure mode: no
-    whoami gate, the read itself reports it)."""
-    return _fake_op(read_errors={uri: (1, "[ERROR] account is not signed in.")})
-
-
-def test_signed_out_read_default_account_raises_connectivity_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A bare op:// string reads against op's default account. A signed-out
-    `op read` (there is no whoami pre-check) raises ConnectivityError with
-    the generic message and a hint pointing at OP_ACCOUNT / the table form."""
-    uri = "op://Work/npm/token"
-    _install_runner(monkeypatch, _signed_out_read(uri))
-    backend = OnePasswordBackend()
-    secret = _decl("npm", backend_mappings={"onepassword": uri})
-    with pytest.raises(ConnectivityError) as excinfo:
-        backend.batch_get([(secret, secret.backend_mappings["onepassword"])])
-    err = excinfo.value
-    assert str(err) == "not signed in to the 1Password CLI"
-    assert "OP_ACCOUNT" in (err.hint or "")
-    assert "{account, reference}" in (err.hint or "")
-
-
-def test_signed_out_read_pinned_account_names_it(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A {account, reference} table reads against the pinned account; a
-    signed-out `op read` raises ConnectivityError naming that account."""
-    uri = "op://Work/npm/token"
-    _install_runner(monkeypatch, _signed_out_read(uri))
-    backend = OnePasswordBackend()
-    secret = _decl(
-        "npm",
-        backend_mappings={"onepassword": {"account": "my.1password.com", "reference": uri}},
-    )
-    with pytest.raises(ConnectivityError, match="my.1password.com"):
-        backend.batch_get([(secret, secret.backend_mappings["onepassword"])])
-
-
-def test_signed_out_read_halts_before_later_reads(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A signed-out read on the first want halts the batch: the second
-    secret's `op read` never fires (the read is the only probe, and its
-    ConnectivityError propagates)."""
-    first, second = "op://Work/a/f", "op://Work/b/f"
-    runner = _fake_op(
-        values={second: "vb"},
-        read_errors={first: (1, "[ERROR] account is not signed in.")},
-    )
-    _install_runner(monkeypatch, runner)
-    backend = OnePasswordBackend()
-    a = _decl("a", backend_mappings={"onepassword": first})
-    b = _decl("b", backend_mappings={"onepassword": second})
-    with pytest.raises(ConnectivityError):
-        backend.batch_get(
+    assert values == {"token": "resolved"}
+    assert calls == [
+        (
             [
-                (a, a.backend_mappings["onepassword"]),
-                (b, b.backend_mappings["onepassword"]),
-            ]
+                "op",
+                "read",
+                "--no-newline",
+                "--account",
+                "work.example.com",
+                "op://Work/item/password",
+            ],
+            4.5,
         )
-    read_calls = [c for c in runner.calls if c[0] == "read"]
-    assert read_calls == [["read", "--no-newline", first]]
+    ]
 
 
-def test_batch_get_empty_wants_does_not_run_op(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """An empty batch returns {} without running op at all."""
-
-    def exploding(args: list[str]) -> _OpResult:
-        raise AssertionError("empty batch must not run op")
-
-    _install_runner(monkeypatch, exploding)
-    assert OnePasswordBackend().batch_get([]) == {}
-
-
-def test_batch_get_missing_binary_raises_connectivity_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def boom(args: list[str]) -> _OpResult:
-        raise FileNotFoundError("op")
-
-    _install_runner(monkeypatch, boom)
-    backend = OnePasswordBackend()
-    secret = _decl("npm", backend_mappings={"onepassword": "op://Work/npm/token"})
-    with pytest.raises(ConnectivityError, match="not found on PATH"):
-        backend.batch_get([(secret, secret.backend_mappings["onepassword"])])
+def test_zero_remaining_time_never_spawns(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: pytest.fail("must not spawn"))
+    context, client = _client(remaining=0.0)
+    try:
+        with pytest.raises(SecretClientTimeout) as caught:
+            client.resolve((_request(),), remaining_time=lambda: 0.0)
+    finally:
+        context.__exit__(None, None, None)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
-def test_batch_get_unexpected_failure_raises_external_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _install_runner(
-        monkeypatch,
-        _fake_op(read_errors={"op://Work/npm/token": (1, "unexpected server error 503")}),
-    )
-    backend = OnePasswordBackend()
-    secret = _decl("npm", backend_mappings={"onepassword": "op://Work/npm/token"})
-    with pytest.raises(ExternalError, match="server error 503"):
-        backend.batch_get([(secret, secret.backend_mappings["onepassword"])])
+def test_subprocess_timeout_translates_without_native_cause(monkeypatch: pytest.MonkeyPatch) -> None:
+    def run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(cmd=["op"], timeout=1, output="sentinel-output", stderr="sentinel-error")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    context, client = _client()
+    try:
+        with pytest.raises(SecretClientTimeout) as caught:
+            client.resolve((_request(),), remaining_time=lambda: 1.0)
+    finally:
+        context.__exit__(None, None, None)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    assert "sentinel" not in repr(caught.value)
 
 
-# -- interactive optimism (preview never probes) -----------------------------
-
-
-def test_preview_reports_onepassword_without_probing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """preview_resolution reports onepassword for a mapped secret WITHOUT
-    invoking op (interactive = True)."""
-
-    def exploding(args: list[str]) -> _OpResult:
-        raise AssertionError("preview must not run op for an interactive backend")
-
-    _install_runner(monkeypatch, exploding)
-    secret = _decl("npm", backend_mappings={"onepassword": "op://Work/npm/token"})
-    assert preview_resolution(secret, _backend_chain(), interactive_available=True) == "onepassword"
-
-
-def test_preview_returns_none_for_unmapped_secret(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def exploding(args: list[str]) -> _OpResult:
-        raise AssertionError("preview must not run op")
-
-    _install_runner(monkeypatch, exploding)
-    # Unmapped: would_attempt is False, so onepassword is skipped entirely.
-    assert preview_resolution(_decl("npm"), _backend_chain(), interactive_available=True) is None
-
-
-# -- registry ----------------------------------------------------------------
-
-
-# That the backend ships as the ``onepassword`` system plugin and that its
-# adapter seats the instance into the code registry at import are both
-# preconditions of the row test below (an unseated backend publishes no row
-# to look up, and a row cannot carry ``origin.plugin == "onepassword"``
-# without the plugin), so neither needs a membership assertion of its own.
-# ``test_plugin_framework.py::test_shipped_index_ships_migrated_plugins``
-# pins the index entry and what it declares.
-
-
-def test_onepassword_descriptor_row_is_disabled_system_plugin_by_default(
-    tmp_path: Path,
-) -> None:
-    """The secret-backend row publishes present-but-disabled with a
-    ``system-plugin`` origin until the operator opts in via [plugins]. (Post
-    migration: the row is no longer a built-in.)"""
-    from agentworks.resources.graph import Enablement
-
-    config = _config(tmp_path)
-    registry = build_registry(config)
-    row = registry.lookup("secret-backend", "onepassword")
-    assert row.origin.variant == "system-plugin"
-    assert row.origin.plugin == "onepassword"
-    assert row.description  # capability-supplied, for inspection surfaces
-    assert registry.graph.enablement_of("secret-backend", "onepassword") is Enablement.disabled
-
-
-# -- Phase 8 migration: the opt-in breaking change (R11.1) --------------------
-
-
-# A secret whose only path is the onepassword backend (env-var opted out),
-# declared as a manifest (config.toml is settings-only now, ADR 0022).
-_OP_ONLY_SECRET = ManifestDoc(
-    "secret",
-    "op-only",
-    {"backend_mappings": {"env-var": False, "onepassword": "op://Vault/item/field"}},
-    description="resolvable only via onepassword",
+@pytest.mark.parametrize(
+    ("stderr", "kind"),
+    [
+        ("not currently signed in sentinel", SecretClientFailureKind.AUTHENTICATION),
+        ("no such item sentinel", SecretClientFailureKind.HARD_MAPPING),
+        ("provider exploded sentinel", SecretClientFailureKind.EXTERNAL),
+    ],
 )
-
-
-def _op_only_settings(*, enabled: bool) -> str:
-    """The settings half of the ``op-only`` fixture: onepassword in the chain,
-    and ``enabled`` toggling the [plugins] opt-in. Pair with
-    ``manifests=[_OP_ONLY_SECRET]``."""
-    plugins = '[plugins]\nsystem = ["onepassword"]\n\n' if enabled else ""
-    return (
-        plugins
-        + """
-        [secret_config]
-        backends = ["env-var", "onepassword"]
-        """
-    )
-
-
-def test_disabled_plugin_backends_maps_onepassword_only_when_disabled(tmp_path: Path) -> None:
-    """The hint's data source: ``disabled_plugin_backends`` reports onepassword
-    (backend name -> plugin name) while the plugin is disabled, and is empty
-    once it is enabled (so the failure message is verbatim today's)."""
-    from agentworks.secrets.resolve import disabled_plugin_backends
-
-    disabled = build_registry(_config(tmp_path, _op_only_settings(enabled=False), manifests=[_OP_ONLY_SECRET]))
-    assert disabled_plugin_backends(disabled) == {"onepassword": "onepassword"}
-
-    enabled = build_registry(_config(tmp_path, _op_only_settings(enabled=True), manifests=[_OP_ONLY_SECRET]))
-    assert disabled_plugin_backends(enabled) == {}
-
-
-def test_secret_mapped_only_to_disabled_onepassword_fails_with_enable_hint(tmp_path: Path) -> None:
-    """R11.1 / LLD b: a secret whose sole mapping targets onepassword, with the
-    plugin not enabled, is excluded from the active chain and fails resolve with
-    the plugin-aware ``enable plugin `onepassword``` hint, not the generic
-    unreachable message."""
-    from agentworks.env.entry import EnvEntry
-    from agentworks.errors import SecretUnavailableError
-    from agentworks.secrets import SecretTarget, resolve_for_command
-
-    config = _config(tmp_path, _op_only_settings(enabled=False), manifests=[_OP_ONLY_SECRET])
-    registry = build_registry(config)
-    target = SecretTarget(vm={"TOKEN": EnvEntry({"secret": "op-only"})})
-    with pytest.raises(SecretUnavailableError) as exc:
-        resolve_for_command([target], config, registry)
-    assert "enable plugin `onepassword`" in (exc.value.hint or "")
-
-
-def test_enabling_the_plugin_resolves_the_onepassword_secret(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Enabling the plugin puts onepassword back in the active chain and the
-    same secret resolves (the ``op`` subprocess is faked; ``op`` is present on
-    PATH so the backend folds ready)."""
-    from agentworks.env.entry import EnvEntry
-    from agentworks.secrets import SecretTarget, resolve_for_command
-
-    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/op" if name == "op" else None)
-    config = _config(tmp_path, _op_only_settings(enabled=True), manifests=[_OP_ONLY_SECRET])
-    registry = build_registry(config)
-    _install_runner(monkeypatch, _fake_op(values={"op://Vault/item/field": "the-token"}))
-    target = SecretTarget(vm={"TOKEN": EnvEntry({"secret": "op-only"})})
-    values = resolve_for_command([target], config, registry)
-    assert values["op-only"] == "the-token"
-
-
-def test_non_plugin_secret_failure_message_is_unchanged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A secret that maps no disabled plugin backend fails with the generic
-    message (no ``enable plugin`` clause): the hint is additive to the sole
-    onepassword-only case, not a blanket change to every resolve failure."""
-    from agentworks.env.entry import EnvEntry
-    from agentworks.errors import SecretUnavailableError
-    from agentworks.secrets import SecretTarget, resolve_for_command
-
-    monkeypatch.delenv("AW_SECRET_PLAIN", raising=False)
-    config = _config(
-        tmp_path,
-        """
-        [secret_config]
-        backends = ["env-var"]
-        """,
-        manifests=[ManifestDoc("secret", "plain", description="reachable via env-var's default convention, but unset")],
-    )
-    registry = build_registry(config)
-    target = SecretTarget(vm={"TOKEN": EnvEntry({"secret": "plain"})})
-    with pytest.raises(SecretUnavailableError) as exc:
-        resolve_for_command([target], config, registry)
-    assert "plain: tried env-var" in (exc.value.hint or "")
-    assert "enable plugin" not in (exc.value.hint or "")
-
-
-def test_hint_reaches_the_dominant_resolver_path(tmp_path: Path) -> None:
-    """The hint reaches the dominant resolution path ``Resolver.resolve()`` (the
-    per-operation resolver used by VM / session / agent commands), not only the
-    env-chain ``resolve_for_command``. Centralizing the hint in
-    ``_fail_unavailable`` is what makes every path carry it."""
-    from agentworks.errors import SecretUnavailableError
-    from agentworks.secrets.resolver import Resolver
-
-    config = _config(tmp_path, _op_only_settings(enabled=False), manifests=[_OP_ONLY_SECRET])
-    registry = build_registry(config)
-    resolver = Resolver(config, registry)
-    resolver.register_name("op-only")
-    with pytest.raises(SecretUnavailableError) as exc:
-        resolver.resolve()
-    assert "enable plugin `onepassword`" in (exc.value.hint or "")
-
-
-def test_explicit_false_opt_out_of_onepassword_gets_no_enable_hint(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_nonzero_results_translate_to_fixed_failure_kinds(
+    monkeypatch: pytest.MonkeyPatch,
+    stderr: str,
+    kind: SecretClientFailureKind,
 ) -> None:
-    """A secret that explicitly opts OUT of onepassword (`onepassword = false`)
-    and fails for another reason does NOT get the enable-plugin hint: enabling a
-    plugin the secret opted out of would not resolve it. The hint loop skips a
-    ``False`` mapping, mirroring ``SecretDecl.dependencies`` / ``validate``."""
-    from agentworks.env.entry import EnvEntry
-    from agentworks.errors import SecretUnavailableError
-    from agentworks.secrets import SecretTarget, resolve_for_command
-
-    monkeypatch.delenv("AW_SECRET_OPTED_OUT", raising=False)
-    config = _config(
-        tmp_path,
-        """
-        [secret_config]
-        backends = ["env-var", "onepassword"]
-        """,
-        manifests=[
-            ManifestDoc(
-                "secret",
-                "opted-out",
-                {"backend_mappings": {"onepassword": False}},
-                description="opts out of onepassword; reachable via env-var default, but unset",
-            )
-        ],
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(["op"], 1, stdout="sentinel-stdout", stderr=stderr),
     )
-    registry = build_registry(config)
-    target = SecretTarget(vm={"TOKEN": EnvEntry({"secret": "opted-out"})})
-    with pytest.raises(SecretUnavailableError) as exc:
-        resolve_for_command([target], config, registry)
-    assert "enable plugin" not in (exc.value.hint or "")
+    context, client = _client()
+    try:
+        with pytest.raises(SecretClientFailure) as caught:
+            client.resolve((_request(),), remaining_time=lambda: 2.0)
+    finally:
+        context.__exit__(None, None, None)
+    assert caught.value.kind is kind
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    assert "sentinel" not in repr(caught.value)
 
 
-def test_doctor_roster_lists_the_onepassword_plugin(tmp_path: Path) -> None:
-    """``agw doctor``'s System plugins roster lists onepassword, disabled by
-    default and enabled once opted in (the discovery surface the enable hint
-    points at)."""
-    from agentworks.doctor import Status, _check_plugins
+def test_missing_binary_is_connectivity(monkeypatch: pytest.MonkeyPatch) -> None:
+    def run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise FileNotFoundError("sentinel-path")
 
-    disabled = _check_plugins(_config(tmp_path))
-    op = next(c for c in disabled.checks if c.name == "plugin onepassword")
-    assert op.status is Status.INFO
-    assert "not enabled in [plugins].system" in (op.message or "")
+    monkeypatch.setattr(subprocess, "run", run)
+    context, client = _client()
+    try:
+        with pytest.raises(SecretClientFailure) as caught:
+            client.resolve((_request(),), remaining_time=lambda: 2.0)
+    finally:
+        context.__exit__(None, None, None)
+    assert caught.value.kind is SecretClientFailureKind.CONNECTIVITY
 
-    enabled = _check_plugins(_config(tmp_path, '[plugins]\nsystem = ["onepassword"]\n'))
-    op_on = next(c for c in enabled.checks if c.name == "plugin onepassword")
-    assert op_on.status is Status.OK
+
+def test_later_failure_does_not_expose_earlier_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = 0
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return subprocess.CompletedProcess(args, 0, stdout="sentinel-resolved", stderr="")
+        return subprocess.CompletedProcess(args, 1, stdout="sentinel-stdout", stderr="no such item")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    context, client = _client()
+    requests = (
+        SecretLookupRequest(name="first", mapping=OnePasswordMapping.model_validate("op://W/a/p")),
+        SecretLookupRequest(name="second", mapping=OnePasswordMapping.model_validate("op://W/b/p")),
+    )
+    try:
+        with pytest.raises(SecretClientFailure) as caught:
+            client.resolve(requests, remaining_time=lambda: 2.0)
+    finally:
+        context.__exit__(None, None, None)
+    assert "sentinel-resolved" not in repr(caught.value)
+
+
+@pytest.mark.parametrize("native", ["timeout", "oserror", "result"])
+def test_native_failure_projects_to_safe_context_free_exception(
+    monkeypatch: pytest.MonkeyPatch,
+    native: str,
+) -> None:
+    def run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if native == "timeout":
+            raise subprocess.TimeoutExpired(
+                cmd=["op", "sentinel-native-reference"],
+                timeout=1,
+                output="sentinel-native-output",
+                stderr="sentinel-native-error",
+            )
+        if native == "oserror":
+            raise OSError("sentinel-native-path")
+        return subprocess.CompletedProcess(
+            ["op", "sentinel-native-reference"],
+            1,
+            stdout="sentinel-native-output",
+            stderr="sentinel-native-error",
+        )
+
+    monkeypatch.setattr(subprocess, "run", run)
+    context, client = _client()
+    try:
+        with pytest.raises((SecretClientFailure, SecretClientTimeout)) as caught:
+            client.resolve((_request(),), remaining_time=lambda: 1.0)
+    finally:
+        context.__exit__(None, None, None)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    rendered = repr((str(caught.value), repr(caught.value), caught.value.args))
+    assert "sentinel-native" not in rendered
+
+
+def test_factory_entry_and_prepare_are_subprocess_free(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: pytest.fail("must remain lazy"))
+    context = OnePasswordBackend.create_client(
+        source_name="work",
+        config=OnePasswordSourceConfig(name="onepassword"),
+        interaction_broker=None,
+        remaining_time=lambda: 30.0,
+    )
+    client = context.__enter__()
+    try:
+        client.prepare((_request(),), remaining_time=lambda: 30.0)
+    finally:
+        context.__exit__(None, None, None)
+
+
+def test_source_timeout_caps_a_larger_operation_remainder(monkeypatch: pytest.MonkeyPatch) -> None:
+    timeouts: list[float] = []
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        timeouts.append(cast("float", kwargs["timeout"]))
+        return subprocess.CompletedProcess(args, 0, stdout="resolved", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    context, client = _client(timeout=3.0, remaining=20.0)
+    try:
+        assert client.resolve((_request(),), remaining_time=lambda: 20.0) == {"token": "resolved"}
+    finally:
+        context.__exit__(None, None, None)
+    assert timeouts == [3.0]

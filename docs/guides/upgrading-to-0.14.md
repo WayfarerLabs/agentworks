@@ -327,12 +327,11 @@ resources guide before editing an appended file.
 
 - **`[named_console]`** becomes a `named-console-template` named `default`.
 
-- **`[secret_backends.*]`** becomes nothing at all. Those sections never carried configuration, only
-  the backend's name, so there is nothing to move and no manifest to write: delete them, and list
-  the backends you want in `[secret_config].backends`, which is a setting and stays in
-  `config.toml`. They are named by the resource-section error like every other section, with that
-  deletion spelled out in place of the rewrite instruction, so there is nothing to do about them
-  ahead of the rest.
+- **`[secret_backends.*]`** rows are deleted. They never carried configuration. For every desired
+  non-default backend, declare a `secret-source` manifest that selects it, then list that source's
+  name in `[secret_config].backends`, which is a setting and stays in `config.toml`. They are named
+  by the resource-section error like every other section, with that declaration step spelled out in
+  place of a direct rewrite instruction.
 
 ### Deleting the sections, and knowing you are done
 
@@ -389,8 +388,8 @@ Configuration:
   [ok]   Config is valid
 
 Secrets:
-  [ok]   Secret 'gh-pat' (auto): would resolve via prompt
-  [ok]   Secret 'npm-token': would resolve via prompt
+  [ok]   Secret 'gh-pat' (auto): would attempt via env-var
+  [ok]   Secret 'npm-token': would attempt via env-var
 
 Results: 18 ok, 11 info, 0 warn, 0 fail
 ```
@@ -468,6 +467,43 @@ system = ["azure", "proxmox", "onepassword", "claude"]  # only the ones you use
 Which of the four you actually need follows from what your resources reference, and the default
 local path needs no `[plugins]` entry at all; "System plugins" in the
 [resources guide](resources.md) has the mapping.
+
+## Secret backend names now require configured sources
+
+`[secret_config].backends` keeps its spelling, but in 0.14 its entries are `secret-source` resource
+names. Each key under a secret's `backend_mappings` is also a source name. The synthesized `env-var`
+and `prompt` sources work as-is, so the default `["env-var", "prompt"]` chain needs no changes.
+
+Direct configured-backend references such as `onepassword` intentionally break. Enable its plugin,
+declare a source, move the old mapping's account to that source, and make each mapping a scalar
+reference. The optional source timeout is new in 0.14 and defaults to 30 seconds; it is not a field
+moved from the old mapping:
+
+```yaml
+apiVersion: agentworks/v1
+kind: secret-source
+metadata:
+  name: work-op
+spec:
+  backend:
+    name: onepassword
+    account: work.example.com
+    timeout: 30
+---
+apiVersion: agentworks/v1
+kind: secret
+metadata:
+  name: npm-token
+  description: npm registry token
+spec:
+  backend_mappings:
+    work-op: op://Engineering/npm/token
+```
+
+Replace `onepassword` with `work-op` in `[secret_config].backends`. Agentworks does not create a
+compatibility source or parse the old `{account, reference}` mapping table. If an unknown source
+name exactly matches a backend, the configuration error prints the source declaration and the
+reference-specific rewrite.
 
 ## Manifests are validated against a declared schema
 
@@ -959,5 +995,5 @@ find the other is the easy mistake here.
 A harness integration's declared secrets carry usage text that used to name
 `harness_integration_config`, a key that can no longer be written; it now reads
 `harness_integration`. The text appears only in the preflight error for a secret that no active
-backend can resolve, and no shipped integration declares a secret, so this is here for completeness
+source can resolve, and no shipped integration declares a secret, so this is here for completeness
 rather than because it will reach you.

@@ -1,11 +1,10 @@
 """Application-level glue: assemble a finalized ``Registry`` from the
 standard set of publishers.
 
-The "standard set of publishers" (the bundled built-in manifests, the
-apt and install-command operator publishers, the git-credential-provider
-and secret-backend capability resources, the TOML ``Config``, and the
-operator's YAML ``ManifestSet``) is application
-knowledge, not Registry knowledge and not Config knowledge. This module
+The "standard set of publishers" (the bundled built-in manifests,
+capability resources, built-in secret sources, the TOML ``Config``, and the
+operator's YAML ``ManifestSet``) is application knowledge, not Registry
+knowledge and not Config knowledge. This module
 is its legitimate home: it imports the publishers and orchestrates
 them. Registry stays publisher-agnostic; Config stays unaware of the
 others.
@@ -62,9 +61,10 @@ def build_registry(
     entries too), then the built-in capability rows (one generic publisher
     per capability-kind descriptor), then the system
     plugins (``plugins.publish_plugins``: every shipped plugin's capability
-    rows plus the enabled plugins' bundled manifests), then the operator's
-    YAML ``ManifestSet`` (``Config.publish_to`` is a no-op now: config.toml
-    is settings only, ADR 0022). Plugin capability rows publish
+    rows plus the enabled plugins' bundled manifests), then the built-in
+    secret-source rows, then the operator's YAML ``ManifestSet``
+    (``Config.publish_to`` is a no-op now: config.toml is settings only, ADR
+    0022). Plugin capability rows publish
     unconditionally and are marked disabled at finalize when not opted in
     (the injected ``plugin_enablement_source``). Operator rows may replace
     built-in rows only where the kind's ``builtin_override`` allows.
@@ -113,6 +113,10 @@ def build_registry(
     # enablement source below), and the enabled plugins' bundled manifests.
     # Publication-only (impls were seated at import), so purity holds.
     plugins.publish_plugins(registry, config)
+    # The two zero-config defaults are ordinary source rows, published only
+    # after every backend class is available and before operator manifests so
+    # the kind's normal allow-override collision rule decides substitutions.
+    secrets.publish_builtin_secret_sources(registry)
     config.publish_to(registry)
     manifests.publish_to(registry)
     registry.finalize(

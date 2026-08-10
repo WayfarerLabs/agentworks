@@ -41,8 +41,8 @@ def collect_secrets_for(
     Order: first-encounter, as the closure yields it, deduplicated. The
     root itself isn't included (it's the publisher, not a target); only secrets
     the root and its transitive references point at are returned. The
-    ``secret -> secret-backend`` edges the graph now carries do not add secrets
-    (backends are a distinct kind), so the filtered result matches the old
+    ``secret -> secret-source`` edges the graph now carries do not add secrets
+    (sources are a distinct kind), so the filtered result matches the old
     walk's secret set.
 
     The Registry must be finalized (the closure reads the retained

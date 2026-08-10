@@ -29,10 +29,10 @@ def test_secret_config_default_chain() -> None:
     """SecretConfig defaults to the standard env-var + prompt chain when no
     [secret_config].backends is provided. Operators who don't use secrets
     pay nothing; operators who do get sensible zero-config resolution."""
-    from agentworks.secrets.base import DEFAULT_BACKEND_CHAIN
+    from agentworks.secrets.base import DEFAULT_SOURCE_CHAIN
 
-    assert SecretConfig().backends == DEFAULT_BACKEND_CHAIN
-    assert DEFAULT_BACKEND_CHAIN == ("env-var", "prompt")
+    assert SecretConfig().backends == DEFAULT_SOURCE_CHAIN
+    assert DEFAULT_SOURCE_CHAIN == ("env-var", "prompt")
 
 
 def test_secret_config_explicit_empty_disables_chain() -> None:

@@ -14,6 +14,7 @@ import typer
 
 from agentworks.cli import _record_unhandled_error
 from agentworks.output import AgentworksError
+from agentworks.secrets.policy import InteractionPolicy
 from agentworks.ssh import SSHError
 
 from .conftest import stub_build_registry, stub_session_resolvers, stub_vm_gates
@@ -474,6 +475,7 @@ def test_create_session_rolls_back_on_keyboard_interrupt(tmp_path: Path, monkeyp
             template_name=None,
             agent_name=None,
             admin=True,
+            interaction=InteractionPolicy.REFUSE,
         )
 
     # Rollback ran: the session row that was inserted before create_tmux_session
@@ -553,6 +555,7 @@ def test_create_session_releases_group_membership_on_keyboard_interrupt(
             workspace="ws1",
             template_name=None,
             agent="a1",
+            interaction=InteractionPolicy.REFUSE,
         )
 
     assert db.get_session("s1") is None
@@ -634,6 +637,7 @@ def test_create_session_rollback_failure_does_not_mask_keyboard_interrupt(
             template_name=None,
             agent_name=None,
             admin=True,
+            interaction=InteractionPolicy.REFUSE,
         )
 
     # The poisoned delete_session was called (confirming we did exercise
@@ -725,6 +729,7 @@ def test_create_session_surfaces_dead_workload_output_through_rollback(
             workspace="ws1",
             template_name=None,
             agent="a1",
+            interaction=InteractionPolicy.REFUSE,
         )
 
     # The typed error carries the workload's own output verbatim, plus the

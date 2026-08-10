@@ -186,6 +186,7 @@ class _FakeVMs:
     seam, with ``get`` answering the did-the-VM-survive probe."""
 
     def __init__(self, events: list[tuple[str, str, str, str]] | None = None) -> None:
+        self.created: list[tuple[str, str, Any]] = []
         self.deleted: list[tuple[str, str]] = []
         self.delete_error: BaseException | None = None
         self._events = events if events is not None else []
@@ -196,6 +197,7 @@ class _FakeVMs:
         raise ResourceNotFoundError("no such VM")
 
     def begin_create_or_update(self, rg: str, name: str, vm: object) -> _Poller:
+        self.created.append((rg, name, vm))
         return _Poller(SimpleNamespace(id=_RESOURCE_ID))
 
     def begin_delete(self, rg: str, name: str) -> _Poller:

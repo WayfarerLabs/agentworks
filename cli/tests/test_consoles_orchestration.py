@@ -21,6 +21,7 @@ from agentworks.errors import (
     NotFoundError,
     ValidationError,
 )
+from agentworks.secrets.policy import InteractionPolicy
 from agentworks.sessions.multi_console import (
     add_sessions,
     add_shell,
@@ -211,7 +212,9 @@ def test_add_sessions(db: Database) -> None:
     _seed_vm(db)
     _seed_sessions(db, ["a", "b", "c"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
-    add_sessions(db, _StubConfig(), console_name="con", session_specs=["b+1", "c"])
+    add_sessions(
+        db, _StubConfig(), console_name="con", session_specs=["b+1", "c"], interaction=InteractionPolicy.REFUSE
+    )
     members = db.list_console_sessions("con")
     assert [(m.session_name, len(m.shells)) for m in members] == [
         ("a", 0),
@@ -225,7 +228,7 @@ def test_add_sessions_rejects_duplicate(db: Database) -> None:
     _seed_sessions(db, ["a"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
     with pytest.raises(AlreadyExistsError, match="already a member"):
-        add_sessions(db, _StubConfig(), console_name="con", session_specs=["a"])
+        add_sessions(db, _StubConfig(), console_name="con", session_specs=["a"], interaction=InteractionPolicy.REFUSE)
 
 
 def test_remove_sessions(db: Database) -> None:
@@ -309,7 +312,15 @@ def test_add_shell_appends_entry(db: Database) -> None:
     _seed_vm(db)
     _seed_sessions(db, ["a"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a+1"])
-    add_shell(db, _StubConfig(), console_name="con", session_name="a", cwd="src", admin=True)
+    add_shell(
+        db,
+        _StubConfig(),
+        console_name="con",
+        session_name="a",
+        cwd="src",
+        admin=True,
+        interaction=InteractionPolicy.REFUSE,
+    )
     member = db.get_console_session("con", "a")
     assert member is not None
     assert member.shells == [
@@ -323,7 +334,7 @@ def test_add_shell_rejects_non_member(db: Database) -> None:
     _seed_sessions(db, ["a", "b"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
     with pytest.raises(NotFoundError, match="not a member"):
-        add_shell(db, _StubConfig(), console_name="con", session_name="b")
+        add_shell(db, _StubConfig(), console_name="con", session_name="b", interaction=InteractionPolicy.REFUSE)
 
 
 def test_add_shell_rejects_bad_cwd(db: Database) -> None:
@@ -331,7 +342,9 @@ def test_add_shell_rejects_bad_cwd(db: Database) -> None:
     _seed_sessions(db, ["a"])
     create_console(db, name="con", vm_name="vm1", session_specs=["a"])
     with pytest.raises(ValidationError):
-        add_shell(db, _StubConfig(), console_name="con", session_name="a", cwd="/etc")
+        add_shell(
+            db, _StubConfig(), console_name="con", session_name="a", cwd="/etc", interaction=InteractionPolicy.REFUSE
+        )
 
 
 def test_delete_console_record(db: Database) -> None:

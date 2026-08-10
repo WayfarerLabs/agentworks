@@ -38,6 +38,7 @@ from agentworks.errors import (
     ValidationError,
 )
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
+from agentworks.secrets.policy import InteractionPolicy
 from agentworks.transports import SSHTransport
 from agentworks.vms import manager as vm_manager
 from agentworks.workspaces import manager as workspace_manager
@@ -113,6 +114,7 @@ def _stop_the_vm(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
         lambda self, row, ctx: events.append("status") or VMStatus.STOPPED,
     )
     monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start"))
+    monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", lambda *a, **k: True)
     monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale"))
 
 
@@ -208,7 +210,7 @@ def test_graph_is_the_live_vm_alone_no_workspace_node(
     vm = db.get_vm("box")
     assert vm is not None
     registry = build_registry(config)
-    resolver = Resolver(config, registry)
+    resolver = Resolver(config, registry, interaction=InteractionPolicy.REFUSE)
 
     nodes = walk(live_vm_node(db, config, registry, vm))
 
@@ -236,7 +238,7 @@ def test_repair_reachable_vm_is_one_boundary_burst(
     _seed(db)
     _reachable(monkeypatch, True)
 
-    workspace_manager.repair_workspace(db, config, "ws1")
+    workspace_manager.repair_workspace(db, config, "ws1", interaction=InteractionPolicy.REFUSE)
 
     assert resolve_counter == [["proxmox-token"]]
     assert any("chmod -c 2770 /srv/ws1" in c for c in target.commands)
@@ -258,7 +260,7 @@ def test_repair_stopped_vm_gate_burst_seeds_the_whole_union(
     events: list[str] = []
     _stop_the_vm(monkeypatch, events)
 
-    workspace_manager.repair_workspace(db, config, "ws1")
+    workspace_manager.repair_workspace(db, config, "ws1", interaction=InteractionPolicy.REFUSE)
 
     assert events == ["status", "start", "tailscale"]  # the gate ran
     assert resolve_counter == [["proxmox-token"]]
@@ -287,7 +289,7 @@ def test_repair_converges_git_identity_on_the_checkout(
     _seed(db)
     _reachable(monkeypatch, True)
 
-    workspace_manager.repair_workspace(db, config, "ws1")
+    workspace_manager.repair_workspace(db, config, "ws1", interaction=InteractionPolicy.REFUSE)
 
     assert any("git -C /srv/ws1 config --local user.name 'Ada Lovelace'" in c for c in target.commands)
     assert any("git -C /srv/ws1 config --local user.email ada@example.com" in c for c in target.commands)
@@ -334,7 +336,7 @@ def test_repair_skips_git_identity_when_not_a_repo(
     _seed(db)
     _reachable(monkeypatch, True)
 
-    workspace_manager.repair_workspace(db, config, "ws1")
+    workspace_manager.repair_workspace(db, config, "ws1", interaction=InteractionPolicy.REFUSE)
 
     assert not any("config" in c for c in fake.commands)
     assert not any("git identity" in w for w in captured_output.warnings)
@@ -356,7 +358,7 @@ def test_repair_git_identity_warns_on_unexpected_probe_failure(
     _seed(db)
     _reachable(monkeypatch, True)
 
-    workspace_manager.repair_workspace(db, config, "ws1")
+    workspace_manager.repair_workspace(db, config, "ws1", interaction=InteractionPolicy.REFUSE)
 
     assert not any("config" in c for c in fake.commands)
     assert any("git identity skipped" in w for w in captured_output.warnings)
@@ -375,7 +377,7 @@ def test_repair_default_template_stamps_no_identity(
     _seed(db)
     _reachable(monkeypatch, True)
 
-    workspace_manager.repair_workspace(db, config, "ws1")
+    workspace_manager.repair_workspace(db, config, "ws1", interaction=InteractionPolicy.REFUSE)
 
     assert not any(c.startswith("git ") for c in target.commands)
 
@@ -510,7 +512,7 @@ def test_repair_healthy_workspace_reports_ok_for_every_step(
     _seed(db)
     _reachable(monkeypatch, True)
 
-    workspace_manager.repair_workspace(db, config, "ws1")
+    workspace_manager.repair_workspace(db, config, "ws1", interaction=InteractionPolicy.REFUSE)
 
     assert "OK: directory ownership and permissions" in captured_output.detail
     assert "OK: ACLs" in captured_output.detail
@@ -538,7 +540,7 @@ def test_repair_fully_damaged_workspace_reports_fixed_per_step(
     _seed(db)
     _reachable(monkeypatch, True)
 
-    workspace_manager.repair_workspace(db, config, "ws1")
+    workspace_manager.repair_workspace(db, config, "ws1", interaction=InteractionPolicy.REFUSE)
 
     assert "Fixed: directory ownership and permissions" in captured_output.detail
     assert "Fixed: ACLs" in captured_output.detail
@@ -563,7 +565,7 @@ def test_repair_partial_damage_reports_only_the_diverged_step(
     _seed(db)
     _reachable(monkeypatch, True)
 
-    workspace_manager.repair_workspace(db, config, "ws1")
+    workspace_manager.repair_workspace(db, config, "ws1", interaction=InteractionPolicy.REFUSE)
 
     assert "Fixed: ACLs" in captured_output.detail
     assert "OK: directory ownership and permissions" in captured_output.detail
@@ -588,7 +590,7 @@ def test_repair_sgid_only_damage_reports_permissions_fixed(
     _seed(db)
     _reachable(monkeypatch, True)
 
-    workspace_manager.repair_workspace(db, config, "ws1")
+    workspace_manager.repair_workspace(db, config, "ws1", interaction=InteractionPolicy.REFUSE)
 
     assert "Fixed: directory ownership and permissions" in captured_output.detail
     assert "OK: ACLs" in captured_output.detail
@@ -611,7 +613,7 @@ def test_repair_mode_only_damage_reports_permissions_fixed(
     _seed(db)
     _reachable(monkeypatch, True)
 
-    workspace_manager.repair_workspace(db, config, "ws1")
+    workspace_manager.repair_workspace(db, config, "ws1", interaction=InteractionPolicy.REFUSE)
 
     assert "Fixed: directory ownership and permissions" in captured_output.detail
     assert "\nRepaired 1 issue(s)" in captured_output.info
@@ -633,7 +635,7 @@ def test_repair_owner_only_damage_reports_permissions_fixed(
     _seed(db)
     _reachable(monkeypatch, True)
 
-    workspace_manager.repair_workspace(db, config, "ws1")
+    workspace_manager.repair_workspace(db, config, "ws1", interaction=InteractionPolicy.REFUSE)
 
     assert "Fixed: directory ownership and permissions" in captured_output.detail
     assert "\nRepaired 1 issue(s)" in captured_output.info
@@ -656,7 +658,7 @@ def test_repair_acl_churn_does_not_report_false_fixed(
     _seed(db)
     _reachable(monkeypatch, True)
 
-    workspace_manager.repair_workspace(db, config, "ws1")
+    workspace_manager.repair_workspace(db, config, "ws1", interaction=InteractionPolicy.REFUSE)
 
     assert "OK: ACLs" in captured_output.detail
     assert not any(line.startswith("Fixed:") for line in captured_output.detail)
@@ -680,7 +682,7 @@ def test_repair_acls_indeterminate_when_getfacl_fails(
     _seed(db)
     _reachable(monkeypatch, True)
 
-    workspace_manager.repair_workspace(db, config, "ws1")
+    workspace_manager.repair_workspace(db, config, "ws1", interaction=InteractionPolicy.REFUSE)
 
     assert "OK: ACLs" not in captured_output.detail
     assert not any(line.startswith("Fixed: ACLs") for line in captured_output.detail)
@@ -723,7 +725,7 @@ def test_repair_parent_traversal_quotes_a_spaced_path(
     config = make_config()
     _reachable(monkeypatch, True)
 
-    workspace_manager.repair_workspace(db, config, "ws1")
+    workspace_manager.repair_workspace(db, config, "ws1", interaction=InteractionPolicy.REFUSE)
 
     traversal = next(c for c in fake.commands if "chmod -c a+x" in c)
     # The path rides in as the shlex-quoted positional arg after `_`, and the
@@ -855,7 +857,7 @@ def test_first_repair_after_create_is_a_noop(
     assert any("setfacl -R -m g::rwx -m m::rwx -m o::---" in c for c in create_acls)
     assert fake._acl_canonical
 
-    workspace_manager.repair_workspace(db, config, "ws1")
+    workspace_manager.repair_workspace(db, config, "ws1", interaction=InteractionPolicy.REFUSE)
 
     assert "OK: ACLs" in captured_output.detail
     assert not any(line.startswith("Fixed:") for line in captured_output.detail)
@@ -919,7 +921,7 @@ def test_repair_hardens_other_bits_on_a_pre254_workspace(
     _seed(db)
     _reachable(monkeypatch, True)
 
-    workspace_manager.repair_workspace(db, config, "ws1")
+    workspace_manager.repair_workspace(db, config, "ws1", interaction=InteractionPolicy.REFUSE)
 
     assert "Fixed: ACLs" in captured_output.detail
     assert "OK: directory ownership and permissions" in captured_output.detail
@@ -942,7 +944,7 @@ def test_delete_reachable_vm_is_one_boundary_burst(
     _seed(db)
     _reachable(monkeypatch, True)
 
-    workspace_manager.delete_workspace(db, config, "ws1", yes=True)
+    workspace_manager.delete_workspace(db, config, "ws1", yes=True, interaction=InteractionPolicy.REFUSE)
 
     assert resolve_counter == [["proxmox-token"]]
     assert any("rm -rf /srv/ws1" in c for c in target.commands)
@@ -963,7 +965,7 @@ def test_delete_stopped_vm_gate_burst_seeds_the_whole_union(
     events: list[str] = []
     _stop_the_vm(monkeypatch, events)
 
-    workspace_manager.delete_workspace(db, config, "ws1", yes=True)
+    workspace_manager.delete_workspace(db, config, "ws1", yes=True, interaction=InteractionPolicy.REFUSE)
 
     assert events == ["status", "start", "tailscale"]
     assert resolve_counter == [["proxmox-token"]]
@@ -989,7 +991,7 @@ def test_delete_removes_the_workspace_group_after_the_directory(
     _seed(db)
     _reachable(monkeypatch, True)
 
-    workspace_manager.delete_workspace(db, config, "ws1", yes=True)
+    workspace_manager.delete_workspace(db, config, "ws1", yes=True, interaction=InteractionPolicy.REFUSE)
 
     dir_removed = next(i for i, c in enumerate(target.commands) if "rm -rf /srv/ws1" in c)
     group_removed = next(i for i, c in enumerate(target.commands) if "groupdel ws-ws1" in c)
@@ -1021,7 +1023,7 @@ def test_delete_group_removal_uses_the_recorded_linux_group(
     )
     _reachable(monkeypatch, True)
 
-    workspace_manager.delete_workspace(db, config, "legacy", yes=True)
+    workspace_manager.delete_workspace(db, config, "legacy", yes=True, interaction=InteractionPolicy.REFUSE)
 
     assert any("groupdel ws--legacy" in c for c in target.commands)
     assert not any("groupdel ws-legacy" in c for c in target.commands)
@@ -1060,7 +1062,7 @@ def test_delete_group_removal_failure_does_not_break_the_delete(
     _seed(db)
     _reachable(monkeypatch, True)
 
-    workspace_manager.delete_workspace(db, config, "ws1", yes=True)
+    workspace_manager.delete_workspace(db, config, "ws1", yes=True, interaction=InteractionPolicy.REFUSE)
 
     assert any("groupdel ws-ws1" in c for c in fake.commands)
     assert db.get_workspace("ws1") is None
@@ -1113,7 +1115,7 @@ def test_create_rollback_removes_the_fresh_workspace_group(
     _boom_after_create(monkeypatch)
 
     with pytest.raises(ExternalError, match="creating workspace: stub exploded"):
-        workspace_manager.create_workspace(db, config, name="ws1", vm_name="box")
+        workspace_manager.create_workspace(db, config, name="ws1", vm_name="box", interaction=InteractionPolicy.REFUSE)
 
     dir_removed = next(i for i, c in enumerate(fake.commands) if c.startswith("rm -rf") and "ws1" in c)
     group_removed = next(i for i, c in enumerate(fake.commands) if "groupdel ws-ws1" in c)
@@ -1141,7 +1143,7 @@ def test_create_rollback_tolerates_a_groupdel_failure(
     _boom_after_create(monkeypatch)
 
     with pytest.raises(ExternalError, match="creating workspace: stub exploded"):
-        workspace_manager.create_workspace(db, config, name="ws1", vm_name="box")
+        workspace_manager.create_workspace(db, config, name="ws1", vm_name="box", interaction=InteractionPolicy.REFUSE)
 
     assert any("groupdel ws-ws1" in c for c in fake.commands)
     assert db.get_workspace("ws1") is None
@@ -1181,7 +1183,7 @@ def test_create_rollback_on_clone_failure_leaves_no_residue(
     # SSHError is an AgentworksError, so realize re-raises it verbatim (not
     # wrapped in ExternalError): the operator-facing clone error survives.
     with pytest.raises(SSHError, match="git clone"):
-        workspace_manager.create_workspace(db, config, name="ws1", vm_name="box")
+        workspace_manager.create_workspace(db, config, name="ws1", vm_name="box", interaction=InteractionPolicy.REFUSE)
 
     dir_removed = next(i for i, c in enumerate(fake.commands) if c.startswith("rm -rf") and "ws1" in c)
     group_removed = next(i for i, c in enumerate(fake.commands) if "groupdel ws-ws1" in c)
@@ -1217,7 +1219,7 @@ def test_workspace_scope_reaches_node_readiness(
 
     monkeypatch.setattr(ProxmoxPlatform, "preflight", _recording)
 
-    workspace_manager.repair_workspace(db, config, "ws1")
+    workspace_manager.repair_workspace(db, config, "ws1", interaction=InteractionPolicy.REFUSE)
 
     (scope,) = scopes
     assert scope is not None
@@ -1243,7 +1245,7 @@ def test_delete_sessions_guard_refuses_with_zero_resolves_and_zero_gate(
     _no_gate(monkeypatch)
 
     with pytest.raises(StateError, match="has 1 session"):
-        workspace_manager.delete_workspace(db, config, "ws1")
+        workspace_manager.delete_workspace(db, config, "ws1", interaction=InteractionPolicy.REFUSE)
 
     assert resolve_counter == []
     assert target.commands == []
@@ -1264,7 +1266,7 @@ def test_delete_declined_confirm_aborts_with_zero_resolves_and_zero_gate(
     captured_output.confirm_response = False
 
     with pytest.raises(UserAbort, match="delete cancelled"):
-        workspace_manager.delete_workspace(db, config, "ws1")
+        workspace_manager.delete_workspace(db, config, "ws1", interaction=InteractionPolicy.REFUSE)
 
     assert resolve_counter == []
     assert target.commands == []
@@ -1284,7 +1286,9 @@ def test_rehome_overlapping_paths_fail_with_zero_resolves_and_zero_gate(
     _no_gate(monkeypatch)
 
     with pytest.raises(ValidationError, match="paths overlap"):
-        workspace_manager.rehome_workspace(db, config, "ws1", target_path="/srv/ws1/nested")
+        workspace_manager.rehome_workspace(
+            db, config, "ws1", target_path="/srv/ws1/nested", interaction=InteractionPolicy.REFUSE
+        )
 
     assert resolve_counter == []
     assert target.commands == []
@@ -1302,7 +1306,7 @@ def test_repair_unknown_workspace_fails_with_zero_resolves_and_zero_gate(
     _no_gate(monkeypatch)
 
     with pytest.raises(NotFoundError, match="workspace 'ghost' not found"):
-        workspace_manager.repair_workspace(db, config, "ghost")
+        workspace_manager.repair_workspace(db, config, "ghost", interaction=InteractionPolicy.REFUSE)
 
     assert resolve_counter == []
     assert target.commands == []
@@ -1346,12 +1350,7 @@ def test_delete_nested_platform_path_reuses_the_callers_composition(
     vm_node = _node_holding(db, config, bound)
 
     workspace_manager.delete_workspace(
-        db,
-        config,
-        "ws1",
-        force=True,
-        yes=True,
-        vm_node=vm_node,
+        db, config, "ws1", force=True, yes=True, vm_node=vm_node, interaction=InteractionPolicy.REFUSE
     )
 
     assert resolve_counter == []  # nothing resolved beyond the caller's pass
@@ -1381,12 +1380,7 @@ def test_delete_nested_rejects_a_mismatched_vm_node(
 
     with pytest.raises(StateError, match="teardown-wiring bug"):
         workspace_manager.delete_workspace(
-            db,
-            config,
-            "ws1",
-            force=True,
-            yes=True,
-            vm_node=vm_node,
+            db, config, "ws1", force=True, yes=True, vm_node=vm_node, interaction=InteractionPolicy.REFUSE
         )
 
     assert resolve_counter == []  # refused before any resolve
@@ -1414,7 +1408,7 @@ def test_delete_without_vm_row_is_db_only_with_zero_gate(
     db._conn.commit()
     _no_gate(monkeypatch)
 
-    workspace_manager.delete_workspace(db, config, "ws1", yes=True)
+    workspace_manager.delete_workspace(db, config, "ws1", yes=True, interaction=InteractionPolicy.REFUSE)
 
     assert resolve_counter == []
     assert target.commands == []
@@ -1455,7 +1449,9 @@ def test_rehome_confirm_sits_inside_the_span_after_the_dir_checks(
     monkeypatch.setattr(output_mod, "confirm", _decline)
 
     with pytest.raises(UserAbort, match="rehome cancelled"):
-        workspace_manager.rehome_workspace(db, config, "ws1", target_path="/dst/ws1")
+        workspace_manager.rehome_workspace(
+            db, config, "ws1", target_path="/dst/ws1", interaction=InteractionPolicy.REFUSE
+        )
 
     assert events == [
         "status",
@@ -1533,7 +1529,9 @@ def test_copy_cross_vm_runs_two_sequential_boundaries_with_nested_holds(
     events: list[str] = []
     _wire_copy_fakes(monkeypatch, events)
 
-    workspace_manager.copy_workspace(db, config, "ws1", dest_name="ws2", vm_name="box2")
+    workspace_manager.copy_workspace(
+        db, config, "ws1", dest_name="ws2", vm_name="box2", interaction=InteractionPolicy.REFUSE
+    )
 
     # Two sequential compositions, one boundary resolve each.
     assert resolve_counter == [["proxmox-token"], ["proxmox-token"]]
@@ -1565,7 +1563,9 @@ def test_copy_same_vm_reuses_the_source_composition(
     events: list[str] = []
     _wire_copy_fakes(monkeypatch, events)
 
-    workspace_manager.copy_workspace(db, config, "ws1", dest_name="ws2", vm_name="box")
+    workspace_manager.copy_workspace(
+        db, config, "ws1", dest_name="ws2", vm_name="box", interaction=InteractionPolicy.REFUSE
+    )
 
     assert resolve_counter == [["proxmox-token"]]
     assert events.count("hold-enter:box") == 1
@@ -1590,11 +1590,15 @@ def test_copy_refusals_fail_with_zero_resolves_and_zero_gate(
     _no_gate(monkeypatch)
 
     with pytest.raises(NotFoundError, match="workspace 'nope' not found"):
-        workspace_manager.copy_workspace(db, config, "nope", dest_name="ws2", vm_name="box")
+        workspace_manager.copy_workspace(
+            db, config, "nope", dest_name="ws2", vm_name="box", interaction=InteractionPolicy.REFUSE
+        )
 
     _seed_workspace(db, vm_name="box", name="ws2")
     with pytest.raises(AlreadyExistsError, match="workspace 'ws2' already exists"):
-        workspace_manager.copy_workspace(db, config, "ws1", dest_name="ws2", vm_name="box")
+        workspace_manager.copy_workspace(
+            db, config, "ws1", dest_name="ws2", vm_name="box", interaction=InteractionPolicy.REFUSE
+        )
 
     assert resolve_counter == []
 
@@ -1636,7 +1640,9 @@ def test_copy_materializes_grant_all_agents_on_the_dest_vm(
         lambda vm, config_, db_, linux_user, ws, **k: group_adds.append((linux_user, ws)),
     )
 
-    workspace_manager.copy_workspace(db, config, "ws1", dest_name="ws2", vm_name="box2")
+    workspace_manager.copy_workspace(
+        db, config, "ws1", dest_name="ws2", vm_name="box2", interaction=InteractionPolicy.REFUSE
+    )
 
     assert group_adds == [("agt-dev", "ws2")]  # the on-VM half, dest agent only
     grants = {(g.workspace_name, g.grant_type) for g in db.list_agent_grants("dev")}
@@ -1663,7 +1669,9 @@ def test_copy_without_grant_all_agents_makes_no_grant_calls(
     calls: list[object] = []
     monkeypatch.setattr(agent_grants, "add_to_workspace_group", lambda *a, **k: calls.append(a))
 
-    workspace_manager.copy_workspace(db, config, "ws1", dest_name="ws2", vm_name="box")
+    workspace_manager.copy_workspace(
+        db, config, "ws1", dest_name="ws2", vm_name="box", interaction=InteractionPolicy.REFUSE
+    )
 
     assert calls == []
     assert db.list_agent_grants("dev") == []
@@ -1706,7 +1714,9 @@ def test_copy_closes_the_ssh_logger_exactly_once_on_cancellation(
     monkeypatch.setattr(agent_grants, "materialize_grant_all_agents", _cancelled)
 
     with pytest.raises(KeyboardInterrupt):
-        workspace_manager.copy_workspace(db, config, "ws1", dest_name="ws2", vm_name="box")
+        workspace_manager.copy_workspace(
+            db, config, "ws1", dest_name="ws2", vm_name="box", interaction=InteractionPolicy.REFUSE
+        )
 
     assert len(closes) == 1  # the finally ran, and no second call site remains
 
@@ -1732,7 +1742,9 @@ def test_copy_applies_canonical_acl_after_unpack_and_chown(
     events: list[str] = []
     fake = _wire_copy_fakes(monkeypatch, events)
 
-    workspace_manager.copy_workspace(db, config, "ws1", dest_name="ws2", vm_name="box")
+    workspace_manager.copy_workspace(
+        db, config, "ws1", dest_name="ws2", vm_name="box", interaction=InteractionPolicy.REFUSE
+    )
 
     cmds = fake.commands
     # The canonical pair, both carrying other-denial (path-agnostic shape).
@@ -1788,7 +1800,9 @@ def test_rehome_routes_through_the_canonical_acl_helper(
     fake = _RehomeTarget()
     monkeypatch.setattr("agentworks.transports.transport", lambda vm, config_, **kwargs: fake)
 
-    workspace_manager.rehome_workspace(db, config, "ws1", target_path="/dst/ws1", yes=True)
+    workspace_manager.rehome_workspace(
+        db, config, "ws1", target_path="/dst/ws1", yes=True, interaction=InteractionPolicy.REFUSE
+    )
 
     cmds = fake.commands
     assert any(c.startswith("find ") and "setfacl -d -m g::rwx -m m::rwx -m o::---" in c for c in cmds)
@@ -1862,10 +1876,12 @@ def test_first_repair_after_rehome_is_a_noop(
     _seed(db)
     _reachable(monkeypatch, True)
 
-    workspace_manager.rehome_workspace(db, config, "ws1", target_path="/dst/ws1", yes=True)
+    workspace_manager.rehome_workspace(
+        db, config, "ws1", target_path="/dst/ws1", yes=True, interaction=InteractionPolicy.REFUSE
+    )
     assert fake._acl_canonical
 
-    workspace_manager.repair_workspace(db, config, "ws1")
+    workspace_manager.repair_workspace(db, config, "ws1", interaction=InteractionPolicy.REFUSE)
 
     assert "OK: ACLs" in captured_output.detail
     assert not any(line.startswith("Fixed:") for line in captured_output.detail)
@@ -1929,7 +1945,9 @@ def test_first_repair_after_copy_is_a_noop(
     _seed(db)
     _reachable(monkeypatch, True)
 
-    workspace_manager.copy_workspace(db, config, "ws1", dest_name="ws2", vm_name="box")
+    workspace_manager.copy_workspace(
+        db, config, "ws1", dest_name="ws2", vm_name="box", interaction=InteractionPolicy.REFUSE
+    )
 
     # Copy applied the recursive canonical ACL (the same spec repair uses),
     # not a top-dir-only default.
@@ -1938,7 +1956,7 @@ def test_first_repair_after_copy_is_a_noop(
     assert any("setfacl -R -m g::rwx -m m::rwx -m o::---" in c for c in copy_acls)
     assert fake._acl_canonical
 
-    workspace_manager.repair_workspace(db, config, "ws2")
+    workspace_manager.repair_workspace(db, config, "ws2", interaction=InteractionPolicy.REFUSE)
 
     assert "OK: ACLs" in captured_output.detail
     assert not any(line.startswith("Fixed:") for line in captured_output.detail)

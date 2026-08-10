@@ -1,520 +1,397 @@
-"""Tests for the resolve loop (``agentworks.secrets.resolve``).
-
-Resolution is a loop over the active backends -- no resolver object, no
-cache. Fakes here are backend-shaped duck types (name / interactive /
-would_attempt / describe_lookup / resolve): the loop only speaks the
-``ActiveBackend`` surface.
-"""
+"""Ordered typed secret-source resolution semantics."""
 
 from __future__ import annotations
 
-from typing import cast
+from contextlib import AbstractContextManager
+from typing import ClassVar
 
 import pytest
 
-from agentworks.errors import ConfigError, SecretMappingError, SecretUnavailableError
+from agentworks.capabilities.secret_backend.client import (
+    InteractionBroker,
+    RemainingTime,
+    SecretClientFailure,
+    SecretClientFailureKind,
+    SecretClientRemediation,
+    SecretSourceClient,
+)
+from agentworks.capabilities.secret_backend.prompt import PromptBackend, PromptSourceConfig
 from agentworks.resources.graph import Readiness
+from agentworks.schema import AgwModel, CapabilityBlock
 from agentworks.secrets import SecretDecl
-from agentworks.secrets.resolve import ActiveBackend, preview_resolution, resolve_secrets
+from agentworks.secrets.outcomes import ResolutionCategory, ResolutionDetail
+from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.resolve import (
+    ActiveSource,
+    CompletionPolicy,
+    ResolutionPolicy,
+    resolve_batch,
+)
+from agentworks.secrets.sources import SecretSourceDecl
+from tests.secrets.test_resolution_lifecycle import _Backend, _source
 
 
-class _FakeBackend:
-    """An ActiveBackend-shaped stub controllable per-test."""
-
-    def __init__(
-        self,
-        name: str,
-        values: dict[str, str] | None = None,
-        attempts: set[str] | None = None,
-        interactive: bool = False,
-        readiness: Readiness | None = None,
-    ) -> None:
-        self.name = name
-        self.interactive = interactive
-        # Stored readiness verdict (R9.6): a not-ready backend is skipped with a
-        # warning at resolution. Defaults to ready.
-        self.readiness = readiness if readiness is not None else Readiness.ready()
-        self._values = values or {}
-        # If attempts is None, this backend attempts everything except
-        # explicit opt-outs (keyed by BACKEND NAME). If attempts is a
-        # set, only secrets in the set are attempted.
-        self._attempts = attempts
-        self.resolve_calls: list[list[str]] = []  # secret-names per call
-
-    def would_attempt(self, secret: SecretDecl) -> bool:
-        if secret.backend_mappings.get(self.name) is False:
-            return False
-        if self._attempts is not None:
-            return secret.name in self._attempts
-        return True
-
-    def describe_lookup(self, secret: SecretDecl) -> str | None:  # noqa: ARG002 - stub
-        return f"<{self.name}>"
-
-    def resolve(self, secrets: list[SecretDecl]) -> dict[str, str]:
-        self.resolve_calls.append([s.name for s in secrets])
-        return {s.name: self._values[s.name] for s in secrets if s.name in self._values}
+def _policy(*, partial: bool = False) -> ResolutionPolicy:
+    return ResolutionPolicy(
+        interaction=InteractionPolicy.REFUSE,
+        completion=CompletionPolicy.PARTIAL if partial else CompletionPolicy.COMPLETE,
+    )
 
 
-def _decl(name: str, **kw: object) -> SecretDecl:
-    return SecretDecl(name=name, description=f"{name} description", **kw)  # type: ignore[arg-type]
+class _First(_Backend):
+    events: ClassVar[list[str]] = []
+    values: ClassVar[dict[str, str]] = {}
+    failure: ClassVar[BaseException | None] = None
 
 
-def _chain(*backends: object) -> list[ActiveBackend]:
-    """The fakes duck-type the ActiveBackend surface; cast for the
-    signatures."""
-    return cast("list[ActiveBackend]", list(backends))
+class _Second(_Backend):
+    events: ClassVar[list[str]] = []
+    values: ClassVar[dict[str, str]] = {}
+    failure: ClassVar[BaseException | None] = None
 
 
-def test_first_backend_wins() -> None:
-    b1 = _FakeBackend("first", values={"x": "from-first"})
-    b2 = _FakeBackend("second", values={"x": "from-second"})
-    assert resolve_secrets([_decl("x")], _chain(b1, b2)) == {"x": "from-first"}
-    # Second backend never got called for x.
-    assert b2.resolve_calls == []
+def _reset() -> None:
+    for backend in (_First, _Second):
+        backend.events = []
+        backend.values = {}
+        backend.failure = None
 
 
-def test_fallthrough_to_later_backend() -> None:
-    b1 = _FakeBackend("first")  # no values
-    b2 = _FakeBackend("second", values={"x": "from-second"})
-    assert resolve_secrets([_decl("x")], _chain(b1, b2)) == {"x": "from-second"}
+def test_first_resolved_source_wins_and_later_source_is_lazy() -> None:
+    _reset()
+    _First.values = {"x": "first"}
+    _Second.values = {"x": "second"}
+    batch = resolve_batch(
+        [SecretDecl(name="x", description="x")],
+        [_source(name="first", backend_class=_First), _source(name="second", backend_class=_Second)],
+        policy=_policy(),
+        interaction_broker=None,
+    )
+    assert batch.complete_or_raise() == {"x": "first"}
+    assert _Second.events == []
 
 
-def test_hard_miss_halts_chain_via_secret_mapping_error() -> None:
-    """A persistent-store provider raises SecretMappingError when an
-    explicit mapping doesn't resolve. The loop lets the exception
-    propagate so a misconfigured store doesn't fall through to a prompt
-    that would mask the real config problem."""
-
-    class _StrictMissBackend(_FakeBackend):
-        def resolve(self, secrets: list[SecretDecl]) -> dict[str, str]:
-            raise SecretMappingError(
-                f"strict backend has no item for {secrets[0].name!r}",
-            )
-
-    strict = _StrictMissBackend("strict")
-    later = _FakeBackend("prompt", values={"x": "would-prompt"})
-
-    with pytest.raises(SecretMappingError, match="strict backend has no item"):
-        resolve_secrets([_decl("x")], _chain(strict, later))
-
-    # Critical contract: the prompt backend NEVER ran. Hard miss halts
-    # the chain.
-    assert later.resolve_calls == []
+def test_soft_miss_falls_through_in_request_order() -> None:
+    _reset()
+    _Second.values = {"x": "second"}
+    batch = resolve_batch(
+        [SecretDecl(name="x", description="x")],
+        [_source(name="first", backend_class=_First), _source(name="second", backend_class=_Second)],
+        policy=_policy(),
+        interaction_broker=None,
+    )
+    assert batch.complete_or_raise() == {"x": "second"}
+    assert _First.events == ["factory", "enter", "prepare", "resolve", "exit"]
+    assert _Second.events == ["factory", "enter", "prepare", "resolve", "exit"]
 
 
-def test_nonconforming_secret_name_still_resolves() -> None:
-    """Issue #279: resolve_secrets itself does not validate secret NAMES, so a
-    non-conforming name resolves normally (the load path only warns, never
-    rejects it). This is a unit check of the resolve loop, not an end-to-end
-    thread of any one reference site; it pins the general guarantee the prior
-    (rejected) raising approach would have broken."""
-    backend = _FakeBackend("env-var", values={"GITHUB_TOKEN": "resolved-value"})
-    resolved = resolve_secrets([_decl("GITHUB_TOKEN")], _chain(backend))
-    assert resolved == {"GITHUB_TOKEN": "resolved-value"}
+def test_hard_failure_halts_attempted_secret_but_unrelated_secret_continues() -> None:
+    _reset()
+    _First.failure = SecretClientFailure(
+        kind=SecretClientFailureKind.HARD_MAPPING,
+        remediation=SecretClientRemediation.CHECK_MAPPING,
+    )
+    _Second.values = {"other": "ok"}
+    mapped = SecretDecl(name="mapped", description="mapped")
+    other = SecretDecl(name="other", description="other", backend_mappings={"first": False})
+    batch = resolve_batch(
+        [mapped, other],
+        [_source(name="first", backend_class=_First), _source(name="second", backend_class=_Second)],
+        policy=_policy(partial=True),
+        interaction_broker=None,
+    )
+    assert batch.outcomes[0].detail is ResolutionDetail.HARD_MAPPING
+    assert batch.outcomes[1].category is ResolutionCategory.RESOLVED
 
 
-def test_unsatisfied_raises_with_backends_tried() -> None:
-    b1 = _FakeBackend("env-var")
-    b2 = _FakeBackend("prompt")
-    with pytest.raises(SecretUnavailableError) as exc:
-        resolve_secrets([_decl("x")], _chain(b1, b2))
-    assert "x" in str(exc.value)
-    assert "env-var" in (exc.value.hint or "")
-    assert "prompt" in (exc.value.hint or "")
+def test_false_opt_out_is_keyed_by_source_name() -> None:
+    _reset()
+    _First.values = {"x": "wrong"}
+    _Second.values = {"x": "right"}
+    decl = SecretDecl(name="x", description="x", backend_mappings={"first": False})
+    batch = resolve_batch(
+        [decl],
+        [_source(name="first", backend_class=_First), _source(name="second", backend_class=_Second)],
+        policy=_policy(),
+        interaction_broker=None,
+    )
+    assert batch.complete_or_raise() == {"x": "right"}
+    assert _First.events == []
+
+
+def test_client_mapping_iteration_order_cannot_reorder_outcomes() -> None:
+    _reset()
+    _First.values = {"b": "b", "a": "a"}
+    batch = resolve_batch(
+        [SecretDecl(name="a", description="a"), SecretDecl(name="b", description="b")],
+        [_source(name="first", backend_class=_First)],
+        policy=_policy(),
+        interaction_broker=None,
+    )
+    assert [outcome.name for outcome in batch.outcomes] == ["a", "b"]
 
 
 @pytest.mark.parametrize(
-    "value",
-    ["line1\nline2", "line1\rline2", "valid\x00rest"],
-    ids=["newline", "carriage-return", "nul"],
+    ("kind", "detail"),
+    [
+        (SecretClientFailureKind.HARD_MAPPING, ResolutionDetail.HARD_MAPPING),
+        (SecretClientFailureKind.AUTHENTICATION, ResolutionDetail.AUTHENTICATION),
+        (SecretClientFailureKind.CONNECTIVITY, ResolutionDetail.CONNECTIVITY),
+        (SecretClientFailureKind.EXTERNAL, ResolutionDetail.EXTERNAL),
+    ],
 )
-def test_control_characters_in_resolved_value_raise(value: str) -> None:
-    """ADR 0014: a resolved secret value containing a newline / CR / NUL
-    corrupts SSH SetEnv. The loop hard-fails so the operator sees a
-    clear error instead of an opaque SSH-side rejection."""
-    b1 = _FakeBackend("vault", values={"x": value})
-    with pytest.raises(ConfigError, match="control character"):
-        resolve_secrets([_decl("x")], _chain(b1))
-
-
-def test_each_backend_called_once_with_still_missing_set() -> None:
-    b1 = _FakeBackend("first", values={"a": "1"})
-    b2 = _FakeBackend("second", values={"b": "2", "c": "3"})
-    out = resolve_secrets([_decl("a"), _decl("b"), _decl("c")], _chain(b1, b2))
-    assert out == {"a": "1", "b": "2", "c": "3"}
-    # b1 was asked for [a, b, c] (it would_attempt all); returned only a.
-    assert b1.resolve_calls == [["a", "b", "c"]]
-    # b2 was asked for [b, c]; a was already resolved.
-    assert b2.resolve_calls == [["b", "c"]]
-
-
-def test_input_deduped_by_name() -> None:
-    """Duplicate decls in the input resolve once (one backend call, one
-    result entry) -- callers union decls from several targets."""
-    b1 = _FakeBackend("first", values={"x": "v"})
-    out = resolve_secrets([_decl("x"), _decl("x")], _chain(b1))
-    assert out == {"x": "v"}
-    assert b1.resolve_calls == [["x"]]
-
-
-def test_opt_out_skips_backend_for_that_secret_only() -> None:
-    b1 = _FakeBackend("env-var", values={"x": "from-env", "y": "from-env-y"})
-    b2 = _FakeBackend("prompt", values={"x": "prompted"})
-    x = _decl("x", backend_mappings={"env-var": False})
-    y = _decl("y")
-    out = resolve_secrets([x, y], _chain(b1, b2))
-    # x skipped env-var (opt-out) and fell through to prompt.
-    # y was resolved by env-var on the first try.
-    assert out == {"x": "prompted", "y": "from-env-y"}
-
-
-def test_empty_chain_with_no_secrets_resolves_empty() -> None:
-    assert resolve_secrets([], _chain()) == {}
-
-
-def test_unsatisfied_hint_omits_opted_out_backends() -> None:
-    """The hint for a missing secret should not list backends whose
-    would_attempt returned False (e.g. via backend_mappings.env-var =
-    false). Only backends that actually tried appear."""
-    b1 = _FakeBackend("env-var")
-    b2 = _FakeBackend("prompt")
-    decl = _decl("x", backend_mappings={"env-var": False})
-    with pytest.raises(SecretUnavailableError) as exc:
-        resolve_secrets([decl], _chain(b1, b2))
-    hint = exc.value.hint or ""
-    assert "x" in hint
-    assert "prompt" in hint
-    assert "env-var" not in hint
-
-
-def test_unsatisfied_hint_per_secret_listing() -> None:
-    """When multiple secrets fail, each gets its own per-secret hint line
-    so operators can see which backends were tried for each one."""
-    b_env = _FakeBackend("env-var")
-    b_prompt = _FakeBackend("prompt")
-    a = _decl("a", backend_mappings={"env-var": False})
-    b = _decl("b")
-    with pytest.raises(SecretUnavailableError) as exc:
-        resolve_secrets([a, b], _chain(b_env, b_prompt))
-    hint = exc.value.hint or ""
-    # 'a' opted out of env-var, only prompt tried.
-    assert "a: tried prompt" in hint
-    # 'b' had no opt-out, both tried.
-    assert "b: tried env-var, prompt" in hint
-
-
-# -- fail before prompting (issue #202) --------------------------------------
-
-
-class _PromptFake(_FakeBackend):
-    """A prompt-shaped interactive backend that mirrors the real
-    ``PromptBackend.batch_get``: it no-ops (resolves nothing) when
-    ``output.is_interactive()`` is False, so the non-interactive path is
-    exercised faithfully. ``resolve_calls`` still records the reach."""
-
-    def resolve(self, secrets: list[SecretDecl]) -> dict[str, str]:
-        from agentworks import output
-
-        self.resolve_calls.append([s.name for s in secrets])
-        if not output.is_interactive():
-            return {}
-        return {s.name: self._values[s.name] for s in secrets if s.name in self._values}
-
-
-def _set_interactive(monkeypatch: pytest.MonkeyPatch, value: bool) -> None:
-    from agentworks import output
-
-    monkeypatch.setattr(output, "is_interactive", lambda: value)
-
-
-def test_doomed_secret_raises_before_any_interactive_prompt(
-    monkeypatch: pytest.MonkeyPatch,
+def test_every_typed_hard_failure_halts_the_attempted_secret(
+    kind: SecretClientFailureKind,
+    detail: ResolutionDetail,
 ) -> None:
-    """The reported bug: chain (env-var, prompt); A will be resolved by
-    prompt, B is env-var-mapped-but-unset AND opts out of prompt. B is
-    doomed the moment env-var soft-misses, so it must raise BEFORE the
-    prompt for A fires (the operator is never asked for A)."""
-    _set_interactive(monkeypatch, True)
-    env = _FakeBackend("env-var")  # no values: both secrets soft-miss
-    prompt = _PromptFake("prompt", values={"a": "typed"}, interactive=True)
-    a = _decl("a")
-    b = _decl("b", backend_mappings={"prompt": False})
-    with pytest.raises(SecretUnavailableError) as exc:
-        resolve_secrets([a, b], _chain(env, prompt))
-    # The prompt never ran: no operator interaction was wasted.
-    assert prompt.resolve_calls == []
-    # Only B is named (attributed to env-var, which DID attempt-and-miss);
-    # A is not dragged into the failure.
-    assert str(exc.value) == "no active backend could resolve secret(s): b"
-    assert "b: tried env-var" in (exc.value.hint or "")
-    assert "a:" not in (exc.value.hint or "")
-
-
-def test_non_interactive_lets_end_of_loop_raise_stand(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Same setup under --non-interactive: the prompt backend no-ops, so
-    there is no prompt to get ahead of. The doom check does NOT fire
-    early; the prompt is still reached (and resolves nothing), and the
-    end-of-loop raise names both unresolved secrets."""
-    _set_interactive(monkeypatch, False)
-    env = _FakeBackend("env-var")
-    prompt = _PromptFake("prompt", values={"a": "typed"}, interactive=True)
-    a = _decl("a")
-    b = _decl("b", backend_mappings={"prompt": False})
-    with pytest.raises(SecretUnavailableError) as exc:
-        resolve_secrets([a, b], _chain(env, prompt))
-    # No early raise: the loop reached the prompt for A (which no-op'd).
-    assert prompt.resolve_calls == [["a"]]
-    # Both secrets are unresolved at loop end.
-    assert "a" in str(exc.value)
-    assert "b" in str(exc.value)
-
-
-def test_prompt_attemptable_secret_is_not_falsely_doomed(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A secret prompt WILL attempt must not be flagged doomed: env-var
-    soft-misses, the doom check clears it (prompt would_attempt), and the
-    prompt resolves it normally."""
-    _set_interactive(monkeypatch, True)
-    env = _FakeBackend("env-var")  # no value: soft-miss
-    prompt = _PromptFake("prompt", values={"x": "typed"}, interactive=True)
-    out = resolve_secrets([_decl("x")], _chain(env, prompt))
-    assert out == {"x": "typed"}
-    assert prompt.resolve_calls == [["x"]]
-
-
-def test_doom_check_catches_structurally_unreachable_secret(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A secret that opts out of every backend in the chain is doomed;
-    the before-interactive check raises it before the prompt fires."""
-    _set_interactive(monkeypatch, True)
-    env = _FakeBackend("env-var")
-    prompt = _PromptFake("prompt", interactive=True)
-    decl = _decl("x", backend_mappings={"env-var": False, "prompt": False})
-    with pytest.raises(SecretUnavailableError):
-        resolve_secrets([decl], _chain(env, prompt))
-    assert prompt.resolve_calls == []
-
-
-def test_hard_miss_halts_before_interactive_doom_check(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A hard miss (SecretMappingError) from a non-interactive store still
-    halts the chain even in interactive mode: the store raises before the
-    interactive backend (and its doom check) is ever reached."""
-    _set_interactive(monkeypatch, True)
-
-    class _StrictMissBackend(_FakeBackend):
-        def resolve(self, secrets: list[SecretDecl]) -> dict[str, str]:
-            raise SecretMappingError("store has no item")
-
-    strict = _StrictMissBackend("strict")
-    prompt = _PromptFake("prompt", values={"x": "typed"}, interactive=True)
-    with pytest.raises(SecretMappingError, match="store has no item"):
-        resolve_secrets([_decl("x")], _chain(strict, prompt))
-    assert prompt.resolve_calls == []
-
-
-# -- R9.6: readiness gating (skip-with-warning, fall-through) -----------------
-
-
-def test_not_ready_backend_skipped_with_warning_and_chain_falls_through(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """R9.6: a not-ready opted-in backend is skipped WITH A WARNING (never
-    silent) and the chain falls through to the next candidate. Delta vs today:
-    a mapped-but-unavailable store used to raise ConnectivityError and halt;
-    now it warns and yields to a later backend."""
-    from agentworks import output
-
-    warnings: list[str] = []
-    monkeypatch.setattr(output, "warn", lambda message: warnings.append(message))
-
-    not_ready = _FakeBackend(
-        "onepassword", values={"x": "vaulted"}, readiness=Readiness.blocked("op CLI not installed")
+    _reset()
+    remediation = {
+        SecretClientFailureKind.HARD_MAPPING: SecretClientRemediation.CHECK_MAPPING,
+        SecretClientFailureKind.AUTHENTICATION: SecretClientRemediation.SIGN_IN,
+        SecretClientFailureKind.CONNECTIVITY: SecretClientRemediation.CHECK_CONNECTIVITY,
+        SecretClientFailureKind.EXTERNAL: SecretClientRemediation.RETRY,
+    }[kind]
+    _First.failure = SecretClientFailure(kind=kind, remediation=remediation)
+    _Second.values = {"token": "must-not-fall-through"}
+    batch = resolve_batch(
+        [SecretDecl(name="token", description="token")],
+        [_source(name="first", backend_class=_First), _source(name="second", backend_class=_Second)],
+        policy=_policy(partial=True),
+        interaction_broker=None,
     )
-    later = _FakeBackend("prompt", values={"x": "prompted"})
-    got = resolve_secrets([_decl("x")], _chain(not_ready, later))
-    assert got == {"x": "prompted"}
-    assert not_ready.resolve_calls == []  # never asked to resolve
-    assert any("skipping onepassword" in w and "op CLI not installed" in w for w in warnings)
+    assert batch.outcomes[0].detail is detail
+    assert _Second.events == []
 
 
-def test_ready_store_hard_miss_still_halts_not_skipped() -> None:
-    """R9.6 contrast (anti-masking preserved): readiness distinguishes 'skip,
-    it can't run here' from 'halt, it ran and said no'. A READY store's hard
-    miss (SecretMappingError) still halts the chain, so a later prompt does not
-    mask the store's definitive 'no'."""
-
-    class _HardMiss(_FakeBackend):
-        def resolve(self, secrets: list[SecretDecl]) -> dict[str, str]:
-            raise SecretMappingError("store has no value")
-
-    ready_store = _HardMiss("onepassword")  # readiness defaults ready
-    prompt = _FakeBackend("prompt", values={"x": "prompted"})
-    with pytest.raises(SecretMappingError, match="store has no value"):
-        resolve_secrets([_decl("x")], _chain(ready_store, prompt))
-    assert prompt.resolve_calls == []  # halted: the prompt never masked the store's 'no'
-
-
-def test_doom_check_treats_not_ready_remaining_backend_as_non_attempting(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """R9.6 lockstep with the #202 predictor: ``remaining`` is filtered to
-    READY backends, so a secret whose only remaining would-attempt backend is
-    not-ready is doomed BEFORE the interactive prompt fires (it will be skipped,
-    so it must not count as attempting)."""
-    from agentworks import output
-
-    monkeypatch.setattr(output, "warn", lambda message: None)
-    _set_interactive(monkeypatch, True)
-
-    env = _FakeBackend("env-var")  # soft-misses everything
-    op = _FakeBackend(
-        "onepassword", values={"x": "vaulted"}, attempts={"x"}, readiness=Readiness.blocked("op CLI not installed")
+def test_not_ready_source_falls_through_without_construction() -> None:
+    _reset()
+    _Second.values = {"token": "winner"}
+    batch = resolve_batch(
+        [SecretDecl(name="token", description="token")],
+        [
+            _source(name="first", backend_class=_First, ready=False),
+            _source(name="second", backend_class=_Second),
+        ],
+        policy=_policy(),
+        interaction_broker=None,
     )
-    prompt = _PromptFake("prompt", values={"a": "typed"}, attempts={"a"}, interactive=True)
-    with pytest.raises(SecretUnavailableError) as exc:
-        resolve_secrets([_decl("a"), _decl("x")], _chain(env, op, prompt))
-    # x is doomed (its only remaining attempter, onepassword, is not-ready), so
-    # the raise fires before the prompt for a runs.
-    assert prompt.resolve_calls == []
-    assert "x" in str(exc.value)
+    assert batch.complete_or_raise() == {"token": "winner"}
+    assert _First.events == []
 
 
-# -- collect mode (errors out-param) -----------------------------------------
+class _Interactive(_Second):
+    interactive: ClassVar[bool] = True
 
 
-def test_collect_mode_keeps_partial_values_and_records_failures() -> None:
-    """With an ``errors`` dict, the loop returns what resolved and
-    records per-secret failures instead of raising -- inspection
-    surfaces get partial success from ONE pass (already-answered
-    prompts are never discarded and re-asked)."""
-    b1 = _FakeBackend("env-var", values={"good": "value"})
-    good = _decl("good")
-    bad = _decl("bad", backend_mappings={"env-var": False})
-    errors: dict[str, str] = {}
-    values = resolve_secrets([good, bad], _chain(b1), errors=errors)
-    assert values == {"good": "value"}
-    assert set(errors) == {"bad"}
-    assert "no active backend could resolve" in errors["bad"]
-    assert "bad: tried" in errors["bad"]
+class _NeverAttempts(_Second):
+    @classmethod
+    def would_attempt(cls, secret_name: str, *, mapping_present: bool) -> bool:
+        return False
 
 
-def test_collect_mode_records_control_character_values() -> None:
-    """The SetEnv transport guard lands in ``errors`` (value withheld)
-    instead of aborting the whole pass; clean values still return."""
-    b1 = _FakeBackend("vault", values={"clean": "ok", "dirty": "a\nb"})
-    errors: dict[str, str] = {}
-    values = resolve_secrets([_decl("clean"), _decl("dirty")], _chain(b1), errors=errors)
-    assert values == {"clean": "ok"}
-    assert set(errors) == {"dirty"}
-    assert "control character" in errors["dirty"]
+def test_final_evidence_precedence_is_refused_then_soft_miss_then_not_ready() -> None:
+    _reset()
+    secret = SecretDecl(name="token", description="token")
+    refused = resolve_batch(
+        [secret],
+        [
+            _source(name="first", backend_class=_First),
+            _source(name="second", backend_class=_Interactive),
+        ],
+        policy=_policy(partial=True),
+        interaction_broker=None,
+    )
+    assert refused.outcomes[0].detail is ResolutionDetail.INTERACTION_REFUSED
+    assert refused.outcomes[0].source == "second"
+
+    soft = resolve_batch(
+        [secret],
+        [
+            _source(name="first", backend_class=_First),
+            _source(name="second", backend_class=_Second, ready=False),
+        ],
+        policy=_policy(partial=True),
+        interaction_broker=None,
+    )
+    assert soft.outcomes[0].detail is ResolutionDetail.SOFT_MISS
+    assert soft.outcomes[0].source == "first"
+
+    not_ready = resolve_batch(
+        [secret],
+        [_source(name="second", backend_class=_Second, ready=False)],
+        policy=_policy(partial=True),
+        interaction_broker=None,
+    )
+    assert not_ready.outcomes[0].detail is ResolutionDetail.SOURCE_NOT_READY
+    assert not_ready.outcomes[0].source == "second"
 
 
-def test_collect_mode_records_backend_exception_without_fallthrough() -> None:
-    """A backend-level exception (hard miss / connectivity) is recorded
-    against every secret that backend was attempting -- batch-level
-    attribution -- and those secrets are NOT forwarded to later
-    backends, preserving the don't-mask-a-store-misconfiguration
-    semantics of the hard-miss halt."""
-
-    class _StrictMissBackend(_FakeBackend):
-        def resolve(self, secrets: list[SecretDecl]) -> dict[str, str]:
-            raise SecretMappingError("store has no item")
-
-    strict = _StrictMissBackend("strict")
-    later = _FakeBackend("prompt", values={"x": "would-prompt", "y": "would-prompt"})
-    errors: dict[str, str] = {}
-    values = resolve_secrets([_decl("x"), _decl("y")], _chain(strict, later), errors=errors)
-    assert values == {}
-    assert set(errors) == {"x", "y"}
-    assert "store has no item" in errors["x"]
-    # The prompt backend NEVER ran for the affected secrets.
-    assert later.resolve_calls == []
+def test_empty_chain_and_non_attempting_chain_are_distinct() -> None:
+    secret = SecretDecl(name="token", description="token")
+    empty = resolve_batch([secret], [], policy=_policy(partial=True), interaction_broker=None)
+    inert = resolve_batch(
+        [secret],
+        [_source(name="inert", backend_class=_NeverAttempts)],
+        policy=_policy(partial=True),
+        interaction_broker=None,
+    )
+    assert empty.outcomes[0].detail is ResolutionDetail.NO_ACTIVE_SOURCE
+    assert inert.outcomes[0].detail is ResolutionDetail.NO_ATTEMPTABLE_SOURCE
 
 
-def test_collect_mode_default_is_unchanged_raise_behavior() -> None:
-    """Without ``errors``, the loop keeps its all-or-nothing contract --
-    the out-param is additive, not a behavior change for commands."""
-    b1 = _FakeBackend("env-var")
-    with pytest.raises(SecretUnavailableError):
-        resolve_secrets([_decl("x")], _chain(b1))
+class _Broker:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def request_secret(self, name: str, /) -> str:
+        self.calls.append(name)
+        return f"prompted-{name}"
 
 
-# -- preview_resolution ------------------------------------------------------
+class _PromptProbe(PromptBackend):
+    factories: ClassVar[int] = 0
+
+    @classmethod
+    def create_client(
+        cls,
+        *,
+        source_name: str,
+        config: AgwModel,
+        interaction_broker: InteractionBroker | None,
+        remaining_time: RemainingTime,
+    ) -> AbstractContextManager[SecretSourceClient]:
+        cls.factories += 1
+        return super().create_client(
+            source_name=source_name,
+            config=config,
+            interaction_broker=interaction_broker,
+            remaining_time=remaining_time,
+        )
 
 
-def test_preview_reports_first_backend_with_value() -> None:
-    b1 = _FakeBackend("env-var", values={"x": "from-env"})
-    b2 = _FakeBackend("prompt", interactive=True)
-    assert preview_resolution(_decl("x"), _chain(b1, b2), interactive_available=True) == "env-var"
+def _prompt_source() -> ActiveSource:
+    return ActiveSource(
+        source=SecretSourceDecl(name="prompt", backend=CapabilityBlock.of("prompt")),
+        backend_class=_PromptProbe,
+        config=PromptSourceConfig(name="prompt"),
+        readiness=Readiness.ready(),
+    )
 
 
-def test_preview_falls_through_to_interactive() -> None:
-    """env-var would_attempt is True but has no value; prompt is the
-    next backend and is not opted out, so preview reports prompt when
-    interactive input is available this run."""
-    b1 = _FakeBackend("env-var")  # no values
-    b2 = _FakeBackend("prompt", interactive=True)
-    assert preview_resolution(_decl("x"), _chain(b1, b2), interactive_available=True) == "prompt"
+def test_complete_mode_dooms_before_prompt_factory_or_broker() -> None:
+    _reset()
+    _PromptProbe.factories = 0
+    broker = _Broker()
+    doomed = SecretDecl(name="doomed", description="doomed", backend_mappings={"prompt": False})
+    independent = SecretDecl(name="independent", description="independent")
+    batch = resolve_batch(
+        [doomed, independent],
+        [_source(name="first", backend_class=_First), _prompt_source()],
+        policy=ResolutionPolicy(interaction=InteractionPolicy.ALLOW, completion=CompletionPolicy.COMPLETE),
+        interaction_broker=broker,
+    )
+    assert [outcome.detail for outcome in batch.outcomes] == [
+        ResolutionDetail.SOFT_MISS,
+        ResolutionDetail.BATCH_DOOMED,
+    ]
+    assert _PromptProbe.factories == 0
+    assert broker.calls == []
 
 
-def test_preview_interactive_unavailable_does_not_report_prompt() -> None:
-    """Under --non-interactive / no TTY (issue #202) the prompt backend
-    no-ops, so a prompt-only secret is genuinely unresolvable: preview
-    walks PAST the interactive backend and returns None."""
-    b1 = _FakeBackend("env-var")  # no values
-    b2 = _FakeBackend("prompt", interactive=True)
-    assert preview_resolution(_decl("x"), _chain(b1, b2), interactive_available=False) is None
+def test_partial_mode_resolves_independent_secret_instead_of_dooming() -> None:
+    _reset()
+    _PromptProbe.factories = 0
+    broker = _Broker()
+    doomed = SecretDecl(name="doomed", description="doomed", backend_mappings={"prompt": False})
+    independent = SecretDecl(name="independent", description="independent")
+    batch = resolve_batch(
+        [doomed, independent],
+        [_source(name="first", backend_class=_First), _prompt_source()],
+        policy=ResolutionPolicy(interaction=InteractionPolicy.ALLOW, completion=CompletionPolicy.PARTIAL),
+        interaction_broker=broker,
+    )
+    assert [outcome.detail for outcome in batch.outcomes] == [
+        ResolutionDetail.SOFT_MISS,
+        ResolutionDetail.RESOLVED,
+    ]
+    assert _PromptProbe.factories == 1
+    assert broker.calls == ["independent"]
 
 
-def test_preview_interactive_unavailable_still_reports_later_backend() -> None:
-    """When interactive input is unavailable the walk continues past the
-    prompt to any later non-interactive backend that would resolve."""
-    b1 = _FakeBackend("env-var")  # no values
-    b2 = _FakeBackend("prompt", interactive=True)
-    b3 = _FakeBackend("vault", values={"x": "from-vault"})
-    assert preview_resolution(_decl("x"), _chain(b1, b2, b3), interactive_available=False) == "vault"
+def test_complete_doom_applies_to_interactive_plugin_without_a_broker() -> None:
+    _reset()
+    doomed = SecretDecl(name="doomed", description="doomed", backend_mappings={"interactive": False})
+    independent = SecretDecl(name="independent", description="independent")
+    batch = resolve_batch(
+        [doomed, independent],
+        [
+            _source(name="first", backend_class=_First),
+            _source(name="interactive", backend_class=_Interactive),
+        ],
+        policy=ResolutionPolicy(interaction=InteractionPolicy.ALLOW, completion=CompletionPolicy.COMPLETE),
+        interaction_broker=None,
+    )
+    assert batch.outcomes[1].detail is ResolutionDetail.BATCH_DOOMED
+    assert _Interactive.events == []
 
 
-def test_preview_never_probes_interactive_backends() -> None:
-    """Preview must never call ``resolve`` on an interactive backend --
-    doing so would actually prompt the operator. It is reported on the
-    strength of ``would_attempt`` alone."""
+class _ProjectionFailureInteractive(_Backend):
+    interactive: ClassVar[bool] = True
+    events: ClassVar[list[str]] = []
+    calls: ClassVar[list[str]] = []
 
-    class _ExplodingPrompt(_FakeBackend):
-        def resolve(self, secrets: list[SecretDecl]) -> dict[str, str]:
-            raise AssertionError("preview must not probe interactive backends")
-
-    b1 = _FakeBackend("env-var")
-    b2 = _ExplodingPrompt("prompt", interactive=True)
-    assert preview_resolution(_decl("x"), _chain(b1, b2), interactive_available=True) == "prompt"
-
-
-def test_preview_skips_opted_out_backend() -> None:
-    """A secret with ``backend_mappings.env-var = false`` makes env-var's
-    would_attempt return False; preview skips it and continues."""
-    b1 = _FakeBackend("env-var", values={"x": "from-env"})
-    b2 = _FakeBackend("prompt", interactive=True)
-    decl = _decl("x", backend_mappings={"env-var": False})
-    assert preview_resolution(decl, _chain(b1, b2), interactive_available=True) == "prompt"
+    @classmethod
+    def would_attempt(cls, secret_name: str, *, mapping_present: bool) -> bool:
+        cls.calls.append(secret_name)
+        if secret_name == "broken":
+            raise RuntimeError("sentinel-provider-policy")
+        return True
 
 
-def test_preview_honors_opt_out_for_interactive_backend() -> None:
-    """Prompt opted out via ``backend_mappings.prompt = false`` returns
-    None, matching what would actually happen at command time
-    (SecretUnavailableError)."""
-    b1 = _FakeBackend("env-var")  # no values; falls through
-    b2 = _FakeBackend("prompt", interactive=True)
-    decl = _decl("x", backend_mappings={"prompt": False})
-    assert preview_resolution(decl, _chain(b1, b2), interactive_available=True) is None
+def test_projection_failure_dooms_before_interactive_factory_without_reconsidering_terminal_name() -> None:
+    _ProjectionFailureInteractive.events = []
+    _ProjectionFailureInteractive.calls = []
+    batch = resolve_batch(
+        [SecretDecl(name="broken", description="broken"), SecretDecl(name="independent", description="independent")],
+        [_source(name="interactive", backend_class=_ProjectionFailureInteractive)],
+        policy=ResolutionPolicy(interaction=InteractionPolicy.ALLOW, completion=CompletionPolicy.COMPLETE),
+        interaction_broker=None,
+    )
+
+    assert [outcome.detail for outcome in batch.outcomes] == [
+        ResolutionDetail.BACKEND_PROTOCOL,
+        ResolutionDetail.BATCH_DOOMED,
+    ]
+    assert _ProjectionFailureInteractive.calls == ["broken", "independent"]
+    assert _ProjectionFailureInteractive.events == []
+    assert "sentinel-provider-policy" not in repr(batch.outcomes)
 
 
-def test_preview_returns_none_when_no_backend_attempts() -> None:
-    b1 = _FakeBackend("env-var", attempts=set())  # never attempts anything
-    assert preview_resolution(_decl("x"), _chain(b1), interactive_available=True) is None
+class _FuturePolicyFailure(_Backend):
+    events: ClassVar[list[str]] = []
+
+    @classmethod
+    def would_attempt(cls, secret_name: str, *, mapping_present: bool) -> bool:
+        raise RuntimeError("sentinel-future-policy")
+
+
+def test_doom_prediction_sanitizes_later_would_attempt_failure_before_prompt() -> None:
+    _PromptProbe.factories = 0
+    _FuturePolicyFailure.events = []
+    broker = _Broker()
+    batch = resolve_batch(
+        [
+            SecretDecl(name="causal", description="causal", backend_mappings={"prompt": False}),
+            SecretDecl(name="independent", description="independent"),
+        ],
+        [_prompt_source(), _source(name="future", backend_class=_FuturePolicyFailure)],
+        policy=ResolutionPolicy(interaction=InteractionPolicy.ALLOW, completion=CompletionPolicy.COMPLETE),
+        interaction_broker=broker,
+    )
+
+    assert batch.outcomes[0].detail is ResolutionDetail.BACKEND_PROTOCOL
+    assert batch.outcomes[1].detail is ResolutionDetail.BATCH_DOOMED
+    assert _PromptProbe.factories == 0
+    assert _FuturePolicyFailure.events == []
+    assert broker.calls == []
+    assert "sentinel-future-policy" not in repr(batch.outcomes)

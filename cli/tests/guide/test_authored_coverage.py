@@ -54,6 +54,11 @@ def test_action_contract_snapshot_pins_consent_refusal_and_single_execution() ->
         "Use describe and backend readiness as prediction only; mark this secret unverifiable.",
         "Retain the stored VM fact and mark connectivity unverifiable without connecting.",
     ]
+    assert actions[0].command == ("agw", "doctor", "--output", "json")
+    assert "parse exactly one JSON document" in actions[0].expected_state
+    assert "schema_version is the integer 1" in actions[0].expected_state
+    assert "command is exactly doctor" in actions[0].expected_state
+    assert "data is an object" in actions[0].expected_state
 
 
 def test_rendered_disclosure_precedes_ordered_action_records() -> None:

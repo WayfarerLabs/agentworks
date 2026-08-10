@@ -1,6 +1,6 @@
 # Phase 1 Acceptance Evidence
 
-- Date: 2026-08-06, updated 2026-08-08 after the PR #444 and PR #446 rebase
+- Date: 2026-08-06, updated 2026-08-08 after the PR #444, PR #446, and PR #455 rebases
 - Branch: `feat/onboarding-discovery-guide`
 - Environment: isolated temporary home, config, state, and fake executable directories
 - Budget: 20 commands and 10 minutes for the initial pass; 8 commands and 5 minutes for the focused
@@ -136,3 +136,71 @@ findings. Final rebased validation passed:
 - mypy: 611 source files clean;
 - Rulesync generated-output check and locked-SDD validation: clean;
 - mandatory file lint: Prettier, markdownlint, and cspell clean.
+
+## PR #455 git-token structural-union adoption
+
+The post-merge adaptation was based exactly on `25e47637`. PR #455 expresses provider token
+acquisition as an untagged scalar-or-table structural union. The live GitHub and AzDO references
+both expose exactly one `stored` arm with `mode` and `secret` rows, the `{mode: stored}` outer
+default, and the owner-templated `git-token-<name>` secret default. The declarable `git-credential`
+reference carries the same complete nested field tree. Focused renderer tests bind all three guide
+topics to those live `FieldEntry.alternatives`; no guide-specific field list or adapter switch was
+needed.
+
+The migration topic now preserves every released spelling deliberately. Omitted `provider.token`
+continues to select the stored arm and default secret. A scalar secret name remains accepted
+shorthand, while the guide writes the canonical tagged stored arm and preserves that name. An
+omitted or null inner `token.secret` selects the default. Explicit outer `token: null` is retired
+and routes through the manifest mutation loop for deletion or the exact `token: {mode: stored}`
+rewrite. No minted arm is taught because none exists. The site-specific read-only null review
+remains unchanged; any manifest validation hard error returns to `edit-one-manifest` before cutover.
+
+The guide-layer contract tests exercise `reference_for("git-credential")`, both live provider
+references, permanent capability validation, and secret-reference extraction. They prove scalar,
+omission, tagged, inner-null, outer-null, and unknown-mode behavior together, so prose cannot drift
+from either schema projection or service semantics. Final gate evidence for this adaptation is
+recorded from the branch runs below:
+
+- direct migration and schema-adapter contract slice: 55 passed;
+- complete guide suite: 444 passed;
+- guide, manifest, schema, retired-shape, and git-credential boundary: 3,069 passed;
+- Ruff: all checks passed; format: 621 files clean;
+- scoped mypy: 3 changed Python files clean;
+- Rulesync generated-output check: clean;
+- mandatory file lint: 272 Markdown files clean, 246 spelling files clean, and Prettier clean.
+
+## Phase 2 machine-readable operational output
+
+The covered resource, secret, VM, workspace, agent, session, console, and doctor commands expose
+local `--output human|json` options. JSON uses the exact v1 envelope and explicit domain-owned fact
+projections recorded in `machine-output-lld.md` and `cli/command-reference.md`. The human and JSON
+renderers consume the same presentation-neutral facts. Request-local presentation suppression keeps
+ordinary progress and resolver prose outside successful JSON documents without changing resolution,
+prompt, activation, status, or session-repair behavior. Domain and usage failures retain the
+existing CLI error routes.
+
+VM inspection classifies its four closed issue stages inside the inspection service while the normal
+VM operation boundary remains unchanged. VM, workspace, and session projections use frozen
+output-owned vocabularies for persisted enum values. Event names use a closed vocabulary and event
+details remain null. Opaque configuration, platform metadata, secret values, session harness state,
+socket paths, and boot identifiers are excluded.
+
+Doctor projects `HealthReport`, `HealthGroup`, and `HealthCheck` directly, so human and JSON output
+carry the same message and hint facts. A failing report is emitted before exit 1. Doctor checks the
+ordinary scalar schema version before opening the existing read-only database connection and reports
+a stale schema without migrating it. The migration guide consumes the doctor JSON facts directly;
+its completion action requires zero failures, exit 0, and an exact successful Database Schema check.
+
+The Phase 2 option additions updated generated help, Bash, Zsh, and PowerShell completion
+expectations in the implementation commits. Dynamic completion remains `--names-only`. No sample
+configuration setting was added.
+
+Phase 2 final review-correction validation passed:
+
+- focused guide, doctor, machine-output, operational JSON, completion, and VM-site suite: 591
+  passed;
+- full non-integration suite: 6,656 passed and 3 deselected;
+- Ruff check and format check: 625 files clean;
+- full mypy: 625 source files clean.
+
+Clean project, fresh-eyes, integration, and PR re-review remain pending after publication.

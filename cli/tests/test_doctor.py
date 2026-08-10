@@ -2,9 +2,25 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 
-from agentworks.doctor import HealthCheck, HealthGroup, HealthReport, Status
+from agentworks.doctor import (
+    HealthCheck,
+    HealthGroup,
+    HealthReport,
+    Status,
+    health_report_data,
+)
+
+
+def _first_projected_check(report: HealthReport) -> dict[str, object]:
+    """Return the single check from a one-group, one-check report."""
+    data = health_report_data(report)
+    groups = cast("list[dict[str, object]]", data["groups"])
+    checks = cast("list[dict[str, object]]", groups[0]["checks"])
+    return checks[0]
 
 
 def test_health_group_convenience_methods() -> None:
@@ -19,6 +35,7 @@ def test_health_group_convenience_methods() -> None:
     assert g.checks[1].status == Status.INFO
     assert g.checks[2].status == Status.WARN
     assert g.checks[3].status == Status.FAIL
+    assert [status.value for status in Status] == ["ok", "info", "warn", "fail"]
 
 
 def test_health_report_counts() -> None:
@@ -61,6 +78,44 @@ def test_health_check_message_optional() -> None:
 
     check_with_msg = HealthCheck(name="test", status=Status.WARN, message="details")
     assert check_with_msg.message == "details"
+
+
+def test_machine_output_serializes_the_same_health_check_facts() -> None:
+    """Human and JSON renderers consume one presentation-neutral check."""
+    report = HealthReport()
+    group = HealthGroup("Configuration")
+    group.fail("Config", "configuration did not load", hint="fix the config")
+    report.groups.append(group)
+
+    check = _first_projected_check(report)
+
+    assert check["message"] == "configuration did not load"
+    assert check["hint"] == "fix the config"
+
+
+def test_config_exception_becomes_one_shared_health_fact(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks import config, doctor
+    from agentworks.errors import ConfigError
+
+    marker = "secret://credentials/production"
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[operator]\n")
+    monkeypatch.setattr(config, "CONFIG_PATH", config_path)
+
+    def fail_load_config(**_kwargs: object):
+        raise ConfigError(f"backend rejected {marker}", hint=f"fix {marker}")
+
+    monkeypatch.setattr(config, "load_config", fail_load_config)
+
+    config_group, _config, _registry = doctor._check_config()
+    report = HealthReport(groups=[config_group])
+    rendered = health_report_data(report)
+
+    groups = cast("list[dict[str, object]]", rendered["groups"])
+    checks = cast("list[dict[str, object]]", groups[0]["checks"])
+    config_check = next(check for check in checks if check["name"] == "Config")
+    assert config_check["message"] == f"backend rejected {marker}"
+    assert config_check["hint"] == f"fix {marker}"
 
 
 class TestCompletionChecks:
@@ -155,13 +210,14 @@ def test_run_checks_group_order_and_config_failure_placeholder(
     """Group order is a presentation choice decoupled from which checks
     need config: with config/registry unavailable, the report keeps its shape;
     the registry-dependent groups (VM platforms, VM sites, Secret backends,
-    Secrets) each render a skipped pointer (they precede the Configuration
-    group that explains the failure, so silent absence would read as "no
-    sites"/"no secrets") and every config-free group renders in presentation
-    order. VM platforms and Secret backends now read stored readiness off the
-    graph (R11), so they too need the registry and skip cleanly in degraded
-    mode. Integration for the same reason as the smoke test above: the
-    config-free groups probe the real environment.
+    Secret sources, Secrets) each retain their presentation slot around the
+    Configuration group that explains the failure and render a skipped pointer;
+    silent absence would read as "no sites"/"no secret sources"/"no secrets".
+    Every config-free group also renders in presentation order. VM platforms
+    and Secret backends now read stored readiness off the graph (R11), so they
+    too need the registry and skip cleanly in degraded mode. Integration for
+    the same reason as the smoke test above: the config-free groups probe the
+    real environment.
     """
     from agentworks import doctor
 
@@ -181,16 +237,33 @@ def test_run_checks_group_order_and_config_failure_placeholder(
         "VM sites",
         "Configuration",
         "Secret backends",
+        "Secret sources",
         "Secrets",
         "Database",
     ]
-    for group_name in ("VM platforms", "System plugins", "VM sites", "Secret backends", "Secrets"):
+    for group_name in (
+        "VM platforms",
+        "System plugins",
+        "VM sites",
+        "Secret backends",
+        "Secrets",
+    ):
         placeholder = next(g for g in report.groups if g.name == group_name).checks
         assert len(placeholder) == 1, group_name
         assert placeholder[0].status is doctor.Status.INFO, group_name
         message = placeholder[0].message or ""
         assert "skipped" in message, group_name
         assert "Configuration" in message, group_name
+
+    source_placeholder = next(g for g in report.groups if g.name == "Secret sources")
+    assert source_placeholder.checks == [
+        doctor.HealthCheck(
+            name="Declared sources",
+            status=doctor.Status.INFO,
+            message="skipped (config or manifests unavailable; see the Configuration group)",
+            hint=None,
+        )
+    ]
 
 
 @pytest.mark.integration

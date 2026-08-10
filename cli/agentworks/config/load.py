@@ -103,15 +103,16 @@ def _raise_for_resource_sections(data: dict[str, object]) -> None:
 
     ``[secret_backends.*]`` is swept here like every other section (it IS a
     resource-declaring section: it is in ``KIND_SECTIONS``, keyed by the
-    ``secret-backend`` kind), but it is the one section whose remediation is
-    not "rewrite it as a manifest". It never carried configuration, only the
-    backend NAME, so there is nothing to move and no manifest to write:
-    delete it, and activate the backend in ``[secret_config].backends``
-    instead. Sending an operator to write a ``secret-backend`` manifest would
-    send them to a command that errors, since ``secret-backend`` is a
-    capability kind with no declarable form. Hence the two clauses below
-    rather than one message: a config carrying both kinds of section still
-    gets the whole job in one read.
+    ``secret-backend`` kind), but it is the one section whose old row cannot
+    be rewritten directly. It never carried backend configuration. Delete it,
+    keep using the implied ``env-var`` / ``prompt`` sources as-is, or declare a
+    ``secret-source`` manifest that selects another desired backend, then place
+    that source name in ``[secret_config].backends``. Sending an
+    operator to write a ``secret-backend`` manifest would send them to a
+    command that errors, since ``secret-backend`` is a capability kind with
+    no declarable form. Hence the two clauses below rather than one message: a
+    config carrying both kinds of section still gets the whole job in one
+    read.
 
     The escape hatch is ``load_config(resources=False)``: the commands that
     ARE the remediation (``resource sample --write``, ``resource edit``'s
@@ -178,9 +179,10 @@ def _raise_for_resource_sections(data: dict[str, object]) -> None:
             "and `agw resource describe-kind <kind>` lists every field with its type."
         )
     if "[secret_backends.*]" in present:
-        message += " [secret_backends.*] carries no configuration, so there is nothing to rewrite: delete it."
+        message += " [secret_backends.*] carries no configuration, so delete it."
         hint_parts.append(
-            "If you meant to ACTIVATE that backend, list its name in [secret_config].backends, "
+            "Use the implied env-var and prompt source names as-is. For another backend, declare a "
+            "secret-source manifest that selects it, then list the source name in [secret_config].backends, "
             "which is a setting and stays in config.toml."
         )
     hint_parts.append(

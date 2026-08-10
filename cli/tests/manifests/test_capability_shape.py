@@ -644,7 +644,7 @@ def test_decode_refuses_exactly_the_three_retired_sibling_shapes() -> None:
     core = {
         kind: (descriptor.manifest_section.naming_field, descriptor.manifest_section.config_field)
         for kind, descriptor in _hosting_descriptors().items()
-        if descriptor.manifest_section is not None
+        if descriptor.manifest_section is not None and descriptor.manifest_section.config_field is not None
     }
 
     assert core == {
@@ -652,3 +652,6 @@ def test_decode_refuses_exactly_the_three_retired_sibling_shapes() -> None:
         "git-credential": ("provider", "provider_config"),
         "session-template": ("harness_integration", "harness_integration_config"),
     }
+    source = _hosting_descriptors()["secret-source"].manifest_section
+    assert source is not None
+    assert (source.naming_field, source.config_field) == ("backend", None)

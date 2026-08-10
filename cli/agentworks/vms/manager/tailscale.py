@@ -9,14 +9,13 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.errors import ConnectivityError, StateError, ValidationError
+from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 
-from ._helpers import _guard_failed_vm, _lookup_or_synthesize_secret, _require_vm
+from ._helpers import _guard_failed_vm, _require_vm
 from .boundary import gated_vm_boundary
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from agentworks.capabilities.base import RunContext
+    from agentworks.capabilities.base import RunContext, SecretReader
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
@@ -77,6 +76,8 @@ def port_forward_vm(
     ports: list[str],
     address: str = "localhost",
     verbose: bool = False,
+    *,
+    interaction: InteractionPolicy,
 ) -> int:
     """Forward one or more local ports to a VM via SSH tunnels.
 
@@ -95,6 +96,7 @@ def port_forward_vm(
     validation and the no-Tailscale guard stay pre-gate: a refused
     forward costs zero prompts, zero resolves, and zero gate events.
     """
+    interaction = validate_interaction_policy(interaction)
     from agentworks.bootstrap import load_request_registry
 
     vm = _require_vm(db, name)
@@ -167,7 +169,7 @@ def port_forward_vm(
 
     # Run in foreground until interrupted
     registry = load_request_registry(config)
-    with gated_vm_boundary(db, config, registry, vm):
+    with gated_vm_boundary(db, config, registry, vm, interaction=interaction):
         try:
             proc = subprocess.Popen(ssh_cmd)
 
@@ -194,74 +196,14 @@ def _ensure_tailscale(
     platform: VMPlatform,
     ctx: RunContext,
     *,
-    auth_key_source: Callable[[], str] | None = None,
-    already_running: bool = False,
+    auth_keys: SecretReader,
+    auth_key_name: str,
 ) -> None:
-    """After starting a VM, verify Tailscale connectivity and rejoin if
-    needed. ``platform`` is the caller's bound platform (the gates never
-    bind, and a re-bind here would re-run the resolve pass), and ``ctx``
-    the op-start context that platform's calls read from: the rejoin
-    path builds the platform-native transport, which on a cloud backend
-    is itself an authenticated call.
-
-    ``auth_key_source`` supplies the rejoin auth key when the caller
-    owns its resolution: the orchestrated activation gate passes its
-    lazy gate-secrets reader (nodes receive, never resolve), so the key
-    resolves on this function's first need, with the same
-    conditional-need timing as the internal resolve below. ``None``
-    keeps today's behavior for the imperative callers: this function
-    resolves the key itself, late.
-
-    ``already_running`` picks the operator-facing wording for the
-    initial connectivity probe. The VM was never down on that path, so
-    "reconnect (may take several minutes)" would read as scary recovery
-    work; the caller passes ``True`` to get truthful "verifying" /
-    "reachable" wording instead. It changes only the messages, not the
-    probe or the rejoin behavior: a probe that fails still falls through
-    to the same rejoin path below, whose wording stays "reconnect"
-    because a rejoin genuinely is one.
-    """
+    """Rejoin Tailscale using one explicitly scoped auth-key reader."""
     import agentworks.vms.manager as _mgr
-    from agentworks.transports import TailscaleWait, native_transport, transport, wait_for_reconnect
+    from agentworks.transports import native_transport, transport, wait_for_reconnect
 
-    # Refresh VM row in case tailscale_host was cleared on stop
-    vm = _require_vm(db, vm.name)
-
-    # If we have a known Tailscale host, wait for it to reconnect after boot.
-    # This avoids an unnecessary route toggle on Azure (poking and
-    # removing the scoped ephemeral SSH allow, plus healing a legacy
-    # VM's missing public IP).
-    if vm.tailscale_host:
-        target = transport(vm, config)
-        context = TailscaleWait.VERIFY if already_running else TailscaleWait.RECONNECT
-        reachable = wait_for_reconnect(target, context=context)
-        if reachable:
-            return
-
-        # Tailscale didn't reconnect (ephemeral key expired, etc.)
-        output.info(f"Tailscale node {vm.tailscale_host} did not reconnect, rejoining...")
-        db.clear_vm_tailscale(vm.name)
-
-    if auth_key_source is not None:
-        auth_key = auth_key_source()
-    else:
-        # Resolve a fresh Tailscale auth key via the framework before
-        # entering the native-transport block; the backend chain handles
-        # env-var lookup with prompt fallback. This is the documented
-        # conditional-need exception to the resolve-at-the-preflight-boundary
-        # contract: whether a rejoin (and therefore a NEW key) is needed is
-        # only knowable after starting the VM and watching the node fail to
-        # reconnect, so it gets its own late resolve rather than prompting
-        # every start for a key that is almost never used.
-        from agentworks.bootstrap import load_request_registry
-        from agentworks.secrets import resolve_for_command
-        from agentworks.vms.templates import resolve_template
-
-        registry = load_request_registry(config)
-        rejoin_vm_tmpl = resolve_template(registry, vm.template)
-        ts_decl = _lookup_or_synthesize_secret(registry, rejoin_vm_tmpl.tailscale_auth_key)
-        resolved = resolve_for_command([], config, registry, extra_decls=[ts_decl])
-        auth_key = resolved[rejoin_vm_tmpl.tailscale_auth_key]
+    auth_key = auth_keys.get(auth_key_name)
 
     # native_transport() composes Azure's route open/close (heal the
     # public IP, poke and remove the scoped ephemeral SSH allow) via
@@ -302,6 +244,27 @@ def _ensure_tailscale(
     from agentworks.ssh_config import sync_ssh_config
 
     sync_ssh_config(config, db)
+
+
+def _tailscale_rejoin_required(
+    db: Database,
+    config: Config,
+    vm: VMRow,
+    *,
+    already_running: bool,
+) -> bool:
+    """Probe a known Tailscale host and clear it when rejoin is required."""
+    from agentworks.transports import TailscaleWait, transport, wait_for_reconnect
+
+    refreshed = _require_vm(db, vm.name)
+    if not refreshed.tailscale_host:
+        return True
+    context = TailscaleWait.VERIFY if already_running else TailscaleWait.RECONNECT
+    if wait_for_reconnect(transport(refreshed, config), context=context):
+        return False
+    output.info(f"Tailscale node {refreshed.tailscale_host} did not reconnect, rejoining...")
+    db.clear_vm_tailscale(refreshed.name)
+    return True
 
 
 def _tailscale_logout(vm: VMRow, config: Config, platform: VMPlatform, ctx: RunContext) -> None:

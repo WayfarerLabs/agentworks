@@ -385,10 +385,13 @@ def run(
     else:
         args.append(command)
 
+    sensitive_input = input_text is not None
     last_err: Exception | None = None
     for attempt in range(retries):
         if attempt > 0 and on_retry is not None:
             on_retry(attempt, retries)
+
+        sensitive_execution_failure = False
         try:
             result = subprocess.run(
                 args,
@@ -399,31 +402,39 @@ def run(
                 errors="replace",
                 timeout=timeout,
             )
-            ssh_result = SSHResult(
-                returncode=result.returncode,
-                stdout="" if input_text is not None else result.stdout,
-                stderr="" if input_text is not None else result.stderr,
-            )
-            if logger is not None:
-                logger.log_command(command, ssh_result)
-            if check and not ssh_result.ok:
-                if input_text is not None:
-                    # Remote stderr can reflect stdin for an arbitrary command.
-                    # Omit it at this sensitive-input boundary.
-                    raise SSHError(f"SSH stdin command failed (exit {result.returncode}): {command}")
-                raise SSHError(
-                    f"SSH command failed (exit {result.returncode}): {command}\nstderr: {result.stderr.strip()}"
-                )
-            return ssh_result
         except subprocess.TimeoutExpired as err:
-            last_err = err
+            if not sensitive_input:
+                last_err = err
             if logger is not None:
                 logger.log_timeout(command, attempt + 1, retries)
             continue
+        except Exception:
+            if not sensitive_input:
+                raise
+            sensitive_execution_failure = True
+
+        if sensitive_execution_failure:
+            raise SSHError(f"SSH stdin command could not be executed: {command}") from None
+
+        ssh_result = SSHResult(
+            returncode=result.returncode,
+            stdout="" if sensitive_input else result.stdout,
+            stderr="" if sensitive_input else result.stderr,
+        )
+        if logger is not None:
+            logger.log_command(command, ssh_result)
+        if check and not ssh_result.ok:
+            if sensitive_input:
+                # Remote output can reflect stdin for an arbitrary command.
+                raise SSHError(f"SSH stdin command failed (exit {result.returncode}): {command}") from None
+            raise SSHError(f"SSH command failed (exit {result.returncode}): {command}\nstderr: {result.stderr.strip()}")
+        return ssh_result
 
     msg = f"SSH command timed out after {retries} attempts ({timeout}s each): {command}"
     if logger is not None:
         logger.log_error(msg)
+    if sensitive_input:
+        raise SSHError(msg) from None
     raise SSHError(msg) from last_err
 
 

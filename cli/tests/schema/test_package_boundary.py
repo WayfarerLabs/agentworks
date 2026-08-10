@@ -93,7 +93,7 @@ def test_the_schema_package_is_importable_on_its_own() -> None:
         "agentworks.capabilities.git_credential.base",
         "agentworks.capabilities.harness_integration.base",
         "agentworks.capabilities.vm_platform.base",
-        "agentworks.secrets.backends",
+        "agentworks.capabilities.secret_backend.base",
     ],
 )
 def test_a_capability_module_is_importable_on_its_own(module: str) -> None:

@@ -6,11 +6,11 @@ family: the local machine's Tailscale membership and the VM's git tokens.
 from __future__ import annotations
 
 import ipaddress
-import shlex
 import subprocess
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.capabilities.vm_platform.tailscale_join import join_tailscale_ephemerally
 from agentworks.errors import ConnectivityError, NotFoundError, StateError
 from agentworks.ssh import SSHError, SSHLogger
 
@@ -166,13 +166,10 @@ def _join_tailscale(
     prompt-here-if-missing path are gone; callers must thread the
     resolved value in.
     """
-    quoted_key = shlex.quote(auth_key)
     # Daemon-side flags (e.g. --tun=userspace-networking for WSL2) live in
     # /etc/default/tailscaled, set during bootstrap. `tailscale up` is the
     # client and only takes client-side flags.
-    ts_cmd = f"tailscale up --auth-key {quoted_key}"
-
-    exec_target.run(ts_cmd, sudo=True)
+    join_tailscale_ephemerally(exec_target, auth_key)
     result = exec_target.run("tailscale ip -4", sudo=True)
 
     raw_ip_output = result.stdout.strip()

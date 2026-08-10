@@ -4,20 +4,33 @@ from __future__ import annotations
 
 import base64
 import contextlib
-import logging
-import os
 import sys
-from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, NamedTuple, Protocol
-
-from pydantic import Field
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
 from agentworks import output
 from agentworks.capabilities.retired_shapes import RetiredPresenceShape
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES, generate_cloud_init
+from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
-from agentworks.errors import ConfigError, NotFoundError, StateError
+from agentworks.errors import NotFoundError, StateError
+from agentworks.plugins.azure.auth import (
+    _build_ambient_credential,
+    _build_service_principal_credential,
+    _quiet_azure_identity_logging,
+)
+from agentworks.plugins.azure.config import (
+    IMAGE_OFFER,
+    IMAGE_OS_DISK_FLOOR_GIB,
+    IMAGE_PUBLISHER,
+    IMAGE_SKU,
+    IMAGE_VERSION,
+    AzureAmbientAuth,
+    AzureVMConfig,
+    _select_vm_size,
+    _size_catalog,
+)
 
 # The network-resource plumbing (public IP, the NSG exposure rules,
 # egress-IP discovery, cleanup) and the shared SDK-error wrapper live in
@@ -26,7 +39,6 @@ from agentworks.errors import ConfigError, NotFoundError, StateError
 from agentworks.plugins.azure.network import (
     BOOTSTRAP_ALLOW_RULE_NAME,
     VNET_NAME_SUFFIX,
-    AzureError,
     cleanup_vm_resources,
     config_allow_cidrs,
     converge_nsg,
@@ -41,8 +53,6 @@ from agentworks.plugins.azure.network import (
     verify_vm_deleted,
     wrap_azure_error,
 )
-from agentworks.schema import AgwModel, NonEmptyStr, PositiveInt, SecretRef
-from agentworks.ssh import SSHError
 from agentworks.topics import TopicProse
 from agentworks.transports import SSHTransport
 
@@ -64,316 +74,6 @@ class _HasSubscriptionId(Protocol):
 
     @property
     def subscription_id(self) -> str: ...
-
-
-# The azure-identity logger tree. Its ChainedTokenCredential emits a WARNING
-# ("DefaultAzureCredential failed to retrieve a token from the included
-# credentials...") when the credential chain is exhausted (nothing in it can
-# authenticate). Observed by reproducing a failing DefaultAzureCredential
-# probe: that WARNING is the only azure-identity record that clears the
-# default threshold; the per-member
-# "... .get_token failed:" lines are DEBUG. azure.core is deliberately not
-# included: its HTTP request/response logging sits at INFO, so it never reaches
-# the last-resort stderr handler and is not part of this noise class.
-_AZURE_IDENTITY_LOGGER = "azure.identity"
-
-
-def _quiet_azure_identity_logging() -> None:
-    """Keep azure-identity's own credential-failure WARNING off stderr so the
-    operator sees only agentworks' typed :class:`AzureError`.
-
-    agentworks configures no logging handlers, so Python's last-resort handler
-    prints WARNING+ to stderr. When a credential fails to authenticate,
-    azure-identity logs its WARNING there directly ahead of the typed error we
-    render for the same failure, so the operator sees the failure twice: once
-    as raw SDK chatter, once as the clean typed one-liner. Raising the
-    ``azure.identity`` logger's threshold above WARNING drops exactly that
-    chatter (and the INFO/DEBUG below it) while still letting a genuine
-    ERROR-level record through, leaving the typed rendering to stand alone.
-
-    Skipped under --debug / AGW_DEBUG=1: there the operator wants the SDK
-    detail, so the logger is left at its default threshold. ``AGW_DEBUG`` is
-    the process-wide debug signal (the CLI mirrors ``--debug`` into it); a
-    plugin reading it avoids importing ``agentworks.cli`` and inverting the
-    layering.
-
-    Idempotent and side-effect-localized: it only ever adjusts the single
-    ``azure.identity`` logger, so calling it on every azure platform
-    construction is safe. This one-time set (rather than a context manager
-    scoped to the credential probe) covers both the probe and the lazy,
-    op-time token requests inside the SDK clients, which emit the same WARNING.
-
-    Single-shot assumption: the ``setLevel`` is decided once, when the first
-    ``AzureVMPlatform`` is built, and never reset for the process lifetime.
-    If ``AGW_DEBUG`` were to flip true AFTER an instance was already built with
-    it off, the logger would stay quieted (no reset path). That is fine for
-    today's one-command CLI; a longer-lived client (e.g. the anticipated
-    web-UI) that toggles debug mid-process would need to re-decide the level.
-    """
-    if os.environ.get("AGW_DEBUG") == "1":
-        return
-    logging.getLogger(_AZURE_IDENTITY_LOGGER).setLevel(logging.ERROR)
-
-
-# The token scope every credential below is probed against: Azure
-# Resource Manager, which is the only API surface this platform talks to.
-_ARM_SCOPE = "https://management.azure.com/.default"
-
-
-def _build_ambient_credential() -> object:
-    """Build the AMBIENT Azure credential (the path a site selects by
-    declaring ``auth: {mode: ambient}``), deciding the interactive-browser
-    fallback with a single live probe.
-
-    Tries DefaultAzureCredential first (picks up az login, env vars,
-    managed identity, etc.) and probes it once with a real token request:
-    that probe is BOTH the validation and the fallback decision. If it
-    succeeds, the DefaultAzureCredential is the credential to use; if it
-    raises ClientAuthenticationError (nothing in the chain can
-    authenticate), fall back to interactive browser login. The browser
-    credential is returned unprobed (its interaction happens lazily on the
-    first real token request), exactly as before.
-
-    Returns object to avoid a hard import of azure.core at module load
-    time. Callers cast to the appropriate type when constructing SDK
-    clients. The credential is subscription-independent, so this is
-    called at most once per platform instance (via the caching
-    :meth:`AzureVMPlatform._get_credential`) even when the instance's
-    SDK clients span multiple subscriptions; the probe's cost, and its
-    browser-fallback decision, are paid once per instance, not per op.
-    """
-    from azure.core.exceptions import ClientAuthenticationError
-    from azure.identity import DefaultAzureCredential, InteractiveBrowserCredential
-
-    cred = DefaultAzureCredential()
-    try:
-        cred.get_token(_ARM_SCOPE)
-        return cred
-    except ClientAuthenticationError:
-        output.info("No Azure credentials found, opening browser for login...")
-        return InteractiveBrowserCredential()
-
-
-def _build_service_principal_credential(sp: AzureServicePrincipalAuth, client_secret: str, site_name: str) -> object:
-    """Build the service-principal credential from the site's configured
-    tenant / client and the resolved client secret, probed once against
-    ARM.
-
-    The probe mirrors the ambient path's, but for a different reason:
-    there is no fallback to decide here (an operator who selected
-    ``mode: service-principal`` means that credential and no other, so falling
-    through to ambient or to a browser prompt would silently authenticate
-    as the wrong identity). It exists purely to turn a bad credential
-    into a clear, site-and-secret-named error at the point of
-    construction, rather than a raw SDK exception surfacing from
-    whichever network call happened to be first.
-
-    That failure is FATAL and is deliberately not classified any finer.
-    azure-identity's ``wrap_exceptions`` converts everything a token
-    request can hit, an Entra rejection and an unreachable STS alike,
-    into ``ClientAuthenticationError``, so the "definitive rejection vs.
-    transient outage" split that proxmox's runup makes (its API answers
-    401/403 distinguishably) is not available to us. Given the choice
-    between calling a network blip a rejection and letting a genuinely
-    bad credential through as a warning, this refuses; the hint names
-    both possibilities so the operator can tell them apart.
-
-    It raises ``AzureError`` (an ``ExternalError``) rather than
-    ``TokenRejectedError``, deliberately. That type promises a definitive
-    rejection, "distinct from network indeterminacy", and the paragraph
-    above is exactly why we cannot honestly make that promise here. The
-    cost is accepted knowingly: ``ExternalError`` renders noisier (the
-    full traceback goes to the error log), which is the right trade when
-    the failure class genuinely includes external outages.
-
-    CONSTRUCTION is inside the try too, not just the probe. The SDK
-    validates its arguments eagerly and raises a bare ``ValueError`` on
-    an empty client secret or a malformed tenant id, and an empty
-    RESOLVED secret is reachable in a way ``validate`` cannot catch (the
-    config names a secret; a backend hands back the value). Letting that
-    escape untyped would carry no site, secret, or hint, and would blow
-    past the ``AgentworksError`` degrade paths that `agw vm describe`
-    and the status probe rely on. The existing hint already covers both
-    causes.
-    """
-    from azure.core.exceptions import ClientAuthenticationError
-    from azure.identity import ClientSecretCredential
-
-    try:
-        cred = ClientSecretCredential(sp.tenant_id, sp.client_id, client_secret)
-        cred.get_token(_ARM_SCOPE)
-    except (ClientAuthenticationError, ValueError) as exc:
-        raise AzureError(
-            f"could not authenticate the Azure service principal for "
-            f"vm-site '{site_name}' (client {sp.client_id} in tenant "
-            f"{sp.tenant_id}, secret '{sp.secret}')",
-            detail=str(exc),
-            entity_kind="vm-site",
-            entity_name=site_name,
-            hint=(
-                f"Check auth.tenant_id / auth.client_id and the "
-                f"value of the '{sp.secret}' secret (an expired client "
-                f"secret is the usual cause; `az ad app credential list` "
-                f"shows expiry). If Entra ID is simply unreachable this "
-                f"fails the same way, because azure-identity reports both "
-                f"as an authentication failure."
-            ),
-        ) from exc
-    return cred
-
-
-# Ambient authentication is an explicit arm so every identity mechanism
-# has a declared shape.
-class AzureAmbientAuth(AgwModel):
-    """Authenticate with the ambient chain: ``az login``, ``AZURE_*``, or a managed identity.
-
-    The interactive-browser fallback runs when none of those can get a
-    token.
-    """
-
-    mode: Literal["ambient"]
-
-
-class AzureServicePrincipalAuth(AgwModel):
-    """Authenticate as an explicit Entra ID service principal.
-
-    It replaces the ambient chain entirely for this site: a rejected
-    client secret fails the command rather than falling back to some other
-    identity.
-    """
-
-    mode: Literal["service-principal"]
-
-    tenant_id: NonEmptyStr
-    """The Entra ID tenant the principal lives in."""
-
-    client_id: NonEmptyStr
-    """The principal's application (client) id."""
-
-    secret: Annotated[
-        NonEmptyStr,
-        SecretRef(usage="the Azure service-principal client secret", default_template="azure-client-secret"),
-    ]
-    """The secret containing the principal's client secret. The default
-    maps to ``AW_SECRET_AZURE_CLIENT_SECRET`` in the env-var backend."""
-
-
-#: Authentication mechanisms have distinct tagged shapes. Ambient is the
-#: default because it is ``DefaultAzureCredential``'s standard behavior.
-AzureAuth = Annotated[AzureAmbientAuth | AzureServicePrincipalAuth, Field(discriminator="mode")]
-
-
-class AzureVMSize(AgwModel):
-    """One Azure VM size in a site's selection catalog."""
-
-    cpus: PositiveInt
-    """The vCPUs the SKU provides."""
-
-    memory: PositiveInt
-    """The memory (GiB) the SKU provides."""
-
-    size: NonEmptyStr
-    """The Azure SKU name (e.g. ``Standard_B2ms``)."""
-
-
-class AzureVMConfig(AgwModel):
-    """Where an azure-vm site creates VMs, and as whom."""
-
-    name: Literal["azure-vm"]
-    """The platform this config is for."""
-
-    subscription_id: NonEmptyStr = Field(examples=["00000000-0000-0000-0000-000000000000"])
-    """The subscription new VMs are created in."""
-
-    resource_group: NonEmptyStr = Field(examples=["agw-dev"])
-    """The resource group new VMs are created in."""
-
-    region: NonEmptyStr = Field(examples=["eastus"])
-    """The Azure region new VMs are created in."""
-
-    vm_sizes: Annotated[list[AzureVMSize], Field(min_length=1)] | None = None
-    """An override of the built-in B-series catalog ``vm create`` picks
-    from. Order does not matter; selection uses the smallest matching
-    entry. Must contain at least one entry."""
-
-    auth: AzureAuth = AzureAmbientAuth(mode="ambient")
-    """How this site authenticates to Azure: ``{mode: ambient}`` for the
-    ambient credential chain, or ``{mode: service-principal, ...}`` for an
-    explicit principal. Defaults to ambient."""
-
-
-class _VMSize(NamedTuple):
-    """One Azure VM size in the selection catalog: a SKU name plus the
-    cpus and memory (GiB) it provides."""
-
-    cpus: int
-    memory_gib: int
-    name: str
-
-
-# Built-in Azure VM size catalog: the B-series (burstable) general-purpose
-# ladder. `vm create` picks the smallest entry whose cpus AND memory both
-# satisfy the vm-template's request, so the operator specifies compute and
-# memory like every other platform instead of an Azure-specific SKU. The
-# ratios are fixed by Azure (a template asking for an off-ratio shape, e.g.
-# 4 vCPU / 8 GiB, rounds UP to the nearest fitting SKU and warns). Ordered
-# small to large for readability; selection takes the minimum by
-# (cpus, memory), so an operator override in the site's vm_sizes
-# need not be pre-sorted.
-_DEFAULT_VM_SIZES: tuple[_VMSize, ...] = (
-    _VMSize(1, 2, "Standard_B1ms"),
-    _VMSize(2, 4, "Standard_B2s"),
-    _VMSize(2, 8, "Standard_B2ms"),
-    _VMSize(4, 16, "Standard_B4ms"),
-    _VMSize(8, 32, "Standard_B8ms"),
-    _VMSize(12, 48, "Standard_B12ms"),
-    _VMSize(16, 64, "Standard_B16ms"),
-    _VMSize(20, 80, "Standard_B20ms"),
-)
-
-
-def _size_catalog(config: AzureVMConfig) -> tuple[_VMSize, ...]:
-    """The site's VM-size catalog: its declared override, else the
-    built-in B-series ladder. A plain read now that the shape is the
-    model's business; what is left here is the DEFAULT, which is domain
-    knowledge (this ladder) rather than schema."""
-    if config.vm_sizes is None:
-        return _DEFAULT_VM_SIZES
-    return tuple(_VMSize(entry.cpus, entry.memory, entry.size) for entry in config.vm_sizes)
-
-
-def _select_vm_size(catalog: tuple[_VMSize, ...], *, cpus: int, memory_gib: int) -> _VMSize:
-    """The catalog entry that both satisfies the request and is smallest
-    by (cpus, memory), chosen with ``min`` so the result is independent
-    of catalog order. Raises ``ConfigError`` when the request exceeds
-    every entry (the template is bigger than anything on offer)."""
-    fits = [s for s in catalog if s.cpus >= cpus and s.memory_gib >= memory_gib]
-    if not fits:
-        largest = max(catalog, key=lambda s: (s.cpus, s.memory_gib))
-        raise ConfigError(
-            f"no Azure VM size satisfies the requested {cpus} vCPU / "
-            f"{memory_gib} GiB (largest available is {largest.name}: "
-            f"{largest.cpus} vCPU / {largest.memory_gib} GiB)",
-            hint="shrink the vm-template's cpus/memory, or add a larger "
-            "entry to the site's vm_sizes catalog (vm-site platform config)",
-        )
-    return min(fits, key=lambda s: (s.cpus, s.memory_gib))
-
-
-# The marketplace image every VM is provisioned from. These feed the single
-# ImageReference in create(); keep them here so the OS-disk floor below stays
-# visibly coupled to the exact image it describes.
-IMAGE_PUBLISHER = "Debian"
-IMAGE_OFFER = "debian-12"
-IMAGE_SKU = "12-gen2"
-IMAGE_VERSION = "latest"
-
-# Minimum OS-disk size (GiB) baked into the image above. Azure rejects a VM
-# whose OS disk is smaller than the image's own disk, so a vm-template disk
-# below this is clamped up to it (see create()). This is not exposed on the
-# marketplace VirtualMachineImage model, so it is pinned by hand: keep it in
-# sync if IMAGE_SKU/IMAGE_VERSION change (a test asserts the pairing).
-IMAGE_OS_DISK_FLOOR_GIB = 30
 
 
 class AzureVMPlatform(VMPlatform):
@@ -714,14 +414,15 @@ class AzureVMPlatform(VMPlatform):
         if swap > 0:
             output.detail(f"Swap: {swap} GiB")
 
-        # Generate the same bootstrap script used by Lima, wrapped in
-        # cloud-init write_files + runcmd for delivery via Azure custom_data.
+        # Azure retains custom_data. Embed the complete bootstrap with an
+        # empty Tailscale key, then deliver the resolved key once over the
+        # post-boot provisioning transport below.
         if tailscale_auth_key:
             bootstrap = generate_bootstrap_script(
                 admin_username=admin_username,
                 ssh_public_key=ssh_pub_key,
                 provisioning_packages=PROVISIONING_PACKAGES,
-                tailscale_auth_key=tailscale_auth_key,
+                tailscale_auth_key=None,
                 hostname=request.hostname,
                 swap=swap,
             )
@@ -921,12 +622,12 @@ class AzureVMPlatform(VMPlatform):
             # allow still open, so a failure that ESCAPES this span must
             # tear the whole set down (VM first: it holds the NIC and
             # disk) exactly as the interrupt arm does.
-            # _wait_for_bootstrap absorbs every SSHError itself (an
-            # unreachable or slow bootstrap is tolerated: create returns
-            # bootstrap_complete=False and Phase A retries), so only a
-            # genuine escape lands here, e.g. the raw OSError that
-            # SSHTransport.run lets through when the local ssh binary is
-            # missing. Re-raised wrapped, matching the creation arm. A
+            # The shared bootstrap finisher absorbs SSHError only while
+            # waiting for readiness (an unreachable or slow bootstrap is
+            # tolerated: Phase A retries). Once it sends the key, join failure
+            # escapes and rolls the VM back rather than risking a second
+            # delivery. Raw local failures escape too. Re-raised wrapped,
+            # matching the creation arm. A
             # second Ctrl-C DURING this arm's rollback escapes to the
             # outer interrupt arm, which re-runs the rollback in full;
             # that repeat is safe because every teardown step is
@@ -941,14 +642,14 @@ class AzureVMPlatform(VMPlatform):
                     force_tty=sys.platform == "win32",
                 )
 
-                # If bootstrap was embedded in cloud-init, wait for it to finish
-                # and extract the Tailscale IP.
+                # The provider-retained bootstrap installed Tailscale without
+                # a credential. Wait for it, then join once over stdin.
                 tailscale_ip = None
                 bootstrap_complete = False
                 if tailscale_auth_key:
-                    tailscale_ip = self._wait_for_bootstrap(prov_transport, vm_name)
-                    if tailscale_ip:
-                        bootstrap_complete = True
+                    completion = EphemeralTailscaleBootstrap(prov_transport).complete(tailscale_auth_key)
+                    bootstrap_complete = completion.complete
+                    tailscale_ip = completion.tailscale_ip
             except Exception as exc:
                 output.detail("Cleaning up resources...")
                 # The teardown captures a VM-delete failure rather than
@@ -995,50 +696,6 @@ class AzureVMPlatform(VMPlatform):
         except Exception as exc:
             raise wrap_azure_error(exc) from exc
         return True
-
-    def _wait_for_bootstrap(self, target: Transport, vm_name: str) -> str | None:
-        """Wait for cloud-init to finish and return the Tailscale IP.
-
-        SSH may not be immediately available after VM creation, so we retry.
-        Returns None if we cannot get the IP (Phase A will handle it).
-
-        Absorbs only ``SSHError``, the tolerated bootstrap-failure class
-        (connection timeouts and remote-command failures, which
-        ``SSHTransport.run`` raises as ``SSHError``): those defer to
-        Phase A via the ``None`` return. Anything else (a raw ``OSError``
-        from a missing local ssh binary, ``KeyboardInterrupt``) escapes
-        to ``create``'s rollback arms; widening the catch here would turn
-        deliberate deferrals into rollbacks.
-        """
-        import time
-
-        output.detail("Waiting for cloud-init bootstrap to complete (this may take several minutes)...")
-
-        for attempt in range(30):
-            try:
-                target.run("echo ok", check=True, timeout=10)
-                break
-            except SSHError:
-                if attempt == 29:
-                    output.warn("SSH not available, deferring bootstrap to Phase A")
-                    return None
-                time.sleep(10)
-
-        try:
-            target.run("cloud-init status --wait", check=True, timeout=600)
-        except SSHError as e:
-            output.warn(f"cloud-init wait failed: {e}")
-            output.warn("Deferring bootstrap to Phase A")
-            return None
-
-        try:
-            result = target.run("sudo tailscale ip -4", check=True, timeout=15)
-            tailscale_ip = result.stdout.strip()
-            output.detail(f"Tailscale IP: {tailscale_ip}")
-            return tailscale_ip
-        except SSHError as e:
-            output.warn(f"could not retrieve Tailscale IP: {e}")
-            return None
 
     def start(self, vm: VMRow, ctx: RunContext) -> None:
         # Idempotent by construction (the ABC flags start): the Azure

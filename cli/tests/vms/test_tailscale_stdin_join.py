@@ -1,0 +1,76 @@
+"""Shared fixed-command Tailscale auth-key delivery."""
+
+from __future__ import annotations
+
+from unittest.mock import MagicMock
+
+import pytest
+
+from agentworks.capabilities.vm_platform.tailscale_join import (
+    TAILSCALE_JOIN_STDIN_COMMAND,
+    join_tailscale_ephemerally,
+)
+from agentworks.ssh import SSHError, SSHResult
+from agentworks.vms.initializer.credentials import _join_tailscale
+
+_SENTINEL = "tskey-join-'swordfish"
+
+
+class _RecordingTransport:
+    logger = None
+
+    def __init__(self, *, failure: BaseException | None = None) -> None:
+        self.failure = failure
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    def run(self, command: str, **kwargs: object) -> SSHResult:
+        self.calls.append((command, kwargs))
+        if kwargs.get("input_text") is not None and self.failure is not None:
+            raise self.failure
+        stdout = "100.64.0.77\n" if command == "tailscale ip -4" else ""
+        return SSHResult(returncode=0, stdout=stdout, stderr="")
+
+
+def _assert_fixed_stdin_call(call: tuple[str, dict[str, object]], *, timeout: int | None) -> None:
+    command, kwargs = call
+    assert command == TAILSCALE_JOIN_STDIN_COMMAND
+    assert _SENTINEL not in command
+    assert kwargs == {"sudo": True, "timeout": timeout, "input_text": f"{_SENTINEL}\n"}
+
+
+def test_shared_join_preserves_failure_identity_without_secret_diagnostics() -> None:
+    failure = SSHError("fixed stdin join failed")
+    target = _RecordingTransport(failure=failure)
+
+    with pytest.raises(SSHError) as caught:
+        join_tailscale_ephemerally(target, _SENTINEL, timeout=30)  # type: ignore[arg-type]
+
+    assert caught.value is failure
+    _assert_fixed_stdin_call(target.calls[0], timeout=30)
+    assert _SENTINEL not in str(caught.value)
+    assert _SENTINEL not in repr(caught.value)
+
+
+def test_initializer_join_uses_fixed_stdin_once_then_updates_the_ip() -> None:
+    db = MagicMock()
+    target = _RecordingTransport()
+
+    result = _join_tailscale(db, "vm1", target, auth_key=_SENTINEL)  # type: ignore[arg-type]
+
+    assert result == "100.64.0.77"
+    _assert_fixed_stdin_call(target.calls[0], timeout=None)
+    assert target.calls[1] == ("tailscale ip -4", {"sudo": True})
+    db.update_vm_tailscale.assert_called_once_with("vm1", "100.64.0.77")
+
+
+def test_initializer_join_failure_is_same_safe_exception_and_stops_before_ip() -> None:
+    failure = SSHError("fixed stdin join failed")
+    target = _RecordingTransport(failure=failure)
+
+    with pytest.raises(SSHError) as caught:
+        _join_tailscale(MagicMock(), "vm1", target, auth_key=_SENTINEL)  # type: ignore[arg-type]
+
+    assert caught.value is failure
+    assert len(target.calls) == 1
+    _assert_fixed_stdin_call(target.calls[0], timeout=None)
+    assert _SENTINEL not in repr(caught.value)

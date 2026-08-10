@@ -22,6 +22,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks.errors import StateError
+from agentworks.secrets.policy import validate_interaction_policy
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -30,6 +31,7 @@ if TYPE_CHECKING:
     from agentworks.resources.registry import Registry
     from agentworks.secrets.base import SecretDecl
     from agentworks.secrets.orchestration import SecretTarget
+    from agentworks.secrets.policy import InteractionPolicy
 
 
 class Resolver:
@@ -39,7 +41,7 @@ class Resolver:
     The two verbs map onto the operation's lifecycle:
 
     - :meth:`resolve` (the preflight boundary): one batched pass over
-      the active backends for every registered declaration: one
+      the active sources for every registered declaration: one
       prompt session. Idempotent when nothing new was registered.
       (Resolvability PREDICTION is not this object's job: it is
       central, over declarations, via
@@ -50,9 +52,17 @@ class Resolver:
       ordering exists to prevent).
     """
 
-    def __init__(self, config: Config, registry: Registry) -> None:
+    def __init__(
+        self,
+        config: Config,
+        registry: Registry,
+        *,
+        interaction: InteractionPolicy,
+    ) -> None:
+        interaction = validate_interaction_policy(interaction)
         self._config = config
         self._registry = registry
+        self._interaction = interaction
         self._decls: dict[str, SecretDecl] = {}
         self._seeded: dict[str, str] = {}
         self._values: dict[str, str] | None = None
@@ -84,10 +94,10 @@ class Resolver:
 
         Looks the name up against the registry's ``secret`` rows and
         falls back to synthesizing a bare declaration when absent: an
-        operator who omits every ``[vm_templates.*]`` and ``[secrets.*]``
-        section leaves the registry empty under the ``secret`` kind, and
-        the backend chain must stay callable for the well-known names
-        (the same fallback the pre-resolver ``_collect_secrets`` used).
+        operator who has no manifest referencing a well-known secret name
+        leaves the registry without that ``secret`` row, and the source
+        chain must stay callable for well-known names (the same fallback
+        the pre-resolver ``_collect_secrets`` used).
         """
         existing = self._decls.get(name)
         if existing is not None:
@@ -113,7 +123,7 @@ class Resolver:
 
         The point is the NO-DOUBLE-RESOLVE property: seeded names
         register on the operation's resolve set and are excluded from
-        the boundary pass's backend loop, so a gate-resolved secret
+        the boundary pass's source loop, so a gate-resolved secret
         never resolves or prompts twice in one command. (Ops read the
         gate's scoped reader while the gate runs, and scoped delivery
         over the boundary cache after it; seeded values also stay
@@ -148,6 +158,7 @@ class Resolver:
         contract violation (it would mean a second prompt session), so
         it raises instead of quietly re-prompting.
         """
+        interaction = validate_interaction_policy(self._interaction)
         if self._values is not None:
             unresolved = [n for n in self._decls if n not in self._values]
             if unresolved:
@@ -158,26 +169,86 @@ class Resolver:
                     "the preflight-boundary resolve."
                 )
             return
-        from agentworks.secrets.resolve import active_backends, resolve_secrets
+        from agentworks.secrets.policy import InteractionPolicy
+        from agentworks.secrets.resolve import (
+            CompletionPolicy,
+            OutputInteractionBroker,
+            ResolutionPolicy,
+            active_sources,
+            resolve_batch,
+        )
 
         # Gate-seeded values are already resolved (by the gate's own
-        # backend-chain pass); the boundary loop covers only the rest.
+        # source-chain pass); the boundary loop covers only the rest.
         missing = [decl for name, decl in self._decls.items() if name not in self._seeded]
         if not missing:
             self._values = dict(self._seeded)
             return
-        self._values = {
-            **self._seeded,
-            # ``registry`` powers the disabled-plugin failure hint (LLD b): a
-            # secret whose only mapping is a disabled plugin backend fails naming
-            # the plugin to enable. This is the dominant resolution path, so the
-            # hint reaches every VM / session / agent command through it.
-            **resolve_secrets(
-                missing,
-                active_backends(self._config, self._registry),
-                registry=self._registry,
-            ),
-        }
+        broker = OutputInteractionBroker(missing) if interaction is InteractionPolicy.ALLOW else None
+        batch = resolve_batch(
+            missing,
+            active_sources(self._config, self._registry),
+            policy=ResolutionPolicy(interaction=interaction, completion=CompletionPolicy.COMPLETE),
+            interaction_broker=broker,
+        )
+        self._values = {**self._seeded, **batch.complete_or_raise()}
+
+    def resolve_gate(self, name: str) -> str:
+        """Resolve and seed one declaration before the operation boundary."""
+        interaction = validate_interaction_policy(self._interaction)
+        if self._values is not None:
+            raise StateError("a gate secret cannot resolve after the operation boundary")
+        decl = self.register_name(name)
+        existing = self._seeded.get(name)
+        if existing is not None:
+            return existing
+        from agentworks.secrets.policy import InteractionPolicy
+        from agentworks.secrets.resolve import (
+            CompletionPolicy,
+            OutputInteractionBroker,
+            ResolutionPolicy,
+            active_sources,
+            resolve_batch,
+        )
+
+        broker = OutputInteractionBroker([decl]) if interaction is InteractionPolicy.ALLOW else None
+        batch = resolve_batch(
+            [decl],
+            active_sources(self._config, self._registry),
+            policy=ResolutionPolicy(interaction=interaction, completion=CompletionPolicy.COMPLETE),
+            interaction_broker=broker,
+        )
+        projected = batch.complete_or_raise()
+        if tuple(projected) != (name,):
+            raise StateError("gate secret resolution returned an invalid singleton result")
+        self._seeded[name] = projected[name]
+        return self._seeded[name]
+
+    def resolve_late_repair(self, decl: SecretDecl) -> str:
+        """Resolve one authorized repair secret without widening the cache."""
+        interaction = validate_interaction_policy(self._interaction)
+        if self._values is None:
+            raise StateError("a late repair secret requires the operation boundary")
+        from agentworks.secrets.policy import InteractionPolicy
+        from agentworks.secrets.resolve import (
+            CompletionPolicy,
+            OutputInteractionBroker,
+            ResolutionPolicy,
+            active_sources,
+            resolve_batch,
+        )
+
+        broker = OutputInteractionBroker([decl]) if interaction is InteractionPolicy.ALLOW else None
+        batch = resolve_batch(
+            [decl],
+            active_sources(self._config, self._registry),
+            policy=ResolutionPolicy(interaction=interaction, completion=CompletionPolicy.COMPLETE),
+            interaction_broker=broker,
+        )
+        projected = batch.complete_or_raise()
+        if tuple(projected) != (decl.name,):
+            raise StateError("late repair resolution returned an invalid singleton result")
+        return projected[decl.name]
 
     def get(self, name: str) -> str:
         """A resolved value, from the boundary pass's cache (or, before

@@ -1,89 +1,95 @@
-# Secret Backends
+# Secret Sources
 
-> `secret-backend` is a real capability kind, but it is a "capability in spirit" today: it has not
-> yet moved into `capabilities/` or adopted the shared capability base, so it is documented here,
-> next to its code in `secrets/`, on its own `SecretBackend` protocol. That migration is tracked in
-> [#374](https://github.com/WayfarerLabs/agentworks/issues/374); the capability model itself is in
-> [`../capabilities/README.md`](../capabilities/README.md). This guide covers the functional
-> contract a backend must honor. The deep implementation contract is deliberately omitted while the
-> shape is in flux and subject to change under that migration.
+`secret-source` is the declarable resource that participates in resolution. Each source has an
+operator-chosen name and selects one registered `secret-backend` capability in `spec.backend`.
+Backends remain read-only implementation rows under
+[`capabilities/secret_backend`](../capabilities/secret_backend/README.md); sources are configured
+instances of those implementations.
 
-## What Is a Secret Backend?
+The distinction matters when one backend needs several configurations. Two sources can both select
+`onepassword` while using different accounts, timeouts, and precedence positions. A secret's
+`backend_mappings` keys are source names, and `[secret_config].backends` keeps its existing spelling
+but contains source names in resolution order.
 
-A secret backend is a source of secret values. It supplies the actual value behind a named secret
-when an Agentworks operation needs it, letting a credential be named in a resource definition and
-resolved from wherever the operator actually keeps it, so tokens and passwords never have to be
-hand-carried onto a VM or baked into an image.
+## Simple defaults
 
-The division of labor is the important part. Agentworks owns WHERE a secret applies and in what
-order: it merges and injects secrets across the VM, workspace, agent, and session scopes, resolves
-the whole secret union a command needs in one pass, and guards each value on its way to the target.
-A backend owns none of that. A backend answers "what is the value for this one mapping," describes
-that lookup safely enough to show an operator without revealing anything, reports whether it can run
-on this host at all, and declares whether resolving that value might have to stop and ask a human.
-Everything about precedence, merging, and injection stays on the Agentworks side of the line.
+Agentworks synthesizes `env-var` and `prompt` sources. With no extra configuration, the chain stays
+`["env-var", "prompt"]` and behaves as before:
 
-That last point matters more than it looks. Resolving a value is not always a silent lookup. Some
-backends read it with no human involved (an environment variable, or a vault the operator is already
-signed into); others must stop and ask, like the `prompt` backend requesting the value directly, or
-a store that demands a biometric to unlock. A backend declares which it is up front, so Agentworks
-can drop interactive backends from a run with no human attached (`--non-interactive`, or no TTY)
-instead of hanging on them, and can preview a mapping during inspection without ever triggering its
-prompt.
+- `env-var` reads `AW_SECRET_<UPPER_SNAKE_NAME>`, or the environment variable named by that secret's
+  `backend_mappings.env-var` scalar. An unset variable is a soft miss.
+- `prompt` asks through an explicit caller-owned interaction broker. It has no mapping vocabulary;
+  `backend_mappings.prompt: false` opts one secret out.
 
-## Available Backends
+The first source that returns a value wins. Duplicate requested names collapse in first-encounter
+order, every attempted source receives one ordered batch, and a hard provider failure or timeout
+halts only the secrets attributed to that attempted batch.
 
-Three backends ship today. This list can change, so `agw resource describe-kind secret-backend` is
-the definitive set on any given install, and `agw resource describe-kind secret-backend/<name>` the
-definitive mapping shape for one. A single secret can map to whichever one matches how the operator
-stores it, and the active backends form a chain: each secret is offered to the backends in turn
-until one resolves it, so different secrets in the same environment can come from different sources.
+## Declaring a source
 
-- **`env-var`** (built in) reads the value from an operator-side environment variable. By default it
-  derives the variable name from the secret (`github-token` becomes `AW_SECRET_GITHUB_TOKEN`), or
-  the mapping can name a specific variable. An unset variable is simply a miss, so the next backend
-  in the chain gets a turn.
-- **`prompt`** (built in) asks the operator for the value interactively at resolution time. It is
-  the usual last link in the chain: when nothing earlier supplied the value, the operator types it.
-  It does nothing on a non-interactive run (no TTY, or `--non-interactive`), leaving the value
-  unresolved rather than blocking.
-- **`onepassword`** (via the `onepassword` system plugin) reads the value from 1Password through the
-  `op` CLI, addressed by an `op://vault/item/field` reference (optionally pinned to a specific
-  account). It becomes available once that plugin is enabled.
+Additional sources are YAML resources under `~/.config/agentworks/resources/`:
 
-## Secret Backend Obligations
+```yaml
+apiVersion: agentworks/v1
+kind: secret-source
+metadata:
+  name: work-op
+spec:
+  backend:
+    name: onepassword
+    account: work.example.com
+    timeout: 30
+```
 
-A secret backend supplies a secret's value, describes that lookup safely, and reports whether it can
-run here. It:
+Enable the `onepassword` system plugin as well. Its permanent per-secret mapping is a scalar native
+reference:
 
-- **MUST** resolve a secret's mapping to its value from the backend's source (an environment
-  variable, a prompt, a vault item), or report a miss so the chain can fall through to the next
-  backend. A persistent-store backend given an explicit but unresolvable mapping **MUST** report a
-  hard miss that halts the chain, rather than fall through to a prompt that would mask the
-  misconfiguration.
-- **MUST** distinguish a definitive "no such value" from a transport or authentication failure
-  (unreachable, not signed in) and surface each as its own typed, actionable error, so a real outage
-  is never silently mistaken for an absent value.
-- **MUST** describe a mapping for inspection (the environment variable name, the vault reference)
-  without ever revealing, resolving, or probing for the value.
-- **MUST** report, cheaply and offline, whether it is usable on this host, using a plain presence
-  check (is the tool installed?) and never a store probe, credential check, biometric, or network
-  round trip.
-- **MUST** declare itself interactive when resolving a value may block on a human (a prompt, a
-  biometric), so inspection surfaces preview it optimistically and never probe it, and a fully
-  non-interactive run can drop it from the chain.
-- **MUST NOT** log, echo, cache to disk, or otherwise persist or leak a resolved value: the only
-  egress for a value is the result it returns to Agentworks.
-- **MUST NOT** mutate the operator's environment, the backing store, or shared state while
-  resolving, because resolution is a read; and an offline backend **MUST NOT** prompt or reach the
-  network at all.
-- **MUST NOT** interfere with the other backends in the chain: it does its own lookup and returns,
-  leaving fall-through, precedence, and ordering to Agentworks.
-- **SHOULD** reach its backing store once for a whole batch of secrets where the store supports it,
-  amortizing expensive setup across the batch rather than paying it per secret
-  ([#370](https://github.com/WayfarerLabs/agentworks/issues/370)).
+```yaml
+apiVersion: agentworks/v1
+kind: secret
+metadata:
+  name: npm-token
+  description: npm registry token
+spec:
+  backend_mappings:
+    work-op: op://Engineering/npm/token
+```
 
-It does not decide where secrets apply or in what precedence. Agentworks merges and injects them
-across the VM, workspace, agent, and session scopes, resolves the command's whole secret union once,
-and guards the transported value; the backend just answers "what is the value for this mapping,"
-describes it safely, and says whether it can run here.
+Then place `work-op` wherever it belongs in `[secret_config].backends`. A configured backend name
+such as `onepassword` is not treated as a source alias in 0.14. The synthesized `env-var` and
+`prompt` source names remain valid unchanged. An unknown source name that exactly matches a
+configured backend produces a hard error with the source manifest and mapping rewrite; there is no
+compatibility source or legacy parser. When rewriting the old OnePassword mapping table, move its
+account to the source; the optional source timeout is new and defaults to 30 seconds.
+
+## Runtime contract
+
+Resolution opens one lazy client for each source it actually attempts. The factory is resource-free;
+the context enters, prepares one batch, resolves once, and closes before the next source begins.
+`agentworks.secrets.resolve.OutputInteractionBroker` is the module-owned public CLI broker; the
+source orchestrator passes it only to the prompt backend and passes `None` to every other backend
+factory. OnePassword owns a positive external-operation timeout and applies the shrinking remaining
+budget to each `op read`. Env-var and prompt perform no non-human blocking I/O and declare no
+timeout.
+
+Results use five value-free categories: `resolved`, `unavailable`, `refused-interaction`, `timeout`,
+and `resolution-failure`. A not-ready outcome retains only bounded remediation metadata; a disabled
+system-plugin backend is attributed by plugin name and rendered with a fixed enablement action.
+Resolved values live only in a private operation batch and the existing operation cache. Outcomes,
+identifiers, errors, warnings, logs, and render inputs never contain a value. NUL, carriage return,
+and newline are rejected before a value can become resolved.
+
+Complete command resolution checks for doomed secrets before every allowed interactive turn, so it
+does not prompt or trigger biometric authentication when another requested secret is already known
+to fail. The explicit `agw env show --resolve` partial-reveal path may still resolve independent
+secrets; list, describe, doctor, schema, guide, and completion never do. Cleanup always runs after
+entry; cleanup failure warns with fixed source-only text and never masks the primary result,
+timeout, or interruption.
+
+Use `agw secret list` and `agw secret describe NAME` for value-free inspection. Use
+`agw secret verify NAME...` for one real batch proof. It deduplicates names in first-written order,
+resolves the batch once, and emits one value-free row per unique name with category, source, safe
+identifier, detail, and remediation. It exits 1 after rendering if any row is not `resolved`.
+Verification refuses interaction by default. Add `--allow-interaction` only with operator consent
+for prompts, biometric checks, or renewed authentication; the opt-in is incompatible with global
+`--non-interactive`.

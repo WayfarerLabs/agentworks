@@ -18,7 +18,8 @@ from __future__ import annotations
 import contextlib
 import os
 import shlex
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, cast
 
 import agentworks.sessions.multi_console as _mc
 from agentworks import output
@@ -30,6 +31,7 @@ from agentworks.errors import (
 )
 from agentworks.name_filters import validate_name_filters
 from agentworks.resources.access import named_console_template
+from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 from agentworks.sessions.tmux import tmux_cmd
 from agentworks.vms.manager import gated_vm_boundary
 
@@ -40,7 +42,8 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
 
     from agentworks.config import Config
-    from agentworks.db import Database, SessionRow, VMRow
+    from agentworks.db import Database, SessionRow, ShellEntry, VMRow
+    from agentworks.machine_output import JsonObject
     from agentworks.resources.registry import Registry
     from agentworks.transports import Transport
 
@@ -49,6 +52,72 @@ if TYPE_CHECKING:
 # table-friendly bound rather than a mirror of the validation cap; a name
 # beyond it truncates with an ellipsis in the list view only.
 _NAME_CELL_WIDTH = 50
+
+
+@dataclass(frozen=True)
+class ConsoleListRow:
+    name: str
+    vm_name: str
+    session_count: int
+
+
+@dataclass(frozen=True)
+class ConsoleListing:
+    consoles: tuple[ConsoleListRow, ...]
+
+
+@dataclass(frozen=True)
+class ConsoleShell:
+    cwd: str | None
+    admin: bool
+
+
+@dataclass(frozen=True)
+class ConsoleMember:
+    position: int
+    session_name: str
+    shells: tuple[ConsoleShell, ...]
+
+
+@dataclass(frozen=True)
+class ConsoleDescription:
+    name: str
+    vm_name: str
+    admin_shell: bool
+    created_at: str
+    updated_at: str
+    sessions: tuple[ConsoleMember, ...]
+
+
+def console_listing_data(listing: ConsoleListing) -> JsonObject:
+    """Project console list facts into the closed JSON v1 shape."""
+    return {
+        "consoles": [
+            {"name": console.name, "vm_name": console.vm_name, "session_count": console.session_count}
+            for console in listing.consoles
+        ],
+    }
+
+
+def console_description_data(description: ConsoleDescription) -> JsonObject:
+    """Project console detail facts into the closed JSON v1 shape."""
+    return {
+        "console": {
+            "name": description.name,
+            "vm_name": description.vm_name,
+            "admin_shell": description.admin_shell,
+            "created_at": description.created_at,
+            "updated_at": description.updated_at,
+            "sessions": [
+                {
+                    "position": member.position,
+                    "session_name": member.session_name,
+                    "shells": [{"cwd": shell.cwd, "admin": shell.admin} for shell in member.shells],
+                }
+                for member in description.sessions
+            ],
+        },
+    }
 
 
 def _session_linux_user(db: Database, session: SessionRow, vm: VMRow) -> str:
@@ -167,7 +236,12 @@ def kill_session_windows(
 
 @contextlib.contextmanager
 def _prepare_vm_target_for_attach(
-    db: Database, config: Config, vm_name: str, *, registry: Registry
+    db: Database,
+    config: Config,
+    vm_name: str,
+    *,
+    registry: Registry,
+    interaction: InteractionPolicy,
 ) -> Iterator[tuple[VMRow, Transport]]:
     """Ensure the VM is running (starting it if needed) and yield
     ``(vm, target)`` inside the activation gate's held-active span.
@@ -184,6 +258,7 @@ def _prepare_vm_target_for_attach(
     resolve their own targets on the documented conditional-need
     path).
     """
+    interaction = validate_interaction_policy(interaction)
     from agentworks.transports import transport
 
     vm = db.get_vm(vm_name)
@@ -208,7 +283,7 @@ def _prepare_vm_target_for_attach(
             entity_kind="vm",
             entity_name=vm.name,
         )
-    with gated_vm_boundary(db, config, registry, vm):
+    with gated_vm_boundary(db, config, registry, vm, interaction=interaction):
         yield vm, transport(vm, config)
 
 
@@ -253,15 +328,14 @@ def _live_best_effort(action: str, *, console_name: str) -> Iterator[None]:
 # -- Read-side helpers ----------------------------------------------------
 
 
-def list_consoles(
+def console_listing(
     db: Database,
     *,
     vm_name: str | list[str] | None = None,
     workspace_name: str | list[str] | None = None,
     agent_name: str | list[str] | None = None,
-    names_only: bool = False,
-) -> None:
-    """Print a table of consoles, optionally filtered by VM, workspace, or agent.
+) -> ConsoleListing:
+    """Collect ordered console list facts, optionally filtered by DB relationships.
 
     Workspace/agent filters match a console if any of its member sessions
     match; see `Database.list_consoles_with_counts` for full semantics.
@@ -269,9 +343,6 @@ def list_consoles(
 
     An unknown name in any filter raises ``NotFoundError`` rather than
     matching nothing (issue #304).
-
-    With ``names_only=True``, emit one console name per line and skip
-    the table render. Used by shell completion (see issue #147).
     """
     validate_name_filters(
         db,
@@ -285,12 +356,23 @@ def list_consoles(
         agent_name=agent_name,
     )
 
+    return ConsoleListing(
+        consoles=tuple(
+            ConsoleListRow(name=console.name, vm_name=console.vm_name, session_count=session_count)
+            for console, session_count in consoles
+        )
+    )
+
+
+def render_console_listing(listing: ConsoleListing, *, names_only: bool = False) -> None:
+    """Render console list facts with the legacy human layout."""
+    consoles = listing.consoles
     if names_only:
         # Empty / fully-filtered-out result prints nothing under
         # names-only; the friendly "No consoles found" line below is
         # for human readers only.
-        for c, _ in consoles:
-            output.info(c.name)
+        for console in consoles:
+            output.info(console.name)
         return
 
     if not consoles:
@@ -300,7 +382,10 @@ def list_consoles(
     # Console names are freeform (cap 64) and display-only, but a very long one
     # would balloon this dynamically-sized column, so cap the NAME cell at a
     # bounded, table-friendly width and let short names size the column down.
-    rows = [(output.truncate(c.name, _NAME_CELL_WIDTH), c.vm_name, str(n)) for c, n in consoles]
+    rows = [
+        (output.truncate(console.name, _NAME_CELL_WIDTH), console.vm_name, str(console.session_count))
+        for console in consoles
+    ]
     name_w = max(len("NAME"), max(len(r[0]) for r in rows))
     vm_w = max(len("VM"), max(len(r[1]) for r in rows))
 
@@ -311,8 +396,8 @@ def list_consoles(
         output.info(f"{n:<{name_w}}  {vm:<{vm_w}}  {count}")
 
 
-def describe_console(db: Database, *, name: str) -> None:
-    """Print a console's configured membership and shell list.
+def console_description(db: Database, *, name: str) -> ConsoleDescription:
+    """Collect a console's configured membership and shell facts.
 
     Output describes the DB-declared target state; live tmux state may
     differ (panes can be killed, layouts changed in tmux, etc.). The next
@@ -320,22 +405,64 @@ def describe_console(db: Database, *, name: str) -> None:
     state back to what's shown here.
     """
     console = _require_console(db, name)
-    members = db.list_console_sessions(name)
+    return ConsoleDescription(
+        name=console.name,
+        vm_name=console.vm_name,
+        admin_shell=console.admin_shell,
+        created_at=console.created_at,
+        updated_at=console.updated_at,
+        sessions=tuple(
+            ConsoleMember(
+                position=member.position,
+                session_name=member.session_name,
+                shells=tuple(ConsoleShell(cwd=shell["cwd"], admin=shell["admin"]) for shell in member.shells),
+            )
+            for member in db.list_console_sessions(name)
+        ),
+    )
 
-    output.info(f"Name:        {console.name}")
-    output.info(f"VM:          {console.vm_name}")
-    output.info(f"Admin shell: {'yes' if console.admin_shell else 'no'}")
-    output.info(f"Created:     {console.created_at}")
-    output.info(f"Updated:     {console.updated_at}")
+
+def render_console_description(description: ConsoleDescription) -> None:
+    """Render console detail facts with the legacy human layout."""
+
+    output.info(f"Name:        {description.name}")
+    output.info(f"VM:          {description.vm_name}")
+    output.info(f"Admin shell: {'yes' if description.admin_shell else 'no'}")
+    output.info(f"Created:     {description.created_at}")
+    output.info(f"Updated:     {description.updated_at}")
     output.info("")
-    output.info(f"Configured sessions: {len(members)}")
+    output.info(f"Configured sessions: {len(description.sessions)}")
 
-    if not members:
+    if not description.sessions:
         return
 
     output.info("")
-    for i, m in enumerate(members):
-        output.info(f"[{i}] {m.session_name}  ({_shell_summary(m.shells)})")
+    for index, member in enumerate(description.sessions):
+        shells = cast(
+            "list[ShellEntry]",
+            [{"cwd": shell.cwd, "admin": shell.admin} for shell in member.shells],
+        )
+        output.info(f"[{index}] {member.session_name}  ({_shell_summary(shells)})")
+
+
+def list_consoles(
+    db: Database,
+    *,
+    vm_name: str | list[str] | None = None,
+    workspace_name: str | list[str] | None = None,
+    agent_name: str | list[str] | None = None,
+    names_only: bool = False,
+) -> None:
+    """Print the legacy console list presentation."""
+    render_console_listing(
+        console_listing(db, vm_name=vm_name, workspace_name=workspace_name, agent_name=agent_name),
+        names_only=names_only,
+    )
+
+
+def describe_console(db: Database, *, name: str) -> None:
+    """Print the legacy console detail presentation."""
+    render_console_description(console_description(db, name=name))
 
 
 # -- High-level entrypoints ------------------------------------------------
@@ -348,12 +475,14 @@ def attach_console(
     name: str,
     recreate: bool = False,
     allow_nesting: bool = False,
+    interaction: InteractionPolicy,
 ) -> int:
     """Attach to a named console, building or rebuilding tmux state as needed.
 
     Returns the interactive attach's exit code; the CLI layer owns the
     translation to process exit (check 9: no sys.exit in the service).
     """
+    interaction = validate_interaction_policy(interaction)
     if os.environ.get("TMUX") and not allow_nesting:
         raise StateError(
             "already inside a tmux session. Nesting is not recommended "
@@ -367,7 +496,13 @@ def attach_console(
     registry = load_request_registry(config)
     # The gate's held-active span covers the build and the interactive
     # attach (the hold this caller used to open itself).
-    with _mc._prepare_vm_target_for_attach(db, config, console.vm_name, registry=registry) as (vm, target):
+    with _mc._prepare_vm_target_for_attach(
+        db,
+        config,
+        console.vm_name,
+        registry=registry,
+        interaction=interaction,
+    ) as (vm, target):
         exists = _mc._console_tmux_exists(target, name)
         layout = named_console_template(registry).tmux_layout
 
@@ -393,6 +528,7 @@ def attach_console(
                 _mc._console_build_secret_targets(db, registry, console=console, vm=vm),
                 config,
                 registry,
+                interaction=interaction,
             )
 
         if recreate and exists:

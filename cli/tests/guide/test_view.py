@@ -102,7 +102,7 @@ def _deny_production_powers(monkeypatch: pytest.MonkeyPatch) -> None:
     from agentworks.db import Database
 
     denied = _RaisingPower()
-    monkeypatch.setattr(secret_resolve, "resolve_secrets", denied)
+    monkeypatch.setattr(secret_resolve, "resolve_batch", denied)
     monkeypatch.setattr(transports, "transport", denied)
     monkeypatch.setattr(output, "prompt", denied)
     monkeypatch.setattr(output, "prompt_secret", denied)

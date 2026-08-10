@@ -19,6 +19,7 @@ import pytest
 from agentworks import output
 from agentworks.db import Database
 from agentworks.errors import ValidationError
+from agentworks.secrets.policy import InteractionPolicy
 from agentworks.secrets.resolver import Resolver
 
 from ._session_ephemeral_support import (
@@ -101,6 +102,7 @@ def test_eager_resolve_fires_exactly_once_for_new_workspace_and_new_agent(
             new_workspace=True,
             new_agent=True,
             vm_name="vm1",
+            interaction=InteractionPolicy.REFUSE,
         )
 
     assert sequence.count("boundary_resolve") == 1
@@ -167,6 +169,7 @@ def test_session_create_frames_phases_like_a_plan(
             new_workspace=True,
             new_agent=True,
             vm_name="vm1",
+            interaction=InteractionPolicy.REFUSE,
         )
 
     assert "=== Preflight ===" in captured_output.info
@@ -252,6 +255,7 @@ def test_realize_bodies_take_domain_shaped_kwargs_only(tmp_path: Path, monkeypat
             new_workspace=True,
             new_agent=True,
             vm_name="vm1",
+            interaction=InteractionPolicy.REFUSE,
         )
 
     # Allowlist, not denylist: the seam contract is domain-shaped args
@@ -314,6 +318,7 @@ def test_failure_after_ephemeral_create_rolls_back_ephemerals(tmp_path: Path, mo
             new_workspace=True,
             new_agent=True,
             vm_name="vm1",
+            interaction=InteractionPolicy.REFUSE,
         )
 
     assert deletes == ["agent:s1", "workspace:s1"]
@@ -345,6 +350,7 @@ def test_new_agent_inherits_vm_from_existing_workspace(tmp_path: Path, monkeypat
             name="s1",
             workspace="ws1",
             new_agent=True,
+            interaction=InteractionPolicy.REFUSE,
         )
     assert len(realize_agent_calls) == 1
     assert realize_agent_calls[0]["vm"].name == "vm1"  # type: ignore[attr-defined]
@@ -376,6 +382,7 @@ def test_validation_failure_does_not_trigger_rollback(tmp_path: Path, monkeypatc
             name="s1",
             workspace="ws-A",
             agent="agt-B",
+            interaction=InteractionPolicy.REFUSE,
         )
 
     assert deletes == [], "no rollback should run when nothing was created"

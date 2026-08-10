@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.db import Database
+from agentworks.secrets.policy import InteractionPolicy
 from agentworks.sessions import multi_console
 from agentworks.sessions.multi_console import add_shell, create_console, delete_console
 from agentworks.sessions.multi_console_layout import SHELL_INDEX_OPTION, _reorder_shell_panes
@@ -40,7 +41,15 @@ def test_add_shell_live_sync_splits_pane_and_tiles(db: Database, fake_target: _F
 
     fake_target.commands.clear()
     fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
-    add_shell(db, _StubConfig(), console_name="con", session_name="a", cwd="src", admin=True)
+    add_shell(
+        db,
+        _StubConfig(),
+        console_name="con",
+        session_name="a",
+        cwd="src",
+        admin=True,
+        interaction=InteractionPolicy.REFUSE,
+    )
 
     splits = [c for c in fake_target.commands if "split-window -t aw-console-con:a" in c]
     assert len(splits) == 1
@@ -81,7 +90,9 @@ def test_split_shell_pane_agent_branch_uses_sudo(db: Database, fake_target: _Fak
 
     fake_target.commands.clear()
     fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
-    add_shell(db, _StubConfig(), console_name="con", session_name="s")  # agent, workspace root
+    add_shell(
+        db, _StubConfig(), console_name="con", session_name="s", interaction=InteractionPolicy.REFUSE
+    )  # agent, workspace root
 
     splits = [c for c in fake_target.commands if "split-window -t aw-console-con:s" in c]
     assert len(splits) == 1
@@ -100,7 +111,7 @@ def test_split_shell_pane_admin_branch_no_sudo(db: Database, fake_target: _FakeT
 
     fake_target.commands.clear()
     fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
-    add_shell(db, _StubConfig(), console_name="con", session_name="a")
+    add_shell(db, _StubConfig(), console_name="con", session_name="a", interaction=InteractionPolicy.REFUSE)
 
     splits = [c for c in fake_target.commands if "split-window -t aw-console-con:a" in c]
     assert len(splits) == 1
@@ -141,7 +152,7 @@ def test_split_shell_pane_agent_branch_preserves_composed_env_across_sudo(
 
     fake_target.commands.clear()
     fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
-    add_shell(db, _StubConfig(), console_name="con", session_name="s")
+    add_shell(db, _StubConfig(), console_name="con", session_name="s", interaction=InteractionPolicy.REFUSE)
 
     splits = [c for c in fake_target.commands if "split-window -t aw-console-con:s" in c]
     assert len(splits) == 1
@@ -181,7 +192,7 @@ def test_sudo_preserve_probe_command_shape(db: Database, fake_target: _FakeTarge
     _seed_agent_session_console(db)
     fake_target.commands.clear()
     fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
-    add_shell(db, _StubConfig(), console_name="con", session_name="s")
+    add_shell(db, _StubConfig(), console_name="con", session_name="s", interaction=InteractionPolicy.REFUSE)
 
     probes = [c for c in fake_target.commands if _PROBE in c]
     assert len(probes) == 1
@@ -206,7 +217,7 @@ def test_split_shell_pane_agent_branch_warns_and_falls_back_when_setenv_missing(
         returncode=1,
         stderr=("sudo: sorry, you are not allowed to set the following environment variables: AWPROBE"),
     )
-    add_shell(db, _StubConfig(), console_name="con", session_name="s")
+    add_shell(db, _StubConfig(), console_name="con", session_name="s", interaction=InteractionPolicy.REFUSE)
 
     splits = [c for c in fake_target.commands if "split-window -t aw-console-con:s" in c]
     assert len(splits) == 1
@@ -250,7 +261,7 @@ def test_split_shell_pane_preserve_probe_warns_once_per_console_build(
     fake_target.responses["list-windows -t aw-console-con"] = _FakeResult(returncode=0, stdout="_PLACEHOLDER\ns1\ns2\n")
     fake_target.responses[_PROBE] = _FakeResult(returncode=1)
     fake_target.commands.clear()
-    attach_console(db, _StubConfig(), name="con", allow_nesting=True)
+    attach_console(db, _StubConfig(), name="con", allow_nesting=True, interaction=InteractionPolicy.REFUSE)
 
     splits = [c for c in fake_target.commands if "split-window -t aw-console-con" in c]
     assert len(splits) == 4
@@ -273,7 +284,7 @@ def test_split_shell_pane_agent_branch_no_probe_without_composed_env(
 
     fake_target.commands.clear()
     fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
-    add_shell(db, _StubConfig(), console_name="con", session_name="s")
+    add_shell(db, _StubConfig(), console_name="con", session_name="s", interaction=InteractionPolicy.REFUSE)
 
     splits = [c for c in fake_target.commands if "split-window -t aw-console-con:s" in c]
     assert len(splits) == 1
@@ -292,7 +303,7 @@ def test_split_shell_pane_admin_branch_never_probes(db: Database, fake_target: _
 
     fake_target.commands.clear()
     fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
-    add_shell(db, _StubConfig(), console_name="con", session_name="a")
+    add_shell(db, _StubConfig(), console_name="con", session_name="a", interaction=InteractionPolicy.REFUSE)
 
     assert not [c for c in fake_target.commands if _PROBE in c]
 
@@ -318,7 +329,7 @@ def test_split_shell_pane_emits_workspace_identity_only(db: Database, fake_targe
 
     fake_target.commands.clear()
     fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
-    add_shell(db, _StubConfig(), console_name="con", session_name="s")
+    add_shell(db, _StubConfig(), console_name="con", session_name="s", interaction=InteractionPolicy.REFUSE)
 
     splits = [c for c in fake_target.commands if "split-window -t aw-console-con:s" in c]
     assert len(splits) == 1
@@ -349,7 +360,7 @@ def test_split_shell_pane_tags_new_pane_with_config_index(db: Database, fake_tar
     # Simulate tmux split-window -P emitting a pane id.
     fake_target.responses["split-window -t aw-console-con:a"] = _FakeResult(stdout="%7\n")
 
-    add_shell(db, _StubConfig(), console_name="con", session_name="a")
+    add_shell(db, _StubConfig(), console_name="con", session_name="a", interaction=InteractionPolicy.REFUSE)
 
     set_options = [c for c in fake_target.commands if "set-option -p" in c and SHELL_INDEX_OPTION in c]
     assert len(set_options) == 1
@@ -372,7 +383,7 @@ def test_split_shell_pane_warns_when_split_returns_no_pane_id(
     fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
     # Default _FakeResult has empty stdout, so no pane_id to tag.
 
-    add_shell(db, _StubConfig(), console_name="con", session_name="a")
+    add_shell(db, _StubConfig(), console_name="con", session_name="a", interaction=InteractionPolicy.REFUSE)
 
     set_options = [c for c in fake_target.commands if "set-option -p" in c]
     assert set_options == []
@@ -436,7 +447,7 @@ def test_add_shell_reorders_shell_panes_into_config_order(
     # Installs the model-backed transport seam (side effect); no handle needed.
     console_target_factory(model)
 
-    add_shell(db, _StubConfig(), console_name="con", session_name="a")
+    add_shell(db, _StubConfig(), console_name="con", session_name="a", interaction=InteractionPolicy.REFUSE)
 
     rows = model.pane_rows(CON, "a")
     assert rows is not None
@@ -461,6 +472,6 @@ def test_split_shell_pane_warns_when_set_option_fails(
     # set-option fails non-zero.
     fake_target.responses["set-option -p"] = _FakeResult(returncode=1, stderr="bad target")
 
-    add_shell(db, _StubConfig(), console_name="con", session_name="a")
+    add_shell(db, _StubConfig(), console_name="con", session_name="a", interaction=InteractionPolicy.REFUSE)
 
     assert any("tagging failed" in w and "attach con --recreate" in w for w in captured_output.warnings)

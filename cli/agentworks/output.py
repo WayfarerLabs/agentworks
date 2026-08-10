@@ -270,6 +270,14 @@ class _DefaultProgress:
         print(f"{_pad(self._level + 1)}{self._label} done ({elapsed:.0f}s){suffix}")
 
 
+class _SilentProgress:
+    def update(self, current: int | None = None, message: str | None = None) -> None:
+        del current, message
+
+    def done(self, message: str | None = None) -> None:
+        del message
+
+
 class _DefaultHandler:
     def emit(self, role: Role, message: str, level: int) -> None:
         if role is Role.WARNING:
@@ -348,7 +356,8 @@ class _DefaultHandler:
                     return value
                 print("(empty, try again)", file=sys.stderr)
         except (EOFError, KeyboardInterrupt):
-            raise UserAbort("interrupted") from None
+            pass
+        raise UserAbort("interrupted") from None
 
     def progress(self, label: str, level: int, total: int | None = None) -> Progress:
         print(f"{_pad(level + 1)}{label}...")
@@ -359,16 +368,40 @@ class _DefaultHandler:
 # Module API
 # ---------------------------------------------------------------------------
 
-# Only the section level is per-flow; the handler stays a module global
-# (as today) so output emitted from an existing worker thread still sees
-# the installed handler. See output-model-lld.md sec 1 for the rationale.
+# Request presentation state is per-flow; the handler stays a module global
+# so output emitted from an existing worker thread still sees the installed
+# handler. See output-model-lld.md sec 1 for the rationale.
 _level: ContextVar[int] = ContextVar("_output_level", default=0)
+_presentation_suppressed: ContextVar[bool] = ContextVar("_presentation_suppressed", default=False)
 _handler: OutputHandler = _DefaultHandler()
 
 
 def _current_level() -> int:
     """The ambient section level for the current flow (0 = top level)."""
     return _level.get()
+
+
+@contextmanager
+def suppress_presentation() -> Iterator[None]:
+    """Temporarily suppress ordinary service presentation for machine output.
+
+    Prompts retain their handler path and interactivity; this only prevents
+    service status, progress, and resolver narration from corrupting stdout.
+    """
+    token = _presentation_suppressed.set(True)
+    try:
+        yield
+    finally:
+        _presentation_suppressed.reset(token)
+
+
+def presentation_suppressed() -> bool:
+    """Return whether ordinary presentation is suppressed for this request.
+
+    The per-flow context preserves nesting semantics. Callers that dispatch
+    work to a thread copy their request context into each worker explicitly.
+    """
+    return _presentation_suppressed.get()
 
 
 @contextmanager
@@ -382,7 +415,7 @@ def section(title: str | None = None) -> Iterator[None]:
     raises, so a section can never strand the ambient level.
     """
     level = _current_level()
-    if title is not None:
+    if title is not None and not presentation_suppressed():
         _handler.emit(Role.HEADER, title, level)
     token = _level.set(level + 1)
     try:
@@ -451,7 +484,8 @@ def truncate(text: str, width: int) -> str:
 
 def info(message: str) -> None:
     """Emit a top-level status message."""
-    _handler.emit(Role.BODY, message, _current_level())
+    if not presentation_suppressed():
+        _handler.emit(Role.BODY, message, _current_level())
 
 
 def detail(message: str) -> None:
@@ -463,12 +497,14 @@ def detail(message: str) -> None:
     in a :func:`section` block; a headerless ``section()`` pushes a level
     with no header line.
     """
-    _handler.emit(Role.DETAIL, message, _current_level())
+    if not presentation_suppressed():
+        _handler.emit(Role.DETAIL, message, _current_level())
 
 
 def warn(message: str) -> None:
     """Emit a non-fatal warning."""
-    _handler.emit(Role.WARNING, message, _current_level())
+    if not presentation_suppressed():
+        _handler.emit(Role.WARNING, message, _current_level())
 
 
 def result(message: str) -> None:
@@ -478,7 +514,8 @@ def result(message: str) -> None:
     closing line of a command stays flush-left even inside nested
     sections.
     """
-    _handler.emit(Role.RESULT, message, 0)
+    if not presentation_suppressed():
+        _handler.emit(Role.RESULT, message, 0)
 
 
 def error(message: str) -> None:
@@ -520,6 +557,8 @@ def prompt_secret(label: str, hint: str | None = None) -> str:
 
 def progress(label: str, total: int | None = None) -> Progress:
     """Start a tracked operation. Returns a Progress handle."""
+    if presentation_suppressed():
+        return _SilentProgress()
     return _handler.progress(label, _current_level(), total)
 
 

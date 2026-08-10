@@ -1,17 +1,17 @@
 # FRD: Secret Sources (Wave 3)
 
-- Status: Seed, ready for an effort lead
+- Status: Implemented and locked
 - Date: 2026-08-07
-- Seeded by: the roadmap lead. This is the roadmap's wave 3 child
-  (`docs/sdd/2026-08-04-next-steps/`), unblocked by wave 2's landing (PR #414): the per-source
-  config model wants the schema machinery, and the descriptor carries the interim exception this
-  wave removes. The effort lead owns the HLA and plan; the roadmap lead reviews PRs. Per the sdd
-  skill, this FRD becomes the effort lead's on merge of this seeding PR.
+- Seeded by: the saga lead. This is the saga's wave 3 child (`docs/sdd/2026-08-04-next-steps/`),
+  unblocked by wave 2's landing (PR #414): the per-source config model wants the schema machinery,
+  and the descriptor carries the interim exception this wave removes. The effort lead owns the HLA
+  and plan; the saga lead reviews PRs. Per the sdd skill, this FRD becomes the effort lead's on
+  merge of this seeding PR.
 
 ## Purpose
 
-Secrets get the two-level model the roadmap settled: a `secret-backend` is the implementation kind
-(the `vm-platform` analog), and a `secret-source` is a declarable configured instance of one (the
+Secrets get the two-level model the saga settled: a `secret-backend` is the implementation kind (the
+`vm-platform` analog), and a `secret-source` is a declarable configured instance of one (the
 `vm-site` analog), exposing key-value secrets through that backend with per-source config. This ends
 the constructed-singleton special case, makes multi-account and multi-vault setups declarable, and
 evolves the resolution API from boolean-shaped answers to typed outcomes. The code already names
@@ -33,14 +33,12 @@ declarable instance kind, the secret-backend analog of vm-site").
   (`docs/sdd/2026-08-07-installer-plugins/frd.md`, C4): an operator declaring a source under a
   synthesized name replaces the synthesized row, with the substitution surfaced in provenance by
   `describe` and `doctor`, never silently.
-- R3. Every per-secret reference names a source. Direct backend references become a deprecated
-  compatibility path (warn in one release, reject in the next), never a permanent second branch. The
-  runway has two carriers: the settings-side chain (`[secret_config].backends`) rides the kept
-  config deprecation channel, while manifest-side per-secret references need their own carrier added
-  into the shared deprecation surface (the per-source-carrier pattern recorded at the kept channel,
-  reusing `--no-deprecations` and the suppression reporting), built as part of this wave. This is
-  the "rebuild one" branch `target-state.md`'s manifest channel-gap item anticipated, and this wave
-  closes that item.
+- R3. Every per-secret reference names a source. Direct backend references hard-error in 0.14 with
+  the exact source declaration and reference rewrite named. They never become a permanent second
+  branch, and this wave adds no warning-only compatibility machinery. The breaking posture is an
+  operator ruling (2026-08-08): 0.14 already carries operator-visible breaks, the improved upgrade
+  guide makes this one tractable, and a one-release normalization path would add substantial
+  complexity solely to remove it in the next release.
 - R4. Resolution API evolution: typed per-secret outcomes with explicit failure categories,
   policy-aware interaction requirements (the non-interactive discipline the verification surfaces
   established), timeouts and cleanup, and bounded-lifetime source clients. The simple case must not
@@ -63,7 +61,7 @@ declarable instance kind, the secret-backend analog of vm-site").
   recorded, whose trigger has fired.
 - R9. Discovery and teaching ride the change: describe/schema/samples derive from the new kind's
   models by construction, guide topics contribute through the universal contract, sample-config and
-  completions updated, and the deprecation warning's remediation names the rewrite.
+  completions updated, and hard errors name the exact rewrite.
 
 ## Settled constraints (inherited; do not reopen)
 
@@ -74,8 +72,8 @@ declarable instance kind, the secret-backend analog of vm-site").
 - C3. The anchored-projections review question applies to the resolution surfaces: what does a
   source client see, where is that view enforced, and secrets never enter persisted state or
   resolved configuration.
-- C4. Compatibility posture: the deprecation runway rides the kept config channel; remediation is
-  precise errors plus guide content, no migration tooling.
+- C4. Compatibility posture: direct backend references break in 0.14 with precise errors and guide
+  content, no compatibility normalizer and no migration tooling.
 - C5. The `development-principles` bad-complexity test applies; in particular, the simple case
   (env-var and prompt, no declared sources) must remain invisible machinery to the operator.
 
@@ -86,10 +84,9 @@ declarable instance kind, the secret-backend analog of vm-site").
   report through them.
 - AC2. A declared source (the `onepassword` account case) is a manifest resource with validated
   config, readiness, and describe/schema/sample surfaces derived from its models.
-- AC3. A direct backend reference warns through its carrier (config channel for the settings chain,
-  the new manifest carrier for per-secret references) with the exact rewrite named; the same
-  reference under the next release's posture hard-errors (mechanism proven in tests; the release
-  flip itself is scheduled work).
+- AC3. A direct backend reference in either the settings chain or a per-secret mapping hard-errors
+  with the exact source declaration and reference rewrite named. No warning-only compatibility row
+  is synthesized.
 - AC4. Editing an `onepassword` `backend_mappings` table in a schema-associated editor offers
   completions and key checking (R8 landed end to end).
 - AC5. Resolution outcomes are typed: at minimum unavailable, refused-interaction, timeout, and
@@ -105,8 +102,8 @@ parameters (scopes, repos, permissions) are creation specifications in the crede
 lookup addresses in the secret's; the per-secret mapping stays addressing, never specification. This
 wave inherits the ruling as a scope guard: do not grow the source abstraction toward
 domain-parameterized value creation. The git-credential one-arm union restructure lands separately
-before the 0.14.0 cut (tracked in the roadmap's release mapping) so minting later arrives as a
-purely additive arm.
+before the 0.14.0 cut (tracked in the saga's release mapping) so minting later arrives as a purely
+additive arm.
 
 ## Open questions for the effort lead
 
@@ -119,5 +116,3 @@ purely additive arm.
   and the wave 2 plan record this as wave 3's call).
 - How synthesized sources are represented internally (true registry rows versus a projection) so
   long as R2's surface behavior holds.
-- The deprecation window release mapping (which release warns, which rejects), proposed to the
-  operator with the plan.

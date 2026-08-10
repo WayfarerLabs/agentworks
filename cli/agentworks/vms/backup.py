@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.errors import BackupError, NotFoundError, StateError
 from agentworks.path_rendering import format_host_path
+from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 from agentworks.vms.manager import gated_vm_boundary
 
 if TYPE_CHECKING:
@@ -27,6 +28,8 @@ def backup_vm(
     db: Database,
     config: Config,
     vm_name: str,
+    *,
+    interaction: InteractionPolicy,
 ) -> Path:
     """Create a full backup of a VM: metadata + workspace files.
 
@@ -38,6 +41,7 @@ def backup_vm(
     just-in-time values seed the boundary resolver), and the
     held-active span covers the whole snapshot-archive-transfer body.
     """
+    interaction = validate_interaction_policy(interaction)
     from agentworks.bootstrap import load_request_registry
     from agentworks.ssh import SSHError, SSHLogger
     from agentworks.transports import SSHTransport, transport
@@ -61,7 +65,7 @@ def backup_vm(
         )
     registry = load_request_registry(config)
 
-    with gated_vm_boundary(db, config, registry, vm):
+    with gated_vm_boundary(db, config, registry, vm, interaction=interaction):
         # Create backup directory first so the log goes inside it
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         backup_name = f"{vm_name}-{timestamp}"

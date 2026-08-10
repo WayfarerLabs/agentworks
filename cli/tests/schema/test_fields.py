@@ -178,8 +178,8 @@ def test_the_shipped_optional_catalog_shape_expands_its_element(platform: str) -
     the rule is about the package, and keeping its tests visibly narrow
     too costs nothing.
     """
-    from agentworks.plugins.aws.platform import AwsEC2Config, AwsInstanceType
-    from agentworks.plugins.azure.platform import AzureVMConfig, AzureVMSize
+    from agentworks.plugins.aws.config import AwsEC2Config, AwsInstanceType
+    from agentworks.plugins.azure.config import AzureVMConfig, AzureVMSize
 
     catalogs: dict[str, tuple[type[AgwModel], type[AgwModel], str]] = {
         "azure": (AzureVMConfig, AzureVMSize, "vm_sizes"),

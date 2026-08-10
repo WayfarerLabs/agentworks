@@ -13,15 +13,17 @@ import re
 from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
 
 import pytest
-from pydantic import Discriminator, Field
+from pydantic import BaseModel, Discriminator, Field
 
 from agentworks.errors import ConfigError
 from agentworks.manifests.describe import reference_lines
+from agentworks.manifests.field_tree import field_tree, root_entry
 from agentworks.manifests.loader import load_manifests
-from agentworks.manifests.reference import describable_targets, reference_for
+from agentworks.manifests.reference import SchemaReference, describable_targets, reference_for
 from agentworks.plugins import Plugin, seated_plugin
 from agentworks.schema import AgwModel
 from tests.plugins._fixtures import ConformingVMPlatform
+from tests.schema._fixture_models import StringOrTableRoot, StringRoot
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -74,6 +76,24 @@ def _text(target: str) -> str:
     return "\n".join(reference_lines(reference_for(target)))
 
 
+def _root_text(model: type[BaseModel]) -> str:
+    """One root-value fixture rendered through the shared reference surface."""
+    reference = SchemaReference(
+        target="fixture",
+        kind="fixture",
+        implementation=None,
+        category="capability",
+        title=None,
+        summary=None,
+        overview=None,
+        metadata=(),
+        spec=(),
+        alternatives=(),
+        root_value=root_entry(model, field_tree(model)),
+    )
+    return "\n".join(reference_lines(reference))
+
+
 def _field_entry(text: str, field: str) -> str:
     """One field's rendered block, unwrapped onto a single line.
 
@@ -118,6 +138,19 @@ def test_a_field_carries_its_type_requiredness_and_description() -> None:
     # about to write it into a document.
     assert "  hint  (string or null, optional, e.g. Generate at https://" in text
     assert "Operator-facing text shown when the secret has to be entered by hand" in text
+    assert "<key>  (string or one of: false, required, names a secret-source)" in text
+
+
+def test_secret_source_kind_describes_the_backend_union_and_override_provenance() -> None:
+    text = _text("secret-source")
+
+    assert text.startswith("Secret sources (secret-source, resource kind)")
+    assert "operator declaration with either name replaces that built-in row" in text
+    backend = _field_entry(text, "backend")
+    assert "env-var: resolves from AW_SECRET_<NAME> environment variables" in backend
+    assert "prompt: prompts interactively at resolution time" in backend
+    assert "onepassword: resolves via the 1Password CLI" in backend
+    assert "`agw resource sample secret-source`" in text
 
 
 def test_an_optional_root_union_keeps_its_outer_null_spelling() -> None:
@@ -138,9 +171,25 @@ def test_a_field_that_folds_a_scalar_offers_both_spellings() -> None:
     assert "        secret  (string, required, names a secret)" in text
 
 
-def test_a_config_that_may_be_a_table_says_what_is_in_the_table() -> None:
-    """A scalar-or-table config documents the table's fields."""
+def test_secret_backend_describes_its_source_config() -> None:
     text = _text("secret-backend/onepassword")
+
+    assert "config:" in text
+    assert "name  (one of: onepassword, required)" in text
+    assert "account  (string or null, optional, min length 1)" in text
+    assert "timeout  (number, optional, default 30.0, gt 0)" in text
+
+
+def test_tag_only_secret_backend_source_config_is_a_table() -> None:
+    text = _text("secret-backend/env-var")
+
+    assert "config:" in text
+    assert "name  (one of: env-var, required)" in text
+
+
+def test_a_root_value_that_may_be_a_table_says_what_is_in_the_table() -> None:
+    """A scalar-or-table root documents the table's fields."""
+    text = _root_text(StringOrTableRoot)
 
     assert "config: (a value, not a table)" in text
     assert "  (string or table, required, min length 1)" in text
@@ -149,9 +198,9 @@ def test_a_config_that_may_be_a_table_says_what_is_in_the_table() -> None:
     assert "    reference  (string, required, min length 1)" in text
 
 
-def test_a_config_that_is_only_ever_a_scalar_has_no_table_form() -> None:
-    """A scalar-only config does not advertise a table form."""
-    text = _text("secret-backend/env-var")
+def test_a_scalar_root_value_has_no_table_form() -> None:
+    """A scalar-only root does not advertise a table form."""
+    text = _root_text(StringRoot)
 
     assert "config: (a value, not a table)" in text
     assert "as a table:" not in text

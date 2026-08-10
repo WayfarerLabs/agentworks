@@ -26,10 +26,9 @@ lands on the right side of that split for free: it reports resolvability
 once, on the secret's own row, instead of smearing it across every
 resource that names the secret.
 
-Resolution itself is untouched here: the single resolve pass at the
-preflight boundary stays :class:`~agentworks.secrets.resolver
-.Resolver` / :func:`~agentworks.secrets.resolve.resolve_secrets`
-machinery. What this module adds downstream of it is SCOPED DELIVERY:
+Resolution itself remains one typed batch at the preflight boundary,
+owned by :class:`~agentworks.secrets.resolver.Resolver`. What this module
+adds downstream of it is SCOPED DELIVERY:
 :class:`ScopedSecrets`, the ``ctx.secret(name)`` view that hands a
 node only the secret names it declared.
 """
@@ -39,15 +38,17 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks.errors import StateError
+from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Iterable, Mapping, Sequence
 
     from agentworks.config import Config
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
     from agentworks.secrets.base import SecretDecl
-    from agentworks.secrets.resolve import ActiveBackend
+    from agentworks.secrets.preview import ResolutionPreview
+    from agentworks.secrets.resolve import ActiveSource
 
     from .node import Node
 
@@ -74,10 +75,9 @@ def secret_declarations(names: Iterable[str], registry: Registry) -> tuple[Secre
     """Declarations for ``names``, from the registry's ``secret`` rows.
 
     A name with no registry row falls back to a synthesized bare
-    declaration: an operator who omits every ``[secrets.*]`` section
-    leaves the registry empty under the ``secret`` kind, and the
-    backend chain must stay callable for the well-known names (the
-    same fallback ``Resolver.register_name`` applies).
+    declaration. This keeps sources callable for well-known names that no
+    manifest references, matching the fallback ``Resolver.register_name``
+    applies.
     """
     from agentworks.secrets.base import SecretDecl
     from agentworks.secrets.kinds import SECRET_KIND_NAME
@@ -92,34 +92,25 @@ def secret_declarations(names: Iterable[str], registry: Registry) -> tuple[Secre
     return tuple(out)
 
 
-def predict_resolution(decls: Iterable[SecretDecl], backends: list[ActiveBackend]) -> dict[str, str | None]:
-    """Central resolvability prediction over declared references: for
-    each declaration, the name of the first active backend that would
-    resolve it, or ``None`` when nothing would.
+def predict_resolution(
+    decls: Iterable[SecretDecl],
+    sources: Sequence[ActiveSource],
+    *,
+    interaction: InteractionPolicy,
+) -> dict[str, ResolutionPreview]:
+    """Pure applicability prediction over declared references.
 
-    :func:`~agentworks.secrets.resolve.preview_resolution` per
-    declaration; the semantics (non-prompting, a non-interactive backend
-    must actually produce a value) are that function's. It must match
-    resolve-time reality: an interactive backend counts as resolving
-    only when interactive input is actually available this run
-    (``output.is_interactive()``), so a prompt-only secret fails fast at
-    the preflight sweep under ``--non-interactive`` rather than reaching
-    a resolve-end failure (issue #202).
-
-    That run-reality gating is honest because only OPERATIONS invoke
-    this: an operation is the thing that would do the prompting, so
-    "could this run resolve it" is the question it is actually asking.
-    Doctor deliberately does not reach here (it reports on secrets
-    through its own Secrets group, whose optimistic semantics answer a
-    different question: could this secret resolve under some run).
+    Each value-free result names the first ready source that would attempt
+    the declaration under this operation's exact interaction policy. It
+    never reads a value or opens a source client; the resolution boundary
+    remains authoritative for presence and provider failures. Doctor uses
+    the inspection variant, which reports interactive applicability without
+    an operation policy.
     """
-    from agentworks import output
-    from agentworks.secrets.resolve import preview_resolution
+    interaction = validate_interaction_policy(interaction)
+    from agentworks.secrets.preview import preview_operation_resolution
 
-    interactive_available = output.is_interactive()
-    return {
-        decl.name: preview_resolution(decl, backends, interactive_available=interactive_available) for decl in decls
-    }
+    return {decl.name: preview_operation_resolution(decl, sources, interaction=interaction) for decl in decls}
 
 
 def require_declared_refs(owner: str, refs: Iterable[ResourceReference], registry: Registry) -> None:
@@ -171,18 +162,16 @@ def require_predicted_refs(
     refs: Iterable[ResourceReference],
     config: Config | None,
     registry: Registry,
+    *,
+    interaction: InteractionPolicy,
 ) -> None:
-    """Central resolvability prediction over one node's declared config
-    secrets: every reference must be predicted resolvable by some active
-    backend, without prompting (an unresolvable secret is fatal and
-    knowable pre-resolve; a prompt-only secret's value check defers past
-    preflight).
+    """Pure impossibility screen over one node's declared config secrets.
 
     Invoked by the preflight sweep
     (:func:`~agentworks.orchestration.readiness.preflight_all`), once
     per node, NOT by the nodes themselves. Whether a declared secret can
-    be resolved is a property of the operation's runtime world (the
-    active backend chain, this run's interactivity), not of the resource
+    be attempted is a property of the operation's runtime world (the
+    active source chain and exact interaction policy), not of the resource
     that named it, so the resource must not assume the concern. The
     practical consequence is doctor: it invokes node preflight per row
     and never sweeps, so it never predicts, and a prompt-only secret
@@ -193,8 +182,10 @@ def require_predicted_refs(
     display of the instance whose config named the secret, so the error
     keeps the owner/usage framing the per-instance prediction produced.
     """
+    interaction = validate_interaction_policy(interaction)
     from agentworks.errors import ConfigError
-    from agentworks.secrets.resolve import active_backends
+    from agentworks.secrets.preview import PreviewCategory
+    from agentworks.secrets.resolve import active_sources
 
     refs = tuple(refs)
     if not refs:
@@ -206,15 +197,16 @@ def require_predicted_refs(
         )
     predictions = predict_resolution(
         secret_declarations((ref.name for ref in refs), registry),
-        active_backends(config, registry),
+        active_sources(config, registry),
+        interaction=interaction,
     )
     for ref in refs:
-        if predictions[ref.name] is None:
+        prediction = predictions[ref.name]
+        if prediction.category is not PreviewCategory.ATTEMPTABLE:
             raise ConfigError(
-                f"{owner}: secret '{ref.name}' ({ref.usage}) is not resolvable by any active backend",
+                f"{owner}: secret '{ref.name}' ({ref.usage}) is not attemptable by any active source",
                 hint=(
-                    f"ensure secret '{ref.name}' is mapped to a backend. "
-                    f"Run `agw secret describe {ref.name}` for details."
+                    f"preview category: {prediction.category.value}. Run `agw secret describe {ref.name}` for details."
                 ),
             )
 

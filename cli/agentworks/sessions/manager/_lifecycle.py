@@ -16,6 +16,7 @@ from agentworks.errors import (
     StateError,
     UserAbort,
 )
+from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 from agentworks.sessions.tmux import AGENT_SOCKET_ROOT
 
 if TYPE_CHECKING:
@@ -154,12 +155,20 @@ def stop_session(
     *,
     name: str,
     force: bool = False,
+    interaction: InteractionPolicy,
 ) -> None:
     """Stop a running session. Sends C-c first, then kills after a grace period."""
+    interaction = validate_interaction_policy(interaction)
     from agentworks.sessions.tmux import force_kill_tmux_server
 
     session = _mgr._require_session(db, name)
-    with _mgr._prepare_vm(db, config, session, operation="session-stop") as (
+    with _mgr._prepare_vm(
+        db,
+        config,
+        session,
+        operation="session-stop",
+        interaction=interaction,
+    ) as (
         _ws,
         vm,
         _run_command,
@@ -235,6 +244,7 @@ def resume_session(
     name: str,
     force: bool = False,
     yes: bool = False,
+    interaction: InteractionPolicy,
 ) -> None:
     """Resume a session. Prompts if running (--yes to skip). --force for BROKEN.
 
@@ -246,6 +256,7 @@ def resume_session(
     after the kill is deliberately non-rollbackable (no unwind is
     consulted there), exactly the imperative shape.
     """
+    interaction = validate_interaction_policy(interaction)
     from agentworks.bootstrap import load_request_registry
     from agentworks.sessions.tmux import (
         create_session as create_tmux_session,
@@ -288,7 +299,7 @@ def resume_session(
     from agentworks.vms.nodes import live_vm_node
     from agentworks.workspaces.nodes import live_workspace_node
 
-    resolver = Resolver(config, registry)
+    resolver = Resolver(config, registry, interaction=interaction)
 
     vm_node = live_vm_node(db, config, registry, vm)
     workspace_node = live_workspace_node(ws, vm_node)
@@ -409,6 +420,7 @@ def resume_session(
                     agent_target=None if is_admin else session_target,
                 ),
                 registry=registry,
+                interaction=interaction,
             )
 
             # Bail-before-prompt: refuse the operation up front in the cases
@@ -477,6 +489,7 @@ def resume_session(
                 ],
                 config,
                 registry,
+                interaction=interaction,
             )
 
         with output.section("Starting Session"):
@@ -622,6 +635,7 @@ def stop_all_sessions(
     agent_name: str | list[str] | None = None,
     admin_only: bool = False,
     force: bool = False,
+    interaction: InteractionPolicy,
 ) -> None:
     """Stop all running sessions, optionally filtered by VM, workspace, agent, and/or mode.
 
@@ -630,6 +644,7 @@ def stop_all_sessions(
     and ``admin_only`` are mutually exclusive; the caller enforces
     the mutex.
     """
+    interaction = validate_interaction_policy(interaction)
     sessions = _mgr.filter_sessions(
         db,
         workspace_name=workspace_name,
@@ -644,7 +659,7 @@ def stop_all_sessions(
     # round-trips; on WSL2 they would race the idle timer without the
     # held-active anchor (a no-op hold on other platforms).
     distinct_vms = _mgr._distinct_vms_for_sessions(db, sessions)
-    with _mgr._batch_vm_boundary(db, config, distinct_vms):
+    with _mgr._batch_vm_boundary(db, config, distinct_vms, interaction=interaction):
         # Auto-repair NULL-PID sessions, then batch check
         sessions = _mgr.ensure_pids_batch(sessions, db=db, config=config)
         status_map = _mgr.batch_check_all_sessions(sessions, db=db, config=config)
@@ -714,6 +729,7 @@ def resume_all_sessions(
     admin_only: bool = False,
     include_running: bool = False,
     force: bool = False,
+    interaction: InteractionPolicy,
 ) -> None:
     """Resume sessions, optionally filtered by VM, workspace, agent, and/or mode.
 
@@ -726,6 +742,7 @@ def resume_all_sessions(
     and ``admin_only`` are mutually exclusive; the caller enforces
     the mutex.
     """
+    interaction = validate_interaction_policy(interaction)
     sessions = _mgr.filter_sessions(
         db,
         workspace_name=workspace_name,
@@ -741,7 +758,7 @@ def resume_all_sessions(
     distinct_vms = _mgr._distinct_vms_for_sessions(db, sessions)
 
     failed: list[tuple[str, str]] = []
-    with _mgr._batch_vm_boundary(db, config, distinct_vms):
+    with _mgr._batch_vm_boundary(db, config, distinct_vms, interaction=interaction):
         # Auto-repair NULL-PID sessions, then batch check
         sessions = _mgr.ensure_pids_batch(sessions, db=db, config=config)
         status_map = _mgr.batch_check_all_sessions(sessions, db=db, config=config)
@@ -791,7 +808,14 @@ def resume_all_sessions(
 
         for session in sessions:
             try:
-                resume_session(db, config, name=session.name, force=force, yes=include_running)
+                resume_session(
+                    db,
+                    config,
+                    name=session.name,
+                    force=force,
+                    yes=include_running,
+                    interaction=interaction,
+                )
             except UserAbort:
                 # A confirm-cancellation aborts the whole batch operation, not
                 # just this one session. Propagate so the outer wrapper renders

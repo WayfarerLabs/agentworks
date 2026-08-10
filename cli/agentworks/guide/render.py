@@ -33,6 +33,7 @@ from agentworks.manifests.reference import SchemaReference, plain_text, referenc
 from agentworks.manifests.samples import sample_text
 from agentworks.manifests.yaml_value import render_value
 from agentworks.schema import MAPPING_KEY, SEQUENCE_ELEMENT
+from agentworks.terminal import sanitize_terminal_output as sanitize_terminal_output
 
 if TYPE_CHECKING:
     from agentworks.guide.assessment import OnboardingSnapshot, VerificationEvidence
@@ -60,12 +61,6 @@ class RenderedTopic:
 
 
 _MARKDOWN_PUNCTUATION_RE = re.compile(r"([\\`*_{}\[\]()<>#!|])")
-_TERMINAL_CONTROL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
-
-
-def sanitize_terminal_output(value: str) -> str:
-    """Remove terminal controls while preserving Markdown newlines and tabs."""
-    return _TERMINAL_CONTROL_RE.sub("", value)
 
 
 def framework_heading(title: str) -> str:

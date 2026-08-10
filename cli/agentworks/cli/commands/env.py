@@ -7,7 +7,8 @@ from typing import Annotated
 import typer
 
 from agentworks.cli._app import app
-from agentworks.cli._helpers import get_db
+from agentworks.cli._helpers import get_db, ordinary_interaction_policy
+from agentworks.secrets.policy import validate_interaction_policy
 
 env_app = typer.Typer(
     name="env",
@@ -50,7 +51,7 @@ def env_show(
             "--resolve",
             help=(
                 "Resolve secret-backed entries through the configured "
-                "backend chain and print their values (default: redacted)."
+                "source chain and print their values (default: redacted)."
             ),
         ),
     ] = False,
@@ -60,8 +61,9 @@ def env_show(
     At least one of --vm / --workspace / --agent / --session is required.
     Entries are precedence-sorted and scope-annotated. Secret-backed
     entries are redacted by default; pass --resolve to resolve them
-    through the active backend chain.
+    through the active source chain.
     """
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.config import load_config
     from agentworks.env.show import show_env
 
@@ -73,4 +75,5 @@ def env_show(
         agent_name=agent,
         session_name=session,
         reveal_secrets=resolve,
+        interaction=interaction,
     )

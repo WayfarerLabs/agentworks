@@ -18,13 +18,18 @@ owns only the per-phase step sequences and status/event bookkeeping.
 from __future__ import annotations
 
 import shlex
+import sys
+import tempfile
+import uuid
 from collections.abc import Callable
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.db import InitStatus, ProvisioningStatus
 from agentworks.env import ResourceContext, vm_stable_identity_env
+from agentworks.errors import ProvisioningError
 from agentworks.ssh import SSHError, SSHLogger
 from agentworks.transports import SSHTransport, Transport
 
@@ -65,6 +70,14 @@ if TYPE_CHECKING:
     from agentworks.resources.registry import Registry
     from agentworks.vms.admin import AdminConfig
     from agentworks.vms.templates import ResolvedVMTemplate
+
+
+def _warn_bootstrap_file_residue(message: str) -> None:
+    """Emit one fixed cleanup warning without replacing active control flow."""
+    try:  # noqa: SIM105 - warning failures must not replace the active provisioning failure
+        output.warn(message)
+    except (Exception, KeyboardInterrupt, SystemExit, GeneratorExit):
+        pass
 
 
 def bootstrap_vm(
@@ -318,26 +331,30 @@ def _phase_a_bootstrap(
 ) -> Transport:
     """Phase A: Bootstrap (over provisioning transport). All steps are fatal.
 
-    Three paths depending on how much the platform already handled:
+    Two paths depending on how much the platform already handled:
 
-    1. bootstrap_complete=True (Lima/Azure): The platform already ran the
-       full bootstrap. Skip straight to Tailscale SSH verification.
-    2. Otherwise (WSL2): Run full bootstrap script over the provisioning
+    1. ``bootstrap_complete=True``: The platform already ran the full
+       bootstrap. Skip straight to Tailscale SSH verification.
+    2. Otherwise: Run the full bootstrap script over the provisioning
        transport (user, packages, SSH key, swap, Tailscale).
 
     Returns the Tailscale ``Transport`` for Phase B.
     """
     db.update_vm_provisioning_status(vm_name, ProvisioningStatus.IN_PROGRESS)
 
-    if bootstrap_complete and tailscale_ip:
-        # Lima/Azure: platform already ran the full bootstrap.
-        # Just update DB and move on to SSH verification.
+    if bootstrap_complete:
+        # The platform already ran the full bootstrap. It may have joined
+        # successfully but failed its best-effort IP probe; rediscover the IP
+        # without selecting the auth-key-bearing bootstrap script.
         logger.step("Bootstrap (platform)")
+        if not tailscale_ip:
+            logger.output("Tailscale joined; retrying IP discovery")
+            tailscale_ip = exec_target.run("sudo tailscale ip -4").stdout.strip()
         logger.output(f"Tailscale IP: {tailscale_ip}")
         db.update_vm_tailscale(vm_name, tailscale_ip)
         db.update_vm_provisioning_status(vm_name, ProvisioningStatus.COMPLETE)
     else:
-        # WSL2: run bootstrap script over the provisioning transport
+        # The platform deferred bootstrap to the provisioning transport.
         tailscale_ip = _run_bootstrap_script(
             db,
             config,
@@ -402,8 +419,6 @@ def _run_bootstrap_script(
     ``tailscale_auth_key`` is required; the framework-resolved value
     arrives from ``create_vm`` -> ``bootstrap_vm`` -> ``_phase_a_bootstrap``.
     """
-    import tempfile
-
     from agentworks.capabilities.vm_platform.bootstrap_script import (
         generate_bootstrap_script,
         parse_bootstrap_output,
@@ -423,73 +438,122 @@ def _run_bootstrap_script(
         swap=script_swap,
     )
 
-    # Copy script to VM and execute synchronously over the provisioning transport
-    remote_script = "/tmp/agentworks-bootstrap.sh"
-    with tempfile.NamedTemporaryFile(mode="wb", suffix=".sh", delete=False) as f:
-        f.write(script.encode("utf-8"))
-        local_script = f.name
-
+    # Allocate both stages privately before the script content reaches them.
+    # The random guest name also avoids following a pre-existing predictable
+    # path. Neither path contains the key, and the key crosses no command argv.
+    remote_script = f"/tmp/agentworks-bootstrap-{uuid.uuid4().hex}.sh"
     try:
-        exec_target.copy_to(local_script, remote_script)
+        try:
+            exec_target.run(
+                f"install -m 600 /dev/null {shlex.quote(remote_script)}",
+                sudo=True,
+            )
+        except SSHError:
+            raise ProvisioningError("could not create the private guest bootstrap staging file") from None
+
+        local_script: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="wb",
+                prefix="agentworks-bootstrap-",
+                suffix=".sh",
+                delete=False,
+            ) as staged:
+                local_script = Path(staged.name)
+                staged.write(script.encode("utf-8"))
+            exec_target.copy_to(local_script, remote_script)
+        finally:
+            if local_script is not None:
+                active_failure = sys.exc_info()[1]
+                try:
+                    local_script.unlink(missing_ok=True)
+                    if local_script.exists():
+                        raise OSError("bootstrap staging file still exists")
+                except (OSError, KeyboardInterrupt, SystemExit, GeneratorExit) as cleanup_failure:
+                    if active_failure is None:
+                        if not isinstance(cleanup_failure, OSError):
+                            raise
+                        raise ProvisioningError(
+                            "could not verify removal of the local bootstrap staging file"
+                        ) from None
+                    _warn_bootstrap_file_residue(
+                        "could not verify removal of the local bootstrap staging file; "
+                        "primary failure unchanged; plaintext may remain"
+                    )
+
+        # Run the bootstrap script synchronously over the platform's
+        # provisioning transport. WSL2's transport is a local wsl.exe
+        # subprocess. There is no network session to disconnect from, so the
+        # detached-poll pattern brings no benefit there. It also actively
+        # breaks WSL2 under systemd: each wsl.exe
+        # invocation is its own systemd-logind user session, and the default
+        # KillUserProcesses=yes reaps every process in the session cgroup when
+        # the foreground shell exits. Nohup blocks SIGHUP, not cgroup teardown.
+        #
+        # The wrapping bits (in order) defend against terminal-related hangs:
+        #   setsid       - new session, no controlling TTY. Without this,
+        #                  sudo's default Defaults use_pty allocates a pty
+        #                  whose foreground PGID is sudo's monitor; any dpkg
+        #                  trigger that touches /dev/tty from a background
+        #                  PGID then SIGTTIN/SIGTTOU-stops apt mid-upgrade.
+        #   </dev/null   - stdin = EOF, so anything that reads from stdin
+        #                  returns immediately.
+        #   2>&1         - merge stderr into captured stdout so apt-get noise
+        #                  lands beside the structured step markers.
+        output.detail("Running bootstrap script...")
+        result = exec_target.run(
+            f"setsid sudo -n /bin/bash {shlex.quote(remote_script)} </dev/null 2>&1",
+            check=False,
+            timeout=900,
+        )
     finally:
-        import os
-
-        os.unlink(local_script)
-
-    # Run the bootstrap script synchronously over the platform's provisioning
-    # transport. WSL2 is the only consumer here (Lima/Azure embed the bootstrap
-    # in their native delivery mechanisms and arrive with bootstrap_complete=True),
-    # and the WSL2 transport is a local wsl.exe subprocess -- there is no
-    # network session to disconnect from, so the detached-poll pattern brings
-    # no benefit. It also actively breaks WSL2 under systemd: each `wsl.exe`
-    # invocation is its own systemd-logind user session, and the default
-    # KillUserProcesses=yes reaps every process in the session cgroup when the
-    # foreground shell exits -- nohup blocks SIGHUP, not cgroup teardown.
-    #
-    # The wrapping bits (in order) defend against terminal-related hangs:
-    #   setsid       - new session, no controlling TTY. Without this, sudo's
-    #                  default `Defaults use_pty` allocates a pty whose
-    #                  foreground PGID is sudo's monitor; any dpkg trigger
-    #                  that touches /dev/tty from a background PGID then
-    #                  SIGTTIN/SIGTTOU-stops apt mid-`dist-upgrade`.
-    #   </dev/null   - stdin = EOF, so anything that reads from stdin (rather
-    #                  than /dev/tty directly) returns immediately.
-    #   2>&1         - merge stderr into captured stdout so apt-get noise
-    #                  lands alongside the script's ##STEP## markers when
-    #                  we need to diagnose a failure.
-    output.detail("Running bootstrap script...")
-    result = exec_target.run(
-        f"setsid sudo -n /bin/bash {remote_script} </dev/null 2>&1",
-        check=False,
-        timeout=900,  # 15 min hard cap; apt-get dist-upgrade is the long pole
-    )
-    exec_target.run(f"rm -f {remote_script}", sudo=True, check=False)
+        active_failure = sys.exc_info()[1]
+        cleanup_command = f"rm -f -- {shlex.quote(remote_script)} && test ! -e {shlex.quote(remote_script)}"
+        try:
+            cleanup_result = exec_target.run(cleanup_command, sudo=True, check=False)
+            if not cleanup_result.ok:
+                raise SSHError("guest bootstrap staging file still exists")
+        except (SSHError, OSError, KeyboardInterrupt, SystemExit, GeneratorExit) as cleanup_failure:
+            if active_failure is None:
+                if not isinstance(cleanup_failure, (SSHError, OSError)):
+                    raise
+                raise ProvisioningError("could not verify removal of the guest bootstrap staging file") from None
+            _warn_bootstrap_file_residue(
+                "could not verify removal of the guest bootstrap staging file; "
+                "primary failure unchanged; plaintext may remain"
+            )
 
     # Parse structured output
     bootstrap = parse_bootstrap_output(result.stdout, result.returncode)
 
     # Feed results into logger and console
+    def _sanitize_bootstrap_field(value: str) -> str:
+        if not tailscale_auth_key:
+            return value
+        return value.replace(tailscale_auth_key, "[REDACTED]")
+
     for step in bootstrap.steps:
-        logger.step(step.name)
+        step_name = _sanitize_bootstrap_field(step.name)
+        logger.step(step_name)
         if step.success_msg:
-            output.detail(f"{step.name}: {step.success_msg}")
-            logger.output(step.success_msg)
+            success_msg = _sanitize_bootstrap_field(step.success_msg)
+            output.detail(f"{step_name}: {success_msg}")
+            logger.output(success_msg)
         for warning in step.warnings:
-            output.warn(warning)
-            logger.warning(warning)
+            safe_warning = _sanitize_bootstrap_field(warning)
+            output.warn(safe_warning)
+            logger.warning(safe_warning)
         if step.error:
-            output.warn(f"Error: {step.error}")
-            logger.log_error(step.error)
+            safe_error = _sanitize_bootstrap_field(step.error)
+            output.warn(f"Error: {safe_error}")
+            logger.log_error(safe_error)
 
     # Log full output for troubleshooting
     if result.stdout:
-        logger.output(result.stdout)
+        logger.output(_sanitize_bootstrap_field(result.stdout))
 
     if not bootstrap.ok:
-        msg = f"Bootstrap script failed (exit {result.returncode})"
-        if result.stdout:
-            msg += f"\n{result.stdout[-500:]}"
-        raise SSHError(msg)
+        raise SSHError(f"Bootstrap script failed (exit {result.returncode})")
 
     # Update DB with Tailscale info
     assert bootstrap.tailscale_ip is not None

@@ -12,6 +12,7 @@ from agentworks.errors import (
     StateError,
 )
 from agentworks.name_filters import validate_name_filters
+from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 from agentworks.vms.manager import gated_vm_boundary
 
 if TYPE_CHECKING:
@@ -77,6 +78,7 @@ def _prepare_vm(
     session: SessionRow,
     *,
     operation: str | None = None,
+    interaction: InteractionPolicy,
 ) -> Iterator[tuple[WorkspaceRow, VMRow, RunCommand, RunCommand, Transport]]:
     """The singular session ops' composition root (stop / delete /
     describe / attach / logs): validate the session's workspace and VM
@@ -89,6 +91,7 @@ def _prepare_vm(
     an SSHLogger attaches to the Transport so all calls log
     automatically.
     """
+    interaction = validate_interaction_policy(interaction)
     from agentworks.bootstrap import load_request_registry
     from agentworks.ssh import SSHLogger
 
@@ -112,7 +115,14 @@ def _prepare_vm(
         )
 
     registry = load_request_registry(config)
-    with gated_vm_boundary(db, config, registry, vm, scope=_session_scope(db, session, ws, vm)):
+    with gated_vm_boundary(
+        db,
+        config,
+        registry,
+        vm,
+        scope=_session_scope(db, session, ws, vm),
+        interaction=interaction,
+    ):
         logger = SSHLogger(vm.name, operation) if operation else None
         target = _mgr.transport(vm, config, logger=logger)
         run_command: RunCommand = target.run
@@ -210,7 +220,13 @@ def _distinct_vms_for_sessions(db: Database, sessions: list[SessionRow]) -> list
 
 
 @contextlib.contextmanager
-def _batch_vm_boundary(db: Database, config: Config, vms: Sequence[VMRow]) -> Iterator[None]:
+def _batch_vm_boundary(
+    db: Database,
+    config: Config,
+    vms: Sequence[VMRow],
+    *,
+    interaction: InteractionPolicy,
+) -> Iterator[None]:
     """The batch session ops' composition root (stop_all_sessions,
     resume_all_sessions, list_sessions' status pass): ONE boundary
     over the distinct VMs, then each VM's activation gate and
@@ -236,7 +252,7 @@ def _batch_vm_boundary(db: Database, config: Config, vms: Sequence[VMRow]) -> It
     design). The one exception is the repair path's Tailscale rejoin
     key: it is inherently outside the boundary union (lazy, read only
     when a started VM fails to reconnect) and resolves late through
-    the backend chain, the same documented conditional-need exception
+    the configured source chain, the same documented conditional-need exception
     the imperative repair path carried; it cannot seed, because the
     boundary has already resolved. The callback is built PER TARGET
     and refuses any other outside-the-union name unless the target
@@ -248,6 +264,7 @@ def _batch_vm_boundary(db: Database, config: Config, vms: Sequence[VMRow]) -> It
     no gate), the imperative lazy-bind property: ``session list
     --no-status`` and empty filter results must cost nothing here.
     """
+    interaction = validate_interaction_policy(interaction)
     if not vms:
         yield
         return
@@ -267,7 +284,7 @@ def _batch_vm_boundary(db: Database, config: Config, vms: Sequence[VMRow]) -> It
     from agentworks.vms.nodes import VMSiteNode, live_vm_node
 
     registry = load_request_registry(config)
-    resolver = Resolver(config, registry)
+    resolver = Resolver(config, registry, interaction=interaction)
     site_nodes: dict[str, VMSiteNode] = {}
     vm_nodes = [live_vm_node(db, config, registry, vm, site_nodes=site_nodes) for vm in vms]
     nodes = walk(*vm_nodes)
@@ -278,7 +295,12 @@ def _batch_vm_boundary(db: Database, config: Config, vms: Sequence[VMRow]) -> It
         level=ScopeLevel.SYSTEM,
         system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
     )
-    preflight_all(nodes, RunContext(config=config, operation_scope=scope), registry=registry)
+    preflight_all(
+        nodes,
+        RunContext(config=config, operation_scope=scope),
+        registry=registry,
+        interaction=interaction,
+    )
     resolver.resolve()
 
     covered = set(union)
@@ -308,17 +330,12 @@ def _batch_vm_boundary(db: Database, config: Config, vms: Sequence[VMRow]) -> It
                     f"ride the boundary union; only the lazy rejoin "
                     f"repair key resolves after it."
                 )
-            # The rejoin repair key: resolve late through the backend
+            # The rejoin repair key: resolve late through the source
             # chain, never seed (the boundary already resolved).
             from agentworks.orchestration.secrets import secret_declarations
-            from agentworks.secrets.resolve import (
-                active_backends,
-                resolve_secrets,
-            )
 
             (decl,) = secret_declarations([secret_name], registry)
-            # ``registry`` powers the disabled-plugin failure hint (LLD b).
-            return resolve_secrets([decl], active_backends(config, registry), registry=registry)[secret_name]
+            return resolver.resolve_late_repair(decl)
 
         return _resolve
 

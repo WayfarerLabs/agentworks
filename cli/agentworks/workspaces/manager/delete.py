@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.errors import NotFoundError, StateError, UserAbort
+from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.manager._common import _workspace_scope
 
@@ -24,6 +25,7 @@ def delete_workspace(
     force: bool = False,
     yes: bool = False,
     vm_node: LiveVMNode | None = None,
+    interaction: InteractionPolicy,
 ) -> None:
     """Delete a workspace.
 
@@ -49,6 +51,7 @@ def delete_workspace(
     boundary-building standalone branch.
     """
 
+    interaction = validate_interaction_policy(interaction)
     ws = db.get_workspace(name)
     if ws is None:
         raise NotFoundError(
@@ -102,6 +105,7 @@ def delete_workspace(
                         registry,
                         vm,
                         scope=_workspace_scope(db, vm, name),
+                        interaction=interaction,
                     )
                 )
             else:

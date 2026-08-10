@@ -77,6 +77,7 @@ class RemoteLimaTransport(Transport):
         check: bool = True,
         timeout: int | None = None,
         env: dict[str, str] | None = None,
+        input_text: str | None = None,
         retries: int | None = None,
         on_retry: Callable[[int, int], None] | None = None,
     ) -> SSHResult:
@@ -96,6 +97,7 @@ class RemoteLimaTransport(Transport):
             lima_cmd,
             check=check,
             timeout=timeout,
+            input_text=input_text,
             retries=retries,
             on_retry=on_retry,
         )

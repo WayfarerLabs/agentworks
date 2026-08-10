@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.errors import StateError
+from agentworks.secrets.policy import InteractionPolicy
 from agentworks.vms import backup as vm_backup
 
 if TYPE_CHECKING:
@@ -29,4 +30,4 @@ def test_missing_tailscale_fails_before_the_boundary(
     monkeypatch.setattr(vm_backup, "gated_vm_boundary", _no_boundary)
 
     with pytest.raises(StateError, match="no Tailscale address"):
-        vm_backup.backup_vm(db, object(), "bvm")  # type: ignore[arg-type]
+        vm_backup.backup_vm(db, object(), "bvm", interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]

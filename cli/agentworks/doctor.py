@@ -18,7 +18,9 @@ from agentworks.path_rendering import format_host_path
 
 if TYPE_CHECKING:
     from agentworks.config import Config
+    from agentworks.machine_output import JsonObject
     from agentworks.resources.registry import Registry
+    from agentworks.secrets.sources import SourceProvenance
     from agentworks.vms.sites import VMSiteDecl
 
 
@@ -45,17 +47,57 @@ class HealthGroup:
     name: str
     checks: list[HealthCheck] = field(default_factory=list)
 
-    def ok(self, name: str, message: str | None = None, *, hint: str | None = None) -> None:
-        self.checks.append(HealthCheck(name=name, status=Status.OK, message=message, hint=hint))
+    def _append(
+        self,
+        status: Status,
+        name: str,
+        message: str | None,
+        hint: str | None,
+    ) -> None:
+        self.checks.append(
+            HealthCheck(
+                name=name,
+                status=status,
+                message=message,
+                hint=hint,
+            )
+        )
 
-    def info(self, name: str, message: str | None = None, *, hint: str | None = None) -> None:
-        self.checks.append(HealthCheck(name=name, status=Status.INFO, message=message, hint=hint))
+    def ok(
+        self,
+        name: str,
+        message: str | None = None,
+        *,
+        hint: str | None = None,
+    ) -> None:
+        self._append(Status.OK, name, message, hint)
 
-    def warn(self, name: str, message: str | None = None, *, hint: str | None = None) -> None:
-        self.checks.append(HealthCheck(name=name, status=Status.WARN, message=message, hint=hint))
+    def info(
+        self,
+        name: str,
+        message: str | None = None,
+        *,
+        hint: str | None = None,
+    ) -> None:
+        self._append(Status.INFO, name, message, hint)
 
-    def fail(self, name: str, message: str | None = None, *, hint: str | None = None) -> None:
-        self.checks.append(HealthCheck(name=name, status=Status.FAIL, message=message, hint=hint))
+    def warn(
+        self,
+        name: str,
+        message: str | None = None,
+        *,
+        hint: str | None = None,
+    ) -> None:
+        self._append(Status.WARN, name, message, hint)
+
+    def fail(
+        self,
+        name: str,
+        message: str | None = None,
+        *,
+        hint: str | None = None,
+    ) -> None:
+        self._append(Status.FAIL, name, message, hint)
 
 
 @dataclass
@@ -89,6 +131,48 @@ class HealthReport:
     @property
     def has_failures(self) -> bool:
         return self.counts()[Status.FAIL] > 0
+
+
+@dataclass(frozen=True, slots=True)
+class SecretSourceStatus:
+    """Value-free doctor projection for one declared secret source."""
+
+    name: str
+    backend: str
+    provenance: SourceProvenance
+    active: bool
+    enabled: bool
+    not_ready_reason: str | None
+
+
+def health_report_data(report: HealthReport) -> JsonObject:
+    """Project a complete doctor report into the closed JSON v1 data shape."""
+    counts = report.counts()
+    return {
+        "groups": [
+            {
+                "name": group.name,
+                "checks": [_health_check_data(check) for check in group.checks],
+            }
+            for group in report.groups
+        ],
+        "counts": {
+            "ok": counts[Status.OK],
+            "info": counts[Status.INFO],
+            "warn": counts[Status.WARN],
+            "fail": counts[Status.FAIL],
+        },
+    }
+
+
+def _health_check_data(check: HealthCheck) -> JsonObject:
+    """Serialize the same check facts rendered to humans."""
+    return {
+        "name": check.name,
+        "status": check.status.value,
+        "message": check.message,
+        "hint": check.hint,
+    }
 
 
 def run_checks(*, completion_version: str | None = None) -> HealthReport:
@@ -141,6 +225,10 @@ def run_checks(*, completion_version: str | None = None) -> HealthReport:
     else:
         report.groups.append(_skipped_group("Secret backends", "Registered backends"))
     if config is not None and registry is not None:
+        report.groups.append(_check_secret_sources(config, registry))
+    else:
+        report.groups.append(_skipped_group("Secret sources", "Declared sources"))
+    if config is not None and registry is not None:
         report.groups.append(_check_secrets(config, registry))
     else:
         report.groups.append(_skipped_group("Secrets", "Declared secrets"))
@@ -184,37 +272,9 @@ def _check_system() -> HealthGroup:
     config file install-wide), so it leads the report under its own
     header rather than hiding in the VM groups.
     """
-    from agentworks.db import SYSTEM_SLUG_KEY, Database
+    from agentworks.doctor_state import check_system
 
-    g = HealthGroup("System")
-    try:
-        db_exists, current, latest = Database.check_schema()
-        if not db_exists:
-            # No database means nothing has ever set the slug.
-            g.info("System slug", "unset (will ask at first vm create)")
-            return g
-        if current != latest:
-            # Opening the DB would auto-migrate mid-report; defer to the
-            # Database group's deliberate migration row.
-            g.info(
-                "System slug",
-                "pending database migration (see the Database group)",
-            )
-            return g
-        db = Database()
-        try:
-            slug = db.get_setting(SYSTEM_SLUG_KEY)
-        finally:
-            db.close()
-        if slug:
-            g.ok("System slug", slug)
-        elif slug == "":
-            g.info("System slug", "declined (asked at first vm create)")
-        else:
-            g.info("System slug", "unset (will ask at first vm create)")
-    except Exception as e:
-        g.warn("System slug", f"could not check the database: {e}")
-    return g
+    return check_system()
 
 
 def _check_python() -> HealthGroup:
@@ -331,7 +391,10 @@ def _platform_summary(decl: VMSiteDecl) -> str:
     return summary
 
 
-def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
+def _check_vm_sites(
+    config: Config,
+    registry: Registry,
+) -> HealthGroup:
     """VM sites: every registered site's state, and every VM's site
     resolving to a usable declaration.
 
@@ -350,8 +413,8 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
     what lets doctor call it.
 
     What that row does NOT cover is whether the site's declared secrets
-    would RESOLVE. That prediction belongs to an operation's runtime
-    world (which backends are active, whether this run can prompt), so
+    have an attemptable source. That prediction belongs to an operation's runtime
+    world (which sources are active, whether this run can prompt), so
     it lives in the operation's preflight sweep
     (:func:`~agentworks.orchestration.readiness.preflight_all`), which
     doctor does not run: doctor invokes ``node.preflight`` per row,
@@ -360,11 +423,7 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
     that names it, and a site whose credential is prompt-only reads ok
     here, correctly, because nothing about that site is unhealthy.
     """
-    from agentworks.db import Database
-    from agentworks.vms.sites import (
-        VMSiteDecl,
-        site_manifest_hint,
-    )
+    from agentworks.vms.sites import VMSiteDecl
 
     g = HealthGroup("VM sites")
 
@@ -389,13 +448,13 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
 
             site_node = vm_site_node(registry, name)
             site_node.preflight(RunContext(config=config))
-        except Exception as e:
+        except Exception as error:
             # A failing preflight on an enabled site is the error the
             # operator's next command hits: warn.
             g.warn(
                 name,
-                f"{_platform_summary(decl)}; preflight: {e}",
-                hint=getattr(e, "hint", None),
+                f"{_platform_summary(decl)}; preflight: {error}",
+                hint=getattr(error, "hint", None),
             )
             continue
         g.ok(name, _platform_summary(decl))
@@ -407,39 +466,9 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
             f"names '{default_site}', which is not ready: {not_ready[default_site]}",
         )
 
-    try:
-        db_exists, current, latest = Database.check_schema()
-        if not db_exists:
-            # No VMs recorded yet; nothing to cross-check.
-            return g
-        if current != latest:
-            # Opening the DB would auto-migrate mid-report (interleaving
-            # the migration's own output into this group and stealing
-            # the Database group's deliberate migration row); defer.
-            g.info(
-                "VM sites",
-                "pending database migration (see the Database group); "
-                "re-run doctor after migrating for the full report",
-            )
-            return g
-        db = Database()
-        try:
-            for vm in db.list_vms():
-                if vm.site in not_ready:
-                    g.warn(
-                        f"VM '{vm.name}'",
-                        f"site '{vm.site}' is not ready: {not_ready[vm.site]}",
-                    )
-                elif vm.site not in sites:
-                    g.fail(
-                        f"VM '{vm.name}'",
-                        f"site '{vm.site}' is not declared",
-                        hint=site_manifest_hint(vm.site),
-                    )
-        finally:
-            db.close()
-    except Exception as e:
-        g.warn("VM sites", f"could not check the database: {e}")
+    from agentworks.doctor_state import append_vm_site_database_checks
+
+    append_vm_site_database_checks(g, sites=sites, not_ready=not_ready)
     return g
 
 
@@ -475,7 +504,7 @@ def _check_tailscale() -> HealthGroup:
 
 
 def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
-    """Returns (group, config_or_none, registry_or_none)."""
+    """Return config and registry facts for the complete doctor report."""
     from agentworks.config import CONFIG_PATH, ConfigError
     from agentworks.errors import ValidationError
 
@@ -493,7 +522,10 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     # is framed by `located()`, which is shared with every non-doctor
     # surface that reports the same error, so it is not doctor's to change.
     if not CONFIG_PATH.exists():
-        g.fail("Config file", f"not found: {format_host_path(CONFIG_PATH)}. Run 'agw config init' to create one.")
+        g.fail(
+            "Config file",
+            f"not found: {format_host_path(CONFIG_PATH)}. Run 'agw config init' to create one.",
+        )
         return g, None, None
 
     g.ok("Config file", format_host_path(CONFIG_PATH))
@@ -502,14 +534,18 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     try:
         from agentworks.config import load_config
 
-        config = load_config(warn_issues=False)
+        config = load_config(warn_issues=False, raise_errors=True)
     except (ConfigError, ValidationError) as e:
         # ValidationError is a SIBLING of ConfigError under AgentworksError,
         # not a subclass, so it must be named explicitly. Catching it here
         # yields a fail row and lets the rest of the report render, per
         # doctor's maximal-visibility contract, instead of aborting with a
         # bare one-liner and no report.
-        g.fail("Config", str(e), hint=e.hint)
+        g.fail(
+            "Config",
+            str(e),
+            hint=e.hint,
+        )
         config_load_failed = True
         # The resource-section hard error (config.toml still declares
         # resources) is exactly the mid-migration operator doctor helps most,
@@ -522,13 +558,9 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
         from agentworks.config import load_config as _load_settings_only
 
         try:
-            config = _load_settings_only(warn_issues=False, resources=False)
+            config = _load_settings_only(warn_issues=False, resources=False, raise_errors=True)
         except (ConfigError, ValidationError):
             return g, None, None
-    except SystemExit:
-        g.fail("Config", "failed to load")
-        return g, None, None
-
     # Manifest spec-level warnings (unknown keys with file:line, env
     # hygiene, ...) surface as doctor rows, exactly like TOML
     # config_issues below. Loading here (and passing the set into
@@ -552,7 +584,11 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
         # and so can surface a ValidationError. Caught here it becomes a fail
         # row and the rest of the report (TOML issues, SSH checks, ...) still
         # renders, rather than aborting the whole run.
-        g.fail("Manifest", str(e), hint=e.hint)
+        g.fail(
+            "Manifest",
+            str(e),
+            hint=e.hint,
+        )
 
     for issue in config.config_issues:
         g.warn("Config", issue)
@@ -585,7 +621,11 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     try:
         registry = build_registry(config, manifests=manifests)
     except ConfigError as e:
-        g.fail("Resource registry", str(e), hint=e.hint)
+        g.fail(
+            "Resource registry",
+            str(e),
+            hint=e.hint,
+        )
         return g, config, None
 
     # Dotfiles
@@ -674,34 +714,58 @@ def _check_secret_backends(registry: Registry) -> HealthGroup:
     return g
 
 
+def _secret_source_statuses(config: Config, registry: Registry) -> tuple[SecretSourceStatus, ...]:
+    """Project every source row without invoking a capability operation."""
+    from agentworks.resources.graph import Enablement
+    from agentworks.secrets.sources import SecretSourceDecl, source_provenance
+
+    active_names = set(config.secret_config_data.backends)
+    statuses: list[SecretSourceStatus] = []
+    for name, row in sorted(registry.iter_kind_items("secret-source"), key=lambda item: item[0]):
+        if not isinstance(row, SecretSourceDecl):
+            continue
+        statuses.append(
+            SecretSourceStatus(
+                name=name,
+                backend=row.backend.name,
+                provenance=source_provenance(row),
+                active=name in active_names,
+                enabled=registry.graph.enablement_of("secret-source", name) is not Enablement.disabled,
+                not_ready_reason=registry.graph.readiness_of("secret-source", name).reason,
+            )
+        )
+    return tuple(statuses)
+
+
+def _check_secret_sources(config: Config, registry: Registry) -> HealthGroup:
+    """Explain participation and readiness for every declared source row."""
+    from agentworks.secrets.sources import SourceProvenance
+
+    provenance_labels = {
+        SourceProvenance.OPERATOR_OVERRIDE: "operator override of synthesized default",
+        SourceProvenance.SYNTHESIZED_DEFAULT: "synthesized default",
+        SourceProvenance.DECLARED: "declared",
+    }
+    group = HealthGroup("Secret sources")
+    statuses = _secret_source_statuses(config, registry)
+    if not statuses:
+        group.info("Declared sources", "none")
+        return group
+    for status in statuses:
+        participation = "active" if status.active else "inactive"
+        enablement = "enabled" if status.enabled else "disabled"
+        readiness = f"not ready: {status.not_ready_reason}" if status.not_ready_reason is not None else "ready"
+        group.info(
+            status.name,
+            f"backend {status.backend}; {participation}; {enablement}; "
+            f"{provenance_labels[status.provenance]}; {readiness}",
+        )
+    return group
+
+
 def _check_secrets(config: Config, registry: Registry) -> HealthGroup:
-    """Check every registry secret for a runtime-resolvable value.
-
-    One row per secret -- operator-declared AND auto-declared alike
-    (the auto-declared ones, e.g. ``tailscale-auth-key`` and the
-    ``git-token-*`` family, are exactly the secrets most likely to
-    prompt or fail at command time, so a doctor that hides them cannot
-    predict the next command). Auto-declared rows carry an ``(auto)``
-    marker.
-
-    - OK: at least one active backend in the chain would resolve the
-      secret at runtime (the message says which -- "would resolve via
-      prompt" is the heads-up that a prompt is coming).
-    - WARN: no active backend would resolve it (config is valid but
-      there's no path to a value -- e.g. env-var has no matching env
-      var set and prompt is opted out, or the only attempting backend is
-      not-ready on this host so resolution would skip it, R9.6).
-    - FAIL: the secret's ``backend_mappings`` references an unknown
-      backend name. Config error; nothing to resolve against. FAIL
-      takes precedence over OK / WARN so the operator fixes the typo
-      before we tell them about resolution.
-
-    Backend-applicability detail (per-backend soft-skip reasons,
-    inactive mappings) lives in ``agw secret list``; unused declarations
-    surface in ``agw secret describe``'s ``Referenced by:`` section.
-    Doctor stays one row per secret so the summary line stays scannable.
-    """
-    from agentworks.resources.access import kind_dict, secret_decls
+    """Predict each declared secret's attempt path without probing a source."""
+    from agentworks.resources.access import secret_decls
 
     g = HealthGroup("Secrets")
 
@@ -710,101 +774,34 @@ def _check_secrets(config: Config, registry: Registry) -> HealthGroup:
         g.info("Declared secrets", "none")
         return g
 
-    # The registry always carries the built-in env-var / prompt backend
-    # rows, so this set covers built-ins and manifest declarations both.
-    known_backends = set(kind_dict(registry, "secret-backend").keys())
-    from agentworks.secrets.resolve import active_backends, preview_resolution
+    from agentworks.secrets.preview import PreviewCategory, preview_resolution
+    from agentworks.secrets.resolve import active_sources
 
-    backends = active_backends(config, registry)
+    sources = active_sources(config, registry)
 
     for name, decl in sorted(secrets.items()):
         auto = getattr(decl.origin, "variant", None) == "auto-declared"
         label = f"Secret {name!r} (auto)" if auto else f"Secret {name!r}"
-        invalid = sorted(backend for backend in decl.backend_mappings if backend not in known_backends)
-        if invalid:
-            noun = "backend" if len(invalid) == 1 else "backends"
-            g.fail(
-                label,
-                f"references unknown {noun}: {', '.join(invalid)}",
-            )
-            continue
-
-        # Doctor is a pure inspection sweep, so its preview stays
-        # optimistic about interactive availability
-        # (``interactive_available=True``): it reports the secret's
-        # configured capability, not whether this doctor run has a TTY.
-        # Preflight prediction is the caller that gates on the run's mode
-        # (issue #202).
-        resolved_by = preview_resolution(decl, backends, interactive_available=True)
-        if resolved_by is not None:
-            g.ok(label, f"would resolve via {resolved_by}")
+        preview = preview_resolution(decl, sources)
+        if preview.category is PreviewCategory.ATTEMPTABLE:
+            g.ok(label, f"would attempt via {preview.source}")
         else:
-            # Readiness-aware (R9.6, in lockstep with the resolution skip): a
-            # secret whose only attempting backend is not-ready is at-risk, and
-            # the reason is the not-ready backend, not "no backend attempts it."
-            skipped = [
-                f"{b.name} ({b.readiness.reason})"
-                for b in backends
-                if b.would_attempt(decl) and not b.readiness.is_ready
-            ]
-            if skipped:
-                g.warn(label, f"no ready backend would resolve it; not ready: {'; '.join(skipped)}")
+            if preview.skipped_not_ready:
+                skipped = "; ".join(f"{source.source} ({source.reason})" for source in preview.skipped_not_ready)
+                g.warn(
+                    label,
+                    f"not attemptable through any active source; not ready: {skipped}",
+                )
             else:
-                g.warn(label, "not available in any active backend")
+                g.warn(label, "not attemptable through any active source")
 
     return g
 
 
 def _check_database() -> HealthGroup:
-    from agentworks.db import Database
+    from agentworks.doctor_state import check_database
 
-    g = HealthGroup("Database")
-
-    try:
-        exists, current, latest = Database.check_schema()
-        if not exists:
-            g.ok("Database", "does not exist yet (will be created on first use)")
-        elif current == latest:
-            g.ok("Schema", f"up to date (version {current})")
-            db = Database()
-            _report_db_contents(g, db)
-        elif current < latest:
-            g.warn("Schema", f"at version {current}, latest is {latest}. Migrating...")
-            db = Database()  # auto-migrates
-            g.ok("Schema", f"migrated to version {latest}")
-            _report_db_contents(g, db)
-        else:
-            g.fail("Schema", f"version {current} is newer than latest {latest} (downgrade?)")
-    except Exception as e:
-        g.fail("Database", str(e))
-
-    return g
-
-
-def _report_db_contents(g: HealthGroup, db: object) -> None:
-    """Report DB contents and flag VMs in non-complete states."""
-    from agentworks.db import Database, InitStatus
-    from agentworks.ssh import LOG_DIR
-
-    assert isinstance(db, Database)
-
-    vms = db.list_vms()
-    ws_count = len(db.list_workspaces())
-    g.ok("Contents", f"{len(vms)} VMs, {ws_count} workspaces")
-
-    def _log_hint(vm_name: str) -> str:
-        if not LOG_DIR.exists():
-            return ""
-        logs = sorted(LOG_DIR.glob(f"{vm_name}-*.log"), reverse=True)
-        return f" Log: {format_host_path(logs[0])}" if logs else ""
-
-    for vm in vms:
-        if vm.init_status == InitStatus.FAILED.value:
-            g.warn(f"VM '{vm.name}'", f"failed state (only delete supported).{_log_hint(vm.name)}")
-        elif vm.init_status == InitStatus.PARTIAL.value:
-            g.warn(f"VM '{vm.name}'", f"initialized with warnings.{_log_hint(vm.name)}")
-        elif vm.init_status not in (InitStatus.COMPLETE.value, InitStatus.PENDING.value):
-            g.warn(f"VM '{vm.name}'", f"unexpected init status: {vm.init_status}")
+    return check_database()
 
 
 def _check_completions(current_version: str) -> HealthGroup:

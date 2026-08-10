@@ -184,7 +184,7 @@ def _recompute_inbound(registry: Registry) -> dict[tuple[str, str], list[Referen
     every resource's ``dependencies(context)`` and project each edge onto its
     target. An independent recomputation (not a read of the graph's own
     inbound), threaded the same build context the finalize walk uses, so a
-    secret's ``secret -> secret-backend`` edges (R9.10) are reproduced too."""
+    secret's ``secret -> secret-source`` edges are reproduced too."""
     from agentworks.resources.graph import build_context
 
     context = build_context(registry._resources)
@@ -247,10 +247,10 @@ def test_dependents_of_reproduces_old_references_field(tmp_path: Path) -> None:
 
 def test_capability_impls_are_stamped_on_nodes(tmp_path: Path) -> None:
     """The builder populates capability nodes' impl off the code registry
-    (heterogeneous: classes for platform/harness-integration/provider, an instance for
-    secret-backend); declarable nodes carry ``None``."""
+    (the exact registered class for every capability kind); declarable
+    nodes carry ``None``."""
     from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
-    from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
+    from agentworks.capabilities.secret_backend import SECRET_BACKEND_REGISTRY
 
     cfg = _write_cfg(tmp_path, "")
     registry = build_registry(load_config(cfg, warn_issues=False))
@@ -291,15 +291,15 @@ def test_runtime_closure_matches_collect_secrets_for(tmp_path: Path) -> None:
     assert "vm-secret" in vm_secrets
 
 
-# -- Phase 4 head step: secret -> secret-backend edges -----------------------
+# -- Secret -> configured-source candidate edges ------------------------------
 
 
-def test_auto_declared_secret_has_resolving_backend_edges(tmp_path: Path) -> None:
+def test_auto_declared_secret_has_resolving_source_edges(tmp_path: Path) -> None:
     """Phase 4 head step (and LLD b subtlety 3, the now-load-bearing
     materialize loop): the default VM template auto-declares
     ``tailscale-auth-key``, and the materialized secret's
-    ``dependencies(context)`` emits its ``secret -> secret-backend`` edges to
-    every present would-attempt backend. env-var and prompt are
+    ``dependencies(context)`` emits its ``secret -> secret-source`` edges to
+    every present would-attempt source. env-var and prompt are
     mapping-optional (always attempt), so both are candidates; onepassword is
     mapping-required and unmapped, so it is not. That the build COMPLETES pins
     the no-loop regression: a materialized secret walks its backend edges, and
@@ -311,16 +311,16 @@ def test_auto_declared_secret_has_resolving_backend_edges(tmp_path: Path) -> Non
 
     assert any(name == "tailscale-auth-key" for name, _ in registry.iter_kind_items("secret"))
     targets = {(ref.kind, ref.name) for ref in graph.edges_of("secret", "tailscale-auth-key")}
-    assert ("secret-backend", "env-var") in targets
-    assert ("secret-backend", "prompt") in targets
-    assert ("secret-backend", "onepassword") not in targets
+    assert ("secret-source", "env-var") in targets
+    assert ("secret-source", "prompt") in targets
+    assert ("secret-source", "onepassword") not in targets
 
 
-def test_backend_rows_gain_inbound_secret_refs(tmp_path: Path) -> None:
+def test_source_rows_gain_inbound_secret_refs(tmp_path: Path) -> None:
     """R9.10: because every secret emits an edge to each mapping-optional
-    backend, the ``env-var`` and ``prompt`` backend rows now list under
+    source, the ``env-var`` and ``prompt`` source rows now list under
     ``dependents_of`` the secrets that could resolve through them (they were
-    referenced by nothing before the ``secret -> secret-backend`` edges)."""
+    referenced by nothing before the source candidate edges)."""
     cfg = _write_cfg(
         tmp_path,
         "",
@@ -328,30 +328,31 @@ def test_backend_rows_gain_inbound_secret_refs(tmp_path: Path) -> None:
     )
     registry = build_registry(load_config(cfg, warn_issues=False))
     graph = registry.graph
-    for backend in ("env-var", "prompt"):
-        sources = {entry.source for entry in graph.dependents_of("secret-backend", backend)}
+    for source in ("env-var", "prompt"):
+        sources = {entry.source for entry in graph.dependents_of("secret-source", source)}
         assert ("secret", "api-key") in sources
         assert ("secret", "tailscale-auth-key") in sources
 
 
-def test_onepassword_mapped_secret_gets_onepassword_edge(tmp_path: Path) -> None:
+def test_onepassword_mapped_secret_gets_declared_source_edge(tmp_path: Path) -> None:
     """A secret with an explicit ``backend_mappings.onepassword`` gains the
     onepassword edge (its ``would_attempt`` is mapping-required), on top of
     the default env-var / prompt edges."""
     cfg = _write_cfg(
         tmp_path,
-        "",
+        '[plugins]\nsystem = ["onepassword"]\n',
+        ManifestDoc("secret-source", "vault-op", {"backend": {"name": "onepassword"}}),
         ManifestDoc(
             "secret",
             "vault-key",
-            {"backend_mappings": {"onepassword": "op://vault/item/field"}},
+            {"backend_mappings": {"vault-op": "op://vault/item/field"}},
             description="a vaulted key",
         ),
     )
     registry = build_registry(load_config(cfg, warn_issues=False))
     targets = {(ref.kind, ref.name) for ref in registry.graph.edges_of("secret", "vault-key")}
-    assert ("secret-backend", "onepassword") in targets
-    assert ("secret-backend", "env-var") in targets
+    assert ("secret-source", "vault-op") in targets
+    assert ("secret-source", "env-var") in targets
 
 
 # -- the graph is frozen -----------------------------------------------------

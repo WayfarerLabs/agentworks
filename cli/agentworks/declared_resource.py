@@ -238,8 +238,8 @@ class DeclaredResource(EnvelopeMetadata):
         edge-extraction method the finalize build walk calls per present row.
 
         The builder threads a :class:`~agentworks.resources.graph.FinalizeContext`
-        (the available-backend list a ``secret`` reads to emit its
-        ``secret -> secret-backend`` edges, and the published rows an
+        (the source rows and backend classes a ``secret`` reads to emit its
+        ``secret -> secret-source`` edges, and the published rows an
         inheriting resource resolves its chain over); every other resource
         ignores it. Total and non-throwing, like the capability
         ``dependencies`` it composes. Base behavior: no edges.

@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.config import load_config
+from agentworks.secrets.policy import InteractionPolicy
 from tests.conftest import ManifestDoc, write_cfg
 
 if TYPE_CHECKING:
@@ -32,11 +33,11 @@ def _resolve_tailscale_key(config, registry, vm_tmpl) -> str:  # type: ignore[no
     from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import vm_template_node
 
-    resolver = Resolver(config, registry)
+    resolver = Resolver(config, registry, interaction=InteractionPolicy.REFUSE)
     node = vm_template_node(vm_tmpl)
     for name in node.secret_refs():
         resolver.register_name(name)
-    preflight_all([node], RunContext(config=config), registry=registry)
+    preflight_all([node], RunContext(config=config), registry=registry, interaction=InteractionPolicy.REFUSE)
     resolver.resolve()
     return resolver.get(vm_tmpl.tailscale_auth_key)
 
@@ -109,14 +110,11 @@ def test_boundary_uses_custom_tailscale_secret_name(
     assert _resolve_tailscale_key(config, registry, vm_tmpl) == "tskey-custom"
 
 
-def test_template_preflight_fails_on_unresolvable_key(
+def test_template_preflight_predicts_env_source_without_probing_key(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """With only the env-var backend active and the variable unset, the
-    preflight sweep fails the vm-template's key prediction BEFORE any
-    resolve pass (and therefore before any prompt or mutation).
-    """
+    """An env source is attemptable without reading its current value."""
     cfg = _write_cfg(
         tmp_path,
         settings="""
@@ -129,16 +127,18 @@ def test_template_preflight_fails_on_unresolvable_key(
 
     from agentworks.bootstrap import build_registry
     from agentworks.capabilities.base import RunContext
-    from agentworks.errors import ConfigError
     from agentworks.orchestration.readiness import preflight_all
     from agentworks.vms.nodes import vm_template_node
     from agentworks.vms.templates import resolve_template
 
     registry = build_registry(config)
     vm_tmpl = resolve_template(registry, "default")
-    # The refusal is the SWEEP's now, not the node's own preflight.
-    with pytest.raises(ConfigError, match="not resolvable"):
-        preflight_all([vm_template_node(vm_tmpl)], RunContext(config=config), registry=registry)
+    preflight_all(
+        [vm_template_node(vm_tmpl)],
+        RunContext(config=config),
+        registry=registry,
+        interaction=InteractionPolicy.REFUSE,
+    )
 
 
 def test_join_tailscale_signature_requires_auth_key_kwarg() -> None:

@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from agentworks.secrets.policy import InteractionPolicy
 from agentworks.vms import manager as vm_manager
 from tests.conftest import ManifestDoc
 from tests.orchestrated_fixtures import PLUGINS_ENABLED, proxmox_site, write_operator_config
@@ -58,7 +59,9 @@ def test_no_site_secrets_skips_the_resolve_pass(
     """A secret-free site's boundary resolve is a no-op: the backend
     loop never runs, so nothing can prompt."""
     config = make_config()
-    vm_node, _ops_ctx = vm_manager._live_vm_boundary(db, config, _seed_vm(db, "lima-local"))
+    vm_node, _ops_ctx = vm_manager._live_vm_boundary(
+        db, config, _seed_vm(db, "lima-local"), interaction=InteractionPolicy.REFUSE
+    )
     assert vm_node.site.platform.name == "lima"
     assert resolve_counter == []
 
@@ -74,7 +77,9 @@ def test_secret_bearing_site_resolves_exactly_once(
     from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 
     config = make_config(PLUGINS_ENABLED, manifests=[proxmox_site()])
-    vm_node, ops_ctx = vm_manager._live_vm_boundary(db, config, _seed_vm(db, "proxmox"))
+    vm_node, ops_ctx = vm_manager._live_vm_boundary(
+        db, config, _seed_vm(db, "proxmox"), interaction=InteractionPolicy.REFUSE
+    )
     assert isinstance(vm_node.site.platform, ProxmoxPlatform)
     assert ops_ctx.secret("proxmox-token") == "pve-token"
     assert len(resolve_counter) == 1
@@ -97,7 +102,7 @@ def test_preflight_failure_prevents_the_resolve_pass(
     monkeypatch.setattr(ProxmoxPlatform, "preflight", _boom)
     config = make_config(PLUGINS_ENABLED, manifests=[proxmox_site()])
     with pytest.raises(ConnectivityError):
-        vm_manager._live_vm_boundary(db, config, _seed_vm(db, "proxmox"))
+        vm_manager._live_vm_boundary(db, config, _seed_vm(db, "proxmox"), interaction=InteractionPolicy.REFUSE)
     assert resolve_counter == []
 
 
@@ -125,7 +130,9 @@ def test_env_targets_join_the_site_secret_pass(
         vm={"API_KEY": EnvEntry({"secret": "api-key"})},
         label="test-shell",
     )
-    with vm_manager.gated_vm_boundary(db, config, registry, _seed_vm(db, "proxmox"), targets=[target]) as (
+    with vm_manager.gated_vm_boundary(
+        db, config, registry, _seed_vm(db, "proxmox"), targets=[target], interaction=InteractionPolicy.REFUSE
+    ) as (
         _vm_node,
         resolver,
         _ops_ctx,

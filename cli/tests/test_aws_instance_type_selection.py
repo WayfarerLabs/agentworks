@@ -10,14 +10,14 @@ import pytest
 
 from agentworks.capabilities.config import validate_capability_config
 from agentworks.errors import ConfigError
-from agentworks.plugins.aws.platform import (
-    _DEBIAN_ARCH_SEGMENT,
+from agentworks.plugins.aws.config import (
     _DEFAULT_INSTANCE_TYPES,
     AwsEC2Config,
     _instance_catalog,
     _InstanceType,
     _select_instance_type,
 )
+from agentworks.plugins.aws.platform import _DEBIAN_ARCH_SEGMENT
 from agentworks.schema import RefOwner
 
 

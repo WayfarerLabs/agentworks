@@ -13,6 +13,7 @@ import pytest
 
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest
+from agentworks.capabilities.vm_platform.tailscale_join import BootstrapCompletion, EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
 from agentworks.errors import ConfigError, StateError
 from agentworks.plugins.aws.network import EC2Error, poke_ssh_allow, remove_ssh_allow
@@ -176,10 +177,14 @@ class TestCreate:
     def test_user_data_is_gzipped_and_under_cap_with_a_large_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The user-data is gzipped (cloud-init decompresses natively) and stays
         under EC2's 16 KiB raw cap even with an RSA-4096-sized key on the
-        Tailscale path (the largest payload); the key is embedded ONCE, so it
-        does not double the cost."""
+        Tailscale path (the largest payload). The resolved key is absent from
+        this payload and crosses the later stdin boundary instead."""
         rec = install_fakes(monkeypatch)
-        monkeypatch.setattr(EC2Platform, "_wait_for_bootstrap", lambda self, target: "100.64.0.5")
+        monkeypatch.setattr(
+            EphemeralTailscaleBootstrap,
+            "complete",
+            lambda self, auth_key: BootstrapCompletion(True, "100.64.0.5"),
+        )
         rsa_key = "ssh-rsa " + ("A" * 716) + " agw@host"
         _platform().create(_request(tailscale="tskey-abc", ssh_key=rsa_key), RunContext(config=_config()))
         user_data = rec.kwargs_for("run_instances")["UserData"]
@@ -256,7 +261,11 @@ class TestCreate:
 
     def test_tailscale_path_waits_for_bootstrap(self, monkeypatch: pytest.MonkeyPatch) -> None:
         install_fakes(monkeypatch)
-        monkeypatch.setattr(EC2Platform, "_wait_for_bootstrap", lambda self, target: "100.64.0.5")
+        monkeypatch.setattr(
+            EphemeralTailscaleBootstrap,
+            "complete",
+            lambda self, auth_key: BootstrapCompletion(True, "100.64.0.5"),
+        )
         result = _platform().create(_request(tailscale="tskey-abc"), RunContext(config=_config()))
         assert result.bootstrap_complete is True
         assert result.tailscale_ip == "100.64.0.5"
@@ -287,9 +296,9 @@ class TestCreateRollback:
         leaking them past both rollback arms."""
         rec = install_fakes(monkeypatch)
         monkeypatch.setattr(
-            EC2Platform,
-            "_wait_for_bootstrap",
-            lambda self, target: (_ for _ in ()).throw(OSError("ssh: command not found")),
+            EphemeralTailscaleBootstrap,
+            "complete",
+            lambda self, auth_key: (_ for _ in ()).throw(OSError("ssh: command not found")),
         )
         with pytest.raises(EC2Error):
             _platform().create(_request(tailscale="tskey-abc"), RunContext(config=_config()))
@@ -303,10 +312,10 @@ class TestCreateRollback:
         interrupt for the caller's row unwind."""
         rec = install_fakes(monkeypatch)
 
-        def _interrupt(self: EC2Platform, target: object) -> str | None:
+        def _interrupt(self: EphemeralTailscaleBootstrap, auth_key: str) -> BootstrapCompletion:
             raise KeyboardInterrupt("first")
 
-        monkeypatch.setattr(EC2Platform, "_wait_for_bootstrap", _interrupt)
+        monkeypatch.setattr(EphemeralTailscaleBootstrap, "complete", _interrupt)
         with pytest.raises(KeyboardInterrupt):
             _platform().create(_request(tailscale="tskey-abc"), RunContext(config=_config()))
         methods = rec.methods("ec2")
@@ -321,7 +330,9 @@ class TestCreateRollback:
         still propagates."""
         install_fakes(monkeypatch)
         monkeypatch.setattr(
-            EC2Platform, "_wait_for_bootstrap", lambda self, target: (_ for _ in ()).throw(KeyboardInterrupt("first"))
+            EphemeralTailscaleBootstrap,
+            "complete",
+            lambda self, auth_key: (_ for _ in ()).throw(KeyboardInterrupt("first")),
         )
         monkeypatch.setattr(
             "tests._aws_fakes._FakeEC2.terminate_instances",

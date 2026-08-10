@@ -7,7 +7,14 @@ from typing import Annotated
 import typer
 
 from agentworks.cli._app import app
-from agentworks.cli._helpers import get_db, parse_csv_filter, prompt_vm
+from agentworks.cli._helpers import (
+    get_db,
+    ordinary_interaction_policy,
+    parse_csv_filter,
+    prompt_vm,
+)
+from agentworks.machine_output import OutputFormat
+from agentworks.secrets.policy import validate_interaction_policy
 
 agent_app = typer.Typer(
     name="agent",
@@ -28,6 +35,7 @@ def agent_create(
     ] = False,
 ) -> None:
     """Create an agent (isolated Linux user) on a VM."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.agents.manager import create_agent
     from agentworks.config import load_config
 
@@ -41,6 +49,7 @@ def agent_create(
         vm_name=resolved_vm.name,
         template=template,
         grant_all_workspaces=grant_all_workspaces,
+        interaction=interaction,
     )
 
 
@@ -55,21 +64,58 @@ def agent_list(
             "Used by shell completion; the order matches the table's row order.",
         ),
     ] = False,
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option("--output", help="Output format: human or json. Default: human."),
+    ] = OutputFormat.HUMAN,
 ) -> None:
     """List agents. --vm accepts comma-separated values for OR-within-filter."""
-    from agentworks.agents.manager import list_agents
+    if names_only and output_format is OutputFormat.JSON:
+        raise typer.BadParameter("cannot be used with --output json", param_hint="--names-only")
 
-    list_agents(get_db(), vm_name=parse_csv_filter(vm), names_only=names_only)
+    from agentworks.agents.manager import agent_listing, list_agents, render_agent_listing
+
+    if names_only:
+        list_agents(get_db(), vm_name=parse_csv_filter(vm), names_only=True)
+        return
+
+    listing = agent_listing(get_db(), vm_name=parse_csv_filter(vm))
+    if output_format is OutputFormat.JSON:
+        from click import get_binary_stream
+
+        from agentworks.agents.manager.inspect import agent_listing_data
+        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+
+        write_json_envelope(MachineOutputCommand.AGENT_LIST, agent_listing_data(listing), get_binary_stream("stdout"))
+        return
+    render_agent_listing(listing, names_only=names_only)
 
 
 @agent_app.command("describe")
 def agent_describe(
     name: Annotated[str, typer.Argument(help="Agent name")],
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option("--output", help="Output format: human or json. Default: human."),
+    ] = OutputFormat.HUMAN,
 ) -> None:
     """Show detailed information about an agent."""
-    from agentworks.agents.manager import describe_agent
+    from agentworks.agents.manager import agent_description, render_agent_description
 
-    describe_agent(get_db(), name=name)
+    description = agent_description(get_db(), name=name)
+    if output_format is OutputFormat.JSON:
+        from click import get_binary_stream
+
+        from agentworks.agents.manager.inspect import agent_description_data
+        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+
+        write_json_envelope(
+            MachineOutputCommand.AGENT_DESCRIBE,
+            agent_description_data(description),
+            get_binary_stream("stdout"),
+        )
+        return
+    render_agent_description(description)
 
 
 @agent_app.command("reinit")
@@ -84,10 +130,17 @@ def agent_reinit(
     ] = None,
 ) -> None:
     """Re-run agent setup using the stored template."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.agents.manager import reinit_agent
     from agentworks.config import load_config
 
-    reinit_agent(get_db(), load_config(), name=name, update_template=update_template)
+    reinit_agent(
+        get_db(),
+        load_config(),
+        name=name,
+        update_template=update_template,
+        interaction=interaction,
+    )
 
 
 @agent_app.command("grant-workspaces")
@@ -100,6 +153,7 @@ def agent_grant_workspaces(
     all_workspaces: Annotated[bool, typer.Option("--all", help="Grant access to all workspaces")] = False,
 ) -> None:
     """Grant an agent explicit access to workspaces."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.agents.grants import grant_workspaces
     from agentworks.config import load_config
 
@@ -109,6 +163,7 @@ def agent_grant_workspaces(
         agent_name=name,
         workspace_names=list(workspaces or []),
         grant_all=all_workspaces,
+        interaction=interaction,
     )
 
 
@@ -122,6 +177,7 @@ def agent_revoke_workspaces(
     all_workspaces: Annotated[bool, typer.Option("--all", help="Remove all explicit grants")] = False,
 ) -> None:
     """Revoke explicit workspace grants from an agent."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.agents.grants import revoke_workspaces
     from agentworks.config import load_config
 
@@ -131,6 +187,7 @@ def agent_revoke_workspaces(
         agent_name=name,
         workspace_names=list(workspaces or []),
         revoke_all=all_workspaces,
+        interaction=interaction,
     )
 
 
@@ -144,6 +201,7 @@ def agent_exec(
     ] = None,
 ) -> None:
     """Execute a command as an agent user."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.agents.manager import exec_agent
     from agentworks.config import load_config
 
@@ -157,6 +215,7 @@ def agent_exec(
             name=name,
             command=ctx.args,
             workspace_name=workspace,
+            interaction=interaction,
         )
     )
 
@@ -167,10 +226,19 @@ def agent_shell(
     workspace: Annotated[str | None, typer.Option("--workspace", help="cd into a workspace")] = None,
 ) -> None:
     """Open a shell as an agent user."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.agents.manager import shell_agent
     from agentworks.config import load_config
 
-    raise typer.Exit(shell_agent(get_db(), load_config(), name=name, workspace_name=workspace))
+    raise typer.Exit(
+        shell_agent(
+            get_db(),
+            load_config(),
+            name=name,
+            workspace_name=workspace,
+            interaction=interaction,
+        )
+    )
 
 
 @agent_app.command("delete")
@@ -180,7 +248,15 @@ def agent_delete(
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
 ) -> None:
     """Delete an agent."""
+    interaction = validate_interaction_policy(ordinary_interaction_policy())
     from agentworks.agents.manager import delete_agent
     from agentworks.config import load_config
 
-    delete_agent(get_db(), load_config(), name=name, force=force, yes=yes)
+    delete_agent(
+        get_db(),
+        load_config(),
+        name=name,
+        force=force,
+        yes=yes,
+        interaction=interaction,
+    )

@@ -35,6 +35,33 @@ def test_generate_bootstrap_script_all_steps() -> None:
     assert "lima--myvm" in script
 
 
+def test_generate_bootstrap_script_can_defer_tailscale_join_without_key() -> None:
+    """Lima's retained bootstrap shape installs Tailscale but omits the key."""
+    sentinel = "tskey-persistence-sentinel"
+    keyed_script = generate_bootstrap_script(
+        admin_username="testuser",
+        ssh_public_key="ssh-ed25519 AAAA testkey",
+        provisioning_packages=["curl", "git"],
+        tailscale_auth_key=sentinel,
+        hostname="lima--myvm",
+        swap=4,
+    )
+    script = generate_bootstrap_script(
+        admin_username="testuser",
+        ssh_public_key="ssh-ed25519 AAAA testkey",
+        provisioning_packages=["curl", "git"],
+        tailscale_auth_key=None,
+        hostname="lima--myvm",
+        swap=4,
+    )
+
+    assert sentinel in keyed_script
+    assert "TAILSCALE_AUTH_KEY=''" in script
+    assert "Tailscale join deferred to platform" in script
+    assert "tailscale up --auth-key" in script
+    assert sentinel not in script
+
+
 def test_generate_bootstrap_script_masks_sve_gated_on_apple() -> None:
     """The SVE mask is gated on Apple Virtualization + SVE, writes a grub
     drop-in with arm64.nosve, and drops a restart sentinel."""

@@ -26,13 +26,14 @@ from __future__ import annotations
 
 import contextlib
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from agentworks.db import PID_STOPPED, SessionMode, VMStatus
 from agentworks.errors import NotFoundError, StateError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
+from agentworks.secrets.policy import InteractionPolicy
 from agentworks.sessions import manager as session_manager
 from agentworks.vms import manager as vm_manager
 
@@ -71,6 +72,7 @@ def _reachable(monkeypatch: pytest.MonkeyPatch, value: bool) -> None:
 def _stop_the_vms(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
     """Backend fakes for the stopped-VM gate path, recording per-VM."""
     _reachable(monkeypatch, False)
+    monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", lambda *a, **k: True)
     monkeypatch.setattr(
         ProxmoxPlatform,
         "status",
@@ -178,7 +180,7 @@ def test_stop_all_reachable_vms_is_one_boundary_burst(
     _seed_session(db, "s-b", "ws-vm-b")
     _reachable(monkeypatch, True)
 
-    session_manager.stop_all_sessions(db, config)
+    session_manager.stop_all_sessions(db, config, interaction=InteractionPolicy.REFUSE)
 
     assert resolve_counter == [["proxmox-token"]]
     assert any("No running sessions to stop" in m for m in captured_output.info)
@@ -206,7 +208,7 @@ def test_stop_all_two_stopped_vms_one_site_one_backend_burst(
     _stop_the_vms(monkeypatch, events)
     _record_holds(monkeypatch, events)
 
-    session_manager.stop_all_sessions(db, config)
+    session_manager.stop_all_sessions(db, config, interaction=InteractionPolicy.REFUSE)
 
     assert resolve_counter == [["proxmox-token"]]
     assert events == [
@@ -247,7 +249,7 @@ def test_batch_empty_vm_set_is_a_complete_noop(
 
     monkeypatch.setattr(bootstrap, "build_registry", _boom)
 
-    session_manager.stop_all_sessions(db, make_config())
+    session_manager.stop_all_sessions(db, make_config(), interaction=InteractionPolicy.REFUSE)
 
     assert resolve_counter == []
     assert any("No running sessions to stop" in m for m in captured_output.info)
@@ -275,7 +277,7 @@ def test_batch_operator_stopped_vm_aborts_before_the_probes(
     monkeypatch.setattr(session_manager, "transport", _no_transport)
 
     with pytest.raises(StateError, match="manually stopped"):
-        session_manager.stop_all_sessions(db, config)
+        session_manager.stop_all_sessions(db, config, interaction=InteractionPolicy.REFUSE)
 
 
 _SECOND_SITE_DOC = """\
@@ -318,7 +320,7 @@ def test_stop_all_mixed_site_batch_resolves_the_union_once(
     _seed_session(db, "s-b", "ws-vm-b")
     _reachable(monkeypatch, True)
 
-    session_manager.stop_all_sessions(db, config)
+    session_manager.stop_all_sessions(db, config, interaction=InteractionPolicy.REFUSE)
 
     assert len(resolve_counter) == 1
     assert sorted(resolve_counter[0]) == ["proxmox-token", "proxmox-token-b"]
@@ -357,7 +359,7 @@ def test_stop_all_two_sessions_one_vm_composes_one_node_one_gate(
 
     monkeypatch.setattr(walk_mod, "walk", _spy)
 
-    session_manager.stop_all_sessions(db, config)
+    session_manager.stop_all_sessions(db, config, interaction=InteractionPolicy.REFUSE)
 
     assert walks == [["vm-site/proxmox", "vm/box"]]
     assert events == [
@@ -402,18 +404,19 @@ def test_batch_repair_path_resolves_the_rejoin_key_late(
         platform: object,
         ctx: object,
         *,
-        auth_key_source=None,  # noqa: ANN001
+        auth_keys: Any,
+        auth_key_name: str,
     ) -> None:
         # The started VM fails to reconnect: the real repair reads the
         # rejoin key through the caller-supplied source at exactly this
         # point (see _ensure_tailscale), so the fake reads it the same
         # way and lets the gate reader's lazy branch run for real.
-        assert auth_key_source is not None
-        keys.append(auth_key_source())
+        keys.append(auth_keys.get(auth_key_name))
 
+    monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", lambda *a, **k: True)
     monkeypatch.setattr(vm_manager, "_ensure_tailscale", _failing_reconnect)
 
-    session_manager.stop_all_sessions(db, config)
+    session_manager.stop_all_sessions(db, config, interaction=InteractionPolicy.REFUSE)
 
     assert keys == ["tskey-late"]
     assert resolve_counter == [["proxmox-token"], ["tailscale-auth-key"]]
@@ -446,7 +449,7 @@ def test_batch_gate_refuses_an_undeclared_outside_union_name(
     monkeypatch.setattr(ProxmoxPlatform, "status", _no_status)
 
     with pytest.raises(StateError, match="repair_secret_refs"):
-        session_manager.stop_all_sessions(db, config)
+        session_manager.stop_all_sessions(db, config, interaction=InteractionPolicy.REFUSE)
 
     # The boundary burst only; the rogue name never resolved.
     assert resolve_counter == [["proxmox-token"]]
@@ -474,7 +477,7 @@ def test_stop_session_reachable_vm_is_one_boundary_burst(
     _seed_singular(db)
     _reachable(monkeypatch, True)
 
-    session_manager.stop_session(db, config, name="s1")
+    session_manager.stop_session(db, config, name="s1", interaction=InteractionPolicy.REFUSE)
 
     assert resolve_counter == [["proxmox-token"]]
     assert any("already stopped" in m for m in captured_output.info)
@@ -496,7 +499,7 @@ def test_stop_session_stopped_vm_gate_burst_seeds_the_boundary(
     events: list[str] = []
     _stop_the_vms(monkeypatch, events)
 
-    session_manager.stop_session(db, config, name="s1")
+    session_manager.stop_session(db, config, name="s1", interaction=InteractionPolicy.REFUSE)
 
     assert events == ["status:box", "start:box", "tailscale:box"]
     assert resolve_counter == [["proxmox-token"]]
@@ -538,7 +541,7 @@ def test_single_stop_ends_on_a_result_terminal_without_duplication(
     )
     monkeypatch.setattr(session_manager, "_kill_session", lambda *a, **k: True)
 
-    session_manager.stop_session(db, config, name="s1")
+    session_manager.stop_session(db, config, name="s1", interaction=InteractionPolicy.REFUSE)
 
     # The terminal is exactly one RESULT line, not doubled by the helper's
     # per-session body line (announce_stopped=False suppresses it).
@@ -558,7 +561,7 @@ def test_delete_session_reachable_vm_is_one_boundary_burst(
     _seed_singular(db)
     _reachable(monkeypatch, True)
 
-    session_manager.delete_session(db, config, name="s1", yes=True)
+    session_manager.delete_session(db, config, name="s1", yes=True, interaction=InteractionPolicy.REFUSE)
 
     assert resolve_counter == [["proxmox-token"]]
     assert db.get_session("s1") is None
@@ -576,7 +579,7 @@ def test_attach_session_reachable_vm_is_one_boundary_burst(
     _reachable(monkeypatch, True)
 
     with pytest.raises(StateError, match="not running"):
-        session_manager.attach_session(db, config, name="s1")
+        session_manager.attach_session(db, config, name="s1", interaction=InteractionPolicy.REFUSE)
 
     assert resolve_counter == [["proxmox-token"]]
 
@@ -593,7 +596,7 @@ def test_session_logs_reachable_vm_is_one_boundary_burst(
     _reachable(monkeypatch, True)
 
     with pytest.raises(StateError, match="not running"):
-        session_manager.session_logs(db, config, name="s1")
+        session_manager.session_logs(db, config, name="s1", interaction=InteractionPolicy.REFUSE)
 
     assert resolve_counter == [["proxmox-token"]]
 
@@ -625,7 +628,7 @@ def test_describe_session_holds_across_the_probe(
 
     monkeypatch.setattr(session_manager, "check_session_status", _probe)
 
-    session_manager.describe_session(db, config, name="s1")
+    session_manager.describe_session(db, config, name="s1", interaction=InteractionPolicy.REFUSE)
 
     assert events == ["hold-open:box", "probe", "hold-close:box"]
     assert resolve_counter == [["proxmox-token"]]
@@ -653,7 +656,7 @@ def test_describe_session_shows_harness_integration_line(
         lambda session, *, target: SessionStatus.STOPPED,
     )
 
-    session_manager.describe_session(db, config, name="s1")
+    session_manager.describe_session(db, config, name="s1", interaction=InteractionPolicy.REFUSE)
 
     info = captured_output.info
     assert "Harness integration: shell" in info
@@ -677,7 +680,7 @@ def test_describe_session_stopped_vm_gate_burst_seeds_the_boundary(
     events: list[str] = []
     _stop_the_vms(monkeypatch, events)
 
-    session_manager.describe_session(db, config, name="s1")
+    session_manager.describe_session(db, config, name="s1", interaction=InteractionPolicy.REFUSE)
 
     assert events == ["status:box", "start:box", "tailscale:box"]
     assert resolve_counter == [["proxmox-token"]]
@@ -699,7 +702,7 @@ def test_unknown_session_refuses_with_zero_resolves_and_zero_gate(
     monkeypatch.setattr(ProxmoxPlatform, "status", _no_status)
 
     with pytest.raises(NotFoundError, match="session 'ghost' not found"):
-        session_manager.stop_session(db, config, name="ghost")
+        session_manager.stop_session(db, config, name="ghost", interaction=InteractionPolicy.REFUSE)
 
     assert resolve_counter == []
 
@@ -728,7 +731,7 @@ def test_unknown_workspace_refuses_with_zero_resolves_and_zero_gate(
     monkeypatch.setattr(ProxmoxPlatform, "status", _no_status)
 
     with pytest.raises(NotFoundError, match="workspace 'ghost-ws' not found"):
-        session_manager.stop_session(db, config, name="orphan")
+        session_manager.stop_session(db, config, name="orphan", interaction=InteractionPolicy.REFUSE)
 
     assert resolve_counter == []
 
@@ -754,7 +757,7 @@ def test_no_tailscale_vm_fails_pre_gate_with_zero_resolves(
     monkeypatch.setattr(ProxmoxPlatform, "status", _no_status)
 
     with pytest.raises(StateError, match="no Tailscale address"):
-        session_manager.stop_session(db, config, name="s1")
+        session_manager.stop_session(db, config, name="s1", interaction=InteractionPolicy.REFUSE)
 
     assert resolve_counter == []
 
@@ -783,7 +786,7 @@ def test_session_scope_reaches_node_readiness(
 
     monkeypatch.setattr(ProxmoxPlatform, "preflight", _recording)
 
-    session_manager.describe_session(db, config, name="s1")
+    session_manager.describe_session(db, config, name="s1", interaction=InteractionPolicy.REFUSE)
 
     (scope,) = scopes
     assert scope is not None

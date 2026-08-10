@@ -52,7 +52,14 @@ from ._common import (
     derive_linux_user,
 )
 from .access import exec_agent, shell_agent
-from .inspect import _format_grants, describe_agent, list_agents
+from .inspect import (
+    agent_description,
+    agent_listing,
+    describe_agent,
+    list_agents,
+    render_agent_description,
+    render_agent_listing,
+)
 from .lifecycle import create_agent, delete_agent, reinit_agent
 
 __all__ = [
@@ -62,16 +69,17 @@ __all__ = [
     "_AgentDirectEnvScopes",
     "_agent_direct_secret_target",
     "_assert_agent_ssh_works",
-    "_format_grants",
     "_require_vm",
     "_require_vm_for_workspace",
     "_require_workspace",
     "_resolve_agent_direct_env_scopes",
     "_resolve_workspace_for_agent",
+    "agent_description",
     "agent_has_grants",
     "agent_has_sessions",
     "agent_is_unused",
     "agent_scope",
+    "agent_listing",
     "create_agent",
     "delete_agent",
     "derive_linux_user",
@@ -79,6 +87,8 @@ __all__ = [
     "exec_agent",
     "list_agents",
     "reinit_agent",
+    "render_agent_description",
+    "render_agent_listing",
     "shell_agent",
     "transport",
 ]

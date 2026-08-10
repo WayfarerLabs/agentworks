@@ -11,6 +11,7 @@ from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH
 from agentworks.errors import AlreadyExistsError, ExternalError, NotFoundError, StateError
 from agentworks.naming import validate_name
 from agentworks.path_rendering import format_host_path
+from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.backends.vm import default_workspace_path
 from agentworks.workspaces.manager._common import _guard_vm_status, _resolve_vm, _workspace_scope
@@ -27,6 +28,7 @@ def copy_workspace(
     *,
     dest_name: str,
     vm_name: str | None = None,
+    interaction: InteractionPolicy,
 ) -> None:
     """Copy a workspace to a new VM workspace.
 
@@ -45,6 +47,7 @@ def copy_workspace(
     source composition with no second boundary. The multi-root walk
     stays available for the batch commands that already coalesce.
     """
+    interaction = validate_interaction_policy(interaction)
     import contextlib
     import tempfile
     from pathlib import Path
@@ -94,6 +97,7 @@ def copy_workspace(
                     registry,
                     src_vm,
                     scope=_workspace_scope(db, src_vm, source_name),
+                    interaction=interaction,
                 )
             )
             if src_vm.tailscale_host is None:
@@ -137,6 +141,7 @@ def copy_workspace(
                         registry,
                         dest_vm,
                         scope=_workspace_scope(db, dest_vm, dest_name),
+                        interaction=interaction,
                     )
                 )
             # Same VM: the source boundary and held span above already

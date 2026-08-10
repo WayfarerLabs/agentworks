@@ -226,7 +226,7 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("console.restore-session", "session"): "sessions",
     # Secret inspection
     ("secret.describe", "name"): "secrets",
-    ("secret.verify", "name"): "secrets",
+    ("secret.verify", "names"): "secrets",
     # Resource inspection (describe took the single KIND/NAME
     # grammar in the display-syntax unification)
     ("resource.list", "kind"): "resource_kinds",

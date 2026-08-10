@@ -99,6 +99,12 @@ class FieldShape:
     """The marker on a collection's elements: the field names many
     Resources."""
 
+    mapping_key_marker: RefMarker | None
+    """The marker on a mapping's keys: each authored key names one Resource.
+
+    ``None`` for sequences and unmarked mappings. Kept separate from
+    :attr:`item_marker`, which describes mapping values."""
+
     item_model: type[BaseModel] | None
     """The model each element of a collection holds."""
 
@@ -296,6 +302,7 @@ def shape_of(field: FieldInfo) -> FieldShape:
 
     collection: Collection | None = None
     item_marker: RefMarker | None = None
+    mapping_key_marker: RefMarker | None = None
     item_model: type[BaseModel] | None = None
     nested_model: type[BaseModel] | None = None
     discriminator: str | None = None
@@ -316,6 +323,8 @@ def shape_of(field: FieldInfo) -> FieldShape:
     found = _collection_element(inner)
     if found is not None:
         collection, element = found
+        if collection is Collection.MAPPING:
+            mapping_key_marker = _first_marker(_mapping_key_metadata(inner))
         element, _element_optional, element_meta = _unwrapped_annotation(element)
         item_marker = _first_marker(element_meta)
         item_discriminator = _element_discriminator(element_meta) if _is_model(element) or _is_union(element) else None
@@ -374,6 +383,7 @@ def shape_of(field: FieldInfo) -> FieldShape:
         marker=marker,
         collection=collection,
         item_marker=item_marker,
+        mapping_key_marker=mapping_key_marker,
         item_model=item_model,
         nested_model=nested_model,
         discriminator=discriminator,
@@ -992,6 +1002,16 @@ def _collection_element(annotation: object) -> tuple[Collection, object] | None:
     return None
 
 
+def _mapping_key_metadata(annotation: object) -> list[object]:
+    """``Annotated`` metadata attached to a mapping's key type."""
+    origin = get_origin(annotation)
+    args = get_args(annotation)
+    if not isinstance(origin, type) or not issubclass(origin, Mapping) or len(args) != 2:
+        return []
+    _key, metadata = split_annotated(args[0])
+    return metadata
+
+
 def _first_marker(metadata: list[object]) -> RefMarker | None:
     for item in metadata:
         if isinstance(item, RefMarker):
@@ -1146,7 +1166,13 @@ def element_annotation(annotation: object) -> object | None:
 
 def _widened(annotation: object, expanding_roots: tuple[type[BaseModel], ...]) -> object:
     """:func:`accepted_annotation`'s recursion, over an annotation whose
-    markers are already stripped."""
+    markers are already stripped.
+
+    Root models are expanded to the value an operator writes, but only on
+    their first occurrence along the current annotation path. A recursive
+    occurrence remains the root model itself, preserving the cycle for the
+    cycle-aware model walkers instead of recursing in this projection.
+    """
     base, metadata = split_annotated(annotation)
     widened: object
     discriminator = _element_discriminator(metadata) if _is_model(base) or _is_union(base) else None
@@ -1164,18 +1190,25 @@ def _widened(annotation: object, expanding_roots: tuple[type[BaseModel], ...]) -
             discriminator=discriminator,
             union_scalar_shorthand=_sole_union_scalar_shorthand(metadata),
         )
-    elif _is_model(base) and issubclass(base, RootModel) and base not in expanding_roots:
-        fields = model_fields_of(base)
-        root = fields.get("root") if fields is not None else None
-        widened = base
-        if root is not None:
-            widened = _accepted_annotation(
-                root.annotation,
-                marker_of(root),
-                (*expanding_roots, base),
-                discriminator=_discriminator_of(root),
-                union_scalar_shorthand=_sole_union_scalar_shorthand(spine_metadata(root)),
-            )
+    elif _is_model(base) and issubclass(base, RootModel):
+        if base in expanding_roots:
+            widened = base
+        else:
+            override = getattr(base, "operator_input_annotation", None)
+            if override is not None:
+                widened = override
+            else:
+                fields = model_fields_of(base)
+                root = fields.get("root") if fields is not None else None
+                widened = base
+                if root is not None:
+                    widened = _accepted_annotation(
+                        root.annotation,
+                        marker_of(root),
+                        (*expanding_roots, base),
+                        discriminator=_discriminator_of(root),
+                        union_scalar_shorthand=_sole_union_scalar_shorthand(spine_metadata(root)),
+                    )
     elif (shorthand := scalar_shorthand_of(base)) is not None:
         # The shorthand first, so the rendered type leads with the form
         # nearly every operator writes.
@@ -1204,7 +1237,10 @@ def _rebuilt_arguments(annotation: object, transform: Callable[[object], object]
         return annotation
     origin = get_origin(annotation)
     if origin in (Union, types.UnionType):
-        return Union[rebuilt]  # noqa: UP007
+        possible = tuple(arg for arg in rebuilt if arg is not typing.NoReturn)
+        if len(possible) == 1:
+            return possible[0]
+        return Union[possible]  # noqa: UP007
     if isinstance(origin, type):
         return types.GenericAlias(origin, rebuilt)
     return annotation

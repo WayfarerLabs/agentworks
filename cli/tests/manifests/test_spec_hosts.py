@@ -1,5 +1,5 @@
-"""The three kinds that host a capability: vm-site, git-credential,
-session-template.
+"""The four kinds that host a capability: vm-site, git-credential,
+session-template, and secret-source.
 
 Each carries the capability as ONE tagged table, which is what the
 operator writes, so the row and the manifest have the same shape and
@@ -14,13 +14,14 @@ from pathlib import Path
 from agentworks.git_credentials.credential import GitCredentialConfig
 from agentworks.naming import MAX_FREEFORM_NAME_LENGTH
 from agentworks.schema import CapabilityBlock
+from agentworks.secrets.sources import SecretSourceDecl
 from agentworks.sessions.template import SessionTemplate
 from agentworks.vms.sites import VMSiteDecl
 
 from ._specs import WHERE, decode, decode_issues, rejection
 
 #: ``(kind, name, field, capability)`` per hosting kind. A corpus, not a
-#: table of cases: every sweep below applies ONE claim to all three, and
+#: table of cases: every sweep below applies ONE claim to all four, and
 #: what breaks a claim is the shared decode path, so the useful report is
 #: every host that stopped answering rather than one red id per host.
 #: ``test_capability_shape.py::test_decode_refuses_exactly_the_three_retired_sibling_shapes``
@@ -29,6 +30,7 @@ _HOSTS = [
     ("vm-site", "lab", "platform", "lima"),
     ("git-credential", "gh", "provider", "github"),
     ("session-template", "htop", "harness_integration", "shell"),
+    ("secret-source", "ci-env", "backend", "env-var"),
 ]
 
 
@@ -72,6 +74,14 @@ def test_a_session_template_round_trips() -> None:
         declared_at=WHERE,
         inherits=["base"],
         harness_integration=CapabilityBlock.of("shell", command="htop"),
+    )
+
+
+def test_a_secret_source_round_trips() -> None:
+    assert decode("secret-source", "ci-env", {"backend": {"name": "env-var"}}) == SecretSourceDecl(
+        name="ci-env",
+        declared_at=WHERE,
+        backend=CapabilityBlock.of("env-var"),
     )
 
 

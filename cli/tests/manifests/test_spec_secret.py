@@ -27,7 +27,9 @@ def test_every_field_round_trips() -> None:
     )
 
 
-def test_all_three_mapping_shapes_validate() -> None:
+def test_raw_mapping_carrier_preserves_legacy_shapes_before_registry_validation() -> None:
+    """Decode is lossless; source-specific registry validation rejects legacy rows."""
+
     row = decode(
         "secret",
         "npm-token",
@@ -67,22 +69,14 @@ def test_an_empty_description_is_refused_too() -> None:
     )
 
 
-def test_a_mapping_value_of_no_accepted_shape_reads_as_one_line() -> None:
-    """Pydantic reports one failure per union member, all at this one
-    address. The operator made one mistake and reads one line naming the
-    alternatives, not three carrying pydantic's member labels."""
-    assert rejection("secret", "npm-token", {"backend_mappings": {"env-var": 3}}, description="d") == (
-        "res.yaml:7: secret/npm-token.backend_mappings.env-var: must be a string, a table, or False"
-    )
+def test_a_numeric_mapping_value_reaches_the_raw_carrier() -> None:
+    secret = decode("secret", "npm-token", {"backend_mappings": {"env-var": 3}}, description="d")
+    assert secret.backend_mappings == {"env-var": 3}
 
 
-def test_true_keeps_its_own_steer() -> None:
-    """The alternatives list says what is accepted without teaching that
-    ``false`` is the opt-out the operator was reaching for."""
-    assert rejection("secret", "npm-token", {"backend_mappings": {"env-var": True}}, description="d") == (
-        "res.yaml:7: secret/npm-token.backend_mappings.env-var: boolean must be `false` (opt-out); "
-        "`true` is not a valid value"
-    )
+def test_true_reaches_the_raw_carrier_without_becoming_false_opt_out() -> None:
+    secret = decode("secret", "npm-token", {"backend_mappings": {"env-var": True}}, description="d")
+    assert secret.backend_mappings == {"env-var": True}
 
 
 def test_a_non_table_backend_mappings_says_table() -> None:

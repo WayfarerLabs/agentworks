@@ -35,6 +35,8 @@ from agentworks.schema import UNSET
 from agentworks.topics import prose_of, summary_of
 
 if TYPE_CHECKING:
+    from pydantic import BaseModel
+
     from agentworks.capabilities.descriptor import CapabilityKindDescriptor
 
 __all__ = [
@@ -183,11 +185,9 @@ def implementation_reference(kind: str, name: str) -> SchemaReference:
     a platform whose plugin is not enabled documents itself exactly as an
     enabled one does.
     """
-    from agentworks.capabilities.config import offered_model
-
     descriptor = _descriptor_for(kind)
     impl = _implementation(descriptor, name)
-    model = offered_model(impl)
+    model = _implementation_documentation_model(kind, name, impl)
     entries = field_tree(model)
     root = root_entry(model, entries)
     return SchemaReference(
@@ -303,6 +303,13 @@ def _implementation(descriptor: CapabilityKindDescriptor, name: str) -> type:
             hint=f"registered: {known}",
         )
     return impl
+
+
+def _implementation_documentation_model(_kind: str, _name: str, impl: type) -> type[BaseModel]:
+    """The primary config model one capability implementation offers."""
+    from agentworks.capabilities.config import offered_model
+
+    return offered_model(impl)
 
 
 def _descriptor_for(kind: str) -> CapabilityKindDescriptor:

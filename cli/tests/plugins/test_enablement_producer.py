@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, cast
 
 import pytest
 
@@ -49,7 +49,8 @@ from agentworks.resources.graph import (
 from agentworks.resources.registry import Registry
 from agentworks.schema import AgwModel, AgwRootModel, CapabilityBlock, NonEmptyStr, SecretRef
 from agentworks.secrets.base import SecretDecl
-from agentworks.secrets.resolve import active_backends
+from agentworks.secrets.resolve import active_sources
+from agentworks.secrets.sources import SecretSourceDecl
 from agentworks.sessions.manager._env import _display_harness_integration
 from agentworks.sessions.template import SessionTemplate
 from agentworks.vms.initializer.credentials import resolve_git_credential_providers
@@ -117,14 +118,15 @@ class _FixtureBackendMapping(AgwRootModel[Literal["good"]]):
 
 
 class _FixtureBackend(ConformingSecretBackend):
-    """A structural ``SecretBackend`` (Protocol, so a plain class)."""
+    """A nominal ``SecretBackend`` with a narrow mapping vocabulary."""
 
     name = "fixture-backend"
     description = "Fixture secret backend (test plugin)"
-    config_model: type[AgwRootModel[Any]] = _FixtureBackendMapping
+    mapping_model: ClassVar[type[AgwRootModel[Any]]] = _FixtureBackendMapping
 
-    def would_attempt(self, secret: SecretDecl, mapping: MappingValue | None) -> bool:
-        return mapping is not None
+    @classmethod
+    def would_attempt(cls, secret_name: str, *, mapping_present: bool) -> bool:
+        return mapping_present
 
 
 def _capable_plugin(name: str = PLUGIN) -> Plugin:
@@ -154,7 +156,7 @@ def _publish_builtin_backend(registry: Registry, name: str) -> None:
     ``secret_backends.publish_to``, which would also sweep the plugin-seated
     fixture backend in under a built-in origin (Phase 5's publisher split, not
     this phase's concern)."""
-    origin = Origin.built_in(source="agentworks.secrets.backends")
+    origin = Origin.built_in(source="agentworks.capabilities.secret_backend")
     row = capability_adapters()["secret-backend"].build_row(name, origin)
     registry.add("secret-backend", name, row, origin)
 
@@ -285,20 +287,25 @@ def test_disabled_plugin_platform_withholds_its_config_implied_secret() -> None:
 # harder half of the same seam.
 
 
-def _registry_mapping_fixture_backend(mapping: MappingValue, *, publish_backend: bool = True) -> Registry:
-    """A registry with one secret mapping ``fixture-backend``, unfinalized.
+def _registry_mapping_fixture_backend(mapping: MappingValue, *, publish_source: bool = True) -> Registry:
+    """A registry with one secret mapping ``fixture-source``, unfinalized.
 
-    ``publish_backend=False`` omits the backend row, which is what makes the
-    backend ABSENT rather than merely disabled: the distinction the two cases
-    below turn on.
+    ``publish_source=False`` omits the configured source row, producing the
+    source-first dangling-key case.
     """
     registry = Registry.empty()
-    if publish_backend:
+    if publish_source:
         _publish_capability(registry, "secret-backend", "fixture-backend")
+        registry.add(
+            "secret-source",
+            "fixture-source",
+            SecretSourceDecl(name="fixture-source", backend=CapabilityBlock.of("fixture-backend")),
+            _operator("sources.yaml"),
+        )
     registry.add(
         "secret",
         "vaulted",
-        SecretDecl(name="vaulted", description="a vaulted key", backend_mappings={"fixture-backend": mapping}),
+        SecretDecl(name="vaulted", description="a vaulted key", backend_mappings={"fixture-source": mapping}),
         _operator("c.toml"),
     )
     return registry
@@ -334,7 +341,7 @@ def test_mapping_to_a_disabled_plugin_backend_is_validated_like_any_other() -> N
             assert precondition.graph.enablement_of("secret-backend", "fixture-backend") is expected
 
             registry = _registry_mapping_fixture_backend("bad")
-            with pytest.raises(ConfigError, match="backend_mappings.fixture-backend: must be one of"):
+            with pytest.raises(ConfigError, match="backend_mappings.fixture-source: must be one of"):
                 registry.finalize(enablement_sources=sources)
 
 
@@ -351,14 +358,22 @@ def test_a_valid_mapping_to_a_disabled_backend_builds_and_stays_inert() -> None:
     with seated_plugin(_capable_plugin()):
         registry = _registry_mapping_fixture_backend("good")
         _publish_builtin_backend(registry, "prompt")
+        registry.add(
+            "secret-source",
+            "prompt",
+            SecretSourceDecl(name="prompt", backend=CapabilityBlock.of("prompt")),
+            Origin.built_in(source="agentworks.secrets.sources"),
+        )
         registry.finalize(enablement_sources=[_plugin_source()])  # PLUGIN not opted in
 
         assert registry.graph.enablement_of("secret-backend", "fixture-backend") is Enablement.disabled
         config = cast(
             "Config",
-            SimpleNamespace(secret_config_data=SimpleNamespace(backends=("fixture-backend", "prompt"))),
+            SimpleNamespace(secret_config_data=SimpleNamespace(backends=("fixture-source", "prompt"))),
         )
-        assert [b.capability.name for b in active_backends(config, registry)] == ["prompt"]
+        chain = active_sources(config, registry)
+        assert [source.name for source in chain] == ["fixture-source", "prompt"]
+        assert not chain[0].readiness.is_ready
 
 
 def test_mapping_to_an_absent_backend_reports_the_dangling_edge_not_a_shape_error() -> None:
@@ -374,8 +389,8 @@ def test_mapping_to_an_absent_backend_reports_the_dangling_edge_not_a_shape_erro
     backend's model would REJECT, so a shape error would surface if the absent
     path had been folded into the validated one.
     """
-    registry = _registry_mapping_fixture_backend("bad", publish_backend=False)
-    with pytest.raises(ConfigError, match="references unknown secret-backend 'fixture-backend'") as exc:
+    registry = _registry_mapping_fixture_backend("bad", publish_source=False)
+    with pytest.raises(ConfigError, match="references unknown secret-source 'fixture-source'") as exc:
         registry.finalize(enablement_sources=[_plugin_source()])
     assert "must be one of" not in str(exc.value)
 

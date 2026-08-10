@@ -203,7 +203,9 @@ The QEMU guest agent is not responding. Check:
 
 Set it for the env-var backend (`export AW_SECRET_PROXMOX_TOKEN="your-secret-here"`) or let the
 prompt backend ask. `agw secret describe proxmox-token` shows how each backend would look it up;
-`agw doctor` reports the runtime outcome.
+`agw doctor` gives a non-probing preview of whether a source could attempt it and whether that
+source is ready, never a runtime resolution outcome. Use `agw secret verify proxmox-token` when you
+need a value-free resolution proof.
 
 ### "401 Unauthorized" from the API
 

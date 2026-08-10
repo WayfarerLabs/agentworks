@@ -23,7 +23,11 @@ from agentworks.ssh import (
     SSH_TRANSPORT_ERROR,
     SSHError,
     SSHResult,
+    SSHTarget,
     _set_env_args,
+)
+from agentworks.ssh import (
+    run as ssh_run,
 )
 from agentworks.transports.base import Transport
 
@@ -183,6 +187,7 @@ class SSHTransport(Transport):
         check: bool = True,
         timeout: int | None = None,
         env: dict[str, str] | None = None,
+        input_text: str | None = None,
         retries: int | None = None,
         on_retry: Callable[[int, int], None] | None = None,
     ) -> SSHResult:
@@ -196,14 +201,37 @@ class SSHTransport(Transport):
         transport wraps in ``$SHELL -lc '<command>'`` (applied after the
         sudo wrap if both are set).
 
-        ``retries`` and ``on_retry`` are SSH-only extensions and are not
-        part of the ``Transport`` ABC. Lima / WSL2 / RemoteLima do not
-        retry on timeout, so neither parameter has anything to bind to
-        there. Callers that need either parameter are type-narrowed
-        to ``SSHTransport`` rather than hoisting these to the ABC.
+        Sensitive ``input_text`` uses the shared SSH stdin primitive, which
+        keeps the value out of argv and diagnostics and discards command
+        output because an arbitrary remote command can reflect stdin.
         """
         if sudo:
             command = f"sudo -n bash -c {shlex.quote(command)}"
+
+        t = self._resolve_timeout(timeout)
+        attempts = retries if retries is not None else self.retries
+        if input_text is not None:
+            stdin_result = ssh_run(
+                SSHTarget(
+                    host=self.host,
+                    user=self.user,
+                    port=self.port,
+                    identity_file=self.identity_file,
+                    proxy_jump=self.proxy_jump,
+                    login_shell=self.login_shell,
+                    force_tty=self.force_tty if tty is None else tty,
+                ),
+                command,
+                check=check,
+                timeout=t,
+                retries=attempts,
+                on_retry=on_retry,
+                env=env,
+                input_text=input_text,
+            )
+            if self.logger is not None:
+                self.logger.log_command(command, stdin_result)
+            return stdin_result
 
         args = self._ssh_base_args(force_tty=tty, env=env)
         # Fence the remote command from ssh's option parser. Some
@@ -218,8 +246,6 @@ class SSHTransport(Transport):
         else:
             args.append(command)
 
-        t = self._resolve_timeout(timeout)
-        attempts = retries if retries is not None else self.retries
         last_err: Exception | None = None
         for attempt in range(attempts):
             if attempt > 0 and on_retry is not None:

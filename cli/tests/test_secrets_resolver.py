@@ -7,12 +7,15 @@ resolve, strict cached ``get``, and the late-registration guard.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.errors import StateError
+from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.resolve import ResolutionBatch
 from agentworks.secrets.resolver import Resolver
 
 
@@ -36,7 +39,7 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 def test_register_name_synthesizes_when_registry_is_sparse(env) -> None:
     config, registry = env()
-    resolver = Resolver(config, registry)
+    resolver = Resolver(config, registry, interaction=InteractionPolicy.REFUSE)
     decl = resolver.register_name("never-declared")
     assert decl.name == "never-declared"
 
@@ -48,15 +51,15 @@ def test_resolve_is_one_pass_and_idempotent(env, monkeypatch: pytest.MonkeyPatch
     monkeypatch.setenv("AW_SECRET_SOME_TOKEN", "v1")
 
     calls: list[object] = []
-    real = secrets_resolve.resolve_secrets
+    real = secrets_resolve.resolve_batch
 
-    def _counting(*args: object, **kwargs: object) -> dict[str, str]:
+    def _counting(*args: Any, **kwargs: Any) -> ResolutionBatch:
         calls.append(args)
-        return real(*args, **kwargs)  # type: ignore[arg-type]
+        return real(*args, **kwargs)
 
-    monkeypatch.setattr(secrets_resolve, "resolve_secrets", _counting)
+    monkeypatch.setattr(secrets_resolve, "resolve_batch", _counting)
 
-    resolver = Resolver(config, registry)
+    resolver = Resolver(config, registry, interaction=InteractionPolicy.REFUSE)
     resolver.register_name("some-token")
     resolver.resolve()
     resolver.resolve()  # idempotent while the set is unchanged
@@ -70,17 +73,17 @@ def test_empty_set_resolves_without_touching_backends(env, monkeypatch: pytest.M
     config, registry = env()
     monkeypatch.setattr(
         secrets_resolve,
-        "resolve_secrets",
+        "resolve_batch",
         lambda *a, **k: (_ for _ in ()).throw(AssertionError("no backends for an empty set")),
     )
-    resolver = Resolver(config, registry)
+    resolver = Resolver(config, registry, interaction=InteractionPolicy.REFUSE)
     resolver.resolve()
     assert resolver.resolved
 
 
 def test_get_before_resolve_raises(env) -> None:
     config, registry = env()
-    resolver = Resolver(config, registry)
+    resolver = Resolver(config, registry, interaction=InteractionPolicy.REFUSE)
     resolver.register_name("some-token")
     with pytest.raises(StateError, match="before the operation's resolve"):
         resolver.get("some-token")
@@ -88,7 +91,7 @@ def test_get_before_resolve_raises(env) -> None:
 
 def test_get_unregistered_name_raises(env, monkeypatch: pytest.MonkeyPatch) -> None:
     config, registry = env()
-    resolver = Resolver(config, registry)
+    resolver = Resolver(config, registry, interaction=InteractionPolicy.REFUSE)
     resolver.resolve()
     with pytest.raises(StateError, match="not part of the operation's resolve"):
         resolver.get("never-registered")
@@ -99,7 +102,7 @@ def test_late_registration_then_resolve_raises(env, monkeypatch: pytest.MonkeyPa
     a second prompt session; the contract violation is loud."""
     config, registry = env()
     monkeypatch.setenv("AW_SECRET_EARLY", "v")
-    resolver = Resolver(config, registry)
+    resolver = Resolver(config, registry, interaction=InteractionPolicy.REFUSE)
     resolver.register_name("early")
     resolver.resolve()
     resolver.register_name("late")

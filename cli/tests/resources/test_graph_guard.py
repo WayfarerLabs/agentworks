@@ -73,7 +73,7 @@ eight of them behind in one change, which is why the check exists.
   ``capabilities/harness_integration``, ``capabilities/git_credential``,
   ``secrets``): each kind's ``CapabilityKindDescriptor`` carries the lazy
   accessor for its own code registry, and the secret-backend record carries the
-  readiness callable that asks the backend instance. Both are the graph
+  readiness callable that asks the backend class. Both are the graph
   BUILDER's own exempt code relocated beside the kind it serves (the builder's
   per-kind loaders and its readiness fold derive from the descriptor table), so
   this is the same exemption at a new address, not a new bypass.
@@ -322,7 +322,7 @@ _REGISTRY_READ_ALLOWLIST = frozenset(
         "capabilities/vm_platform/__init__.py",
         "capabilities/harness_integration/__init__.py",
         "capabilities/git_credential/__init__.py",
-        "secrets/backends.py",
+        "capabilities/secret_backend/base.py",
         # The whole plugin framework is deliberately ABSENT. Its adapters
         # still seat plugin impls into the four registries (the plugin analog
         # of the built-in publishers), but the one generic adapter reaches
@@ -341,7 +341,7 @@ _REGISTRY_READ_ALLOWLIST = frozenset(
         "capabilities/vm_platform/kinds.py",
         "capabilities/harness_integration/kinds.py",
         "capabilities/git_credential/kinds.py",
-        "secrets/kinds.py",
+        "capabilities/secret_backend/kinds.py",
         # Op-time construction of a capability instance.
         "vms/sites.py",  # resolve_site: the one chokepoint every VM op passes
         "git_credentials/__init__.py",
@@ -403,13 +403,7 @@ _NOT_READY_ALLOWLIST = frozenset(
     {
         "resources/graph.py",  # the readiness fold
         "vms/sites.py",  # VMSite.not_ready hook -> platform impl off the graph
-        # The secret-backend descriptor's readiness callable: the fold's own
-        # secret-backend branch, relocated onto the descriptor so the fold
-        # stops enumerating kinds (declarative-schema step 2.0). It is fold
-        # code living beside its kind, not a projection surface recomputing
-        # a verdict, and it is now the SOLE implementation: the fold calls it
-        # rather than duplicating it.
-        "secrets/kinds.py",
+        "secrets/sources.py",  # SecretSourceDecl.not_ready hook -> backend impl off the graph
     }
 )
 
@@ -571,8 +565,8 @@ def test_readiness_projections_read_readiness_of() -> None:
     # The two named banned-pattern-2 sites carry zero registry reads.
     assert find_registry_reads(_read("vms/kinds.py")) == []
     assert find_registry_reads(_read("secrets/resolve.py")) == []
-    # Secret resolution reaches a backend's code off the graph, not the registry.
-    assert "impl_of" in _read("secrets/resolve.py")
+    # Source selection reaches a backend's code off the graph, not a code registry.
+    assert "impl_of" in _read("secrets/sources.py")
 
 
 def test_vms_sites_exempt_reads_are_function_scoped() -> None:
@@ -624,15 +618,14 @@ def test_descriptor_exempt_reads_are_function_scoped() -> None:
     is one of the two sites banned pattern 2 was written about. So pin each
     read to the accessor that owns it, exactly as ``vms/sites.py`` is pinned.
 
-    ``secrets/kinds.py`` needs it most: it is the only other module exempt for
-    two patterns at once, and it is where a "just ask the backend" recompute
-    would most naturally be written.
+    The secret-backend owner now lives under the capability package like the
+    other three.
     """
     registry_owners = {
         "capabilities/vm_platform/kinds.py": {"_registry"},
         "capabilities/harness_integration/kinds.py": {"_registry"},
         "capabilities/git_credential/kinds.py": {"_registry"},
-        "secrets/kinds.py": {"_backend_registry"},
+        "capabilities/secret_backend/kinds.py": {"_backend_registry"},
     }
     offenders: list[str] = []
     for rel, owners in registry_owners.items():
@@ -651,17 +644,6 @@ def test_descriptor_exempt_reads_are_function_scoped() -> None:
         "a capability kinds module reads a capability registry outside the "
         "descriptor's registry accessor (the exemption covers that accessor, "
         "not the module):\n" + "\n".join(offenders)
-    )
-
-    backend_source = _read("secrets/kinds.py")
-    not_ready_offenders = [
-        f"secrets/kinds.py:{func}:{lineno}"
-        for func, lineno in _enclosing_functions(backend_source, _is_not_ready_call)
-        if func != "_backend_readiness"
-    ]
-    assert not not_ready_offenders, (
-        "secrets/kinds.py calls not_ready outside the descriptor's readiness "
-        "callable (read the stored verdict via readiness_of instead):\n" + "\n".join(not_ready_offenders)
     )
 
 

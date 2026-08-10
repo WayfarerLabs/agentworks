@@ -13,15 +13,20 @@ boundary-burst pins live in ``test_delete_vm_gating.py``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import contextlib
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
 from agentworks.db import VMStatus
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
+from agentworks.secrets.policy import InteractionPolicy
 from agentworks.vms import manager as vm_manager
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable, Iterator
+
     from agentworks.capabilities.base import OperationScope, RunContext
     from agentworks.db import Database
 
@@ -45,6 +50,7 @@ def _fake_power(monkeypatch: pytest.MonkeyPatch, status: VMStatus) -> list[str]:
     )
     monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: events.append("start"))
     monkeypatch.setattr(ProxmoxPlatform, "stop", lambda self, row, ctx: events.append("stop"))
+    monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", lambda *a, **k: True)
     monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale"))
     return events
 
@@ -94,12 +100,13 @@ def test_start_stopped_vm_resolves_once_starts_and_clears_flag(
     platform; the operator-stopped flag is cleared (an explicit start
     is operator intent)."""
     config = make_config()
+    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "ts-key")
     _seed_vm(db, operator_stopped=True)
     events = _fake_power(monkeypatch, VMStatus.STOPPED)
 
-    vm_manager.start_vm(db, config, "box")
+    vm_manager.start_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
 
-    assert resolve_counter == [["proxmox-token"]]
+    assert resolve_counter == [["proxmox-token"], ["tailscale-auth-key"]]
     assert events == ["status", "start", "tailscale"]
     row = db.get_vm("box")
     assert row is not None and row.operator_stopped is False
@@ -118,17 +125,322 @@ def test_start_running_vm_short_circuits_but_still_clears_flag(
     (and no 'is ready' noise), Tailscale still verified, and the flag
     still cleared; the boundary still costs exactly one burst."""
     config = make_config()
+    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "ts-key")
     _seed_vm(db, operator_stopped=True)
     events = _fake_power(monkeypatch, VMStatus.RUNNING)
 
-    vm_manager.start_vm(db, config, "box")
+    vm_manager.start_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
 
-    assert resolve_counter == [["proxmox-token"]]
+    assert resolve_counter == [["proxmox-token"], ["tailscale-auth-key"]]
     assert events == ["status", "tailscale"]
     row = db.get_vm("box")
     assert row is not None and row.operator_stopped is False
     assert any("VM 'box' is already running" in m for m in captured_output.info)
     assert not any("is ready" in m for m in captured_output.info)
+
+
+class _TrackedValues(dict[str, str]):
+    def __init__(self, events: list[str]) -> None:
+        super().__init__({"tailscale-auth-key": "ts-key"})
+        self._events = events
+
+    def clear(self) -> None:
+        self._events.append("values-clear")
+        super().clear()
+
+
+def _patch_recording_start_hold(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
+    monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, row, ctx: VMStatus.STOPPED)
+    monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: None)
+
+    @contextlib.contextmanager
+    def _hold(self: object, row: object, *, config: object) -> Iterator[None]:
+        events.append("hold-enter")
+        try:
+            yield
+        finally:
+            events.append("hold-exit")
+
+    monkeypatch.setattr(ProxmoxPlatform, "vm_active", _hold)
+
+
+def _patch_actual_ensure_sequence(
+    monkeypatch: pytest.MonkeyPatch,
+    events: list[str],
+    *,
+    failure_stage: str | None = None,
+    failure: BaseException | None = None,
+) -> dict[str, int]:
+    import agentworks.ssh_config as ssh_config
+    import agentworks.transports as transports
+    from agentworks.vms.manager.tailscale import _ensure_tailscale as actual_ensure
+
+    calls = {"verify": 0, "native": 0, "rejoin": 0, "final-wait": 0, "sync": 0}
+
+    def _raise_at(stage: str) -> None:
+        if failure_stage == stage:
+            assert failure is not None
+            raise failure
+
+    class _Target:
+        logger = None
+
+    def _verify() -> None:
+        calls["verify"] += 1
+
+    def _native(*args: object, **kwargs: object) -> _Target:
+        calls["native"] += 1
+        return _Target()
+
+    def _rejoin(*args: object, **kwargs: object) -> None:
+        calls["rejoin"] += 1
+        events.append("rejoin")
+        _raise_at("rejoin")
+
+    def _final_wait(*args: object, **kwargs: object) -> bool:
+        calls["final-wait"] += 1
+        events.append("final-wait")
+        _raise_at("final-wait")
+        return True
+
+    def _sync(*args: object, **kwargs: object) -> None:
+        calls["sync"] += 1
+
+    monkeypatch.setattr(vm_manager, "verify_tailscale_available", _verify)
+    monkeypatch.setattr(vm_manager, "rejoin_tailscale", _rejoin)
+    monkeypatch.setattr(transports, "native_transport", _native)
+    monkeypatch.setattr(transports, "transport", lambda *args, **kwargs: object())
+    monkeypatch.setattr(transports, "wait_for_reconnect", _final_wait)
+    monkeypatch.setattr(ssh_config, "sync_ssh_config", _sync)
+
+    def _recording_ensure(*args: object, **kwargs: object) -> None:
+        events.append("ensure-enter")
+        cast("Callable[..., None]", actual_ensure)(*args, **kwargs)
+        events.append("ensure-return")
+
+    monkeypatch.setattr(vm_manager, "_ensure_tailscale", _recording_ensure)
+    return calls
+
+
+def test_start_healthy_probe_stays_inside_hold_and_never_acquires_auth(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agentworks.secrets as secret_package
+
+    config = make_config()
+    _seed_vm(db)
+    events: list[str] = []
+    _patch_recording_start_hold(monkeypatch, events)
+    monkeypatch.setattr(
+        vm_manager,
+        "_tailscale_rejoin_required",
+        lambda *args, **kwargs: events.append("probe-false") or False,
+    )
+    monkeypatch.setattr(
+        secret_package,
+        "resolve_for_command",
+        lambda *args, **kwargs: pytest.fail("healthy start acquired Tailscale auth"),
+    )
+
+    vm_manager.start_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
+
+    assert events == ["hold-enter", "probe-false", "hold-exit"]
+
+
+def test_start_rejoin_orders_acquisition_reader_ensure_cleanup_and_release(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agentworks.orchestration.secrets as orchestration_secrets
+    import agentworks.secrets as secret_package
+    import agentworks.vms.manager.power as power
+    import agentworks.vms.templates as templates
+
+    config = make_config()
+    _seed_vm(db)
+    events: list[str] = []
+    _patch_recording_start_hold(monkeypatch, events)
+    monkeypatch.setattr(
+        vm_manager,
+        "_tailscale_rejoin_required",
+        lambda *args, **kwargs: events.append("probe-true") or True,
+    )
+    monkeypatch.setattr(
+        templates,
+        "resolve_template",
+        lambda registry, name: SimpleNamespace(tailscale_auth_key="tailscale-auth-key"),
+    )
+    monkeypatch.setattr(power, "_lookup_or_synthesize_secret", lambda *args: object())
+    values = _TrackedValues(events)
+    monkeypatch.setattr(
+        secret_package,
+        "resolve_for_command",
+        lambda *args, **kwargs: events.append("resolve") or values,
+    )
+
+    class _Reader:
+        def __init__(self, mapping: dict[str, str], names: object) -> None:
+            self._tracks_tailscale = tuple(cast("Iterable[str]", names)) == ("tailscale-auth-key",)
+            if self._tracks_tailscale:
+                events.append("reader-build")
+            self._mapping = mapping
+
+        def get(self, name: str) -> str:
+            if self._tracks_tailscale:
+                events.append("auth-read")
+            return self._mapping[name]
+
+    monkeypatch.setattr(orchestration_secrets, "ScopedSecrets", _Reader)
+
+    calls = _patch_actual_ensure_sequence(monkeypatch, events)
+
+    vm_manager.start_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
+
+    assert events == [
+        "hold-enter",
+        "probe-true",
+        "resolve",
+        "reader-build",
+        "ensure-enter",
+        "auth-read",
+        "rejoin",
+        "final-wait",
+        "ensure-return",
+        "values-clear",
+        "hold-exit",
+    ]
+    assert values == {}
+    assert calls == {"verify": 1, "native": 1, "rejoin": 1, "final-wait": 1, "sync": 1}
+
+
+@pytest.mark.parametrize("failure_type", [RuntimeError, KeyboardInterrupt])
+@pytest.mark.parametrize("failure_stage", ["probe", "resolve", "reader-build", "auth-read", "rejoin", "final-wait"])
+def test_start_tailscale_failure_matrix_cleans_before_one_release_without_retry(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    failure_stage: str,
+    failure_type: type[BaseException],
+) -> None:
+    import agentworks.orchestration.secrets as orchestration_secrets
+    import agentworks.secrets as secret_package
+    import agentworks.vms.manager.power as power
+    import agentworks.vms.templates as templates
+
+    config = make_config()
+    _seed_vm(db)
+    events: list[str] = []
+    _patch_recording_start_hold(monkeypatch, events)
+    failure = failure_type(failure_stage)
+
+    def _stage(name: str) -> None:
+        events.append(name)
+        if failure_stage == name:
+            raise failure
+
+    def _probe(*args: object, **kwargs: object) -> bool:
+        _stage("probe")
+        return True
+
+    monkeypatch.setattr(vm_manager, "_tailscale_rejoin_required", _probe)
+    monkeypatch.setattr(
+        templates,
+        "resolve_template",
+        lambda registry, name: SimpleNamespace(tailscale_auth_key="tailscale-auth-key"),
+    )
+    monkeypatch.setattr(power, "_lookup_or_synthesize_secret", lambda *args: object())
+    values = _TrackedValues(events)
+
+    def _acquire(*args: object, **kwargs: object) -> dict[str, str]:
+        assert kwargs["interaction"] is InteractionPolicy.REFUSE
+        _stage("resolve")
+        return values
+
+    monkeypatch.setattr(secret_package, "resolve_for_command", _acquire)
+
+    class _Reader:
+        def __init__(self, mapping: dict[str, str], names: object) -> None:
+            self._tracks_tailscale = tuple(cast("Iterable[str]", names)) == ("tailscale-auth-key",)
+            if self._tracks_tailscale:
+                _stage("reader-build")
+            self._mapping = mapping
+
+        def get(self, name: str) -> str:
+            if self._tracks_tailscale:
+                _stage("auth-read")
+            return self._mapping[name]
+
+    monkeypatch.setattr(orchestration_secrets, "ScopedSecrets", _Reader)
+
+    calls = _patch_actual_ensure_sequence(
+        monkeypatch,
+        events,
+        failure_stage=failure_stage,
+        failure=failure,
+    )
+
+    with pytest.raises(failure_type) as caught:
+        vm_manager.start_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
+
+    assert caught.value is failure
+    assert events.count(failure_stage) == 1
+    assert events.count("hold-enter") == events.count("hold-exit") == 1
+    assert events[-1] == "hold-exit"
+    if failure_stage in {"reader-build", "auth-read", "rejoin", "final-wait"}:
+        assert events[-2] == "values-clear"
+        assert values == {}
+    else:
+        assert "values-clear" not in events
+
+    expected_before_release = {
+        "probe": ["hold-enter", "probe"],
+        "resolve": ["hold-enter", "probe", "resolve"],
+        "reader-build": ["hold-enter", "probe", "resolve", "reader-build", "values-clear"],
+        "auth-read": [
+            "hold-enter",
+            "probe",
+            "resolve",
+            "reader-build",
+            "ensure-enter",
+            "auth-read",
+            "values-clear",
+        ],
+        "rejoin": [
+            "hold-enter",
+            "probe",
+            "resolve",
+            "reader-build",
+            "ensure-enter",
+            "auth-read",
+            "rejoin",
+            "values-clear",
+        ],
+        "final-wait": [
+            "hold-enter",
+            "probe",
+            "resolve",
+            "reader-build",
+            "ensure-enter",
+            "auth-read",
+            "rejoin",
+            "final-wait",
+            "values-clear",
+        ],
+    }
+    assert events == [*expected_before_release[failure_stage], "hold-exit"]
+    no_ensure_work = {"verify": 0, "native": 0, "rejoin": 0, "final-wait": 0, "sync": 0}
+    expected_calls = {
+        "probe": no_ensure_work,
+        "resolve": no_ensure_work,
+        "reader-build": no_ensure_work,
+        "auth-read": no_ensure_work,
+        "rejoin": {"verify": 1, "native": 1, "rejoin": 1, "final-wait": 0, "sync": 0},
+        "final-wait": {"verify": 1, "native": 1, "rejoin": 1, "final-wait": 1, "sync": 0},
+    }
+    assert calls == expected_calls[failure_stage]
 
 
 # -- vm stop: boundary burst, flag set, short-circuits ------------------------
@@ -145,7 +457,7 @@ def test_stop_running_vm_resolves_once_stops_and_sets_flag(
     _seed_vm(db)
     events = _fake_power(monkeypatch, VMStatus.RUNNING)
 
-    vm_manager.stop_vm(db, config, "box")
+    vm_manager.stop_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
 
     assert resolve_counter == [["proxmox-token"]]
     assert events == ["status", "stop"]
@@ -168,7 +480,7 @@ def test_stop_sets_flag_before_already_stopped_shortcut(
     _seed_vm(db)
     events = _fake_power(monkeypatch, VMStatus.STOPPED)
 
-    vm_manager.stop_vm(db, config, "box")
+    vm_manager.stop_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
 
     row = db.get_vm("box")
     assert row is not None and row.operator_stopped is True
@@ -194,7 +506,7 @@ def test_stop_of_a_manually_stopped_vm_is_a_true_noop(
     _seed_vm(db, operator_stopped=True)
     _fake_power(monkeypatch, VMStatus.STOPPED)
 
-    vm_manager.stop_vm(db, config, "box")
+    vm_manager.stop_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
 
     (message,) = [m for m in captured_output.info if not m.startswith("Resolved ")]
     assert message == "VM 'box' is already manually stopped"
@@ -212,6 +524,7 @@ def test_vm_scope_reaches_node_readiness(
     from agentworks.capabilities.base import ScopeLevel
 
     config = make_config()
+    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "ts-key")
     _seed_vm(db)
     _fake_power(monkeypatch, VMStatus.RUNNING)
     scopes: list[OperationScope | None] = []
@@ -223,7 +536,7 @@ def test_vm_scope_reaches_node_readiness(
 
     monkeypatch.setattr(ProxmoxPlatform, "preflight", _recording)
 
-    vm_manager.start_vm(db, config, "box")
+    vm_manager.start_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
 
     (scope,) = scopes
     assert scope is not None

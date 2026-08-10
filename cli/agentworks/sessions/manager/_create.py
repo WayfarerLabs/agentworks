@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import agentworks.sessions.manager as _mgr
 from agentworks import output
 from agentworks.errors import StateError
+from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 
 from ._create_build import _build_session_graph
 from ._create_plan import _resolve_session_plan
@@ -61,6 +62,7 @@ def _preflight_and_resolve(
     graph: SessionGraph,
     vm: VMRow,
     target: Transport,
+    interaction: InteractionPolicy,
 ) -> tuple[dict[str, str], Transport | None]:
     """Run the Preflight sweep and the Resolving-Secrets boundary resolve.
 
@@ -73,6 +75,7 @@ def _preflight_and_resolve(
     any prompt or mutation, the earlier-failure win) and is ``None`` for
     a pending or admin target.
     """
+    interaction = validate_interaction_policy(interaction)
     from agentworks.capabilities.base import RunContext
     from agentworks.orchestration.readiness import preflight_all
 
@@ -121,6 +124,7 @@ def _preflight_and_resolve(
                 agent_target=agent_target,
             ),
             registry=graph.registry,
+            interaction=interaction,
         )
 
     with output.section("Resolving Secrets"):
@@ -147,6 +151,7 @@ def create_session(
     admin: bool = False,
     # VM anchor (validated against workspace/agent VMs when both specified):
     vm_name: str | None = None,
+    interaction: InteractionPolicy,
 ) -> None:
     """Create and start a session.
 
@@ -180,6 +185,7 @@ def create_session(
             pins the VM; required when no other anchor does. When
             specified alongside other anchors, must agree with them.
     """
+    interaction = validate_interaction_policy(interaction)
     from agentworks.bootstrap import load_request_registry
 
     # build_registry runs first so framework miss-policies (e.g. typos
@@ -218,7 +224,14 @@ def create_session(
     # boundary secret union onto the resolver, and the operation scope.
     # No SSH, no DB writes, no secret resolution (that waits for the
     # gate).
-    graph = _build_session_graph(db, config, registry=registry, plan=plan, template_name=template_name)
+    graph = _build_session_graph(
+        db,
+        config,
+        registry=registry,
+        plan=plan,
+        template_name=template_name,
+        interaction=interaction,
+    )
 
     from agentworks.orchestration.activation import (
         activation_gate,
@@ -234,7 +247,14 @@ def create_session(
         vm = _reload_vm(db, plan.target_vm_name)
         target, run_command = _build_live_transport(vm, config)
 
-        secret_values, agent_target = _preflight_and_resolve(config, plan=plan, graph=graph, vm=vm, target=target)
+        secret_values, agent_target = _preflight_and_resolve(
+            config,
+            plan=plan,
+            graph=graph,
+            vm=vm,
+            target=target,
+            interaction=interaction,
+        )
 
         # ===== Dependency-ordered roll-forward (S11) ========================
         #
