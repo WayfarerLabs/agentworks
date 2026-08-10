@@ -9,7 +9,7 @@ offline gates, and operator-gated live acceptance are complete; the SDD is locke
 
 ## Phase 0: contract and schema gates
 
-- [ ] Rebase or stack on the review-clean vm-platform v2 complete-or-raise contract from issue #471.
+- [x] Rebase or stack on the review-clean vm-platform v2 complete-or-raise contract from issue #471.
 - [x] Review the latest stable `google-cloud-compute` and `google-auth` releases and select only the
       direct dependencies the implementation will import; actual dependency edits remain Phase 1.
 - [x] Review and approve `prior-art-research.md` plus `provider-state-machine-lld.md`, which pin the
