@@ -266,9 +266,8 @@ Both generated `SKILL.md` files prepend this Agent Skills frontmatter to the sam
 ---
 name: agentworks
 description: >-
-  Help with any Agentworks setup, discovery, adoption, configuration, troubleshooting, VM operation,
-  or session operation request. Use whenever the operator asks to install, understand, configure,
-  troubleshoot, or operate Agentworks.
+  Install or update the Agentworks CLI, verify its version, and run its built-in agent guide. Use
+  when the operator wants to bootstrap Agentworks assistance.
 compatibility:
   Requires Python 3.12 or newer and network access only when installing or updating the CLI.
 metadata:
@@ -301,12 +300,12 @@ object with these minimal fields:
 ```json
 {
   "displayName": "Agentworks",
-  "shortDescription": "Agentworks assistance",
-  "longDescription": "Set up, understand, configure, troubleshoot, and operate Agentworks.",
+  "shortDescription": "Bootstrap Agentworks CLI",
+  "longDescription": "Install or update the Agentworks CLI, verify it, and open its agent guide.",
   "developerName": "Wayfarer Labs",
   "category": "Productivity",
-  "capabilities": ["Lifecycle assistance"],
-  "defaultPrompt": ["Help me with Agentworks."]
+  "capabilities": ["CLI bootstrap"],
+  "defaultPrompt": ["Install or update Agentworks and open its guide."]
 }
 ```
 
