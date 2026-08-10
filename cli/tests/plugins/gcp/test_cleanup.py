@@ -413,8 +413,13 @@ def test_manual_guidance_recommends_delete_only_for_verified_owned_survivors(
         ),
     )
     assert "Owned instance survivor (expected provider ID '201', observed '201')" in message
+    assert (
+        "`gcloud compute instances describe vm-a --project project-a --zone us-central1-a "
+        "--format='value(id)'`" in message
+    )
     assert "gcloud compute instances delete vm-a --project project-a --zone us-central1-a" in message
     assert "Owned allow rule survivor (expected provider ID '101', observed '101')" in message
+    assert "`gcloud compute firewall-rules describe vm-a-allow --project project-a --format='value(id)'`" in message
     assert "gcloud compute firewall-rules delete vm-a-allow --project project-a" in message
     assert "Owned deny rule retained while instance absence is unproven" in message
 
@@ -434,7 +439,12 @@ def test_manual_guidance_for_provider_id_collisions_is_inspect_and_escalate_only
         ),
     )
     assert "Same-name instance collision (expected provider ID '201', observed '202')" in message
+    assert (
+        "`gcloud compute instances describe vm-a --project project-a --zone us-central1-a "
+        "--format='value(id)'`" in message
+    )
     assert "Same-name allow rule collision or shape mismatch (expected provider ID '101', observed '901')" in message
+    assert "`gcloud compute firewall-rules describe vm-a-allow --project project-a --format='value(id)'`" in message
     assert "Same-name deny rule collision or shape mismatch (expected provider ID '102', observed '902')" in message
     assert message.count("do not delete by name; escalate ownership") == 3
     assert "gcloud compute instances delete" not in message
@@ -453,7 +463,12 @@ def test_manual_guidance_for_unknown_provider_ids_is_inspect_and_escalate_only(
         ),
     )
     assert "Instance ownership is unknown (expected provider ID '201', observed 'unknown')" in message
+    assert (
+        "`gcloud compute instances describe vm-a --project project-a --zone us-central1-a "
+        "--format='value(id)'`" in message
+    )
     assert "Allow rule ownership is unknown (expected provider ID '101', observed 'unknown')" in message
+    assert "`gcloud compute firewall-rules describe vm-a-allow --project project-a --format='value(id)'`" in message
     assert "Deny rule ownership is unknown (expected provider ID '102', observed 'unknown')" in message
     assert message.count("do not delete by name; escalate ownership") == 3
     assert "gcloud compute instances delete" not in message

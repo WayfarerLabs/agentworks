@@ -422,7 +422,7 @@ def _instance_guidance(
 ) -> str:
     inspect = (
         f"Inspect `gcloud compute instances describe {coordinates.instance_name} "
-        f"--project {coordinates.project_id} --zone {coordinates.zone} --format=value(id)`"
+        f"--project {coordinates.project_id} --zone {coordinates.zone} --format='value(id)'`"
     )
     identity = f"expected provider ID '{expected_id or 'unknown'}', observed '{observed_id or 'unknown'}'"
     if state is InstanceState.SURVIVING and expected_id is not None and observed_id == expected_id:
@@ -447,7 +447,8 @@ def _firewall_guidance(
     instance_absent: bool,
 ) -> str:
     inspect = (
-        f"Inspect `gcloud compute firewall-rules describe {name} --project {coordinates.project_id} --format=value(id)`"
+        f"Inspect `gcloud compute firewall-rules describe {name} --project {coordinates.project_id} "
+        "--format='value(id)'`"
     )
     identity = f"expected provider ID '{expected_id or 'unknown'}', observed '{observed_id or 'unknown'}'"
     if state is FirewallState.REALIZED and expected_id is not None and observed_id == expected_id:
