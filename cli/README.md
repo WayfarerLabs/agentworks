@@ -536,6 +536,11 @@ restored by an Agentworks release that understands that schema. Before downgradi
 restore a backup whose schema the older release understands; do not open newer state with the older
 release first.
 
+SQLite may leave user-only `-shm` and zero-byte `-wal` coordination files beside a selected backup
+after validation or restore. This is expected: the backup database remains unchanged, valid, and
+retryable. Agentworks uses an ordinary read-only open here so committed WAL content is not ignored,
+and it does not race SQLite by deleting those coordination files.
+
 ## Environment Variables
 
 Secret values are read from the operator's shell via the `env-var` backend, which follows the

@@ -212,10 +212,9 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
         from agentworks import output
         from agentworks.vms.sites import site_manifest_hint
 
-        # Everything goes through output.warn: migrations run at every
-        # Database() open, including from the shell-completion helpers
-        # that capture stdout (`agw vm list --names-only`), so stdout
-        # must stay clean for machine consumers.
+        # Everything goes through output.warn: migrations can run under
+        # ordinary JSON or names-only commands, so stdout must stay clean
+        # for machine consumers. Completion probes never migrate.
         output.warn("remote-Lima VMs now live at host-named sites; declare each site or those VMs stay unreachable:")
         for site, (ssh_host, host) in sorted(site_hosts.items()):
             if site != host:

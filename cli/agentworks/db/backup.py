@@ -499,6 +499,10 @@ def _validate_sqlite_file(path: Path, *, source_kind: str) -> sqlite3.Connection
         raise NotFoundError(f"{source_kind} not found: {format_host_path(path)}")
     connection: sqlite3.Connection | None = None
     try:
+        # Backup and restore sources may have committed WAL content, so immutable
+        # mode is unsafe here. An ordinary read-only open can leave restrictive
+        # SQLite coordination sidecars; retain them rather than racing SQLite or
+        # another reader by deleting them.
         connection = sqlite3.connect(
             f"{path.resolve().as_uri()}?mode=ro",
             uri=True,

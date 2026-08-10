@@ -1,6 +1,6 @@
 # HLA: Safer Database Migrations
 
-- Status: Approved for implementation
+- Status: Implemented
 - FRD: [frd.md](./frd.md)
 - Prior art: [prior-art-research.md](./prior-art-research.md)
 - Saga: `docs/sdd/2026-08-04-next-steps/`

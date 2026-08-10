@@ -2,7 +2,7 @@
 
 <!-- cspell:ignore sdds -->
 
-- Status: Active
+- Status: Complete
 - Builds on: [frd.md](./frd.md), [hla.md](./hla.md),
   [migration-strategy.md](./migration-strategy.md)
 - Saga: `docs/sdd/2026-08-04-next-steps/`
@@ -122,27 +122,27 @@ behavior. Live validation uses a temporary isolated home and no operator state.
 
 ## Phase 3: Integrated validation and closeout
 
-- [ ] As the invoking session, fetch the PR's real head and base; prove the checkout matches the
+- [x] As the invoking session, fetch the PR's real head and base; prove the checkout matches the
       remote head; and check freshness and merge conflicts with current `main`. Save and preserve an
       `agw-state` snapshot first only if the planned run can touch operator state.
-- [ ] Run six mutation checks: force migration before backup, bypass initial stale qualification,
+- [x] Run six mutation checks: force migration before backup, bypass initial stale qualification,
       remove canonical version-shape conformance under the first lock, remove only the
       preliminary-to-qualified version/cookie comparison, remove the post-interaction schema
       recheck, and force completion through a writable open. Each must fail a focused test; restore
       production behavior afterward.
-- [ ] Run the full gate from a clean tree and record the exact commands and results in the PR.
-- [ ] Have an independent fresh-eyes reviewer inspect the complete implementation, tests, docs, and
+- [x] Run the full gate from a clean tree and record the exact commands and results in the PR.
+- [x] Have an independent fresh-eyes reviewer inspect the complete implementation, tests, docs, and
       SDD traceability; return every valid finding to the implementing agent and re-review fixes.
-- [ ] As the invoking session, load `integration-testing` and `agw-test-env`, select the local-only
+- [x] As the invoking session, load `integration-testing` and `agw-test-env`, select the local-only
       inventory and a bounded resource budget, and inject the relevant environment, safety,
       freshness, cleanup, and disposition charter into an `agentworks-tester`. Have it exercise the
       installed real CLI with an isolated temporary home: manual backup/restore, automatic
       stale-schema backup, opt-out, migration failure remediation, JSON/names-only purity, and
       non-mutating completion. The tester returns evidence only; the invoking session independently
       verifies cleanup, decides the operator-gated disposition, and posts the signed PR comment.
-- [ ] Obtain the saga lead's final implementation ruling after code, review, gate, and live-test
+- [x] Obtain the saga lead's final implementation ruling after code, review, gate, and live-test
       findings converge.
-- [ ] Classify residual migration claims and completion call sites, confirm the brief remains
+- [x] Classify residual migration claims and completion call sites, confirm the brief remains
       absent, update all plan checkboxes truthfully, and create `locked.md` containing final state
       and evidence.
 - DoD: full gates, mutation checks, fresh-eyes review, and isolated CLI validation are clear; the PR
