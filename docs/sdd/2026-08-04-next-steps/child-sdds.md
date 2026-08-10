@@ -246,9 +246,9 @@ continuous-lander stack entry moves to main.
 Permanent homes landed via PRs #473/#474/#477/#481: the sdd skill's supersession paragraph; the
 dev-process draft/ready handoff, author-owned review-requested label, exact handoff definition,
 subagent-review taxonomy, and commit/PR/stack layering with the cascade rule; and the saga-lead
-review triggers matching them. The operator's 2026-08-10 enforcement calibration is codified in the
-dev-process skill's poller rule (PR #489): a handoff gap is reported while the review proceeds in
-good faith, and review is withheld only for unaddressed substantive findings.
+review triggers matching them. (A previously recorded enforcement-calibration note was retracted by
+the operator on 2026-08-10 as personal guidance to the saga lead, not process; the dev-process
+poller rule stands as merged in PR #481, and PR #489 closed unmerged.)
 
 - **Plan-history ruling (operator, 2026-08-10):** completed plan steps may never be removed — no
   exception for never-merged, superseded, or expunged work. Everything else strips clean under a
