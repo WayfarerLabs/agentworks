@@ -308,11 +308,11 @@ pre-migration backup was created. Notices and prompts stay on stderr, so JSON an
 stdout remain machine-pure.
 
 `database restore` validates SQLite integrity, the claimed supported schema version, and that
-version's Agentworks tables and critical columns before it opens the live destination. It refuses an
-identical path, a generic SQLite file, an incomplete Agentworks lookalike, or a schema newer than
-this release understands. The source remains available after restore. Confirmation is required by
-default; a non-interactive invocation must pass `--yes` (or `-y`). Restore does not create an
-implicit backup of the live destination and does not migrate the restored schema. Run
+version's complete Agentworks table-and-column shape before it opens the live destination. It
+refuses an identical path, a generic SQLite file, an incomplete Agentworks lookalike, or a schema
+newer than this release understands. The source remains available after restore. Confirmation is
+required by default; a non-interactive invocation must pass `--yes` (or `-y`). Restore does not
+create an implicit backup of the live destination and does not migrate the restored schema. Run
 `agw database backup` first if you want an additional recovery point before replacement. Restore a
 schema-compatible backup before running an older Agentworks release against state created by a newer
 release.

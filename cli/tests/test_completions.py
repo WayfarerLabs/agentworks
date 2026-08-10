@@ -14,6 +14,7 @@ import pytest
 from agentworks.cli import app
 from agentworks.completions import generate
 from agentworks.completions.spec import (
+    COMPLETION_PROBE_OPTION,
     DATABASE_BACKED_COMPLETION_PATHS,
     DATABASE_BACKED_DYNAMIC_COMPLETERS,
     DATABASE_BACKED_DYNAMIC_COMPLETIONS,
@@ -186,6 +187,20 @@ class TestDynamicCompletionsMapping:
         assert frozenset(path for _completer, path in DATABASE_BACKED_DYNAMIC_COMPLETIONS) == (
             DATABASE_BACKED_COMPLETION_PATHS
         )
+
+    def test_generated_database_backed_invocations_all_carry_hidden_probe_marker(self) -> None:
+        for shell in ("bash", "zsh", "powershell"):
+            script = generate(shell)
+            for command_path in DATABASE_BACKED_COMPLETION_PATHS:
+                invocation = re.compile(
+                    rf"\bagw (?P<marker>{re.escape(COMPLETION_PROBE_OPTION)} )?"
+                    rf"{re.escape(' '.join(command_path))}\b[^\n]*--names-only"
+                )
+                matches = tuple(invocation.finditer(script))
+                assert matches, f"{shell} generated no invocation for {' '.join(command_path)}"
+                assert all(match.group("marker") is not None for match in matches), (
+                    f"{shell} generated a marker-free database-backed invocation for {' '.join(command_path)}"
+                )
 
     def test_database_restore_uses_native_file_completion_in_every_shell(self) -> None:
         from agentworks.completions.bash import DYNAMIC_SNIPPETS as BASH_SNIPPETS

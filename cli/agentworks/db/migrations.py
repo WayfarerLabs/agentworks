@@ -757,4 +757,4 @@ def _build_schema_sentinels() -> dict[int, dict[str, frozenset[str]]]:
 
 
 SCHEMA_SENTINELS = _build_schema_sentinels()
-"""Agentworks tables and critical columns required for each completed schema."""
+"""Complete Agentworks table-and-column shape for each completed schema."""
