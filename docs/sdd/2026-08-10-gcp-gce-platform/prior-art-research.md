@@ -168,6 +168,8 @@ cannot protect against hostile delete/recreate replacement and is not represente
 Decisions:
 
 - publish one `gcloud-cli` system install command from the `gcp` plugin, using `test_exec: gcloud`;
+- bundle the optional guest CLI for parity with the established Azure plugin surface and because the
+  operator explicitly requested consistent cloud-provider guest tooling;
 - install the current apt package from Google's signed repository rather than pinning a stale CLI
   version or using an interactive user installer;
 - overwrite the exact repository source and reconcile the keyring safely on every incomplete retry,
@@ -176,6 +178,38 @@ Decisions:
   ambient mode may obtain host ADC through any supported ADC source while optional host recovery
   tooling remains separate from this declarable;
 - do not bundle optional Google Cloud components until a concrete template requires one.
+
+## Optional guest AWS CLI
+
+- AWS's
+  [CLI v2 Linux install guide](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
+  publishes current official ZIP archives for 64-bit `x86_64` and `aarch64` Linux systems. The
+  bundled installer accepts explicit install and launcher directories, and `--update` reconciles an
+  existing installation.
+- The same guide publishes detached signatures, the armored AWS CLI Team public key, and full
+  fingerprint `FB5D B77F D5C1 18B8 0511 ADA8 A631 0ACC 4672 475C`. It documents signature
+  verification as optional for a manual install; this unattended root installer makes it mandatory.
+- The standard layout installs under `/usr/local/aws-cli` and places the `aws` launcher in
+  `/usr/local/bin`. The base guest bootstrap already provides `curl` and `unzip`, so this declarable
+  does not need a separate package-manager repository.
+
+Decisions:
+
+- publish one `aws-cli` system install command from the existing `aws` vendor plugin without the
+  generic `test_exec` probe, because AWS CLI v1 and v2 share the `aws` executable name;
+- put the completed-install fast path inside the command and skip only when `aws --version` reports
+  `aws-cli/2.`; an existing v1 executable proceeds through the v2 installation;
+- select the current official AWS CLI v2 archive by normalized guest architecture and fail clearly
+  on an unsupported architecture;
+- download the matching detached signature, import the reviewed AWS key into a private temporary
+  GnuPG home, require the exact full fingerprint, and verify the archive before extraction;
+- download and extract in a private temporary directory with cleanup on every exit, then use the
+  official installer's explicit directories and `--update` path to reconcile interrupted installs;
+- keep the command optional and guest-scoped: EC2 operations continue to use boto3, and the command
+  does not run `aws configure`, create a credential/profile file, or alter operator-host
+  credentials;
+- treat this as the same established-Azure-parity and explicit-operator-need decision as the GCP
+  CLI, not as a new provider abstraction or a provisioning dependency.
 
 ## Resulting shared seam
 

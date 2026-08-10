@@ -9,7 +9,13 @@ contracts do not change.
 
 The implementation is a new opt-in `gcp` system plugin publishing `vm-platform/gcp-gce` and an
 optional guest-side Google Cloud CLI install command. The plugin name identifies the vendor bundle;
-the capability name identifies Compute Engine rather than reserving all future GCP mechanisms.
+the capability name identifies Compute Engine rather than reserving all future GCP mechanisms. The
+existing `aws` vendor plugin also gains an optional guest-side AWS CLI install command in the same
+publication correction.
+
+Operator ruling, 2026-08-10: vendor plugins may grow beyond their first capability implementation.
+Their vendor-level identity is the composition boundary; each service-specific implementation keeps
+its own capability contract, model, and name.
 
 ## Requirements
 
@@ -25,6 +31,13 @@ plugin `gcp` before use.
 The `gcloud-cli` declarable installs the current Google Cloud CLI in a guest VM only when a template
 references it. GCE provisioning itself remains SDK-driven and does not require `gcloud`; the guest
 installer neither installs nor authenticates the operator host CLI.
+
+The existing `aws` vendor plugin contributes one optional `system-install-command` named `aws-cli`.
+It installs the current AWS CLI v2 in a guest VM only when a template references it. EC2
+provisioning remains boto3-driven and does not require `aws`; the installer does not run
+`aws configure`, create a guest credential profile, or alter operator-host authentication. Bundling
+both cloud CLIs follows the established Azure CLI precedent and the operator's explicit request for
+consistent optional guest tooling across shipped cloud-provider plugins.
 
 ### R2: declared site schema
 
@@ -160,20 +173,21 @@ precisely without replacing a more important primary failure.
 ### R10: operator discovery and documentation
 
 `resource list`, `describe-kind`, schema emission, guide topics, samples, and plugin enablement show
-the new plugin, `gcp-gce` platform, and `gcloud-cli` declarable from their authoritative descriptors
-and manifest. Permanent docs teach both auth modes, the default-network behavior, the
-service-account secret format, provisioning exposure, required IAM/API setup, an ergonomic
-key-file-to-env-var workflow, optional guest CLI use, and recovery. Shell completion remains
-registry-driven; tests prove the new names are discoverable without a bespoke completion branch.
+the new plugin, `gcp-gce` platform, and both `gcloud-cli` and `aws-cli` install commands from their
+authoritative descriptors and manifests. Permanent docs teach both auth modes, the default-network
+behavior, the service-account secret format, provisioning exposure, required IAM/API setup, an
+ergonomic key-file-to-env-var workflow, optional guest CLI use, AWS guest-tooling boundaries, and
+recovery. Shell completion remains registry-driven; tests prove the new names are discoverable
+without a bespoke completion branch.
 
 ### R11: verification and live acceptance
 
-Offline tests cover registration, multi-contribution plugin publication, `gcloud-cli` payload and
-disabled/enabled recipe gating, schema discrimination/defaults, secret references, auth failure,
-client caching, size/image selection, request retention, fixed stdin, lifecycle, rollback,
-interrupts, cleanup survivors, exposure hooks, output/log/exception non-reflection, guide rendering,
-startup-script size enforcement, indeterminate firewall inserts, pre-classic policy ordering,
-priority-zero allow/deny conflicts, and full repository gates.
+Offline tests cover registration, multi-contribution plugin publication, `gcloud-cli` and `aws-cli`
+payloads plus disabled/enabled recipe gating, schema discrimination/defaults, secret references,
+auth failure, client caching, size/image selection, request retention, fixed stdin, lifecycle,
+rollback, interrupts, cleanup survivors, exposure hooks, output/log/exception non-reflection, guide
+rendering, startup-script size enforcement, indeterminate firewall inserts, pre-classic policy
+ordering, priority-zero allow/deny conflicts, and full repository gates.
 
 One operator-approved live acceptance run creates and initializes a bounded VM, verifies Tailscale
 reachability and platform lifecycle, queries the realized instance to prove that no guest service
@@ -187,8 +201,9 @@ gate.
   host-project indirection, OS Login, custom images, IPv6, static external IPs, or service account
   attachment to the guest.
 - General credential scrubbing or a new secret-lifecycle framework.
-- A GCP-specific Agentworks CLI command family or imperative site configuration. The bundled
-  guest-side `gcloud-cli` declarable is ordinary plugin data, not a new Agentworks command family.
+- A provider-specific Agentworks CLI command family or imperative site configuration. The bundled
+  guest-side `gcloud-cli` and `aws-cli` install commands are ordinary plugin data, not new
+  Agentworks command families.
 - Supporting a project without the Compute Engine API, target network, or required IAM permissions
   by mutating around the missing prerequisite.
 - Projects where an organization/folder firewall policy terminal-allows ingress before VPC rules or
@@ -199,10 +214,12 @@ gate.
 ## Definition of done
 
 `vm-platform/gcp-gce` and `system-install-command/gcloud-cli` are normal disabled-by-default
-contributions of the extensible vendor plugin `gcp`; both auth modes and the reviewed schema are
-enforced; create is complete-or-raise with credential-free retained metadata and one fixed-stdin
-join; lifecycle and rollback are provider-shaped and secret-free; docs, samples, guide, and
-completions agree; offline gates and reviews pass; operator-gated live acceptance leaves zero
-residue; the SDD is locked truthfully.
+contributions of the extensible vendor plugin `gcp`, and `system-install-command/aws-cli` is an
+equivalent contribution of the existing `aws` vendor plugin; both auth modes and the reviewed schema
+are enforced; create is complete-or-raise with credential-free retained metadata and one fixed-stdin
+join; lifecycle and rollback are provider-shaped and secret-free; neither guest CLI is a
+provisioning or authentication dependency; docs, samples, guide, and completions agree; offline
+gates and reviews pass; operator-gated live acceptance leaves zero residue; the SDD is locked
+truthfully.
 
 -- agw-ns-gcp-platform (effort lead)

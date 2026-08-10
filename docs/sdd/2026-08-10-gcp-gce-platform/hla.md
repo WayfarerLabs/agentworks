@@ -18,10 +18,12 @@ ephemeral stdin join, SSH-prefix detection, capability registration, and manager
 core.
 
 The plugin identity names the Google Cloud vendor bundle, while `gcp-gce` names one capability
-implementation. The descriptor may later add independently named GCP implementations under any
-existing capability kind, including `secret-backend`, without changing `GCEPlatform` or introducing
-a provider-wide base class. Plugin enablement remains bundle-wide; each contributed row is consumed
-only when an operator resource references it.
+implementation. The descriptor may later add independently named GCP implementations under existing
+capability contracts without changing `GCEPlatform` or introducing a provider-wide base class. For
+example, any future GCP secret backend must conform to the contracts designed in
+`docs/sdd/2026-08-07-secret-sources/`; this effort does not design or reserve that implementation.
+Plugin enablement remains bundle-wide; each contributed row is consumed only when an operator
+resource references it.
 
 ## Reviewed schema
 
@@ -296,19 +298,35 @@ Google Cloud CLI into a Debian/Ubuntu guest from Google's signed apt repository,
 the completed-install fast path, reconciles an interrupted key/source setup without duplicate apt
 entries, and is never used by provider lifecycle code.
 
+The existing `aws` plugin anchors its own `manifests/install-commands.yaml` and publishes
+`system-install-command/aws-cli` with the same disabled/enabled, operator-override, provenance, and
+recipe-gate semantics. Its command selects AWS's current official CLI v2 archive for the guest's
+`x86_64` or `aarch64` architecture, downloads the matching detached signature, imports the pinned
+AWS CLI signing key into a private temporary GnuPG home, verifies its full fingerprint and the
+archive signature, extracts it in that private directory, and installs to `/usr/local/aws-cli` with
+the `aws` launcher in `/usr/local/bin`. The manifest deliberately omits the generic `test_exec`
+probe because AWS CLI v1 and v2 share that executable name. The command's own completed-install fast
+path parses `aws --version` and skips only an existing v2 installation; v1 continues through the v2
+install path. An incomplete prior installation is reconciled with the official installer's explicit
+`--update`, `--install-dir`, and `--bin-dir` options, and temporary artifacts are removed on success
+or failure. Unsupported architectures, signing-key drift, and invalid signatures fail clearly. The
+installer never runs `aws configure`, writes a credentials/profile file, or participates in EC2
+lifecycle code, which continues to use boto3.
+
 Permanent edits cover the installed-plugin list, VM platform list, command reference, resources
 guide, plugin author contract, vm-platform author contract, capability durable-surface enumeration,
-and GCP operator setup/recovery. The guide distinguishes optional guest installation from host-side
-ADC sources and optional host recovery tooling. Completion code remains unchanged because capability
-and declarable names are discovered from registries; tests pin the relevant names on
-completion-adjacent surfaces.
+and GCP/AWS operator teaching. The guides distinguish optional guest installation from host-side ADC
+or AWS credential sources and optional host recovery tooling. Completion code remains unchanged
+because capability and declarable names are discovered from registries; tests pin the relevant names
+on completion-adjacent surfaces.
 
 ## Verification structure
 
 Offline fakes retain the final typed Compute request and record operations. Tests cover:
 
-- plugin disabled/enabled registration, multi-contribution publication, `gcloud-cli` recipe gating,
-  operator override, and contract-v2 conformance;
+- plugin disabled/enabled registration, multi-contribution publication, `gcloud-cli` and `aws-cli`
+  recipe gating, operator override, exact manifest payloads, AWS CLI v1/v2 fast-path distinction,
+  signing-key/signature rejection, and contract-v2 conformance;
 - exact schema, omission-only outer-auth default, in-arm secret null/default, `SecretRef`,
   schema/sample/guide projection;
 - ambient and service-account construction, no fallback, caching, malformed JSON, and secret-free

@@ -3,10 +3,11 @@
 ## Definition of done
 
 The disabled-by-default `gcp` vendor plugin publishes a contract-v2 `gcp-gce` platform and optional
-guest-side `gcloud-cli` install command; both auth modes are secret-source conforming; create is
-complete-or-raise with a credential-free retained request and one fixed-stdin join; lifecycle,
-rollback, exposure, docs, offline gates, and operator-gated live acceptance are complete; the SDD is
-locked truthfully.
+guest-side `gcloud-cli` install command, while the existing `aws` vendor plugin publishes an
+optional guest-side `aws-cli` install command; both auth modes are secret-source conforming; create
+is complete-or-raise with a credential-free retained request and one fixed-stdin join; neither CLI
+is a provisioning or authentication dependency; lifecycle, rollback, exposure, docs, offline gates,
+and operator-gated live acceptance are complete; the SDD is locked truthfully.
 
 ## Phase 0: contract and schema gates
 
@@ -90,18 +91,25 @@ suites and strict typing pass.
 - [ ] Bundle one `gcloud-cli` `system-install-command` using Google's signed Debian/Ubuntu apt
       repository, current `google-cloud-cli` package, completed-install `gcloud` probe, retry-safe
       key/source reconciliation, and no host or guest authentication side effect.
+- [ ] Bundle one `aws-cli` `system-install-command` using AWS's current official CLI v2 archive,
+      architecture selection, pinned signing-key fingerprint, mandatory detached-signature
+      verification, command-owned v2-aware completed-install probe, private temporary extraction,
+      retry-safe explicit update/install directories, and no host or guest authentication side
+      effect; omit generic `test_exec` because it cannot distinguish CLI v1 from v2.
 - [ ] Add disabled/enabled provenance, recipe-gate, operator-override, manifest-payload, discovery,
-      multi-contribution plugin, and partial-install retry tests; confirm provider lifecycle remains
-      independent of `gcloud`.
-- [ ] Update permanent plugin-author, resource, sample, and GCP operator teaching to distinguish
-      optional guest tooling from ambient host ADC sources and optional host recovery tooling, and
-      leave completion code registry-driven.
+      multi-contribution plugin, architecture, v1-present/v2-present, signing-key/signature
+      rejection, and partial-install retry tests; confirm provider lifecycle remains independent of
+      both CLIs.
+- [ ] Update permanent plugin-author, resource, sample, GCP, and AWS operator teaching to
+      distinguish optional guest tooling from ambient host ADC/AWS credential sources and optional
+      host recovery tooling, and leave completion code registry-driven.
 - [ ] Run focused/full offline gates and both required reviews for the amended publication before
       recording this corrective phase complete.
 
-**DoD:** `gcp` can grow through the existing capability/manifest composition boundary, enabling it
-publishes both current contributions, and the optional guest CLI is discoverable without becoming a
-provisioning or authentication dependency.
+**DoD:** vendor plugins can grow through the existing capability/manifest composition boundary;
+enabling `gcp` publishes both current GCP contributions, enabling `aws` publishes its existing EC2
+platform and optional CLI, and neither guest CLI becomes a provisioning or authentication
+dependency.
 
 ## Phase 3: integration, review, and live acceptance
 
@@ -118,10 +126,11 @@ provisioning or authentication dependency.
 - [ ] Run one bounded create/init/Tailscale/lifecycle/delete acceptance, then independently query
       the realized instance to prove it has no guest service account or OAuth scopes, and query the
       project after delete to prove zero instance, disk, firewall, and address residue.
-- [ ] In that bounded acceptance, select `gcloud-cli`, verify `gcloud` is available in the guest
-      with no authenticated account, rerun initialization to prove the installer is idempotent,
-      prove it created no guest authentication state, and prove the operator's pre-existing host
-      credential baseline is unchanged.
+- [ ] In that bounded acceptance, select both `gcloud-cli` and `aws-cli`; verify both executables
+      are available in the guest, require `aws --version` to begin with `aws-cli/2.`, and verify no
+      authenticated Google account, AWS credential file, or AWS profile; rerun initialization to
+      prove both installers are idempotent; prove they created no guest authentication state; and
+      prove the operator's pre-existing host credential baseline is unchanged.
 - [ ] Record exact offline/live/review evidence, add `locked.md`, post the detailed ready-for-review
       disposition, and flip the PR from draft only when every requirement is true.
 
