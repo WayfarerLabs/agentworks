@@ -15,6 +15,10 @@ def _command(provider: str) -> str:
     return str(yaml.safe_load(manifest.read_text())["spec"]["command"])
 
 
+def _aws_command_with_test_install_dir(install_dir: Path) -> str:
+    return _command("aws").replace('install_dir="/usr/local/aws-cli"', f'install_dir="{install_dir}"')
+
+
 def _tool(bin_dir: Path, name: str, body: str) -> None:
     path = bin_dir / name
     path.write_text(f"#!/bin/sh\nset -eu\n{body}\n")
@@ -147,14 +151,16 @@ def test_gcloud_installer_reconciles_partial_key_and_source_setup(tmp_path: Path
 def test_aws_installer_selects_architecture_and_cleans_private_temp(
     tmp_path: Path, arch: str, expected_archive: str
 ) -> None:
-    result = _run(_command("aws"), tmp_path, AGW_TEST_ARCH=arch)
+    install_dir = tmp_path / "fresh" / "aws-cli"
+    assert not install_dir.exists()
+    result = _run(_aws_command_with_test_install_dir(install_dir), tmp_path, AGW_TEST_ARCH=arch)
 
     assert result.returncode == 0, result.stderr
     assert f"awscli-exe-linux-{expected_archive}.zip" in (tmp_path / "log").read_text()
     assert "--update" not in (tmp_path / "install-args").read_text()
     sudo_log = (tmp_path / "sudo-log").read_text()
     assert sudo_log.splitlines() == [
-        f"sudo {tmp_path}/private-temp/aws/install --install-dir /usr/local/aws-cli --bin-dir /usr/local/bin"
+        f"sudo {tmp_path}/private-temp/aws/install --install-dir {install_dir} --bin-dir /usr/local/bin"
     ]
     assert "sudo test" not in sudo_log
     assert "sudo gpg" not in sudo_log
@@ -166,8 +172,7 @@ def test_aws_installer_selects_architecture_and_cleans_private_temp(
 def test_aws_installer_updates_an_existing_explicit_installation(tmp_path: Path) -> None:
     install_dir = tmp_path / "system" / "usr" / "local" / "aws-cli"
     install_dir.mkdir(parents=True)
-    command = _command("aws").replace('install_dir="/usr/local/aws-cli"', f'install_dir="{install_dir}"')
-    result = _run(command, tmp_path)
+    result = _run(_aws_command_with_test_install_dir(install_dir), tmp_path)
 
     assert result.returncode == 0, result.stderr
     assert "--update" in (tmp_path / "install-args").read_text()
