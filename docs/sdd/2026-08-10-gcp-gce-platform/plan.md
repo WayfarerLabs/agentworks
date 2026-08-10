@@ -26,7 +26,7 @@ contract and no schema guesswork.
 
 - [ ] Add current stable Google Compute/auth dependencies and regenerate the lock file.
 - [ ] Implement the auth union, machine catalog, `GcpGCEConfig`, size selection, and image-family
-      mapping with exact schema/default/reference tests.
+      mapping with exact schema/default/reference tests, including omitted-versus-null outer auth.
 - [ ] Implement secret-free ambient and service-account credential builders. The explicit builder
       consumes one complete JSON secret, never falls back, and does not retain or chain raw parser
       failures.
@@ -70,7 +70,7 @@ foundation is fully typed, secret-free, offline-tested, and the existing platfor
       catalog/rendering/inertness, and completion-adjacent discovery tests.
 - [ ] Update the installed-plugin index, permanent plugin/platform/capability docs, command
       reference, resources guide, sample teaching, durable six-surface enumeration, `TopicProse`,
-      and recovery guidance in the same publication commit.
+      key-file-to-env-var setup, and recovery guidance in the same publication commit.
 - [ ] Confirm shell completion implementation needs no bespoke edit because it remains
       registry-driven; update tests and generated/reference projections that enumerate platforms.
 - [ ] Delete the branch-seeded task brief before the PR leaves draft.

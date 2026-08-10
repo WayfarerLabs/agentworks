@@ -28,10 +28,10 @@ The `gcp-gce` platform config has this closed-world shape:
 - optional non-empty `machine_types` catalog override;
 - an `auth` tagged union defaulting to `{mode: ambient}`.
 
-Blank location strings and an empty catalog are invalid. Omitted or explicit-null outer `auth`
-selects ambient, matching the existing vm-platform union convention. In the service-account arm,
-omitted or explicit-null `secret` selects the well-known `gcp-service-account` secret name; a blank
-name is invalid.
+Blank location strings and an empty catalog are invalid. Omitted outer `auth` selects ambient,
+matching the existing vm-platform union convention; explicit-null `auth` is rejected. In the
+service-account arm, omitted or explicit-null `secret` selects the well-known
+`gcp-service-account-key` secret name; a blank name is invalid.
 
 Each machine-type entry declares positive `cpus` and `memory`, a non-empty Compute Engine `type`,
 and `arch` of `x86_64` or `arm64`. The built-in catalog is an x86 E2 standard ladder. Selection is
@@ -154,8 +154,9 @@ precisely without replacing a more important primary failure.
 `resource list`, `describe-kind`, schema emission, guide topics, samples, and plugin enablement show
 the new plugin and `gcp-gce` platform from the declared models. Permanent docs teach both auth
 modes, the default-network behavior, the service-account secret format, provisioning exposure,
-required IAM/API setup, and recovery. Shell completion remains registry-driven; tests prove the new
-names are discoverable without a bespoke completion branch.
+required IAM/API setup, an ergonomic key-file-to-env-var workflow, and recovery. Shell completion
+remains registry-driven; tests prove the new names are discoverable without a bespoke completion
+branch.
 
 ### R11: verification and live acceptance
 

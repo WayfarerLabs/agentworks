@@ -31,7 +31,7 @@ spec:
     subnet: app-subnet # optional; omit for the default network
     auth:
       mode: service-account
-      secret: gcp-service-account
+      secret: gcp-service-account-key
     machine_types: # optional override
       - cpus: 4
         memory: 16
@@ -49,35 +49,39 @@ Pydantic models are:
 
 - `GcpAmbientAuth(mode: Literal["ambient"])`;
 - `GcpServiceAccountAuth(mode: Literal["service-account"], secret: SecretRef)` where the marker's
-  `default_template` is `gcp-service-account`;
+  `default_template` is `gcp-service-account-key`;
 - discriminated `GcpAuth`, default `GcpAmbientAuth(mode="ambient")`;
 - `GcpMachineType(cpus, memory, type, arch)`;
 - `GcpGCEConfig(name, project_id, zone, subnet, machine_types, auth)`.
 
 Exact field behavior:
 
-| Field                   | Type/default                                         | Null and validation behavior                                       |
-| ----------------------- | ---------------------------------------------------- | ------------------------------------------------------------------ |
-| `name`                  | literal `gcp-gce`, required                          | null/other names rejected                                          |
-| `project_id`            | non-empty string, required                           | null/blank rejected                                                |
-| `zone`                  | non-empty string, required                           | null/blank rejected                                                |
-| `subnet`                | non-empty string or null, default null               | null/omitted selects `global/networks/default`; blank rejected     |
-| `machine_types`         | non-empty list or null, default null                 | null/omitted selects built-in catalog; empty list rejected         |
-| `auth`                  | discriminated union, default `{mode: ambient}`       | null/omitted selects ambient; unknown/mixed arms rejected          |
-| `auth.secret`           | non-empty secret name, default `gcp-service-account` | null/omitted inside service-account selects default; blank rejects |
-| machine `cpus`/`memory` | positive integers, required                          | zero, negative, null, and non-integers rejected                    |
-| machine `type`          | non-empty string, required                           | null/blank rejected                                                |
-| machine `arch`          | literal `x86_64` or `arm64`, required                | null/other values rejected                                         |
+| Field                   | Type/default                                             | Null and validation behavior                                       |
+| ----------------------- | -------------------------------------------------------- | ------------------------------------------------------------------ |
+| `name`                  | literal `gcp-gce`, required                              | null/other names rejected                                          |
+| `project_id`            | non-empty string, required                               | null/blank rejected                                                |
+| `zone`                  | non-empty string, required                               | null/blank rejected                                                |
+| `subnet`                | non-empty string or null, default null                   | null/omitted selects `global/networks/default`; blank rejected     |
+| `machine_types`         | non-empty list or null, default null                     | null/omitted selects built-in catalog; empty list rejected         |
+| `auth`                  | discriminated union, default `{mode: ambient}`           | omitted selects ambient; null/unknown/mixed arms rejected          |
+| `auth.secret`           | non-empty secret name, default `gcp-service-account-key` | null/omitted inside service-account selects default; blank rejects |
+| machine `cpus`/`memory` | positive integers, required                              | zero, negative, null, and non-integers rejected                    |
+| machine `type`          | non-empty string, required                               | null/blank rejected                                                |
+| machine `arch`          | literal `x86_64` or `arm64`, required                    | null/other values rejected                                         |
 
 No credential identifier is split out of the service-account document. The union's `secret` names
 one secret value containing the complete JSON document. `project_id` is common because it identifies
 where the site operates under either credential mode.
 
+The field is named `subnet`, not `subnet_id`, because GCE resolves a subnetwork by name within the
+region derived from `zone`; callers do not provide a provider-generated identifier.
+
 The immutable built-in catalog is `(2, 8, e2-standard-2, x86_64)`, `(4, 16, e2-standard-4, x86_64)`,
 `(8, 32, e2-standard-8, x86_64)`, `(16, 64, e2-standard-16, x86_64)`, and
 `(32, 128, e2-standard-32, x86_64)`, with memory in GiB. An override may name Arm types and selects
-the `debian-12-arm64` image family rather than `debian-12`. Unsupported size requests fail before
-mutation.
+the `debian-12-arm64` image family rather than `debian-12`. E2/x86 is the default because its broad
+zone availability makes a portable built-in catalog; T2A/Arm availability is limited to a narrower
+zone set and remains an explicit override. Unsupported size requests fail before mutation.
 
 ## Dependency and credential boundary
 
@@ -94,6 +98,17 @@ mapping are not retained by the platform.
 
 No fallback crosses modes. Client construction and runup failures name the site, mode, secret name
 when applicable, and remediation, but never the value.
+
+The ordinary secret-resolution boundary rejects carriage returns and line feeds, so a multi-line key
+file cannot be exported verbatim. Operator docs require validating and compacting it into the
+default env-var value in one step:
+
+```bash
+export AW_SECRET_GCP_SERVICE_ACCOUNT_KEY="$(jq -c . /path/to/service-account-key.json)"
+```
+
+The explicit arm then receives that complete JSON value through the ordinary secret-source chain;
+the path and document never enter the site manifest.
 
 ## Runup and resolution
 
@@ -243,7 +258,8 @@ discovered from registries; tests pin both names on completion-adjacent surfaces
 Offline fakes retain the final typed Compute request and record operations. Tests cover:
 
 - plugin disabled/enabled registration and contract-v2 conformance;
-- exact schema, union discrimination/default, `SecretRef`, schema/sample/guide projection;
+- exact schema, omission-only outer-auth default, in-arm secret null/default, `SecretRef`,
+  schema/sample/guide projection;
 - ambient and service-account construction, no fallback, caching, malformed JSON, and secret-free
   full exception graphs;
 - runup default-network/subnet behavior and pre-mutation failures;
