@@ -9,6 +9,7 @@ from __future__ import annotations
 import gzip
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -21,6 +22,7 @@ from agentworks.plugins.aws.network import EC2Error, poke_ssh_allow, remove_ssh_
 from agentworks.plugins.aws.platform import EC2Platform
 from agentworks.ssh import SSHError
 from agentworks.transports import SSHTransport
+from agentworks.vms.initializer import driver as initializer_driver
 from tests._aws_fakes import Controls, client_error, install_fakes, stub_egress, unreachable
 
 if TYPE_CHECKING:
@@ -376,41 +378,100 @@ class TestCreateRollback:
         _assert_exception_graph_is_value_free(caught.value)
         assert _SENTINEL not in repr(captured_output.lines)
 
+    @pytest.mark.parametrize(
+        ("failure_command", "expected_commands"),
+        [
+            ("echo ok", ["echo ok"]),
+            ("cloud-init status --wait", ["echo ok", "cloud-init status --wait"]),
+        ],
+        ids=("ssh-readiness", "cloud-init-wait"),
+    )
+    def test_readiness_interrupt_rolls_back_before_key_delivery_or_fallback(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        captured_output: CapturedOutput,
+        failure_command: str,
+        expected_commands: list[str],
+    ) -> None:
+        rec = install_fakes(monkeypatch)
+        interrupt = KeyboardInterrupt(f"interrupted during {failure_command}")
+        calls: list[tuple[str, dict[str, object]]] = []
+
+        def _interrupt_readiness(self: SSHTransport, command: str, **kwargs: object) -> object:
+            calls.append((command, kwargs))
+            if command == failure_command:
+                raise interrupt
+            return SimpleNamespace(stdout="", returncode=0)
+
+        monkeypatch.setattr(SSHTransport, "run", _interrupt_readiness)
+        fallback = MagicMock(side_effect=AssertionError("Phase A fallback reached"))
+        monkeypatch.setattr(initializer_driver, "_run_bootstrap_script", fallback)
+
+        with pytest.raises(KeyboardInterrupt) as caught:
+            _platform().create(_request(tailscale=_SENTINEL), RunContext(config=_config()))
+
+        assert caught.value is interrupt
+        assert [command for command, _kwargs in calls] == expected_commands
+        assert all("input_text" not in kwargs for _command, kwargs in calls)
+        assert not any("agentworks-bootstrap" in command for command, _kwargs in calls)
+        fallback.assert_not_called()
+        retained_user_data = gzip.decompress(rec.kwargs_for("run_instances")["UserData"]).decode()
+        assert _SENTINEL not in retained_user_data
+        assert _SENTINEL not in repr(calls)
+        assert _SENTINEL not in repr(captured_output.lines)
+        assert rec.kwargs_for("terminate_instances") == {"InstanceIds": ["i-123"]}
+        assert rec.kwargs_for("delete_security_group") == {"GroupId": "sg-123"}
+
     def test_rolls_back_on_keyboard_interrupt(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """An operator Ctrl-C during the inline bootstrap wait rolls back the
         partial resource set (terminate + delete SG) and re-raises the
         interrupt for the caller's row unwind."""
         rec = install_fakes(monkeypatch)
 
-        def _interrupt(self: EphemeralTailscaleBootstrap, auth_key: str) -> BootstrapCompletion:
-            raise KeyboardInterrupt("first")
+        interrupt = KeyboardInterrupt("first")
 
-        monkeypatch.setattr(EphemeralTailscaleBootstrap, "complete", _interrupt)
-        with pytest.raises(KeyboardInterrupt):
+        def _interrupt(self: SSHTransport, command: str, **kwargs: object) -> object:
+            del self, command, kwargs
+            raise interrupt
+
+        monkeypatch.setattr(SSHTransport, "run", _interrupt)
+        with pytest.raises(KeyboardInterrupt) as caught:
             _platform().create(_request(tailscale="tskey-abc"), RunContext(config=_config()))
-        methods = rec.methods("ec2")
-        assert "terminate_instances" in methods
-        assert "delete_security_group" in methods
+        assert caught.value is interrupt
+        assert rec.kwargs_for("terminate_instances") == {"InstanceIds": ["i-123"]}
+        assert rec.kwargs_for("delete_security_group") == {"GroupId": "sg-123"}
 
     def test_second_interrupt_abandons_cleanup_loudly(
-        self, monkeypatch: pytest.MonkeyPatch, captured_output: Any
+        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
     ) -> None:
         """A second Ctrl-C during the rollback abandons it (naming the region
         and tag for manual cleanup) instead of wedging; the ORIGINAL interrupt
         still propagates."""
         install_fakes(monkeypatch)
-        monkeypatch.setattr(
-            EphemeralTailscaleBootstrap,
-            "complete",
-            lambda self, auth_key: (_ for _ in ()).throw(KeyboardInterrupt("first")),
-        )
-        monkeypatch.setattr(
-            "tests._aws_fakes._FakeEC2.terminate_instances",
-            lambda self, **kw: (_ for _ in ()).throw(KeyboardInterrupt("second")),
-        )
-        with pytest.raises(KeyboardInterrupt):
+        interrupt = KeyboardInterrupt("first")
+
+        def _interrupt_readiness(self: SSHTransport, command: str, **kwargs: object) -> object:
+            del self, command, kwargs
+            raise interrupt
+
+        cleanup_calls: list[dict[str, object]] = []
+
+        def _interrupt_cleanup(self: object, **kwargs: object) -> object:
+            del self
+            cleanup_calls.append(kwargs)
+            raise KeyboardInterrupt("second")
+
+        monkeypatch.setattr(SSHTransport, "run", _interrupt_readiness)
+        monkeypatch.setattr("tests._aws_fakes._FakeEC2.terminate_instances", _interrupt_cleanup)
+        with pytest.raises(KeyboardInterrupt) as caught:
             _platform().create(_request(tailscale="tskey-abc"), RunContext(config=_config()))
-        assert any("Cleanup abandoned" in w for w in captured_output.warnings)
+        assert caught.value is interrupt
+        assert cleanup_calls == [{"InstanceIds": ["i-123"]}]
+        abandoned = [warning for warning in captured_output.warnings if "Cleanup abandoned" in warning]
+        assert abandoned == [
+            "Cleanup abandoned: EC2 resources tagged 'agentworks:vm=dev' may remain in region "
+            "'us-east-1'; terminate the instance and delete its security group there manually."
+        ]
 
 
 class TestCloseProvisioningHooks:
