@@ -196,16 +196,24 @@ ones.
   exception is the SDD pre-implementation artifact review, which the `sdd` skill runs as a draft PR
   on purpose (section 2).
 - **Draft/ready is the re-review signal** (operator convention, 2026-08-10). When starting a new
-  round of edits on an existing PR, toggle it to draft immediately — before pushing any changes, so
-  a ready PR's head is always its reviewed state. Toggle back to ready only after two things are
-  true: every change of the round is pushed, and a comment is posted detailing the changes, the
+  round of edits on an existing PR, toggle it to draft immediately, before pushing any changes, so a
+  ready PR's head is always its complete handoff state. Toggle back to ready only after two things
+  are true: every change of the round is pushed, and a comment is posted detailing the changes, the
   rationale, and any pushbacks on previous review findings. The toggle says _when_ to re-review, the
   comment says _what changed and why_; a ready flip without both is a false signal. Reviewers treat
   the draft-to-ready transition as the re-review request; nobody has to infer from push traffic
   whether work is mid-flight. The convention supports both consumption styles: edge-trigger on the
-  transition itself, or poll ready PRs and remember the last-reviewed head per PR — a new head on a
+  transition itself, or poll ready PRs and remember the last-reviewed head per PR; a new head on a
   ready PR always means there is something to review, so a consumer that missed the edge loses
   nothing.
+- **Checkpoint reviews use the `review-requested` label** (operator convention, 2026-08-10). Ready
+  keeps its full meaning: round complete, handoff comment posted, believed mergeable. When work that
+  is NOT at merge intent needs eyes now (the `sdd` skill's phased artifact reviews on a draft PR, a
+  pre-implementation schema gate, a mid-effort design consult), apply the `review-requested` label
+  to the draft PR together with a comment scoping what to review. The reviewer removes the label
+  when the review is delivered, so the label is simultaneously the request and the pending state:
+  self-clearing, never stale. Consumers watch label events or poll
+  `gh pr list --label review-requested`.
 
 ## 7. Get a fresh-eyes pass: Copilot if available, else a generic review here
 
