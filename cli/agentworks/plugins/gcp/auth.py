@@ -1,0 +1,156 @@
+"""GCP credential construction and one-client-per-kind caching."""
+
+from __future__ import annotations
+
+import json
+from typing import TYPE_CHECKING, Any, Literal, cast
+
+from agentworks.plugins.gcp.config import GcpAmbientAuth, GcpGCEConfig, GcpServiceAccountAuth
+from agentworks.plugins.gcp.errors import GCEAuthenticationError
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from google.auth.credentials import Credentials
+
+    from agentworks.capabilities.base import RunContext
+
+type GcpClientKind = Literal[
+    "projects",
+    "zones",
+    "networks",
+    "subnetworks",
+    "machine-types",
+    "images",
+    "instances",
+    "firewalls",
+]
+
+_CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
+
+
+def build_ambient_credential(site_name: str) -> Credentials:
+    """Build Application Default Credentials with the cloud-platform scope."""
+    import google.auth
+
+    failure = False
+    credential: Credentials | None = None
+    try:
+        credential, _detected_project = google.auth.default(scopes=(_CLOUD_PLATFORM_SCOPE,))
+    except Exception:
+        failure = True
+    if failure or credential is None:
+        raise GCEAuthenticationError(
+            f"could not construct Application Default Credentials for vm-site '{site_name}'",
+            entity_kind="vm-site",
+            entity_name=site_name,
+            hint="configure Application Default Credentials or select auth.mode service-account",
+        )
+    return credential
+
+
+def build_service_account_credential(
+    auth: GcpServiceAccountAuth,
+    secret_value: str,
+    site_name: str,
+) -> Credentials:
+    """Build one credential from a complete service-account JSON secret.
+
+    The raw string and parsed mapping remain local and are never attached to
+    the returned platform state or any raised exception.
+    """
+    from google.oauth2 import service_account
+
+    info: object | None = None
+    invalid_json = False
+    try:
+        info = json.loads(secret_value)
+    except (json.JSONDecodeError, TypeError):
+        invalid_json = True
+
+    if invalid_json or not isinstance(info, dict):
+        raise _service_account_error(auth, site_name, "is not one complete JSON object")
+
+    credential: Credentials | None = None
+    invalid_document = False
+    try:
+        factory = cast("Callable[..., Credentials]", service_account.Credentials.from_service_account_info)
+        credential = factory(
+            info,
+            scopes=(_CLOUD_PLATFORM_SCOPE,),
+        )
+    except Exception:
+        invalid_document = True
+    if invalid_document or credential is None:
+        raise _service_account_error(auth, site_name, "is not a valid Google service-account document")
+    return credential
+
+
+def _service_account_error(
+    auth: GcpServiceAccountAuth,
+    site_name: str,
+    reason: str,
+) -> GCEAuthenticationError:
+    return GCEAuthenticationError(
+        f"could not authenticate vm-site '{site_name}': secret '{auth.secret}' {reason}",
+        entity_kind="vm-site",
+        entity_name=site_name,
+        hint=(
+            f"store the complete compact service-account key JSON in secret '{auth.secret}' "
+            "and do not split credential fields into the vm-site"
+        ),
+    )
+
+
+class GcpClientCache:
+    """Credential and concrete Compute clients for one bound vm-site.
+
+    Exactly one successful credential build and one client construction per
+    concrete kind are retained. No context, secret value, or parsed JSON is
+    stored.
+    """
+
+    def __init__(self, site_name: str, config: GcpGCEConfig) -> None:
+        self._site_name = site_name
+        self._config = config
+        self._credential_cached: Credentials | None = None
+        self._clients: dict[GcpClientKind, Any] = {}
+
+    def credential(self, ctx: RunContext) -> Credentials:
+        """Return the selected credential, constructing it at most once."""
+        if self._credential_cached is not None:
+            return self._credential_cached
+
+        auth = self._config.auth
+        if isinstance(auth, GcpAmbientAuth):
+            credential = build_ambient_credential(self._site_name)
+        else:
+            credential = build_service_account_credential(
+                auth,
+                ctx.secret(auth.secret),
+                self._site_name,
+            )
+        self._credential_cached = credential
+        return credential
+
+    def client(self, kind: GcpClientKind, ctx: RunContext) -> Any:
+        """Return one cached typed Compute client for ``kind``."""
+        cached = self._clients.get(kind)
+        if cached is not None:
+            return cached
+
+        from google.cloud import compute_v1
+
+        constructors: dict[GcpClientKind, type[Any]] = {
+            "projects": compute_v1.ProjectsClient,
+            "zones": compute_v1.ZonesClient,
+            "networks": compute_v1.NetworksClient,
+            "subnetworks": compute_v1.SubnetworksClient,
+            "machine-types": compute_v1.MachineTypesClient,
+            "images": compute_v1.ImagesClient,
+            "instances": compute_v1.InstancesClient,
+            "firewalls": compute_v1.FirewallsClient,
+        }
+        built = constructors[kind](credentials=self.credential(ctx))
+        self._clients[kind] = built
+        return built
