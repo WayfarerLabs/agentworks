@@ -118,17 +118,19 @@ Sources: [SQLite backup API](https://sqlite.org/c3ref/backup_finish.html),
 Migration 1 creates `vms(name)` and `workspaces(name)`, and later rebuilds preserve them. They
 reject a generic SQLite file that has only `schema_version`, but they cannot distinguish a
 current-version lookalike that copies those three common sentinels while omitting current tables
-such as `settings` and `sessions`. Restore therefore needs a cumulative table-and-critical-column
-sentinel map keyed by the claimed completed version.
+such as `settings` and `sessions`. Restore therefore needs a cumulative version-shape map keyed by
+the claimed completed version and exact equality across every non-`sqlite_%` table and every column
+in those tables.
 
 Design consequences:
 
 - Restore validation accepts only versions this binary understands and checks that version's
-  declarative sentinel set before opening the live destination.
-- A test builds every real migration version and proves its corresponding sentinel set, while a
-  current-version common-sentinel lookalike proves the map is semantically meaningful.
-- A migration-ladder comment makes sentinel-map review part of future table addition, rebuild, and
-  removal work.
+  complete non-SQLite table-and-column shape before opening the live destination.
+- A test builds every real migration version and proves its corresponding exact shape, while a
+  current-version common-sentinel lookalike and a partial-next-version database prove the equality
+  check is semantically meaningful.
+- A migration-ladder comment makes exact-shape-map review part of future table addition, rebuild,
+  and removal work.
 - This is not hostile-input authentication; a deliberately forged lookalike remains outside scope.
 
 Source: current `agentworks.db.migrations` history and
@@ -164,8 +166,9 @@ portable mutex without changing those migration transactions.
 Design consequences:
 
 - Acquire bounded `BEGIN IMMEDIATE` on one persistent adjacent lock database only for stale opens.
-- Qualify the first stale observation under the lock. If acquisition initially reports busy, a
-  still-stale result after waiting is not a trustworthy baseline and must be refused.
+- Treat the preliminary stale observation only as an acquisition trigger. After bounded lock
+  acquisition, current state converges; only an exact canonical shape with unchanged version and
+  schema-cookie tokens becomes a trustworthy stale baseline.
 - After interaction, reacquire and compare both application version and SQLite schema cookie; then
   hold the lock across backup and the full existing migration ladder.
 - Never unlink the lock file; unlinking can let a waiter and a new caller lock different files.
