@@ -7,17 +7,24 @@ need a Compute Engine site with the same declared capability, secret-source, boo
 and discovery behavior as its siblings. This is additive: existing configuration and platform
 contracts do not change.
 
-The implementation is a new opt-in `gcp` system plugin publishing `vm-platform/gcp-gce`. The name
-identifies Compute Engine rather than reserving all future GCP VM mechanisms.
+The implementation is a new opt-in `gcp` system plugin publishing `vm-platform/gcp-gce` and an
+optional guest-side Google Cloud CLI install command. The plugin name identifies the vendor bundle;
+the capability name identifies Compute Engine rather than reserving all future GCP mechanisms.
 
 ## Requirements
 
 ### R1: plugin and capability identity
 
-The shipped `gcp` system plugin is installed but disabled by default. When enabled, it registers one
-contract-v2 VM platform named `gcp-gce`, publishes the normal system-plugin provenance, and resolves
-through an ordinary `vm-site`. Disabled sites remain present but not ready and tell the operator to
-enable plugin `gcp`.
+The shipped `gcp` system plugin is installed but disabled by default. It is a vendor bundle, not a
+one-service architectural boundary: this release contributes one contract-v2 VM platform named
+`gcp-gce` and one bundled `system-install-command` named `gcloud-cli`, while future GCP capability
+implementations may join the same plugin under their own service-specific names. Disabled
+contributions remain present with normal system-plugin provenance and tell the operator to enable
+plugin `gcp` before use.
+
+The `gcloud-cli` declarable installs the current Google Cloud CLI in a guest VM only when a template
+references it. GCE provisioning itself remains SDK-driven and does not require `gcloud`; the guest
+installer neither installs nor authenticates the operator host CLI.
 
 ### R2: declared site schema
 
@@ -153,15 +160,16 @@ precisely without replacing a more important primary failure.
 ### R10: operator discovery and documentation
 
 `resource list`, `describe-kind`, schema emission, guide topics, samples, and plugin enablement show
-the new plugin and `gcp-gce` platform from the declared models. Permanent docs teach both auth
-modes, the default-network behavior, the service-account secret format, provisioning exposure,
-required IAM/API setup, an ergonomic key-file-to-env-var workflow, and recovery. Shell completion
-remains registry-driven; tests prove the new names are discoverable without a bespoke completion
-branch.
+the new plugin, `gcp-gce` platform, and `gcloud-cli` declarable from their authoritative descriptors
+and manifest. Permanent docs teach both auth modes, the default-network behavior, the
+service-account secret format, provisioning exposure, required IAM/API setup, an ergonomic
+key-file-to-env-var workflow, optional guest CLI use, and recovery. Shell completion remains
+registry-driven; tests prove the new names are discoverable without a bespoke completion branch.
 
 ### R11: verification and live acceptance
 
-Offline tests cover registration, schema discrimination/defaults, secret references, auth failure,
+Offline tests cover registration, multi-contribution plugin publication, `gcloud-cli` payload and
+disabled/enabled recipe gating, schema discrimination/defaults, secret references, auth failure,
 client caching, size/image selection, request retention, fixed stdin, lifecycle, rollback,
 interrupts, cleanup survivors, exposure hooks, output/log/exception non-reflection, guide rendering,
 startup-script size enforcement, indeterminate firewall inserts, pre-classic policy ordering,
@@ -179,7 +187,8 @@ gate.
   host-project indirection, OS Login, custom images, IPv6, static external IPs, or service account
   attachment to the guest.
 - General credential scrubbing or a new secret-lifecycle framework.
-- A GCP-specific CLI command family or imperative site configuration.
+- A GCP-specific Agentworks CLI command family or imperative site configuration. The bundled
+  guest-side `gcloud-cli` declarable is ordinary plugin data, not a new Agentworks command family.
 - Supporting a project without the Compute Engine API, target network, or required IAM permissions
   by mutating around the missing prerequisite.
 - Projects where an organization/folder firewall policy terminal-allows ingress before VPC rules or
@@ -189,10 +198,11 @@ gate.
 
 ## Definition of done
 
-`vm-platform/gcp-gce` is a normal disabled-by-default contribution of plugin `gcp`; both auth modes
-and the reviewed schema are enforced; create is complete-or-raise with credential-free retained
-metadata and one fixed-stdin join; lifecycle and rollback are provider-shaped and secret-free; docs,
-samples, guide, and completions agree; offline gates and reviews pass; operator-gated live
-acceptance leaves zero residue; the SDD is locked truthfully.
+`vm-platform/gcp-gce` and `system-install-command/gcloud-cli` are normal disabled-by-default
+contributions of the extensible vendor plugin `gcp`; both auth modes and the reviewed schema are
+enforced; create is complete-or-raise with credential-free retained metadata and one fixed-stdin
+join; lifecycle and rollback are provider-shaped and secret-free; docs, samples, guide, and
+completions agree; offline gates and reviews pass; operator-gated live acceptance leaves zero
+residue; the SDD is locked truthfully.
 
 -- agw-ns-gcp-platform (effort lead)

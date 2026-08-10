@@ -154,6 +154,29 @@ source, and allow/deny request shape. Missing proof or a mismatch is retained an
 collision. Because firewall delete has no provider-ID precondition, the verification-to-delete gap
 cannot protect against hostile delete/recreate replacement and is not represented as atomic.
 
+## Optional guest Google Cloud CLI
+
+- Google's [Google Cloud CLI install guide](https://docs.cloud.google.com/sdk/docs/install-sdk)
+  publishes a signed apt repository for supported Debian and Ubuntu releases and installs the
+  `google-cloud-cli` package. That package provides `gcloud`, `gsutil`, and `bq`; extra components
+  such as `kubectl` remain separate packages.
+- The same guide documents `CLOUDSDK_SKIP_PY_COMPILATION=1` for resource-constrained VMs and
+  automated environments to reduce installation time, trading installation speed for minor
+  interactive startup overhead. This effort adopts it because install commands have a 120-second
+  execution bound.
+
+Decisions:
+
+- publish one `gcloud-cli` system install command from the `gcp` plugin, using `test_exec: gcloud`;
+- install the current apt package from Google's signed repository rather than pinning a stale CLI
+  version or using an interactive user installer;
+- overwrite the exact repository source and reconcile the keyring safely on every incomplete retry,
+  so an interrupted attempt cannot accumulate duplicate source entries or fail on an existing key;
+- keep the command optional and guest-scoped: GCE operations continue to use the Python SDK, and
+  ambient mode may obtain host ADC through any supported ADC source while optional host recovery
+  tooling remains separate from this declarable;
+- do not bundle optional Google Cloud components until a concrete template requires one.
+
 ## Resulting shared seam
 
 Azure/AWS use the shared post-boot stdin join after `cloud-init status --wait`; GCP uses a startup

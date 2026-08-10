@@ -2,9 +2,12 @@
 
 ## Placement
 
-The plugin lives at `cli/agentworks/plugins/gcp/` and follows the AWS package shape:
+The plugin lives at `cli/agentworks/plugins/gcp/` and uses the same vendor-bundle shape already
+proven by Azure:
 
-- `__init__.py`: one `Plugin(name="gcp")` descriptor contributing `GCEPlatform`;
+- `__init__.py`: one `Plugin(name="gcp")` descriptor contributing `GCEPlatform` and anchoring
+  bundled manifests;
+- `manifests/install-commands.yaml`: optional guest-side `gcloud-cli` system install command;
 - `config.py`: auth union, site model, machine-type catalog and selection;
 - `auth.py`: ambient/service-account credential construction and secret-free error mapping;
 - `network.py`: Compute API error mapping, external access, firewall, rollback, and cleanup helpers;
@@ -13,6 +16,12 @@ The plugin lives at `cli/agentworks/plugins/gcp/` and follows the AWS package sh
 The installed plugin index imports `gcp` beside `aws` and `azure`. Shared bootstrap generation,
 ephemeral stdin join, SSH-prefix detection, capability registration, and manager lifecycle stay in
 core.
+
+The plugin identity names the Google Cloud vendor bundle, while `gcp-gce` names one capability
+implementation. The descriptor may later add independently named GCP implementations under any
+existing capability kind, including `secret-backend`, without changing `GCEPlatform` or introducing
+a provider-wide base class. Plugin enablement remains bundle-wide; each contributed row is consumed
+only when an operator resource references it.
 
 ## Reviewed schema
 
@@ -279,16 +288,27 @@ key.
 ## Discovery and documentation
 
 Registration drives capability rows, config schema, `describe-kind`, guide topics, and resource
-samples. Permanent edits cover the installed-plugin list, VM platform list, command reference,
-resources guide, vm-platform author contract, capability durable-surface enumeration, and GCP
-operator setup/recovery. Completion code remains unchanged because platform and plugin names are
-discovered from registries; tests pin both names on completion-adjacent surfaces.
+samples. The same plugin manifest publishes `system-install-command/gcloud-cli` with weak
+present-but-disabled semantics: a template reference finalizes while `gcp` is disabled, use is
+refused with the enable-plugin hint, an operator declaration of the same name wins while disabled,
+and enabling `gcp` enables both the platform and install command. The command installs the current
+Google Cloud CLI into a Debian/Ubuntu guest from Google's signed apt repository, checks `gcloud` for
+the completed-install fast path, reconciles an interrupted key/source setup without duplicate apt
+entries, and is never used by provider lifecycle code.
+
+Permanent edits cover the installed-plugin list, VM platform list, command reference, resources
+guide, plugin author contract, vm-platform author contract, capability durable-surface enumeration,
+and GCP operator setup/recovery. The guide distinguishes optional guest installation from host-side
+ADC sources and optional host recovery tooling. Completion code remains unchanged because capability
+and declarable names are discovered from registries; tests pin the relevant names on
+completion-adjacent surfaces.
 
 ## Verification structure
 
 Offline fakes retain the final typed Compute request and record operations. Tests cover:
 
-- plugin disabled/enabled registration and contract-v2 conformance;
+- plugin disabled/enabled registration, multi-contribution publication, `gcloud-cli` recipe gating,
+  operator override, and contract-v2 conformance;
 - exact schema, omission-only outer-auth default, in-arm secret null/default, `SecretRef`,
   schema/sample/guide projection;
 - ambient and service-account construction, no fallback, caching, malformed JSON, and secret-free
