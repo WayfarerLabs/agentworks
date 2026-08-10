@@ -174,16 +174,22 @@ correction. The final evidence record and SDD lock still follow the passing live
 ### Phase 3a: second live rejection correction
 
 - [ ] Route a first `KeyboardInterrupt` raised during ordinary-failure rollback into one more
-      idempotent bounded interrupt rollback attempt; preserve that interrupt object's identity,
-      prove cleanup success, and prove only a second interrupt abandons with exact provider-ID
-      survivor guidance.
-- [ ] Preserve safe structured errors from completed extended operations. Map zonal resource-pool
-      exhaustion to a typed capacity failure with zone/retry guidance, retain a definitive generic
-      operation failure for other completed errors, and reserve inspect-before-retry guidance for
-      truly indeterminate outcomes.
-- [ ] Add provider-shaped DONE-with-error, ordinary-failure cleanup-interrupt success, and
-      second-interrupt abandonment regressions with secret-free exception graphs and exact retained
-      coordinates; align permanent operator guidance if the new capacity type is exposed there.
+      idempotent bounded interrupt rollback attempt after at least one owned artifact was removed;
+      preserve that interrupt object's identity, prove convergence from partial cleanup, and prove
+      only a second interrupt abandons with exact provider-ID survivor guidance.
+- [ ] Split extended-operation failures into definitive `GCEOperationError`, typed
+      `GCECapacityError`, and indeterminate `GCEIndeterminateOperationError`. Classify the exact
+      allowlisted `ZONE_RESOURCE_POOL_EXHAUSTED` code only from a DONE operation's
+      `operation.error.errors[*].code`, using the cached `operation.status` rather than another
+      provider-refreshing predicate, with no provider text or object retention. Have instance and
+      firewall inserts reconcile only the indeterminate type, power operations propagate every
+      failure, and delete/rollback continue to use verified final state as their postcondition.
+- [ ] Add provider-shaped DONE/HTTP-503 known-capacity, DONE unknown/malformed, and non-DONE timeout
+      regressions; prove classification makes no post-wait provider refresh, definitive insert
+      failures cannot become success, partial-cleanup interrupt convergence, second-interrupt
+      abandonment, secret-free detached exception graphs, and exact retained coordinates. Update the
+      `GCEPlatform` guide contribution and permanent GCP guide with selected-zone capacity recovery,
+      and cover rendered wording and safety.
 - [ ] Run focused GCP rollback/operation/platform tests, Ruff, strict mypy, file lint, locked-SDD,
       Rulesync, full non-integration tests, and both required code reviews; resolve every valid
       finding.

@@ -178,6 +178,14 @@ indeterminate, it remains protecting the surviving VM. The first operator interr
 same bounded rollback and re-raises the original interrupt. A second interrupt abandons cleanup
 promptly and names the project, zone, instance, firewall rules, and manual removal actions.
 
+A completed Google operation with a structured failure is definitive, even when the SDK surfaces an
+HTTP-shaped exception from `result()`. The observed `ZONE_RESOURCE_POOL_EXHAUSTED` code becomes a
+typed capacity failure that names the selected zone and tells the operator to retry later or choose
+another zone. Other completed failures remain definitive and cannot be reconciled into success.
+Inspect-before-retry guidance is reserved for waits whose completion and outcome cannot be
+established. Provider messages, details, credentials, and exception objects never enter the safe
+diagnostic graph.
+
 Deletion first makes a best-effort close of the provisioning allow, then attempts VM deletion even
 if that close fails, and deletes the deny only after VM absence is proven. It is idempotent for
 already-gone resources. A surviving or indeterminate VM is a typed failure so its database row
@@ -207,6 +215,15 @@ secret resolver, NUL rejection, sink-local line-safety failures for environment,
 Proxmox HTTP-header, and Tailscale consumers, and full repository gates. Create and Tailscale rekey
 tests prove an incompatible line-oriented secret fails before any DB, provider, daemon, or
 durable-material mutation.
+
+Provider-shaped operation tests distinguish DONE HTTP 503 failures carrying the exact structured
+`ZONE_RESOURCE_POOL_EXHAUSTED` code, DONE failures carrying an unknown or malformed structured
+shape, and timeout/non-DONE waits. They prove only the last case is indeterminate, definitive
+failures cannot reconcile to insert success, capacity guidance names the zone without reflecting
+provider text, and every resulting exception graph is detached and secret-free. Rollback tests
+interrupt an ordinary-failure cleanup only after at least one owned resource is removed, then prove
+the second idempotent pass converges with the first interrupt object's identity or, on a second
+interrupt, reports exact retained provider identities and manual recovery actions.
 
 One operator-approved live acceptance run creates and initializes a bounded VM, verifies Tailscale
 reachability and platform lifecycle, queries the realized instance to prove that no guest service

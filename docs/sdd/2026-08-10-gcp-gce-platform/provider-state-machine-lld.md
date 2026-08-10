@@ -128,6 +128,23 @@ request UUID and operation target ID, then requires the realized instance provid
 instance-delete operation error or timeout is followed by `instances.get`; only not-found proves
 absence, while a same-name different-ID instance is retained as a collision.
 
+Extended-operation waits return through three typed failure outcomes:
+
+| Wait outcome                                                               | Type                             | Caller behavior                                                                                                                        |
+| -------------------------------------------------------------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| DONE with `operation.error.errors[*].code == ZONE_RESOURCE_POOL_EXHAUSTED` | `GCECapacityError`               | definitive; inserts, power operations, and create propagate; guide names the selected zone and says retry later or select another zone |
+| DONE with another, missing, or malformed structured error                  | `GCEOperationError`              | definitive; inserts and power operations propagate without live-state success reconciliation                                           |
+| timeout/transport failure with no DONE structured outcome                  | `GCEIndeterminateOperationError` | instance/firewall inserts may reconcile matching owned live state; power operations propagate with inspect-before-retry guidance       |
+
+The classifier establishes DONE only from the already-returned operation's cached
+`operation.status == compute_v1.Operation.Status.DONE`. It never calls `operation.done()` or makes a
+second provider refresh after the bounded `result()` wait. It reads only
+`operation.error.errors[*].code`, uses an allowlist containing exactly the observed
+`ZONE_RESOURCE_POOL_EXHAUSTED` token, and never renders provider codes, messages, details, or
+exception objects. Delete and rollback are postcondition-driven exceptions to the insert matrix:
+after any wait failure they inspect provider state, accept only verified absence, retain survivors
+or mismatches, and preserve the deny when an instance may remain.
+
 A deny/allow insert error or timeout is likewise a possible rule. Every insert carries a unique
 request UUID. A pre-response indeterminate call retries the same request once with the same UUID;
 definite `ALREADY_EXISTS` remains a collision. An accepted operation must match the UUID through
@@ -157,7 +174,10 @@ command.
 A `KeyboardInterrupt` escaping the first ordinary-failure rollback attempt counts as the first
 interrupt. The ordinary-failure helper passes that exact object to the idempotent interrupt rollback
 path for one more bounded cleanup attempt. Success re-raises the same interrupt after clean
-rollback; a second interrupt is the sole abandon case and emits the survivor guidance above.
+rollback; a second interrupt is the sole abandon case and emits the survivor guidance above. The
+required regression removes at least one owned artifact during the first rollback before that first
+interrupt occurs, so the second pass proves convergence from partial cleanup rather than only from
+an untouched starting state.
 
 ## Native transient route
 

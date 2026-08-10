@@ -309,13 +309,29 @@ collision.
 Google API authentication/permission, not-found, quota, capacity, collision, operation, readiness,
 and cleanup failures map to existing Agentworks error categories where one fits. A completed
 extended operation with a nonempty structured error is definitive even when `result()` raises an
-HTTP transport-shaped exception. Safe structured capacity codes, including zonal resource-pool
-exhaustion, map to a typed provider-capacity failure with zone-change or later-retry guidance.
-Unknown completed-operation failures remain definitive typed operation failures. Only an operation
-whose outcome cannot be established uses the indeterminate inspect-before-retry path. Provider
-exceptions are sanitized before chaining; errors that may retain request or credential objects are
-not attached as cause/context. No provider error text is allowed to reflect service-account JSON or
-the Tailscale key.
+HTTP transport-shaped exception. `GCEOperationError` represents a definitive completed-operation
+failure, `GCECapacityError` is its typed capacity specialization, and
+`GCEIndeterminateOperationError` alone represents a wait whose completion and outcome cannot be
+established. The safe capacity allowlist initially contains exactly `ZONE_RESOURCE_POOL_EXHAUSTED`.
+Classification requires the already-returned operation's cached
+`operation.status == compute_v1.Operation.Status.DONE`; it must not call `operation.done()` or make
+another provider refresh after the bounded `result()` wait. It then reads only
+`operation.error.errors[*].code`; it never stringifies the provider message, details, error object,
+or caught exception. That exact code maps to `GCECapacityError` with the caller-supplied zone and
+retry-later-or-select-another-zone guidance. A DONE operation with an unknown code, missing entries,
+or malformed structured shape maps to generic definitive `GCEOperationError`. A timeout or transport
+failure with no DONE structured outcome maps to `GCEIndeterminateOperationError` and
+inspect-before-retry guidance.
+
+Instance and firewall insert callers reconcile only `GCEIndeterminateOperationError`; matching live
+state may establish success for that outcome. They immediately propagate definitive
+`GCEOperationError` and `GCECapacityError` into create rollback, even when a matching resource can
+be read. Start and stop propagate every wait failure. Delete and rollback may inspect final provider
+state after a wait failure because verified absence, rather than operation classification, is their
+authoritative postcondition; they never turn a surviving or mismatched resource into success.
+Provider exceptions are sanitized before chaining; errors that may retain request or credential
+objects are not attached as cause/context. No provider error text is allowed to reflect
+service-account JSON or the Tailscale key.
 
 ## Discovery and documentation
 
@@ -374,6 +390,9 @@ Offline fakes retain the final typed Compute request and record operations. Test
 - provider-retained sentinel absence plus exactly one fixed-stdin join;
 - create success, every partial rollback point, first/second interrupts, cleanup survivors, and
   no-residue assertions;
+- DONE known-capacity and unknown/malformed operation failures, non-DONE timeout outcomes, exact
+  definitive/indeterminate caller behavior, no post-wait provider refresh, partial-progress cleanup
+  interruption, original interrupt identity, and second-interrupt retained-resource guidance;
 - exposure priorities and protocols, inherited-policy support boundary, indeterminate firewall
   insert reconciliation, concurrent transient routes, live IP lookup, guarded power/status, typed
   surviving-VM delete, and auxiliary cleanup behavior;
