@@ -80,7 +80,7 @@ test("static NOC foundation renders from the same retained collision terrain", a
     const vertices = terrainVerticesForWindow(STATIC_WORLD_SEED, [site], -40, 140);
     const expectedSceneY = 548 - siteFoundationBottom(vertices, site) * 10;
     const template = await readFile(TEMPLATE_URL, "utf8");
-    const match = template.match(/class="noc-building">\s*<path d="M428 ([0-9.]+)V/);
+    const match = template.match(/<path class="noc-building" d="M428 ([0-9.]+)V/);
     assert.ok(match);
     close(Number(match[1]), expectedSceneY, 0.001);
 });
