@@ -18,6 +18,7 @@ import tomllib
 from typing import TYPE_CHECKING
 
 from agentworks.config.loaders_core import _load_defaults, _load_operator, _load_paths
+from agentworks.config.loaders_database import _load_database_config
 from agentworks.config.loaders_secrets import _load_plugins, _load_secret_config
 from agentworks.config.loaders_sessions import _load_session_config
 from agentworks.config.models import Config, _SectionLineMap
@@ -32,6 +33,7 @@ EXPECTED_TOP_LEVEL_KEYS = {
     "operator",
     "paths",
     "defaults",
+    "database",
     "named_console",
     "vm_templates",
     "admin",
@@ -300,6 +302,7 @@ def load_config(
         defaults=_load_defaults(data),
         source_path=config_path,
         session=session_config,
+        database=_load_database_config(data),
         secret_config_data=secret_config_data,
         enabled_system_plugins=enabled_system_plugins,
         config_issues=tuple(issues),

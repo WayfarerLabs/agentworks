@@ -212,10 +212,9 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
         from agentworks import output
         from agentworks.vms.sites import site_manifest_hint
 
-        # Everything goes through output.warn: migrations run at every
-        # Database() open, including from the shell-completion helpers
-        # that capture stdout (`agw vm list --names-only`), so stdout
-        # must stay clean for machine consumers.
+        # Everything goes through output.warn: migrations can run under
+        # ordinary JSON or names-only commands, so stdout must stay clean
+        # for machine consumers. Completion probes never migrate.
         output.warn("remote-Lima VMs now live at host-named sites; declare each site or those VMs stay unreachable:")
         for site, (ssh_host, host) in sorted(site_hosts.items()):
             if site != host:
@@ -625,3 +624,136 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
 }
 
 LATEST_VERSION = max(MIGRATIONS)
+
+# Restore validation depends on this map matching every completed migration.
+# Future migrations that add, rebuild, rename, or remove a table or column must
+# update the sentinel changes below in the same change as the migration.
+_SCHEMA_SENTINEL_ADDITIONS: dict[int, dict[str, tuple[str, ...]]] = {
+    1: {
+        "schema_version": ("version", "applied_at"),
+        "vm_hosts": ("name", "ssh_host", "platform", "os", "created_at", "last_seen_at"),
+        "vms": (
+            "name",
+            "platform",
+            "vm_host_name",
+            "extra_packages",
+            "init_status",
+            "ssh_public_key",
+            "tailscale_host",
+            "azure_resource_id",
+            "wsl_distro_name",
+            "created_at",
+            "last_seen_at",
+        ),
+        "workspaces": (
+            "name",
+            "type",
+            "vm_name",
+            "template",
+            "workspace_path",
+            "created_at",
+            "last_seen_at",
+        ),
+        "vm_git_host_keys": ("id", "vm_name", "git_host_name", "remote_key_id", "created_at"),
+    },
+    2: {"vms": ("cpus", "memory_gib", "disk_gib")},
+    3: {"vms": ("vm_user",)},
+    4: {"agents": ("name", "workspace_name", "linux_user", "created_at")},
+    6: {
+        "vms": ("provisioning_status",),
+        "vm_events": ("id", "vm_name", "event", "detail", "created_at"),
+    },
+    7: {"vms": ("admin_username",)},
+    8: {
+        "tasks": (
+            "name",
+            "workspace_name",
+            "template",
+            "mode",
+            "linux_user",
+            "status",
+            "created_at",
+            "updated_at",
+        )
+    },
+    10: {"vms": ("swap_gib",)},
+    11: {"vms": ("template",)},
+    12: {"agents": ("template",)},
+    13: {
+        "agents": ("vm_name", "grant_all"),
+        "agent_workspace_grants": ("agent_name", "workspace_name", "grant_type", "task_name", "created_at"),
+    },
+    14: {"tasks": ("agent_name",)},
+    15: {"tasks": ("created_workspace",)},
+    16: {"vms": ("proxmox_vmid",)},
+    17: {
+        "sessions": (
+            "name",
+            "workspace_name",
+            "template",
+            "mode",
+            "status",
+            "created_at",
+            "updated_at",
+            "agent_name",
+            "created_workspace",
+            "socket_path",
+        )
+    },
+    18: {"agent_workspace_grants": ("session_name",)},
+    20: {"sessions": ("pid",)},
+    21: {"sessions": ("boot_id",)},
+    22: {"workspaces": ("linux_group",)},
+    23: {
+        "consoles": ("name", "vm_name", "created_at", "updated_at"),
+        "console_sessions": ("console_name", "session_name", "position", "shells"),
+    },
+    24: {"consoles": ("admin_shell",)},
+    25: {"sessions": ("created_agent",)},
+    27: {
+        "vms": ("site", "hostname", "platform_metadata", "operator_stopped"),
+        "settings": ("key", "value"),
+    },
+    29: {"sessions": ("harness_state",)},
+    30: {"vms": ("admin_template",)},
+    31: {"sessions": ("harness_integration_state",)},
+}
+
+_SCHEMA_SENTINEL_REMOVED_TABLES: dict[int, tuple[str, ...]] = {
+    5: ("vm_git_host_keys",),
+    17: ("tasks",),
+    27: ("vm_hosts",),
+}
+
+_SCHEMA_SENTINEL_REMOVED_COLUMNS: dict[int, dict[str, tuple[str, ...]]] = {
+    7: {"vms": ("vm_user",)},
+    13: {"agents": ("workspace_name",)},
+    14: {"tasks": ("linux_user",)},
+    18: {"agent_workspace_grants": ("task_name",)},
+    20: {"sessions": ("status",)},
+    26: {"workspaces": ("type",)},
+    27: {
+        "vms": ("platform", "vm_host_name", "azure_resource_id", "wsl_distro_name", "proxmox_vmid"),
+    },
+    28: {"workspaces": ("last_seen_at",)},
+    31: {"sessions": ("harness_state",)},
+}
+
+
+def _build_schema_sentinels() -> dict[int, dict[str, frozenset[str]]]:
+    """Expand milestone changes into the completed shape for each version."""
+    tables: dict[str, set[str]] = {}
+    versions: dict[int, dict[str, frozenset[str]]] = {}
+    for version in range(1, LATEST_VERSION + 1):
+        for table in _SCHEMA_SENTINEL_REMOVED_TABLES.get(version, ()):
+            tables.pop(table)
+        for table, columns in _SCHEMA_SENTINEL_REMOVED_COLUMNS.get(version, {}).items():
+            tables[table].difference_update(columns)
+        for table, columns in _SCHEMA_SENTINEL_ADDITIONS.get(version, {}).items():
+            tables.setdefault(table, set()).update(columns)
+        versions[version] = {table: frozenset(columns) for table, columns in tables.items()}
+    return versions
+
+
+SCHEMA_SENTINELS = _build_schema_sentinels()
+"""Complete Agentworks table-and-column shape for each completed schema."""

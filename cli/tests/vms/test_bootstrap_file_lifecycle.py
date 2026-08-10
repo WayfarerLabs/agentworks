@@ -1,4 +1,4 @@
-"""Durable file lifecycle for the WSL2 Phase A bootstrap."""
+"""Durable file lifecycle for the WSL2-owned bootstrap helper."""
 
 from __future__ import annotations
 
@@ -11,13 +11,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from agentworks.capabilities.vm_platform import wsl2_bootstrap
 from agentworks.errors import ProvisioningError
 from agentworks.ssh import SSHError, SSHLogger, SSHResult
 from agentworks.transports.wsl2 import WSL2Transport
-from agentworks.vms.initializer import driver
 
 if TYPE_CHECKING:
-    from agentworks.db import Database
+    from agentworks.capabilities.vm_platform import BootstrapProgress
     from tests.conftest import CapturedOutput
 
 _AUTH_KEY = "tskey-bootstrap-file-sentinel"
@@ -94,31 +94,47 @@ class _RecordingTransport:
         self.guest_files[remote_path] = path.read_bytes()
 
 
+class _RecordingProgress:
+    """Deliberately non-redacting sink that exposes helper output verbatim."""
+
+    def __init__(self) -> None:
+        self.steps: list[str] = []
+        self.outputs: list[str] = []
+        self.warnings: list[str] = []
+        self.errors: list[str] = []
+
+    def step(self, name: str) -> None:
+        self.steps.append(name)
+
+    def output(self, text: str) -> None:
+        self.outputs.append(text)
+
+    def warning(self, msg: str) -> None:
+        self.warnings.append(msg)
+
+    def log_error(self, msg: str) -> None:
+        self.errors.append(msg)
+
+
 def _call(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     transport: _RecordingTransport,
     *,
-    db: Database | None = None,
-    logger: SSHLogger | None = None,
+    progress: BootstrapProgress | None = None,
 ) -> str:
-    public_key = tmp_path / "id.pub"
-    public_key.write_text("ssh-ed25519 AAAA test\n")
     monkeypatch.setattr(
-        "agentworks.vms.initializer.driver.uuid.uuid4",
+        "agentworks.capabilities.vm_platform.wsl2_bootstrap.uuid.uuid4",
         lambda: SimpleNamespace(hex="a" * 32),
     )
-    return driver._run_bootstrap_script(
-        db if db is not None else MagicMock(),
-        SimpleNamespace(operator=SimpleNamespace(ssh_public_key=public_key)),
-        SimpleNamespace(),
-        "vm1",
+    return wsl2_bootstrap.run_wsl2_bootstrap(
         transport,  # type: ignore[arg-type]
-        "agentworks",
-        "wsl2--vm1",
-        logger if logger is not None else MagicMock(),
+        admin_username="agentworks",
+        ssh_public_key="ssh-ed25519 AAAA test",
         tailscale_auth_key=_AUTH_KEY,
-        script_swap=0,
+        hostname="wsl2--vm1",
+        swap_gib=0,
+        progress=progress if progress is not None else MagicMock(),
     )
 
 
@@ -143,6 +159,22 @@ def test_success_uses_private_random_stages_and_removes_both(
     guest_path = "/tmp/agentworks-bootstrap-" + "a" * 32 + ".sh"
     assert guest_path in surfaced
     assert transport.commands[-1] == f"rm -f -- {guest_path} && test ! -e {guest_path}"
+
+
+def test_helper_does_not_close_manager_owned_progress(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks import ssh
+
+    monkeypatch.setattr(ssh, "LOG_DIR", tmp_path / "logs")
+    logger = SSHLogger("vm1", "vm-create", redactions=(_AUTH_KEY,))
+
+    assert _call(tmp_path, monkeypatch, _RecordingTransport(), progress=logger) == "100.64.0.9"
+    assert "# Finished:" not in logger.path.read_text()
+
+    logger.close()
+    assert "# Finished:" in logger.path.read_text()
 
 
 def test_structured_failure_output_is_redacted_from_console_log_and_error(
@@ -171,7 +203,7 @@ def test_structured_failure_output_is_redacted_from_console_log_and_error(
     )
 
     with pytest.raises(SSHError) as caught:
-        _call(tmp_path, monkeypatch, transport, logger=logger)
+        _call(tmp_path, monkeypatch, transport, progress=logger)
     logger.close()
 
     assert str(caught.value) == "Bootstrap script failed (exit 1)"
@@ -183,6 +215,39 @@ def test_structured_failure_output_is_redacted_from_console_log_and_error(
     assert durable_log.count("[REDACTED]") >= 4
     assert console.count("[REDACTED]") >= 4
     _assert_no_residue(transport)
+
+
+def test_helper_redacts_every_non_redacting_progress_surface(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transcript = "\n".join(
+        (
+            f"##STEP## step {_AUTH_KEY}",
+            f"##SUCCESS## success {_AUTH_KEY}",
+            f"##WARN## warning {_AUTH_KEY}",
+            f"##ERROR## error {_AUTH_KEY}",
+            f"raw transcript {_AUTH_KEY}",
+            "",
+        )
+    )
+    transport = _RecordingTransport(
+        execute_result=SSHResult(returncode=1, stdout=transcript, stderr=""),
+    )
+    progress = _RecordingProgress()
+
+    with pytest.raises(SSHError, match=r"Bootstrap script failed \(exit 1\)"):
+        _call(tmp_path, monkeypatch, transport, progress=progress)
+
+    assert progress.steps == ["step [REDACTED]"]
+    assert progress.outputs == [
+        "success [REDACTED]",
+        transcript.replace(_AUTH_KEY, "[REDACTED]"),
+    ]
+    assert progress.warnings == ["warning [REDACTED]"]
+    assert progress.errors == ["error [REDACTED]"]
+    for captured in (progress.steps, progress.outputs, progress.warnings, progress.errors):
+        assert _AUTH_KEY not in repr(captured)
 
 
 class _FailingTempFile:
@@ -209,7 +274,7 @@ def test_local_write_failure_removes_both_stages_and_preserves_error(
     failure = OSError("write failed")
     local_path = tmp_path / "bootstrap.sh"
     monkeypatch.setattr(
-        "agentworks.vms.initializer.driver.tempfile.NamedTemporaryFile",
+        "agentworks.capabilities.vm_platform.wsl2_bootstrap.tempfile.NamedTemporaryFile",
         lambda **kwargs: _FailingTempFile(local_path, failure),
     )
     transport = _RecordingTransport()
@@ -222,14 +287,45 @@ def test_local_write_failure_removes_both_stages_and_preserves_error(
     assert transport.guest_files == {}
 
 
-def test_copy_failure_removes_both_stages_and_preserves_error(
+def test_reflected_copy_failure_is_secret_free_across_every_surface(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
 ) -> None:
-    failure = SSHError("copy failed")
+    from agentworks import ssh
+
+    monkeypatch.setattr(ssh, "LOG_DIR", tmp_path / "logs")
+    logger = SSHLogger("vm1", "vm-create", redactions=(_AUTH_KEY,))
+    failure = SSHError(f"WSL2 copy failed: reflected {_AUTH_KEY}")
+    transport = _RecordingTransport(copy_failure=failure)
+    assert _AUTH_KEY in repr(failure)
+
+    with pytest.raises(ProvisioningError) as caught:
+        _call(tmp_path, monkeypatch, transport, progress=logger)
+    logger.close()
+
+    assert str(caught.value) == "could not copy the private guest bootstrap staging file"
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    _assert_exception_graph_is_value_free(caught.value)
+    assert _AUTH_KEY not in logger.path.read_text()
+    assert _AUTH_KEY not in repr(captured_output)
+    _assert_no_residue(transport)
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [KeyboardInterrupt("stop"), SystemExit("exit"), GeneratorExit("close")],
+    ids=("interrupt", "system-exit", "generator-exit"),
+)
+def test_copy_control_flow_removes_both_stages_and_preserves_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: BaseException,
+) -> None:
     transport = _RecordingTransport(copy_failure=failure)
 
-    with pytest.raises(SSHError) as caught:
+    with pytest.raises(type(failure)) as caught:
         _call(tmp_path, monkeypatch, transport)
 
     assert caught.value is failure
@@ -291,7 +387,7 @@ def test_real_wsl_timeout_drops_reflected_output_and_removes_both_stages(
         raise AssertionError(f"unexpected subprocess command: {args}")
 
     monkeypatch.setattr("agentworks.transports.wsl2.subprocess.run", _run)
-    monkeypatch.setattr("agentworks.vms.initializer.driver.tempfile.tempdir", str(tmp_path))
+    monkeypatch.setattr("agentworks.capabilities.vm_platform.wsl2_bootstrap.tempfile.tempdir", str(tmp_path))
 
     with pytest.raises(SSHError) as caught:
         _call(tmp_path, monkeypatch, WSL2Transport("vm1"))
@@ -304,12 +400,11 @@ def test_real_wsl_timeout_drops_reflected_output_and_removes_both_stages(
     assert list(tmp_path.glob("agentworks-bootstrap-*.sh")) == []
 
 
-def test_invalid_reflected_tailscale_ip_never_reaches_output_db_or_return(
+def test_invalid_reflected_tailscale_ip_never_reaches_output_or_return(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
 ) -> None:
-    database = MagicMock()
     transport = _RecordingTransport(
         execute_result=SSHResult(
             returncode=0,
@@ -325,7 +420,7 @@ def test_invalid_reflected_tailscale_ip_never_reaches_output_db_or_return(
     )
 
     with pytest.raises(SSHError) as caught:
-        _call(tmp_path, monkeypatch, transport, db=database)
+        _call(tmp_path, monkeypatch, transport)
 
     assert str(caught.value) == "Bootstrap script failed (exit 0)"
     assert caught.value.__cause__ is None
@@ -333,8 +428,6 @@ def test_invalid_reflected_tailscale_ip_never_reaches_output_db_or_return(
     _assert_exception_graph_is_value_free(caught.value)
     assert _AUTH_KEY not in repr(captured_output)
     assert not any(message.startswith("Tailscale IP:") for message in captured_output.detail)
-    database.update_vm_tailscale.assert_not_called()
-    database.update_vm_provisioning_status.assert_not_called()
     _assert_no_residue(transport)
 
 
@@ -457,7 +550,7 @@ def test_warning_failure_does_not_mask_primary(
         del message
         raise warning_failure
 
-    monkeypatch.setattr("agentworks.vms.initializer.driver.output.warn", _fail_warning)
+    monkeypatch.setattr("agentworks.capabilities.vm_platform.wsl2_bootstrap.output.warn", _fail_warning)
 
     with pytest.raises(KeyboardInterrupt) as caught:
         _call(tmp_path, monkeypatch, transport)
@@ -511,13 +604,14 @@ def test_local_removal_failure_does_not_mask_staging_primary(
     if operation == "write":
         primary: BaseException = OSError("write failed")
         monkeypatch.setattr(
-            "agentworks.vms.initializer.driver.tempfile.NamedTemporaryFile",
+            "agentworks.capabilities.vm_platform.wsl2_bootstrap.tempfile.NamedTemporaryFile",
             lambda **kwargs: _FailingTempFile(local_path, primary),
         )
         transport = _RecordingTransport()
     else:
-        primary = SSHError("copy failed")
-        transport = _RecordingTransport(copy_failure=primary)
+        copy_failure = SSHError("copy failed")
+        primary = ProvisioningError("could not copy the private guest bootstrap staging file")
+        transport = _RecordingTransport(copy_failure=copy_failure)
 
     cleanup_failure = cleanup_failure_type("local cleanup failed")
 
@@ -531,7 +625,12 @@ def test_local_removal_failure_does_not_mask_staging_primary(
         with pytest.raises(type(primary)) as caught:
             _call(tmp_path, monkeypatch, transport)
 
-        assert caught.value is primary
+        if operation == "write":
+            assert caught.value is primary
+        else:
+            assert str(caught.value) == str(primary)
+            assert caught.value.__cause__ is None
+            assert caught.value.__context__ is None
         assert transport.guest_files == {}
         staged_paths = [local_path] if operation == "write" else transport.local_paths
         assert len(staged_paths) == 1

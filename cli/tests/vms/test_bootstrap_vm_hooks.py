@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -62,57 +63,43 @@ def _hermetic_driver(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda *a, **k: None)
 
 
-def _call_bootstrap(db: Database, platform: _SpyPlatform, on_ready: Any) -> tuple[Any, Any, str]:
+def _call_bootstrap(db: Database, platform: _SpyPlatform, on_ready: Any) -> tuple[Any, str]:
+    logger = SimpleNamespace(display_path="~/hookvm-vm-create.log")
     return driver.bootstrap_vm(
         db,
         SimpleNamespace(),  # type: ignore[arg-type]  # config: unused past the stubbed seams
-        SimpleNamespace(swap=0),  # type: ignore[arg-type]  # vm_template: only swap is read
         "hookvm",
         _stub_exec_target(),
         platform,  # type: ignore[arg-type]
         RunContext(),
+        logger,  # type: ignore[arg-type]
         admin_username="agentworks",
-        tailscale_auth_key="tskey-test",
-        git_tokens={},
         on_tailscale_ready=on_ready,
     )
 
 
-def test_bootstrap_logger_receives_every_resolved_secret(
+def test_bootstrap_uses_manager_owned_logger_without_closing(
     db: Database, monkeypatch: pytest.MonkeyPatch, _hermetic_driver: None
 ) -> None:
-    """The VM-create boundary supplies both the Tailscale key and every
-    credential token before the incremental logger writes its header."""
-    captured: list[tuple[str, ...]] = []
-
-    class _LoggerSpy:
-        path = "/dev/null"
-
-        def __init__(self, vm_name: str, command_stem: str, *, redactions: tuple[str, ...] = ()) -> None:
-            captured.append(redactions)
-
-        def close(self) -> None:
-            pass
-
     db.insert_vm("hookvm", site="stub", hostname="hookvm")
-    monkeypatch.setattr("agentworks.ssh.SSHLogger", _LoggerSpy)
     monkeypatch.setattr(driver, "_phase_a_bootstrap", lambda *a, **k: SimpleNamespace())
+    exec_target = _stub_exec_target()
+    logger = MagicMock(display_path="~/hookvm-vm-create.log")
 
     driver.bootstrap_vm(
         db,
         SimpleNamespace(),  # type: ignore[arg-type]
-        SimpleNamespace(swap=0),  # type: ignore[arg-type]
         "hookvm",
-        _stub_exec_target(),
+        exec_target,
         _SpyPlatform(),  # type: ignore[arg-type]
         RunContext(),
+        logger,  # type: ignore[arg-type]
         admin_username="admin",
-        tailscale_auth_key="tailscale-secret",
-        git_tokens={"gh": "github-secret", "gl": "gitlab-secret"},
         on_tailscale_ready=lambda: None,
     )
 
-    assert captured == [("tailscale-secret", "github-secret", "gitlab-secret")]
+    assert exec_target.logger is logger
+    logger.close.assert_not_called()
 
 
 def test_success_path_fires_on_tailscale_ready(
@@ -171,10 +158,10 @@ def test_failed_path_hook_failure_does_not_mask(
     assert any("could not secure the failed VM" in w for w in captured_output.warnings)
 
 
-def test_interrupt_during_bootstrap_secures_and_reraises(
+def test_interrupt_during_tailscale_verification_secures_and_reraises(
     db: Database, monkeypatch: pytest.MonkeyPatch, _hermetic_driver: None
 ) -> None:
-    """Ctrl-C during the minutes-long bootstrap escapes the Exception arm
+    """Ctrl-C during Tailscale verification escapes the Exception arm
     (KeyboardInterrupt is a BaseException), but the kept VM must still be
     secured best-effort before the interrupt propagates: without it the
     Azure bootstrap allow would stand indefinitely. The row's status is

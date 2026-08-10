@@ -214,6 +214,7 @@ class CapturedOutput:
     lines: list[tuple[Role, int, str]] = field(default_factory=list)
     info: list[str] = field(default_factory=list)
     detail: list[str] = field(default_factory=list)
+    notices: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     progress_items: list[_CapturedProgress] = field(default_factory=list)
     confirm_response: bool = True  # what confirm() returns in tests
@@ -240,6 +241,8 @@ class _TestHandler:
             self._captured.info.append(_render_header(message, level))
         elif role is Role.DETAIL:
             self._captured.detail.append(message)
+        elif role is Role.NOTICE:
+            self._captured.notices.append(message)
         elif role is Role.WARNING:
             self._captured.warnings.append(message)
 

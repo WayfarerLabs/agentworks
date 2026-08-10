@@ -1,3 +1,19 @@
+## Keep SQLite recovery separate
+
+The actions in this topic back up `config.toml` and resource manifests for the manual 0.14 resource
+rewrite. They are not substitutes for a state database snapshot. When a normal command finds an
+older SQLite schema, Agentworks announces the version change and asks an interactive operator
+whether to back up, defaulting to yes. Non-interactive commands use the strict default-true
+`[database] auto_backup_before_migration` setting. Completed automatic snapshots live in
+`~/.config/agentworks/database-backups/`; only the five newest recognized automatic snapshots are
+retained, while manual snapshots and unrelated files remain.
+
+A selected snapshot must complete before migration starts. If migration fails afterward, follow the
+exact restore command in the error; if backup was declined or disabled, the error explicitly says
+there is no pre-migration snapshot. Restore a schema-compatible backup before downgrading. After the
+0.14 upgrade, run `agw completion install` so generated database-backed completions use the current
+read-only safety probe.
+
 ## Inventory and preserve the migration evidence
 
 Before any backup or edit, read only the selected `config.toml` and the resources directory when it

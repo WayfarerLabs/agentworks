@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextlib
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -127,6 +128,258 @@ def test_create_graph_derives_from_declared_resources(make_config, db: Database)
     assert "api-key" not in secret_union(nodes)
 
 
+def test_create_logger_precedes_dispatch_has_all_redactions_and_closes_once(
+    make_config,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: object,
+) -> None:
+    """The manager constructs one fully redacted log before platform create,
+    passes it as bootstrap progress, reuses it downstream, and closes it once."""
+    from agentworks.capabilities.vm_platform import ProvisionRequest
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+
+    config = make_config(
+        manifests=[
+            GIT_CRED_GH,
+            ManifestDoc("admin-template", "default", {"git_credentials": ["gh"]}),
+        ]
+    )
+    events: list[str] = []
+    captured_redactions: list[tuple[str, ...]] = []
+    loggers: list[object] = []
+
+    class _LoggerSpy:
+        display_path = "~/.config/agentworks/logs/logvm-vm-create.log"
+        has_warnings = False
+        warnings: list[str] = []
+
+        def __init__(self, vm_name: str, command_stem: str, *, redactions: tuple[str, ...] = ()) -> None:
+            assert (vm_name, command_stem) == ("logvm", "vm-create")
+            events.append("logger")
+            captured_redactions.append(redactions)
+            loggers.append(self)
+
+        def close(self) -> None:
+            events.append("close")
+
+    monkeypatch.setattr("agentworks.ssh.SSHLogger", _LoggerSpy)
+
+    def _create(self: LimaPlatform, request: ProvisionRequest, ctx: object) -> ProvisionResult:
+        events.append("create")
+        assert request.progress is loggers[0]
+        return ProvisionResult(native_transport=SimpleNamespace(), tailscale_ip="100.64.0.7")  # type: ignore[arg-type]
+
+    monkeypatch.setattr(LimaPlatform, "create", _create)
+
+    def _phase_a(*args: object, **kwargs: object) -> tuple[object, str]:
+        events.append("phase-a")
+        assert args[6] is loggers[0]
+        return SimpleNamespace(), "/home/agentworks"
+
+    monkeypatch.setattr(vm_manager, "bootstrap_vm", _phase_a)
+
+    def _phase_b(*args: object, **kwargs: object) -> None:
+        events.append("phase-b")
+        assert args[10] is loggers[0]
+
+    monkeypatch.setattr(vm_manager, "run_initialization", _phase_b)
+
+    vm_manager.create_vm(db, config, name="logvm", interaction=InteractionPolicy.REFUSE)
+
+    assert captured_redactions == [("tskey-test", "ghtok")]
+    assert events == ["logger", "create", "phase-a", "phase-b", "close"]
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [RuntimeError("log exploded"), KeyboardInterrupt("stop")],
+    ids=("ordinary", "interrupt"),
+)
+def test_logger_construction_failure_never_dispatches_and_unwinds_row(
+    make_config,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: BaseException,
+) -> None:
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.errors import ProvisioningError
+
+    def _logger_failure(*args: object, **kwargs: object) -> None:
+        raise failure
+
+    create = MagicMock()
+    monkeypatch.setattr("agentworks.ssh.SSHLogger", _logger_failure)
+    monkeypatch.setattr(LimaPlatform, "create", create)
+
+    if isinstance(failure, KeyboardInterrupt):
+        with pytest.raises(KeyboardInterrupt) as interrupt_caught:
+            vm_manager.create_vm(db, make_config(), name="nologvm", interaction=InteractionPolicy.REFUSE)
+        assert interrupt_caught.value is failure
+    else:
+        with pytest.raises(ProvisioningError) as provisioning_caught:
+            vm_manager.create_vm(db, make_config(), name="nologvm", interaction=InteractionPolicy.REFUSE)
+        assert provisioning_caught.value.__cause__ is failure
+
+    create.assert_not_called()
+    assert db.get_vm("nologvm") is None
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [RuntimeError("create exploded"), KeyboardInterrupt("stop")],
+    ids=("ordinary", "interrupt"),
+)
+def test_create_failure_closes_logger_once_without_replacing_primary(
+    make_config,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,
+    failure: BaseException,
+) -> None:
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.errors import ProvisioningError
+
+    closes: list[str] = []
+    close_interrupt = KeyboardInterrupt("close interrupted")
+
+    class _LoggerSpy:
+        display_path = "~/.config/agentworks/logs/failvm-vm-create.log"
+        has_warnings = False
+        warnings: list[str] = []
+
+        def __init__(self, vm_name: str, command_stem: str, *, redactions: tuple[str, ...] = ()) -> None:
+            pass
+
+        def close(self) -> None:
+            closes.append("close")
+            raise close_interrupt
+
+    monkeypatch.setattr("agentworks.ssh.SSHLogger", _LoggerSpy)
+
+    def _fail(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:
+        raise failure
+
+    monkeypatch.setattr(LimaPlatform, "create", _fail)
+
+    if isinstance(failure, KeyboardInterrupt):
+        with pytest.raises(KeyboardInterrupt) as interrupt_caught:
+            vm_manager.create_vm(db, make_config(), name="failvm", interaction=InteractionPolicy.REFUSE)
+        assert interrupt_caught.value is failure
+        assert any(
+            "Log: ~/.config/agentworks/logs/failvm-vm-create.log" in warning for warning in captured_output.warnings
+        )
+    else:
+        with pytest.raises(ProvisioningError) as provisioning_caught:
+            vm_manager.create_vm(db, make_config(), name="failvm", interaction=InteractionPolicy.REFUSE)
+        assert provisioning_caught.value.__cause__ is failure
+        assert "Details: ~/.config/agentworks/logs/failvm-vm-create.log" in str(provisioning_caught.value)
+
+    assert closes == ["close"]
+    assert db.get_vm("failvm") is None
+    assert any(
+        "could not close provisioning log ~/.config/agentworks/logs/failvm-vm-create.log: close interrupted" in warning
+        for warning in captured_output.warnings
+    )
+
+
+def test_successful_create_propagates_fresh_logger_close_interrupt(
+    make_config,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,
+) -> None:
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+
+    close_interrupt = KeyboardInterrupt("fresh close interrupt")
+    closes: list[str] = []
+
+    class _LoggerSpy:
+        display_path = "~/.config/agentworks/logs/freshvm-vm-create.log"
+        has_warnings = False
+        warnings: list[str] = []
+
+        def __init__(self, vm_name: str, command_stem: str, *, redactions: tuple[str, ...] = ()) -> None:
+            pass
+
+        def close(self) -> None:
+            closes.append("close")
+            raise close_interrupt
+
+    monkeypatch.setattr("agentworks.ssh.SSHLogger", _LoggerSpy)
+    monkeypatch.setattr(
+        LimaPlatform,
+        "create",
+        lambda self, request, ctx: ProvisionResult(  # noqa: ARG005
+            native_transport=SimpleNamespace(),  # type: ignore[arg-type]
+            tailscale_ip="100.64.0.7",
+        ),
+    )
+    monkeypatch.setattr(
+        vm_manager,
+        "bootstrap_vm",
+        lambda *args, **kwargs: (SimpleNamespace(), "/home/agentworks"),
+    )
+    monkeypatch.setattr(vm_manager, "run_initialization", lambda *args, **kwargs: None)
+
+    with pytest.raises(KeyboardInterrupt) as caught:
+        vm_manager.create_vm(db, make_config(), name="freshvm", interaction=InteractionPolicy.REFUSE)
+
+    assert caught.value is close_interrupt
+    assert closes == ["close"]
+    assert db.get_vm("freshvm") is not None
+    assert not any("could not close provisioning log" in warning for warning in captured_output.warnings)
+
+
+def test_logger_close_warning_failure_does_not_replace_primary(
+    make_config,
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.errors import ProvisioningError
+
+    primary = RuntimeError("create exploded")
+    close_interrupt = KeyboardInterrupt("close interrupted")
+    warning_failure = SystemExit("warning failed")
+    closes: list[str] = []
+    warning_messages: list[str] = []
+
+    class _LoggerSpy:
+        display_path = "~/.config/agentworks/logs/warnvm-vm-create.log"
+        has_warnings = False
+        warnings: list[str] = []
+
+        def __init__(self, vm_name: str, command_stem: str, *, redactions: tuple[str, ...] = ()) -> None:
+            pass
+
+        def close(self) -> None:
+            closes.append("close")
+            raise close_interrupt
+
+    monkeypatch.setattr("agentworks.ssh.SSHLogger", _LoggerSpy)
+
+    def _fail_create(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:
+        raise primary
+
+    def _fail_warning(message: str) -> None:
+        warning_messages.append(message)
+        raise warning_failure
+
+    monkeypatch.setattr(LimaPlatform, "create", _fail_create)
+    monkeypatch.setattr("agentworks.vms.manager.lifecycle.output.warn", _fail_warning)
+
+    with pytest.raises(ProvisioningError) as caught:
+        vm_manager.create_vm(db, make_config(), name="warnvm", interaction=InteractionPolicy.REFUSE)
+
+    assert caught.value.__cause__ is primary
+    assert closes == ["close"]
+    assert warning_messages == [
+        "could not close provisioning log ~/.config/agentworks/logs/warnvm-vm-create.log: close interrupted"
+    ]
+    assert db.get_vm("warnvm") is None
+
+
 # -- vm create: unwind parity ------------------------------------------------
 
 
@@ -223,11 +476,31 @@ def test_create_init_failure_keeps_the_row(
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
     from agentworks.errors import ExternalError
 
+    closes: list[str] = []
+
+    class _LoggerSpy:
+        display_path = "~/.config/agentworks/logs/kvm-vm-create.log"
+        has_warnings = False
+        warnings: list[str] = []
+
+        def __init__(
+            self,
+            vm_name: str,
+            command_stem: str,
+            *,
+            redactions: tuple[str, ...] = (),
+        ) -> None:
+            pass
+
+        def close(self) -> None:
+            closes.append("close")
+
+    monkeypatch.setattr("agentworks.ssh.SSHLogger", _LoggerSpy)
+
     def _fake_create(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:
         return ProvisionResult(
             native_transport=SimpleNamespace(),  # type: ignore[arg-type]
             platform_metadata={},
-            bootstrap_complete=True,
             tailscale_ip="100.64.0.7",
         )
 
@@ -237,7 +510,7 @@ def test_create_init_failure_keeps_the_row(
     monkeypatch.setattr(
         vm_manager,
         "bootstrap_vm",
-        lambda *a, **k: (SimpleNamespace(), SimpleNamespace(), "/home/agentworks"),
+        lambda *a, **k: (SimpleNamespace(), "/home/agentworks"),
     )
 
     def _init_boom(*a: object, **k: object) -> None:
@@ -247,6 +520,7 @@ def test_create_init_failure_keeps_the_row(
     with pytest.raises(ExternalError, match="init exploded"):
         vm_manager.create_vm(db, make_config(), name="kvm", interaction=InteractionPolicy.REFUSE)
     assert db.get_vm("kvm") is not None
+    assert closes == ["close"]
 
 
 def test_create_phase_a_failure_maps_to_provisioning_error(
@@ -267,14 +541,13 @@ def test_create_phase_a_failure_maps_to_provisioning_error(
         return ProvisionResult(
             native_transport=SimpleNamespace(),  # type: ignore[arg-type]
             platform_metadata={},
-            bootstrap_complete=True,
             tailscale_ip="100.64.0.7",
         )
 
     monkeypatch.setattr(LimaPlatform, "create", _fake_create)
     monkeypatch.setattr(LimaPlatform, "vm_active", _noop_hold)
 
-    def _boom_bootstrap(db_: Database, config_: object, tmpl: object, vm_name: str, *a: object, **k: object) -> None:
+    def _boom_bootstrap(db_: Database, config_: object, vm_name: str, *a: object, **k: object) -> None:
         # Mirror the real bootstrap_vm's fatal path: mark provisioning
         # failed, then raise for create_vm's mapping to pick up.
         db_.update_vm_provisioning_status(vm_name, ProvisioningStatus.FAILED)
@@ -317,7 +590,6 @@ def test_create_phase_a_sync_failure_is_non_fatal(
         return ProvisionResult(
             native_transport=SimpleNamespace(describe=lambda: "lima:vm", logger=None),  # type: ignore[arg-type]
             platform_metadata={},
-            bootstrap_complete=True,
             tailscale_ip="100.64.0.7",
         )
 
@@ -377,7 +649,6 @@ def test_create_provisioning_section_ends_with_ssh_config_synced(
         return ProvisionResult(
             native_transport=SimpleNamespace(describe=lambda: "lima:vm", logger=None),  # type: ignore[arg-type]
             platform_metadata={},
-            bootstrap_complete=True,
             tailscale_ip="100.64.0.7",
         )
 

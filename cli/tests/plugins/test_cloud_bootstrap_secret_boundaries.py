@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import gzip
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -44,6 +45,7 @@ def _request() -> ProvisionRequest:
         ssh_public_key="ssh-ed25519 AAAA test",
         ssh_private_key=None,
         tailscale_auth_key=_SENTINEL,
+        progress=MagicMock(),
         cpus=4,
         memory_gib=8,
         disk_gib=50,
@@ -99,7 +101,6 @@ def test_azure_final_custom_data_is_key_free_then_joins_once(
     assert _SENTINEL not in custom_data
     assert "TAILSCALE_AUTH_KEY=''" in custom_data
     _assert_one_ephemeral_join(calls)
-    assert result.bootstrap_complete is True
     assert result.tailscale_ip == "100.64.0.5"
 
 
@@ -120,7 +121,6 @@ def test_ec2_final_run_instances_user_data_is_key_free_then_joins_once(
     assert _SENTINEL not in user_data
     assert "TAILSCALE_AUTH_KEY=''" in user_data
     _assert_one_ephemeral_join(calls)
-    assert result.bootstrap_complete is True
     assert result.tailscale_ip == "100.64.0.5"
 
 
