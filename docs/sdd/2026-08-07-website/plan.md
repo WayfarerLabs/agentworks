@@ -85,8 +85,12 @@ Operator evidence:
 - 2026-08-09: isolated Chromium 151 acceptance at interim-shell head `1798ca9a` passed 113 of 113
   measured assertions across the shared shell, game, responsive layouts, reduced motion,
   accessibility-tree contracts, lifecycle, requests, storage, and clean-context comprehension with
-  no product defect. Firefox, WebKit, spoken screen-reader quality, and physical touch/motion remain
-  explicit pre-release checks because those surfaces are unavailable locally.
+  no product defect.
+- 2026-08-09: the operator narrows the pre-merge browser gate to Chrome and Edge, the two browsers
+  available on the machine that can reach the forwarded preview. Firefox/WebKit, spoken
+  screen-reader quality, physical mobile/touch hardware, and broader device coverage move to
+  post-launch production validation; defects found there are follow-up work. Those rows remain
+  explicit and must close before the final production-acceptance record and `locked.md`.
 - 2026-08-09: with operator approval, repository Pages is enabled with GitHub Actions as its source
   at the default project URL and HTTPS enforcement on. The automatically created `github-pages`
   environment uses custom deployment-branch policies and has exactly one policy, branch `main`; no
@@ -153,8 +157,9 @@ introducing a framework, remote asset, hidden critical content, or onboarding de
       boundaries, no-JavaScript fallback, and responsive scene bounds.
 - [x] `agentworks-reviewer` and a fresh-eyes reviewer inspect the slice; valid findings return to
       the implementing subagent and are resolved before re-review.
-- [ ] Complete the checklist's pending Firefox, WebKit, screen-reader, and human touch/motion rows
-      on available surfaces before declaring Phase 2 fully accepted.
+- [ ] Complete the checklist's pending Firefox, WebKit, screen-reader, human touch/motion, and
+      broader-device rows as post-launch production acceptance before the final closeout and
+      `locked.md`.
 
 Definition of done: the brand and 404 game are review-clean and locally demonstrable from PR #439,
 but are not deployed or merged as a partial website.
@@ -207,8 +212,9 @@ sources, with an explicit removable notice and no branch-only or speculative onb
       guidance.
 - [x] Update the top-level `README.md` component inventory in the same PR so it no longer claims
       `cli/` is the repository's only component after `website/` lands.
-- [ ] Complete the Phase 2 Firefox, WebKit, screen-reader, and human touch/motion checks before
-      proposing a public release.
+- [ ] Complete the Phase 2 Firefox, WebKit, screen-reader, human touch/motion, and broader-device
+      checks after launch on available public-host surfaces, before the final closeout and
+      `locked.md`.
 - [x] Run focused tests and `./scripts/lint-files.sh --fix`; confirm generated output does not
       appear in Git status.
 - [x] `agentworks-reviewer` and a fresh-eyes reviewer inspect the implementation; valid findings go
@@ -347,8 +353,10 @@ the 404 begins directly with its title after a compact natural gap.
       saga lead's standalone-effort review, and resolve valid findings. Re-run current Chromium
       no-JavaScript recovery, source-order focus, Escape/browser-key independence,
       320-pixel/400-percent reflow, computed shared-shell visibility, reduced motion, and
-      clean-context comprehension, plus Firefox, WebKit, spoken screen-reader, and physical
-      touch/human-motion acceptance. Then hand the reviewed PR to the operator for merge.
+      clean-context comprehension. Then mark the reviewed PR ready for the operator's Chrome and
+      Edge pre-merge pass and merge decision. Firefox/WebKit, spoken screen-reader, physical mobile
+      touch/human-motion, and broader device acceptance are post-launch gates for the final
+      production-acceptance record, not blockers for this interim-release merge.
 - [ ] After merge, verify the matching commit deploys automatically at the default Pages URL. Leave
       custom-domain, onboarding, and lock boxes unchecked.
 
@@ -394,6 +402,10 @@ Phase 6 retains the one-time same-run root-base redeployment gate before DNS cut
       reduced-motion presentation.
 - [ ] Verify the production custom 404 compact title, explanatory copy, route-home fallback, and
       byte-equivalent shared game subtree preserve the same game and no-JavaScript contracts.
+- [ ] Run the deferred production compatibility pass in Firefox and Safari/WebKit, with a spoken
+      screen reader, on physical mobile/touch hardware, and on at least one additional computer or
+      device outside the pre-merge machine. Smoke all five pages, record device/OS/browser evidence,
+      and route defects into the next website work round before final closeout.
 - [ ] Run interim accessibility acceptance: keyboard-only flow, visible focus, landmarks/headings,
       320 CSS pixel reflow, 400 percent zoom, contrast evidence, reduced motion, and recognizable
       controls independent of terminal familiarity.

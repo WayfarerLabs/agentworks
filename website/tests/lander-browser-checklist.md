@@ -71,28 +71,37 @@ browser cache for request-log checks.
 - Human visual review of motion quality and touch hardware feel: pending; CDP verified state,
   geometry, computed styles, event behavior, and timing contracts.
 
-Repeat the full checklist in current Chromium and Firefox. Repeat the responsive rows on a touch
-browser. Safari or another WebKit browser is required before public launch.
+Before merge, repeat the applicable preview checklist in current Chrome and Edge, the two browsers
+available to the operator on the machine with port-forward access. After the site is public, repeat
+the full engine and responsive rows in Firefox and Safari/WebKit and on physical touch hardware.
+Those post-launch findings feed the next website work round and remain required before final
+production closeout.
 
 ## Phase 4C permanent acceptance
 
-Record a new dated run against the exact implementation SHA. Current Chromium owns the ordinary
-functional baseline; Firefox and WebKit remain independent engine gates. Spoken screen-reader
-quality and physical touch/motion feel require humans on those actual surfaces. Emulation and an
-accessibility-tree dump are useful evidence, but do not close those rows.
+Record a new dated run against the exact implementation SHA. Chrome and Edge own the operator's
+pre-merge functional gate. Firefox and WebKit remain post-launch independent-engine gates. Spoken
+screen-reader quality and physical touch/motion feel require humans on those actual surfaces after
+the public host is reachable. Emulation and an accessibility-tree dump are useful evidence, but do
+not close those rows or the final production-acceptance record.
 
-- [ ] In current Chromium, exercise `/lander/` and `/404.html` with JavaScript enabled and disabled,
-      at normal and reduced motion, and at every responsive viewport below. Record the exact browser
-      version and source SHA.
-- [ ] In Firefox, repeat the complete keyboard, pointer, lifecycle, reflow, computed-style, and
-      reduced-motion pass. Record the exact browser version and source SHA.
-- [ ] In Safari or another WebKit browser, repeat the same engine pass before public release.
-- [ ] With a spoken screen reader, verify initial scene naming, hidden preflight controls, the
-      application transition, concise control description, polite status changes, native Exit and
-      Restart names/states, and focus destinations. Record screen reader, browser, and versions.
-- [ ] On physical touch hardware, verify start, tap impulse, hold, drag, Exit, Restart, scroll
-      outside the active scene, and human motion quality. Record device, operating system, browser,
-      and input observations.
+- [ ] In current Chrome and Edge before merge, exercise `/lander/` and `/404.html` with JavaScript
+      enabled and disabled, at normal and reduced motion, and at every responsive viewport below.
+      Record the exact browser version and source SHA.
+- [ ] After launch, in Firefox, repeat the complete keyboard, pointer, lifecycle, reflow,
+      computed-style, and reduced-motion pass. Record the exact browser version and source SHA.
+- [ ] After launch, in Safari or another WebKit browser, repeat the same engine pass.
+- [ ] After launch, with a spoken screen reader, verify initial scene naming, hidden preflight
+      controls, the application transition, concise control description, polite status changes,
+      native Exit and Restart names/states, and focus destinations. Record screen reader, browser,
+      and versions.
+- [ ] After launch, on physical touch hardware, verify start, tap impulse, hold, drag, Exit,
+      Restart, scroll outside the active scene, and human motion quality. Record device, operating
+      system, browser, and input observations.
+- [ ] After launch, on at least one additional computer or device outside the pre-merge machine,
+      smoke Home, Manifesto, Security, Lander, and 404 over the public host. Record device,
+      operating system, browser, viewport, navigation, layout, and game observations; route defects
+      into the next website work round.
 - [ ] On all five pages, inspect every reviewed shell link with computed styles. Each link is
       visible, intersects the viewport, has nonzero bounds, receives keyboard focus with the full
       outline, and is reachable by pointer without overlap. Temporarily apply an offscreen
@@ -251,10 +260,10 @@ new run records the refined source.
       Lander, and 404 each show one GitHub and one PyPI icon-and-text link in the header and exactly
       three footer destinations: Manifesto, Security, then the icon-only Lander link. No destination
       is duplicated in the body.
-- [ ] In current Chromium, Firefox, and WebKit at 320 CSS pixels, 400 percent zoom, touch landscape,
-      and wide desktop, Home, Manifesto, Security, Lander, and 404 have no page overflow, clipped
-      text or navigation, overlap, or fixed-height content loss. Record browser versions, viewport,
-      date, and result before public release.
+- [ ] In Chrome and Edge before merge, then Firefox and WebKit after launch, verify at 320 CSS
+      pixels, 400 percent zoom, touch landscape, and wide desktop that Home, Manifesto, Security,
+      Lander, and 404 have no page overflow, clipped text or navigation, overlap, or fixed-height
+      content loss. Record browser versions, viewport, date, and result.
 - [ ] With JavaScript disabled, Home, Manifesto, and Security retain all content and links, Lander
       retains its heading and named scene, and 404 retains its message, named scene, and breadcrumb
       route-home action. No surface depends on terminal familiarity.

@@ -274,5 +274,8 @@ python3 website/build.py --repo-root . --output /tmp/agentworks-site-project --s
 git diff --check
 ```
 
-The manual browser checklist remains a release gate because unit tests do not prove physical touch
-feel, spoken screen-reader quality, or engine-specific reflow.
+The operator's 2026-08-09 ruling makes Chrome and Edge the pre-merge manual browser gate on the
+forwarded preview. Unit tests still do not prove physical touch feel, spoken screen-reader quality,
+or independent-engine reflow, so Firefox/WebKit, spoken screen-reader, physical mobile/touch, and
+broader device rows remain mandatory post-launch production acceptance before closeout and
+`locked.md`; defects found there enter the next website work round.
