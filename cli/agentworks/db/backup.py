@@ -156,30 +156,45 @@ def prepare_database_open(database_path: Path) -> DatabaseOpenPlan:
             )
     try:
         qualified = inspect_schema(database_path)
+        _raise_if_unopenable(qualified)
+        if qualified.state is SchemaState.CURRENT:
+            return DatabaseOpenPlan(qualified)
+        if overlapped:
+            raise StateError(
+                "state database remained outdated after an overlapping migration attempt",
+                hint="Inspect the database with `agw doctor` before retrying.",
+            )
+        initial_tokens = (initial.current_version, initial.schema_cookie)
+        qualified_tokens = (qualified.current_version, qualified.schema_cookie)
+        if qualified.state is SchemaState.STALE and qualified_tokens != initial_tokens:
+            raise StateError(
+                "state database changed before its stale state could be qualified under the migration lock",
+                hint="Inspect the database with `agw doctor`, then retry the original command.",
+            )
+        if qualified.state is not SchemaState.STALE or qualified.schema_cookie is None:
+            raise StateError("state database changed while its migration state was being qualified")
+        if qualified.current_version > 0:
+            connection = _validate_sqlite_file(database_path, source_kind="state database")
+            try:
+                _validate_canonical_schema(
+                    connection,
+                    qualified.current_version,
+                    source_kind="state database",
+                    hint=(
+                        "Restore an unmodified backup captured after a completed Agentworks migration, "
+                        "or repair the partial schema before retrying."
+                    ),
+                )
+            except sqlite3.DatabaseError as error:
+                _raise_sqlite_error(error, source_kind="state database")
+            finally:
+                connection.close()
+        return DatabaseOpenPlan(
+            qualified,
+            stale_baseline=(qualified.current_version, qualified.schema_cookie),
+        )
     finally:
         _release_migration_lock(lock)
-
-    _raise_if_unopenable(qualified)
-    if qualified.state is SchemaState.CURRENT:
-        return DatabaseOpenPlan(qualified)
-    if overlapped:
-        raise StateError(
-            "state database remained outdated after an overlapping migration attempt",
-            hint="Inspect the database with `agw doctor` before retrying.",
-        )
-    initial_tokens = (initial.current_version, initial.schema_cookie)
-    qualified_tokens = (qualified.current_version, qualified.schema_cookie)
-    if qualified.state is SchemaState.STALE and qualified_tokens != initial_tokens:
-        raise StateError(
-            "state database changed before its stale state could be qualified under the migration lock",
-            hint="Inspect the database with `agw doctor`, then retry the original command.",
-        )
-    if qualified.state is not SchemaState.STALE or qualified.schema_cookie is None:
-        raise StateError("state database changed while its migration state was being qualified")
-    return DatabaseOpenPlan(
-        qualified,
-        stale_baseline=(qualified.current_version, qualified.schema_cookie),
-    )
 
 
 def open_database_safely(
@@ -384,48 +399,62 @@ def validate_restore_source(backup_path: Path) -> int:
                 hint="Preserve this backup and restore it with a release that understands its schema.",
             )
 
-        expected_tables = SCHEMA_SENTINELS[version]
-        actual_tables = {
-            str(row[0])
-            for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
-            )
-        }
-        missing_tables = sorted(set(expected_tables) - actual_tables)
-        unexpected_tables = sorted(actual_tables - set(expected_tables))
-        if missing_tables:
-            raise StateError(
-                f"database backup is missing required Agentworks tables: {', '.join(missing_tables)}",
-                hint="Select an unmodified backup captured after a completed Agentworks migration.",
-            )
-        if unexpected_tables:
-            raise StateError(
-                f"database backup has unexpected tables for completed schema version {version}: "
-                f"{', '.join(unexpected_tables)}",
-                hint="Select an unmodified backup captured after a completed Agentworks migration.",
-            )
-        for table, expected_columns in expected_tables.items():
-            columns = {
-                str(column[1]) for column in connection.execute(f"PRAGMA table_info({_quote_identifier(table)})")
-            }
-            missing_columns = sorted(expected_columns - columns)
-            unexpected_columns = sorted(columns - expected_columns)
-            if missing_columns:
-                raise StateError(
-                    f"database backup table '{table}' is missing required columns: {', '.join(missing_columns)}",
-                    hint="Select an unmodified backup captured after a completed Agentworks migration.",
-                )
-            if unexpected_columns:
-                raise StateError(
-                    f"database backup table '{table}' has unexpected columns for completed schema version "
-                    f"{version}: {', '.join(unexpected_columns)}",
-                    hint="Select an unmodified backup captured after a completed Agentworks migration.",
-                )
+        _validate_canonical_schema(
+            connection,
+            version,
+            source_kind="database backup",
+            hint="Select an unmodified backup captured after a completed Agentworks migration.",
+        )
         return version
     except sqlite3.DatabaseError as error:
         _raise_sqlite_error(error, source_kind="database backup")
     finally:
         connection.close()
+
+
+def _validate_canonical_schema(
+    connection: sqlite3.Connection,
+    version: int,
+    *,
+    source_kind: str,
+    hint: str,
+) -> None:
+    """Require the exact completed Agentworks table and column shape."""
+    expected_tables = SCHEMA_SENTINELS[version]
+    actual_tables = {
+        str(row[0])
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+        )
+    }
+    missing_tables = sorted(set(expected_tables) - actual_tables)
+    unexpected_tables = sorted(actual_tables - set(expected_tables))
+    if missing_tables:
+        raise StateError(
+            f"{source_kind} is missing required Agentworks tables: {', '.join(missing_tables)}",
+            hint=hint,
+        )
+    if unexpected_tables:
+        raise StateError(
+            f"{source_kind} has unexpected tables for completed schema version {version}: "
+            f"{', '.join(unexpected_tables)}",
+            hint=hint,
+        )
+    for table, expected_columns in expected_tables.items():
+        columns = {str(column[1]) for column in connection.execute(f"PRAGMA table_info({_quote_identifier(table)})")}
+        missing_columns = sorted(expected_columns - columns)
+        unexpected_columns = sorted(columns - expected_columns)
+        if missing_columns:
+            raise StateError(
+                f"{source_kind} table '{table}' is missing required columns: {', '.join(missing_columns)}",
+                hint=hint,
+            )
+        if unexpected_columns:
+            raise StateError(
+                f"{source_kind} table '{table}' has unexpected columns for completed schema version "
+                f"{version}: {', '.join(unexpected_columns)}",
+                hint=hint,
+            )
 
 
 def _read_schema_version(connection: sqlite3.Connection, *, source_kind: str) -> int:

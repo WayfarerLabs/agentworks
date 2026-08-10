@@ -109,6 +109,21 @@ def _released_partial_writer(path: Path, start: Any, released: Any) -> None:
     released.set()
 
 
+def _tainted_baseline_writer(path: Path, committed: Any, release: Any, released: Any) -> None:
+    from agentworks.db.backup import _acquire_migration_lock, _release_migration_lock
+
+    lock = _acquire_migration_lock(path, timeout=5.0)
+    assert lock is not None
+    connection = sqlite3.connect(path)
+    connection.execute("ALTER TABLE vms ADD COLUMN cpus INTEGER")
+    connection.commit()
+    connection.close()
+    committed.set()
+    assert release.wait(timeout=5)
+    _release_migration_lock(lock)
+    released.set()
+
+
 def test_inspection_matrix_is_non_migrating_and_wal_aware(tmp_path: Path) -> None:
     absent = tmp_path / "absent.db"
     stale = tmp_path / "stale.db"
@@ -237,6 +252,49 @@ def test_prepare_refuses_changed_stale_state_when_lock_released_before_first_acq
     assert writer.exitcode == 0
     assert raised.value.hint == "Inspect the database with `agw doctor`, then retry the original command."
     assert _version(path) == LATEST_VERSION - 1
+    assert not backup_directory(path).exists()
+
+
+def test_prepare_refuses_identical_tainted_baseline_after_lock_released_before_first_acquire(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.db import backup as backup_module
+
+    path = tmp_path / "state.db"
+    _build_schema(path, 1)
+    context = multiprocessing.get_context("spawn")
+    committed = context.Event()
+    release = context.Event()
+    released = context.Event()
+    writer = context.Process(target=_tainted_baseline_writer, args=(path, committed, release, released))
+    writer.start()
+    assert committed.wait(timeout=5)
+    real_inspect = backup_module.inspect_schema
+    observed_tokens: list[tuple[int, int | None]] = []
+
+    def _inspect_then_release(database_path: Path, *, immutable: bool = False):
+        result = real_inspect(database_path, immutable=immutable)
+        observed_tokens.append((result.current_version, result.schema_cookie))
+        if len(observed_tokens) == 1:
+            release.set()
+            assert released.wait(timeout=5)
+        return result
+
+    monkeypatch.setattr(backup_module, "inspect_schema", _inspect_then_release)
+
+    with pytest.raises(StateError, match="unexpected columns for completed schema version 1: cpus") as raised:
+        prepare_database_open(path)
+
+    writer.join(timeout=10)
+    assert writer.exitcode == 0
+    assert len(observed_tokens) == 2
+    assert observed_tokens[0] == observed_tokens[1]
+    assert raised.value.hint == (
+        "Restore an unmodified backup captured after a completed Agentworks migration, "
+        "or repair the partial schema before retrying."
+    )
+    assert _version(path) == 1
     assert not backup_directory(path).exists()
 
 
