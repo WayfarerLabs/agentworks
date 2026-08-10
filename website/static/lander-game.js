@@ -102,8 +102,9 @@ function positionSite(group, site) {
     group.querySelector(".gas-can").setAttribute("transform", `translate(${center + 30} ${top - 15})`);
     const buildingLeft = right + 20;
     const roof = top - 72;
+    const foundation = 548 - (site.foundationBottom ?? site.platformTop) * 10;
     const building = group.querySelector(".noc-building");
-    building.firstElementChild.setAttribute("d", `M${buildingLeft} ${top}v-72h70v72Z`);
+    building.firstElementChild.setAttribute("d", `M${buildingLeft} ${foundation}V${roof}h70V${foundation}Z`);
     building.lastElementChild.setAttribute("d", `M${buildingLeft} ${top - 18}h13v18h-13Z`);
     const battery = group.querySelector(".noc-battery");
     battery.querySelector("rect").setAttribute("x", buildingLeft + 13); battery.querySelector("rect").setAttribute("y", roof + 18);
@@ -282,12 +283,12 @@ export class LanderGameController {
             const pointer = this.pointer;
             const elapsed = eventTime(event) - pointer.started;
             const distance = Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y);
-            if (this.lander_scene_shell.hasPointerCapture(pointer.id)) this.lander_scene_shell.releasePointerCapture(pointer.id);
             if (elapsed <= 180 && distance <= 10 && elapsed < 140) {
                 this.pointer.currentX = event.clientX; this.pointer.pulseDeadline = eventTime(event) + 140 - elapsed;
                 this.pulseTimer = setTimeout(() => this.finishPointer(pointer.token, performance.now()), 140 - elapsed); return;
             }
         }
+        if (event.type === "lostpointercapture" && this.pointer.pulseDeadline !== null) return;
         this.finishPointer(this.pointer.token, eventTime(event));
     }
 
@@ -317,6 +318,7 @@ export class LanderGameController {
 
     onMotionChange(event) {
         this.root.dataset.reducedMotion = String(event.matches);
+        this.model = { ...this.model, reducedMotion: event.matches };
         if (event.matches) { this.cue = settleCue(); this.model = advanceMissionSequence(this.model, 3.1, true); this.render(); }
     }
 

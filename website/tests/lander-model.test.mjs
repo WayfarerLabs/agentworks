@@ -15,6 +15,7 @@ import {
     advanceMissionSequence,
     advanceSimulation,
     classifySweptContact,
+    checkpointPoseForContact,
     createCueState,
     createPreflightModel,
     createRun,
@@ -31,6 +32,11 @@ import {
     transitionMission,
     updateRetention,
 } from "../static/lander-model.js";
+import {
+    STATIC_WORLD_SEED,
+    instantiateTemplateSite,
+    siteFoundationBottom,
+} from "../static/lander-world.js";
 
 const ROOT = new URL("../", import.meta.url).pathname;
 
@@ -54,11 +60,25 @@ class FakeElement {
         this.parentElement = parentElement; this.hidden = false; this.disabled = false; this.tabIndex = -1;
         this.textContent = ""; this.value = "0.0"; this.dataset = {}; this.attributes = new Map(); this.children = [];
         this.setCount = 0;
+        this.listeners = new Map(); this.capturedPointers = new Set();
         const properties = new Map();
         this.style = { setProperty: (name, value) => properties.set(name, value),
             removeProperty: (name) => properties.delete(name), properties };
     }
-    addEventListener() {} removeEventListener() {}
+    addEventListener(type, listener) {
+        const listeners = this.listeners.get(type) ?? [];
+        listeners.push(listener); this.listeners.set(type, listeners);
+    }
+    removeEventListener(type, listener) {
+        this.listeners.set(type, (this.listeners.get(type) ?? []).filter((candidate) => candidate !== listener));
+    }
+    dispatchEvent(event) {
+        event.target ??= this; event.currentTarget = this;
+        event.composedPath ??= () => [this];
+        event.preventDefault ??= () => { event.defaultPrevented = true; };
+        for (const listener of [...(this.listeners.get(event.type) ?? [])]) listener(event);
+        return !event.defaultPrevented;
+    }
     setAttribute(name, value) {
         this.setCount += 1;
         this.attributes.set(name, String(value));
@@ -71,7 +91,13 @@ class FakeElement {
     replaceWith(node) { this.replacement = node; }
     remove() { if (this.parentElement) this.parentElement.children = this.parentElement.children.filter((node) => node !== this); }
     focus() { globalThis.document.activeElement = this; }
-    hasPointerCapture() { return false; }
+    setPointerCapture(pointerId) { this.capturedPointers.add(pointerId); }
+    hasPointerCapture(pointerId) { return this.capturedPointers.has(pointerId); }
+    releasePointerCapture(pointerId) {
+        if (!this.capturedPointers.delete(pointerId)) return;
+        this.dispatchEvent({ type: "lostpointercapture", pointerId, timeStamp: performance.now() });
+    }
+    getBoundingClientRect() { return { width: 1000 }; }
     get firstElementChild() { return this.children[0] ?? null; }
     get lastElementChild() { return this.children.at(-1) ?? null; }
     querySelector(selector) {
@@ -169,6 +195,23 @@ test("all nine copied route literals pass exactly two defensive replays", () => 
     assert.match(ROUTE_DIGESTS.outputDigest, /^[0-9a-f]{64}$/);
 });
 
+test("every accepted touchdown margin settles to the same proven centered checkpoint", () => {
+    for (const template of REFERENCE_TEMPLATES) {
+        const originSite = { id: 0, center: 20, platformLeft: 15.2, platformRight: 24.8,
+            platformTop: 4, platformBottom: 3.65, canCollected: true, powered: true, nocStage: 5 };
+        const targetSite = instantiateTemplateSite(STATIC_WORLD_SEED, 1, originSite, template);
+        for (const x of [originSite.platformLeft + 1.621, originSite.center, originSite.platformRight - 1.621]) {
+            const contact = { x, y: originSite.platformTop, vx: 0, vy: -1, angle: 0, angularVelocity: 0 };
+            const pose = checkpointPoseForContact(originSite, contact);
+            assert.equal(pose.x, originSite.center); assert.equal(pose.y, originSite.platformTop);
+            const proof = proveTemplate(template, { seed: STATIC_WORLD_SEED, originSite, targetSite, pose });
+            assert.equal(proof.success.classification, "safe");
+            assert.equal(proof.smallerFailure.allowance, template.demonstratedMinimum - FUEL_QUANTUM);
+            assert.ok(proof.smallerFailure.exhaustionStep < proof.success.contactStep);
+        }
+    }
+});
+
 test("independent derivation CLI reproduces canonical bytes and rejects misuse", async () => {
     const directory = await mkdtemp(join(tmpdir(), "agw-route-test-"));
     const output = join(directory, "routes.json");
@@ -189,13 +232,23 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
     const blocked = JSON.parse(await readFile(geometry, "utf8"));
     blocked.templates[0].clearanceKnots[2][1] = 50;
     await writeFile(blockedGeometry, `${JSON.stringify(blocked)}\n`, "utf8");
-    assert.equal(spawnSync(process.execPath, [tool, "--geometry", blockedGeometry, "--output", output]).status, 1);
+    assert.equal(spawnSync(process.execPath, [tool, "--geometry", blockedGeometry, "--output", output,
+        "--verify", fixture]).status, 1);
 
     const changedTool = join(directory, "changed-recipes.mjs");
     const changedSource = (await readFile(tool, "utf8")).replace("[3,199,201]", "[3,1,1]");
     assert.notEqual(changedSource, await readFile(tool, "utf8"));
     await writeFile(changedTool, changedSource, "utf8");
     assert.equal(spawnSync(process.execPath, [changedTool, "--geometry", geometry, "--output", output]).status, 1);
+
+    const obstructedWorldTool = join(directory, "obstructed-world.mjs");
+    const obstructedWorldSource = (await readFile(tool, "utf8")).replace(
+        "const y = raw > cap ? Math.max(0.75, cap - 0.15 * sampleUnit(trial.seed, 4, index >>> 0)) : raw;",
+        "const y = raw + 20;",
+    );
+    assert.notEqual(obstructedWorldSource, await readFile(tool, "utf8"));
+    await writeFile(obstructedWorldTool, obstructedWorldSource, "utf8");
+    assert.equal(spawnSync(process.execPath, [obstructedWorldTool, "--geometry", geometry, "--output", output]).status, 1);
 });
 
 test("the old route-78 target crossing is rejected by the exact landing envelope", () => {
@@ -211,7 +264,7 @@ test("the old route-78 target crossing is rejected by the exact landing envelope
     const targetSite = { id: 1, center: 78, platformLeft: 73.2, platformRight: 82.8,
         platformTop: 0, platformBottom: -0.35, clearanceKnots: current.clearanceKnots };
     assert.throws(() => proveTemplate(current, { seed: 1, originSite, targetSite,
-        terrainVertices: [[4.8,-0.8],[72,50],[73.2,-0.8],[82.8,-0.8]] }), /Route proof mismatch/);
+        terrainVertices: [[4.8,-0.8],[72,50],[73.2,-0.8],[82.8,-0.8],[100,-0.8]] }), /Route proof mismatch/);
 });
 
 test("safe target top is inclusive and epsilon excess is unsafe", () => {
@@ -269,6 +322,21 @@ test("safe landing creates next target, adds uncapped award, and begins service"
     close(landed.awardRatio, 2.64);
     assert.equal(landed.targetSiteId, 1);
     assert.ok(landed.targetRouteProof);
+});
+
+test("accepted touchdown margins award from the centered immutable checkpoint", () => {
+    for (const side of ["left", "right"]) {
+        let model = createRun({ seed: 1, reducedMotion: true });
+        const target = model.retainedSites[0];
+        const x = side === "left" ? target.platformLeft + 1.621 : target.platformRight - 1.621;
+        model = { ...model, pose: { x, y: target.platformTop + 0.001,
+            vx: 0, vy: -1, angle: 0, angularVelocity: 0 } };
+        model = stepFlight(model, { left: 0, right: 0 });
+        assert.equal(model.state, "launching"); assert.equal(model.completedSites, 1);
+        assert.equal(model.pose.x, target.center); assert.equal(model.checkpoint.pose.x, target.center);
+        assert.equal(model.targetRouteProof.success.classification, "safe");
+        assert.ok(model.targetRouteProof.smallerFailure.exhaustionStep < model.targetRouteProof.success.contactStep);
+    }
 });
 
 test("service powers the NOC, freezes a checkpoint, and launches with actual fuel", () => {
@@ -341,6 +409,83 @@ test("render clears stale live status on crash entry", async () => {
     controller.model = { ...createPreflightModel(), state: "crashing", status: "", crash: null };
     controller.render();
     assert.equal(fixture.elements["lander-status"].textContent, "");
+    controller.destroy();
+});
+
+test("short pointer tap survives automatic lost capture for its full pulse", async () => {
+    const { LanderGameController } = await controllerClasses();
+    const fixture = controllerFixture(); const controller = new LanderGameController(fixture.root);
+    controller.model = createRun({ seed: 1 });
+    const shell = fixture.elements["lander-scene-shell"];
+    shell.dispatchEvent({ type: "pointerdown", pointerId: 7, isPrimary: true, button: 0,
+        clientX: 100, clientY: 50, timeStamp: 0 });
+    shell.dispatchEvent({ type: "pointerup", pointerId: 7, isPrimary: true, button: 0,
+        clientX: 103, clientY: 52, timeStamp: 50 });
+    assert.equal(shell.hasPointerCapture(7), true);
+    shell.releasePointerCapture(7);
+    assert.equal(controller.pointer.id, 7); assert.equal(controller.pointer.pulseDeadline, 140);
+    assert.notEqual(controller.pulseTimer, null);
+    assert.ok(controller.clock.queue.some((edge) => edge.token === 7 && edge.left === 0.72 && edge.right === 0.72));
+    controller.finishPointer(7, 140);
+    assert.equal(controller.pointer, null); assert.equal(controller.pulseTimer, null);
+    assert.deepEqual(controller.clock.queue.at(-1), {
+        timestamp: 140, left: 0, right: 0, token: null,
+        physical: { heldCodes: [], pointer: { active: false } }, sequence: 1,
+    });
+    controller.destroy();
+});
+
+test("live reduced-motion changes persist into crash behavior in both directions", async () => {
+    const { LanderGameController } = await controllerClasses();
+    const fixture = controllerFixture(); const controller = new LanderGameController(fixture.root);
+    controller.model = createRun({ seed: 7, reducedMotion: false });
+    controller.onMotionChange({ matches: true });
+    assert.equal(controller.model.reducedMotion, true);
+    const impact = { ...controller.model, pose: { x: -4.99, y: 20, vx: -10, vy: 0, angle: 0, angularVelocity: 0 } };
+    assert.equal(stepFlight(impact, { left: 0, right: 0 }).state, "failed");
+    controller.model = createRun({ seed: 7, reducedMotion: true });
+    controller.onMotionChange({ matches: false });
+    assert.equal(controller.model.reducedMotion, false);
+    const animated = { ...controller.model, pose: impact.pose };
+    assert.equal(stepFlight(animated, { left: 0, right: 0 }).state, "crashing");
+    controller.destroy();
+});
+
+test("intermediate NOC battery stages project from model to the retained site DOM", async () => {
+    let model = createRun({ seed: 1 });
+    const site = model.retainedSites[0];
+    model = { ...model, pose: { x: site.center, y: site.platformTop + 0.001,
+        vx: 0, vy: -1, angle: 0, angularVelocity: 0 } };
+    model = stepFlight(model, { left: 0, right: 0 });
+    model = advanceMissionSequence(model, 0.3);
+    model = advanceMissionSequence(model, 1.8);
+    assert.equal(advanceMissionSequence(model, 0.199).nocStage, 0);
+    assert.equal(advanceMissionSequence(model, 0.2).nocStage, 1);
+    assert.equal(advanceMissionSequence(model, 0.4).nocStage, 2);
+    assert.equal(advanceMissionSequence(model, 0.6).nocStage, 3);
+    assert.equal(advanceMissionSequence(model, 0.8).nocStage, 4);
+    assert.equal(advanceMissionSequence(model, 0.999).state, "powering");
+    assert.equal(advanceMissionSequence(model, 1).state, "launching");
+    assert.equal(advanceMissionSequence(model, 1).retainedSites[0].powered, true);
+    model = updateRetention(advanceMissionSequence(model, 0.41));
+    const active = model.retainedSites.find((candidate) => candidate.id === model.activeSiteId);
+    assert.equal(model.state, "powering"); assert.equal(model.nocStage, 2); assert.equal(active.nocStage, 2);
+    close(active.foundationBottom, siteFoundationBottom(model.terrainVertices, active));
+    const buildingLeft = active.platformRight + 2;
+    const foundationPose = { x: buildingLeft + 1.6, y: active.foundationBottom + 0.2,
+        vx: 0, vy: 0, angle: 0, angularVelocity: 0 };
+    assert.equal(classifySweptContact(model, foundationPose, foundationPose).cause, "noc");
+
+    const { LanderGameController } = await controllerClasses();
+    const fixture = controllerFixture(); const controller = new LanderGameController(fixture.root);
+    controller.model = model; controller.render();
+    const group = fixture.elements["site-layer"].querySelector(`[data-site-id="${active.id}"]`);
+    assert.equal(group.dataset.nocStage, "2");
+    assert.equal(group.querySelector(".noc-building").firstElementChild.attributes.get("d"),
+        `M${active.platformRight * 10 + 20} ${548 - active.foundationBottom * 10}` +
+        `V${548 - active.platformTop * 10 - 72}h70V${548 - active.foundationBottom * 10}Z`);
+    controller.model = updateRetention(advanceMissionSequence(model, 0.2)); controller.render();
+    assert.equal(group.dataset.nocStage, "3");
     controller.destroy();
 });
 

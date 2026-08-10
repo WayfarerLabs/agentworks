@@ -8,6 +8,12 @@ const RECIPE_VERSION = "agw-lander-route-recipes/v1";
 const MAX_COMBINATIONS = 2_000_000;
 const STEP_SECONDS = 1 / 120;
 const FUEL_QUANTUM = 0.05;
+const MOTIF = Object.freeze([0, 1.2, -0.8, 1, -0.6, 0]);
+const WORLD_TRIALS = Object.freeze([
+    Object.freeze({ seed: 0x41475731, originCenter: 36, originTop: 3.5 }),
+    Object.freeze({ seed: 1, originCenter: 117, originTop: 5 }),
+    Object.freeze({ seed: 0x12345678, originCenter: -42, originTop: 6.5 }),
+]);
 const CONSTANTS = Object.freeze({
     COLLISION_MARGIN: 0.02,
     ENGINE_ACCELERATION: 8.4,
@@ -66,6 +72,37 @@ function digest(value) {
 
 function normalizeDegrees(degrees) {
     return ((((degrees + 180) % 360) + 360) % 360) - 180;
+}
+
+function mixUint32(input) {
+    let value = Number(input) >>> 0;
+    value = Math.imul(value ^ (value >>> 16), 0x7feb352d);
+    value = Math.imul(value ^ (value >>> 15), 0x846ca68b);
+    return (value ^ (value >>> 16)) >>> 0;
+}
+
+function sampleUnit(seed, stream, index) {
+    const normalized = (Number(seed) >>> 0) || 0x6d2b79f5;
+    return mixUint32(normalized ^ Math.imul(stream, 0x9e3779b9) ^
+        Math.imul((Number(index) + 1) >>> 0, 0x85ebca6b)) / 2 ** 32;
+}
+
+function terrainSample(seed, sampleIndex) {
+    const chunk = Math.floor(sampleIndex / 5); const local = sampleIndex - chunk * 5;
+    const boundary = (index) => 2 + 3 * sampleUnit(seed, 1, index >>> 0);
+    if (local === 0) return boundary(chunk);
+    const base = boundary(chunk) + (boundary(chunk + 1) - boundary(chunk)) * local / 5;
+    const sign = sampleUnit(seed, 2, chunk >>> 0) >= 0.5 ? 1 : -1;
+    return Math.max(0.75, Math.min(7.5, base + sign * MOTIF[local]));
+}
+
+function interpolateKnots(knots, x) {
+    if (x <= knots[0][0]) return knots[0][1];
+    for (let index = 1; index < knots.length; index += 1) {
+        const left = knots[index - 1]; const right = knots[index];
+        if (x <= right[0]) return left[1] + (right[1] - left[1]) * (x - left[0]) / (right[0] - left[0]);
+    }
+    return knots.at(-1)[1];
 }
 
 function step(pose, engines, fuel = Infinity) {
@@ -167,29 +204,63 @@ function polygonSegmentDistanceSquared(polygon, start, end) {
     return minimum;
 }
 
-const CORRIDOR_CACHE = new WeakMap();
-function corridorSegments(geometry) {
-    if (CORRIDOR_CACHE.has(geometry)) return CORRIDOR_CACHE.get(geometry);
-    const segments = geometry.clearanceKnots.slice(1).map((right, index) => [
-        { x: geometry.clearanceKnots[index][0], y: geometry.clearanceKnots[index][1] },
-        { x: right[0], y: right[1] },
-    ]);
-    CORRIDOR_CACHE.set(geometry, segments);
-    return segments;
-}
-
 function rectangleSegments(left, right, bottom, top) {
     const points = [{x:left,y:bottom},{x:right,y:bottom},{x:right,y:top},{x:left,y:top}];
     return points.map((point,index) => [point, points[(index + 1) % points.length]]);
 }
 
+const WORLD_CACHE = new WeakMap();
+function constructWorld(geometry, trial) {
+    const cached = WORLD_CACHE.get(geometry) ?? new Map();
+    if (cached.has(trial)) return cached.get(trial);
+    const origin = { center: trial.originCenter, top: trial.originTop };
+    const target = { center: origin.center + geometry.centerDelta, top: origin.top + geometry.deckDelta };
+    const originRight = origin.center + 4.8; const targetLeft = target.center - 4.8;
+    const targetRight = target.center + 4.8; const vertices = [[originRight, origin.top - 0.8]];
+    const first = Math.floor(originRight / 4) + 1; const last = Math.ceil(targetLeft / 4) - 1;
+    for (let index = first; index <= last; index += 1) {
+        const x = index * 4; const raw = terrainSample(trial.seed, index);
+        const cap = origin.top + interpolateKnots(geometry.clearanceKnots, x - origin.center);
+        const y = raw > cap ? Math.max(0.75, cap - 0.15 * sampleUnit(trial.seed, 4, index >>> 0)) : raw;
+        vertices.push([x, y]);
+    }
+    vertices.push([targetLeft, target.top - 0.8], [targetRight, target.top - 0.8]);
+    const resume = Math.floor(targetRight / 4) + 1;
+    for (let index = resume; index * 4 <= targetRight + 20; index += 1) {
+        vertices.push([index * 4, terrainSample(trial.seed, index)]);
+    }
+    const world = { geometry, origin, target, seed: trial.seed, vertices };
+    cached.set(trial, world); WORLD_CACHE.set(geometry, cached);
+    return world;
+}
+
+const TERRAIN_SEGMENT_CACHE = new WeakMap();
+function terrainSegments(world) {
+    const cached = TERRAIN_SEGMENT_CACHE.get(world);
+    if (cached) return cached;
+    const segments = world.vertices.slice(1).map((right, index) => [
+        { x: world.vertices[index][0], y: world.vertices[index][1] }, { x: right[0], y: right[1] },
+    ]);
+    TERRAIN_SEGMENT_CACHE.set(world, segments);
+    return segments;
+}
+
+function terrainHeight(world, x) {
+    for (const [left, right] of terrainSegments(world)) {
+        if (x < left.x || x > right.x) continue;
+        return left.y + (right.y - left.y) * (x - left.x) / (right.x - left.x);
+    }
+    throw new Error(`Independent terrain does not cover ${x}`);
+}
+
 const SOLID_CACHE = new WeakMap();
-function solidSegments(geometry, launchCleared) {
-    const cached = SOLID_CACHE.get(geometry) ?? {};
+function solidSegments(world, launchCleared) {
+    const cached = SOLID_CACHE.get(world) ?? {};
     const key = launchCleared ? "cleared" : "launch";
     if (cached[key]) return cached[key];
     const segments = [];
-    for (const [center, top, isOrigin] of [[0,0,true],[geometry.centerDelta,geometry.deckDelta,false]]) {
+    for (const [center, top, isOrigin] of [[world.origin.center,world.origin.top,true],
+        [world.target.center,world.target.top,false]]) {
         const left = center - 4.8; const right = center + 4.8; const bottom = top - 0.35;
         if (isOrigin && launchCleared) segments.push([{x:left,y:top},{x:right,y:top}]);
         segments.push([{x:left,y:top},{x:left,y:bottom}], [{x:left,y:bottom},{x:right,y:bottom}],
@@ -198,13 +269,14 @@ function solidSegments(geometry, launchCleared) {
             segments.push(...rectangleSegments(pylon - 0.3,pylon + 0.3,top - 0.8,bottom));
         }
         const buildingLeft = right + 2; const roof = top + 7.2;
-        segments.push(...rectangleSegments(buildingLeft,buildingLeft + 7,top - 0.8,roof));
+        const foundation = Math.min(terrainHeight(world, buildingLeft), terrainHeight(world, buildingLeft + 7));
+        segments.push(...rectangleSegments(buildingLeft,buildingLeft + 7,foundation,roof));
         segments.push(...rectangleSegments(buildingLeft + 3.25,buildingLeft + 3.75,roof,roof + 3.2));
     }
-    cached[key] = segments; SOLID_CACHE.set(geometry, cached); return segments;
+    cached[key] = segments; SOLID_CACHE.set(world, cached); return segments;
 }
 
-function collidesWithUnsafe(pose, geometry, launchCleared) {
+function collidesWithUnsafe(pose, world, launchCleared) {
     const marginSquared = CONSTANTS.COLLISION_MARGIN ** 2;
     const polygon = hull(pose);
     const bounds = { left: Math.min(...polygon.map((point) => point.x)), right: Math.max(...polygon.map((point) => point.x)),
@@ -213,9 +285,9 @@ function collidesWithUnsafe(pose, geometry, launchCleared) {
         Math.min(left.x,right.x) <= bounds.right + CONSTANTS.COLLISION_MARGIN &&
         Math.max(left.y,right.y) >= bounds.bottom - CONSTANTS.COLLISION_MARGIN &&
         Math.min(left.y,right.y) <= bounds.top + CONSTANTS.COLLISION_MARGIN;
-    if (solidSegments(geometry, launchCleared).some(([left, right]) => near([left,right]) &&
+    if (solidSegments(world, launchCleared).some(([left, right]) => near([left,right]) &&
         polygonSegmentDistanceSquared(polygon, left, right) <= marginSquared)) return true;
-    return corridorSegments(geometry).some(([left, right]) =>
+    return terrainSegments(world).some(([left, right]) =>
         near([left,right]) && polygonSegmentDistanceSquared(polygon, left, right) <= marginSquared || polygon.some((point) => {
             if (point.x < left.x || point.x > right.x) return false;
             const terrain = left.y + (right.y - left.y) * (point.x - left.x) / (right.x - left.x);
@@ -223,21 +295,25 @@ function collidesWithUnsafe(pose, geometry, launchCleared) {
         }));
 }
 
-function sweptUnsafeCollision(previous, next, geometry, launchCleared) {
+function sweptUnsafeCollision(previous, next, world, launchCleared) {
     const rotation = Math.hypot(1.6,6.5) * Math.abs(normalizeDegrees(next.angle - previous.angle) * Math.PI / 180);
     const intervals = Math.ceil((Math.hypot(next.x - previous.x, next.y - previous.y) + rotation) /
         CONSTANTS.COLLISION_MARGIN);
     if (intervals > 64) return true;
     for (let index = 0; index <= Math.max(1, intervals); index += 1) {
-        if (collidesWithUnsafe(interpolatePose(previous, next, index / Math.max(1, intervals)), geometry, launchCleared)) return true;
+        if (collidesWithUnsafe(interpolatePose(previous, next, index / Math.max(1, intervals)), world, launchCleared)) return true;
     }
     return false;
 }
 
-function replay(fullRuns, geometry, allowance = Infinity) {
-    const center = geometry.centerDelta;
-    const deckTop = geometry.deckDelta;
-    let pose = { x: 0, y: 0, vx: 0, vy: 0, angle: 0, angularVelocity: 0 };
+function replay(fullRuns, geometry, allowance = Infinity, trial = null) {
+    const world = trial ? constructWorld(geometry, trial) : {
+        origin: { center: 0, top: 0 },
+        target: { center: geometry.centerDelta, top: geometry.deckDelta },
+    };
+    const center = world.target.center;
+    const deckTop = world.target.top;
+    let pose = { x: world.origin.center, y: world.origin.top, vx: 0, vy: 0, angle: 0, angularVelocity: 0 };
     let fuel = allowance;
     let burn = 0;
     let stepIndex = 0;
@@ -253,21 +329,23 @@ function replay(fullRuns, geometry, allowance = Infinity) {
             burn += result.burn;
             stepIndex += 1;
             used += 1;
-            if (sweptUnsafeCollision(previous, pose, geometry, launchCleared)) {
-                throw new Error(`Recipe collided with its clearance envelope at step ${stepIndex}`);
+            if (trial && sweptUnsafeCollision(previous, pose, world, launchCleared)) {
+                throw new Error(`Recipe collided with its clearance envelope at step ${stepIndex} ${JSON.stringify(pose)}`);
             }
             launchCleared ||= [transform(pose,-1.6,0),transform(pose,1.6,0)]
-                .every((foot) => foot.y > 0.05);
+                .every((foot) => foot.y > world.origin.top + 0.05);
             if (hullBottom(previous) > deckTop && hullBottom(pose) <= deckTop &&
                 Math.max(transform(pose, -1.6, 0).x, transform(pose, 1.6, 0).x) >= center - 4.8 &&
                 Math.min(transform(pose, -1.6, 0).x, transform(pose, 1.6, 0).x) <= center + 4.8) {
                 runs.push([commandIndex, used]);
                 const contact = contactPose(previous, pose, deckTop);
-                return { burn, classification: safe(contact, center) ? "safe" : "unsafe", contactStep: stepIndex, pose: contact, runs };
+                return { burn, classification: safe(contact, center) ? "safe" : "unsafe", contactStep: stepIndex,
+                    pose: { ...contact, x: contact.x - world.origin.center, y: contact.y - world.origin.top }, runs };
             }
             if (Number.isFinite(allowance) && fuel === 0) {
                 runs.push([commandIndex, used]);
-                return { allowance, burn, exhaustionStep: stepIndex, pose, runs };
+                return { allowance, burn, exhaustionStep: stepIndex,
+                    pose: { ...pose, x: pose.x - world.origin.center, y: pose.y - world.origin.top }, runs };
             }
             if (pose.y > CONSTANTS.MAX_PLAYABLE_Y) {
                 throw new Error(`Recipe exceeded the playable ceiling at step ${stepIndex}`);
@@ -316,29 +394,69 @@ function compareDerived(left, right) {
     return JSON.stringify(left.success.runs).localeCompare(JSON.stringify(right.success.runs));
 }
 
+function sameVector(left, right) {
+    return left.contactStep === right.contactStep && left.classification === right.classification &&
+        ["x","y","vx","vy","angle","angularVelocity"].every(
+            (key) => Math.abs(left.pose[key] - right.pose[key]) <= 1e-9,
+        );
+}
+
 function deriveTemplate(geometry) {
     let combinationsEvaluated = 0;
+    let firstFailure = null;
+    const firstFailureByTrial = WORLD_TRIALS.map(() => null);
+    const safeByTrial = WORLD_TRIALS.map(() => 0);
+    let translatedSafe = 0;
     const successes = [];
     for (const candidate of recipeCandidates(geometry.centerDelta)) {
         combinationsEvaluated += 1;
         if (combinationsEvaluated > MAX_COMBINATIONS) {
             throw new Error(`${geometry.templateId} exceeded the finite recipe budget`);
         }
+        let canonicalSuccess;
         try {
-            const success = replay(candidate, geometry);
-            if (success.classification === "safe") {
-                const demonstratedMinimum = Math.ceil((success.burn - 1e-12) / FUEL_QUANTUM) * FUEL_QUANTUM;
-                const smallerFailure = replay(success.runs, geometry, demonstratedMinimum - FUEL_QUANTUM);
-                if ("exhaustionStep" in smallerFailure) {
-                    successes.push({ candidate, demonstratedMinimum, smallerFailure, success });
-                }
+            canonicalSuccess = replay(candidate, geometry);
+        } catch (error) {
+            firstFailure ??= error.message;
+            continue;
+        }
+        if (canonicalSuccess.classification !== "safe") continue;
+        const trialSuccesses = WORLD_TRIALS.map((trial, index) => {
+            try {
+                const result = replay(candidate, geometry, Infinity, trial);
+                if (result.classification === "safe") safeByTrial[index] += 1;
+                return result;
+            } catch (error) {
+                firstFailure ??= error.message;
+                firstFailureByTrial[index] ??= error.message;
+                return null;
             }
-        } catch {
-            // A candidate outside the safe recipe envelope is not a derived route.
+        });
+        const representative = trialSuccesses[0];
+        if (representative?.classification === "safe" &&
+            trialSuccesses.every((result) => result && sameVector(canonicalSuccess, result))) {
+            try {
+                translatedSafe += 1;
+                const demonstratedMinimum = Math.ceil((canonicalSuccess.burn - 1e-12) / FUEL_QUANTUM) * FUEL_QUANTUM;
+                const trialFailures = WORLD_TRIALS.map((trial) =>
+                    replay(canonicalSuccess.runs, geometry, demonstratedMinimum - FUEL_QUANTUM, trial));
+                const smallerFailure = replay(canonicalSuccess.runs, geometry, demonstratedMinimum - FUEL_QUANTUM);
+                if ("exhaustionStep" in smallerFailure && trialFailures.every((result) =>
+                    result.exhaustionStep === smallerFailure.exhaustionStep &&
+                    ["x","y","vx","vy","angle","angularVelocity"].every(
+                        (key) => Math.abs(result.pose[key] - smallerFailure.pose[key]) <= 1e-9,
+                    ))) {
+                    successes.push({ candidate, demonstratedMinimum, smallerFailure, success: canonicalSuccess });
+                }
+            } catch (error) {
+                firstFailure ??= error.message;
+                // A candidate outside the safe recipe envelope is not a derived route.
+            }
         }
     }
     if (successes.length === 0) {
-        throw new Error(`${geometry.templateId} has no safe route in ${RECIPE_VERSION}`);
+        throw new Error(`${geometry.templateId} has no safe route in ${RECIPE_VERSION} after ${combinationsEvaluated} combinations ` +
+            `(${safeByTrial.join("/")} per trial, ${translatedSafe} translated): ${JSON.stringify(firstFailureByTrial)}; ${firstFailure}`);
     }
     successes.sort(compareDerived);
     const { demonstratedMinimum, smallerFailure, success } = successes[0];

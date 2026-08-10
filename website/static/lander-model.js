@@ -8,6 +8,7 @@ import {
     retainedSiteDescriptors,
     sampleUnit,
     selectTemplate,
+    siteFoundationBottom,
     STATIC_WORLD_SEED,
     terrainHeightAt,
     terrainVerticesForWindow,
@@ -192,6 +193,11 @@ function uprightPose(site, x = site.center) {
         vx: 0, vy: 0, angle: 0, angularVelocity: 0 };
 }
 
+export function checkpointPoseForContact(site, contactPose) {
+    if (!Number.isFinite(contactPose?.x)) throw new TypeError("Touchdown pose is required");
+    return uprightPose(site);
+}
+
 export function createPreflightModel() {
     return { state: "preflight", pose: initialPose(), fuel: 0, commanded: { ...ZERO }, status: "" };
 }
@@ -348,7 +354,8 @@ function unsafeFeatures(model, pose, target, ignoredTopSiteId = null) {
         }
         const buildingLeft = site.platformRight + 2;
         const buildingRight = buildingLeft + 7;
-        const foundationBottom = Math.min(terrainHeightAt(model.seed, buildingLeft), terrainHeightAt(model.seed, buildingRight));
+        const foundationBottom = site.foundationBottom ??
+            Math.min(terrainHeightAt(model.seed, buildingLeft), terrainHeightAt(model.seed, buildingRight));
         const roof = site.platformTop + 7.2;
         features.push({ cause: "noc", priority: 1,
             polygon: rectangle(buildingLeft, buildingRight, foundationBottom, roof) });
@@ -510,17 +517,20 @@ function routeContext(template, supplied = null) {
 function replayTemplate(template, fuel, suppliedContext = null) {
     const context = routeContext(template, suppliedContext);
     const { originSite, targetSite } = context;
-    let pose = uprightPose(originSite);
+    let pose = context.pose ?? uprightPose(originSite);
     let reserve = fuel;
     let step = 0;
     let launchCleared = false;
-    const retainedSites = [originSite, targetSite];
+    const rawSites = [originSite, targetSite];
+    const terrainVertices = context.terrainVertices ?? terrainVerticesForWindow(context.seed, rawSites,
+        originSite.center - 20, targetSite.center + 20);
+    const retainedSites = rawSites.map((site) => ({ ...site,
+        foundationBottom: siteFoundationBottom(terrainVertices, site) }));
     const collisionModel = {
         seed: context.seed, retainedSites, targetSiteId: targetSite.id,
-        terrainVertices: context.terrainVertices ?? terrainVerticesForWindow(context.seed, retainedSites,
-            originSite.center - 12, targetSite.center + 12),
+        terrainVertices,
     };
-    const target = targetSite;
+    const target = retainedSites.find((site) => site.id === targetSite.id);
     const ordinaryFeatures = unsafeFeatures(collisionModel, pose, target);
     const launchFeatures = unsafeFeatures(collisionModel, pose, target, originSite.id);
     for (const [commandIndex, count] of template.runs) {
@@ -578,7 +588,7 @@ function provisionalProofContext(model, originSite, targetSite, contactPose) {
         .concat(poweredOrigin, targetSite).sort((left, right) => left.id - right.id);
     return freeze({ seed: model.seed, completedSites: model.completedSites + 1,
         awardRatio: nextAwardRatio(model.awardRatio), generatorCursor: model.generatorCursor + 1,
-        pose: uprightPose(originSite, contactPose.x), fuel: null, activeSiteId: originSite.id,
+        pose: checkpointPoseForContact(originSite, contactPose), fuel: null, activeSiteId: originSite.id,
         targetSiteId: targetSite.id, retainedSites, originSite: poweredOrigin, targetSite });
 }
 
@@ -592,11 +602,11 @@ function prepareService(model, contactPose) {
         const award = proof.demonstratedMinimum * model.awardRatio;
         const sites = model.retainedSites.filter((site) => site.id !== contacted.id).concat(serviced, nextSite).sort((a, b) => a.id - b.id);
         return {
-            ...model, state: "landed", pose: uprightPose(contacted, contactPose.x), commanded: { ...ZERO },
+            ...model, state: "landed", pose: checkpointPoseForContact(contacted, contactPose), commanded: { ...ZERO },
             fuel: model.fuel + award, completedSites: model.completedSites + 1,
             awardRatio: nextAwardRatio(model.awardRatio), generatorCursor: model.generatorCursor + 1,
             activeSiteId: contacted.id, targetSiteId: nextSite.id, targetRouteProof: proof,
-            retainedSites: sites, touchdownPose: uprightPose(contacted, contactPose.x), sequenceSeconds: 0,
+            retainedSites: sites, touchdownPose: checkpointPoseForContact(contacted, contactPose), sequenceSeconds: 0,
             nocStage: 0, agent: null, status: "Touchdown confirmed. Fuel collected. Deploying agent.",
         };
     } catch (error) {
@@ -706,8 +716,11 @@ export function advanceMissionSequence(model, seconds, reducedMotion = model.red
         return { ...model, state: "powering", sequenceSeconds: elapsed - 1.8, agent: null };
     }
     if (model.state === "powering") {
-        const stage = Math.min(5, Math.floor(elapsed / 0.2) + 1);
-        if (elapsed < 1) return { ...model, sequenceSeconds: elapsed, nocStage: stage };
+        const stage = Math.min(5, Math.floor((elapsed + 1e-12) / 0.2));
+        if (elapsed < 1) {
+            const sites = model.retainedSites.map((site) => site.id === model.activeSiteId ? { ...site, nocStage: stage } : site);
+            return { ...model, sequenceSeconds: elapsed, retainedSites: sites, nocStage: stage };
+        }
         const sites = model.retainedSites.map((site) => site.id === model.activeSiteId ? { ...site, powered: true, nocStage: 5 } : site);
         const powered = { ...model, state: "launching", retainedSites: sites, nocStage: 5,
             sequenceSeconds: 0, status: SUCCESS_STATUS, launchCleared: false };
@@ -722,9 +735,13 @@ export function updateRetention(model) {
     const chunks = retainedChunkIndexes(cameraLeft);
     const sites = retainedSiteDescriptors(model.retainedSites, model.activeSiteId, model.targetSiteId);
     const retentionKey = `${chunks[0]}:${chunks.at(-1)}|${sites.map((site) => site.id).join(",")}`;
+    const terrainLeft = Math.min(chunks[0] * 20, ...sites.map((site) => site.center - 20));
+    const terrainRight = Math.max((chunks.at(-1) + 1) * 20, ...sites.map((site) => site.center + 20));
     const terrainVertices = retentionKey === model.retentionKey && model.terrainVertices ? model.terrainVertices :
-        terrainVerticesForWindow(model.seed, sites, chunks[0] * 20, (chunks.at(-1) + 1) * 20);
-    return { ...model, retainedChunks: chunks, retainedSites: sites, retentionKey, terrainVertices };
+        terrainVerticesForWindow(model.seed, sites, terrainLeft, terrainRight);
+    const sitesWithFoundations = sites.map((site) => Object.freeze({ ...site,
+        foundationBottom: siteFoundationBottom(terrainVertices, site) }));
+    return { ...model, retainedChunks: chunks, retainedSites: sitesWithFoundations, retentionKey, terrainVertices };
 }
 
 export function createCueState(reducedMotion = false) {

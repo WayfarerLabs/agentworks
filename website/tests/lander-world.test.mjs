@@ -16,6 +16,7 @@ import {
     retainedSiteDescriptors,
     sampleUnit,
     selectTemplate,
+    siteFoundationBottom,
     targetIsOffscreen,
     templatePreference,
     terrainSample,
@@ -23,6 +24,15 @@ import {
 } from "../static/lander-world.js";
 
 const GEOMETRY_URL = new URL("fixtures/lander-route-geometry-v1.json", import.meta.url);
+const TEMPLATE_URL = new URL("../templates/lander-game.html", import.meta.url);
+
+function canonical(value) {
+    if (Array.isArray(value)) return value.map(canonical);
+    if (value && typeof value === "object") {
+        return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])]));
+    }
+    return value;
+}
 
 function close(actual, expected, tolerance = 1e-12) {
     assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} differs from ${expected}`);
@@ -35,7 +45,10 @@ test("seed mixer and sampled terrain match independent fixed vectors", () => {
     assert.equal(mixUint32(0xffffffff), 1734902346);
     const expected = [3.632365759695, 2.237045118399, 4.041724477103, 2.046403835807, 3.451083194511, 2.655762553215];
     expected.forEach((value, index) => close(terrainSample(1, index), value, 5e-13));
-    assert.equal(sampleUnit(1, 1, 0), sampleUnit(1, 1, 0));
+    close(sampleUnit(1, 1, 0), 0.5441219198983163);
+    close(sampleUnit(1, 4, 7), 0.29075191100127995);
+    close(sampleUnit(0x12345678, 3, 99), 0.38062425260432065);
+    close(sampleUnit(0xffffffff, 5, 0), 0.4930636757053435);
 });
 
 test("adjacent terrain chunks share boundaries and contain material slopes", () => {
@@ -58,6 +71,16 @@ test("first site is one exact elevated three-lander-width helipad", () => {
     assert.equal(site.canCollected, false);
     assert.equal(site.powered, false);
     assert.ok(Object.isFrozen(site));
+});
+
+test("static NOC foundation renders from the same retained collision terrain", async () => {
+    const site = createFirstSite(STATIC_WORLD_SEED);
+    const vertices = terrainVerticesForWindow(STATIC_WORLD_SEED, [site], -40, 140);
+    const expectedSceneY = 548 - siteFoundationBottom(vertices, site) * 10;
+    const template = await readFile(TEMPLATE_URL, "utf8");
+    const match = template.match(/class="noc-building">\s*<path d="M428 ([0-9.]+)V/);
+    assert.ok(match);
+    close(Number(match[1]), expectedSceneY, 0.001);
 });
 
 test("template preference vectors and fallback are exact", async () => {
@@ -106,6 +129,7 @@ test("geometry fixture is independent, versioned, and has a stable digest", asyn
     assert.equal(geometry.templates.length, 9);
     assert.ok(!text.includes("demonstratedMinimum"));
     assert.ok(!text.includes('"runs"'));
-    const canonical = JSON.stringify(geometry, Object.keys(geometry).sort());
-    assert.equal(typeof createHash("sha256").update(canonical).digest("hex"), "string");
+    const bytes = JSON.stringify(canonical(geometry));
+    assert.equal(createHash("sha256").update(bytes).digest("hex"),
+        "a45465787699a9b737b22bb32e0f40ae50913ce14cc3c6c2aeb9300f287ed8d8");
 });

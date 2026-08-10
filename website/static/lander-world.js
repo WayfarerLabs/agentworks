@@ -68,6 +68,21 @@ export function terrainHeightAt(seed, x) {
     return left + (right - left) * fraction;
 }
 
+export function terrainHeightFromVertices(vertices, x) {
+    for (let index = 1; index < vertices.length; index += 1) {
+        const left = vertices[index - 1]; const right = vertices[index];
+        if (x < left[0] || x > right[0]) continue;
+        if (right[0] === left[0]) return Math.min(left[1], right[1]);
+        return left[1] + (right[1] - left[1]) * ((x - left[0]) / (right[0] - left[0]));
+    }
+    throw new RangeError(`Terrain vertices do not cover ${x}`);
+}
+
+export function siteFoundationBottom(vertices, site) {
+    const left = site.platformRight + 2;
+    return Math.min(terrainHeightFromVertices(vertices, left), terrainHeightFromVertices(vertices, left + 7));
+}
+
 export function nativeTerrainVertices(seed, left, right) {
     const first = Math.floor(left / TERRAIN_SAMPLE_SPACING);
     const last = Math.ceil(right / TERRAIN_SAMPLE_SPACING);
