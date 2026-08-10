@@ -9,6 +9,7 @@ if TYPE_CHECKING:
 
 # PowerShell snippets that provide dynamic completions.
 DYNAMIC_SNIPPETS: dict[str, str] = {
+    "files": "([System.Management.Automation.CompletionCompleters]::CompleteFilename($wordToComplete))",
     "vms": ('(agw vm list --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'),
     "sites": (
         "(agw resource list --kind vm-site --names-only 2>$null"

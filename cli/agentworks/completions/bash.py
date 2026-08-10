@@ -9,6 +9,7 @@ if TYPE_CHECKING:
 
 # Shell snippets that provide dynamic completions.
 DYNAMIC_SNIPPETS: dict[str, str] = {
+    "files": '$(compgen -f -- "$cur")',
     "vms": ("$(agw vm list --names-only 2>/dev/null)"),
     "sites": ("$(agw resource list --kind vm-site --names-only 2>/dev/null | awk -F/ '{print $2}')"),
     "workspaces": ("$(agw workspace list --names-only 2>/dev/null)"),
@@ -42,7 +43,7 @@ def generate_bash(spec: CommandSpec, version: str) -> str:
     lines.append("")
 
     lines.append("_agentworks() {")
-    lines.append("    local cur prev words cword")
+    lines.append("    local cur prev words cword candidate")
     lines.append("    if type _init_completion &>/dev/null; then")
     lines.append("        _init_completion || return")
     lines.append("    else")
@@ -157,7 +158,14 @@ def _emit_leaf_completions(lines: list[str], spec: CommandSpec, token_offset: in
             words = DYNAMIC_SNIPPETS[param.dynamic_completer]
         if words:
             lines.append(f'{indent}if [[ $cword {cmp_op} {pos_token} && "$cur" != -* ]]; then')
-            lines.append(f'{indent}    COMPREPLY=($(compgen -W "{words}" -- "$cur"))')
+            if param.dynamic_completer == "files":
+                lines.append(f"{indent}    COMPREPLY=()")
+                lines.append(f"{indent}    while IFS= read -r candidate; do")
+                lines.append(f'{indent}        COMPREPLY+=("$candidate")')
+                lines.append(f'{indent}    done < <(compgen -f -- "$cur")')
+                lines.append(f"{indent}    compopt -o filenames 2>/dev/null || true")
+            else:
+                lines.append(f'{indent}    COMPREPLY=($(compgen -W "{words}" -- "$cur"))')
             lines.append(f"{indent}    return")
             lines.append(f"{indent}fi")
 

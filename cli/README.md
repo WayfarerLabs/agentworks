@@ -506,6 +506,25 @@ current, so doctor does not run migrations. Doctor reports a pending migration a
 operator to run a normal Agentworks command. See the
 [doctor JSON contract](command-reference.md#doctor-json-schema) for the machine-readable result.
 
+Create a consistent on-demand snapshot, including committed WAL content, with:
+
+```console
+agw database backup
+```
+
+The command prints the completed backup path to stdout. Backups live in
+`~/.config/agentworks/database-backups/` beside the live database. On-demand files use the
+`agentworks-manual-...db` prefix and are never removed by automatic retention. Automatic
+pre-migration files use `agentworks-pre-migration-...-vN.db`; only that category is pruned, keeping
+the five newest automatic files. Unrecognized files in the directory are left alone.
+
+Restore a selected snapshot with `agw database restore BACKUP_PATH`. The command validates the
+backup, shows the backup and live paths on stderr, and asks before replacing the live database. Pass
+`--yes` (or `-y`) for intentional non-interactive recovery. Restore does not first back up the
+database it replaces and does not run schema migrations. If the restored snapshot is older, the next
+ordinary command owns any forward migration. A backup from a newer schema is preserved but must be
+restored by an Agentworks release that understands that schema.
+
 ## Environment Variables
 
 Secret values are read from the operator's shell via the `env-var` backend, which follows the

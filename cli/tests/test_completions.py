@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -63,6 +64,7 @@ class TestTopLevelGroups:
             "completion",
             "config",
             "console",
+            "database",
             "env",
             "resource",
             "secret",
@@ -157,6 +159,54 @@ class TestDynamicCompletionsMapping:
         assert "agw guide --names-only" in BASH_SNIPPETS["guide_topics"]
         assert "agw guide --names-only" in POWERSHELL_SNIPPETS["guide_topics"]
         assert "agw guide --names-only" in DYNAMIC_FUNCTIONS["guide_topics"]
+
+    def test_database_restore_uses_native_file_completion_in_every_shell(self) -> None:
+        from agentworks.completions.bash import DYNAMIC_SNIPPETS as BASH_SNIPPETS
+        from agentworks.completions.powershell import DYNAMIC_SNIPPETS as POWERSHELL_SNIPPETS
+        from agentworks.completions.zsh import COMPLETER_FUNC_NAMES, DYNAMIC_FUNCTIONS
+
+        spec = build_spec(app)
+        restore = spec.subcommands["database"].subcommands["restore"]
+        backup_path = next(param for param in restore.params if param.name == "backup_path")
+
+        assert DYNAMIC_COMPLETIONS[("database.restore", "backup_path")] == "files"
+        assert backup_path.required
+        assert backup_path.is_argument
+        assert backup_path.dynamic_completer == "files"
+        assert "compgen -f" in BASH_SNIPPETS["files"]
+        assert COMPLETER_FUNC_NAMES["files"] == "_agentworks_files"
+        assert "_files" in DYNAMIC_FUNCTIONS["files"]
+        assert "CompleteFilename" in POWERSHELL_SNIPPETS["files"]
+
+        generated = {shell: generate(shell) for shell in ("bash", "zsh", "powershell")}
+        assert 'done < <(compgen -f -- "$cur")' in generated["bash"]
+        assert "_agentworks_files" in generated["zsh"]
+        assert "CompleteFilename($wordToComplete)" in generated["powershell"]
+        for script in generated.values():
+            assert "database" in script
+            assert "restore" in script
+            assert "--yes" in script
+
+    def test_generated_bash_preserves_spaces_in_restore_file_completion(self, tmp_path: Path) -> None:
+        filename = "backup with spaces.db"
+        (tmp_path / filename).touch()
+        script = generate("bash")
+        invocation = f"""{script}
+COMP_WORDS=(agw database restore backup)
+COMP_CWORD=3
+_agentworks
+printf '%s\\0' "${{COMPREPLY[@]}}"
+"""
+
+        completed = subprocess.run(
+            ["bash"],
+            cwd=tmp_path,
+            input=invocation.encode(),
+            capture_output=True,
+            check=True,
+        )
+
+        assert completed.stdout.split(b"\0") == [filename.encode(), b""]
 
     def test_secret_verify_variadic_completion_contract_in_every_shell(self) -> None:
         spec = build_spec(app)

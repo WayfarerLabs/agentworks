@@ -10,6 +10,10 @@ if TYPE_CHECKING:
 # Shell functions that provide dynamic completions.
 # Each key matches a completer identifier from DYNAMIC_COMPLETIONS.
 DYNAMIC_FUNCTIONS: dict[str, str] = {
+    "files": """\
+_agentworks_files() {
+    _files
+}""",
     "vms": """\
 _agentworks_vms() {
     local -a vms
@@ -110,6 +114,7 @@ _agentworks_guide_topics() {
 
 # Maps completer identifiers to their zsh function names.
 COMPLETER_FUNC_NAMES: dict[str, str] = {
+    "files": "_agentworks_files",
     "vms": "_agentworks_vms",
     "sites": "_agentworks_sites",
     "workspaces": "_agentworks_workspaces",

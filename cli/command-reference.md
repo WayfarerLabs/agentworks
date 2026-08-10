@@ -270,6 +270,33 @@ changing an enum spelling requires a new schema version and an explicit compatib
 | `agw completion install`   | Install the completion script in-place   |
 | `agw completion uninstall` | Remove installed completions for a shell |
 
+### Database
+
+| Command                                       | Description                                       |
+| --------------------------------------------- | ------------------------------------------------- |
+| `agw database backup`                         | Create an on-demand SQLite snapshot               |
+| `agw database restore BACKUP_PATH [--yes/-y]` | Replace the live database with a validated backup |
+
+Both commands operate directly on SQLite through its online backup API. They do not open the
+migrating `Database` facade. `database backup` snapshots the present schema, including a schema
+newer than the running release, and emits only the completed path on stdout. Status text stays on
+stderr. A missing or malformed live database is refused without creating an empty database or a
+completed backup.
+
+Backups are stored in `database-backups/` beside `agentworks.db`. On-demand names start with
+`agentworks-manual-` and are never automatically removed. Pre-migration names start with
+`agentworks-pre-migration-` and include the source schema version; after a successful automatic
+backup, only the five newest recognized pre-migration files remain. Manual and unrelated files are
+not part of that retention set.
+
+`database restore` validates SQLite integrity, the claimed supported schema version, and that
+version's Agentworks tables and critical columns before it opens the live destination. It refuses an
+identical path, a generic SQLite file, an incomplete Agentworks lookalike, or a schema newer than
+this release understands. The source remains available after restore. Confirmation is required by
+default; a non-interactive invocation must pass `--yes` (or `-y`). Restore does not create an
+implicit backup of the live destination and does not migrate the restored schema. Run
+`agw database backup` first if you want an additional recovery point before replacement.
+
 ### Secrets
 
 | Command                                           | Description                                       |
