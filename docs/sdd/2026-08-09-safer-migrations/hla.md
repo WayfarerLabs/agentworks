@@ -150,13 +150,11 @@ A preliminary WAL-aware read can identify absent, current, future, or malformed 
 lock. A stale result is only a trigger to acquire the migration lock, never a trustworthy baseline.
 Under that lock, the service rechecks and requires the database's complete non-SQLite table and
 column shape to match the canonical map for its claimed completed version. Current state converges
-normally. If the lock was observed busy, still-stale state refuses because it overlapped another
-migration attempt. If the first acquisition observed the lock as free, a shape mismatch refuses a
-partial migration even when the preliminary and locked version/cookie are identical;
-changed-but-still-stale tokens also refuse. Only a canonical, unchanged stale shape becomes the
-interaction baseline. The service then releases the lock while the operator answers. This closes
-both late-inspector windows: another process may still hold the lock after partial DDL, or may
-release it between the preliminary read and the first acquisition.
+normally. A shape mismatch refuses a partial migration even when the preliminary and locked
+version/cookie are identical; a canonical shape whose tokens changed but remain stale also refuses.
+Only a canonical, unchanged stale shape becomes the interaction baseline. The service then releases
+the lock while the operator answers. This closes the late-inspector window even when another process
+commits partial DDL before the preliminary read and releases the lock before the first acquisition.
 
 After interaction, safe writable open reacquires the lock and rechecks the state database against
 that qualified Agentworks version and schema cookie. If another process completed migration, the
@@ -325,8 +323,8 @@ Focused tests establish the contracts at three layers:
    common-sentinel lookalike and partial-next-version rejection; future-version refusal before
    destination open; restore direction; identical-path refusal; first-observation lock qualification
    with canonical version-shape conformance; serialized safe-open recheck; staggered
-   partial-migration refusal while the lock is held and after an actor releases it between a tainted
-   preliminary read and first acquisition; migration-failure association; and failure cleanup.
+   partial-migration refusal after an actor releases the lock between a tainted preliminary read and
+   first acquisition; migration-failure association; and failure cleanup.
 2. **Policy and CLI:** fresh/current/stale/future/malformed matrices; interactive accept and
    decline; non-interactive default and opt-out; backup-before-first-migration ordering; backup
    failure prevention; partial-migration failure and exact remediation; confirmation and `--yes`;

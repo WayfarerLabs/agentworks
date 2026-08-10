@@ -92,12 +92,11 @@ transaction, so the product must not promise that every failure rolls itself bac
 - R14. Concurrent commands that observe the same stale database serialize at one narrow migration
   boundary. An initial stale observation is provisional until the service holds that lock and proves
   the database exactly matches the canonical table-and-column shape for its claimed completed
-  version. A caller whose first stale inspection overlapped an in-flight migration, whose locked
-  shape does not match its claimed version, or whose recorded version or schema cookie changed but
-  remains non-current refuses without another backup or migration. The service rechecks again after
-  interaction when it reacquires the lock. Exactly one command backs up and migrates that version
-  transition; a waiter that finds current state continues without a second backup or stale failure
-  remediation.
+  version. A caller whose locked shape does not match its claimed version, or whose recorded version
+  or schema cookie changed but remains non-current, refuses without another backup or migration. The
+  service rechecks again after interaction when it reacquires the lock. Exactly one command backs up
+  and migrates that version transition; a waiter that finds current state continues without a second
+  backup or stale failure remediation.
 
 ## Acceptance
 
@@ -138,13 +137,13 @@ transaction, so the product must not promise that every failure rolls itself bac
   to retry with an explicit decline or opt-out rather than continuing automatically.
 - AC12. Two processes opening the same stale database converge on one successful backup and
   migration; the waiter rechecks under serialization, exits successfully, and does not create a
-  second automatic backup. A staggered case starts the waiter after the first process's initial DDL
-  but before that process releases the lock; the waiter reads the same partial version and schema
-  cookie before and after release, then refuses because the locked shape does not match the claimed
-  completed version. Another staggered case records clean stale state before a competing process
-  changes it and proves the changed tokens also refuse. Removing initial lock qualification,
-  canonical shape conformance, only the preliminary-to-qualified token comparison, or the later
-  locked recheck makes these tests fail.
+  second automatic backup. A staggered case has one process commit a next-version DDL while holding
+  the lock, lets the waiter inspect that partial state, then releases before the waiter's first lock
+  acquisition; the waiter reads identical version and schema-cookie tokens under the lock, then
+  refuses because the locked shape does not match the claimed completed version. Another staggered
+  case records clean stale state before a competing process changes it and proves the changed tokens
+  also refuse. Removing initial lock qualification, canonical shape conformance, only the
+  preliminary-to-qualified token comparison, or the later locked recheck makes these tests fail.
 - AC13. A held SQLite lock makes backup or restore return the documented retryable error within the
   fixed deadline and leaves no completed partial backup or newly created live destination.
 

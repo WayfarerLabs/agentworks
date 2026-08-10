@@ -30,7 +30,7 @@ separately in prerequisite PR #472 so the saga could review the contract before 
 
 ## Verification
 
-- The final full local gate passed with 7,715 non-integration tests and 3 tests deselected, Ruff,
+- The final full local gate passed with 7,716 non-integration tests and 3 tests deselected, Ruff,
   formatting, strict mypy across 667 files, Prettier, markdownlint, cspell, locked-SDD, Rulesync,
   and diff checks.
 - Six design safety mutations and the additional exact-schema and interruption-cleanup branch

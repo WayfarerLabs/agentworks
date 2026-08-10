@@ -82,11 +82,10 @@ behavior. Live validation uses a temporary isolated home and no operator state.
       database safety service. Serialize stale opens with one persistent dedicated SQLite lock,
       treat the preliminary stale observation only as a lock-acquisition trigger, require canonical
       version-shape conformance under that first lock, compare the locked version and schema cookie
-      with the preliminary tokens, recheck after interaction, refuse an overlapped,
-      shape-mismatched, or changed-but-stale observation, refuse malformed and future schema,
-      complete any selected backup before `Database` construction, close construction failures, and
-      raise a kind-based `StateError` with the exact platform-aware recovery command or the explicit
-      no-backup fact.
+      with the preliminary tokens, recheck after interaction, refuse a shape-mismatched or
+      changed-but-stale observation, refuse malformed and future schema, complete any selected
+      backup before `Database` construction, close construction failures, and raise a kind-based
+      `StateError` with the exact platform-aware recovery command or the explicit no-backup fact.
 - [x] Add the strict default-true `DatabaseConfig` and focused `[database]` loader. Full config
       includes the section; only stale non-interactive opens use the focused projection.
 - [x] Update `get_db()` to own notice, interactive default-yes prompt, and non-interactive setting
@@ -111,11 +110,11 @@ behavior. Live validation uses a temporary isolated home and no operator state.
       non-interactive default, opt-out, and invalid focused config; backup-before-first-statement;
       backup failure prevention and retry guidance; partial failure recovery; POSIX and PowerShell
       command rendering; two-process serialized recheck with one backup; staggered late-inspector
-      partial-migration refusal while the lock is held and after an actor releases it between a
-      tainted preliminary read and the first acquisition; interactive JSON and names-only stdout
-      purity with the required stderr notice; doctor; the single writable-construction-site
-      inventory; and byte-identical zero-output completion probes, including shell-wrapped warning,
-      invalid-config, and pre-0.14 marker-free cases.
+      partial-migration refusal after an actor releases the lock between a tainted preliminary read
+      and the first acquisition; interactive JSON and names-only stdout purity with the required
+      stderr notice; doctor; the single writable-construction-site inventory; and byte-identical
+      zero-output completion probes, including shell-wrapped warning, invalid-config, and pre-0.14
+      marker-free cases.
 - DoD: every writable production open follows the reviewed safety flow, every completion probe is
   non-mutating, all permanent teaching matches behavior, and the complete gate and project-specific
   review have no unresolved valid finding.
