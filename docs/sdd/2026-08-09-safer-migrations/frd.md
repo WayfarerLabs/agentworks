@@ -43,11 +43,11 @@ transaction, so the product must not promise that every failure rolls itself bac
 - R5. `agw database restore BACKUP_PATH` restores the selected backup into the state database. It
   shows both paths and asks for confirmation by default; `--yes` accepts the replacement for
   automation. A non-interactive invocation without `--yes` refuses cleanly. Refusal or an invalid
-  backup leaves both paths untouched. Validation requires a structurally sound SQLite database with
-  the version-appropriate Agentworks tables and columns, not merely caller-supplied common
-  sentinels. A backup newer than the running release is preserved but refused for restore until a
-  release that understands its schema performs the operation. Restore does not open the restored
-  database through the automatic migration path during the same command.
+  backup leaves both paths untouched. Validation requires a structurally sound SQLite database whose
+  complete non-SQLite table and column shape exactly matches the claimed Agentworks version, not
+  merely caller-supplied common sentinels. A backup newer than the running release is preserved but
+  refused for restore until a release that understands its schema performs the operation. Restore
+  does not open the restored database through the automatic migration path during the same command.
 - R6. Backups use SQLite's online backup API rather than filesystem copying. A completed backup is a
   consistent SQLite snapshot even when the source uses WAL or another process has it open. Backup
   and restore use one fixed bounded busy deadline; exhausting it returns a clean retryable error
@@ -90,7 +90,8 @@ transaction, so the product must not promise that every failure rolls itself bac
   operator that a retry may explicitly decline the offer and tells automation that the documented
   config opt-out is the deliberate escape hatch.
 - R14. Concurrent commands that observe the same stale database serialize at one narrow migration
-  boundary. An initial stale observation is first qualified under that lock, and the service
+  boundary. An initial stale observation is first qualified under that lock; if its version or
+  schema cookie changed but remains stale before qualification, the service refuses it. The service
   rechecks again after interaction when it reacquires the lock. Exactly one command backs up and
   migrates that version transition; a waiter that finds current state continues without a second
   backup or stale failure remediation. A caller whose first stale inspection overlapped an in-flight
@@ -115,7 +116,9 @@ transaction, so the product must not promise that every failure rolls itself bac
 - AC6. Restore refusal changes neither source nor destination. Confirmed restore replaces the state
   database with the selected snapshot; the next ordinary command applies any required forward
   migrations through the normal notice and backup flow. A structurally valid current-version
-  lookalike containing only common Agentworks sentinels is rejected before the destination opens.
+  lookalike containing only common Agentworks sentinels is rejected before the destination opens. A
+  version-1 database containing a committed version-2 column is likewise rejected as partially
+  migrated before the destination opens.
 - AC7. Doctor does not create, migrate, back up, or restore state, and its human and JSON schema
   facts remain accurate for absent, current, stale, malformed, and newer databases.
 - AC8. Focused tests, the complete repository gates, and an isolated-home drive of the shipped CLI
@@ -135,8 +138,11 @@ transaction, so the product must not promise that every failure rolls itself bac
 - AC12. Two processes opening the same stale database converge on one successful backup and
   migration; the waiter rechecks under serialization, exits successfully, and does not create a
   second automatic backup. A staggered case starts the waiter after the first process's initial DDL
-  and makes it refuse without a backup after the first process fails. Removing initial lock
-  qualification or the later locked recheck makes these tests fail.
+  and makes it refuse without a backup after the first process fails. Another staggered case records
+  stale state, lets a competing process change stale state and release the lock, then proves the
+  caller refuses on its first acquisition after the competing process released the lock. Removing
+  initial lock qualification, only the preliminary-to-qualified token comparison, or the later
+  locked recheck makes these tests fail.
 - AC13. A held SQLite lock makes backup or restore return the documented retryable error within the
   fixed deadline and leaves no completed partial backup or newly created live destination.
 
