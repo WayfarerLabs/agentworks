@@ -450,11 +450,17 @@ def guide_contributions() -> tuple[TopicContribution, ...]:
 
     return (
         _concept(
+            "concept-manifesto",
+            "Agentworks Manifesto",
+            "Find the canonical statement of the project's values and use it as design context.",
+            related_topics=("concept-onboarding",),
+        ),
+        _concept(
             "concept-onboarding",
             "Agentworks onboarding",
             "Start safely, assess current adoption, and use one durable authorization envelope for in-scope work.",
             inventory=True,
-            related_topics=("concept-migration", "concept-release-notes"),
+            related_topics=("concept-manifesto", "concept-migration", "concept-release-notes"),
         ),
         _concept(
             "concept-management",

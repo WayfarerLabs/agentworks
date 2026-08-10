@@ -60,6 +60,31 @@ def test_onboarding_authored_blocks_cover_durable_authorization_and_clean_setup(
     assert "never retries the mutation automatically" in teaching_flat
 
 
+def test_manifesto_topic_points_to_the_canonical_document_without_restatement() -> None:
+    topic = _topic("concept-manifesto")
+    blocks = {type(block): block.markdown for block in topic.blocks if hasattr(block, "markdown")}
+
+    assert tuple(map(str, topic.related_topics)) == ("concept-onboarding",)
+    assert "concept-manifesto" in tuple(map(str, _topic("concept-onboarding").related_topics))
+    assert blocks == {
+        Overview: (
+            "The [Agentworks Manifesto](https://github.com/WayfarerLabs/agentworks/blob/main/docs/manifesto.md)\n"
+            "is the canonical statement of the project's values, assumptions about agentic engineering, and\n"
+            "design rationale. This topic points to that document instead of restating it."
+        ),
+        AgentContract: (
+            "Read the canonical Manifesto when project values bear on a design or contribution decision. Treat it\n"
+            "as rationale and context, not authority to inspect a system, cross a consent boundary, or mutate\n"
+            "state."
+        ),
+        Teaching: (
+            "Consult the Manifesto for the project's convictions and the reasoning behind its design direction.\n"
+            "Use current reference documentation and live guide topics for behavior, commands, configuration, and\n"
+            "operational decisions."
+        ),
+    }
+
+
 def test_action_contract_pins_authorization_refusal_and_first_resources() -> None:
     actions = onboarding_actions()
     assert [(str(action.id), action.consent, action.verification) for action in actions] == [

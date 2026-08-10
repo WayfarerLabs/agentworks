@@ -28,7 +28,7 @@ class SourceContractTests(RepositoryFixture):
         )
         self.assertIn("<strong>Durable agents</strong>", content["HOME_IDENTITY"])
         self.assertIn("<strong>SSH-over-Tailscale control plane</strong>", content["HOME_IDENTITY"])
-        self.assertTrue(content["HOME_META_DESCRIPTION"].startswith("A comprehensive toolkit"))
+        self.assertTrue(content["HOME_META_DESCRIPTION"].startswith("A toolkit for managing"))
         for contract in site_builder.DOCUMENT_CONTRACTS:
             rendered = content[f"{contract.contract_id}_CONTENT"]
             self.assertEqual(rendered.count("<h1 "), 1)
@@ -98,10 +98,10 @@ class SourceContractTests(RepositoryFixture):
         rendered = site_builder.extract_content(self.root)["MANIFESTO_CONTENT"]
         self.assertNotIn('class="page-toc"', rendered)
 
-    def test_current_source_path_is_single_and_has_no_future_fallback(self) -> None:
-        self.assertEqual(site_builder.MANIFESTO_CONTRACT.source, Path("docs/why-agentworks.md"))
+    def test_manifesto_source_path_is_single(self) -> None:
+        self.assertEqual(site_builder.MANIFESTO_CONTRACT.source, Path("docs/manifesto.md"))
         production = (WEBSITE / "site_content.py").read_text(encoding="utf-8")
-        self.assertNotIn("docs/manifesto.md", production)
+        self.assertNotIn("docs/why-agentworks.md", production)
 
     def test_crlf_does_not_break_home_or_complete_documents(self) -> None:
         paths = [Path("README.md"), *(contract.source for contract in site_builder.DOCUMENT_CONTRACTS)]
@@ -178,7 +178,10 @@ class SourceContractTests(RepositoryFixture):
         cases = (
             (original.replace("# Agentworks", "# Different", 1), "missing heading"),
             (original + "\n# Agentworks\n", "duplicate heading"),
-            (original.replace("A comprehensive toolkit", "A partial toolkit", 1), "content drift"),
+            (
+                original.replace("A toolkit for managing", "A partial toolkit for managing", 1),
+                "content drift",
+            ),
         )
         for changed, reason in cases:
             readme.write_text(changed, encoding="utf-8")

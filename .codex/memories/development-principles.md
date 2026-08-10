@@ -104,7 +104,8 @@ must recognize old data), documentation describes the destination, not the journ
 guidance, reference docs, docstrings, and comments state the current behavior and only the durable
 rationale needed to operate or maintain it safely. Design debate, superseded spellings, and the
 story of how the current shape emerged do not belong there. Prefer the shortest text that leaves the
-reader able to act correctly.
+reader able to act correctly. Conviction-voiced reasoning removed from those factual surfaces has
+one sanctioned permanent destination: `docs/manifesto.md`.
 
 Minimizing cognitive load is the day-to-day form of this. Every bespoke shape a reader must decode
 is a tax on everyone downstream, so use existing patterns and conventions when they exist and are

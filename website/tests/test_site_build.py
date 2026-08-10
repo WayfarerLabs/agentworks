@@ -305,7 +305,7 @@ class BuildAndInstallTests(RepositoryFixture):
         readme = self.root / "README.md"
         original_readme = readme.read_text(encoding="utf-8")
         readme.write_text(
-            original_readme.replace("A comprehensive toolkit", "A drifting toolkit", 1),
+            original_readme.replace("A toolkit for managing", "A drifting toolkit for managing", 1),
             encoding="utf-8",
         )
         with self.assertRaises(site_builder.ContractError):
