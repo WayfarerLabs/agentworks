@@ -151,8 +151,8 @@ jobs:
       - name: Python website tests
         run: python3 -m unittest discover -s website/tests -p 'test_*.py'
 
-      - name: Node website model tests
-        run: node --test website/tests/lander-model.test.mjs
+      - name: Node website tests
+        run: node --test website/tests/*.test.mjs
 
       - name: Verify deterministic full builds
         run: |

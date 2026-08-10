@@ -19,7 +19,7 @@ __all__ = (
     "CSP",
     "Document",
     "EXPECTED_FILES",
-    "NOTICE",
+    "ONBOARDING_PROMPT",
     "Path",
     "REPO_ROOT",
     "RepositoryFixture",
@@ -50,10 +50,7 @@ if SPEC is None or SPEC.loader is None:
 site_builder = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(site_builder)
 
-NOTICE = (
-    "Guided onboarding is not yet published. You can still explore the repository, PyPI package, "
-    "rationale, and security model."
-)
+ONBOARDING_PROMPT = (REPO_ROOT / "packaging/agentworks/assistance.md").read_text(encoding="utf-8")
 CSP = (
     "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; "
     "connect-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
@@ -69,6 +66,7 @@ EXPECTED_FILES = frozenset(
         Path("assets/agw-rocket.svg"),
         Path("static/lander-game.js"),
         Path("static/lander-model.js"),
+        Path("static/onboarding-copy.js"),
         Path("static/lander.css"),
         Path("static/site.css"),
     }
@@ -171,6 +169,9 @@ class RepositoryFixture(unittest.TestCase):
         self.root = Path(self.temporary.name) / "repo"
         self.root.mkdir()
         shutil.copy2(REPO_ROOT / "README.md", self.root / "README.md")
+        assistance_source = self.root / site_builder.ASSISTANCE_SOURCE
+        assistance_source.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(REPO_ROOT / site_builder.ASSISTANCE_SOURCE, assistance_source)
         for contract in site_builder.DOCUMENT_CONTRACTS:
             destination = self.root / contract.source
             destination.parent.mkdir(parents=True, exist_ok=True)
