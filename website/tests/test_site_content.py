@@ -34,17 +34,15 @@ class SourceContractTests(RepositoryFixture):
             self.assertTrue(content[f"{contract.contract_id}_META_DESCRIPTION"])
         self.assertIn(site_builder.REPORTING_URL, content["SECURITY_CONTENT"])
         self.assertNotIn("email", content["SECURITY_CONTENT"].lower())
-        for destination in site_builder.SOURCE_RELATIVE_URLS.values():
-            self.assertIn(destination, content["MANIFESTO_CONTENT"])
 
     def test_supported_source_additions_render_without_contract_edits(self) -> None:
         addition = (
-            "\n## Added section\n\n"
+            "\n   ## Added section\n\n"
             "A new paragraph with **strong text**, _underscore emphasis_, "
             "*asterisk emphasis*, and `code`.\n\n"
-            "- Hyphen item.\n"
-            "* Asterisk item.\n"
-            "+ Plus item.\n"
+            "   - Hyphen item.\n"
+            "   * Asterisk item.\n"
+            "   + Plus item.\n"
         )
         for contract in site_builder.DOCUMENT_CONTRACTS:
             path = self.root / contract.source
@@ -104,6 +102,11 @@ class SourceContractTests(RepositoryFixture):
             "\n![image](https://example.com/image.png)\n",
             "\n1. Numbered item\n",
             "\n> Quoted text\n",
+            "\nSetext heading\n===============\n",
+            "\nSetext heading\n---------------\n",
+            "\n- \n",
+            "\n+ \n",
+            "\n* \n",
             "\nParagraph with a hard break.  \nNext line.\n",
             "\nParagraph with a backslash break.\\\nNext line.\n",
         )

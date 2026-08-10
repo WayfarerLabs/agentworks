@@ -9,11 +9,13 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Final, NamedTuple
 
-HEADING_PATTERN = re.compile(r"^(#{1,6})[ \t]+(.*?)(?:[ \t]+#+[ \t]*)?$")
+HEADING_PATTERN = re.compile(r"^[ ]{0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+[ \t]*)?$")
 FENCE_PATTERN = re.compile(r"^[ ]{0,3}(`{3,}|~{3,})(?:[^`~]*)$")
 REFERENCE_PATTERN = re.compile(r"^[ ]{0,3}\[([^]]+)]\:[ \t]*(\S*)[ \t]*$")
 REFERENCE_LINK_PATTERN = re.compile(r"\[([^\[\]\n]+)]\[([^\[\]\n]+)]")
-LIST_ITEM_PATTERN = re.compile(r"^[*+-][ \t]+(.+)$")
+LIST_ITEM_PATTERN = re.compile(r"^( {0,3})[*+-][ \t]+(.+)$")
+EMPTY_LIST_ITEM_PATTERN = re.compile(r"^[ ]{0,3}[*+-][ \t]+$")
+SETEXT_UNDERLINE_PATTERN = re.compile(r"^[ ]{0,3}(?:=+|-+)[ \t]*$")
 UNSUPPORTED_BLOCK_PATTERN = re.compile(
     r"^(?:[ ]{4,}|[ ]{0,3}>[ \t]?|[ ]{0,3}\d+[.)][ \t]+|[ ]{0,3}(?:[-*_][ \t]*){3,}$)"
 )
@@ -405,6 +407,8 @@ def _document_blocks(
         raw_line = lines[index]
         if re.search(r" {2,}$", raw_line):
             raise ContractError(contract, "unsupported block or inline Markdown: hard break")
+        if EMPTY_LIST_ITEM_PATTERN.match(raw_line):
+            raise ContractError(contract, "unsupported block or inline Markdown: empty list item")
         line = raw_line.rstrip(" \t")
         heading = HEADING_PATTERN.match(line)
         if heading:
@@ -428,28 +432,41 @@ def _document_blocks(
             continue
         if not blocks or blocks[0].kind != "heading" or blocks[0].level != 1:
             raise ContractError(contract, "document must begin with its single h1")
-        if UNSUPPORTED_BLOCK_PATTERN.match(line):
+        if SETEXT_UNDERLINE_PATTERN.match(line) or UNSUPPORTED_BLOCK_PATTERN.match(line):
             raise ContractError(contract, "unsupported block or inline Markdown")
-        if LIST_ITEM_PATTERN.match(line):
+        initial_item = LIST_ITEM_PATTERN.match(line)
+        if initial_item:
+            list_indent = initial_item.group(1)
             items: list[str] = []
             while index < len(lines) and index not in definition_lines:
                 item_line = lines[index]
                 if re.search(r" {2,}$", item_line):
                     raise ContractError(contract, "unsupported block or inline Markdown: hard break")
+                if EMPTY_LIST_ITEM_PATTERN.match(item_line):
+                    raise ContractError(contract, "unsupported block or inline Markdown: empty list item")
                 item_match = LIST_ITEM_PATTERN.match(item_line.rstrip(" \t"))
                 if item_match is None:
                     break
-                item = item_match.group(1)
+                if item_match.group(1) != list_indent:
+                    raise ContractError(contract, "unsupported block or inline Markdown")
+                item = item_match.group(2)
                 index += 1
                 continuations: list[str] = []
                 while index < len(lines) and index not in definition_lines:
                     continuation_line = lines[index]
                     if re.search(r" {2,}$", continuation_line):
                         raise ContractError(contract, "unsupported block or inline Markdown: hard break")
+                    if EMPTY_LIST_ITEM_PATTERN.match(continuation_line):
+                        raise ContractError(contract, "unsupported block or inline Markdown: empty list item")
                     continuation = continuation_line.rstrip(" \t")
+                    next_item = LIST_ITEM_PATTERN.match(continuation)
+                    if next_item:
+                        if next_item.group(1) != list_indent:
+                            raise ContractError(contract, "unsupported block or inline Markdown")
+                        break
                     if re.match(r"^[ ]{2,}\S", continuation):
                         stripped = continuation.lstrip(" ")
-                        if LIST_ITEM_PATTERN.match(stripped):
+                        if LIST_ITEM_PATTERN.match(stripped) or SETEXT_UNDERLINE_PATTERN.match(continuation):
                             raise ContractError(contract, "unsupported block or inline Markdown")
                         continuations.append(stripped)
                         index += 1
@@ -461,12 +478,19 @@ def _document_blocks(
         paragraph_lines = [line]
         index += 1
         while index < len(lines) and index not in definition_lines:
-            continuation = lines[index].rstrip(" \t")
+            continuation_line = lines[index]
+            if EMPTY_LIST_ITEM_PATTERN.match(continuation_line):
+                raise ContractError(contract, "unsupported block or inline Markdown: empty list item")
+            continuation = continuation_line.rstrip(" \t")
             if not continuation or HEADING_PATTERN.match(continuation) or LIST_ITEM_PATTERN.match(continuation):
                 break
-            if re.search(r" {2,}$", lines[index]):
+            if re.search(r" {2,}$", continuation_line):
                 raise ContractError(contract, "unsupported block or inline Markdown: hard break")
-            if FENCE_PATTERN.match(continuation) or UNSUPPORTED_BLOCK_PATTERN.match(continuation):
+            if (
+                FENCE_PATTERN.match(continuation)
+                or SETEXT_UNDERLINE_PATTERN.match(continuation)
+                or UNSUPPORTED_BLOCK_PATTERN.match(continuation)
+            ):
                 raise ContractError(contract, "unsupported block or inline Markdown")
             paragraph_lines.append(continuation)
             index += 1

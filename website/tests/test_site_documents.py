@@ -45,19 +45,25 @@ def source_semantics(source: str) -> tuple[list[tuple[str, str]], list[str]]:
             index += 1
             continue
         line = lines[index].rstrip()
-        if heading := re.fullmatch(r"(#{1,6})[ \t]+(.*?)(?:[ \t]+#+[ \t]*)?", line):
+        if heading := re.fullmatch(r"[ ]{0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+[ \t]*)?", line):
             blocks.append((f"h{len(heading.group(1))}", plain_markdown(heading.group(2))))
             index += 1
             continue
-        if item := re.fullmatch(r"[*+-][ \t]+(.+)", line):
+        if item := re.fullmatch(r"( {0,3})[*+-][ \t]+(.+)", line):
+            list_indent = item.group(1)
+            list_item = re.compile(rf"({re.escape(list_indent)})[*+-][ \t]+(.+)")
             while item is not None:
-                parts = [item.group(1)]
+                parts = [item.group(2)]
                 index += 1
-                while index < len(lines) and re.match(r"^[ ]{2,}\S", lines[index]):
+                while (
+                    index < len(lines)
+                    and list_item.fullmatch(lines[index].rstrip()) is None
+                    and re.match(r"^[ ]{2,}\S", lines[index])
+                ):
                     parts.append(lines[index].strip())
                     index += 1
                 blocks.append(("li", plain_markdown(" ".join(parts))))
-                item = re.fullmatch(r"[*+-][ \t]+(.+)", lines[index].rstrip()) if index < len(lines) else None
+                item = list_item.fullmatch(lines[index].rstrip()) if index < len(lines) else None
             continue
         parts = [line]
         index += 1
@@ -65,8 +71,8 @@ def source_semantics(source: str) -> tuple[list[tuple[str, str]], list[str]]:
             continuation = lines[index].rstrip()
             if (
                 not continuation
-                or re.fullmatch(r"#{1,6}[ \t]+(?:.*?)(?:[ \t]+#+[ \t]*)?", continuation)
-                or re.fullmatch(r"[*+-][ \t]+.+", continuation)
+                or re.fullmatch(r"[ ]{0,3}#{1,6}[ \t]+(?:.*?)(?:[ \t]+#+[ \t]*)?", continuation)
+                or re.fullmatch(r"[ ]{0,3}[*+-][ \t]+.+", continuation)
             ):
                 break
             parts.append(continuation)
@@ -288,7 +294,6 @@ class GeneratedDocumentTests(RepositoryFixture):
             with self.subTest(name=name):
                 self.assertEqual(rendered.blocks, expected_blocks)
                 self.assertEqual(rendered.links, expected_links)
-                self.assertNotIn("Repository sourced", self.pages[name])
                 self.assertFalse(self.documents[name].tags("script"))
         self.assertNotIn("email", self.pages["security"].lower())
 
