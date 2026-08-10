@@ -239,6 +239,43 @@ code {
     margin-top: 0.5rem;
 }
 
+.onboarding-prompt {
+    max-height: 28rem;
+    margin-block: 1.25rem;
+    padding: 1rem;
+    overflow: auto;
+    border: 1px solid var(--ink-muted);
+    background: var(--canvas);
+    white-space: pre-wrap;
+}
+
+.onboarding-prompt code {
+    padding: 0;
+    background: transparent;
+    overflow-wrap: anywhere;
+}
+
+.copy-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem 1rem;
+}
+
+.copy-controls button {
+    padding: 0.65rem 0.85rem;
+    border: 1px solid var(--ink);
+    background: var(--canvas);
+    color: var(--ink);
+    font: inherit;
+    cursor: pointer;
+}
+
+.copy-controls p {
+    margin: 0;
+    color: var(--ink-muted);
+}
+
 .sourced-content > :first-child {
     margin-top: 0;
 }

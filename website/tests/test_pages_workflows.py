@@ -12,7 +12,7 @@ CI_PATH = REPO_ROOT / ".github/workflows/ci.yml"
 PAGES_PATH = REPO_ROOT / ".github/workflows/pages.yml"
 
 PYTHON_TEST_COMMAND = "python3 -m unittest discover -s website/tests -p 'test_*.py'"
-NODE_TEST_COMMAND = "node --test website/tests/lander-model.test.mjs"
+NODE_TEST_COMMAND = "node --test website/tests/*.test.mjs"
 
 CI_DETERMINISTIC_BUILD_SCRIPT = '''\
 python3 website/build.py --repo-root . --output "${RUNNER_TEMP}/site-root-a" --site-base /
@@ -234,7 +234,7 @@ class WorkflowContractTests(unittest.TestCase):
                 ("Check out source commit", frozenset({"name", "uses", "with"})),
                 ("Set up Node.js", frozenset({"name", "uses", "with"})),
                 ("Python website tests", frozenset({"name", "run"})),
-                ("Node website model tests", frozenset({"name", "run"})),
+                ("Node website tests", frozenset({"name", "run"})),
                 ("Verify deterministic full builds", frozenset({"name", "run"})),
             ),
         )
@@ -259,7 +259,7 @@ class WorkflowContractTests(unittest.TestCase):
             PYTHON_TEST_COMMAND,
         )
         self.assertEqual(
-            step_mapping(website_steps["Node website model tests"])["run"],
+            step_mapping(website_steps["Node website tests"])["run"],
             NODE_TEST_COMMAND,
         )
         self.assertEqual(
@@ -336,7 +336,7 @@ class WorkflowContractTests(unittest.TestCase):
                 ("Check out source commit", frozenset({"name", "uses", "with"})),
                 ("Set up Node.js", frozenset({"name", "uses", "with"})),
                 ("Python website tests", frozenset({"name", "run"})),
-                ("Node website model tests", frozenset({"name", "run"})),
+                ("Node website tests", frozenset({"name", "run"})),
                 ("Verify tested source state", frozenset({"name", "id", "env", "run"})),
                 ("Configure GitHub Pages", frozenset({"name", "id", "uses"})),
                 ("Normalize Pages base path", frozenset({"name", "id", "shell", "env", "run"})),
@@ -399,7 +399,7 @@ class WorkflowContractTests(unittest.TestCase):
             PYTHON_TEST_COMMAND,
         )
         self.assertEqual(
-            step_mapping(build_steps["Node website model tests"])["run"],
+            step_mapping(build_steps["Node website tests"])["run"],
             NODE_TEST_COMMAND,
         )
         self.assertEqual(
@@ -457,7 +457,7 @@ class WorkflowContractTests(unittest.TestCase):
         website = block(self.ci, "website:", 2)
         self.assertIn("actions/checkout@v7", website)
         self.assertIn("python3 -m unittest discover -s website/tests -p 'test_*.py'", website)
-        self.assertIn("node --test website/tests/lander-model.test.mjs", website)
+        self.assertIn("node --test website/tests/*.test.mjs", website)
         self.assertEqual(website.count("python3 website/build.py"), 4)
         self.assertIn("--site-base /", website)
         self.assertIn("--site-base /agentworks/", website)
@@ -529,7 +529,7 @@ class WorkflowContractTests(unittest.TestCase):
     def test_pages_build_tests_determinism_and_exact_artifact_boundary(self) -> None:
         build = block(self.pages, "build:", 2)
         self.assertIn("python3 -m unittest discover -s website/tests -p 'test_*.py'", build)
-        self.assertIn("node --test website/tests/lander-model.test.mjs", build)
+        self.assertIn("node --test website/tests/*.test.mjs", build)
         self.assertEqual(build.count("python3 website/build.py"), 2)
         self.assertIn('"${RUNNER_TEMP}/agentworks-site"', build)
         self.assertIn('"${RUNNER_TEMP}/agentworks-site-repeat"', build)

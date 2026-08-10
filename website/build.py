@@ -18,6 +18,9 @@ if str(WEBSITE_DIR) not in sys.path:
 
 from site_asset_validation import validate_favicon_asset  # noqa: E402
 from site_content import (  # noqa: E402
+    ASSISTANCE_README_BEGIN,
+    ASSISTANCE_README_END,
+    ASSISTANCE_SOURCE,
     CLI_SECRETS_URL,
     CONTRACTS,
     DOCUMENT_CONTRACTS,
@@ -30,6 +33,7 @@ from site_content import (  # noqa: E402
     ContractError,
     _read_utf8,
     _render_inline,
+    extract_assistance_prompt,
     extract_content,
 )
 from site_validation import (  # noqa: E402
@@ -50,6 +54,9 @@ from site_validation import (  # noqa: E402
 
 __all__ = (
     "CLI_SECRETS_URL",
+    "ASSISTANCE_README_BEGIN",
+    "ASSISTANCE_README_END",
+    "ASSISTANCE_SOURCE",
     "CONTRACTS",
     "ContractError",
     "DOCUMENT_CONTRACTS",
@@ -73,6 +80,7 @@ __all__ = (
     "_validate_template",
     "build_site",
     "extract_content",
+    "extract_assistance_prompt",
     "render_named_template",
     "validate_site_base",
 )
@@ -88,6 +96,7 @@ FULL_MANIFEST: Final = frozenset(
         Path("security/index.html"),
         Path("static/lander-game.js"),
         Path("static/lander-model.js"),
+        Path("static/onboarding-copy.js"),
         Path("static/lander.css"),
         Path("static/site.css"),
     }
@@ -118,6 +127,7 @@ def _render_artifact(repo_root: Path, site_base: str) -> tuple[dict[Path, bytes]
         Path("assets/agw-rocket.svg"): website / "assets/agw-rocket.svg",
         Path("static/lander-game.js"): website / "static/lander-game.js",
         Path("static/lander-model.js"): website / "static/lander-model.js",
+        Path("static/onboarding-copy.js"): website / "static/onboarding-copy.js",
         Path("static/lander.css"): website / "static/lander.css",
         Path("static/site.css"): website / "static/site.css",
     }
