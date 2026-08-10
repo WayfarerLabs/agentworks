@@ -666,8 +666,9 @@ Keep `website/tools/derive_lander_routes.mjs` permanently. It uses only Node bui
 import production or test code; runtime, model, and tests must not import it. Version
 `agw-lander-route-deriver/v1` independently implements sections 5.3, 8, 9, and the reachable command
 table. Its versioned per-template constructive recipes give command phase order and finite integer
-step ranges; it exhausts at most `2,000,000` lexicographically ordered combinations per template and
-chooses by `(burn,totalSteps,RLE lexicographic)`, failing rather than emitting an incomplete route.
+step ranges; it exhausts exactly `45` lexicographically ordered combinations per template, `405`
+total, and chooses by `(burn,totalSteps,RLE lexicographic)`, failing rather than emitting an
+incomplete route. Every candidate must be safe in the three pinned seed/translation worlds.
 
 The exact invocation is:
 
@@ -680,22 +681,28 @@ node website/tools/derive_lander_routes.mjs \
 Unknown/missing flags exit 2; derivation or verification failure exits 1; success exits 0.
 `--geometry` contains schema `agw-lander-route-geometry/v1` and the nine IDs, deltas, and literal
 clearance knots. Output schema `agw-lander-route-derived/v1` contains `deriverVersion`,
-`physicsDigest`, `geometryDigest`, the ordered route records from section 10.1, and `outputDigest`.
-Canonical JSON recursively sorts object keys, preserves array order, uses `JSON.stringify` without
-whitespace, and hashes UTF-8 bytes with lowercase SHA-256. `geometryDigest` hashes the complete
-geometry object; `physicsDigest` hashes an object containing every named numeric constant in
-sections 8-10 plus the eight command rows; `outputDigest` hashes the output object with only
-`outputDigest` omitted. The file adds one unhashed trailing LF.
+`physicsDigest`, `geometryDigest`, the ordered route records from section 10.1, `worldWitnesses`,
+`worldDigest`, and `outputDigest`. `worldWitnesses` contains exactly 81 independently reconstructed
+world descriptors: nine templates times three pinned seeds times three translations. Each descriptor
+includes native/corridor samples, cap relief, target replacement and blends, both platforms and
+pylons, terrain-derived NOC foundations/buildings, mast colliders, and its own digest. Canonical
+JSON recursively sorts object keys, preserves array order, uses `JSON.stringify` without whitespace,
+and hashes UTF-8 bytes with lowercase SHA-256. `geometryDigest` hashes the complete geometry object;
+`physicsDigest` hashes an object containing every named numeric constant in sections 8-10 plus the
+eight command rows; `worldDigest` hashes the ordered world descriptors; `outputDigest` hashes the
+output object with only `outputDigest` omitted. The file adds one unhashed trailing LF.
 
 The reviewed output is `website/tests/fixtures/lander-route-derived-v1.json`. The production model
-embeds byte-equivalent template/route arrays and the three literal digest strings. Tests project
+embeds byte-equivalent template/route arrays and the four literal digest strings. Tests project
 those arrays back to the two schemas, compare canonical bytes with both fixtures, and recompute all
-digests before replay. Thus the world and tool consume identical envelope values while independently
-implementing corridor construction, physics, and collision. Intentional regeneration writes to a
-temporary path, uses `--verify` against the checked fixture, reviews any mismatch, then deliberately
-updates geometry, derived fixture, and production literals together. Ordinary tests only verify
-checked data and never regenerate expectations. `website/README.md` will permanently teach this
-workflow. Neither fixture nor tool enters the 12-file artifact.
+digests before replay. Independent test-side reconstruction compares all 81 corridor vertex arrays
+and raw/native-resume samples to production with strict numeric equality and pins ULP-sensitive
+vectors so arithmetic reassociation fails. Thus the world and tool consume identical envelope values
+while independently implementing corridor construction, physics, and collision. Intentional
+regeneration writes to a temporary path, uses `--verify` against the checked fixture, reviews any
+mismatch, then deliberately updates geometry, derived fixture, and production literals together.
+Ordinary tests only verify checked data and never regenerate expectations. `website/README.md` will
+permanently teach this workflow. Neither fixture nor tool enters the 12-file artifact.
 
 Catalog tests replay every literal from an upright origin with `fuel=demonstratedMinimum`, using the
 exact production fixed-step physics and the translated corridor. Each must land at its literal
