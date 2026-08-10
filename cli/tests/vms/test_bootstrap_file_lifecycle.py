@@ -287,14 +287,45 @@ def test_local_write_failure_removes_both_stages_and_preserves_error(
     assert transport.guest_files == {}
 
 
-def test_copy_failure_removes_both_stages_and_preserves_error(
+def test_reflected_copy_failure_is_secret_free_across_every_surface(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
 ) -> None:
-    failure = SSHError("copy failed")
+    from agentworks import ssh
+
+    monkeypatch.setattr(ssh, "LOG_DIR", tmp_path / "logs")
+    logger = SSHLogger("vm1", "vm-create", redactions=(_AUTH_KEY,))
+    failure = SSHError(f"WSL2 copy failed: reflected {_AUTH_KEY}")
+    transport = _RecordingTransport(copy_failure=failure)
+    assert _AUTH_KEY in repr(failure)
+
+    with pytest.raises(ProvisioningError) as caught:
+        _call(tmp_path, monkeypatch, transport, progress=logger)
+    logger.close()
+
+    assert str(caught.value) == "could not copy the private guest bootstrap staging file"
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    _assert_exception_graph_is_value_free(caught.value)
+    assert _AUTH_KEY not in logger.path.read_text()
+    assert _AUTH_KEY not in repr(captured_output)
+    _assert_no_residue(transport)
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [KeyboardInterrupt("stop"), SystemExit("exit"), GeneratorExit("close")],
+    ids=("interrupt", "system-exit", "generator-exit"),
+)
+def test_copy_control_flow_removes_both_stages_and_preserves_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: BaseException,
+) -> None:
     transport = _RecordingTransport(copy_failure=failure)
 
-    with pytest.raises(SSHError) as caught:
+    with pytest.raises(type(failure)) as caught:
         _call(tmp_path, monkeypatch, transport)
 
     assert caught.value is failure
@@ -578,8 +609,9 @@ def test_local_removal_failure_does_not_mask_staging_primary(
         )
         transport = _RecordingTransport()
     else:
-        primary = SSHError("copy failed")
-        transport = _RecordingTransport(copy_failure=primary)
+        copy_failure = SSHError("copy failed")
+        primary = ProvisioningError("could not copy the private guest bootstrap staging file")
+        transport = _RecordingTransport(copy_failure=copy_failure)
 
     cleanup_failure = cleanup_failure_type("local cleanup failed")
 
@@ -593,7 +625,12 @@ def test_local_removal_failure_does_not_mask_staging_primary(
         with pytest.raises(type(primary)) as caught:
             _call(tmp_path, monkeypatch, transport)
 
-        assert caught.value is primary
+        if operation == "write":
+            assert caught.value is primary
+        else:
+            assert str(caught.value) == str(primary)
+            assert caught.value.__cause__ is None
+            assert caught.value.__context__ is None
         assert transport.guest_files == {}
         staged_paths = [local_path] if operation == "write" else transport.local_paths
         assert len(staged_paths) == 1

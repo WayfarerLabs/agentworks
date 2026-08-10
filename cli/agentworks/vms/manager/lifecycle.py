@@ -19,6 +19,7 @@ either phase to the same operator-facing outcome.
 
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING
 
 from agentworks import output
@@ -380,10 +381,16 @@ def create_vm(
                 ) from e
 
             def _close_create_logger() -> None:
+                active_primary = sys.exc_info()[1]
                 try:
                     logger.close()
                 except BaseException as close_error:
-                    output.warn(f"could not close provisioning log {logger.display_path}: {close_error}")
+                    if active_primary is None:
+                        raise
+                    try:  # noqa: SIM105 - warning failure must not replace the active primary
+                        output.warn(f"could not close provisioning log {logger.display_path}: {close_error}")
+                    except BaseException:
+                        pass
 
             init_stack.callback(_close_create_logger)
 

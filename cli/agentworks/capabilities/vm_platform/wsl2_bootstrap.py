@@ -82,7 +82,16 @@ def run_wsl2_bootstrap(
             ) as staged:
                 local_script = Path(staged.name)
                 staged.write(script.encode("utf-8"))
-            exec_target.copy_to(local_script, remote_script)
+            copy_failed = False
+            try:
+                exec_target.copy_to(local_script, remote_script)
+            except SSHError:
+                copy_failed = True
+            if copy_failed:
+                # Raise outside the handling arm so the transport's raw error
+                # cannot remain attached as __context__. WSL2 copy diagnostics
+                # may reflect the key-bearing script through stderr.
+                raise ProvisioningError("could not copy the private guest bootstrap staging file") from None
         finally:
             if local_script is not None:
                 active_failure = sys.exc_info()[1]
