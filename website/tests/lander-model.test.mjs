@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -42,6 +43,27 @@ const ROOT = new URL("../", import.meta.url).pathname;
 
 function close(actual, expected, tolerance = 1e-10) {
     assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} differs from ${expected}`);
+}
+
+function canonical(value) {
+    if (Array.isArray(value)) return value.map(canonical);
+    if (value && typeof value === "object") {
+        return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])]));
+    }
+    return value;
+}
+
+function digest(value) {
+    return createHash("sha256").update(JSON.stringify(canonical(value)), "utf8").digest("hex");
+}
+
+function heightFromVertices(vertices, x) {
+    for (let index = 1; index < vertices.length; index += 1) {
+        const [leftX, leftY] = vertices[index - 1]; const [rightX, rightY] = vertices[index];
+        if (x < leftX || x > rightX) continue;
+        return leftY + (rightY - leftY) * (x - leftX) / (rightX - leftX);
+    }
+    throw new RangeError(`Witness vertices do not cover ${x}`);
 }
 
 function stepMany(pose, request, fuel, count) {
@@ -225,6 +247,53 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
     assert.equal(ROUTE_DIGESTS.outputDigest, derived.outputDigest);
     assert.equal(ROUTE_DIGESTS.physicsDigest, derived.physicsDigest);
     assert.equal(ROUTE_DIGESTS.geometryDigest, derived.geometryDigest);
+    assert.equal(ROUTE_DIGESTS.worldDigest, derived.worldDigest);
+    const { outputDigest, ...unsignedDerived } = derived;
+    assert.equal(digest(unsignedDerived), outputDigest);
+    assert.equal(derived.worldWitnesses.length, 81);
+    assert.deepEqual([...new Set(derived.worldWitnesses.map(({ descriptor }) => descriptor.seed))],
+        [1, 0x12345678, 0xffffffff]);
+    assert.deepEqual([...new Set(derived.worldWitnesses.map(({ descriptor }) =>
+        `${descriptor.origin.center}:${descriptor.origin.top}`))], ["36:3.5", "117:5", "-42:6.5"]);
+    assert.equal(digest(derived.worldWitnesses), derived.worldDigest);
+    assert.deepEqual([derived.worldWitnesses[0].digest, derived.worldWitnesses[40].digest,
+        derived.worldWitnesses.at(-1).digest], [
+        "1e3ed8b97aea43fd56d1fb29e6a34f7cd77cff4e54079547b8637cb97f4bf66e",
+        "f1cdffa74c42cf133bdb3fc264d25227cf8d0df980b9b8a9db8db0f753dfda57",
+        "115173e8c5d9177f1660d5fb917dd89cfcc8d331155eb4e53b77ededf65cca8a",
+    ]);
+    assert.ok(derived.worldWitnesses.some(({ descriptor }) =>
+        descriptor.corridorSamples.some((sample) => sample.relieved)));
+    for (const witness of derived.worldWitnesses) {
+        const { descriptor } = witness;
+        assert.equal(digest(descriptor), witness.digest);
+        assert.ok(descriptor.corridorSamples.length > 0);
+        assert.ok(descriptor.corridorSamples.every((sample) => sample.y === (sample.relieved ?
+            Math.max(0.75, sample.cap - 0.15 * sample.reliefUnit) : sample.raw)));
+        for (const sample of descriptor.corridorSamples.concat(descriptor.nativeResumeSamples)) {
+            assert.ok(descriptor.vertices.some(([x, y]) => x === sample.x && y === sample.y));
+        }
+        assert.deepEqual(descriptor.blendSegments.left[1],
+            [descriptor.target.center - 4.8, descriptor.target.top - 0.8]);
+        assert.deepEqual(descriptor.blendSegments.right[0],
+            [descriptor.target.center + 4.8, descriptor.target.top - 0.8]);
+        assert.equal(descriptor.sites.length, 2);
+        for (const site of descriptor.sites) {
+            close(site.platform.right - site.platform.left, 9.6);
+            assert.equal(site.pylons.length, 2);
+            for (const pylon of site.pylons) {
+                close(pylon.bottom, site.platform.top - 0.8);
+                close(pylon.top, site.platform.bottom);
+                close(pylon.right - pylon.left, 0.6);
+            }
+            close(site.noc.right - site.noc.left, 7);
+            close(site.noc.top - site.platform.top, 7.2);
+            close(site.noc.bottom, Math.min(heightFromVertices(descriptor.vertices, site.noc.left),
+                heightFromVertices(descriptor.vertices, site.noc.right)));
+            close(site.mast.right - site.mast.left, 0.5);
+            close(site.mast.top - site.mast.bottom, 3.2);
+        }
+    }
     assert.equal(derived.routes[0].runs[1][1], 200, "the selected route is not the first ranged candidate");
     assert.equal(spawnSync(process.execPath, [tool, "--bogus"]).status, 2);
 
@@ -243,12 +312,19 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
 
     const obstructedWorldTool = join(directory, "obstructed-world.mjs");
     const obstructedWorldSource = (await readFile(tool, "utf8")).replace(
-        "const y = raw > cap ? Math.max(0.75, cap - 0.15 * sampleUnit(trial.seed, 4, index >>> 0)) : raw;",
+        "const y = raw > cap ? Math.max(0.75, cap - 0.15 * reliefUnit) : raw;",
         "const y = raw + 20;",
     );
     assert.notEqual(obstructedWorldSource, await readFile(tool, "utf8"));
     await writeFile(obstructedWorldTool, obstructedWorldSource, "utf8");
     assert.equal(spawnSync(process.execPath, [obstructedWorldTool, "--geometry", geometry, "--output", output]).status, 1);
+
+    const subtleReliefTool = join(directory, "subtle-relief-world.mjs");
+    const subtleReliefSource = (await readFile(tool, "utf8")).replace("cap - 0.15 * reliefUnit", "cap - 0.14 * reliefUnit");
+    assert.notEqual(subtleReliefSource, await readFile(tool, "utf8"));
+    await writeFile(subtleReliefTool, subtleReliefSource, "utf8");
+    assert.equal(spawnSync(process.execPath, [subtleReliefTool, "--geometry", geometry, "--output", output,
+        "--verify", fixture]).status, 1);
 });
 
 test("the old route-78 target crossing is rejected by the exact landing envelope", () => {

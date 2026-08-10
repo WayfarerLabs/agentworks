@@ -9,11 +9,16 @@ const MAX_COMBINATIONS = 2_000_000;
 const STEP_SECONDS = 1 / 120;
 const FUEL_QUANTUM = 0.05;
 const MOTIF = Object.freeze([0, 1.2, -0.8, 1, -0.6, 0]);
-const WORLD_TRIALS = Object.freeze([
-    Object.freeze({ seed: 0x41475731, originCenter: 36, originTop: 3.5 }),
-    Object.freeze({ seed: 1, originCenter: 117, originTop: 5 }),
-    Object.freeze({ seed: 0x12345678, originCenter: -42, originTop: 6.5 }),
+const WORLD_SEEDS = Object.freeze([1, 0x12345678, 0xffffffff]);
+const WORLD_TRANSLATIONS = Object.freeze([
+    Object.freeze({ originCenter: 36, originTop: 3.5 }),
+    Object.freeze({ originCenter: 117, originTop: 5 }),
+    Object.freeze({ originCenter: -42, originTop: 6.5 }),
 ]);
+const WORLD_TRIALS = Object.freeze(WORLD_SEEDS.map((seed, index) =>
+    Object.freeze({ seed, ...WORLD_TRANSLATIONS[index] })));
+const WORLD_WITNESS_CASES = Object.freeze(WORLD_SEEDS.flatMap((seed) =>
+    WORLD_TRANSLATIONS.map((translation) => Object.freeze({ seed, ...translation }))));
 const CONSTANTS = Object.freeze({
     COLLISION_MARGIN: 0.02,
     ENGINE_ACCELERATION: 8.4,
@@ -217,19 +222,24 @@ function constructWorld(geometry, trial) {
     const target = { center: origin.center + geometry.centerDelta, top: origin.top + geometry.deckDelta };
     const originRight = origin.center + 4.8; const targetLeft = target.center - 4.8;
     const targetRight = target.center + 4.8; const vertices = [[originRight, origin.top - 0.8]];
+    const corridorSamples = [];
     const first = Math.floor(originRight / 4) + 1; const last = Math.ceil(targetLeft / 4) - 1;
     for (let index = first; index <= last; index += 1) {
         const x = index * 4; const raw = terrainSample(trial.seed, index);
         const cap = origin.top + interpolateKnots(geometry.clearanceKnots, x - origin.center);
-        const y = raw > cap ? Math.max(0.75, cap - 0.15 * sampleUnit(trial.seed, 4, index >>> 0)) : raw;
+        const reliefUnit = sampleUnit(trial.seed, 4, index >>> 0);
+        const y = raw > cap ? Math.max(0.75, cap - 0.15 * reliefUnit) : raw;
+        corridorSamples.push({ cap, index, raw, reliefUnit, relieved: raw > cap, x, y });
         vertices.push([x, y]);
     }
     vertices.push([targetLeft, target.top - 0.8], [targetRight, target.top - 0.8]);
     const resume = Math.floor(targetRight / 4) + 1;
+    const nativeResumeSamples = [];
     for (let index = resume; index * 4 <= targetRight + 20; index += 1) {
-        vertices.push([index * 4, terrainSample(trial.seed, index)]);
+        const x = index * 4; const y = terrainSample(trial.seed, index);
+        nativeResumeSamples.push({ index, x, y }); vertices.push([x, y]);
     }
-    const world = { geometry, origin, target, seed: trial.seed, vertices };
+    const world = { corridorSamples, geometry, nativeResumeSamples, origin, target, seed: trial.seed, vertices };
     cached.set(trial, world); WORLD_CACHE.set(geometry, cached);
     return world;
 }
@@ -254,26 +264,66 @@ function terrainHeight(world, x) {
 }
 
 const SOLID_CACHE = new WeakMap();
+const SITE_SOLID_CACHE = new WeakMap();
+function siteSolids(world) {
+    const cached = SITE_SOLID_CACHE.get(world);
+    if (cached) return cached;
+    const descriptors = [[world.origin.center,world.origin.top,true],[world.target.center,world.target.top,false]]
+        .map(([center, top, isOrigin]) => {
+            const left = center - 4.8; const right = center + 4.8; const bottom = top - 0.35;
+            const buildingLeft = right + 2; const roof = top + 7.2;
+            const foundation = Math.min(terrainHeight(world, buildingLeft), terrainHeight(world, buildingLeft + 7));
+            return {
+                isOrigin,
+                mast: { bottom: roof, left: buildingLeft + 3.25, right: buildingLeft + 3.75, top: roof + 3.2 },
+                noc: { bottom: foundation, left: buildingLeft, right: buildingLeft + 7, top: roof },
+                platform: { bottom, left, right, top },
+                pylons: [left + 1.4, right - 1.4].map((pylon) =>
+                    ({ bottom: top - 0.8, left: pylon - 0.3, right: pylon + 0.3, top: bottom })),
+            };
+        });
+    SITE_SOLID_CACHE.set(world, descriptors);
+    return descriptors;
+}
+
 function solidSegments(world, launchCleared) {
     const cached = SOLID_CACHE.get(world) ?? {};
     const key = launchCleared ? "cleared" : "launch";
     if (cached[key]) return cached[key];
     const segments = [];
-    for (const [center, top, isOrigin] of [[world.origin.center,world.origin.top,true],
-        [world.target.center,world.target.top,false]]) {
-        const left = center - 4.8; const right = center + 4.8; const bottom = top - 0.35;
-        if (isOrigin && launchCleared) segments.push([{x:left,y:top},{x:right,y:top}]);
+    for (const site of siteSolids(world)) {
+        const { bottom, left, right, top } = site.platform;
+        if (site.isOrigin && launchCleared) segments.push([{x:left,y:top},{x:right,y:top}]);
         segments.push([{x:left,y:top},{x:left,y:bottom}], [{x:left,y:bottom},{x:right,y:bottom}],
             [{x:right,y:bottom},{x:right,y:top}]);
-        for (const pylon of [left + 1.4, right - 1.4]) {
-            segments.push(...rectangleSegments(pylon - 0.3,pylon + 0.3,top - 0.8,bottom));
+        for (const pylon of site.pylons) {
+            segments.push(...rectangleSegments(pylon.left,pylon.right,pylon.bottom,pylon.top));
         }
-        const buildingLeft = right + 2; const roof = top + 7.2;
-        const foundation = Math.min(terrainHeight(world, buildingLeft), terrainHeight(world, buildingLeft + 7));
-        segments.push(...rectangleSegments(buildingLeft,buildingLeft + 7,foundation,roof));
-        segments.push(...rectangleSegments(buildingLeft + 3.25,buildingLeft + 3.75,roof,roof + 3.2));
+        segments.push(...rectangleSegments(site.noc.left,site.noc.right,site.noc.bottom,site.noc.top));
+        segments.push(...rectangleSegments(site.mast.left,site.mast.right,site.mast.bottom,site.mast.top));
     }
     cached[key] = segments; SOLID_CACHE.set(world, cached); return segments;
+}
+
+function worldWitness(geometry, trial) {
+    const world = constructWorld(geometry, trial);
+    const descriptor = {
+        blendSegments: {
+            left: [world.vertices[world.vertices.length - world.nativeResumeSamples.length - 3],
+                world.vertices[world.vertices.length - world.nativeResumeSamples.length - 2]],
+            right: [world.vertices[world.vertices.length - world.nativeResumeSamples.length - 1],
+                world.vertices[world.vertices.length - world.nativeResumeSamples.length]],
+        },
+        corridorSamples: world.corridorSamples,
+        nativeResumeSamples: world.nativeResumeSamples,
+        origin: world.origin,
+        seed: world.seed,
+        sites: siteSolids(world),
+        target: world.target,
+        templateId: geometry.templateId,
+        vertices: world.vertices,
+    };
+    return { descriptor, digest: digest(descriptor) };
 }
 
 function collidesWithUnsafe(pose, world, launchCleared) {
@@ -507,12 +557,16 @@ async function main() {
         if (geometry.schema !== "agw-lander-route-geometry/v1" || geometry.templates.length !== 9) {
             throw new Error("Unsupported or incomplete geometry fixture");
         }
+        const worldWitnesses = geometry.templates.flatMap((template) =>
+            WORLD_WITNESS_CASES.map((trial) => worldWitness(template, trial)));
         const output = {
             deriverVersion: DERIVER_VERSION,
             geometryDigest: digest(geometry),
             physicsDigest: digest({ commands: COMMANDS, constants: CONSTANTS }),
             routes: geometry.templates.map(deriveTemplate),
             schema: "agw-lander-route-derived/v1",
+            worldDigest: digest(worldWitnesses),
+            worldWitnesses,
         };
         output.outputDigest = digest(output);
         const serialized = `${canonicalBytes(output)}\n`;
