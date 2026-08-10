@@ -20,17 +20,17 @@ Installing one can make the inert skill discoverable, but cannot inspect or chan
 
 ## Decisions
 
-| Concern              | Decision                                                                                                                                                                                                                                       |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Canonical prose      | `packaging/onboarding/bootstrap.md` is the only authored bootstrap body and owns its security posture text and links.                                                                                                                          |
-| Canonical metadata   | `packaging/onboarding/metadata.json` owns machine metadata only: package identity, bootstrap version, minimum CLI version, and publisher fields.                                                                                               |
-| Minimum CLI          | `agentworks-cli >=0.14.0`; no maximum. Version 0.14.0 is the first release containing the guide contract used by the bootstrap.                                                                                                                |
-| Package identity     | Marketplace `agentworks`; plugin and skill `agentworks-onboarding`; independent bootstrap package version starts at `1.0.0`.                                                                                                                   |
-| Cross-harness parity | A deterministic generator emits both native package layouts from the same body and metadata. Generated skill bodies are byte-identical after their generated frontmatter.                                                                      |
-| README parity        | The first fenced block under `## Getting Started` contains the exact canonical body. The generator owns that fenced region.                                                                                                                    |
-| Runtime behavior     | The inert skill instructs the agent to obtain consent, check or install a compatible CLI, and run the guide. The skill performs none of those actions itself and contains no day-two teaching.                                                 |
-| Security posture     | Claude Code uses default/manual approvals without bypass. Codex uses `danger-full-access` with on-request approvals because Agentworks needs workstation-wide account access. Never change harness security settings on the operator's behalf. |
-| Release ownership    | The Agentworks repository owns the source, wrappers, marketplaces, tests, and version. The CLI release and bootstrap version remain distinct.                                                                                                  |
+| Concern              | Decision                                                                                                                                                                                                                                                          |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Canonical prose      | `packaging/onboarding/bootstrap.md` is the only authored bootstrap body and owns its security posture text and links.                                                                                                                                             |
+| Canonical metadata   | `packaging/onboarding/metadata.json` owns machine metadata only: package identity, bootstrap version, minimum CLI version, and publisher fields.                                                                                                                  |
+| Minimum CLI          | `agentworks-cli >=0.14.0`; no maximum. Version 0.14.0 is the first release containing the guide contract used by the bootstrap.                                                                                                                                   |
+| Package identity     | Marketplace `agentworks`; plugin and skill `agentworks-onboarding`; independent bootstrap package version starts at `1.0.0`.                                                                                                                                      |
+| Cross-harness parity | A deterministic generator emits both native package layouts from the same body and metadata. Generated skill bodies are byte-identical after their generated frontmatter.                                                                                         |
+| README parity        | The first fenced block under `## Getting Started` contains the exact canonical body. The generator owns that fenced region.                                                                                                                                       |
+| Runtime behavior     | The inert skill instructs the agent to obtain consent, check or install a compatible CLI, and run the guide. The skill performs none of those actions itself and contains no day-two teaching.                                                                    |
+| Security posture     | Claude Code uses default/manual approvals without bypass. Codex starts with `workspace-write` and on-request approvals, then requests scoped escalation for account-wide files, network, or SSH. Never change harness security settings on the operator's behalf. |
+| Release ownership    | The Agentworks repository owns the source, wrappers, marketplaces, tests, and version. The CLI release and bootstrap version remain distinct.                                                                                                                     |
 
 The bootstrap version changes whenever an installed generated artifact changes. It is deliberately
 independent of the CLI version. Claude Code and Codex cache installed plugins by version, so a body,
@@ -63,7 +63,6 @@ scripts/
 cli/tests/bootstrap/
   test_generation.py
   test_contract.py
-  test_flows.py
 ```
 
 The root `plugins/` tree is harness distribution packaging and is separate from the in-process
@@ -128,15 +127,17 @@ posture:
 - Claude Code: use `default` permission mode and the normal manual approval flow. Never use
   `bypassPermissions` for workstation management. See <https://code.claude.com/docs/en/permissions>
   and <https://code.claude.com/docs/en/sandboxing>.
-- Codex: use `sandbox_mode = "danger-full-access"` with `approval_policy = "on-request"`. Agentworks
-  manages account-scoped files, credentials, SSH destinations, and infrastructure beyond a project
-  workspace, so `workspace-write` is not the operating boundary. On-request approvals preserve
-  operator visibility for consequential actions. Never use `approval_policy = "never"` or the bypass
-  flag. See <https://learn.chatgpt.com/docs/agent-approvals-security> and
+- Codex: start with `sandbox_mode = "workspace-write"` and `approval_policy = "on-request"`. Request
+  a scoped escalation only when an exact operation needs account-wide files, network, or SSH. If the
+  harness cannot support the required bounded escalation, disclose that limitation and ask whether
+  the operator elects `danger-full-access` as a fallback. Explain that full access removes the
+  sandbox boundary and does not create per-command prompts for operations already allowed. Never
+  select it on the operator's behalf or use `approval_policy = "never"`. See
+  <https://learn.chatgpt.com/docs/agent-approvals-security> and
   <https://learn.chatgpt.com/docs/config-file/config-basic>.
 
-These policies preserve manual approval while allowing the workstation-wide account access that
-Agentworks requires. No-prompt or bypass modes discard the operator visibility R12 requires.
+These policies preserve manual approval and make each boundary crossing visible. No-prompt or bypass
+modes discard the operator visibility R12 requires.
 
 The bootstrap never writes `.claude/settings*.json`, `.codex/config.toml`, or managed policy. It
 asks the operator to select or confirm the posture using the harness's own controls. The canonical
@@ -172,9 +173,7 @@ name: agentworks-onboarding
 description: >-
   Install, configure, discover, and manage Agentworks from an operator workstation. Use when the
   operator asks to set up Agentworks or manage an existing installation.
-compatibility:
-  Requires Python 3.12+ and agentworks-cli >=0.14.0; network and approved workstation access are
-  needed during setup.
+compatibility: Requires network and operator-approved workstation access during setup.
 metadata:
   agentworks-bootstrap-version: "1.0.0"
   agentworks-min-cli-version: "0.14.0"
@@ -240,7 +239,16 @@ The Codex manifest uses the same identity and common metadata, plus the native s
   "homepage": "https://github.com/WayfarerLabs/agentworks",
   "repository": "https://github.com/WayfarerLabs/agentworks",
   "license": "MIT",
-  "skills": "./skills/"
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Agentworks Onboarding",
+    "shortDescription": "Set up Agentworks",
+    "longDescription": "Set up Agentworks and hand teaching to its installed guide.",
+    "developerName": "Wayfarer Labs",
+    "category": "Productivity",
+    "capabilities": ["Onboarding guidance"],
+    "defaultPrompt": ["Help me set up Agentworks."]
+  }
 }
 ```
 
@@ -399,34 +407,26 @@ falls back to an older guide contract.
 | Generated inventory        | Exact Claude package paths, no extras                        | Exact Codex package paths, no extras                                         | Exactly one marked region             |
 | Inertness                  | No hook, MCP, command, script, app, or allowed tool          | Same                                                                         | No executable wrapper                 |
 | Disclosure order           | Every R12 clause and both posture links precede first action | Same                                                                         | Same                                  |
-| Minimum version            | Compatibility and metadata say 0.14.0, no maximum            | Same                                                                         | Body says 0.14.0, no maximum          |
+| Minimum version            | Machine metadata says 0.14.0, no maximum                     | Same                                                                         | Body says 0.14.0, no maximum          |
 | Drift                      | Generator `--check` is clean                                 | Same invocation                                                              | Same invocation                       |
 
-Harness validators are version-pinned in CI to the latest stable versions verified during
-implementation. Updating either pin requires rerunning its local-install and clean-environment probe
-before merge. The generated JSON also receives schema-focused unit tests so a validator availability
-outage does not obscure an ordinary generator defect.
+CI pins the latest stable harness validators. Updating a pin reruns its local-install and
+clean-environment probe. Schema-focused JSON tests keep validator outages distinct from generator
+defects.
 
-### Flow fixtures
+### Focused contract and reused guide fixtures
 
-`cli/tests/bootstrap/test_flows.py` runs every scenario over the Claude Code skill path, the Codex
-skill path, and the README body. Each case begins from the same canonical body and drives the real
-`agw guide` and JSON surfaces against isolated Agentworks config and database fixtures.
+Phase 3 adds no Markdown parser or bootstrap orchestration driver. `test_contract.py` applies the
+same checks to the canonical body, both generated skill bodies, and the README projection. It
+compares exact body bytes and uses literal positions to prove every disclosure and consent boundary
+precedes the first check, install, or guide command.
 
-| Scenario               | Required evidence                                                                                                                                                                         |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Fresh guided setup     | Disclosure is transcript event 1; consent is event 2; the first action follows; the resulting guide action IDs and final registry, graph, and stored-row facts match the Phase 1 fixture. |
-| Fresh replayable setup | Same action IDs and final facts as guided mode; commands use `agw --non-interactive`; every JSON v1 document is parsed and its version, command, and data shape asserted.                 |
-| Refused probe          | No probe runs; both modes retain the same `unverifiable` outcome and manual alternative.                                                                                                  |
-| Rerun                  | Replayed verified evidence produces the expected no-op plan without a new Agentworks ledger.                                                                                              |
-| Post-upgrade delta     | A newly available fixture capability appears as not yet adopted; already-ready work is not repeated.                                                                                      |
-| Old CLI                | Version 0.13.x never reaches the guide; the transcript contains the exact minimum and upgrade command after disclosure.                                                                   |
-| Failed upgrade         | No guide or setup action follows; the package-manager error remains visible and no alternative source is selected.                                                                        |
-
-The fixture driver records events at the command-runner boundary rather than inferring order from
-final output. It does not implement guide logic or parse bootstrap prose into an action language.
-The only bootstrap-specific decisions it makes are the consent response and the installed CLI
-version; all later actions come from the real guide records.
+The existing guide action fixtures are extended once for guided and non-interactive JSON behavior,
+refusal, rerun, and upgrade-delta evidence. They are not copied per package. Both native projections
+contain the same canonical `agw guide concept-onboarding --agent` handoff, so the projection checks
+and the one real guide fixture connect both packages to the same guide inventory by construction.
+Model interpretation, including old-CLI repair and failed-install behavior, belongs to the live
+Claude Code and Codex probes below.
 
 ### Clean-environment and live probes
 
@@ -438,7 +438,7 @@ retained as acceptance evidence.
 | Path                   | Install source                                                         | Required outcome                                                                                                                                            |
 | ---------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Claude Code plugin     | Exact Claude candidate-ref command pair above                          | Installed cached skill equals canonical body; a vanilla session emits disclosure before action, reaches the guide, and completes the first working session. |
-| Codex plugin           | Exact Codex candidate-ref command pair above                           | Same, using `danger-full-access` and on-request approvals.                                                                                                  |
+| Codex plugin           | Exact Codex candidate-ref command pair above                           | Same, starting in `workspace-write` with on-request approval and recording each scoped escalation.                                                          |
 | README only            | Copy the GitHub-rendered fenced block into a vanilla supported harness | Same flow without any plugin installed.                                                                                                                     |
 | Claude refusal         | Installed plugin                                                       | Refuse the first probe; no probe runs and a manual alternative is shown.                                                                                    |
 | Codex refusal          | Installed plugin                                                       | Same.                                                                                                                                                       |
@@ -446,17 +446,20 @@ retained as acceptance evidence.
 | Non-interactive replay | Each plugin in turn                                                    | Same caller-owned evidence yields the same final facts and JSON v1 parsing as guided setup.                                                                 |
 | Upgrade discovery      | Each plugin in turn with an older complete fixture                     | A newly registered capability is reported without redoing ready work.                                                                                       |
 
-Production metadata and prose always require `agentworks-cli >=0.14.0`. Before 0.14.0 is on PyPI,
-the clean probes install the built 0.14.0 release-candidate artifact directly at the package-install
-boundary. They do not resolve the candidate from PyPI and do not change the production bootstrap
-command or metadata. After publication, the same matrix runs once against real PyPI and the tagged
-GitHub marketplace. The post-publication smoke is release evidence, not permission to merge a
-bootstrap that failed the candidate probes.
+Production metadata and prose always require `agentworks-cli >=0.14.0`. Candidate gates install the
+built 0.14.0 release-candidate wheel directly at the package-install boundary. This settled HLA
+decision tests the unreleased CLI without changing the production command, metadata, or source.
+
+Release choreography is explicit: Phase 3 merges after candidate gates pass; release automation tags
+and publishes 0.14 from that main commit; then the post-publish smoke runs the exact production PyPI
+command and tagged marketplace. The short main-before-PyPI interval is expected. A failed publish
+blocks release completion and never causes a silent branch, archive, or alternate-index install.
 
 Every live transcript is checked for a strict prefix: disclosure, operator decision, then the first
 command or probe. A model response that combines disclosure with an already-executed action fails.
-No acceptance probe grants bypass mode, no-prompt execution, or root. Codex retains on-request
-approvals while using the required workstation-wide `danger-full-access` sandbox mode.
+No acceptance probe grants bypass mode, no-prompt execution, or root. Codex probes begin bounded;
+any `danger-full-access` fallback requires a separate disclosure and operator decision, and the
+evidence never claims that full access prompts for operations already inside its boundary.
 
 ## Documentation, completions, and sample config
 
@@ -471,29 +474,25 @@ The implementation commit ships these permanent artifacts with the generated pac
 
 Phase 3 adds no Agentworks CLI command or option. Existing `agw guide` completions are unchanged, so
 the shell completion generators and snapshots need no edit. It adds no setting, so
-`cli/agentworks/sample-config.toml` is unchanged. The implementation handoff records both audits.
-
-Permanent prose uses the current destination only. Package-layout rationale, candidate-artifact
-details, and this test decomposition remain in the SDD.
+`cli/agentworks/sample-config.toml` is unchanged.
 
 ## External contracts verified
 
-| Contract                                        | Primary source                                                                                 | Design consequence                                                                             |
-| ----------------------------------------------- | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| Claude Code plugin structure                    | <https://code.claude.com/docs/en/plugins>                                                      | Native `.claude-plugin/plugin.json` plus plugin-root `skills/`.                                |
-| Claude Code marketplace and GitHub installation | <https://code.claude.com/docs/en/plugin-marketplaces>                                          | Root `.claude-plugin/marketplace.json`, relative source path, two-step GitHub add and install. |
-| Claude Code cache boundary                      | <https://code.claude.com/docs/en/plugins-reference>                                            | Generated package is self-contained and never references canonical files outside its root.     |
-| Claude Code permissions and sandbox             | <https://code.claude.com/docs/en/permissions> and <https://code.claude.com/docs/en/sandboxing> | Default permission mode with manual approvals and no bypass.                                   |
-| Codex package structure                         | <https://developers.openai.com/plugins/build/plugins>                                          | Native `.codex-plugin/plugin.json`, plugin-root `skills/`, no unused component declarations.   |
-| Codex sandbox and approvals                     | <https://learn.chatgpt.com/docs/agent-approvals-security>                                      | `danger-full-access` for workstation-wide account access, with on-request approvals.           |
-| Agent Skills frontmatter                        | <https://agentskills.io/specification>                                                         | Common name, description, compatibility, and string metadata; no allowed-tool grant.           |
+| Contract                                        | Primary source                                                                                 | Design consequence                                                                                         |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Claude Code plugin structure                    | <https://code.claude.com/docs/en/plugins>                                                      | Native `.claude-plugin/plugin.json` plus plugin-root `skills/`.                                            |
+| Claude Code marketplace and GitHub installation | <https://code.claude.com/docs/en/plugin-marketplaces>                                          | Root `.claude-plugin/marketplace.json`, relative source path, two-step GitHub add and install.             |
+| Claude Code cache boundary                      | <https://code.claude.com/docs/en/plugins-reference>                                            | Generated package is self-contained and never references canonical files outside its root.                 |
+| Claude Code permissions and sandbox             | <https://code.claude.com/docs/en/permissions> and <https://code.claude.com/docs/en/sandboxing> | Default permission mode with manual approvals and no bypass.                                               |
+| Codex package structure                         | <https://developers.openai.com/plugins/build/plugins>                                          | Native manifest with the required minimal `interface`, plugin-root `skills/`, and no unused components.    |
+| Codex sandbox and approvals                     | <https://learn.chatgpt.com/docs/agent-approvals-security>                                      | `workspace-write` with on-request, scoped escalation, and disclosed operator-elected full-access fallback. |
+| Agent Skills frontmatter                        | <https://agentskills.io/specification>                                                         | Common name, description, compatibility, and string metadata; no allowed-tool grant.                       |
 
-Codex CLI 0.147.0 was also exercised locally on 2026-08-10 to verify
-`codex plugin marketplace add owner/repo` and `codex plugin add plugin@marketplace`. These commands
-match the current OpenAI plugin builder documentation. Implementation rechecks both harness CLIs
-against their latest stable releases before committing generated formats.
+Codex CLI 0.147.0 verified both marketplace commands on 2026-08-10. The manifest fields match the
+current official `interface` contract and installed plugin validator.
 
-## Open questions
+## Process
 
-None. The production minimum remains 0.14.0, and pre-release gates consume the built
-release-candidate artifact directly rather than resolving an unreleased version from PyPI.
+A delegated developer authored this LLD under the onboarding-and-discovery lead's ownership. The
+lead reviewed it. This artifact is intended for a draft checkpoint PR and merges only after saga
+review converges.
