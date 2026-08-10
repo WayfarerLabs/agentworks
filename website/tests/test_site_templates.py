@@ -489,6 +489,19 @@ class TemplateContractTests(RepositoryFixture):
             ):
                 site_builder._validate_template(name, template.replace(old, new))
 
+    def test_security_template_rejects_email_address_reporting_canary(self) -> None:
+        template = (self.root / "website/templates/security.html").read_text(encoding="utf-8")
+        for address_text in (
+            "Report privately to security@example.test",
+            "Report privately to security@example.test.",
+        ):
+            changed = template.replace("</main>", f"<p>{address_text}</p>\n</main>")
+            with (
+                self.subTest(address_text=address_text),
+                self.assertRaisesRegex(ValueError, "email reporting paths are forbidden"),
+            ):
+                site_builder._validate_template("security.html", changed)
+
     def test_manifesto_tokens_cannot_move_out_of_reviewed_article_or_metadata(
         self,
     ) -> None:

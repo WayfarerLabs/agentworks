@@ -5,8 +5,7 @@
 If you believe you have found a security vulnerability in Agentworks, please report it privately
 rather than opening a public issue.
 
-Use GitHub's [private vulnerability reporting][gh-private] on this repository, or email the
-maintainer directly. Please include:
+Use GitHub's [private vulnerability reporting][gh-private] on this repository. Please include:
 
 - A description of the issue and the impact you believe it has.
 - Steps to reproduce (or a proof-of-concept, if applicable).

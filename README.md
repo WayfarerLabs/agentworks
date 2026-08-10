@@ -272,7 +272,7 @@ across the surface, and pairs well with AI coding assistants.
 
 ## Security
 
-Found a vulnerability? Please report it privately. See [SECURITY.md](SECURITY.md) for scope and
-reporting channels.
+Found a vulnerability? Please report it privately. See [SECURITY.md](SECURITY.md) for scope and the
+reporting channel.
 
 Licensed under [MIT](LICENSE).

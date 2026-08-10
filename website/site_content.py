@@ -210,8 +210,8 @@ CONTRACTS: Final = (
                 "privately rather than opening a public issue."
             ),
             paragraph(
-                "Use GitHub's [private vulnerability reporting][gh-private] on this repository, or email the "
-                "maintainer directly. Please include:"
+                "Use GitHub's [private vulnerability reporting][gh-private] on this repository. Please "
+                "include:"
             ),
             unordered(
                 "A description of the issue and the impact you believe it has.",

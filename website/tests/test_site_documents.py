@@ -213,6 +213,7 @@ class GeneratedDocumentTests(RepositoryFixture):
         hrefs = [anchor.get("href") for anchor in document.tags("a")]
         self.assertEqual(hrefs.count(site_builder.REPORTING_URL), 2)
         self.assertIn("https://github.com/WayfarerLabs/agentworks/security/policy", hrefs)
+        self.assertNotIn("email", self.pages["security"].lower())
         self.assertFalse(document.tags("script"))
 
     def test_404_retains_fallback_and_has_only_its_local_module(self) -> None:

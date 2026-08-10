@@ -24,6 +24,11 @@ SITE_BASE_PATTERN = re.compile(r"/(?:[A-Za-z0-9][A-Za-z0-9._~-]*/)*\Z", re.ASCII
 TOKEN_PATTERN = re.compile(r"{{[A-Z][A-Z0-9_]*}}")
 HTTP_URL_PATTERN = re.compile(r"(?i)https?://")
 QUOTED_PROTOCOL_RELATIVE_URL_PATTERN = re.compile(r"""["'`]//""")
+EMAIL_ADDRESS_PATTERN = re.compile(
+    r"(?<![A-Z0-9._%+-])[A-Z0-9._%+-]+@[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?"
+    r"(?:\.[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?)+",
+    re.IGNORECASE,
+)
 STATIC_IMPORT_PATTERN = re.compile(
     r"\b(?:import|export)\s+(?:[^;\"']*?\s+from\s+)?([\"'])([^\"']+)\1",
     re.DOTALL,
@@ -878,6 +883,8 @@ def _validate_template(name: str, template: str) -> None:
     masked = TOKEN_PATTERN.sub("", template)
     if "{{" in masked or "}}" in masked:
         raise ValueError(f"{name}: template contains brace-like unknown text")
+    if name == "security.html" and EMAIL_ADDRESS_PATTERN.search(template):
+        raise ValueError("security.html: email reporting paths are forbidden")
     for match in re.finditer(re.escape(SITE_BASE_TOKEN), template):
         prefix = template[max(0, match.start() - 160) : match.start()]
         if re.search(r"(?:href|src)=\"[^\"]*$", prefix) is None:
@@ -910,6 +917,8 @@ def render_named_template(name: str, template: str, site_base: str, substitution
     rendered = TOKEN_PATTERN.sub(lambda match: values[match.group(0)], template)
     if TOKEN_PATTERN.search(rendered) or "{{" in rendered or "}}" in rendered:
         raise ValueError(f"{name}: rendered template contains an unexpanded token")
+    if name == "security.html" and EMAIL_ADDRESS_PATTERN.search(rendered):
+        raise ValueError("security.html: email reporting paths are forbidden")
     return rendered
 
 

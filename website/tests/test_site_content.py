@@ -23,6 +23,7 @@ class SourceContractTests(RepositoryFixture):
         self.assertIn("<em>when</em>", content["SECURITY_BOUNDARIES"])
         self.assertIn(site_builder.CLI_SECRETS_URL, content["SECURITY_SECRETS"])
         self.assertIn(site_builder.REPORTING_URL, content["SECURITY_REPORTING"])
+        self.assertNotIn("email", content["SECURITY_REPORTING"].lower())
         self.assertIn(
             '<h2 id="the-problem-space">The Problem Space</h2>',
             content["MANIFESTO_CONTENT"],

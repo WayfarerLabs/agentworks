@@ -26,7 +26,7 @@ A later onboarding phase replaces that notice through its own canonical contract
 | ------------------------------------ | --------------------------------------------------------------------------- |
 | `website/templates/index.html`       | Compact repository-sourced identity and interim onboarding notice           |
 | `website/templates/manifesto.html`   | Presentation shell for the generated long-form argument                     |
-| `website/templates/security.html`    | Repository-sourced security depth and reporting routes                      |
+| `website/templates/security.html`    | Repository-sourced security depth and GitHub reporting route                |
 | `website/templates/lander.html`      | Dedicated semantic shell for the shared lunar deployment game               |
 | `website/templates/404.html`         | Useful error surface and progressively enhanced lander                      |
 | `website/templates/lander-game.html` | Sole template source for the reusable game subtree                          |

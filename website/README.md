@@ -10,12 +10,12 @@ published by any static host.
 The current release is intentionally useful without guided onboarding. The compact Home page renders
 the repository-sourced identity and states that guided onboarding is not yet published. A generated
 Manifesto presents the complete long-form argument from `docs/why-agentworks.md`, while a separate
-Security page provides practical depth and reporting routes. The shared header places the GitHub and
-PyPI destinations once per page. A dedicated Lander page presents the same bounded lunar-deployment
-game used as progressive enhancement on the useful 404 fallback. The shared footer places the
-Manifesto, Security, and icon-only Lander destinations once per page. Home contains no substitute
-command or copy control. A later change will replace the notice with the canonical onboarding source
-after that source is available on `main`.
+Security page provides practical depth and a GitHub reporting route. The shared header places the
+GitHub and PyPI destinations once per page. A dedicated Lander page presents the same bounded
+lunar-deployment game used as progressive enhancement on the useful 404 fallback. The shared footer
+places the Manifesto, Security, and icon-only Lander destinations once per page. Home contains no
+substitute command or copy control. A later change will replace the notice with the canonical
+onboarding source after that source is available on `main`.
 
 ## Local build and test
 
