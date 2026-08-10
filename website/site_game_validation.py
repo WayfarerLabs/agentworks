@@ -134,7 +134,7 @@ def validate_game_contract(template: str) -> None:
         'class="gas-can"',
         'class="noc-building"',
         'class="noc-battery"',
-        'class="noc-antenna"',
+        'class="noc-antenna antenna-mast"',
     ):
         if required not in template:
             raise ValueError(f"lander-game.html: missing static world contract {required}")

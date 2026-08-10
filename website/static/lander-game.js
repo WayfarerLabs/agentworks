@@ -65,23 +65,17 @@ function freshSeed() {
 
 function createSiteGroup(site) {
     const group = svg("g", { class: "lander-site", "data-site-id": site.id });
-    const platform = svg("g", { class: "landing-platform" });
-    platform.append(svg("rect"), svg("path", { class: "helipad-mark" }));
-    group.append(platform, svg("path", { class: "platform-supports" }));
-    const can = svg("g", { class: "gas-can" });
-    can.append(svg("path", { d: "M-7 0h14v15H-7Zm4-5h7v5h-7Zm10 7h4v8H7" }));
-    group.append(can);
-    const building = svg("g", { class: "noc-building" });
-    building.append(svg("path"), svg("path", { class: "noc-entry" }));
-    group.append(building);
+    group.append(svg("rect", { class: "landing-platform" }), svg("path", { class: "helipad-mark" }),
+        svg("path", { class: "platform-supports" }),
+        svg("path", { class: "gas-can", d: "M-7 0h14v15H-7Zm4-5h7v5h-7Zm10 7h4v8H7" }),
+        svg("path", { class: "noc-building" }), svg("path", { class: "noc-building noc-entry" }));
     const battery = svg("g", { class: "noc-battery" });
     battery.append(svg("rect", { rx: 2 }), svg("path", { class: "battery-terminal" }));
     for (let index = 1; index <= 4; index += 1) battery.append(svg("path", { class: `battery-bar battery-bar-${index}` }));
     group.append(battery);
-    const antenna = svg("g", { class: "noc-antenna" });
-    antenna.append(svg("path", { class: "antenna-mast" }), svg("circle", { class: "antenna-head", r: 4 }),
-        svg("path", { class: "antenna-signal" }));
-    group.append(antenna);
+    group.append(svg("path", { class: "noc-antenna antenna-mast" }),
+        svg("circle", { class: "noc-antenna antenna-head", r: 4 }),
+        svg("path", { class: "noc-antenna antenna-signal" }));
     return group;
 }
 
@@ -94,27 +88,25 @@ function positionSite(group, site) {
     group.dataset.can = site.canCollected ? "collected" : "present";
     group.dataset.power = site.powered ? "on" : "off";
     group.dataset.nocStage = String(site.nocStage ?? (site.powered ? 5 : 0));
-    const platform = group.querySelector(".landing-platform");
-    const deck = platform.querySelector("rect");
+    const deck = group.querySelector(".landing-platform");
     deck.setAttribute("x", left); deck.setAttribute("y", top); deck.setAttribute("width", right - left); deck.setAttribute("height", bottom - top);
-    platform.querySelector(".helipad-mark").setAttribute("d", `M${center - 9} ${top + 1.7}v-20m18 20v-20m-18 10h18`);
+    group.querySelector(".helipad-mark").setAttribute("d", `M${center - 9} ${top + 1.7}v-20m18 20v-20m-18 10h18`);
     group.querySelector(".platform-supports").setAttribute("d", `M${left + 14} ${bottom}v4.5m${right - left - 28} -4.5v4.5`);
     group.querySelector(".gas-can").setAttribute("transform", `translate(${center + 30} ${top - 15})`);
     const buildingLeft = right + 20;
     const roof = top - 72;
     const foundation = 548 - (site.foundationBottom ?? site.platformTop) * 10;
-    const building = group.querySelector(".noc-building");
-    building.firstElementChild.setAttribute("d", `M${buildingLeft} ${foundation}V${roof}h70V${foundation}Z`);
-    building.lastElementChild.setAttribute("d", `M${buildingLeft} ${top - 18}h13v18h-13Z`);
+    group.querySelector(".noc-building").setAttribute("d", `M${buildingLeft} ${foundation}V${roof}h70V${foundation}Z`);
+    group.querySelector(".noc-entry").setAttribute("d", `M${buildingLeft} ${top - 18}h13v18h-13Z`);
     const battery = group.querySelector(".noc-battery");
     battery.querySelector("rect").setAttribute("x", buildingLeft + 13); battery.querySelector("rect").setAttribute("y", roof + 18);
     battery.querySelector("rect").setAttribute("width", 40); battery.querySelector("rect").setAttribute("height", 22);
     battery.querySelector(".battery-terminal").setAttribute("d", `M${buildingLeft + 53} ${roof + 24}h5v10h-5`);
     for (let index = 1; index <= 4; index += 1) battery.querySelector(`.battery-bar-${index}`).setAttribute("d", `M${buildingLeft + 18 + (index - 1) * 8} ${roof + 23}h5v12h-5Z`);
-    const antenna = group.querySelector(".noc-antenna");
-    antenna.querySelector(".antenna-mast").setAttribute("d", `M${buildingLeft + 35} ${roof}v-32`);
-    antenna.querySelector(".antenna-head").setAttribute("cx", buildingLeft + 35); antenna.querySelector(".antenna-head").setAttribute("cy", roof - 34);
-    antenna.querySelector(".antenna-signal").setAttribute("d", `M${buildingLeft + 44} ${roof - 38}a15 15 0 0 1 0 16m8-24a26 26 0 0 1 0 32`);
+    group.querySelector(".antenna-mast").setAttribute("d", `M${buildingLeft + 35} ${roof}v-32`);
+    group.querySelector(".antenna-head").setAttribute("cx", buildingLeft + 35);
+    group.querySelector(".antenna-head").setAttribute("cy", roof - 34);
+    group.querySelector(".antenna-signal").setAttribute("d", `M${buildingLeft + 44} ${roof - 38}a15 15 0 0 1 0 16m8-24a26 26 0 0 1 0 32`);
 }
 
 export class LanderGameController {

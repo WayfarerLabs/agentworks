@@ -182,6 +182,10 @@ function focusable(element) {
     return !element.disabled;
 }
 
+function descendantCount(element) {
+    return element.children.reduce((total, child) => total + 1 + descendantCount(child), 0);
+}
+
 test("8.4 engine physics, fuel exhaustion, input, and plumes match fixed vectors", () => {
     assert.equal(ENGINE_ACCELERATION, 8.4);
     const pose = { x: 10, y: 30, vx: 0, vy: 0, angle: 0, angularVelocity: 0 };
@@ -569,7 +573,7 @@ test("intermediate NOC battery stages project from model to the retained site DO
     controller.model = model; controller.render();
     const group = fixture.elements["site-layer"].querySelector(`[data-site-id="${active.id}"]`);
     assert.equal(group.dataset.nocStage, "2");
-    assert.equal(group.querySelector(".noc-building").firstElementChild.attributes.get("d"),
+    assert.equal(group.querySelector(".noc-building").attributes.get("d"),
         `M${active.platformRight * 10 + 20} ${548 - active.foundationBottom * 10}` +
         `V${548 - active.platformTop * 10 - 72}h70V${548 - active.foundationBottom * 10}Z`);
     controller.model = updateRetention(advanceMissionSequence(model, 0.2)); controller.render();
@@ -673,6 +677,33 @@ test("retention and DOM reconciliation change only at bounded window keys", asyn
     assert.equal(fixture.elements["site-layer"].children.length, 0);
     assert.equal(controller.root.style.properties.has("--crash-x"), false);
     assert.equal(fixture.elements["lander-start"].hidden, false);
+    controller.destroy();
+});
+
+test("worst-case world projection stays within eighty descendants during a crash", async () => {
+    let model = createRun({ seed: 1 });
+    const sites = [model.retainedSites[0]];
+    sites.push(instantiateTemplateSite(model.seed, 1, sites[0], REFERENCE_TEMPLATES[0]));
+    sites.push(instantiateTemplateSite(model.seed, 2, sites[1], REFERENCE_TEMPLATES[1]));
+    model = updateRetention({ ...model, pose: { ...model.pose, x: sites[1].center }, retainedSites: sites,
+        activeSiteId: 1, targetSiteId: 2 });
+    assert.equal(model.retainedChunks.length, 10); assert.equal(model.retainedSites.length, 3);
+    const fragments = Array.from({ length: 8 }, (_, id) => ({ id, x: model.pose.x, y: model.pose.y,
+        vx: id / 10, vy: id / 20, angularVelocity: id, color: "#292b30" }));
+    model = { ...model, state: "crashing", crash: { pose: model.pose, fragments }, sequenceSeconds: 0.1 };
+
+    const { LanderGameController } = await controllerClasses();
+    const fixture = controllerFixture(); const controller = new LanderGameController(fixture.root);
+    const world = new FakeElement(); const missionLander = new FakeElement();
+    missionLander.append(...Array.from({ length: 4 }, () => new FakeElement()));
+    fixture.elements["mission-agent"].append(new FakeElement(), new FakeElement());
+    world.append(fixture.elements["terrain-layer"], fixture.elements["site-layer"],
+        fixture.elements["debris-layer"], missionLander, fixture.elements["mission-agent"]);
+    controller.model = model; controller.render();
+    assert.equal(fixture.elements["terrain-layer"].children.length, 10);
+    assert.equal(fixture.elements["site-layer"].children.length, 3);
+    assert.equal(fixture.elements["debris-layer"].children.length, 8);
+    assert.equal(descendantCount(world), 80);
     controller.destroy();
 });
 
