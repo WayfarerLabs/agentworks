@@ -1,4 +1,4 @@
-# HLA: Onboarding, Discovery, and Management
+# HLA: Agentworks Assistance, Discovery, and Management
 
 - Status: Draft for pre-implementation review
 - FRD: `docs/sdd/2026-08-05-onboarding-and-discovery/frd.md`
@@ -15,8 +15,9 @@ The implementation has four cooperating surfaces:
    plugins contribute through the same path.
 3. Selected operational commands expose versioned JSON from the same service-layer fact records
    their human renderers use.
-4. Claude Code and Codex publish thin, equivalent bootstrap skills that disclose access, install the
-   CLI, and hand control to `agw guide`.
+4. Claude Code and Codex publish thin, equivalent Agentworks skills that remain available for the
+   Agentworks lifecycle. They disclose access, install or update the CLI when needed, and hand the
+   current request to the top-level `agw guide --agent` intent router.
 
 The first implementation slice uses only contracts on `main`: current registries, finalized graph
 facts, resource inspection records, and the completion mechanism. Wave 2 adoption is a later adapter
@@ -193,7 +194,22 @@ missing resources.
 ## Guide rendering and agent shaping
 
 `agw guide` always writes markdown to stdout. With no topic it renders a compact overview, security
-disclosure, golden-path entry, and live topic index.
+disclosure, intent router, and live topic index. Agent mode routes common requests without assuming
+that every invocation is first-run onboarding:
+
+- setup, adoption assessment, and installed-release capability questions route to
+  `concept-onboarding`; a temporal release-change question is distinguished explicitly and points to
+  the canonical GitHub release notes rather than treating current state as a historical delta;
+- configuration, declared-resource changes, and VM or session operation route to
+  `concept-management` and the applicable kind or instance topics;
+- diagnosis routes to `concept-troubleshooting`;
+- breaking-input remediation routes to `concept-migration`;
+- secret-model questions route to `concept-secrets`;
+- defects route to `concept-reporting-bugs`.
+
+The router is authored core guide content over the live topic catalog. It contains no operation
+commands and grants no authority. Adding a topic does not silently make it a top-level intent; the
+small set of intent routes is reviewed teaching, while the complete index remains derived.
 
 The CLI exposes a paired `--agent/--human` override. Detection precedence is:
 
@@ -228,15 +244,32 @@ Schema-derived guide topics consume the context-free reference and sample record
 default filling remains at the manifest decode boundary; the guide does not recreate that step, pass
 Pydantic validation context, or construct capability implementations.
 
-`concept-onboarding` does not persist a second onboarding ledger. Done and not-yet-done status is a
-pure assessment over sanitized facts already available through `GuideView`: resource identity and
-description from registry rows, finalized enablement and readiness verdicts from graph nodes,
-declared graph relationships, and existing instance rows from kind-owned read-only inventory hooks.
-The guide never loads raw config to infer additional state and never runs doctor while rendering. A
-fact outside that set is `unverifiable`, not permission to reach around the view.
+`concept-onboarding` remains the specialized first-run and adoption-assessment topic; it is not the
+identity of the installed skill. It does not persist a second onboarding ledger. Done and
+not-yet-done status is a pure assessment over sanitized facts already available through `GuideView`:
+resource identity and description from registry rows, finalized enablement and readiness verdicts
+from graph nodes, declared graph relationships, and existing instance rows from kind-owned read-only
+inventory hooks. The guide never loads raw config to infer additional state and never runs doctor
+while rendering. A fact outside that set is `unverifiable`, not permission to reach around the view.
+Its golden path continues through a usable VM and a started first session. Those operations are
+inert action records with explicit names and selected templates or sites, declared impact,
+`mutate-agentworks` consent, ordinary JSON verification, and a refusal alternative. The action plan
+does not attach, delete, elevate privileges, or infer operator choices.
+
+`concept-management` is the ongoing configuration and operation entry. It routes to live kind and
+instance facts, then names the applicable built-in CLI help entry point for exact current command
+syntax. Group and command help from the existing Typer command tree is the command authority; the
+guide does not project a command registry or copy complete operational recipes. The small stable set
+of group-level help links is authored connective teaching and changes in the same commit as a CLI
+rename. There is no package-level wall between configuring Agentworks and operating managed VMs or
+sessions. The boundary is the action: read-only discovery may remain read-only; creating or changing
+declared state uses `mutate-agentworks`; connection uses the named-target boundary; and destructive
+work or privilege elevation requires a fresh, explicitly described operator decision. Existing
+consent boundaries are sufficient for the first slice, so this correction does not add a second risk
+model.
 
 Agent-only workstation facts are never inferred by `agw`. Doctor, tool checks, SSH tests, and other
-verification commands are explicit onboarding actions that the agent runs only after obtaining the
+verification commands are explicit assistance actions that the agent runs only after obtaining the
 applicable consent. The guide asks the agent to check presence without reading sensitive values and
 record refusals in the current interaction or caller-owned replay log. The guide presents an ordered
 action plan:
@@ -244,7 +277,8 @@ action plan:
 - guided use lets the agent ask before each consent boundary and execute the next action;
 - replayable use uses the same actions with `agw --non-interactive`, explicit inputs, and repeatable
   target-scoped `--evidence ACTION_ID:KIND/NAME=OUTCOME` values from the caller-owned replay log;
-- reruns skip facts already ready and report new, disabled, not-ready, or unverifiable items.
+- reruns skip facts already ready and report currently not-yet-adopted, disabled, not-ready, or
+  unverifiable items.
 
 The first slice defines the assessment and plan. It does not add a CLI wizard or hidden state
 machine.
@@ -265,7 +299,7 @@ an Agentworks onboarding ledger; the caller remains responsible for retaining an
 | Need                          | Existing surface                                                                                                                                        | Gap and commitment                                                                                                                                                                                                                                                                |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Secret reference availability | `agw secret describe` predicts the ready backend without resolving or exposing a value. Doctor reports the same prediction in its consented full check. | Prediction is not proof. Add a named-secret verification operation that resolves through the normal boundary, returns only success or framed failure, never emits or returns the value to the caller, and cannot fall through to an interactive backend without explicit consent. |
-| Required host tools           | `agw doctor` checks `ssh`, `scp`, and `tailscale`; finalized capability rows carry already-computed readiness for their host requirements.              | The LLD inventories every onboarding action's required tool and adds a safe explicit check only where doctor or readiness does not already cover it. Agent-side discovery of other installed tools remains consent-first.                                                         |
+| Required host tools           | `agw doctor` checks `ssh`, `scp`, and `tailscale`; finalized capability rows carry already-computed readiness for their host requirements.              | The LLD inventories every assistance action's required tool and adds a safe explicit check only where doctor or readiness does not already cover it. Agent-side discovery of other installed tools remains consent-first.                                                         |
 | SSH connectivity              | VM lifecycle code verifies connectivity during mutating operations, but there is no dedicated read-only operator surface for an existing VM.            | Add a bounded, non-mutating named-VM connection verification operation that uses the standard transport and reports success or framed failure without repairing, rekeying, or changing power state.                                                                               |
 
 Doctor and the new proof operations run only as explicit, consented action records. Guide rendering
@@ -322,30 +356,34 @@ The topic catalog and guide renderer live below Typer. CLI functions parse optio
 state, call the service, and emit the returned markdown. This mirrors the existing resource
 inspection separation and keeps tests independent of terminal presentation.
 
-## Bootstrap packaging
+## Assistance packaging
 
-One canonical bootstrap body is the source for both harness packages. It contains only:
+One canonical assistance body is the source for both harness packages. It contains only:
 
 1. supported Python and `agentworks-cli` installation guidance;
 2. the complete R12 access disclosure, including the intended workstation, full account-scoped file
    inspection and command execution, separate explicit privilege elevation, Agentworks-reachable
    resources, and concrete strict-security posture links;
-3. the instruction to run `agw guide concept-onboarding --agent` and follow it.
+3. the instruction to run `agw guide --agent`, select the route matching the operator's current
+   goal, and follow that topic.
 
 A small generator wraps that body in the Claude Code and Codex package layouts. Generated files are
 committed so GitHub installation works without a build step. CI regenerates into a temporary
-directory and requires a clean diff, proving substantive parity. Bootstrap metadata declares the
+directory and requires a clean diff, proving substantive parity. Package metadata declares the
 minimum CLI version that first supplies the referenced guide contract and no maximum. The guide
 itself owns all evolving teaching.
 
-The repository README leads with the same canonical agent-addressed bootstrap text in a fenced
+The repository README leads with the same canonical agent-addressed assistance text in a fenced
 copyable block. It derives from or is checked against the canonical source rather than maintaining a
 second security paraphrase. The plugins remain an additional discovery channel, not a prerequisite.
 
-The bootstrap's instruction to follow `concept-onboarding` also exercises the machine-readable
-contract. The guide tells the agent which list, describe, and doctor JSON documents to request and
-inspect at each applicable action. End-to-end bootstrap tests follow that instruction and parse the
-returned v1 documents rather than merely checking that the flags exist.
+The package is named for Agentworks rather than onboarding, and its description activates for setup,
+discovery, adoption, configuration, troubleshooting, and operation. It contains no intent-to-topic
+switchboard of its own. The top-level guide owns that routing, and selected topics tell the agent
+which list, describe, doctor, and operation records to request at each applicable action. End-to-end
+assistance tests cover an initial VM and session, a returning current-capability and adoption
+assessment, the release-notes handoff for temporal history, an ongoing management operation, and a
+refusal at a higher-risk action boundary.
 
 ## Feedback decision
 
@@ -382,10 +420,10 @@ gated work.
 
 ## Documentation and compatibility
 
-Permanent CLI docs define topic taxonomy, agent shaping, JSON v1, bootstrap installation, and the
-safe contribution contract in the same commits as their code. Package-level contributor docs explain
-how to colocate inert topic data. The sample config changes only if onboarding introduces a new
-setting; no setting is currently planned.
+Permanent CLI docs define topic taxonomy, agent shaping, JSON v1, assistance-package installation,
+and the safe contribution contract in the same commits as their code. Package-level contributor docs
+explain how to colocate inert topic data. The sample config changes only if assistance introduces a
+new setting; no setting is currently planned.
 
 The contributor contract also becomes durable agent guidance through Rulesync's canonical sources.
 An always-on rule tells developers that code adding or changing a resource kind, capability

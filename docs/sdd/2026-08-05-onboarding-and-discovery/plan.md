@@ -1,4 +1,4 @@
-# Plan: Onboarding, Discovery, and Management
+# Plan: Agentworks Assistance, Discovery, and Management
 
 - Status: Active, Phase 3
 - FRD: `docs/sdd/2026-08-05-onboarding-and-discovery/frd.md`
@@ -253,38 +253,57 @@ The checked review rounds above record work later superseded by the operator sco
 Definition of done: R7 and AC4 hold across the named commands, with human and JSON renderers sharing
 one fact source.
 
-## Phase 3: README and cross-harness bootstraps
+## Phase 3: always-available assistance and cross-harness packages
 
 - [x] `bootstrap-packaging-lld.md` pins the canonical source, generated Claude Code and Codex
       layouts, marketplace metadata, install commands, security-setting links, minimum CLI version,
       regeneration guard, README derivation or equivalence check, and clean-environment probe
       matrix.
-- [ ] Canonical thin bootstrap contains installation, the complete R12 disclosure, strict harness
-      posture, and `agw guide concept-onboarding --agent`, with no duplicated teaching content. The
+
+The completed checkpoint above records the initial onboarding-centered package design. The
+operator's 2026-08-10 lifecycle-assistance correction supersedes that lens without erasing the
+completed design work; the corrective LLD and implementation boxes below carry the destination.
+
+- [ ] Revise `bootstrap-packaging-lld.md` around an always-available Agentworks package: neutral
+      package and skill identity, top-level `agw guide --agent` handoff, setup and
+      returning-operator probes, and no package-owned intent switchboard or duplicated teaching.
+- [ ] Top-level agent guide rendering routes setup and adoption, management and operation,
+      troubleshooting, exceptional migration, secrets, and bug-reporting intents without granting
+      action authority or hiding the complete live topic index.
+- [ ] `concept-onboarding` remains the specialized first-run and adoption-assessment path and gains
+      a bounded, consented golden path that creates and verifies a usable VM and started first
+      session from explicit operator-selected inputs.
+- [ ] `concept-management` routes ongoing configuration and VM or session operation through live
+      kind and instance facts, existing JSON facts, and the applicable built-in CLI group or command
+      help for exact syntax. It adds no command registry or copied recipe catalog. Configuration and
+      operation remain one assistance surface; each read, mutation, connection, privilege, or
+      destructive boundary retains its own explicit scope and operator decision.
+- [ ] Canonical thin assistance content contains installation or update guidance, the complete R12
+      disclosure, strict harness posture, and `agw guide --agent`, with no duplicated teaching. The
       disclosure names the intended workstation, full file inspection and command execution under
       the harness account, separate explicit privilege elevation, and the strictest practical
       approval and visibility posture that preserves the required workstation access.
-- [ ] Generator emits committed Claude Code and Codex plugin/marketplace wrappers from that source;
-      CI requires regeneration to produce no diff.
-- [ ] Repository README Getting Started leads with the R16 agent-addressed fenced block generated
-      from the canonical source and retains a clear human installation path below it.
+- [ ] Generator emits committed Claude Code and Codex Agentworks plugin and marketplace wrappers
+      from that source; CI requires regeneration to produce no diff.
+- [ ] Repository README Getting Started leads with the R16 agent-addressed assistance block
+      generated from the canonical source and retains a clear human installation path below it.
 - [ ] Both packages install directly from GitHub in clean harness environments and reach the guide;
       minimum-version failure produces an actionable upgrade instruction.
-- [ ] Both generated package projections contain the exact same guide handoff and bind by
+- [ ] Both generated package projections contain the exact same top-level guide handoff and bind by
       construction to one shared guided and non-interactive guide fixture covering refusal, rerun
-      no-op behavior, post-upgrade newly available capability reporting, and JSON v1 consumption;
-      per-harness live probes validate model interpretation without a bootstrap orchestration
-      driver.
-- [ ] Canonical projection checks and every live bootstrap probe assert the R12 disclosure is
-      emitted before the first setup command, probe, verification command, or other action, and pin
+      no-op behavior, post-upgrade current not-yet-adopted capability reporting, the canonical
+      release-notes handoff for temporal history, and JSON v1 consumption; per-harness live probes
+      validate model interpretation without a bootstrap orchestration driver.
+- [ ] Canonical projection checks and every live assistance probe assert the R12 disclosure is
+      emitted before the first command, probe, verification, mutation, or other action, and pin
       every workstation-access and privilege boundary from the canonical source.
 - [ ] Permanent installation and security documentation ships with the packages.
 - [ ] Packaging, generation, lint, and end-to-end gates pass; step reviewed by `agentworks-reviewer`
       and a fresh-eyes reviewer; valid findings resolved.
 - [ ] Always-green ready-to-merge PR opened and saga-lead review requested.
 
-Definition of done: R1, R11, R12, R16, AC1, AC3, AC7, AC8, and AC10 hold for both harnesses and the
-zero-plugin README path.
+Definition of done: R1, R2, R3, R10, R11, R12, R13, R16, AC1, AC2, AC3, AC7, AC8, AC10, and AC14
+hold for both harnesses and the zero-plugin README path.
 
 ## Phase 4: registry inventory and specific-resource projection
 
@@ -307,7 +326,7 @@ hand-maintained switchboard.
 ## Phase 5: acceptance, promotion, and closeout
 
 - [ ] Fresh-operator acceptance matrix run for Claude Code, Codex, and README-only paths with
-      evidence for all 13 FRD acceptance criteria.
+      evidence for all 14 FRD acceptance criteria.
 - [ ] No telemetry, general-feedback prompt, or non-bug manual-relay request ships; acceptance runs
       retain their own timing and unexplained-intervention evidence as test artifacts.
 - [ ] `concept-reporting-bugs` is tested to redact sensitive evidence, point at the repository bug
