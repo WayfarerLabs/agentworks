@@ -1,0 +1,22 @@
+{
+  "name": "agentworks",
+  "version": "1.0.0",
+  "description": "Always-available assistance for setting up, discovering, configuring, troubleshooting, and operating Agentworks.",
+  "author": {
+    "name": "Wayfarer Labs",
+    "url": "https://github.com/WayfarerLabs"
+  },
+  "homepage": "https://github.com/WayfarerLabs/agentworks",
+  "repository": "https://github.com/WayfarerLabs/agentworks",
+  "license": "MIT",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Agentworks",
+    "shortDescription": "Agentworks assistance",
+    "longDescription": "Set up, understand, configure, troubleshoot, and operate Agentworks.",
+    "developerName": "Wayfarer Labs",
+    "category": "Productivity",
+    "capabilities": ["Lifecycle assistance"],
+    "defaultPrompt": ["Help me with Agentworks."]
+  }
+}

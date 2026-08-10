@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "agentworks",
+  "description": "Always-available assistance for setting up, discovering, configuring, troubleshooting, and operating Agentworks.",
+  "owner": {
+    "name": "Wayfarer Labs"
+  },
+  "plugins": [
+    {
+      "name": "agentworks",
+      "description": "Always-available assistance for setting up, discovering, configuring, troubleshooting, and operating Agentworks.",
+      "source": "./plugins/claude-code/agentworks"
+    }
+  ]
+}
