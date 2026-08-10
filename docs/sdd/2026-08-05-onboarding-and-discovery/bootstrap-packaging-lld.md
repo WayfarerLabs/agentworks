@@ -257,18 +257,24 @@ review and requires authorization from the operator's established envelope or a 
 After the startup envelope is established, the body instructs the Agentworks assistant agent to:
 
 1. Run `agw version`.
-2. If `agw` is absent, malformed, older than 0.14.0, or the operator requests an update, select an
-   exact compatible stable version and make the source review offer above.
-3. If exact-version installation is already authorized by the operator's instruction and startup
-   envelope, run `uv tool install --upgrade 'agentworks-cli==VERSION'` without asking again. If it
-   is not covered, disclose that one material expansion and obtain a decision first.
-4. Re-run `agw version` and require the exact selected version.
-5. Run `agw guide --agent`, interpret its intent-to-topic map and live index against the operator's
+2. If the installed version is valid and at least 0.14.0 and the operator did not request an update,
+   retain that exact version, skip source review and installation without prompting, and continue to
+   the guide handoff.
+3. Only when `agw` is absent, malformed, older than 0.14.0, or the operator requests an update,
+   select an exact compatible stable version and make the source review offer above.
+4. When that installation or update is needed and exact-version installation is already authorized
+   by the operator's instruction and startup envelope, run
+   `uv tool install --upgrade 'agentworks-cli==VERSION'` without asking again. If installation is
+   not covered, disclose that one material expansion and obtain a decision first.
+5. After an installation or update, re-run `agw version` and require the exact selected version.
+6. Run `agw guide --agent`, interpret its intent-to-topic map and live index against the operator's
    current request, and decide what topic or action to propose next.
 
 The source body merely instructs the Agentworks assistant agent to perform these steps. It does not
-execute them. An installation failure, absent or declined installation authorization, or unsatisfied
-version stops before guide execution and leaves the exact manual command available.
+execute them. A compatible no-update path performs no source review or installation and does not ask
+for either. When installation is needed, an installation failure, absent or declined installation
+authorization, or unsatisfied version stops before guide execution and leaves the exact manual
+command available.
 
 ## Native package projections
 
