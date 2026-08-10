@@ -283,9 +283,6 @@ class _SilentProgress:
 class _DefaultHandler:
     def emit(self, role: Role, message: str, level: int) -> None:
         if role is Role.NOTICE:
-            # CodeQL conflates NOTICE with WARNING. The reported SecretRef is a resource name;
-            # its resolved value goes only to boto3 session construction and never reaches output.
-            # codeql[py/clear-text-logging-sensitive-data]
             print(f"{_pad(level)}Notice: {message}", file=sys.stderr)
         elif role is Role.WARNING:
             print(f"{_pad(level)}Warning: {message}", file=sys.stderr)
