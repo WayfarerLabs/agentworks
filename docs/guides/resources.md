@@ -585,9 +585,9 @@ still exits 1 when its complete report contains failed checks, after writing tha
 
 The [CLI JSON v1 reference](../../cli/command-reference.md#machine-readable-output) documents the
 exact envelopes, fields, null rules, ordering, error behavior, and compatibility policy. Doctor's
-JSON diagnostic message and hint fields are closed safe diagnostics, so troubleshooting detail such
-as configuration paths, backend responses, exception text, and secret-adjacent text remains only in
-the human report.
+JSON diagnostic message and hint fields are the same structured facts shown by the human renderer.
+They can therefore contain configuration paths, backend responses, exception text, or other
+troubleshooting detail that the human report exposes.
 
 ADRs 0016 and 0022 record the design of the config/resource split, capability kinds, and YAML as the
 resource-declaration frontend.

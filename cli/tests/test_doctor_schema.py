@@ -13,6 +13,8 @@ from typing import cast
 import pytest
 
 from agentworks.db import LATEST_VERSION, Database
+from agentworks.doctor import HealthGroup, Status
+from agentworks.doctor_state import append_vm_site_database_checks, check_database, check_system
 from agentworks.errors import StateError
 
 
@@ -79,6 +81,66 @@ def test_schema_check_rejects_invalid_scalar_versions(tmp_path: Path, version: o
     assert str(version) not in str(raised.value)
     assert str(database_path) not in str(raised.value)
 
+    with pytest.raises(StateError, match="schema version is invalid"):
+        Database(database_path, read_only=True)
+
+
+@pytest.mark.parametrize(
+    ("schema", "expected_status", "expected_text"),
+    [
+        ((False, 0, LATEST_VERSION), Status.OK, "does not exist yet"),
+        ((True, LATEST_VERSION - 1, LATEST_VERSION), Status.WARN, "normal Agentworks command"),
+        ((True, LATEST_VERSION + 1, LATEST_VERSION), Status.FAIL, "downgrade?"),
+    ],
+)
+def test_doctor_distinguishes_absent_stale_and_newer_schema(
+    monkeypatch: pytest.MonkeyPatch,
+    schema: tuple[bool, int, int],
+    expected_status: Status,
+    expected_text: str,
+) -> None:
+    monkeypatch.setattr(Database, "check_schema", staticmethod(lambda path=None: schema))
+
+    check = check_database().checks[0]
+
+    assert check.status is expected_status
+    assert expected_text in (check.message or "")
+
+
+def test_doctor_warns_without_echoing_an_unexpected_vm_initialization_state(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_path = Path(db._conn.execute("PRAGMA database_list").fetchone()[2])
+    monkeypatch.setattr("agentworks.db.DB_PATH", database_path)
+    db.insert_vm("box", site="lima-local", hostname="box")
+    db._conn.execute("UPDATE vms SET init_status = ? WHERE name = ?", ("PRIVATE_FUTURE_STATE", "box"))
+    db._conn.commit()
+
+    checks = check_database().checks
+
+    warning = next(check for check in checks if check.name == "VM 'box'")
+    assert warning.status is Status.WARN
+    assert warning.message == "unexpected initialization state"
+
+
+def test_doctor_database_errors_remain_shared_actionable_facts(monkeypatch: pytest.MonkeyPatch) -> None:
+    marker = "database permission denied"
+    monkeypatch.setattr(
+        Database,
+        "check_schema",
+        staticmethod(lambda path=None: (_ for _ in ()).throw(PermissionError(marker))),
+    )
+
+    system = check_system().checks[0]
+    database = check_database().checks[0]
+    sites = HealthGroup("VM sites")
+    append_vm_site_database_checks(sites, sites={}, not_ready={})
+
+    assert system.message == f"could not check the database: {marker}"
+    assert database.message == marker
+    assert sites.checks[0].message == f"could not check the database: {marker}"
+
 
 def test_installed_doctor_reports_malformed_schema_in_human_and_json(tmp_path: Path) -> None:
     config_dir = tmp_path / ".config" / "agentworks"
@@ -94,7 +156,7 @@ def test_installed_doctor_reports_malformed_schema_in_human_and_json(tmp_path: P
 
     assert human.returncode == machine.returncode == 1
     assert "Database:" in human.stdout
-    assert "state database is unavailable or malformed" in human.stdout
+    assert "state database schema is unavailable or malformed" in human.stdout
     document = cast("dict[str, object]", json.loads(machine.stdout))
     assert machine.stdout.count("\n") == 1
     assert machine.stderr == ""
@@ -106,7 +168,7 @@ def test_installed_doctor_reports_malformed_schema_in_human_and_json(tmp_path: P
         {
             "name": "Database",
             "status": "fail",
-            "message": "state database is unavailable or malformed",
+            "message": "state database schema is unavailable or malformed",
             "hint": None,
         }
     ]

@@ -17,9 +17,6 @@ from ._helpers import (
     _vm_scope,
 )
 from .boundary import _live_vm_boundary, _platform_ops_ctx
-from .inspect import (
-    vm_listing_data as vm_listing_data,
-)
 
 if TYPE_CHECKING:
     from agentworks.config import Config

@@ -57,7 +57,6 @@ class Database:
             try:
                 connection = sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True)
                 row = connection.execute("SELECT MAX(version) FROM schema_version").fetchone()
-                current = row[0] or 0
             except sqlite3.DatabaseError as error:
                 if connection is not None:
                     connection.close()
@@ -65,6 +64,12 @@ class Database:
                     "state database is unavailable or malformed",
                     hint="Run a normal Agentworks command to initialize or repair the state database.",
                 ) from error
+            current = row[0]
+            if current is None:
+                current = 0
+            elif type(current) is not int or current < 0:
+                connection.close()
+                raise StateError("state database schema version is invalid")
             if current != LATEST_VERSION:
                 connection.close()
                 raise StateError(

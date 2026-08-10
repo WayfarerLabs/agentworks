@@ -613,3 +613,38 @@ def test_vm_site_construction_error_is_exact_site_lookup_issue(
     data = json.loads(result.stdout_bytes)["data"]
     assert data["issues"] == [{"source": "site_lookup", "code": "unavailable"}]
     assert marker.encode() not in result.stdout_bytes + result.stderr_bytes
+
+
+@pytest.mark.parametrize("stage", ["preflight", "secret_resolution"])
+def test_vm_describe_propagates_operator_abort_in_service_and_both_cli_formats(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+) -> None:
+    """Inspection degradation never turns a declined prompt into success."""
+    from agentworks.errors import UserAbort
+    from agentworks.vms import manager
+
+    config = make_config()
+    _seed_vm(db)
+    _wire_cli(monkeypatch, db, config)
+    _platform_fast_path(monkeypatch)
+
+    def abort(*_args: object, **_kwargs: object) -> None:
+        raise UserAbort("operator declined")
+
+    if stage == "preflight":
+        monkeypatch.setattr("agentworks.orchestration.readiness.preflight_all", abort)
+    else:
+        monkeypatch.setattr("agentworks.orchestration.readiness.preflight_all", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr("agentworks.secrets.resolver.Resolver.resolve", abort)
+
+    with pytest.raises(UserAbort, match="operator declined"):
+        manager.vm_description(db, config, "box")
+
+    for output_format in ("human", "json"):
+        result = CliRunner().invoke(app, ["vm", "describe", "box", "--output", output_format])
+        assert result.exit_code == 1
+        assert isinstance(result.exception, UserAbort)
+        assert result.stdout_bytes == b""

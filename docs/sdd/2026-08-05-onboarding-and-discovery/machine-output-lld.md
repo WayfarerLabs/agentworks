@@ -295,9 +295,11 @@ Implementation must add:
    report.
 2. Repeat-run raw-byte tests that prove deterministic array and key order.
 3. A human byte-compatibility fixture for every covered command: no option and explicit --output
-   human both match pre-Phase-2 stdout and stderr in a non-interactive no-color fixture. VM and
-   session fixtures cover existing bounded status and degraded paths, including the existing session
-   PID and boot-ID repair write.
+   human both match pre-Phase-2 stdout and stderr in a non-interactive no-color fixture. The
+   explicit exception is a checkable doctor configuration failure: doctor now captures that failure
+   as the same `HealthCheck` message and hint consumed by both human and JSON renderers instead of
+   retaining the prior parser-stderr side channel. VM and session fixtures cover existing bounded
+   status and degraded paths, including the existing session PID and boot-ID repair write.
 4. Mutual exclusion, existing error routing, error-empty-stdout, and doctor-report-before-exit
    tests.
 5. Safety tests proving JSON excludes secret values, raw config, opaque platform metadata, harness

@@ -54,8 +54,8 @@ def check_system() -> HealthGroup:
             group.info("System slug", "declined (asked at first vm create)")
         else:
             group.info("System slug", "unset (will ask at first vm create)")
-    except Exception:
-        group.warn("System slug", "could not check the database")
+    except Exception as error:
+        group.warn("System slug", f"could not check the database: {error}")
     return group
 
 
@@ -80,8 +80,8 @@ def check_database() -> HealthGroup:
                 )
             else:
                 group.fail("Schema", f"version {current} is newer than latest {latest} (downgrade?)")
-    except Exception:
-        group.fail("Database", "state database is unavailable or malformed")
+    except Exception as error:
+        group.fail("Database", str(error))
     return group
 
 
@@ -143,5 +143,5 @@ def append_vm_site_database_checks(
                         f"site '{vm.site}' is not declared",
                         hint=site_manifest_hint(vm.site),
                     )
-    except Exception:
-        group.warn("VM sites", "could not check the database")
+    except Exception as error:
+        group.warn("VM sites", f"could not check the database: {error}")

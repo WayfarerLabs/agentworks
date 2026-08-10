@@ -195,12 +195,12 @@ The Phase 2 option additions updated generated help, Bash, Zsh, and PowerShell c
 expectations in the implementation commits. Dynamic completion remains `--names-only`. No sample
 configuration setting was added.
 
-Clean-slate correction validation passed:
+Phase 2 final review-correction validation passed:
 
-- focused guide, doctor, machine-output, operational JSON, and completion suite: 566 passed;
-- full non-integration suite: 6,649 passed and 3 deselected;
+- focused guide, doctor, machine-output, operational JSON, completion, and VM-site suite: 591
+  passed;
+- full non-integration suite: 6,656 passed and 3 deselected;
 - Ruff check and format check: 625 files clean;
 - full mypy: 625 source files clean.
 
-Clean project, fresh-eyes, integration, and PR re-review remain pending after the updated branch is
-published.
+Clean project, fresh-eyes, integration, and PR re-review remain pending after publication.

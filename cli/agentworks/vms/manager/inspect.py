@@ -483,6 +483,8 @@ def vm_description(
                     RunContext(config=config, operation_scope=scope),
                     registry=registry,
                 )
+            except UserAbort:
+                raise
             except AgentworksError as exc:
                 issue = VMIssue(source=VMInspectionIssueSource.PREFLIGHT)
                 issues.append(issue)
@@ -490,6 +492,8 @@ def vm_description(
             else:
                 try:
                     resolver.resolve()
+                except UserAbort:
+                    raise
                 except AgentworksError as exc:
                     issue = VMIssue(source=VMInspectionIssueSource.SECRET_RESOLUTION)
                     issues.append(issue)
