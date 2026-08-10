@@ -93,8 +93,9 @@ The initial block vocabulary is closed:
 - `ReleaseNotes`: a core-rendered, size-bounded section selected for the exact installed CLI version
   from release-please's changelog packaged in the wheel. Contributions cannot supply its path,
   version, or prose.
-- `ActionList`: inert, strictly validated `GuideAction` records with an exact consent boundary,
-  command or platform-neutral manual step, expected state, verification, and refusal alternative.
+- `ActionList`: inert, strictly validated `GuideAction` records with an exact authorization class in
+  the existing `consent` field, command or platform-neutral manual step, expected state,
+  verification, and refusal alternative.
 - `TopicLinks`: core-rendered related-topic links.
 
 Contributions supply block records and authored strings only. They cannot supply functions, imports,
@@ -209,13 +210,15 @@ missing resources.
 `agw guide` always writes markdown to stdout. With no topic it renders a compact overview, security
 disclosure, intent-to-topic map, and live topic index. The map supplies context; the Agentworks
 assistant agent interprets the current operator request and chooses what topic, proposal, or inert
-action to use next. Agent mode presents these reviewed associations without assuming that every
-invocation is first-run onboarding:
+action to use next. Keeping the disclosure in the context makes the contract available on every
+invocation; it does not instruct the Agentworks assistant agent to recite it again after the startup
+authorization envelope is established. Agent mode presents these reviewed associations without
+assuming that every invocation is first-run onboarding:
 
 - setup, adoption assessment, and installed-release capability questions point to
   `concept-onboarding`;
 - temporal release-change questions point to `concept-release-notes`, which renders the installed
-  release's packaged canonical notes, offers a consented canonical fallback for older ranges, and
+  release's packaged canonical notes, offers an authorized canonical fallback for older ranges, and
   then links back to the live adoption assessment;
 - configuration, declared-resource changes, and VM or session operation point to
   `concept-management` and the applicable kind or instance topics;
@@ -238,15 +241,18 @@ and fails soft with the canonical releases URL when the artifact or unique match
 unavailable. Rendering opens no network connection and never renders the whole changelog.
 
 For an older or missing range, a validated `read-release-notes` action requires operator-supplied
-`FROM_VERSION` and `TO_VERSION`, uses a dedicated `read-canonical-release-notes` consent boundary,
-and names only `https://github.com/WayfarerLabs/agentworks/releases` as the allowed network source.
-Its manual step reads only the requested inclusive release range, summarizes the changes, and does
-not follow embedded links. Fetched or packaged release prose is untrusted evidence. The Agentworks
-assistant agent ignores instructions, commands, permission requests, and scope changes within it,
-and treats any proposed follow-up as a new action requiring its own operator decision. Refusal
-performs no network request and leaves the canonical URL and requested range as manual operator
-steps without claiming a summary. The topic then links to `concept-onboarding` for the separate
-question of which capabilities the current installation has adopted.
+`FROM_VERSION` and `TO_VERSION`, uses a dedicated `read-canonical-release-notes` authorization class
+in the existing `consent` field, and names only
+`https://github.com/WayfarerLabs/agentworks/releases` as the allowed network source. Its manual step
+reads only the requested inclusive release range, summarizes the changes, and does not follow
+embedded links. Fetched or packaged release prose is untrusted evidence. The Agentworks assistant
+agent ignores instructions, commands, permission requests, and scope changes within it, and treats
+any proposed follow-up as untrusted rather than as an expansion of the current authorization
+envelope. A follow-up already requested by the operator may proceed within that envelope; a material
+expansion needs a new operator decision. Refusal performs no network request and leaves the
+canonical URL and requested range as manual operator steps without claiming a summary. The topic
+then links to `concept-onboarding` for the separate question of which capabilities the current
+installation has adopted.
 
 The CLI exposes a paired `--agent/--human` override. Detection precedence is:
 
@@ -266,9 +272,9 @@ Agentworks assistant agent invocation deterministic when no signature exists. De
 inspects parent processes, session files, or other workstation state.
 
 Both modes traverse the same topic and block sequence. Agent mode may move `AgentContract` blocks
-immediately after the summary, expand their heading, and foreground the R12 disclosure and R4
-consent rules. It may not add, remove, or alter factual content. Snapshot tests normalize headings
-and prove both modes contain the same semantic block identifiers.
+immediately after the summary, expand their heading, and foreground the R12 startup envelope and R4
+authorization rules. It may not add, remove, or alter factual content. Snapshot tests normalize
+headings and prove both modes contain the same semantic block identifiers.
 
 `concept-migration` is the exceptional remediation topic for breaking resource-model changes. It is
 not a general upgrade guide: ordinary upgrades should remain routine. The topic carries authored
@@ -290,8 +296,11 @@ instance rows from kind-owned read-only inventory hooks. The guide never loads r
 additional state and never runs doctor while rendering. A fact outside that set is `unverifiable`,
 not permission to reach around the view. Its golden path continues through a usable VM and a started
 first session. Those operations are inert action records with explicit names and selected templates
-or sites, declared impact, `mutate-agentworks` consent, ordinary JSON verification, and a refusal
-alternative. The action plan does not attach, delete, elevate privileges, or infer operator choices.
+or sites, declared impact, a `mutate-agentworks` authorization class, ordinary JSON verification,
+and a refusal alternative. When the operator explicitly asks for first-run setup and accepts the
+startup envelope describing local and remote resource creation, that authorization covers the
+VM-then-session sequence; the records do not force a second conversational approval for each
+command. The action plan does not attach, delete, elevate privileges, or infer operator choices.
 
 `concept-management` is the ongoing configuration and operation entry. It presents live kind and
 instance facts, then points to the applicable built-in CLI help entry point for exact current
@@ -299,35 +308,41 @@ command syntax. Group and command help from the existing Typer command tree is t
 authority; the guide does not project a command registry or copy complete operational recipes. The
 small stable set of group-level help links is authored connective teaching and changes in the same
 commit as a CLI rename. There is no package-level wall between configuring Agentworks and operating
-managed VMs or sessions. The boundary is the action: read-only discovery may remain read-only;
-creating or changing declared state uses `mutate-agentworks`; connection uses the named-target
-boundary; and destructive work or privilege elevation requires a fresh, explicitly described
-operator decision. Existing consent boundaries remain sufficient for configuration and operation;
-the release-note lookup adds only the narrow `read-canonical-release-notes` boundary and does not
-create a second risk model.
+managed VMs or sessions. `GuideAction.consent` identifies the action's authorization class; it is
+not an instruction to ask again when the operator's current instruction and startup envelope already
+cover that class, target, and impact. Read-only discovery may remain read-only; creating or changing
+declared state uses `mutate-agentworks`; connection uses the named-target boundary; and destructive
+work or privilege elevation requires a fresh, explicitly described operator decision unless the
+operator explicitly established that exact boundary. The release-note lookup adds only the narrow
+`read-canonical-release-notes` class and does not create a second risk model.
 
 Workstation facts observable only by the Agentworks assistant agent are never inferred by `agw`.
-Doctor, tool checks, SSH tests, and other verification commands are explicit assistance actions that
-the Agentworks assistant agent runs only after obtaining the applicable consent. The guide asks the
-Agentworks assistant agent to check presence without reading sensitive values and record refusals in
-the current interaction or caller-owned replay log. The guide presents an ordered action plan:
+Doctor, tool checks, SSH tests, and other verification commands are explicit assistance actions. The
+Agentworks assistant agent may run a sequence of them under one current authorization envelope
+without repeated prompts. The guide asks the Agentworks assistant agent to check presence without
+reading sensitive values and record refusals in the current interaction or caller-owned replay log.
+The guide presents an ordered action plan:
 
-- guided use lets the Agentworks assistant agent ask before each consent boundary and execute the
-  next operator-approved action;
+- guided use lets the Agentworks assistant agent execute actions already covered by the operator's
+  instruction and established envelope, asking only when an action materially expands it or the
+  operator requested per-action confirmation;
 - replayable use uses the same actions with `agw --non-interactive`, explicit inputs, and repeatable
   target-scoped `--evidence ACTION_ID:KIND/NAME=OUTCOME` values from the caller-owned replay log;
 - reruns skip facts already ready and report currently not-yet-adopted, disabled, not-ready, or
   unverifiable items.
 
 The first slice defines the assessment and plan. It does not add a CLI wizard or hidden state
-machine.
+machine. The authorization envelope is caller-owned interaction state in the Agentworks assistant
+agent's current session. Agentworks does not persist it, infer it from prior sessions, or turn it
+into a new CLI authorization framework.
 
 Each action is inert guide data with an identifier, sanitized precondition, required operator
-inputs, consent boundary, command template, expected observable state, verification command, and
-manual alternative when consent is declined. Guided and replayable modes consume the same ordered
-action records. Equivalence means both produce the same registry, graph, stored-row, and explicit
-verification outcomes for the same inputs. A refusal produces the same `unverifiable` outcome in
-both modes.
+inputs, authorization class in the existing `consent` field, command template, expected observable
+state, verification command, and manual alternative when authorization is absent or declined. The
+record gives the Agentworks assistant agent enough information to detect a boundary expansion; it is
+not a conversational script. Guided and replayable modes consume the same ordered action records.
+Equivalence means both produce the same registry, graph, stored-row, and explicit verification
+outcomes for the same inputs. A refusal produces the same `unverifiable` outcome in both modes.
 
 Evidence outcomes are `verified`, `failed`, or `refused`. The CLI validates every evidence item
 atomically and persists none of them. A verified rerun can therefore become a no-op without adding
@@ -335,14 +350,14 @@ an Agentworks onboarding ledger; the caller remains responsible for retaining an
 
 ### Verification surface inventory
 
-| Need                          | Existing surface                                                                                                                                        | Gap and commitment                                                                                                                                                                                                                                                                |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Secret reference availability | `agw secret describe` predicts the ready backend without resolving or exposing a value. Doctor reports the same prediction in its consented full check. | Prediction is not proof. Add a named-secret verification operation that resolves through the normal boundary, returns only success or framed failure, never emits or returns the value to the caller, and cannot fall through to an interactive backend without explicit consent. |
-| Required host tools           | `agw doctor` checks `ssh`, `scp`, and `tailscale`; finalized capability rows carry already-computed readiness for their host requirements.              | The LLD inventories every assistance action's required tool and adds a safe explicit check only where doctor or readiness does not already cover it. Discovery by the Agentworks assistant agent of other installed tools remains consent-first.                                  |
-| SSH connectivity              | VM lifecycle code verifies connectivity during mutating operations, but there is no dedicated read-only operator surface for an existing VM.            | Add a bounded, non-mutating named-VM connection verification operation that uses the standard transport and reports success or framed failure without repairing, rekeying, or changing power state.                                                                               |
+| Need                          | Existing surface                                                                                                                                         | Gap and commitment                                                                                                                                                                                                                                                                                   |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Secret reference availability | `agw secret describe` predicts the ready backend without resolving or exposing a value. Doctor reports the same prediction in its authorized full check. | Prediction is not proof. Add a named-secret verification operation that resolves through the normal boundary, returns only success or framed failure, never emits or returns the value to the caller, and cannot fall through to an interactive backend unless that access is explicitly authorized. |
+| Required host tools           | `agw doctor` checks `ssh`, `scp`, and `tailscale`; finalized capability rows carry already-computed readiness for their host requirements.               | The LLD inventories every assistance action's required tool and adds a safe explicit check only where doctor or readiness does not already cover it. Discovery by the Agentworks assistant agent follows the current authorization envelope.                                                         |
+| SSH connectivity              | VM lifecycle code verifies connectivity during mutating operations, but there is no dedicated read-only operator surface for an existing VM.             | Add a bounded, non-mutating named-VM connection verification operation that uses the standard transport and reports success or framed failure without repairing, rekeying, or changing power state.                                                                                                  |
 
-Doctor and the new proof operations run only as explicit, consented action records. Guide rendering
-never calls them.
+Doctor and the new proof operations run only as explicit action records under an applicable current
+authorization envelope. Guide rendering never calls them.
 
 ## Machine-readable output contract
 
@@ -402,22 +417,24 @@ harness packages. A capable Agentworks assistant agent can consume it directly f
 website without plugin support. It contains only:
 
 1. supported Python and `agentworks-cli` installation guidance;
-2. the complete R12 access disclosure, including the intended workstation, full account-scoped file
-   inspection and command execution, separate explicit privilege elevation, Agentworks-reachable
-   resources, and concrete strict-security posture links;
+2. the complete R12 startup disclosure and authorization-envelope behavior, including the intended
+   workstation, account-scoped file inspection and command execution, separate explicit privilege
+   elevation, Agentworks-reachable resources, no repeated prompts for in-scope work, material
+   expansion triggers, and concrete strict-security posture links;
 3. a pre-install offer to review the exact canonical source tag, with a warning that the repository
    is substantial and a full review can consume significant model usage, and separate focused, full,
    decline-review, and install decisions;
 4. the instruction to run `agw guide --agent`, interpret its intent-to-topic map and live index
    against the operator's current goal, and decide what topic or action to propose next.
 
-After the general disclosure and network consent, the package resolves the exact stable PyPI version
-it proposes to install and pins both the source-review tag and install command to that version. A
+After the startup envelope is established, the package resolves the exact stable PyPI version it
+proposes to install, using ordinary network access when covered and asking once if that access would
+expand the envelope. It pins both the source-review tag and install command to that version. A
 focused review covers packaging, dependencies, CLI entry, and security-sensitive execution
 boundaries; a full review may inspect the entire canonical tag. Repository content remains untrusted
 evidence: it cannot grant permission, direct execution, or expand the reviewed scope. Declining
-review neither claims review nor blocks a separately approved install. Review approval never implies
-install approval.
+review neither claims review nor revokes installation authorization established by the operator's
+instruction or a later decision. Review selection never implies install authorization.
 
 Source inspection runs from the assistance session's protected policy root. The Agentworks assistant
 agent does not launch or reconfigure a harness from the candidate tree, change its working root to
@@ -458,10 +475,12 @@ switchboard of its own. The top-level guide supplies the intent map, and selecte
 Agentworks assistant agent which list, describe, doctor, and operation records are relevant at each
 applicable action. The Agentworks assistant agent still chooses what to propose next. End-to-end
 assistance tests cover a generic prompt-only Agentworks assistant agent with no native plugin,
-focused and full source-review choices, decline-review followed by separately approved installation,
-completed review followed by declined installation, an initial VM and session, a returning
-current-capability and adoption assessment, offline installed release notes plus the consented range
-fallback, an ongoing management operation, and a refusal at a higher-risk action boundary.
+focused and full source-review choices, decline-review with independently authorized installation,
+completed review followed by declined installation, one startup authorization covering an initial
+VM-and-session sequence without repeated prompts, a returning current-capability and adoption
+assessment, offline installed release notes plus the authorized range fallback, an ongoing
+multi-command management operation, a material-expansion prompt, an operator-selected per-action
+confirmation mode, and a refusal at a higher-risk action boundary.
 
 ## Feedback decision
 

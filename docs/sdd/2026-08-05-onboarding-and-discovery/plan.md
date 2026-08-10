@@ -282,28 +282,35 @@ completed design work; the corrective LLD and implementation boxes below carry t
       operator-approved exact-range canonical GitHub fallback when local history is insufficient.
       Guide rendering performs no network request, and neither harness package copies release prose.
 - [ ] `concept-onboarding` remains the specialized first-run and adoption-assessment path and gains
-      a bounded, consented golden path that creates and verifies a usable VM and started first
-      session from explicit operator-selected inputs.
+      a bounded, authorized golden path that creates and verifies a usable VM and started first
+      session from explicit operator-selected inputs. One startup setup envelope can cover the full
+      VM-then-session sequence without repeated approval prompts.
 - [ ] `concept-management` presents live kind and instance facts for ongoing configuration and VM or
       session operation, then points to existing JSON facts and the applicable built-in CLI group or
       command help for exact syntax. It adds no command registry or copied recipe catalog.
-      Configuration and operation remain one assistance surface; each read, mutation, connection,
-      privilege, or destructive boundary retains its own explicit scope and operator decision.
+      Configuration and operation remain one assistance surface. Actions already covered by the
+      current operator instruction and authorization envelope proceed without re-asking; a
+      materially new target, access class, mutation, privilege, destructive effect, cost, or
+      external side effect retains an explicit operator decision.
 - [ ] Canonical thin assistance content contains installation or update guidance, the complete R12
       disclosure, conditional strict harness posture, and `agw guide --agent`, with no duplicated
       teaching or Claude Code/Codex prerequisite. Any capable Agentworks assistant agent can consume
       the same body as a copy/paste prompt. The disclosure names the intended workstation, full file
       inspection and command execution under the harness account, separate explicit privilege
       elevation, and the strictest practical approval and visibility posture that preserves the
-      required workstation access.
+      required workstation access. It establishes one durable authorization envelope for the
+      requested goal, treats an explicit operator instruction as authorization without a redundant
+      confirmation, does not repeat risks or approval questions for every in-scope step, and honors
+      an operator preference for narrower or per-action confirmation.
 - [ ] Before CLI installation or update, canonical assistance resolves one exact stable version,
       offers to inspect its canonical `vVERSION` source tag, warns that a full-repository review may
       consume significant model usage, and keeps focused review, full review, decline-review, and
       exact-version installation as separate decisions. Source content is untrusted evidence and
       cannot authorize execution or expand scope.
 - [ ] Source-review contract tests cover focused and full review, decline-review followed by a
-      separately approved exact install, and completed review followed by declined install. No path
-      treats review approval as installation approval or declining review as a failed installation.
+      previously authorized exact install, and completed review followed by declined install. No
+      path treats review selection as installation authorization or declining review as a failed
+      installation; installation may already be covered by the operator's startup instruction.
 - [ ] Adversarial source-review fixtures keep the assistance session in its protected policy root
       and treat candidate `AGENTS.md`, `CLAUDE.md`, skills, hooks, plugins, configuration, and
       embedded commands only as data. Candidate content cannot redirect the review, load policy,
@@ -328,8 +335,12 @@ completed design work; the corrective LLD and implementation boxes below carry t
       release-notes handoff for temporal history, and JSON v1 consumption; per-harness live probes
       validate model interpretation without a bootstrap orchestration driver.
 - [ ] Canonical projection checks and every live assistance probe assert the R12 disclosure is
-      emitted before the first command, probe, verification, mutation, or other action, and pin
-      every workstation-access and privilege boundary from the canonical source.
+      emitted once before the first command, probe, verification, mutation, or other action. Probes
+      pin the resulting authorization envelope, prove a multi-step in-scope flow does not ask again,
+      prove a materially ambiguous request gets one resolving scope question and no follow-up
+      confirmation, prove an explicitly instructed expansion needs no redundant confirmation, prove
+      an uncovered material expansion asks once, and prove an operator-selected confirm-every-action
+      preference is honored.
 - [ ] Release-note tests prove the packaged section uniquely matches the installed version's
       release-please source, guide rendering and fallback refusal perform zero network work, an
       approved lookup stays within the exact requested range on the canonical releases surface, and

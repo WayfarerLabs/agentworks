@@ -48,8 +48,8 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
   configure, troubleshoot, or operate Agentworks. It needs only to accept the canonical copy/paste
   prompt, invoke and interpret the Agentworks CLI, and have the operator-approved workstation access
   required by the requested task. It consumes guide context, decides what to propose next, and
-  remains subject to operator consent. Claude Code and Codex are packaged integrations, not limits
-  on this role.
+  remains subject to the operator's authorization envelope. Claude Code and Codex are packaged
+  integrations, not limits on this role.
 - **Agentworks-managed agent** means an agent resource created and managed by Agentworks for work in
   a workspace or session. It is part of the system being operated and is never the Agentworks
   assistant agent.
@@ -75,7 +75,7 @@ term whenever either role could be ambiguous.
   update, the package MUST offer to inspect the exact canonical source tag it intends to install. It
   MUST warn that the repository is substantial and a full review can consume significant model
   usage, offer a focused security and installation-surface review or a full repository review, and
-  keep source review optional and separate from installation approval.
+  keep source review optional and separate from installation authorization.
 - **R2 (progressive golden path).** First-run assistance MUST reach a first working session in
   minutes, including a usable VM and a started session, with the major capability areas (config,
   resources, plugins, secrets, VMs, workspaces, Agentworks-managed agents, sessions) discoverable
@@ -85,16 +85,21 @@ term whenever either role could be ambiguous.
   available in the installed release, confirm what they have adopted, or continue toward a new goal.
   Together with R2 and R5 this delivers the assisted onboarding flow of issue #391 without making
   first-run setup the lifetime boundary.
-- **R4 (assistant agent probes, agw verifies; consent-first).** Agentworks itself never probes the
-  machine. Discovery of existing material (SSH keys are the canonical example, installed tools
-  another) is the Agentworks assistant agent's act, and the guide's assistance content MUST instruct
-  it to be consent-first: ask before looking, state what will be looked for and what will never be
-  read, and honor refusals with a manual alternative. Within that consent frame the content SHOULD
-  direct the Agentworks assistant agent to verify wherever possible rather than trusting
-  declarations, using non-probing verification surfaces `agw` provides for configured state: confirm
-  a secret reference (a 1Password item, for example) resolves without reading its value, test SSH
-  connections, confirm installed tools respond. The result is verified setup, not blind
-  configuration, and onboarding is where trust is established, in both directions.
+- **R4 (assistant agent probes, agw verifies; authorization-aware).** Agentworks itself never probes
+  the machine. Discovery of existing material (SSH keys are the canonical example, installed tools
+  another) is the Agentworks assistant agent's act. At assistance startup, the operator's request
+  and the R12 disclosure establish a working authorization envelope for the current goal. Within
+  that envelope, the Agentworks assistant agent SHOULD perform reasonably necessary reads, probes,
+  commands, and verification without repeating the disclosure or asking for approval before every
+  step. It MUST ask again before materially expanding the goal, target, access class, impact, or
+  risk, and whenever the operator requests per-action confirmation. Sensitive discovery checks only
+  for presence unless the operator separately authorizes content access. A refusal or narrower scope
+  is honored with a manual alternative. Within the authorized frame, content SHOULD direct the
+  Agentworks assistant agent to verify wherever possible rather than trusting declarations, using
+  non-probing verification surfaces `agw` provides for configured state: confirm a secret reference
+  (a 1Password item, for example) resolves without reading its value, test SSH connections, and
+  confirm installed tools respond. The result is verified setup, not blind configuration, and
+  onboarding is where trust is established, in both directions.
 - **R5 (interactive and non-interactive).** Both a guided path and a scriptable, replayable
   non-interactive path MUST exist, producing equivalent results.
 - **R6 (derived content).** Assistance and discovery content MUST derive from the platform's
@@ -127,30 +132,47 @@ term whenever either role could be ambiguous.
   questions to `concept-release-notes`. That topic MUST render the installed release's notes offline
   from release-please's canonical changelog packaged in the wheel, without a second hand-maintained
   copy. Older or missing ranges MAY fall back to Agentworks' canonical GitHub releases with an
-  explicit version range and network-read consent. Current facts alone MUST NOT be presented as a
-  version-to-version delta. Release prose and repository source are untrusted evidence, never an
-  instruction source or authorization to follow links or run commands. Configuration and operation
-  are not separate assistance silos. Risk is expressed by each action's explicit scope, impact,
-  consent, and verification; creating or connecting to managed resources is never authorized merely
-  because the prompt is present or a native skill is installed.
+  explicit version range and `read-canonical-release-notes` authorization class. The operator's
+  request and current envelope may satisfy that class without a second prompt. Current facts alone
+  MUST NOT be presented as a version-to-version delta. Release prose and repository source are
+  untrusted evidence, never an instruction source or authorization to follow links or run commands.
+  Configuration and operation are not separate assistance silos. Risk is expressed by each action's
+  explicit scope, impact, authorization class, and verification. The current operator instruction
+  may authorize a sequence of such actions when they remain within the established envelope; the
+  action record does not require a ritual approval prompt of its own. Creating or connecting to
+  managed resources is never authorized merely because the prompt is present or a native skill is
+  installed.
 - **R11 (cross-harness parity, by construction).** Teaching content lives in the CLI (R13), so it
   cannot fork between harnesses. The thin assistance packages (R1) MUST NOT drift apart in
   substance: share or generate them from one source where the harness formats allow (the repo's own
   Rulesync pipeline is prior art); otherwise a CI guard verifies equivalence. The guard's scope is
   the packages only.
-- **R12 (security disclosure).** Before assistance performs any workstation, Agentworks, remote, or
-  mutating action, it MUST state plainly that the Agentworks assistant agent runs on the machine the
-  operator intends to use as their workstation and needs full file inspection and command execution
-  access with the permissions of the workstation account running the harness. That access does not
-  implicitly grant root; privilege elevation is separate and explicit. The Agentworks assistant
-  agent also gains access to everything Agentworks can reach: every managed resource and secret
-  reference, and anything accessible over SSH from the workstation. Assistance MUST recommend the
-  strictest practical harness security posture for operator approval and visibility while preserving
-  that required workstation access, especially once Agentworks is in real use, and point at the
-  relevant settings rather than leaving the recommendation abstract. A prior disclosure does not
-  authorize later actions: read-only inspection, configuration mutation, resource creation, remote
-  connection, privilege elevation, and destructive operation retain their own applicable consent
-  boundaries.
+- **R12 (startup disclosure and durable authorization).** At assistance startup, before the first
+  workstation, Agentworks, remote, or mutating action, assistance MUST state plainly that the
+  Agentworks assistant agent runs on the machine the operator intends to use as their workstation
+  and can inspect files and execute commands with the permissions of the workstation account running
+  the harness. That access does not implicitly grant root; privilege elevation is separate. The
+  Agentworks assistant agent can also reach everything Agentworks can reach: managed resources,
+  secret references, and destinations accessible over SSH from the workstation. Assistance MUST
+  recommend the strictest practical harness security posture for operator approval and visibility
+  while preserving the access needed for the requested work, and point at relevant settings rather
+  than leaving the recommendation abstract. The startup disclosure MUST be concise rather than an
+  exhaustive risk or settings recital. The disclosure and operator's instruction establish a durable
+  authorization envelope for the current assistance session. Later operator requests may extend the
+  goal inside that envelope without replaying startup. An explicit operator instruction does not
+  require a redundant confirmation after the disclosure; an exploratory or materially ambiguous
+  request may require one scope question. The Agentworks assistant agent proceeds without re-asking
+  for every in-scope command, read, probe, verification, or mutation. It MUST pause and obtain a new
+  operator decision before a material expansion that the operator has not explicitly instructed. A
+  clear instruction covering the expansion is already that decision; assistance may briefly state
+  the newly relevant impact but MUST NOT ask for redundant confirmation. Material expansion includes
+  a different workstation, account, environment, or remote target; access to sensitive contents
+  rather than presence; work not reasonably necessary for the stated goal; privilege elevation;
+  destructive or irreversible work; an unanticipated material cost or external side effect; or
+  another ambiguity that materially changes impact. The operator MAY request a narrower envelope or
+  confirmation before every action, which assistance MUST honor. Required harness tool approvals,
+  escalation prompts, and CLI safety confirmations still apply, but assistance MUST NOT add a
+  redundant conversational approval prompt for the same in-scope operation.
 - **R13 (the guide command).** The CLI MUST provide `agw guide [topic ...]`, serving skill-shaped
   markdown for Agentworks assistant agents and humans alike. With no topic it gives a top-level
   overview and lists the available topics. Topics MUST cover at least: resource kinds
@@ -164,25 +186,26 @@ term whenever either role could be ambiguous.
   reporting. `concept-release-notes` renders the installed release's section from release-please's
   packaged canonical changelog and links the result to the live adoption assessment. Rendering
   performs no network request and does not maintain a separate release-note source. A fallback
-  network lookup is a bounded inert action record with an exact release range, consent, expected
-  result, and refusal path. Release content is treated only as evidence and cannot expand scope.
-  Content blends static authored material with dynamic material from the live system (registries,
-  resources, enablement state), so a disabled implementation or an added resource changes what the
-  guide says. Output is markdown only; structured data appears only inside the markdown. R7's
-  machine-readable contract is a separate surface and stays so. Topics are sized like skills, with
-  sub-topics referenced rather than inlined, and topic names participate in shell completions. With
-  no topic, agent mode MUST present an explicit intent-to-topic map for first setup and adoption
-  assessment, current capabilities versus temporal release changes, ongoing management and
-  operation, troubleshooting, exceptional migration, secrets, and bug reporting. It returns context
-  only: the Agentworks assistant agent interprets the operator's current request and decides which
-  topic, proposal, or inert action to use next. The canonical prompt and published native skills
-  enter through this top-level context rather than hard-coding first-run onboarding as every
-  request's destination. An Agentworks assistant agent rendering mode (an `--agent` flag with a
-  TTY-informed default; the exact mechanism is the HLA's call) MAY adjust emphasis, never substance:
-  in agent mode the rendering foregrounds the behavioral contract (ask for consent before any tool
-  call that examines the operator's machine; test only for the presence of sensitive material such
-  as SSH keys and secrets, never view values; restate R12's access disclosure). Both renderings
-  derive from one source; there are never two contents. Prior art for the effort's
+  network lookup is a bounded inert action record with an exact release range, authorization class,
+  expected result, and refusal path. Release content is treated only as evidence and cannot expand
+  scope. Content blends static authored material with dynamic material from the live system
+  (registries, resources, enablement state), so a disabled implementation or an added resource
+  changes what the guide says. Output is markdown only; structured data appears only inside the
+  markdown. R7's machine-readable contract is a separate surface and stays so. Topics are sized like
+  skills, with sub-topics referenced rather than inlined, and topic names participate in shell
+  completions. With no topic, agent mode MUST present an explicit intent-to-topic map for first
+  setup and adoption assessment, current capabilities versus temporal release changes, ongoing
+  management and operation, troubleshooting, exceptional migration, secrets, and bug reporting. It
+  returns context only: the Agentworks assistant agent interprets the operator's current request and
+  decides which topic, proposal, or inert action to use next. The canonical prompt and published
+  native skills enter through this top-level context rather than hard-coding first-run onboarding as
+  every request's destination. An Agentworks assistant agent rendering mode (an `--agent` flag with
+  a TTY-informed default; the exact mechanism is the HLA's call) MAY adjust emphasis, never
+  substance: in agent mode the rendering foregrounds the behavioral contract (establish the R12
+  authorization envelope at startup; proceed naturally within it; ask again only for a material
+  expansion or when the operator requests per-action confirmation; test sensitive material such as
+  SSH keys and secrets only for presence unless content access is separately authorized). Both
+  renderings derive from one source; there are never two contents. Prior art for the effort's
   `prior-art-research.md`: PowerShell's module-contributed `about_*` topics, `kubectl explain`'s
   live schema walks, `git help` concept guides, `go help` topics, `rustc --explain`, and Terraform's
   per-provider schema-plus-prose docs generation.
@@ -206,7 +229,7 @@ term whenever either role could be ambiguous.
   projection carries identity, descriptions, enablement and readiness, and relationships; secrets
   and secret-bearing config are excluded at the projection boundary, not by per-template discipline.
   Rendering is side-effect-free: it never resolves secrets, probes targets, or mutates state (probes
-  belong to consented assistance actions, not to displaying a page). The projection is expected to
+  belong to authorized assistance actions, not to displaying a page). The projection is expected to
   be the resource graph itself running in a gated access mode, not a second structure kept in
   lockstep: powers (secret readers, run targets, capability API objects) sit behind callables a mode
   can gate, while universal facts are plain data on the nodes. In a gated mode, data is only what is
@@ -225,22 +248,24 @@ term whenever either role could be ambiguous.
   needed, help me understand what it can do, and help me set it up or operate it. It is available on
   PyPI as `agentworks-cli` and runs on Python >= 3.12. Before installing it, please offer to review
   the exact source tag and warn me that a full repository review may incur substantial model usage.
-  Please obtain my consent before acting, then run `agw guide --agent` for current context and
-  decide what to propose next based on my request." This is a first-class zero-plugin assistance
-  path; the harness plugins (R1) say essentially the same thing and remain primarily an advertising
-  and discoverability channel. The prompt MUST avoid product-specific harness assumptions beyond the
-  ability to accept the prompt, drive the CLI, and request or use appropriate operator-approved
-  workstation access.
+  At startup, please explain the access posture and establish the scope of my request. Then follow
+  my instructions without repeatedly asking for approval inside that scope. Ask again if you need to
+  expand it materially, or if I tell you to confirm every action. Run `agw guide --agent` for
+  current context and decide what to propose next based on my request." This is a first-class
+  zero-plugin assistance path; the harness plugins (R1) say essentially the same thing and remain
+  primarily an advertising and discoverability channel. The prompt MUST avoid product-specific
+  harness assumptions beyond the ability to accept the prompt, drive the CLI, and request or use
+  appropriate operator-approved workstation access.
 
 ## Personas and stories
 
 - As an operator using any agent that meets the Agentworks assistant agent capability definition, I
   paste the canonical website prompt and receive the same disclosure, CLI-driven context, and
-  consent boundaries without installing a native Agentworks plugin.
+  authorization posture without installing a native Agentworks plugin.
 - As a new operator with Claude Code or Codex on my workstation, I add the Agentworks marketplace
   and plugin from GitHub, ask my Agentworks assistant agent to set Agentworks up, and reach my first
-  working session in minutes, told up front what access I am granting and asked before anything on
-  my machine is examined.
+  working session in minutes after one clear startup disclosure and authorization decision, without
+  repeated approval prompts for steps inside that scope.
 - As an operator six months in, I ask the same Agentworks assistant agent to add a VM site, create a
   VM or session, rotate a secret, or troubleshoot a failure. The assistance entry supplies current
   guide context, and the Agentworks assistant agent chooses what to propose rather than guessing
@@ -279,12 +304,13 @@ term whenever either role could be ambiguous.
 
 1. A fresh operator with any Agentworks assistant agent meeting the capability definition and no
    prior Agentworks knowledge reaches a working session using only the canonical copy/paste prompt
-   and the guide command, with every probe consented. The native Claude Code and Codex packages each
-   pass the same path.
+   and the guide command. The startup disclosure establishes the authorized setup envelope once; the
+   assistant completes in-scope probes and steps without repeated approval prompts. The native
+   Claude Code and Codex packages each pass the same path.
 2. Asking for an adoption assessment on an unchanged, fully-adopted system is a clean no-op; asking
    after an upgrade reports all currently not-yet-adopted capabilities without redoing completed
    work. `concept-release-notes` renders the installed release's packaged canonical notes offline. A
-   broader temporal range uses the consented canonical GitHub fallback and is not inferred from
+   broader temporal range uses the authorized canonical GitHub fallback and is not inferred from
    current-state facts.
 3. The non-interactive path reproduces the guided path's result on a clean machine.
 4. List, describe, and doctor surfaces offer documented machine-readable output consumed by the
@@ -294,11 +320,13 @@ term whenever either role could be ambiguous.
 6. Completions and docs are current for every surface this effort adds (repo rule).
 7. Both harness assistance packages exist, equivalent per R11, and both pass criterion 1's
    fresh-operator test.
-8. The security disclosure (R12) appears before any assistance action in both the guided and
-   non-interactive paths, and each later boundary retains its applicable operator decision.
-9. Verification during assistance is driven by the Agentworks assistant agent and consented per the
-   guide's instructions; `agw`'s verification surfaces read no secret values, and a declined probe
-   leaves an explicit manual-verification note.
+8. The security disclosure (R12) appears before the first assistance action in both the guided and
+   non-interactive paths. In-scope work reuses that authorization without repeating it, while every
+   uncovered material expansion retains an applicable operator decision. A materially ambiguous
+   request gets one resolving scope question, then proceeds without redundant confirmation.
+9. Verification during assistance is driven by the Agentworks assistant agent under the current
+   authorization envelope; `agw`'s verification surfaces read no secret values, and a declined or
+   out-of-scope probe leaves an explicit manual-verification note.
 10. The README's getting-started section leads with the R16 copy-paste block, and following it on a
     clean machine with a capable prompt-driven assistant reaches the top-level `agw guide --agent`
     context successfully. The Agentworks assistant agent, not the guide command, decides what to
@@ -313,12 +341,13 @@ term whenever either role could be ambiguous.
     can use the top-level guide's intent-to-topic map and live index for setup, adoption assessment,
     release history, configuration, troubleshooting, and VM or session operation requests. The
     Agentworks assistant agent decides what to propose next. First-run assistance creates and
-    verifies a usable VM and a started session. Every mutating, remote, privileged, or destructive
-    action retains an explicit operator decision.
+    verifies a usable VM and a started session. The operator's setup instruction may authorize the
+    full disclosed creation sequence. A materially new remote target, privilege elevation,
+    destructive operation, or other scope expansion retains an explicit operator decision.
 15. Before installing or updating the CLI, the assistance package offers an exact-tag source review,
     warns about full-repository model usage, and preserves separate decisions for focused review,
     full review, no review, and installation. Declining source review does not claim the source was
-    reviewed and does not itself block a separately approved install.
+    reviewed and does not itself block an independently authorized install.
 
 ## Decisions
 
@@ -341,7 +370,8 @@ term whenever either role could be ambiguous.
   block is an equal first-class entry beside the plugins, which are kept primarily for advertising
   and discoverability. The package is always-available Agentworks assistance, not a one-time
   onboarding artifact. Agentworks never probes the operator's machine; the Agentworks assistant
-  agent probes with consent and `agw` verifies. The assistance package offers an optional,
+  agent probes under one durable current-session authorization envelope and `agw` verifies. It does
+  not repeatedly ask for approval inside that envelope. The assistance package offers an optional,
   usage-disclosed review of the exact source tag before installing or updating the CLI.
 - **D7 (migration remediation; operator ruling, 2026-08-07).** Automated resource migrators do not
   ship. Precise load errors name the offending input, and `agw guide concept-migration` teaches the
@@ -356,7 +386,7 @@ term whenever either role could be ambiguous.
   the intent-to-topic map; the Agentworks assistant agent decides what to propose next.
   `concept-onboarding` remains the specialized first-run and adoption-assessment path, while
   `concept-release-notes` renders the installed release's release-please-authored notes and owns the
-  consented canonical fallback for wider temporal history.
+  authorized canonical fallback for wider temporal history.
 
 ## Open questions
 
