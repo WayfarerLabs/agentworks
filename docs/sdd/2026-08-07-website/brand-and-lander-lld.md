@@ -1,48 +1,72 @@
-# LLD: AGW Brand and Lunar Deployment Lander
+# LLD: AGW Brand and Continuous Lunar Deployment Lander
 
-<!-- cspell:ignore focusout keyup pointerdown unitless -->
+<!-- cspell:ignore focusout imul keyup pointerdown PRNG repower -->
+<!-- cspell:ignore substep unitless uint32 quantized quantization -->
 
-- Status: Phase 4F implemented; release acceptance remains pending
+- Status: Continuous Lander refinement designed; implementation pending
 - Date: 2026-08-10
-- FRD: `frd.md`, specifically R6-R9 and R15-R20
+- FRD: `frd.md`, specifically R6-R9 and R15-R23
 - HLA: `hla.md`, specifically D5 and D7
 - Selected geometry: `logo-concept-10-twin-flame.svg`
 
-## 1. Scope
+## 1. Scope and terms
 
-This LLD pins the selected asset and shared Lander/404 game, excluding main-page, deployment, and
-DNS design. Use plain HTML, CSS, SVG, and JavaScript. A **run** spans START to restart, exit, or
-reload; **commanded thrust** is the post-input/fuel engine value shared by physics/plumes; **mission
-time** excludes hidden time. The semantic 404 and breadcrumb home link remain independent of the
-game subtree; the dedicated Lander shell presents that same subtree deliberately.
+This LLD preserves the selected brand and replaces the one-shot game with the continuous Lander
+defined by R7-R9 and R21-R23. It excludes main-page, onboarding, deployment, and DNS design. Use
+plain HTML, CSS, SVG, and JavaScript.
 
-## 2. Permanent files and ownership
+A **run** begins at START and ends at Exit or reload. A run contains successive **legs**, each from
+one checkpoint or the initial approach to one target site. A **site** is one platform, gas can, and
+NOC. **Commanded thrust** is the post-input, post-fuel engine value shared by physics and plumes.
+**Mission time** excludes hidden time. A **demonstrated minimum** is the smallest fuel allowance, at
+the pinned fuel quantum, that replays one successful bounded-search reference plan. It is not a
+global mathematical optimum over all possible controls.
+
+The semantic 404, breadcrumb home link, and dedicated Lander shell remain independent of the game
+subtree. Both shells render the same game fragment.
+
+## 2. Permanent files and module boundaries
 
 Implementation uses these permanent names:
 
-| File                                        | Responsibility                                                  |
-| ------------------------------------------- | --------------------------------------------------------------- |
-| `website/assets/agw-rocket.svg`             | Canonical selected A, G, W, and twin-plume geometry             |
-| `website/assets/agw-favicon.svg`            | Flame-free browser projection of the selected A/G/W mark        |
-| `website/templates/404.html`                | Semantic 404 shell with the shared game placeholder             |
-| `website/templates/lander.html`             | Dedicated Lander shell with the shared game placeholder         |
-| `website/templates/lander-game.html`        | Sole source for the complete reusable game subtree              |
-| `website/build.py`                          | Standard-library base validation, rendering, and asset copying  |
-| `website/static/lander.css`                 | Scene layout, state selectors, focus, cue, and SVG presentation |
-| `website/static/lander-model.js`            | Pure state, scheduler, physics, collision, and plume functions  |
-| `website/static/lander-game.js`             | DOM, clock/input adapters, focus, lifecycle, and rendering      |
-| `website/tests/lander-model.test.mjs`       | Built-in `node:test` unit and deterministic-vector coverage     |
-| `website/tests/test_lander_404.py`          | Standard-library build/no-JS/forbidden-surface checks           |
-| `website/tests/lander-browser-checklist.md` | Package-free manual browser and accessibility acceptance        |
+| File                                        | Responsibility                                                   |
+| ------------------------------------------- | ---------------------------------------------------------------- |
+| `website/assets/agw-rocket.svg`             | Canonical selected A, G, W, and twin-plume geometry              |
+| `website/assets/agw-favicon.svg`            | Flame-free browser projection of the selected A/G/W mark         |
+| `website/templates/404.html`                | Semantic 404 shell with the shared game placeholder              |
+| `website/templates/lander.html`             | Dedicated Lander shell with the shared game placeholder          |
+| `website/templates/lander-game.html`        | Sole source for the complete reusable game subtree               |
+| `website/build.py`                          | Standard-library rendering, validation, and asset copying        |
+| `website/static/lander.css`                 | Scene layout, state selectors, focus, and SVG presentation       |
+| `website/static/lander-world.js`            | Pure seed, terrain, site, geometry, and window functions         |
+| `website/static/lander-model.js`            | Flight/run state, scheduler, physics, contact, and route planner |
+| `website/static/lander-game.js`             | DOM, clock/input, camera, focus, lifecycle, and rendering        |
+| `website/tests/lander-world.test.mjs`       | Seeded world, window, site, and route-input vectors              |
+| `website/tests/lander-model.test.mjs`       | Scheduler, physics, mission, fuel, and checkpoint vectors        |
+| `website/tests/test_lander_404.py`          | Build, DOM, no-JS, and forbidden-surface checks                  |
+| `website/tests/lander-browser-checklist.md` | Package-free browser, performance, and accessibility acceptance  |
 
-`lander-game.js` alone imports the model and owns the frame and pointer; no scheduler is duplicated.
-The production build-time seam is `website/build.py --repo-root ROOT --output OUT --site-base BASE`.
-It renders the complete linked eleven-file site; game work serves `/lander/` from that artifact and
-fallback acceptance also exercises `/404.html`. `BASE` is a slash-bounded URL path; `/` and
-`/agentworks/` pass. A closed ASCII segment grammar rejects encoding, whitespace, controls, HTML
-delimiters, URL components, backslashes, `//`, and dot segments. Output beneath the repository is
-rejected before staging. The sole token `{{SITE_BASE}}` prefixes home and local asset URLs; missing
-uses or tokens fail. The builder has no partial-output mode.
+The shipped artifact grows by exactly one file, `static/lander-world.js`. Test files are not in the
+artifact. `lander-game.js` imports only `lander-model.js`. `lander-model.js` imports only pure
+exports from `lander-world.js`. `lander-world.js` imports neither production module, reads no DOM,
+clock, storage, or ambient randomness, and owns no mutable singleton. No other production module
+imports upward through this chain.
+
+The model is the sole mutable run authority. One run aggregate owns physics, fuel, mission state,
+seed, generator cursor, retained sites, active and target IDs, route proof, checkpoint, and crash
+debris. The controller owns browser listeners, the animation frame, focus, pointer capture, CSS
+projection, and entropy acquisition. It must not keep a second site, fuel, checkpoint, or mission
+copy.
+
+Prefer each focused production or test module at or below 500 lines; every authored source must
+remain below 1,000. `website/site_validation.py` is already near the hard ceiling, so new
+game-fragment or manifest validation belongs in `test_lander_404.py` or a new focused helper, not in
+that module. Splitting follows authority, not line compression.
+
+The build seam remains `website/build.py --repo-root ROOT --output OUT --site-base BASE`. It emits
+only the complete linked site. The sole `{{SITE_BASE}}` token prefixes local links and imports.
+Missing tokens, unresolved references, or any output other than the exact manifest fail before
+replacement.
 
 ## 3. AGW SVG contract
 
@@ -60,11 +84,12 @@ agw-engine-right: agw-right-cool-edge, agw-right-warm-middle, agw-right-hot-core
 agw-mark: agw-letter-w, agw-letter-g, agw-letter-a
 ```
 
-Paths and transforms are byte-identical to the concept; only IDs, root metadata, and formatting may
-change. The asset is a named image titled `Agentworks AGW rocket with twin layered flames`. The
-`aria-hidden` `#mission-lander` references that source with same-origin external uses:
-`#mission-mark` uses `{{SITE_BASE}}assets/agw-rocket.svg#agw-mark`; `#mission-left-engine` and
-`#mission-right-engine` use their corresponding `agw-engine-*` fragments.
+Paths and transforms are byte-identical to the selected concept; only IDs, root metadata, and
+formatting may change. The asset is a named image titled
+`Agentworks AGW rocket with twin layered flames`. The `aria-hidden` `#mission-lander` references
+that source with same-origin external uses: `#mission-mark` uses
+`{{SITE_BASE}}assets/agw-rocket.svg#agw-mark`; `#mission-left-engine` and `#mission-right-engine`
+use their corresponding `agw-engine-*` fragments.
 
 The body color is `#292b30`. Each engine preserves, from outside to inside, `#d94a1e`, `#ff7a00`,
 and `#ffe09a`. CSS transforms only the two `#mission-*-engine` use elements, never their nested
@@ -84,446 +109,639 @@ The physics pose `(x, y, angle)` refers to the midpoint between the W's two lowe
 asset coordinate `(120, 415)`. The inline scene applies transforms in this order:
 
 ```text
-translate(sceneX, sceneY) rotate(angleDeg) scale(0.16) translate(-120, -415)
+translate(worldX * 10, 548 - worldY * 10)
+rotate(angleDeg)
+scale(0.16)
+translate(-120, -415)
 ```
 
-Positive world `x` is right, positive world `y` is up, and positive `angle` is clockwise, matching
-SVG rotation. The collision feet are model points `(-1.6 m, 0)` and `(1.6 m, 0)` relative to the
-reference point. The lander's solid hull is the rectangle from `(-1.6,0)` to `(1.6,6.5)` transformed
-by its pose. Plumes are visual only and do not enlarge the hull.
+The stable world group supplies the camera translation described in section 6. Positive world `x` is
+right, positive world `y` is up, and positive `angle` is clockwise, matching SVG rotation. The
+collision feet are model points `(-1.6 m, 0)` and `(1.6 m, 0)` relative to the reference point. The
+lander width is therefore exactly `3.2 m`. Its solid hull is the rectangle from `(-1.6,0)` to
+`(1.6,6.5)` transformed by its pose. Plumes are visual only and do not enlarge the hull.
 
 Pure `transformLocalPoint(pose,lx,ly)` returns `worldX=x+lx*cos(a)+ly*sin(a)` and
-`worldY=y-lx*sin(a)+ly*cos(a)` for clockwise degrees; feet, hull, render, and G opening use it.
+`worldY=y-lx*sin(a)+ly*cos(a)` for clockwise degrees. Feet, hull, render, bay, and collision use the
+same export.
 
-## 4. Static Lander/404 and DOM contract
+## 4. Shared DOM and no-JavaScript contract
 
 The Lander and 404 shells each render the shared `header`, `main`, and `footer` landmarks. The 404
-header breadcrumb is its sole visible route-home action. One reviewed `lander-game.html` fragment
-owns the following stable subtree and is rendered byte-equivalently into both shells:
+breadcrumb is its sole visible route-home action. One reviewed `lander-game.html` fragment owns this
+stable subtree and is rendered byte-equivalently into both shells after site-base substitution:
 
 ```text
-<section id="lander-game" aria-label="Lunar deployment scene">
-  <div id="lander-scene-shell">
-    <svg id="lander-scene" viewBox="0 0 1000 640" ...>...</svg>
-    <button id="lander-start" type="button" hidden aria-label="Start lunar deployment mission"></button>
-  </div>
-  <p id="lander-controls" hidden>...</p>
-  <div id="lander-actions" hidden>
-    <button id="lander-exit" type="button">Exit mission</button>
-    <button id="lander-restart" type="button" hidden>Restart mission</button>
-  </div>
-  <p id="lander-status" role="status" aria-live="polite" aria-atomic="true"></p>
-</section>
+section#lander-game[aria-label="Lunar deployment scene"]
+  div#lander-scene-shell[tabindex="-1"]
+    svg#lander-scene[viewBox="0 0 1000 640"]
+      title#lander-scene-title
+      desc#lander-scene-description
+      rect#scene-sky
+      path#scene-stars
+      g#lander-world[aria-hidden="true"]
+        g#terrain-layer
+        g#site-layer
+        g#debris-layer
+        g#mission-lander
+        g#mission-agent
+      g#crash-flash[aria-hidden="true"]
+      g#next-site-cue[aria-hidden="true"]
+    button#lander-start[type="button"][hidden]
+  p#lander-fuel[hidden]
+    span#lander-fuel-label "Fuel reserve"
+    output#lander-fuel-value[aria-labelledby="lander-fuel-label"]
+  span#lander-target-direction.visually-hidden[hidden] "Next site is to the right."
+  p#lander-controls[hidden]
+  div#lander-actions[hidden]
+    button#lander-exit[type="button"] "Exit mission"
+    button#lander-restart[type="button"][hidden] "Restart mission"
+  p#lander-status[role="status"][aria-live="polite"][aria-atomic="true"]
 ```
 
-Each `main` begins with a `.page-heading` containing only its reviewed `h1`: `Lunar deployment` on
-the dedicated route and `Page not found` on 404. The 404 then retains
-`<p id="not-found-message">...</p>` before the shared subtree. Both use `.detail-main` and the
-game-specific compact gap, with no eyebrow, error-code, provenance, or other pre-title label.
+The template contains the complete static first terrain window, site 0, lander, gas can, and dark
+NOC inside the listed layers. Enhancement reconciles those same nodes rather than keeping a hidden
+second world. Generated terrain paths use `.terrain-chunk[data-chunk-index]`. Each retained site is
+one `.lander-site[data-site-id][data-can="present|collected"][data-power="off|on"]` containing, in
+order, `.landing-platform`, `.platform-supports`, `.gas-can`, `.noc-building`, `.noc-battery`, and
+`.noc-antenna`. Reconciliation keys by the integer data value and replaces no stable outer layer.
+Decorative world descendants remain `aria-hidden`.
 
-`#lander-controls` is the only control copy, stays hidden until START, and then reads exactly:
-`Thrust: Space or Up. Turn: Left/H or Right/L. Escape exits. R restarts after success or failure.`
-`#lander-actions` is also hidden in preflight. START reveals it with `Exit mission` enabled and
-`Restart mission` hidden. Failure or success reveals and enables Restart; flying, deployment,
-restart, and departure keep Restart hidden. Both buttons use native focus and click semantics and
-invoke the same controller methods and model events as Escape and `r`.
+The control copy reads exactly:
 
-The zero-angle preflight asset occupies scene `x=[285.92,314.08]`, `y=[163.2,243.36]`, including
-nose, body, engines, and settled plumes. Center the transparent start button at `(30%,31.7625%)` and
-size it `max(44px,2.816%)` by `max(44px,12.525%)`. This covers the full rendered silhouette at every
-shell size with at least 44 CSS pixels in each dimension. Only `:focus-visible` draws its three
-pixel outline and two pixel offset.
+```text
+Thrust: Space or Up. Turn: Left/H or Right/L. Tap or hold to thrust; drag to turn. R restarts after a crash. Escape exits.
+```
+
+Preflight hides fuel, controls, actions, direction cue, crash presentation, and all instructions.
+START reveals fuel, controls, and actions, with Exit enabled and Restart hidden. Only `failed`
+reveals and enables Restart. The live fuel output uses `fuel.toFixed(1)` for display but retains the
+unrounded number in the model. A status update does not redundantly announce fuel every frame; the
+named output changes only when its displayed tenth changes.
 
 On start, the controller hides and disables `#lander-start`, gives `#lander-scene-shell`
 `tabindex="0"`, `role="application"`, `aria-label="Lunar deployment game"`, and
-`aria-describedby="lander-controls lander-status"`, then focuses it with `preventScroll: true`. On
-exit it removes those active attributes, restores `tabindex="-1"`, reveals and enables the start
-button, hides the controls and action region, resets Restart hidden, and focuses the start button
-without scrolling. Restart hides its button, returns focus to the active scene without scrolling,
-and starts the same fresh in-memory run as `r`.
+`aria-describedby="lander-controls lander-fuel lander-target-direction lander-status"`, then focuses
+it with `preventScroll: true`. Exit removes active attributes, restores `tabindex="-1"`, reveals and
+enables Start, hides active chrome, and focuses Start without scrolling. Restart hides its button,
+focuses the active shell without scrolling, and dispatches the same RESTART event as `r`.
 
-Before activation the SVG is a named image whose description mentions the lander, surface, zone, and
-dark NOC, but no controls. While the shell is an application, the SVG is `aria-hidden`; status
-conveys changes and no SVG descendant is separately exposed.
+Before activation the SVG is a named image whose description mentions the hovering lander, varied
+lunar surface, elevated platform, gas can, and dark NOC, but no controls. While the shell is an
+application, the SVG is `aria-hidden`; the live status and named fuel output convey changes. With
+JavaScript unavailable, Start and all active chrome remain hidden while the named static scene, page
+heading, 404 explanation, and breadcrumb remain useful.
 
-With JavaScript unavailable, the start button, controls, and action region remain hidden. The static
-named scene and each page heading remain visible and usable; 404 also retains its explanatory text
-and breadcrumb home anchor. No CSS selector depends on a JavaScript-added class to show shell
-content or the breadcrumb.
+The transparent start target covers the full preflight lander with at least 44 CSS pixels in each
+dimension. At zero angle the complete asset occupies scene `x=[285.92,314.08]` and
+`y=[163.2,243.36]`; center the target at `(30%,31.7625%)` and size it `max(44px,2.816%)` by
+`max(44px,12.525%)`. Only `:focus-visible` draws its three-pixel outline and two-pixel offset.
 
-## 5. Responsive scene geometry
+## 5. Seed and deterministic world generation
 
-The scene uses the pinned view box, `preserveAspectRatio="xMidYMid meet"`, ratio `25 / 16`, and
-`width: min(100%, 60rem)`, with no minimum width. `overflow: hidden` clips only departing artwork.
-It cannot cause page overflow at 320 CSS pixels or 400 percent zoom; collision stays in view-box
-coordinates.
+### 5.1 Run seed lifecycle
 
-World-to-scene mapping is:
+World values are unsigned 32-bit integers. `lander-world.js` exports pure `normalizeSeed(value)`,
+`mixUint32(value)`, and `sampleUnit(seed, stream, index)`. `normalizeSeed` converts with `>>>0` and
+maps zero to `0x6d2b79f5`, so every run has one nonzero canonical seed. The exact mixer is:
 
-```text
-sceneX = worldX * 10
-sceneY = 548 - worldY * 10
+```js
+value = Math.imul(value ^ (value >>> 16), 0x7feb352d);
+value = Math.imul(value ^ (value >>> 15), 0x846ca68b);
+return (value ^ (value >>> 16)) >>> 0;
 ```
 
-Surface collision is world `y=0`, scene `y=548`. That exact horizon spans the zone through the NOC,
-so terrain cannot cover the operational geometry.
+`sampleUnit` mixes `seed ^ Math.imul(stream, 0x9e3779b9) ^ Math.imul(index + 1, 0x85ebca6b)` and
+divides by `2 ** 32`. Streams `1`, `2`, `3`, `4`, and `5` are terrain boundaries, terrain
+orientation, site spacing, route tie-breaking, and debris. Indexed samples make regeneration
+independent of call order. There is no mutable PRNG cursor inside the world module.
 
-Pinned game geometry, in world metres, is:
+The checked-in preflight scene uses `STATIC_WORLD_SEED=0x41475731`. Production START requests one
+`Uint32Array(2)` from `crypto.getRandomValues` and passes both words through
+`mixUint32(word0 ^ rotateLeft(word1,13))`. If Web Crypto is unavailable, the controller mixes
+integer `Date.now()` and the integer microsecond portion of `performance.now()` once. It never uses
+`Math.random`. The resulting nonzero seed replaces the static scene and exists only in the run
+aggregate. Tests call `createRun({seed})`; ordinary START, Exit followed by START, and reload
+acquire a fresh seed. Restart reuses the current run seed and checkpoint.
 
-| Object                    | Geometry                                                 |
-| ------------------------- | -------------------------------------------------------- |
-| Playable horizontal bound | Lander reference `x` in `[7, 93]`                        |
-| Playable vertical bound   | Lander reference `y <= 48`; `y <= 0` is ground contact   |
-| Landing zone              | Surface segment `x` in `[18, 42]`                        |
-| Zone marker               | Scene line `(180, 548)` to `(420, 548)`, two units thick |
-| NOC west module           | Rectangle `x=[54, 59]`, `y=[0, 4.2]`                     |
-| NOC server module         | Rectangle `x=[60, 66]`, `y=[0, 6.8]`                     |
-| NOC east module           | Rectangle `x=[67, 72]`, `y=[0, 4.8]`                     |
-| NOC entry                 | West face centered at `(54, 1.1)`                        |
-| Antenna                   | Mast from `(69.5, 4.8)` to `(69.5, 8.0)`                 |
+### 5.2 Terrain chunks
 
-NOC is `#20232a`; inactive features `#3b3f47`; windows `#ffe09a`; status `#7de2c5`; antenna/signals
-`#d94a1e`, with computed `3.788:1` contrast on lunar `#f5f2e8`; terrain `#d7d2c4`; outlines
-`#4b4e55`. Powered state also adds window bars, solid status lights, and two static signal arcs.
+Constants are `CHUNK_WIDTH=20 m`, `TERRAIN_SAMPLE_SPACING=4 m`, and six vertices per chunk,
+including both boundaries. Shared boundary height for integer boundary `b` is
+`2 + 3 * sampleUnit(seed,1,b)`. For local vertex `k` in `[0,5]`, interpolate the two boundary
+heights at `k/5`, then add the signed motif below. The sign is `+1` when
+`sampleUnit(seed,2,chunkIndex) >= 0.5`, otherwise `-1`.
 
-The landing zone is visually distinct and left of the NOC. Their 12 metre gap has no collision
-geometry. The scaled radius is `66.3121` scene units; `[7,93]` maps to `x=[70,930]`, and `y=48` maps
-to scene `y=68`, keeping the rotating mark visible.
+```text
+k:       0     1      2     3      4    5
+motif:   0   +1.2   -0.8  +1.0   -0.6  0   metres
+```
 
-## 6. CSS state contract
+Clamp final heights to `[0.75,7.5]`. Adjacent chunks share their boundary byte-for-byte. The motif
+guarantees both materially rising and falling sampled edges before a platform replacement; the world
+tests additionally prove that every retained representative window has one rise and one fall of at
+least `0.35 m`, at least four nonzero slopes, and no three equal consecutive samples outside
+platform spans.
 
-`#lander-game` is the only state-bearing DOM root. The controller sets:
+`terrainHeightAt(seed,x)` linearly interpolates the enclosing sampled edge. A chunk path closes at
+world `y=-10`, below the view. Terrain is collision geometry, not merely art.
 
-- `data-mission-state` to one state name from section 7;
-- `data-noc-power="off|on"`;
-- `data-noc-stage="0|1|2|3|4"` for west, server, east, and antenna progression;
-- `data-cue="running|settled"`;
-- `data-paused="true|false"`;
-- CSS custom properties `--lander-x`, `--lander-y`, `--lander-angle`, `--left-plume-scale`,
-  `--right-plume-scale`, `--left-plume-opacity`, and `--right-plume-opacity`.
+### 5.3 Sites and bounded candidate generation
 
-`--lander-x`/`--lander-y` are scene `px`, `--lander-angle` is `deg`, and plume scale/opacity are
-unitless. Render writes them once after a frame's steps; CSS never infers model state.
+Site 0 has fixed platform center `x=36 m`; its top follows the same `0.8 m` terrain-clearance rule
+as every other platform. The checked-in no-JavaScript scene is the exact site-0 descriptor for
+`STATIC_WORLD_SEED`; START reconciles it to the fresh run seed before the first flight frame. Every
+later target is generated from the current site and seed. Candidate `c` in `[0,7]` uses indexed
+streams and never advances ambient state:
 
-`lander.css` selects those attributes and structural IDs. Its only keyframes are `agw-preflight-cue`
-and `agw-agent-route`. Controller clocks, never CSS events, advance and test state.
-`data-paused="true"` pauses every active keyframe; powered antenna arcs remain static.
+- for candidates 0 through 6, let `base=floor(8*sampleUnit(seed,3,siteIndex))` and
+  `slot=1+((base+3*c)%8)`; center delta is `78+3*slot` metres, yielding seven distinct values in
+  `[81,102]` and placing the complete next platform beyond the current 100 m viewport;
+- candidate platform top is `0.8 m` above the greatest native terrain vertex or interpolated
+  boundary under its span;
+- candidate 7 is the distinct deterministic fallback with center delta `78 m`; its deck follows the
+  ordinary native-terrain elevation rule.
 
-Initial enhancement sets `data-cue="running"` once for a 2.4-second, three-pulse plume scale from
-`0.08` to `0.28`, then `settled`. Reduced motion and START settle it immediately. EXIT restores
-settled preflight and never replays it; only reload creates a new cue opportunity.
+For candidates 0 through 6, the model runs section 10's bounded reference search and accepts the
+first candidate with a complete proof. It then tries the fixed candidate 7. There are exactly eight
+attempts, no retry loop. Failure of the fallback proof is an invariant error: site state is left
+unchanged, the run enters `failed`, and the status reports a game error without presenting an
+unreachable target. Unit tests exhaust at least 4,096 consecutive seeds for the fallback contract.
+No code silently weakens the fuel proof or generates a ninth candidate.
 
-Reduced motion disables animations/transitions. Settled preflight variables keep plumes at `0.08`;
-no media rule overrides live flight plume commands. Essential physics remains, while the decorative
-post-touchdown sequence uses section 11's shortcut.
+Each platform is exactly `3 * 3.2 = 9.6 m` long, centered at the site coordinate, `0.35 m` thick,
+and `0.8 m` above its highest underlying native terrain point. Two narrow pylons connect its
+underside to native terrain. A centered `H` marking and outline make it read as a small elevated
+helicopter pad. The platform replaces the terrain collision surface on its open horizontal span; its
+top, ends, underside, and pylons are explicit solid geometry.
 
-## 7. Mission state machine
+One gas can sits `3.0 m` right of platform center and does not collide. One NOC begins `2.0 m` right
+of the platform edge. It is a single solid `7.0 m` by `7.2 m` building on a filled foundation up to
+platform height, not separate modules. Its face contains one phone-battery outline, terminal, and
+four fill bars. A `3.2 m` mast, antenna head, and two signal arcs rise from the roof. Building,
+foundation, and mast collide; signal arcs do not.
 
-The machine is named `DeploymentMission`. Its states and only legal transitions are:
+## 6. Projection, camera, and bounded retention
 
-| From                         | Event                               | To          |
-| ---------------------------- | ----------------------------------- | ----------- |
-| `preflight`                  | `START`                             | `flying`    |
-| `flying`                     | `SAFE_CONTACT`                      | `landed`    |
-| `flying`                     | `SAFE_CONTACT` with reduced motion  | `succeeded` |
-| `flying`                     | `UNSAFE_CONTACT` or `OUT_OF_BOUNDS` | `failed`    |
-| `landed`                     | `LANDING_SETTLED`                   | `deploying` |
-| `deploying`                  | `AGENT_ENTERED`                     | `powering`  |
-| `powering`                   | `NOC_POWERED`                       | `departing` |
-| `departing`                  | `LANDER_DEPARTED`                   | `succeeded` |
-| `failed` or `succeeded`      | `RESTART`                           | `flying`    |
-| Any state except `preflight` | `EXIT`                              | `preflight` |
+The SVG uses `viewBox="0 0 1000 640"`, `preserveAspectRatio="xMidYMid meet"`, and
+`width:min(100%,60rem)`, with no minimum width. It cannot cause page overflow at 320 CSS pixels or
+400 percent zoom. Horizontal scale is `10 scene units/m`; vertical projection is
+`sceneY=548-worldY*10`.
 
-Reduced-motion `SAFE_CONTACT` atomically records touchdown, powers the NOC, and succeeds. Illegal
-events return the unchanged model.
+The model tracks `furthestX` and a per-leg `legCameraFloor`. The controller computes
+`cameraLeft=max(0,legCameraFloor,furthestX-35)` only from the rendered model and writes
+`--camera-x=-cameraLeft*10px` on the game root. CSS applies one transform on `#lander-world`:
 
-Entry invariants: preflight has initial pose, NOC/input off, controls hidden; flying resets clock
-and enables collision/controls; landed freezes and zeros input; deploying opens bay/agent; powering
-is monotonic; departing uses powered-NOC scripted pose; succeeded keeps NOC/exact status; failed
-freezes harmlessly with NOC/engines off.
+```text
+transform: translate(var(--camera-x), 0)
+```
 
-`START` and `RESTART` call `createFlightModel()`, which returns a new `flying` model with pinned
-pose/fuel and reset NOC, bay, agent, and signals. The transition also resets controller clocks,
-accumulator, inputs, and pointer. `EXIT` instead creates the preflight presentation model.
+All terrain, sites, lander, agent, and debris retain absolute world-derived scene coordinates inside
+that group. The fixed sky, stars, crash flash overlay, and next-site cue remain outside it. The
+camera does not rewrite child coordinates per frame. It begins moving only after the lander passes
+`x=35`, keeps the reference point at scene `x=350`, and never moves backward during a leg. On
+checkpoint restore, `legCameraFloor` and `furthestX` are derived from the active platform center;
+there is no controller camera cache.
 
-## 8. Simulation contract
+The visible interval is `[cameraLeft,cameraLeft+100]`. Retain chunks intersecting the interval plus
+`40 m` on each side, at most ten chunks. Retain the active checkpoint site, target site, and at most
+one immediately preceding powered site, at most three sites. When a window key changes, reconcile
+the fixed layers once; ordinary frames update transforms and attributes only. The run retains no
+discarded terrain or site history beyond `completedSites` and the latest checkpoint snapshot.
 
-### 8.1 Units and constants
+Hard runtime ceilings are ten terrain paths, three site groups, eight debris fragments, 80 children
+under `#lander-world`, 64 queued input edges, one pointer, one animation frame, and one pulse timer.
+Input edges beyond 64 are coalesced by physical control to their latest value without changing the
+step-end ordering. A 100-site browser witness must keep these counts constant, show no increasing
+event-listener count, and keep active-game frame work below 4 ms at the 95th percentile on the
+pre-merge Chromium machine. Candidate generation and its route proof must finish below 75 ms at the
+95th percentile and 150 ms maximum over the same witness.
 
-The model uses metres, seconds, metres per second, degrees, and degrees per second. Constants are
-named exports and are not configurable at runtime:
+The right-edge cue is a fixed `44 by 44` scene-unit target at `(932,280)`. It contains a solid
+right-pointing arrow, not just motion. It is visible only when a target exists and
+`target.platformLeft > cameraLeft+100`; it hides on equality or once the target enters view. The
+controller reveals the visually hidden `#lander-target-direction` on the same predicate, so target
+direction is available without seeing animation or SVG.
+
+## 7. Model shape, mission states, and checkpoint
+
+### 7.1 Sole mutable run aggregate
+
+`createRun({seed,reducedMotion=false})` returns a new aggregate with this conceptual shape:
+
+```text
+state, seed, missionSeconds, completedSites, furthestX, legCameraFloor
+pose, commanded, fuel
+generatorCursor, retainedChunks, retainedSites
+activeSiteId, targetSiteId, targetRouteProof
+touchdownPose, sequenceSeconds, agent, nocStage
+checkpoint, failureCause, crash
+```
+
+The object is replaced by pure model transitions; nested collections are copied on change. World
+descriptors returned by `lander-world.js` are immutable values. Fuel is an unbounded nonnegative
+JavaScript number measured in engine-seconds. There is no capacity, clamp, or award replacement:
+unused fuel always carries forward.
+
+Preflight uses the checked-in site 0 and initial pose but no active run seed or visible fuel. START
+creates site 0 as target, fuel `30`, `completedSites=0`, and the initial approach:
+`(x,y,vx,vy,angle,angularVelocity)=(30,32,0.8,-0.4,0,0)`.
+
+### 7.2 State machine
+
+The legal mission transitions are:
+
+| From        | Event                                   | To          |
+| ----------- | --------------------------------------- | ----------- |
+| `preflight` | `START`                                 | `flying`    |
+| `flying`    | safe target-platform contact            | `landed`    |
+| `flying`    | unsafe contact or leg bound             | `crashing`  |
+| `landed`    | `LANDING_SETTLED`                       | `deploying` |
+| `deploying` | `AGENT_ENTERED`                         | `powering`  |
+| `powering`  | `NOC_POWERED`                           | `launching` |
+| `launching` | `LAUNCH_COMPLETE`                       | `flying`    |
+| `crashing`  | `CRASH_COMPLETE`                        | `failed`    |
+| `failed`    | `RESTART` with checkpoint               | `launching` |
+| `failed`    | `RESTART` before first checkpoint       | `flying`    |
+| Any active  | `EXIT`                                  | `preflight` |
+| `flying`    | unsafe contact with reduced motion      | `failed`    |
+| `flying`    | safe target contact with reduced motion | `launching` |
+
+The reduced-motion safe-contact transition atomically applies the complete `landed`, `deploying`,
+and `powering` state result, then begins the mechanical launch. There is no `succeeded` or terminal
+deployment state.
+
+Safe contact performs one indivisible service preparation before `landed` renders: generate and
+prove the next site, mark the contacted can collected, add its award, increment `completedSites`,
+and freeze at the deck. If next-site generation hits its invariant error, none of these mutations
+commit. Normal timing is:
+
+1. `landed`, 300 ms: settle, open the G bay, and show the collected-can/fuel result.
+2. `deploying`, 1,800 ms: the agent descends for 300 ms, crosses to the NOC entry by 1,650 ms, and
+   is hidden inside by 1,800 ms.
+3. `powering`, 1,000 ms: battery fill bars become permanent at 200, 400, 600, and 800 ms; antenna
+   head and static signal arcs activate at 1,000 ms.
+4. At `NOC_POWERED`, write status `Agent deployed. Mission continues.`, mark the NOC powered, and
+   create the checkpoint. Enter `launching` immediately afterward.
+5. `launching`, 750 ms: command both engines at `0.82`, consume actual reserve through the ordinary
+   fuel path, integrate the same immutable physics, ignore player input, and retain collision
+   against platform sides, pylons, and the building. The starting deck-top contact is ignored only
+   while velocity is upward and until both feet clear it by `0.05 m`. On completion, return control
+   in `flying`, carrying the launch result across that transition without a reset.
+
+Reduced motion skips the 3,100 ms service presentation, applies can collection, award, agent entry,
+full battery, powered antenna, and checkpoint in one transition, then performs the same fuel-burning
+launch at fixed simulation steps without CSS interpolation.
+
+### 7.3 Immutable checkpoint
+
+The model deep-copies and freezes this exact checkpoint after power and before launch:
+
+```text
+seed
+completedSites
+generatorCursor
+pose = settled platform pose with zero velocities and angle
+fuel = exact post-award reserve
+activeSiteId
+targetSiteId
+targetRouteProof
+retainedChunks = ordered chunk indexes
+retainedSites = ordered descriptors with canCollected and powered flags
+furthestX = active platform center
+legCameraFloor = max(0, active platform center - 35)
+```
+
+It excludes controller clocks, input, pointer, camera, animation progress, debris, status text, and
+the pre-crash flight pose. RESTART clears those excluded values, restores a fresh deep copy, keeps
+the current run seed, and enters `launching`, so the restored vehicle visibly begins on the last
+powered pad and pays the same automatic-launch fuel again. Repeated restarts restore exactly the
+same post-award fuel; they never recollect the can, add the award, increment progress, or repower
+the NOC. Before the first powered site, RESTART recreates the initial approach with the same run
+seed and initial `30` fuel. Exit or ordinary reload discards the checkpoint and gets a fresh seed.
+
+## 8. Physics, fuel, and fixed-step clock
+
+### 8.1 Constants and integration
+
+Constants are named exports and are not configurable at runtime:
 
 ```js
 export const STEP_SECONDS = 1 / 120;
 export const MAX_FRAME_SECONDS = 0.1;
 export const MAX_CATCH_UP_STEPS = 12;
-export const GRAVITY = 3.0; // m/s^2 downward
-export const ENGINE_ACCELERATION = 4.2; // m/s^2 per engine at command 1
-export const TORQUE_ACCELERATION = 70.0; // deg/s^2 at unit differential
-export const FUEL_CAPACITY = 30.0; // engine-seconds
-export const FUEL_FLOW = 1.0; // units/s per engine at command 1
-export const INITIAL_X = 30.0;
-export const INITIAL_Y = 32.0;
-export const INITIAL_VX = 0.8;
-export const INITIAL_VY = -0.4;
-export const INITIAL_ANGLE = 0.0;
-export const INITIAL_ANGULAR_VELOCITY = 0.0;
-export const MAX_PLAYABLE_Y = 48.0;
+export const GRAVITY = 3.0;
+export const ENGINE_ACCELERATION = 8.4;
+export const TORQUE_ACCELERATION = 70.0;
+export const FUEL_FLOW = 1.0;
+export const MAX_PLAYABLE_Y = 56.0;
 export const MAX_LANDING_HORIZONTAL_SPEED = 1.4;
 export const MAX_LANDING_DESCENT_SPEED = 2.2;
 export const MAX_LANDING_ANGLE = 8.0;
 export const MAX_LANDING_ANGULAR_SPEED = 12.0;
 ```
 
-Fuel has no mass effect. Burn is `FUEL_FLOW * (left + right) * STEP_SECONDS`. If fuel is smaller,
-scale both engines by `fuel / requestedBurn`, exhausting it without favoring an engine. These
-effective values drive physics and plumes; zero fuel means zero thrust.
+Fuel burn is `FUEL_FLOW*(left+right)*STEP_SECONDS`. If reserve is smaller, scale both engines by
+`fuel/requestedBurn`, exhausting it without favoring an engine. Effective engines drive both physics
+and plumes. Zero fuel means zero thrust. Fuel has no mass effect.
 
-### 8.2 Input mixing
-
-Digital controls produce:
-
-```text
-collective = 0.72 when Space or Up is held, otherwise 0
-leftBias = 0.45 when Left or H is held, otherwise 0
-rightBias = 0.45 when Right or L is held, otherwise 0
-keyboardLeft = clamp(collective + rightBias, 0, 1)
-keyboardRight = clamp(collective + leftBias, 0, 1)
-```
-
-Left/H fires right and turns left; Right/L fires left and turns right. Both directions yield equal
-thrust. Each final engine request is `max(keyboard, pointer)`, not their sum.
-
-### 8.3 Integrator
-
-Each step first applies queued input events through the step-end mission timestamp, scales thrust
-for fuel, then uses the pre-step angle for acceleration:
+Each step applies queued input through the step end, resolves effective thrust, stores the previous
+pose, then uses the pre-step angle and semi-implicit Euler:
 
 ```text
 total = ENGINE_ACCELERATION * (left + right)
-ax = total * sin(angle radians)
-ay = total * cos(angle radians) - GRAVITY
+ax = total * sin(angle)
+ay = total * cos(angle) - GRAVITY
 angularAcceleration = TORQUE_ACCELERATION * (left - right)
-
-vx += ax * dt
-vy += ay * dt
-angularVelocity += angularAcceleration * dt
-x += vx * dt
-y += vy * dt
-angle = normalizeDegrees(angle + angularVelocity * dt)
+vx += ax * dt; vy += ay * dt; angularVelocity += angularAcceleration * dt
+x += vx * dt; y += vy * dt; angle = normalizeDegrees(angle + angularVelocity * dt)
 ```
 
-This is semi-implicit Euler, with no drag, damping, clamp, bounce, randomness, or variable mass.
-`normalizeDegrees` returns `[-180, 180)` and state is not rounded between steps.
+There is no drag, damping, bounce, random force, variable mass, position rounding, or doubled
+gravity. Player and automatic-launch thrust share `effectiveThrust` and `integrateStep`.
 
-### 8.4 Fixed-step and catch-up
+### 8.2 Input mixing and scheduler
 
-`lander-model.js` exports side-effect-free `createSimulationClock(timestamp)`,
-`enqueueInputEdge(clock, edge)`, and `advanceSimulation(clock, model, timestamp)`. Their immutable
-clock owns timestamp, accumulator, integer cursor, sequence, and queue. Controller and Node tests
-use these same exports; there is no second scheduler.
-
-The first advance renders without stepping. Each later `advanceSimulation`:
-
-1. Compute `frameSeconds = (timestamp - previousTimestamp) / 1000` and store the new timestamp.
-2. If `frameSeconds < 0` or `frameSeconds > MAX_FRAME_SECONDS`, return unchanged model plus a reset
-   clock and `discarded: true`, with no step.
-3. Otherwise add `frameSeconds` to the accumulator. While `accumulator + 1e-12 >= STEP_SECONDS`,
-   take a step, subtract `STEP_SECONDS`, and stop after 12 steps.
-4. If numerical residue is within `1e-12` of zero, set it to zero. Render once.
-
-Order `performance.now()` edges by timestamp then sequence and apply through integer step cursor
-plus `1e-9 ms`. On `discarded`, invoke pointer teardown, clear held input, and render unchanged
-state; the reset cursor advances without mission time, preserving frame-schedule independence.
-
-When hidden, cancel the frame, clear input/capture and accumulator, and set `data-paused="true"`.
-When visible, the first new frame only resets time; hidden time never accumulates.
-
-## 9. Contact, landing envelope, and failure
-
-After each integration step, transform the feet and solid hull by the new pose. First ground contact
-occurs when any hull vertex has world `y <= 0`; NOC contact is polygon-rectangle intersection.
-Classification uses post-step velocities and angle before clamping.
-
-A contact is safe only when all comparisons below are true, including equality at each limit:
+Digital and pointer mappings remain:
 
 ```text
-both transformed feet have x in [18, 42]
-vy <= 0
+collective = 0.72 for Space or Up, otherwise 0
+leftBias = 0.45 for Left or H, otherwise 0
+rightBias = 0.45 for Right or L, otherwise 0
+keyboardLeft = clamp(collective + rightBias, 0, 1)
+keyboardRight = clamp(collective + leftBias, 0, 1)
+final engine = max(keyboard engine, pointer engine)
+```
+
+The model retains the one immutable scheduler exported by `lander-model.js`. The first callback
+renders without stepping. A frame delta less than zero or greater than `0.1 s` discards the gap,
+clears active input, and advances no mission time. Otherwise, run at most 12 fixed steps and retain
+the substep residue. Timestamp ties use enqueue sequence; step-end comparison uses `1e-9 ms`.
+
+When hidden, cancel the animation frame, pointer/tap timer, key state, and active CSS animation; set
+`data-paused="true"`; and retain no accumulator. On visibility, the first frame resets time without
+stepping. Hidden time advances neither physics, service, crash, cue, arrow blink, nor mission time.
+
+## 9. Swept collision and landing classification
+
+Collision uses previous and next poses from every physics step. Build the transformed hull at both
+ends and a swept broad-phase box against nearby terrain edges, the target platform rectangle and
+pylons, every retained NOC/foundation/mast, and any retained non-target platform.
+
+For each broad-phase candidate, interpolate position linearly and angle by the shortest normalized
+arc. Choose enough samples that maximum hull-vertex travel is at most `0.2 m` and angular travel is
+at most `1 degree`. Use at most 64 samples. If a step would require more, classify it immediately as
+unsafe `overspeed` rather than permitting tunneling. Find the first intersecting interval, then use
+12 bisections to pin contact time. Segment/polygon intersection and separating-axis rectangle tests
+include equality.
+
+Classify the earliest contact, with equal-time precedence: building or mast, non-top platform
+surface, terrain, then target platform top. The target top is safe only when both transformed feet
+are on its closed `9.6 m` span, neither hull side intersects an end, `vy<=0`, and these inclusive
+limits hold at contact:
+
+```text
 abs(vy) <= 2.2
 abs(vx) <= 1.4
 abs(normalizeDegrees(angle)) <= 8.0
 abs(angularVelocity) <= 12.0
 ```
 
-Classify the raw post-step pose in this order: NOC `UNSAFE_CONTACT`; ground as safe touchdown or
-`UNSAFE_CONTACT`/`surface`; then `x` or upper-`y` `OUT_OF_BOUNDS`. Ground crossing is not a bound.
-Settle safe contact from raw pose with its lower foot at `y=0`; clamp only frozen failures.
-Antenna/signals do not collide, departure ignores bounds, and fuel is not a landing predicate.
+Settle a safe pose with both feet on the deck and zero velocities. Gas-can art and antenna signal
+arcs do not collide. Contact with a consumed/powered site's platform during a later leg is unsafe;
+only the current target can complete a leg.
 
-Failure status is exactly `Landing unsuccessful. Press R to restart or Escape to exit.` There is no
-shake, flash, explosion, layout movement, or breadcrumb change.
+Per-leg bounds are `x >= checkpointCenter-45`, `x <= targetCenter+65`, and `y <= 56`. Before the
+first checkpoint, use `x>=-5`. Crossing a bound is unsafe only when no earlier swept collision
+exists. Terrain generation covers the whole bound corridor, so a missing collision node cannot turn
+into a fall through the world.
 
-## 10. Exact input behavior
+## 10. Reference route proof and progressive award
 
-### 10.1 Keyboard
+### 10.1 Bounded search
 
-Match Space/arrows by `code` and `h`, `l`, `r` by lowercased `key`.
+`lander-model.js` owns one pure
+`proveReferenceRoute({physics,originSite,targetSite,seed,siteIndex})`. It uses the exact physics,
+fuel scaling, swept collision, landing envelope, and automatic-launch prefix from sections 8 and 9.
+The immutable profile is not independently configurable.
 
-Preflight starts only for non-repeated, unmodified `code === "Space"` targeted at `body`, game,
-shell, or scene. Exclude any anchor, button, form control, editable element, or descendant. Consume
-only the accepted event. Its START seeds held physical `Space` and a same-timestamp collective-down
-edge; document keyup ends it even after focus moves to the shell. Native start-button click,
-including keyboard click, starts without thrust.
+Search resolution is:
 
-In `flying`, accept Space, Up, Left, Right, H, and L without Control, Alt, or Meta only on the
-active shell path; Shift does not alter mapping. Consume repeats but queue only first edges. Release
-an accepted held code even after focus moves. Track aliases by physical code, so releasing Up leaves
-Space-held collective active.
+- engine commands from `{(0,0),(.55,.55),(.72,.72),(.90,.90),(.90,.45),(.45,.90)}`;
+- one command decision every `0.5 s`, simulated as 60 fixed steps;
+- at most 48 decisions, a 24-second route horizon;
+- beam width 24 after quantizing state by `1 m x`, `1 m y`, `0.5 m/s vx`, `0.5 m/s vy`,
+  `5 degree angle`, and `5 degree/s angular velocity`;
+- score order: unsafe last, then estimated target error plus fuel burned, then lexicographic command
+  sequence, then `mixUint32(seed ^ scheduleDigest ^ Math.imul(siteIndex,0x9e3779b9))` only as the
+  final stable tie key.
 
-Unmodified Escape exits any non-preflight state only on the active shell path, cuts engines, and
-focuses the restored start button. Breadcrumb-link Escape and every event outside that path retain
-browser behavior. Unmodified `r` restarts only `failed` or `succeeded` on the shell path.
+Every candidate begins with the exact 750 ms `(0.82,0.82)` automatic-launch schedule. A beam node
+that contacts anything unsafely is removed. A node that safely contacts the target is a witness. The
+search returns the lowest-burn witness in its retained beam and its complete fixed-step engine
+schedule. It allocates fixed-size arrays and performs no recursion or unbounded expansion.
 
-Window blur, shell focusout, exit, restart, contact, failure, and hide clear keys and queue zero
-input. Focus loss does not pause or change state.
+This is a deterministic, conservative reference planner. Beam pruning and control quantization mean
+its result is explicitly not the physical or global minimum.
 
-### 10.2 Pointer Events
+### 10.2 Demonstrated minimum and award
 
-The preflight lander's ordinary click starts without thrust. In `flying`, accept only the primary
-pointer and mouse button 0. Pointer down is consumed and captured, records client position/time, and
-immediately commands equal `0.72`; ignore a second pointer.
+Set `FUEL_QUANTUM=0.05`. Replay the chosen schedule from the checkpoint with integer allowances from
+`ceil(witnessBurn/FUEL_QUANTUM)` downward. The **demonstrated minimum** is the smallest tested
+allowance whose replay safely lands on the target. The immediately smaller nonnegative allowance
+must fail to complete that same schedule; otherwise continue downward. Store the successful replay,
+smaller-failure replay, quantum, schedule digest, and burn in `targetRouteProof`. Candidate
+generation accepts no site without both witnesses.
 
-For a captured pointer, horizontal displacement is measured in CSS pixels from pointerdown:
+For zero-based award index `i=completedSites` before increment, compute:
 
-```text
-deadZone = max(10 px, rendered scene width * 0.01)
-fullBiasDistance = max(56 px, rendered scene width * 0.18)
-bias = sign(dx) * clamp((abs(dx) - deadZone) / (fullBiasDistance - deadZone), 0, 1)
-pointerLeft = clamp(0.72 + 0.28 * bias, 0, 1)
-pointerRight = clamp(0.72 - 0.28 * bias, 0, 1)
+```js
+const tail = Math.max(2 * 0.82 ** i, Number.EPSILON);
+const ratio = 1 + tail;
+const award = demonstratedMinimum * ratio;
 ```
 
-Positive drag biases left and turns right; negative drag biases right and turns left. Ignore
-vertical travel. Client-space distance keeps behavior responsive.
+Thus the first award is exactly `3 * minimum`; later ratios decrease monotonically and IEEE-754
+rounding cannot make the stored ratio equal to or below one. Tests cover indexes through underflow
+and compare each value with its predecessor. Add `award` to existing fuel without rounding or a
+capacity clamp. Display only the resulting reserve to one decimal place.
 
-A tap is pointer up within 180 ms and 10 CSS pixels. Its equal `0.72` pulse lasts at least 140 ms
-from down, using a timer that queues its release. After early tap-up, release capture but retain the
-logical token until pulse end and ignore another down. Idempotent `teardownPointer()` releases owned
-capture; clears active/logical tokens, pulse timer, and queued gesture edges; then queues zero
-input. Pointer up/cancel, lost capture, stall discard, exit, restart, contact, failure, blur, hide,
-and `destroy()` use it (ordinary up may honor the minimum; every other cause does not).
+The contacted site's gas can is consumed only after the proof succeeds. The award is based on the
+new target, so site 0's can funds leg 1. Initial fuel funds the approach to site 0. The checkpoint
+then captures the post-award reserve. Automatic launch spends from that reserve in actual play and
+in the reference proof. Carried excess can therefore compensate for a later flight that uses more
+than the reference route.
 
-Only the flying shell gets `touch-action: none` and suppression. Elsewhere, scrolling, zoom,
-selection, and links work normally. Clear the active pointer before state callbacks.
+## 11. Input, focus, and lifecycle
 
-## 11. Plumes and successful deployment
+Match Space/arrows by `code` and `h`, `l`, `r` by lowercase `key`. Preflight starts only for a
+non-repeated, unmodified Space targeted at body, game, shell, or scene. Exclude anchors, buttons,
+form controls, editable elements, and descendants. The accepted key starts and seeds held Space at
+the same timestamp. Native Start activation starts without thrust.
 
-### 11.1 Plume mapping
+Only `flying` accepts flight keys on the active shell path. Consume repeats but enqueue only first
+edges. Track aliases by physical code. Release accepted keys even after focus moves. Escape exits
+any active state only on the shell path. Unmodified `r` and native Restart work only in `failed`.
+Window blur, shell focusout, hide, exit, restart, contact, and destroy clear held input.
 
-For commanded engine thrust `u` in `[0, 1]`, model export `plumeForThrust(u)` returns:
+In `flying`, primary pointer button 0 captures one pointer and commands equal `0.72`. Horizontal
+travel uses:
 
 ```text
-scaleY = 0.08 + 0.92 * u
-opacity = 0.25 + 0.75 * u
+deadZone = max(10 px, scene width * 0.01)
+fullBiasDistance = max(56 px, scene width * 0.18)
+bias = sign(dx) * clamp((abs(dx)-deadZone)/(fullBiasDistance-deadZone),0,1)
+pointerLeft = clamp(0.72 + 0.28*bias,0,1)
+pointerRight = clamp(0.72 - 0.28*bias,0,1)
 ```
 
-Write external uses independently: scale `#mission-left-engine` around `(82,401)` and right around
-`(158,401)`. Plumes do not affect collision/layout. Scales: `0 -> 0.08`, `0.5 -> 0.54`, `1 -> 1`.
+A release within 180 ms and 10 CSS pixels retains a minimum 140 ms equal-thrust pulse. Pointer up,
+cancel, lost capture, stall discard, contact, blur, hide, exit, restart, and destroy use one
+idempotent teardown. `touch-action:none` applies only to the active flying shell. Elsewhere,
+scrolling, zoom, text selection, and links retain browser behavior. Flight input is ignored during
+service, launch, crash, and failure.
 
-### 11.2 G-bay, agent route, NOC power, and departure
+`destroy()` cancels the frame, listeners, media-query listener, capture, pulse timer, active ARIA,
+status, and thrust; it hides and disables dead actions while leaving static recovery markup intact.
+Never intercept Tab or trap focus. The header and breadcrumb remain available in every state.
 
-Normal-motion sequence times are mission-clock durations and do not depend on frame count:
+## 12. Plumes, direction cue, NOC, and reduced motion
 
-1. `landed`, 300 ms: the G opening gains a visible graphite bay lip. Status is
-   `Touchdown confirmed. Deploying agent.`
-2. `deploying`, 2200 ms: a 0.9 metre terminal-shaped agent appears at lander-local G opening
-   `(1.136 m, 2.8 m)`, transformed from the touchdown pose by `transformLocalPoint`. From 0 to 350
-   ms it descends to the surface. From 350 to 2000 ms it moves linearly to the NOC entry at
-   `(54, 1.1)`. From 2000 to 2200 ms it enters and becomes hidden.
-3. `powering`, 1000 ms: the west window powers at 200 ms, server status bars at 400 ms, east window
-   at 600 ms, and the two static antenna arcs at 800 ms. Once on, each feature remains on. At 1000
-   ms `data-noc-power` becomes `on` and remains on.
-4. `departing`, 1800 ms: both scripted engine commands are `0.82`. The lander moves linearly from
-   its touchdown pose to `(touchdownX + 6 m, 62 m)` while angle approaches zero by the shortest
-   signed path. Physics and collision remain disabled. At 1800 ms the lander is hidden, engines are
-   zero, state becomes `succeeded`, and the live status is set in one DOM write to exactly
-   `Agent deployed. Mission continues.`
+`plumeForThrust(u)` returns `scaleY=0.08+0.92*u` and `opacity=0.25+0.75*u`. CSS independently
+transforms each external engine use around `(82,401)` and `(158,401)`. Plumes affect no collision or
+layout.
 
-The decorative, hidden agent has a terminal body, legs, and path-drawn `>_`, with no font. Bay and
-agent overlay the unchanged G's existing opening.
+Scene tokens remain local and fixed: sky `#f5f2e8`, stars `#8a867c`, terrain `#d7d2c4`, outlines and
+platform `#4b4e55`, NOC shell `#20232a`, inactive battery `#3b3f47`, active battery `#7de2c5`, gas
+can and antenna `#d94a1e`, and helipad marking `#f5f2e8`. Shape, outline, fill progression, and the
+solid `H` keep platform, fuel, battery, and direction meaning independent of color.
 
-Reduced-motion safe contact skips bay, route, power sequence, and departure in one task: hide
-lander/agent, show powered NOC and static arcs, succeed, and set final status. Turning the
-preference on mid-sequence uses this shortcut; changing it in flight does not alter physics.
+`#lander-game` is the only state-bearing root. The controller writes:
 
-## 12. Per-run state, focus, and lifecycle
+- `data-mission-state` from section 7;
+- `data-paused`, `data-cue`, `data-target-offscreen`, and `data-reduced-motion`;
+- `data-noc-stage="0|1|2|3|4|5"` on retained site groups;
+- custom properties `--camera-x`, `--lander-x`, `--lander-y`, `--lander-angle`, independent plume
+  scale/opacity, `--agent-x`, `--agent-y`, `--crash-x`, `--crash-y`, and `--crash-progress`.
 
-Section 14's forbidden surfaces enforce in-memory runs; reload starts fresh. Home precedes game;
-never intercept Tab or move/trap focus. Restart retains shell focus. `destroy()` cancels
-clocks/listeners, clears input/capture/active ARIA, status, and thrust, hides its now-dead start
-control, hides the action region, resets Restart hidden, disables Exit and Restart, and leaves the
-static no-JavaScript recovery intact. Automated teardown witnesses cover destruction from active and
-terminal states and prove no dead action remains visible, focusable, or enabled.
+The only CSS keyframes are `agw-preflight-cue` and `agw-target-cue`. Preflight runs three subtle
+plume pulses over 2.4 seconds once per document load; reduced motion and START settle immediately.
+The target arrow blinks at a 900 ms period only while its solid right-pointing shape is visible,
+motion is allowed, and the document is active. Reduced motion leaves it continuously visible.
+`data-paused="true"` pauses both keyframes.
 
-## 13. Deterministic vectors
+Agent travel, battery stage, launch, and crash are model-time projections, not CSS completion
+events. The battery outline is always visible. Stages 1 through 4 fill one bar each; stage 5 changes
+the terminal, antenna head, and two static arcs to powered colors. Once powered, attributes remain
+on that retained site. Reduced motion removes transitions and applies the service result atomically.
 
-Unit tests use tolerance `1e-10` unless an exact string, integer, state, or Boolean is specified.
-Each vector starts from the listed values rather than the gameplay initial state unless stated.
+## 13. Vacuum crash
 
-| Vector                   | Input                                                                                             | Expected result                                                                                                                                                    |
-| ------------------------ | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Gravity for 120 steps    | `(x,y,vx,vy)=(10,30,0,0)`, angle zero, engines zero                                               | `x=10`, `y=28.4875`, `vx=0`, `vy=-3`, fuel `30`                                                                                                                    |
-| Collective for 120 steps | Same pose, both engines `0.72`                                                                    | `y=31.5367`, `vy=3.048`, angle and `x` unchanged, fuel `28.56`                                                                                                     |
-| One right-engine step    | `(x,y,vx,vy)=(10,30,0,0)`, left `0`, right `1`                                                    | `x=10`, `y=30.0000833333333`, `vy=0.01`, angular velocity `-0.583333333333`, angle `-0.00486111111111`, fuel `29.9916666666667`                                    |
-| Exhaustion scaling       | Fuel `0.005`, one step, left and right `1`                                                        | Each effective engine is `0.3`, fuel is exactly `0`                                                                                                                |
-| Plumes                   | Thrust `0`, `0.5`, `1`                                                                            | Scales `0.08`, `0.54`, `1`; opacities `0.25`, `0.625`, `1`                                                                                                         |
-| Safe inclusive edge      | Both feet in zone; `vx=1.4`, `vy=-2.2`, angle `-8`, angular velocity `12`                         | Safe contact                                                                                                                                                       |
-| Unsafe epsilon           | Repeat edge vector with any one magnitude larger by `1e-9`                                        | Failed contact                                                                                                                                                     |
-| Frame equivalence        | Gameplay initial state, no input, callbacks through 1000 ms at exact 30, 60, and 120 Hz schedules | 120 steps; `x=30.8`, `y=30.0875`, `vx=0.8`, `vy=-3.4`, fuel `30`, angle and angular velocity zero                                                                  |
-| Timestamped input        | Gameplay initial state; edges at 125, 375, 625, and 875 ms as below                               | `x=30.789294822951447`, `y=32.5627822785585`, `vx=0.7612478269876443`, `vy=1.4296050729753735`, angle `-2.5112500000010414`, angular velocity `-4.9`, fuel `28.85` |
-| Stall discard            | Callback at 0, then 100.000001 ms, then 108.333335 ms                                             | No first-gap steps; exactly one step after resume                                                                                                                  |
+Unsafe contact creates state `crashing`, zeros engines and input, freezes the lander at contact, and
+stores at most eight fragment descriptors. Each comes from seed stream 5 keyed by site ID, crash
+ordinal, and fragment index. A descriptor has initial point, `vx` in `[-8,8]`, `vy` in `[2,11]`,
+angular velocity in `[-240,240] degree/s`, and one of the existing graphite or flame colors.
 
-Schedules include an explicit final 1000 ms callback. A second vector queues collective down at 125
-ms, Left down at 375, Left up at 625, and collective up at 875. The expected row must match across
-all schedules.
+Normal-motion crash duration is exactly 600 ms. `#crash-flash` is a compact ellipse centered at
+contact through `--crash-x` and `--crash-y`, expands only within the SVG from 0 to `1.4` lander
+widths, and is visible for the first 140 ms. A fragment follows `x=x0+vx*t`,
+`y=y0+vy*t-0.5*GRAVITY*t*t`, with its stored rotation. Clip it to the scene; remove all flash and
+fragment nodes at 600 ms; enter `failed`; reveal Restart; and set status
+`Landing unsuccessful. Press R to restart or Escape to exit.`
 
-## 14. Verification matrix
+There is no smoke, dust cloud, atmospheric shock wave, sustained flame, sound, vibration, camera
+shake, page movement, or layout change. Reduced motion skips flash and fragment travel, creates no
+debris nodes, and enters the same final failed state in the contact task.
 
-Log manual rows in the checklist with date, browser/version, viewport, motion setting, and outcome.
-The exact root-base demo is
-`python3 website/build.py --repo-root . --output /tmp/agentworks-site-demo --site-base /`, then
-`python3 -m http.server --directory /tmp/agentworks-site-demo 8000`. Open `/lander/` for game work
-and `/404.html` for fallback acceptance. The output is the complete eleven-file artifact:
-`index.html`, `manifesto/index.html`, `security/index.html`, `lander/index.html`, `404.html`,
-`assets/agw-favicon.svg`, `assets/agw-rocket.svg`, `static/site.css`, `static/lander.css`,
-`static/lander-model.js`, and `static/lander-game.js`.
+## 14. Deterministic vectors
 
-| Layer                                                                   | Required coverage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `node --test website/tests/lander-model.test.mjs`                       | One pure scheduler; state/event matrix; Space held through START; keyboard/pointer mixing; vectors; fuel; transformed geometry; landing/playable bounds; NOC/surface/bound ties and independent clamps; frame/input ties, catch-up/stall; plume/sequence; one-shot cue/EXIT; reset; exact status                                                                                                                                                                                                                                                                                                                                                                 |
-| `python -m unittest discover -s website/tests -p 'test_*.py'`           | Builder rejects invalid bases, renders root/project bases to the independent exact output set, resolves every local module import, enforces the shared Lander/404 subtree, native action states, and closed placeholder vocabulary, and checks template/rendered no-JS semantics, external SVG IDs, CSS units, antenna contrast `3.788:1`, and forbidden `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `navigator.sendBeacon`, `document.cookie`, `Cache`/`CacheStorage`/`caches`, `ServiceWorker`/`navigator.serviceWorker`, `location.href`/`assign`/`replace`, `history.pushState`/`replaceState`, `localStorage`, `sessionStorage`, and `indexedDB` |
-| Manual Chrome and Edge pre-merge; Firefox and Safari/WebKit post-launch | No-JS recovery; one-shot cue; Space hold-through-start; native start/focus; shell-only Escape/home independence; keys; full pointer/stall teardown; safe/failure/success/reset; hidden time; request log labels initial same-origin document/module/CSS/SVG loads and proves zero game-initiated requests                                                                                                                                                                                                                                                                                                                                                        |
-| Manual responsive acceptance                                            | 320 CSS pixels, 400 percent zoom, touch landscape, and wide viewport: no page overflow, clipped controls, covered breadcrumb home link, or start target below the pinned full-silhouette bounds; touch Exit and Restart remain visible and operable after activation                                                                                                                                                                                                                                                                                                                                                                                             |
-| Standard-library accessibility assertions                               | Landmarks, heading order, duplicate IDs, names, hidden state, live region, focusable elements, and fixed-token 4.5:1 text and 3:1 necessary-graphic contrast                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| Manual keyboard and screen-reader acceptance                            | Logical tab/focus, no trap or intercepted Tab, keyboard and native-button exit/restart focus, static description, start and action names, revealed controls, restrained intermediate announcements, failure and exact success, silent decorative SVG                                                                                                                                                                                                                                                                                                                                                                                                             |
+Numerical physics tests use tolerance `1e-10`; strings, integers, states, seed values, DOM order,
+and serialized world descriptors are exact. Every schedule includes an explicit final callback.
 
-Reduced-motion acceptance additionally proves no cue, agent travel, sequential power animation, CSS
-transition, or departure, while playable physics and the complete success result remain.
+| Vector                | Input                                                                  | Expected result                                                                                                            |
+| --------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Gravity, 120 steps    | `(10,30,0,0)`, zero angle/engines, fuel 30                             | `x=10`, `y=28.4875`, `vx=0`, `vy=-3`, fuel `30`                                                                            |
+| Collective, 120 steps | Same pose, engines `(0.72,0.72)`                                       | `y=34.5854`, `vy=9.096`, angle/x unchanged, fuel `28.56`                                                                   |
+| One right-engine step | Same pose, engines `(0,1)`                                             | `y=30.000375`, `vy=0.045`, angular velocity `-0.583333333333`, angle `-0.00486111111111`, fuel `29.9916666666667`          |
+| Exhaustion            | Fuel `0.005`, one step, engines `(1,1)`                                | Effective engines `(0.3,0.3)`, fuel exactly `0`                                                                            |
+| Plumes                | `u=0,0.5,1`                                                            | scales `0.08,0.54,1`; opacities `0.25,0.625,1`                                                                             |
+| First site            | Any normalized seed                                                    | ID `0`, platform center `36`, width `9.6`, top `native maximum+0.8`, NOC count `1`, can present                            |
+| Ratio                 | award indexes `0,1,2,10`                                               | `3`, `2.64`, `2.3448`, `1+2*0.82^10`; every finite index is greater than one                                               |
+| Safe inclusive edge   | Target top; `vx=1.4,vy=-2.2,angle=-8,omega=12`                         | safe contact                                                                                                               |
+| Unsafe epsilon        | Any one safe magnitude increased by `1e-9`                             | unsafe contact                                                                                                             |
+| Swept thin obstacle   | Hull crosses a `0.35 m` deck between step endpoints                    | first crossing detected, never tunnels                                                                                     |
+| Frame equivalence     | Initial approach, no input, callbacks to 1,000 ms at 30, 60, and 120Hz | 120 steps; `x=30.8`, `y=30.0875`, `vx=0.8`, `vy=-3.4`, fuel `30`                                                           |
+| Checkpoint replay     | Award, launch, crash, RESTART twice                                    | each restart starts from identical post-award fuel/site flags; no can, award, or progress duplication                      |
+| Route quantum         | Accepted representative route                                          | allowance `minimum` lands safely; `minimum-0.05` cannot complete the stored schedule                                       |
+| Long run              | 100 successful deterministic sites                                     | at most 10 chunks, 3 sites, 8 debris, 80 world children, 64 input edges; reserve equals initial plus awards minus all burn |
 
-## 15. Traceability
+World tests pin complete JSON descriptors and route-proof digests for seeds `1`, `0x12345678`, and
+`0xffffffff`. The independent world fixtures begin with these exact values:
 
-| Requirement or decision                                                               | Pinned by                      |
-| ------------------------------------------------------------------------------------- | ------------------------------ |
-| R6, D5: custom graphite AGW and original twin layered plumes                          | Sections 2, 3, 6, and 11.1     |
-| R7, D7: shared static Lander/404 game, hidden reveal, Space and activation start      | Sections 4, 6, and 10.1        |
-| R8, D7: keyboard/pointer thrust, physics, landing, deployment, powered NOC, departure | Sections 5 and 7-11            |
-| R9, D5/D7: no-JS recovery, no nonessential motion, pause/exit, ephemeral state        | Sections 4, 6, 8.4, 12, and 14 |
-| AC5: semantic fallback, home path, and hidden preflight controls                      | Sections 4, 6, and 14          |
-| AC6: focus, keyboard/pointer controls, and independent plumes                         | Sections 4, 10, 11.1, and 14   |
-| AC7: safe/failure states, deployment, persistent-run NOC, and exact status            | Sections 7, 9, 11.2, and 14    |
-| AC8: deterministic schedules, lifecycle, motion, accessibility, and narrow screens    | Sections 8.4, 10, and 14       |
-| AC19: one byte-equivalent shared game subtree on Lander and 404                       | Sections 2, 4, and 14          |
+| Seed         | `mixUint32(seed)` | Chunk 0 heights                                                                             | Site 0 top           | Leg-1 candidate deltas     |
+| ------------ | ----------------- | ------------------------------------------------------------------------------------------- | -------------------- | -------------------------- |
+| `1`          | `1753845952`      | `3.632365759695,2.237045118399,4.041724477103,2.046403835807,3.451083194511,2.655762553215` | `4.3452401980757713` | `102,87,96,81,90,99,84,78` |
+| `0x12345678` | `4125564054`      | `2.894239616115,4.222849254729,2.351458893344,4.280068531958,2.808678170573,3.537287809188` | `4.6608121663331987` | `99,84,93,102,87,96,81,78` |
+| `0xffffffff` | `1734902346`      | `2.975416276604,1.709050793713,3.642685310822,1.776319827931,3.309954345040,2.643588862149` | `4.3304941696580501` | `87,96,81,90,99,84,93,78`  |
 
-Implementation must treat this LLD as temporary design input. Permanent source and tests stand on
-their own and do not link back to this SDD path.
+The static scene seed's site-0 top is exactly `5.119569691829383`. The implementation commit also
+records literal accepted-site descriptors and route-proof digests after independently calculating
+the bounded search results; tests must not generate expected values by calling the function under
+test. For each seed, tests cover at least three accepted sites, terrain diversity, candidate attempt
+count, offscreen placement, proof replay, exact award, and rolling-window eviction.
+
+## 15. Verification matrix
+
+The exact local demo remains
+`python3 website/build.py --repo-root . --output /tmp/agentworks-site-demo --site-base /`, followed
+by `python3 -m http.server --directory /tmp/agentworks-site-demo 8000`. Game work opens `/lander/`;
+fallback acceptance opens `/404.html`.
+
+The complete artifact contains exactly these 12 files:
+
+```text
+index.html
+manifesto/index.html
+security/index.html
+lander/index.html
+404.html
+assets/agw-favicon.svg
+assets/agw-rocket.svg
+static/site.css
+static/lander.css
+static/lander-world.js
+static/lander-model.js
+static/lander-game.js
+```
+
+| Layer                                                                   | Required coverage                                                                                                                                                                                                                                                                                                                                            |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `node --test website/tests/lander-world.test.mjs`                       | Mixer and injected seeds; exact terrain/site vectors; shared boundaries; diversity; 9.6 m elevated replacement; one NOC/can; eight-attempt bound/fallback; viewport/window keys; fixed retention ceilings; target visibility; descriptor immutability                                                                                                        |
+| `node --test website/tests/lander-model.test.mjs`                       | State/event matrix; 8.4 authority vectors; fuel scaling and uncapped carry; fixed scheduler; input/frame ties; swept terrain/platform/building contacts; route proof and smaller failure; ratio monotonicity/epsilon floor; service/launch actual burn; three sites; checkpoint idempotence; crash timing/debris; reduced motion; pause/destroy              |
+| `python -m unittest discover -s website/tests -p 'test_*.py'`           | Exact 12-file artifacts at both bases; local import closure; byte-equivalent game subtree; exact DOM/order/data selectors; no-JS scene; named fuel output; native action states; local SVG IDs; CSS units/motion; and forbidden network, storage, audio, canvas, service worker, navigation mutation, cookie, and uncontrolled-random surfaces               |
+| Manual Chrome and Edge pre-merge; Firefox and Safari/WebKit post-launch | Start/focus; Space hold; arrows/vi; touch tap/hold/drag; later braking feel; three successive sites; platform/NOC/can legibility; battery/antenna power; arrow enter-view boundary; excess carry; empty-fuel response; every crash surface; checkpoint replay; Exit fresh run; hidden pause; request log proving zero game-initiated requests                |
+| Manual responsive and accessibility acceptance                          | 320 CSS pixels, 400 percent zoom, touch landscape, and wide viewport; no overflow or clipped actions; 44-pixel targets; logical focus; no trap; useful no-CSS/no-JS order; named fuel value; restrained live announcements; solid direction cue; static reduced-motion cue; silent decorative SVG; fixed-token 4.5:1 text and 3:1 necessary-graphic contrast |
+| Performance and longevity witness                                       | 100-site deterministic run; ceilings in section 6 never exceeded; candidate planner timing recorded; hidden tab has no frame or mission progress; normal active frame p95 below 4 ms; teardown leaves no listener, timer, capture, frame, enabled dead action, or growing retained history                                                                   |
+
+Mutation tests reject duplicated/moved shared markup, a second scheduler/controller/site authority,
+artifact count drift, pad-width drift, fuel caps, can recollection, route proofs that omit launch,
+an unbounded candidate loop, retained-node growth, non-swept contact, animated-only direction,
+atmospheric crash effects, or a durable/network surface.
+
+## 16. Traceability
+
+| Requirement or decision                                                | Pinned by                            |
+| ---------------------------------------------------------------------- | ------------------------------------ |
+| R6, D5: selected custom mark, twin plumes, and favicon                 | Sections 2 and 3                     |
+| R7, AC5, AC19: hidden shared 404/Lander game and byte-equivalent DOM   | Sections 4, 11, and 15               |
+| R8, AC6: stronger physics, keyboard/vi/touch, independent plumes       | Sections 8, 11, 12, and 14           |
+| R9, AC8: no-JS, in-memory lifecycle, pause, focus, reduced motion      | Sections 4, 5.1, 8.2, 11, 12, and 15 |
+| R21, AC7: rolling terrain, exact elevated pad, NOC, can, repeated legs | Sections 5-7, 10.2, 12, and 15       |
+| R22, AC22: seeded target, demonstrated minimum, ratio, carryover       | Sections 5, 7.3, 10, 14, and 15      |
+| R22, AC23: offscreen target and motion-safe right cue                  | Sections 6, 8.2, 12, and 15          |
+| R23, AC24: vacuum crash and exact checkpoint restart                   | Sections 7.3, 9, 13-15               |
+| AC18: complete build only and exact local manifest                     | Sections 2 and 15                    |
+| Phase 4G: focused modules, bounded work, docs, and browser evidence    | Sections 2, 6, 14, and 15            |
+
+Implementation treats this LLD as temporary design input. Permanent source, tests, and
+`website/README.md` stand on their own and do not link back to this SDD path.
