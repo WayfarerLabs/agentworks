@@ -34,6 +34,10 @@ below are subagent work; the role itself is not.
   without waiting for the operator to ask, and review a draft PR carrying the `review-requested`
   label whose head you have not yet reviewed (a checkpoint review; the label is author-owned and
   audience-free, so never remove it: track the last head you reviewed, exactly as with ready PRs).
+- Stacked PRs review entry-by-entry, bottom-up: each entry is its own handoff surface with its own
+  verdict. When an upstream entry changes substantially, expect the cascade (downstream entries back
+  to draft) and re-review only what re-hands-off. Stack membership is readable via the GraphQL
+  `PullRequestStack` type when the monitor or a sweep needs it.
 - Re-review on the draft-to-ready transition after an effort absorbs findings (the dev-process
   skill's handoff convention); poll ready PRs' heads against the last head you reviewed as the
   missed-edge fallback. A review verdict stands until the findings are absorbed or successfully

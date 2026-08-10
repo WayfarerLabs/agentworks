@@ -122,13 +122,18 @@ says which tier ran, so the mismatch never announces itself. Name the model, and
 exposed, on each launch, dev and reviewer alike, and inherit only when inheriting is the deliberate
 choice.
 
-## 5. Review every step
+## 5. Subagent reviews: the author's quality loop
 
-Every development step gets reviewed by the `agentworks-reviewer` subagent before you consider it
-done, at the model tier from section 4 (reviewer >= dev). This holds for delegated steps and for
-small changes you make directly. Give the reviewer what the diff cannot show it: who held which role
-(you, or a delegated dev) and whether this PR is meant to merge as-is. Its SDD-process check turns
-on both, and neither is recoverable from the changes themselves.
+Development work gets reviewed by the `agentworks-reviewer` subagent before you consider it done, at
+the model tier from section 4 (reviewer >= dev). This holds for delegated steps and for small
+changes you make directly. These are **subagent reviews**: the self-executed quality loop the author
+runs on work in progress, distinct from the PR-level reviews in section 6. Run multiple
+subagent-review cycles per PR, batched by judgment: per plan step, per risky chunk, per batch of
+commits. A cycle is never owed per commit, and every PR should see at least one before its first
+handoff. Subagent reviews never appear as PR state; when their outcome is load-bearing, the evidence
+lives in the round comment or the plan. Give the reviewer what the diff cannot show it: who held
+which role (you, or a delegated dev) and whether this PR is meant to merge as-is. Its SDD-process
+check turns on both, and neither is recoverable from the changes themselves.
 
 The stance toward any finding, from the reviewer or from automated review (section 7), is the same:
 
@@ -218,6 +223,42 @@ ones.
   is always a complete handoff state. Remove it for good when checkpoint reviews are no longer
   wanted (the request is absorbed, or the PR flips ready). Consumers watch label and push events or
   poll `gh pr list --label review-requested`.
+- **A handoff is the unit of PR-level review, defined exactly.** A handoff is a discrete,
+  machine-visible event where the author presents an exact head for review, with three required
+  components: (1) a pushed head that is complete on its own terms (green, no mid-flight partials),
+  (2) a round comment scoping it (what changed, rationale, pushbacks on prior findings), and (3) a
+  state signal: the draft-to-ready flip when the claim is reviewable AND merge-intent, or the
+  `review-requested` label when the claim is a reviewable checkpoint without merge intent.
+  Everything between handoffs is the author's private workspace: reviewers do not look, and nothing
+  there carries claims. PR-level reviews (the saga lead, the integration tester, the operator's
+  disposition) are triggered only by handoffs, never by push traffic, and every PR gets at least one
+  full PR-level pass before merge. Subagent reviews (section 5) are the author's own loop and follow
+  no handoff.
+
+## 6a. The three-level layering: commit, PR, PR stack
+
+- **Commit: for the devs.** Whatever chunking serves the work. Generally self-consistent, but
+  partial work, and even breaking tests, is acceptable between handoffs when the message says so
+  plainly. The head at every handoff must be green: partial commits live inside a round, never at
+  its boundary.
+- **PR: a significant increment of functionality, business or technical.** Always self-consistent,
+  and the system works when it merges; for a stack entry, "when it merges" means when its prefix
+  lands. An incomplete solution is not a smaller version of a complete one (the
+  development-principles rule); every merged PR is complete and honest on its own terms.
+- **PR stack: a sequence of increments that together make up a full feature.** GitHub's native
+  stacked pull requests are the vehicle where available: each entry targets its parent's branch,
+  which materializes the stack (the GraphQL `PullRequestStack` type exposes membership; the gh CLI
+  has no stack verbs yet, so create entries by branch targeting and read stacks via the API). Devs
+  plow forward on later entries while reviewers take earlier ones in bite-sized units, each with its
+  own handoffs. **The cascade rule**: a substantial change to entry N obligates the author to flip
+  entries N+1 onward to draft until each is rebased and re-handed-off; the stack makes "everything
+  downstream, and only that, needs reconsideration" a mechanical signal instead of a judgment call.
+  Keep stacks to roughly two to five entries: deeper stacks usually mean increments too thin to be
+  honest working systems, and rebase churn grows with depth. Merge bottom-up. Stacks are single-repo
+  by construction; in a poly-repo environment (not this repo today) the analog is coordinated
+  non-stacked PRs with cross-references and an agreed landing order. This practice is affordable
+  because CI checks are fast (about two minutes); protect that economy, because per-entry CI is the
+  price of the layering.
 
 ## 7. Get a fresh-eyes pass: Copilot if available, else a generic review here
 
