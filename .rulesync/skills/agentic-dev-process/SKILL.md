@@ -212,8 +212,11 @@ ones.
   whether work is mid-flight. The convention supports both consumption styles: edge-trigger on the
   transition itself, or poll ready PRs and remember the last-reviewed head per PR. A new head on a
   ready PR means a handoff should exist: the poller verifies the matching round comment (or initial
-  body, for a first handoff) before reviewing, and when the head has no matching handoff it reports
-  the process violation rather than reviewing private work or silently ignoring it.
+  body, for a first handoff) before reviewing. When the head has no matching handoff, the poller
+  reports the process gap AND proceeds with the review in good faith (operator enforcement
+  calibration, 2026-08-10: reminders accompany the work rather than replacing it; review is withheld
+  only for unaddressed substantive findings, never for missing ceremony). Never review silently past
+  the gap, and never ignore the head.
 - **Checkpoint reviews use the author-owned `review-requested` label** (operator convention,
   2026-08-10). Ready keeps its full meaning: round complete, handoff comment posted, believed
   mergeable. When work that is NOT at merge intent needs eyes now (the `sdd` skill's phased artifact
