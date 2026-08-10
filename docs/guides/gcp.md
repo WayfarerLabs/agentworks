@@ -22,9 +22,10 @@ the current `google-cloud-cli` package in that Debian or Ubuntu guest from Googl
 repository. The installer reconciles its keyring and source file on retry, then sets
 `CLOUDSDK_SKIP_PY_COMPILATION=1` to keep initialization bounded. It performs no `gcloud auth` step.
 
-This is guest tooling only. GCE provisioning uses the Python SDK and host-side ADC, so neither
-enabling `gcp` nor selecting `gcloud-cli` changes host credentials, configures a guest account, or
-makes `gcloud` a lifecycle dependency.
+This is guest tooling only. GCE provisioning uses the Python SDK with the selected host-side
+credential, either ADC or the declared service-account secret. Neither enabling `gcp` nor selecting
+`gcloud-cli` changes host credentials, configures a guest account, or makes `gcloud` a lifecycle
+dependency.
 
 ## Google Cloud prerequisites
 

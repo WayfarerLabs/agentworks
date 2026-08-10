@@ -102,7 +102,7 @@ def verify_live_machine_type(
     config: GcpGCEConfig,
     selected: MachineTypeSelection,
 ) -> Any:
-    """Verify provider CPU, memory, and architecture against the catalog."""
+    """Verify provider CPU and memory plus any reported architecture."""
     client = clients.client("machine-types", ctx)
     machine = call_google_optional(
         lambda: client.get(
@@ -119,13 +119,15 @@ def verify_live_machine_type(
             hint="select a machine type that exists in the vm-site zone",
         )
 
-    live = (int(machine.guest_cpus), int(machine.memory_mb), str(machine.architecture).lower())
-    declared = (selected.cpus, selected.memory_gib * 1024, selected.arch)
-    if live != declared:
+    live_cpus = int(machine.guest_cpus)
+    live_memory_mib = int(machine.memory_mb)
+    live_arch = str(machine.architecture).lower()
+    architecture_mismatch = bool(live_arch) and live_arch != selected.arch
+    if live_cpus != selected.cpus or live_memory_mib != selected.memory_gib * 1024 or architecture_mismatch:
         raise ConfigError(
             f"GCE machine type '{selected.type}' does not match its machine_types declaration: "
-            f"provider reports {live[0]} vCPU / {live[1]} MiB / {live[2]}, "
-            f"site declares {declared[0]} vCPU / {declared[1]} MiB / {declared[2]}",
+            f"provider reports {live_cpus} vCPU / {live_memory_mib} MiB / {live_arch or 'unknown architecture'}, "
+            f"site declares {selected.cpus} vCPU / {selected.memory_gib * 1024} MiB / {selected.arch}",
             hint="correct the machine_types entry rather than provisioning a different live shape",
         )
     return machine

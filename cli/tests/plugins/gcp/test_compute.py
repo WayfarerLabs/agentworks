@@ -108,11 +108,26 @@ def test_live_machine_shape_and_architecture_are_verified() -> None:
     assert client.calls == [{"project": "project-a", "zone": "us-central1-a", "machine_type": "t2a-standard-4"}]
 
 
+def test_live_e2_micro_shape_accepts_omitted_provider_architecture() -> None:
+    machine = compute_v1.MachineType(
+        name="e2-micro",
+        guest_cpus=2,
+        memory_mb=1024,
+    )
+    client = _GetClient(machine)
+    cache = _Cache(**{"machine-types": client})
+    selected = MachineTypeSelection(2, 1, "e2-micro", "x86_64")
+
+    assert machine.architecture == ""
+    assert verify_live_machine_type(cache, RunContext(), _CONFIG, selected) is machine  # type: ignore[arg-type]
+    assert client.calls == [{"project": "project-a", "zone": "us-central1-a", "machine_type": "e2-micro"}]
+
+
 @pytest.mark.parametrize(
     "machine",
     [
-        compute_v1.MachineType(guest_cpus=8, memory_mb=16384, architecture="ARM64"),
-        compute_v1.MachineType(guest_cpus=4, memory_mb=8192, architecture="ARM64"),
+        compute_v1.MachineType(guest_cpus=8, memory_mb=16384),
+        compute_v1.MachineType(guest_cpus=4, memory_mb=8192),
         compute_v1.MachineType(guest_cpus=4, memory_mb=16384, architecture="X86_64"),
     ],
     ids=("cpus", "memory", "architecture"),
