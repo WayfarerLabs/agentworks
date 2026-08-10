@@ -103,7 +103,7 @@ suites and strict typing pass.
 - [x] Update permanent plugin-author, resource, sample, GCP, and AWS operator teaching to
       distinguish optional guest tooling from ambient host ADC/AWS credential sources and optional
       host recovery tooling, and leave completion code registry-driven.
-- [x] Run focused/full offline gates and both required reviews for the amended publication before
+- [ ] Run focused/full offline gates and both required reviews for the amended publication before
       recording this corrective phase complete.
 
 **DoD:** vendor plugins can grow through the existing capability/manifest composition boundary;
@@ -158,7 +158,8 @@ existing secret name, backend, configuration, CLI, sample, or completion contrac
       are available in the guest, require `aws --version` to begin with `aws-cli/2.`, and verify no
       authenticated Google account, AWS credential file, or AWS profile; rerun initialization to
       prove both installers are idempotent; prove they created no guest authentication state; and
-      prove the operator's pre-existing host credential baseline is unchanged.
+      prove the operator's pre-existing host credential baseline is unchanged. Watch the existing
+      120-second install-command timeout explicitly during the `gcloud-cli` live pass.
 - [ ] Record exact offline/live/review evidence, add `locked.md`, post the detailed ready-for-review
       disposition, and flip the PR from draft only when every requirement is true.
 

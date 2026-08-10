@@ -33,6 +33,7 @@ spec:
     key_path="$temp_root/aws-cli-team.asc"
     curl --fail --silent --show-error "https://awscli.amazonaws.com/$archive" -o "$archive_path"
     curl --fail --silent --show-error "https://awscli.amazonaws.com/$archive.sig" -o "$signature_path"
+    # Refresh this pinned block and fingerprint when AWS rotates its CLI signing key or subkeys.
     cat > "$key_path" <<'AWS_CLI_TEAM_KEY'
     -----BEGIN PGP PUBLIC KEY BLOCK-----
 
