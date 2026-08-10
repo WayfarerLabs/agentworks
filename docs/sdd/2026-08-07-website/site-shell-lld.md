@@ -145,6 +145,15 @@ block in order. It deliberately does not pin source hashes, heading inventories,
 or heading-path selections; ordinary supported document edits therefore appear on the site without a
 website-code edit.
 
+The renderer also derives one `On this page` navigation from the parsed document's `h2` and `h3`
+blocks. The navigation is inserted immediately after the source `h1`, links to the same generated
+heading identifiers, preserves source order, and nests each `h3` beneath its preceding `h2`. It is
+omitted when a document has no `h2` or `h3`. This derived navigation is not a second content model:
+it is computed from the same validated blocks during the same render pass, and no heading inventory
+is stored in code or tests. Its default flow is inline. At the wide-screen breakpoint the article
+becomes a two-column grid, placing the navigation in the left column and all source blocks in the
+right column without changing DOM or keyboard order.
+
 The Manifesto source path is exactly `docs/why-agentworks.md` in this release. A later document
 rename changes that one configuration value to `docs/manifesto.md` in the same reviewed rename.
 There is no dual-path fallback, probing, or autodetection.

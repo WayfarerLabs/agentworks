@@ -92,6 +92,7 @@ class LongFormSemantics(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
         self.in_article = False
+        self.in_toc = False
         self.active_tag = ""
         self.active_text: list[str] = []
         self.blocks: list[tuple[str, str]] = []
@@ -101,10 +102,12 @@ class LongFormSemantics(HTMLParser):
         attributes = dict(attrs)
         if tag == "article" and attributes.get("class") == "long-form-content sourced-content":
             self.in_article = True
-        elif self.in_article and tag in {"h1", "h2", "h3", "h4", "h5", "h6", "p", "li"}:
+        elif self.in_article and tag == "nav" and attributes.get("class") == "page-toc":
+            self.in_toc = True
+        elif self.in_article and not self.in_toc and tag in {"h1", "h2", "h3", "h4", "h5", "h6", "p", "li"}:
             self.active_tag = tag
             self.active_text = []
-        if self.in_article and tag == "a":
+        if self.in_article and not self.in_toc and tag == "a":
             self.links.append(str(attributes["href"]))
 
     def handle_endtag(self, tag: str) -> None:
@@ -112,12 +115,60 @@ class LongFormSemantics(HTMLParser):
             self.blocks.append((tag, " ".join("".join(self.active_text).split())))
             self.active_tag = ""
             self.active_text = []
+        elif self.in_toc and tag == "nav":
+            self.in_toc = False
         elif tag == "article":
             self.in_article = False
 
     def handle_data(self, data: str) -> None:
         if self.active_tag:
             self.active_text.append(data)
+
+
+class TocSemantics(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.in_toc = False
+        self.list_depth = 0
+        self.active_link: tuple[int, str, list[str]] | None = None
+        self.nav_attributes: list[dict[str, str | None]] = []
+        self.entries: list[tuple[int, str, str]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        if tag == "nav" and attributes.get("class") == "page-toc":
+            self.in_toc = True
+            self.nav_attributes.append(attributes)
+        elif self.in_toc and tag == "ol":
+            self.list_depth += 1
+        elif self.in_toc and tag == "a":
+            self.active_link = (self.list_depth + 1, str(attributes["href"]), [])
+
+    def handle_endtag(self, tag: str) -> None:
+        if self.active_link is not None and tag == "a":
+            level, destination, parts = self.active_link
+            self.entries.append((level, destination, " ".join("".join(parts).split())))
+            self.active_link = None
+        elif self.in_toc and tag == "ol":
+            self.list_depth -= 1
+        elif self.in_toc and tag == "nav":
+            self.in_toc = False
+
+    def handle_data(self, data: str) -> None:
+        if self.active_link is not None:
+            self.active_link[2].append(data)
+
+
+def source_toc(source: str) -> list[tuple[int, str, str]]:
+    entries: list[tuple[int, str, str]] = []
+    for line in source.splitlines():
+        match = re.fullmatch(r"[ ]{0,3}(#{2,3})[ \t]+(.*?)(?:[ \t]+#+[ \t]*)?", line.rstrip())
+        if match is None:
+            continue
+        label = plain_markdown(match.group(2))
+        identifier = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")
+        entries.append((len(match.group(1)), f"#{identifier}", label))
+    return entries
 
 
 class GeneratedDocumentTests(RepositoryFixture):
@@ -297,6 +348,29 @@ class GeneratedDocumentTests(RepositoryFixture):
                 self.assertFalse(self.documents[name].tags("script"))
         self.assertNotIn("email", self.pages["security"].lower())
 
+    def test_long_form_contents_navigation_matches_source_h2_h3_structure(self) -> None:
+        pages = {
+            "manifesto": site_builder.MANIFESTO_CONTRACT,
+            "security": site_builder.SECURITY_CONTRACT,
+        }
+        for name, contract in pages.items():
+            source = (self.root / contract.source).read_text(encoding="utf-8")
+            toc = TocSemantics()
+            toc.feed(self.pages[name])
+            direct_article_children = [
+                tag
+                for tag, _, ancestors in self.documents[name].elements
+                if ancestors
+                and ancestors[-1][0] == "article"
+                and ancestors[-1][1].get("class") == "long-form-content sourced-content"
+            ]
+            with self.subTest(name=name):
+                self.assertEqual(toc.nav_attributes, [{"class": "page-toc", "aria-label": "On this page"}])
+                self.assertEqual(toc.entries, source_toc(source))
+                self.assertEqual(direct_article_children[:2], ["h1", "nav"])
+                for _, destination, _ in toc.entries:
+                    self.assertEqual(self.documents[name].ids.count(destination[1:]), 1)
+
     def test_404_retains_fallback_and_has_only_its_local_module(self) -> None:
         document = self.documents["404"]
         self.assertIn("Page not found", self.pages["404"])
@@ -413,6 +487,20 @@ class GeneratedDocumentTests(RepositoryFixture):
         self.assertIn("padding-block-start: clamp(0.75rem, 2vw, 1.25rem)", detail_main_rule)
         detail_heading_rule = css.split(".detail-main .page-heading {", 1)[1].split("}", 1)[0]
         self.assertIn("padding-top: 0", detail_heading_rule)
+
+    def test_long_form_contents_navigation_is_inline_then_becomes_a_left_rail(self) -> None:
+        css = (self.output / "static/site.css").read_text(encoding="utf-8")
+        default_article = css.split(".long-form-content {", 1)[1].split("}", 1)[0]
+        default_toc = css.split(".page-toc {", 1)[1].split("}", 1)[0]
+        self.assertNotIn("display: grid", default_article)
+        self.assertIn("margin-block: 1.5rem 2.5rem", default_toc)
+        wide = css.split("@media (min-width: 64rem)", 1)[1]
+        wide_article = wide.split(".long-form-content {", 1)[1].split("}", 1)[0]
+        wide_toc = wide.split(".long-form-content > .page-toc {", 1)[1].split("}", 1)[0]
+        self.assertIn("display: grid", wide_article)
+        self.assertIn("grid-template-columns: minmax(10rem, 13rem) minmax(0, 1fr)", wide_article)
+        self.assertIn("grid-column: 1", wide_toc)
+        self.assertIn("grid-row: 1", wide_toc)
 
     def test_pinned_color_contrasts_meet_text_component_and_status_thresholds(
         self,

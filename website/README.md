@@ -125,6 +125,13 @@ the same closed transform. Their templates supply only the shared shell and meta
 Supported document edits appear on the site without synchronized website prose, a source hash, a
 heading inventory, or selected-section configuration.
 
+Each long-form page derives one `On this page` navigation from its source `h2` and `h3` blocks. It
+appears immediately after the source `h1` in ordinary flow, with `h3` links nested beneath their
+preceding `h2`. A wide-screen CSS layout presents that same navigation as a left rail; narrow and
+zoomed layouts keep it inline. The links target the renderer's existing heading identifiers, and the
+navigation is omitted when the source has no `h2` or `h3`. No JavaScript or separate heading
+inventory is involved.
+
 The closed document subset supports ATX headings, paragraphs, unordered lists using `-`, `*`, or
 `+`, strong text, emphasis using `_` or `*`, inline code, and reviewed inline or reference links.
 Reserved Markdown syntax outside that subset fails the build instead of rendering as literal text.

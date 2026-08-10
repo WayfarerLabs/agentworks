@@ -501,11 +501,51 @@ def _document_blocks(
     return tuple(blocks), references
 
 
+def _render_document_toc(
+    blocks: tuple[DocumentBlock, ...],
+    contract: DocumentContract,
+    references: dict[str, str],
+) -> str:
+    sections: list[tuple[DocumentBlock, list[DocumentBlock]]] = []
+    for block in blocks:
+        if block.kind != "heading" or block.level not in {2, 3}:
+            continue
+        if block.level == 2:
+            sections.append((block, []))
+        elif sections:
+            sections[-1][1].append(block)
+        else:
+            raise ContractError(contract, "malformed heading structure")
+    if not sections:
+        return ""
+
+    def link(block: DocumentBlock) -> str:
+        value = str(block.value)
+        plain = _plain_inline(value, contract, references)
+        label = html.escape(plain)
+        identifier = _heading_id(plain)
+        return f'<a href="#{identifier}">{label}</a>'
+
+    items: list[str] = []
+    for heading, children in sections:
+        nested = ""
+        if children:
+            child_items = "".join(f"<li>{link(child)}</li>" for child in children)
+            nested = f'<ol class="page-toc-sublist">{child_items}</ol>'
+        items.append(f"<li>{link(heading)}{nested}</li>")
+    return (
+        '<nav class="page-toc" aria-label="On this page">'
+        '<p class="page-toc-title">On this page</p>'
+        f'<ol class="page-toc-list">{"".join(items)}</ol></nav>'
+    )
+
+
 def _render_document(source: str, contract: DocumentContract) -> tuple[str, str]:
     blocks, references = _document_blocks(source, contract)
     rendered: list[str] = []
     description = ""
-    for block in blocks:
+    toc = _render_document_toc(blocks, contract, references)
+    for index, block in enumerate(blocks):
         if block.kind == "heading":
             plain_heading = _plain_inline(str(block.value), contract, references)
             rendered.append(
@@ -521,6 +561,8 @@ def _render_document(source: str, contract: DocumentContract) -> tuple[str, str]
             rendered.append(f"<ul>{items}</ul>")
         else:
             raise ContractError(contract, "unsupported block or inline Markdown")
+        if index == 0 and toc:
+            rendered.append(toc)
     if not description:
         raise ContractError(contract, "missing meaningful paragraph for metadata")
     output = "\n".join(rendered)

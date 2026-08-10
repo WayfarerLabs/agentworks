@@ -317,11 +317,62 @@ code {
     margin-top: 0;
 }
 
+.page-toc {
+    margin-block: 1.5rem 2.5rem;
+    padding: 1rem;
+    border-left: 4px solid var(--accent);
+    background: var(--panel);
+}
+
+.page-toc-title {
+    margin: 0 0 0.75rem;
+    color: var(--ink-muted);
+    font-family: ui-monospace, "Cascadia Code", "Liberation Mono", Menlo, monospace;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.page-toc-list,
+.page-toc-sublist {
+    margin-block: 0;
+    padding-left: 1.25rem;
+}
+
+.page-toc li + li {
+    margin-top: 0.45rem;
+}
+
+.page-toc-sublist {
+    margin-top: 0.45rem;
+}
+
 @media (min-width: 48rem) {
     .identity-panel {
         grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     }
 
+}
+
+@media (min-width: 64rem) {
+    .long-form-content {
+        display: grid;
+        width: 100%;
+        grid-template-columns: minmax(10rem, 13rem) minmax(0, 1fr);
+        column-gap: clamp(2rem, 4vw, 3.5rem);
+        align-items: start;
+    }
+
+    .long-form-content > :not(.page-toc) {
+        grid-column: 2;
+    }
+
+    .long-form-content > .page-toc {
+        grid-row: 1;
+        grid-column: 1;
+        margin-block: 0;
+    }
 }
 
 @media (max-width: 35rem) {

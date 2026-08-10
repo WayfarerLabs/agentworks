@@ -182,6 +182,9 @@ The built pages provide:
 - after onboarding integration, the complete bootstrap in a `pre`/`code` region, without image-baked
   or CSS-generated text;
 - useful link text that identifies GitHub, PyPI, rationale, and security destinations;
+- on complete long-form pages, one source-derived `h2`/`h3` contents navigation using ordinary
+  fragment links, inline after the source `h1` by default and presented as a left rail only when the
+  viewport has enough horizontal room;
 - no essential state hidden behind interaction, animation, canvas, or client rendering.
 
 No `llms.txt` or second agent-only representation is introduced. It would be another content copy

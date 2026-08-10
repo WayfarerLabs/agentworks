@@ -364,6 +364,27 @@ Definition of done: `/manifesto/` is the complete safe HTML rendition of `docs/w
 long-form prose model, and a future source rename requires changing exactly one configured path from
 `docs/why-agentworks.md` to `docs/manifesto.md`.
 
+## Phase 4E: source-derived long-form navigation
+
+- [x] Amend the FRD, HLA, shell LLD, plan, and permanent website documentation with the automatic
+      `h2`/`h3` contents-navigation contract.
+- [x] Generate one labeled contents navigation from the same validated document blocks, place it
+      immediately after the source `h1`, preserve source order, nest `h3` entries under their
+      preceding `h2`, and resolve every link to the existing generated heading ID.
+- [x] Keep the default layout inline and add a wide-screen two-column article layout that places the
+      same navigation on the left without changing DOM order, adding JavaScript, or weakening narrow
+      viewport and zoom behavior.
+- [x] Add independent source-to-navigation semantic witnesses, synthetic `h2`/`h3` nesting and
+      escaping coverage, fragment validation, no-heading behavior, and CSS layout assertions without
+      pinning the current documents' heading inventories.
+- [ ] Run focused and complete repository gates, rebuild the port-8766 preview, obtain an
+      `agentworks-reviewer` approval, update PR #439, and monitor its required checks.
+
+Definition of done: Manifesto and Security automatically expose an accessible `h2`/`h3` contents
+navigation derived from their complete current Markdown source, inline after `h1` by default and in
+a left rail only when enough horizontal room exists, with no manually synchronized heading
+inventory.
+
 ## Phase 5: CI and default Pages deployment
 
 - [x] Delegate workflow implementation to an `agentworks-dev` subagent with ownership of the Pages

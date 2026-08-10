@@ -134,6 +134,12 @@ growth path so nothing forecloses it, and none of it is in scope now.
   detail-page inset. They show no eyebrow, error-code, repository-provenance, or other pre-title
   label. The 404 retains its useful explanatory copy below the title; removing the redundant `404`
   label does not weaken document metadata, breadcrumb state, HTTP fallback behavior, or recovery.
+- R19. Manifesto and Security automatically expose an `On this page` navigation generated from every
+  source `h2` and `h3`, preserving heading order and nesting without a separately maintained
+  inventory. On narrow or zoomed layouts it appears inline immediately after the source `h1`. When
+  enough horizontal room exists, the same navigation becomes a left rail beside the document. It
+  uses ordinary same-page anchors, remains useful without CSS or JavaScript, and introduces no
+  duplicate body prose or alternate document model.
 
 ## Settled constraints (inherited; do not reopen)
 
@@ -243,6 +249,11 @@ merged and settled on `main`. The first slice must not build toward them specula
   site-base rendering. One reviewed template fragment owns that subtree, and mutation tests reject
   duplicate, missing, moved, or independently edited game markup. Both routes pass the same no-JS,
   focus, input, motion, lifecycle, and zero-runtime-request acceptance.
+- AC20. Manifesto and Security each contain one labeled table-of-contents navigation whose links and
+  visible labels exactly match the source-derived `h2` and `h3` sequence. `h3` entries are nested
+  beneath their preceding `h2`; every fragment resolves to exactly one generated heading ID. The
+  default flow places the navigation after the `h1`, and a tested wide-screen media query moves it
+  into a left column without changing source order or requiring JavaScript.
 
 ## Settled implementation rulings
 

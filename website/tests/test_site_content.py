@@ -61,6 +61,43 @@ class SourceContractTests(RepositoryFixture):
                     rendered,
                 )
 
+    def test_contents_navigation_derives_nested_h2_h3_links_and_escapes_labels(self) -> None:
+        contract = site_builder.MANIFESTO_CONTRACT
+        source = synthetic_document(
+            contract,
+            "\n## [Parent section](../README.md)\n\nParent paragraph.\n\n"
+            "### Child & `detail`\n\nChild paragraph.\n\n"
+            "## Final section\n\nFinal paragraph.\n",
+        )
+        path = self.root / contract.source
+        path.write_text(source, encoding="utf-8")
+        rendered = site_builder.extract_content(self.root)["MANIFESTO_CONTENT"]
+        self.assertIn(
+            '<nav class="page-toc" aria-label="On this page"><p class="page-toc-title">On this page</p>',
+            rendered,
+        )
+        self.assertIn(
+            '<li><a href="#parent-section">Parent section</a>'
+            '<ol class="page-toc-sublist"><li><a href="#child-detail">'
+            "Child &amp; detail</a></li></ol></li>",
+            rendered,
+        )
+        self.assertIn('<li><a href="#final-section">Final section</a></li>', rendered)
+        self.assertIn(
+            f'<h2 id="parent-section"><a href="{site_builder.SOURCE_RELATIVE_URLS["../README.md"]}">'
+            "Parent section</a></h2>",
+            rendered,
+        )
+        self.assertLess(rendered.index("</h1>"), rendered.index('class="page-toc"'))
+        self.assertLess(rendered.index('class="page-toc"'), rendered.index('<h2 id="parent-section">'))
+
+    def test_document_without_h2_or_h3_omits_contents_navigation(self) -> None:
+        contract = site_builder.MANIFESTO_CONTRACT
+        path = self.root / contract.source
+        path.write_text("# Root\n\nOpening paragraph.\n", encoding="utf-8")
+        rendered = site_builder.extract_content(self.root)["MANIFESTO_CONTENT"]
+        self.assertNotIn('class="page-toc"', rendered)
+
     def test_current_source_path_is_single_and_has_no_future_fallback(self) -> None:
         self.assertEqual(site_builder.MANIFESTO_CONTRACT.source, Path("docs/why-agentworks.md"))
         production = (WEBSITE / "site_content.py").read_text(encoding="utf-8")
