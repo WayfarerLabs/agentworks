@@ -4,7 +4,7 @@
 <!-- cspell:ignore lerp Minkowski overspeed subinterval unhashed unmarginated -->
 <!-- cspell:ignore substep unitless uint32 quantized quantization -->
 
-- Status: Continuous Lander implementation in review
+- Status: Continuous Lander implementation review-clean; browser acceptance pending
 - Date: 2026-08-10
 - FRD: `frd.md`, specifically R6-R9 and R15-R23
 - HLA: `hla.md`, specifically D5 and D7

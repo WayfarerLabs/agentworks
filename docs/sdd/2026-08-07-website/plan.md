@@ -1,6 +1,7 @@
 # Plan: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander implementation in review
+- Status: Interim implementation complete; continuous Lander code review-clean, browser acceptance
+  pending
 - Date: 2026-08-07
 - Last revised: 2026-08-10
 - FRD: `frd.md`
@@ -457,22 +458,22 @@ eleven files at either supported site base.
       module, flight/mission model, controller, shared scene, Lander CSS, focused tests, browser
       checklist, builder manifest/validation, and permanent `website/README.md` updates. Isolate its
       worktree and preserve concurrent changes.
-- [ ] Add a pure seeded world module and split model/world tests so focused production and test
+- [x] Add a pure seeded world module and split model/world tests so focused production and test
       files target the preferred 500-line scale and remain below the hard 1,000-line ceiling. Expand
       both deterministic site-base artifacts by exactly the one reviewed local module and retain one
       builder CLI, one scheduler, one controller, and one byte-equivalent shared game subtree.
-- [ ] Implement a bounded rolling SVG world with varied terrain, a stable camera transform, one
+- [x] Implement a bounded rolling SVG world with varied terrain, a stable camera transform, one
       slightly elevated pad exactly three lander widths long, one solid battery-style NOC, one
       consumable gas can, and a right-edge next-site cue; never append unbounded terrain, sites,
       debris, event queues, or DOM nodes.
-- [ ] Implement repeated safe-landing cycles, visible/programmatic fuel, stronger thrust authority,
+- [x] Implement repeated safe-landing cycles, visible/programmatic fuel, stronger thrust authority,
       deterministic conservative route-fuel proofs, a ratio beginning near three and monotonically
       approaching one, exact excess carryover, single-consumption cans, powered-NOC retention, and
       post-deployment return to controllable flight.
-- [ ] Implement finite vacuum crash presentation and checkpoint recovery: compact flash,
+- [x] Implement finite vacuum crash presentation and checkpoint recovery: compact flash,
       deterministic ballistic fragments, no atmosphere/audio/page movement, reduced-motion atomic
       failure, and restart at the exact last post-refuel pad without duplicating fuel or the can.
-- [ ] Add independent seeded-world, minimum-award, ratio, carryover, checkpoint, swept-contact,
+- [x] Add independent seeded-world, minimum-award, ratio, carryover, checkpoint, swept-contact,
       repeated-site, camera/window, arrow, fuel-accessibility, motion, lifecycle, and performance
       witnesses. Preserve the existing input-timestamp, frame-schedule, pause, no-JavaScript,
       privacy, local-reference, focus, reflow, and shared-fragment contracts.
@@ -482,6 +483,33 @@ eleven files at either supported site base.
 - [ ] Obtain `agentworks-reviewer` and fresh-eyes code approval, resolve valid findings through the
       implementing subagent, mark the stacked PR ready, rebase it and change its base after PR #439
       merges, and monitor every required CI and CodeQL check.
+
+Code-review evidence (2026-08-10): after three adversarial correction rounds, the project reviewer
+and cold fresh-eyes reviewer approved exact head `559a7f8d` against merged `main` `0fe72d67` with no
+findings. The final witnesses strictly compare 81 independently reconstructed world descriptors to
+production, detect both arithmetic reassociation and a `0.15` to `0.14` relief mutation, and retain
+byte-identical routes and demonstrated minima. The 32 Node, 114 website Python, and 7,753 complete
+repository tests pass, as do Ruff, mypy, file lint, locked-SDD, Rulesync, deterministic 12-file
+root/project builds, and diff checks. The final compound item remains open for Chrome/Edge and
+long-run browser acceptance, saga-lead checkpoint closure, ready-state transition, and final forge
+checks.
+
+The project reviewer then approved exact runtime head `e0db7e22` after the browser-found DOM-ceiling
+correction, confirming the static/dynamic SVG flattening, exact simultaneous 80-descendant witness,
+CSS/state parity, no-JavaScript and ARIA contracts, shared-fragment identity, and module boundaries
+with no finding.
+
+Automated browser evidence (2026-08-10): isolated Chromium 151 acceptance at exact runtime head
+`e0db7e22` passed three repeated service cycles, every named collision and lifecycle path, real
+keyboard/mouse/touch input, hidden-tab freezing, request/storage privacy, camera reversal, and
+static/dynamic visual parity. The first run correctly found 84 world descendants during ordinary
+flight against the hard limit of 80; the implementation removed four redundant wrappers per site,
+and the focused rerun rendered the true simultaneous worst case of ten terrain paths, three full
+sites, eight debris fragments, and exactly 80 descendants. Active-frame p95 was `0.9 ms` against
+`4 ms`; 100-site in-browser generation-plus-two-proof p95 was `7.2 ms` and maximum `15.3 ms` against
+`25/50 ms`. After garbage collection, observed JavaScript heap and DOM-node counts decreased and
+event-listener count remained fixed. The operator's current Chrome and Edge pass remains open; the
+permanent checklist records exact methods, results, limitations, and cleanup.
 
 Definition of done: the same accessible game on `/lander/` and `404.html` supports at least three
 successive generated sites in one run, its demonstrated route allowance and decaying multiplier are

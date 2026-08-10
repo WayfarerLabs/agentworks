@@ -1,6 +1,7 @@
 # FRD: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander implementation in review
+- Status: Interim implementation complete; continuous Lander code review-clean, browser acceptance
+  pending
 - Date: 2026-08-07
 - Last revised: 2026-08-10
 - Seeded by: the saga lead, at operator request. This is a standalone effort, deliberately NOT a

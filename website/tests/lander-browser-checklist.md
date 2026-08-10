@@ -20,34 +20,76 @@ they do not accept the current game.
 
 - [ ] Record the exact source SHA and current Chrome and Edge versions. Exercise both `/lander/` and
       `/404.html`; confirm their `#lander-game` subtrees are byte-equivalent.
-- [ ] Fly and safely service at least three sites. Each target has one elevated H platform exactly
+- [x] Fly and safely service at least three sites. Each target has one elevated H platform exactly
       three lander widths long, one gas can, and one solid NOC with a four-bar phone battery and
       antenna. The can disappears once, fuel increases once, the agent enters, all four bars fill,
       the antenna powers, and actual-fuel launch returns to player-controlled flight.
-- [ ] Confirm the next site begins fully offscreen right after service. The solid arrow blinks only
+- [x] Confirm the next site begins fully offscreen right after service. The solid arrow blinks only
       while that target remains offscreen; it is static with reduced motion and has equivalent
       visually hidden direction text.
-- [ ] Confirm visible fuel changes by tenths without repetitive live announcements. Spend fuel on
+- [x] Confirm visible fuel changes by tenths without repetitive live announcements. Spend fuel on
       thrust, carry excess through multiple sites, and verify empty fuel produces no thrust.
-- [ ] Crash on terrain, a platform end or underside, a pylon, the NOC, and the mast. Normal motion
+- [x] Crash on terrain, a platform end or underside, a pylon, the NOC, and the mast. Normal motion
       shows one brief compact flash and exactly eight ballistic fragments for 600 milliseconds, with
       no smoke, dust, sound, shake, or page movement. Reduced motion reaches the same failed state
       with no moving debris.
-- [ ] Restart after crashes before and after a powered site. Before the first checkpoint, restart
+- [x] Restart after crashes before and after a powered site. Before the first checkpoint, restart
       restores the same seeded initial approach. Afterward, it starts on the last powered pad,
       relaunches using fuel, and never duplicates the can, award, progress, ratio, or power
       sequence.
-- [ ] Fly far enough for the camera and rolling window to move in both directions. At every sampled
+- [x] Fly far enough for the camera and rolling window to move in both directions. At every sampled
       point, count at most ten terrain paths, three site groups, eight debris nodes, and 80 children
       under `#lander-world`; discarded sites do not return as retained history.
-- [ ] Hide and restore the tab during flight, arrow blink, service, launch, and crash. Hidden time
+- [x] Hide and restore the tab during flight, arrow blink, service, launch, and crash. Hidden time
       advances none of them, input and pointer capture clear, and the first visible frame only
       resets timing.
-- [ ] Keep the network panel open for the complete three-site run. After initial same-origin HTML,
+- [x] Keep the network panel open for the complete three-site run. After initial same-origin HTML,
       CSS, three modules, and SVG loads, the game makes no request and creates no durable storage.
-- [ ] Record active frame p95, 100-site retention counts, and direct generation plus two-proof
+- [x] Record active frame p95, 100-site retention counts, and direct generation plus two-proof
       replay p95/max on the pre-merge Chromium machine. Required ceilings are 4 ms frame p95, 25 ms
       generation p95, and 50 ms generation maximum.
+
+### Continuous-expedition automated execution record
+
+- Date: 2026-08-10
+- Source: `e0db7e225e227c69725709b2fd013a1d3e0d2475`
+- Browser and version: Chromium 151.0.7922.108, headless DevTools Protocol
+- Operating system: Debian GNU/Linux 12, aarch64; Chromium reported a Linux x86_64 headless user
+  agent
+- Viewport: 1000 by 900 CSS pixels at device-pixel ratio 1
+- Motion preference: normal and reduced
+- Tester: isolated fresh-eyes automated browser acceptance
+- Outcome: PASS for every automated continuous-expedition row; the separate operator Chrome/Edge row
+  remains pending
+
+Three legal service contacts were injected into the live controller and then exercised through real
+browser animation frames, model transitions, rendering, and player-control return. Fuel progressed
+from `30` to `54.75`, `76.638`, and `94.78536`; each can disappeared once; stages 0 through 5 filled
+the four bars in order and enabled the antenna at 1,000 milliseconds; each offscreen cue and launch
+returned correctly. The 100-site timing witness invoked the real model inside Chromium rather than
+claiming 100 manually flown services.
+
+The actual simultaneous worst-case render contained ten terrain paths, three complete sites, eight
+crash fragments, five direct world children, and exactly 80 `#lander-world` descendants. Active
+frame callback time over 1,250 samples had p95 `0.9 ms`, maximum `26.5 ms`, and mean `0.433 ms`.
+Generation plus both proof replays across 100 deterministic services had p95 `7.2 ms`, maximum
+`15.3 ms`, and mean `6.071 ms`. Retention stayed at ten chunks and three sites while the camera
+moved in both directions. After garbage collection, observed JavaScript heap decreased from
+2,123,772 to 1,285,712 bytes, DOM nodes from 484 to 479, and browser-reported event listeners
+remained 19 to 19.
+
+The run also passed real CDP keyboard, mouse, and touch events; browser-generated
+`lostpointercapture`; every named collision surface; normal and reduced-motion crashes; pre- and
+post-checkpoint restart without duplication; actual tab hiding through every timed state; empty-fuel
+suppression; Escape teardown; static/dynamic site structure and computed-style parity; no
+atmospheric presentation; and shared `/lander/`/`404.html` initialization. Eight initial same-origin
+requests produced seven unique resources; actions made no request, no cross-origin request occurred,
+and cookies, local/session storage, CacheStorage, and IndexedDB remained empty.
+
+The evidence observes JavaScript heap, DOM nodes, and event listeners rather than operating-system
+resident memory or every native browser listener. It does not replace qualitative spoken-screen
+reader, physical-touch, Edge, Firefox, or WebKit acceptance. The isolated Chromium process, profile,
+and harness were removed; its debug port was closed; the port-8766 preview remained running.
 
 ## Local demo
 
