@@ -377,19 +377,22 @@ installed no-topic agent guide owns source-review and continuing assistance.
       the same reviewed artifact. Candidate probes inspect the exact release-PR commit that built
       their wheel and name that test-only substitution; the post-tag PyPI smoke exercises production
       `vVERSION` review.
-- [ ] Both generated package projections contain the exact same top-level guide handoff and bind by
+- [x] Both generated package projections contain the exact same top-level guide handoff and bind by
       construction to one shared guided and non-interactive guide fixture covering refusal, rerun
       no-op behavior, post-upgrade current not-yet-adopted capability reporting, the canonical
-      release-notes handoff for temporal history, and JSON v1 consumption; per-harness live probes
-      validate model interpretation without a bootstrap orchestration driver.
-- [ ] Canonical projection checks and every live assistance probe assert the R12 disclosure is
-      emitted once before the first command, probe, verification, mutation, or other action. Probes
-      pin the resulting authorization envelope, prove a multi-step in-scope flow does not ask again,
-      prove a materially ambiguous request gets one resolving scope question and no follow-up
-      confirmation, prove an explicitly instructed expansion needs no redundant confirmation, prove
-      an uncovered material expansion asks once, and prove an operator-selected confirm-every-action
-      preference is honored.
-- [ ] Release-note tests prove every tagged 0.2.0-through-0.13.0 version has one normalized packaged
+      release-notes handoff for temporal history, and JSON v1 consumption.
+- [ ] Per-harness live probes validate Claude Code and Codex model interpretation without a
+      bootstrap orchestration driver. Clean-home marketplace installation and exact artifact parity
+      are proven; provider-backed first-VM/session acceptance remains pending an approved live
+      inventory.
+- [x] Canonical projection checks prove the thin bootstrap contains no startup disclosure. The
+      no-topic guide emits the R12 disclosure once before continuing assistance, and selected topics
+      do not repeat it. Guide probes pin the resulting authorization envelope, prove a multi-step
+      in-scope flow does not ask again, prove a materially ambiguous request gets one resolving
+      scope question and no follow-up confirmation, prove an explicitly instructed expansion needs
+      no redundant confirmation, prove an uncovered material expansion asks once, and prove an
+      operator-selected confirm-every-action preference is honored.
+- [x] Release-note tests prove every tagged 0.2.0-through-0.13.0 version has one normalized packaged
       section, curated 0.13 content is preserved, no 0.1 section is invented, the installed section
       uniquely matches release-please's source, and exact historical version topics render locally
       and complete dynamically. Guide rendering and fallback refusal perform zero network work, an
@@ -397,7 +400,7 @@ installed no-topic agent guide owns source-review and continuing assistance.
       range on the canonical releases surface, and instruction-like release prose remains inert
       without active links or command execution.
 - [x] Permanent installation and security documentation ships with the packages.
-- [ ] Packaging, generation, lint, and end-to-end gates pass; step reviewed by `agentworks-reviewer`
+- [x] Packaging, generation, lint, and end-to-end gates pass; step reviewed by `agentworks-reviewer`
       and a fresh-eyes reviewer; valid findings resolved.
 - [ ] Always-green ready-to-merge PR opened and saga-lead review requested.
 

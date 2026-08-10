@@ -577,7 +577,7 @@ with no branch-only dependency, duplicated bootstrap, or website-owned continuin
       identity, thin-scope semantics, copy behavior, and absence of website-owned source-review,
       startup-disclosure, or security-posture prose.
 - [x] Run focused tests, full CI-equivalent gates, locked-SDD checks, and file-quality lint.
-- [ ] `agentworks-reviewer` and a fresh-eyes reviewer inspect content identity, accessibility,
+- [x] `agentworks-reviewer` and a fresh-eyes reviewer inspect content identity, accessibility,
       migration cleanliness, and scope; resolve valid findings and re-review.
 - [ ] Open the integration PR ready for review, triage Copilot comments, request the saga lead's
       review, resolve all valid findings, and hand the reviewed PR to the operator for merge.
