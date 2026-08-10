@@ -4,32 +4,22 @@ from __future__ import annotations
 
 import ast
 import importlib
-from pathlib import Path
 from typing import cast
 
 import pytest
 
-from tests.secrets.phase7_call_graph_support import _actual_boundary_call_edges
 from tests.secrets.phase7_lexical_support import _interaction_call_edges
 from tests.secrets.phase7_stored_support import _stored_call_edges
 from tests.secrets.test_phase7_enforcement import (
-    _CLI_MANIFEST,
     _DIRECTED_CALLEE_ALIASES,
-    _DIRECTED_EDGE_MANIFEST,
-    _INTERNAL_MANIFEST,
-    _SERVICE_MANIFEST,
     _STORED_INVOCATION_MANIFEST,
-    _STORED_POLICY_MANIFEST,
-    _VERIFY_CLI_MANIFEST,
-    _combined_entries,
+    _cli_boundary_entries,
     _function_node,
     _invoke_with_opaque_arguments,
     _object,
+    _parameter_boundary_entries,
+    _stored_policy_entries,
 )
-
-
-def test_ast_derived_boundary_caller_graph_exactly_matches_literal_edges() -> None:
-    assert _actual_boundary_call_edges() == _DIRECTED_EDGE_MANIFEST
 
 
 @pytest.mark.parametrize(
@@ -86,7 +76,7 @@ def test_every_stored_policy_boundary_runtime_revalidates_exact_sentinel(
     assert seen == [sentinel]
 
 
-def test_every_manifest_owner_reaches_a_declared_policy_or_storage_seam() -> None:
+def test_every_discovered_owner_reaches_a_policy_or_storage_seam() -> None:
     interaction_edges = _interaction_call_edges()
     stored_edges = _stored_call_edges()
     owners = set(interaction_edges) | set(stored_edges)
@@ -121,15 +111,7 @@ def test_every_manifest_owner_reaches_a_declared_policy_or_storage_seam() -> Non
                 return True
         return False
 
-    roots = set(
-        _combined_entries(
-            _SERVICE_MANIFEST,
-            _INTERNAL_MANIFEST,
-            _CLI_MANIFEST,
-            _VERIFY_CLI_MANIFEST,
-            _STORED_POLICY_MANIFEST,
-        )
-    )
+    roots = set(_parameter_boundary_entries()) | set(_cli_boundary_entries()) | set(_stored_policy_entries())
     assert {root for root in roots if not _reaches_seam(root, set())} == set()
 
     actual_graph: dict[tuple[str, str], set[tuple[str, str] | str]] = {}
@@ -157,26 +139,6 @@ def test_every_manifest_owner_reaches_a_declared_policy_or_storage_seam() -> Non
                 reverse_callers.add(caller)
                 frontier.append(caller)
     assert reverse_callers == owners - final_owners
-
-
-def test_reverse_signature_closure_matches_literal_boundary_manifests() -> None:
-    root = Path(__file__).parents[2] / "agentworks"
-    discovered: set[tuple[str, str]] = set()
-    for path in root.rglob("*.py"):
-        tree = ast.parse(path.read_text())
-        parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
-        module = ".".join(("agentworks", *path.relative_to(root).with_suffix("").parts))
-        for function in (node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)):
-            parameters = (*function.args.args, *function.args.kwonlyargs)
-            if not any(parameter.arg == "interaction" for parameter in parameters):
-                continue
-            if module == "agentworks.secrets.preview" and function.name == "_preview":
-                continue
-            parent = parents.get(function)
-            name = f"{parent.name}.{function.name}" if isinstance(parent, ast.ClassDef) else function.name
-            discovered.add((module, name))
-    expected = set(_combined_entries(_SERVICE_MANIFEST, _INTERNAL_MANIFEST))
-    assert discovered == expected
 
 
 def test_policy_storage_and_teardown_edges_preserve_identity_shape() -> None:

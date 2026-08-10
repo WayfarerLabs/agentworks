@@ -56,7 +56,12 @@ def test_tailscale_ensure_has_only_explicit_reader_and_name() -> None:
 
 def test_exact_tailscale_source_edges_and_forbidden_false_edges() -> None:
     ensure = _object("agentworks.vms.manager.tailscale", "_ensure_tailscale")
-    ensure_calls = _production_semantic_target_calls(ensure)
+    resolve_for_command = _object("agentworks.secrets.orchestration", "resolve_for_command")
+    registry = _object("agentworks.resources.registry", "Registry")
+    resolve_template = _object("agentworks.vms.templates", "resolve_template")
+    forbidden_targets = (registry, resolve_for_command, resolve_template)
+    calls = _production_semantic_target_calls(ensure, *forbidden_targets)
+    ensure_calls = [entry for entry in calls if entry[1] is ensure]
     discovered: list[tuple[str, str, str, str, str]] = []
     for owner, target, call in ensure_calls:
         assert target is ensure
@@ -65,22 +70,18 @@ def test_exact_tailscale_source_edges_and_forbidden_false_edges() -> None:
         discovered.append((*owner, "_ensure_tailscale", "auth_keys", ast.unparse(auth_keywords[0])))
     assert tuple(sorted(discovered)) == _TAILSCALE_SOURCE_EDGE_MANIFEST
 
-    resolve_for_command = _object("agentworks.secrets.orchestration", "resolve_for_command")
     standalone_calls = [
         (owner[0], owner[1], "resolve_for_command")
-        for owner, target, call in _production_semantic_target_calls(resolve_for_command)
+        for owner, target, call in calls
         if target is resolve_for_command and any(keyword.arg == "extra_decls" for keyword in call.keywords)
     ]
     assert tuple(standalone_calls) == _TAILSCALE_STANDALONE_EDGE_MANIFEST
 
-    registry = _object("agentworks.resources.registry", "Registry")
-    resolve_template = _object("agentworks.vms.templates", "resolve_template")
-    forbidden_targets = (registry, resolve_for_command, resolve_template)
     forbidden_names = {_object_name(target): target for target in forbidden_targets}
     assert tuple(forbidden_names) == _TAILSCALE_ENSURE_FORBIDDEN_TARGETS
     forbidden_ensure_edges = [
         (owner, _object_name(target))
-        for owner, target, _call in _production_semantic_target_calls(*forbidden_targets)
+        for owner, target, _call in calls
         if owner == ("agentworks.vms.manager.tailscale", "_ensure_tailscale")
     ]
     assert forbidden_ensure_edges == []

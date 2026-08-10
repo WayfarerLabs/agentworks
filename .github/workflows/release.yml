@@ -47,7 +47,7 @@ jobs:
         run: uv run mypy agentworks/
 
       - name: Pytest
-        run: uv run pytest tests/ -v -m 'not integration'
+        run: uv run pytest tests/ -m 'not integration'
 
   publish:
     needs: test

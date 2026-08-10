@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import ast
 import importlib
+from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 from typing import cast
 
@@ -12,6 +14,34 @@ from tests.secrets.test_phase7_enforcement import (
     _RESOLVER_TYPE,
     _object,
 )
+
+
+@dataclass(frozen=True)
+class _ProductionModule:
+    """One parsed production module shared by every structural contract."""
+
+    module: str
+    current_package: str
+    tree: ast.Module
+    parents: dict[ast.AST, ast.AST]
+
+
+@cache
+def _production_modules() -> tuple[_ProductionModule, ...]:
+    root = Path(__file__).parents[2] / "agentworks"
+    modules: list[_ProductionModule] = []
+    for path in sorted(root.rglob("*.py")):
+        module, current_package = _module_identity(path, root)
+        tree = ast.parse(path.read_text())
+        modules.append(
+            _ProductionModule(
+                module=module,
+                current_package=current_package,
+                tree=tree,
+                parents={child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)},
+            )
+        )
+    return tuple(modules)
 
 
 def _enclosing_function(
@@ -33,12 +63,11 @@ def _qualified_function_name(parents: dict[ast.AST, ast.AST], function: ast.Func
 
 
 def _interaction_call_edges() -> dict[tuple[str, str], tuple[tuple[str, str], ...]]:
-    root = Path(__file__).parents[2] / "agentworks"
     discovered: dict[tuple[str, str], list[tuple[str, str]]] = {}
-    for path in root.rglob("*.py"):
-        tree = ast.parse(path.read_text())
-        parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
-        module = ".".join(("agentworks", *path.relative_to(root).with_suffix("").parts))
+    for source in _production_modules():
+        tree = source.tree
+        parents = source.parents
+        module = source.module
         for call in (node for node in ast.walk(tree) if isinstance(node, ast.Call)):
             keywords = [keyword for keyword in call.keywords if keyword.arg == "interaction"]
             if not keywords:
@@ -90,7 +119,8 @@ def _semantic_aliases(tree: ast.Module, current_package: str) -> dict[str, str]:
     return aliases
 
 
-def _function_lexical_bindings(function: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
+@cache
+def _function_lexical_bindings(function: ast.FunctionDef | ast.AsyncFunctionDef) -> frozenset[str]:
     bindings = {
         argument.arg
         for argument in (
@@ -127,20 +157,15 @@ def _function_lexical_bindings(function: ast.FunctionDef | ast.AsyncFunctionDef)
 
     for statement in function.body:
         visit(statement)
-    return bindings - declarations
+    return frozenset(bindings - declarations)
 
 
-def _module_semantic_state(
+@cache
+def _module_semantic_events(
     tree: ast.Module,
-    node: ast.AST,
     current_package: str,
-) -> tuple[dict[str, str], set[str]]:
-    aliases: dict[str, str] = {}
-    shadowed: set[str] = set()
-    node_position = (
-        cast(int, vars(node)["lineno"]),
-        cast(int, vars(node).get("col_offset", 0)),
-    )
+) -> tuple[tuple[tuple[int, int], str, str, str | ast.expr | None], ...]:
+    """Return source-ordered module bindings without rescanning per call site."""
     events: list[tuple[tuple[int, int], str, str, str | ast.expr | None]] = []
 
     def position(value: ast.AST) -> tuple[int, int]:
@@ -209,7 +234,21 @@ def _module_semantic_state(
 
     for statement in tree.body:
         visit(statement)
-    for event_position, kind, name, target in sorted(events, key=lambda event: event[0]):
+    return tuple(sorted(events, key=lambda event: event[0]))
+
+
+def _module_semantic_state(
+    tree: ast.Module,
+    node: ast.AST,
+    current_package: str,
+) -> tuple[dict[str, str], set[str]]:
+    aliases: dict[str, str] = {}
+    shadowed: set[str] = set()
+    node_position = (
+        cast(int, vars(node)["lineno"]),
+        cast(int, vars(node).get("col_offset", 0)),
+    )
+    for event_position, kind, name, target in _module_semantic_events(tree, current_package):
         if event_position >= node_position:
             continue
         if kind == "alias":
@@ -377,6 +416,7 @@ def _semantic_annotation_type(
     return reference
 
 
+@cache
 def _semantic_object(target: str) -> object | None:
     parts = target.split(".")
     for boundary in range(len(parts), 0, -1):
@@ -393,7 +433,8 @@ def _semantic_object(target: str) -> object | None:
     return None
 
 
-def _scope_nodes(function: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.AST]:
+@cache
+def _scope_nodes(function: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[ast.AST, ...]:
     nodes: list[ast.AST] = []
 
     def visit(node: ast.AST) -> None:
@@ -405,7 +446,7 @@ def _scope_nodes(function: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.A
 
     for statement in function.body:
         visit(statement)
-    return nodes
+    return tuple(nodes)
 
 
 def _binding_targets(target: ast.expr) -> tuple[str, ...]:
@@ -463,13 +504,14 @@ def _interaction_binding_sites(
     return bindings
 
 
+@cache
 def _semantic_type_indexes() -> tuple[dict[str, str], dict[tuple[str, str], str]]:
-    root = Path(__file__).parents[2] / "agentworks"
     returns: dict[str, str] = {}
     fields: dict[tuple[str, str], str] = {}
-    for path in root.rglob("*.py"):
-        tree = ast.parse(path.read_text())
-        module, current_package = _module_identity(path, root)
+    for source in _production_modules():
+        tree = source.tree
+        module = source.module
+        current_package = source.current_package
         aliases = _semantic_aliases(tree, current_package)
         local_definitions = {
             statement.name
