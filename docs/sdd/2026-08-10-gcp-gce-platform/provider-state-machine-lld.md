@@ -122,7 +122,7 @@ failure retained separately:
 | absent instance       | delete deny; boot disk disappears through explicit auto-delete                                 |
 | auxiliary rule leak   | name exact rule; never claim zero residue; preserve more important original failure if present |
 
-An instance insert timeout is a possible instance, not “none.” Reconciliation uses the insert's
+An instance insert timeout is a possible instance, not `none`. Reconciliation uses the insert's
 request UUID and operation target ID, then requires the realized instance provider ID to match. An
 instance-delete operation error or timeout is followed by `instances.get`; only not-found proves
 absence, while a same-name different-ID instance is retained as a collision.
