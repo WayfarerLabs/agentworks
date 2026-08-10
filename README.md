@@ -5,10 +5,8 @@
 [![Python](https://img.shields.io/pypi/pyversions/agentworks-cli.svg)](https://pypi.org/project/agentworks-cli/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A comprehensive toolkit for managing agentic workloads: VMs, workspaces, agents, sessions,
-harnesses, secrets/config, and the supporting systems that glue them together. Built around the
-conviction that autonomy, security, and control are not mutually exclusive: a good platform makes it
-possible and straightforward to have it all.
+A toolkit for managing agentic workloads: VMs, workspaces, agents, sessions, harnesses,
+configuration, secrets, and the systems that connect them.
 
 Create and manage an agentic fleet from your own workstation. **Durable agents** run as separate
 Linux users in **VMs** on infrastructure you choose and control. They retain their own tools, git
@@ -37,17 +35,15 @@ workloads:
 - Each session invokes a **harness integration** that knows how to run a particular workload (e.g. a
   full agentic harness such as Claude Code, Codex, etc. or just a plain login shell). The harness
   integration owns start/resume semantics (e.g. resuming a Claude Code or Codex conversation right
-  where it left off) as well as validating the target environment for its workload. Additionally,
-  since each harness integration is built for a specific workload, it is the perfect place to grow
-  further harness-specific functionality (user and workspace setup, authentication handling,
-  specific configuration, deeper integrations, ...).
+  where it left off) as well as validating the target environment for its workload. It also owns
+  workload-specific configuration and integration behavior.
 - Sessions can be organized into **named consoles**: curated tmux views that organize active
   sessions along with optional extra shell panes.
 - Both **config** and **secrets** (together with configured **secret sources**) can be managed and
   securely injected at any level (VM, workspace, agent, session) to control access and behavior.
 
-And all of this is managed via a **declarative, idempotent configuration system** that makes it easy
-for operators to define, evolve, and scale their infrastructure over time.
+All of this is managed through a **declarative, idempotent configuration system** for defining and
+evolving infrastructure over time.
 
 Zooming in on a single VM, the diagram below shows how these primitives fit together inside one
 machine: sessions invoke a harness integration to launch a harness or shell workload inside tmux,
@@ -101,39 +97,22 @@ Agentworks organizes work into a handful of layered concepts.
 
 A single human **operator** is in control of all agentic workloads: they create VMs, workspaces,
 agents, and sessions, and orchestrate how the pieces interact, all through the `agw` CLI on their
-workstation. (We reserve "user" for the technical Linux users on the VMs, the admin user and the
-agentic identities.)
+workstation. In Agentworks terminology, "user" refers to a Linux user on a VM: either the admin user
+or an agent identity.
 
 ### VMs - The Compute Environment
 
-A major question the industry is wrestling with is "what is the right compute primitive for agentic
-work?" Agentworks sits solidly in the virtual machine camp. The reasoning is simple: you would not
-seal a good developer inside a single locked-down container and expect their best work. A capable
-agent is no different. Containers and other less-than-full-machine primitives might work for basic
-development but, just like with human devs, the more you expect, the more friction this introduces:
-no system services, no room to install a real development environment or spin up containers of their
-own, no ability to collaborate with other users, etc.
+Agentworks uses shared, full-featured Linux VMs as its compute primitive. A VM provides standard
+software, system services, package installation, containers, and multi-user collaboration between
+agents. Platforms that support nested virtualization can run nested VMs too. The VM is the strong
+isolation boundary; Linux users, groups, and permissioned filesystem subtrees provide further
+separation between workloads inside it. See [ADR 0001](docs/adrs/0001-vm-based-infrastructure.md)
+for the decision record.
 
-Agentworks gives workloads a **shared, full-featured Linux VM**, complete with the whole tapestry
-that a full machine entails: massive libraries of standard software, daemonized services, the
-ability to run containers when needed, and genuine multi-user collaboration between agents.
-Underlying platforms that support nested virtualization can run nested VMs too. On the security
-side, this choice taps into decades of multi-user Linux development and experience. While the VM
-itself provides a strong isolation boundary, further isolation between workloads is possible using
-the battle-tested Linux primitives of users, groups, and permissioned filesystem subtrees, all
-mapped to the concepts described below, thus allowing many workloads to securely share a single VM.
-For additional reasoning on the VM choice, see
-[ADR 0001](docs/adrs/0001-vm-based-infrastructure.md).
-
-And to support the [consistency principle](docs/why-agentworks.md#consistency), Agentworks demands
-that every VM uses the same base OS (Debian Bookworm), the same admin user setup, and the same
-Tailscale tailnet join, so that the technical reality of the VM largely disappears and all VMs can
-be handled the same way, both by the human operator and Agentworks itself. See
-[ADR 0002](docs/adrs/0002-use-debian-as-the-vm-base-image.md) for more information.
-
-Consistent with the general declarative approach, VMs are long-lived, backed by declarative
-templates, and can be idempotently reinitialized to pick up changes whenever desired, thus allowing
-operators to evolve their VMs over time without having to tear them down and start over.
+Every managed VM uses Debian Bookworm, the same admin-user setup, and the same Tailscale network
+model. See [ADR 0002](docs/adrs/0002-use-debian-as-the-vm-base-image.md) for the base-image
+decision. VMs are long-lived, backed by declarative templates, and can be idempotently reinitialized
+to pick up changes without being replaced.
 
 ### Workspaces - The Project
 
@@ -154,6 +133,16 @@ lifting when a stronger one is needed. Agents are mapped to workspaces (explicit
 implicitly via sessions), and that mapping drives the group and filesystem permissions that bound
 what they can reach.
 
+Agentworks does not constrain outbound network access, so an agent exposed to untrusted content can
+reach the network with anything its Linux user can read. Network containment is tracked in
+[#224](https://github.com/WayfarerLabs/agentworks/issues/224).
+
+An agent may be durable and reused across sessions, or created with `--new-agent` for one session.
+Interactive session deletion offers to remove an unused agent. `--yes` removes one automatically
+only when that session created it and no remaining session or workspace grant needs it. Reproducible
+agent setup belongs in its template and can be converged with `agw agent reinit`; harness state,
+application memory, and interactive logins persist in the agent's home.
+
 ### Sessions and Harness Integrations - The Workloads
 
 A **session** runs an agentic workload in a persistent tmux session as a target user (agent or
@@ -164,9 +153,8 @@ persistent tmux session, and integration-specific resume semantics let the opera
 of concurrent workloads and attach, detach, stop, resume, create, and delete them at will. Tmux
 always owns the pane and its tty; the harness integration only decides what runs inside it.
 
-Session templates make workload configuration reusable and predictable. Because the harness
-integration is a distinct extension layer, it is the natural place for optimized, harness-specific
-logic and for adding support for new harnesses over time.
+Session templates make workload configuration reusable. Harness integrations keep workload-specific
+logic outside the core session lifecycle.
 
 ### Named Consoles - Organizing Active Work
 
@@ -182,51 +170,20 @@ surface.
 
 ### Agentworks Is Not a Harness
 
-One point is absolutely critical to understanding the Agentworks model: **Agentworks is not a
-harness**. There are many incredible options for running agentic workloads, from first-party
-harnesses (Anthropic's Claude Code, OpenAI's Codex, etc.) to independent alternatives (OpenCode,
-Aider, etc.). Agentworks does not try to be any of those. Rather, it strives to be the platform that
-makes it easy to run them, and to run them securely, consistently, and at scale. A harness
-integration is the Agentworks layer that makes a particular harness easy to run. That's as far as we
-want to go.
+Agentworks is not an agentic harness. It provides infrastructure for running harnesses such as
+Claude Code, Codex, OpenCode, Aider, and plain shells. A harness integration supplies the
+workload-specific launch, validation, and resume behavior; Agentworks owns the environment and
+session around it.
 
-Harnesses are getting better and better every day. Our belief is that, before long, custom harnesses
-simply won't be able to compete with vanilla harnesses running the latest models. Context will
-always matter, but the harness minutiae will matter less and less (and even get in the way) as the
-models get better and better at autonomous operation.
+## Manifesto
 
-In that world, though, standing up and managing least-privilege environments for those agents and
-harnesses will become increasingly important. Agentworks is designed to solve that problem, and to
-do so in a way that is consistent, secure, and scalable.
-
-## Why It's Built This Way
-
-A few convictions shape the whole design. The short version:
-
-- **Autonomy and control are not a tradeoff.** Much of the ecosystem treats loss of control as the
-  price of agentic autonomy; Agentworks is built on the opposite bet, that the right platform lets
-  you have both.
-- **Composable, Linux-native isolation.** The hard boundary is the VM; agents are Linux users and
-  workspaces are Linux groups. Use the full model or any subset, and because it is all ordinary
-  users, groups, and filesystem permissions, graduated privilege between cooperating agents (a
-  low-privilege researcher handing artifacts to a privileged actor) is an everyday pattern, not a
-  special case.
-- **Support for differing levels of ephemerality.** Different operators have different needs for how
-  long-lived their workloads and related resources are. Robust, declarative templates facilitate
-  rapid setup and scale, while idempotent reinitialization and reuse of resources across workloads
-  allow durable resources such as agents to accumulate state and context.
-- **Declarative and idempotent.** Every layer is templated and declared, and the long-lived
-  resources (VMs and agents) can be reinitialized to pick up changes, so environments stay
-  consistent and evolve predictably rather than drifting.
-
-The full reasoning, including the threat model Agentworks is designed against and how it bounds
-blast radius (and what it deliberately does not do), is in [Why Agentworks](docs/why-agentworks.md).
+The project's values, assumptions about agentic engineering, and reasoning behind these design
+choices are collected in the [Manifesto](docs/manifesto.md).
 
 ## Tightly Integrated Software
 
-In the spirit of opinionated consistency, Agentworks standardizes on a small set of excellent
-software rather than abstracting over interchangeable alternatives. Users are encouraged to embrace
-these choices rather than work around them.
+Agentworks standardizes on a small set of integrated tools rather than abstracting over
+interchangeable alternatives.
 
 - **SSH** is the control plane after provisioning: initialization, agent and session management,
   file transfer, and command execution. Provisioning uses the platform's native transport (Lima
@@ -268,8 +225,8 @@ the same claims.
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). The project follows
-[Conventional Commits](https://www.conventionalcommits.org/), is opinionated about consistency
-across the surface, and pairs well with AI coding assistants.
+[Conventional Commits](https://www.conventionalcommits.org/), applies consistent conventions across
+the repository, and includes shared configuration for AI coding assistants.
 
 ## Security
 
