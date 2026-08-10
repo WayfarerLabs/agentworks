@@ -264,7 +264,7 @@ The completed checkpoint above records the initial onboarding-centered package d
 operator's 2026-08-10 lifecycle-assistance correction supersedes that lens without erasing the
 completed design work; the corrective LLD and implementation boxes below carry the destination.
 
-- [ ] Revise `bootstrap-packaging-lld.md` around an always-available Agentworks package: neutral
+- [x] Revise `bootstrap-packaging-lld.md` around an always-available Agentworks package: neutral
       package and skill identity, top-level `agw guide --agent` handoff, setup and
       returning-operator probes, and no package-owned intent switchboard or duplicated teaching.
 - [ ] Top-level agent guide rendering routes setup and adoption, management and operation, temporal

@@ -386,8 +386,10 @@ impact field is introduced. JSON retains the same record shape.
   uses provider network and later SSH connectivity under normal secret-reference boundaries. No
   privilege elevation is implied.
 - `verification`: run `agw vm describe VM_NAME --output json`; require JSON contract v1,
-  `command == "vm.describe"`, matching `data.vm.name`, `site`, `template`, and `admin_template`,
-  complete provisioning and initialization statuses, and observed running status.
+  `command == "vm.describe"`, matching `data.vm.name`, `site`, and `template`, complete provisioning
+  and initialization statuses, and observed running status. The canonical admin-template comparison
+  requires `data.vm.admin_template` to be null when `ADMIN_TEMPLATE` is the reserved `default`;
+  every non-default selection must equal `ADMIN_TEMPLATE` exactly.
 - `refusal_alternative`: keep the exact inert command and input checklist, make no VM or provider
   change, and explain that session creation requires an operator-selected usable VM.
 
@@ -449,7 +451,8 @@ observed state and routes to troubleshooting without retrying the mutation.
   current-versus-temporal separation; the exact `read-release-notes` inputs, consent, inclusive
   range, no-follow rule, expected evidence, and refusal; live management facts and built-in help
   authority; and both first-run action records, exact inputs/tokens, impact-before-consent
-  rendering, refusal, JSON verification, selection rules, and absence of attach/delete/elevation.
+  rendering, refusal, JSON verification, default and non-default admin-template normalization,
+  selection rules, and absence of attach/delete/elevation.
 
 ### Clean-environment probes
 
