@@ -207,7 +207,10 @@ def require_instance_name_available(
             f"GCE instance '{instance_name}' already exists in project '{project_id}', zone '{zone}'",
             entity_kind="gcp-instance",
             entity_name=instance_name,
-            hint="choose another Agentworks VM name or remove the existing instance if it is known residue",
+            hint=(
+                "choose another Agentworks VM name; otherwise inspect the existing provider identity and "
+                "escalate ownership. Do not delete the instance by name without independent ownership proof"
+            ),
         )
 
 

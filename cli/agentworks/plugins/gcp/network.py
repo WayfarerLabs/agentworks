@@ -309,7 +309,10 @@ def require_firewall_name_available(client: Any, *, project_id: str, rule_name: 
             f"GCE firewall rule '{rule_name}' already exists in project '{project_id}'",
             entity_kind="gcp-firewall-rule",
             entity_name=rule_name,
-            hint="choose another VM name or inspect and remove known Agentworks residue",
+            hint=(
+                "choose another VM name; otherwise inspect the existing provider identity and escalate ownership. "
+                "Do not delete the rule by name without independent ownership proof"
+            ),
         )
 
 

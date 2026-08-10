@@ -110,8 +110,8 @@ A vm-platform stands up a machine and hands Agentworks an administrative foothol
   closed rather than open; on an externally administered or local host it **MUST NOT** manage the
   host's or network's security at all.
 - **MUST NOT** share host filesystem paths into the guest by default (a VM is self-contained), and
-  **MUST NOT** log or persist resolved secret values (its metadata carries only backend
-  identifiers).
+  **MUST NOT** log or persist resolved secret values (its metadata carries only non-secret state
+  required for safe lifecycle operations).
 
 Notably, VM platforms do not create agent users, workspaces, groups, sessions, or inject secrets.
 Those are managed by the Agentworks core system through platform-agnostic mechanisms.
@@ -476,13 +476,16 @@ before global/regional network firewall policies and rejects applicable priority
 organization/folder terminal policies remain an operator-owned prerequisite. An EC2 security group
 is the opposite: a group with no ingress rules already denies all inbound, so EC2's baseline is the
 group's NATURAL empty state, with nothing to install. That is why `plugins/aws/network.py`'s
-`create_security_group` authorizes no ingress at all. The close hooks revoke exactly the bootstrap
-allow's recorded prefixes (not a blanket revoke-all), so a concurrent `vm shell --platform` route's
-distinct allow survives (nothing serializes commands per VM); the prefixes are recorded in
-platform_metadata at create rather than recomputed, which would drift if the operator's egress or
-`ssh_allow_cidrs` changed. The other EC2-native divergence (tuple-identity rules, so concurrent
-same-egress routes share one rule and the poke/remove are idempotent/tolerant and fail closed) is
-covered under `transient_route` above and in `network.py`.
+`create_security_group` authorizes no ingress at all. The close hooks use exactly the bootstrap
+allow's recorded prefixes, not a blanket or a recomputed scope that could drift if the operator's
+egress or `ssh_allow_cidrs` changed. EC2 revokes only those tuples. GCE reconstructs the complete
+fixed-name allow from the persisted canonical prefixes, network, tag, and contract fields, then
+requires both its persisted provider ID and that independent full shape before a name-based delete;
+a same-ID rule whose shape changed is retained and reported. In both platforms a concurrent
+`vm shell --platform` route's distinct allow survives (nothing serializes commands per VM). The
+other EC2-native divergence (tuple-identity rules, so concurrent same-egress routes share one rule
+and the poke/remove are idempotent/tolerant and fail closed) is covered under `transient_route`
+above and in `network.py`.
 
 ### Resources on a Cloud Platform: Per-VM Lifecycle, Shared State Stays Ambient
 

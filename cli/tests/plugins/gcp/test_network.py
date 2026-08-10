@@ -358,8 +358,11 @@ class _FirewallClient:
 def test_firewall_name_collision_and_absence() -> None:
     expected = _owned_rule("allow", priority=0, deny=False)
     present = _FirewallClient(states=iter([expected]))
-    with pytest.raises(AlreadyExistsError, match="already exists"):
+    with pytest.raises(AlreadyExistsError, match="already exists") as caught:
         require_firewall_name_available(present, project_id="project-a", rule_name="allow")
+    assert "inspect the existing provider identity" in (caught.value.hint or "")
+    assert "Do not delete the rule by name" in (caught.value.hint or "")
+    assert "remove" not in (caught.value.hint or "").lower()
     absent = _FirewallClient(states=iter([None]))
     require_firewall_name_available(absent, project_id="project-a", rule_name="allow")
 

@@ -12,10 +12,10 @@ from google.api_core import exceptions as api_exceptions
 from google.cloud import compute_v1
 
 from agentworks.capabilities.base import RunContext
-from agentworks.capabilities.vm_platform import ProvisionRequest, ssh_exposure
+from agentworks.capabilities.vm_platform import BootstrapProgress, ProvisionRequest, ssh_exposure
 from agentworks.capabilities.vm_platform.tailscale_join import TAILSCALE_JOIN_STDIN_COMMAND
 from agentworks.db import VMRow, VMStatus
-from agentworks.errors import AlreadyExistsError
+from agentworks.errors import AlreadyExistsError, ConnectivityError, ProvisioningError, StateError
 from agentworks.plugins.gcp.bootstrap import GCE_READINESS_COMMAND
 from agentworks.plugins.gcp.errors import GCEOperationError
 from agentworks.plugins.gcp.platform import GCEPlatform
@@ -35,15 +35,25 @@ def _api_error(kind: type[Exception], message: str) -> Exception:
 class _Operation:
     error_code = None
 
-    def __init__(self, request_id: str, operation_type: str, target_link: str, target_id: int) -> None:
+    def __init__(
+        self,
+        request_id: str,
+        operation_type: str,
+        target_link: str,
+        target_id: int,
+        failure: BaseException | None = None,
+    ) -> None:
         self.client_operation_id = request_id
         self.operation_type = operation_type
         self.target_link = target_link
         self.target_id = target_id
+        self.failure = failure
         self.waits: list[float] = []
 
     def result(self, *, timeout: float) -> None:
         self.waits.append(timeout)
+        if self.failure is not None:
+            raise self.failure
 
 
 class _Firewalls:
@@ -51,18 +61,29 @@ class _Firewalls:
         self.resources: dict[str, compute_v1.Firewall] = {}
         self.insert_requests: list[compute_v1.InsertFirewallRequest] = []
         self.delete_requests: list[compute_v1.DeleteFirewallRequest] = []
+        self.get_failures: dict[str, list[Exception]] = {}
+        self.insert_failures: list[Exception | None] = []
+        self.insert_wait_failures: list[BaseException | None] = []
+        self.delete_failures: list[BaseException] = []
         self._next_id = 101
 
     def list(self, **_kwargs: object) -> list[compute_v1.Firewall]:
         return list(self.resources.values())
 
     def get(self, *, firewall: str, **_kwargs: object) -> compute_v1.Firewall:
+        failures = self.get_failures.get(firewall, [])
+        if failures:
+            raise failures.pop(0)
         if firewall not in self.resources:
             raise _api_error(api_exceptions.NotFound, "provider reflection")
         return self.resources[firewall]
 
     def insert(self, *, request: compute_v1.InsertFirewallRequest, **_kwargs: object) -> _Operation:
         self.insert_requests.append(request)
+        if self.insert_failures:
+            failure = self.insert_failures.pop(0)
+            if failure is not None:
+                raise failure
         resource = compute_v1.Firewall(compute_v1.Firewall.to_dict(request.firewall_resource))
         resource.id = self._next_id
         self._next_id += 1
@@ -72,10 +93,13 @@ class _Firewalls:
             "insert",
             f"projects/{request.project}/global/firewalls/{resource.name}",
             int(resource.id),
+            self.insert_wait_failures.pop(0) if self.insert_wait_failures else None,
         )
 
     def delete(self, *, request: compute_v1.DeleteFirewallRequest, **_kwargs: object) -> _Operation:
         self.delete_requests.append(request)
+        if self.delete_failures:
+            raise self.delete_failures.pop(0)
         resource = self.resources.pop(request.firewall)
         return _Operation(
             request.request_id,
@@ -92,19 +116,33 @@ class _Instances:
         self.start_requests: list[compute_v1.StartInstanceRequest] = []
         self.stop_requests: list[compute_v1.StopInstanceRequest] = []
         self.delete_requests: list[compute_v1.DeleteInstanceRequest] = []
+        self.get_failures: list[Exception] = []
+        self.insert_failures: list[Exception | None] = []
+        self.insert_wait_failures: list[BaseException] = []
+        self.delete_failures: list[Exception] = []
 
     def get(self, **_kwargs: object) -> compute_v1.Instance:
+        if self.get_failures:
+            raise self.get_failures.pop(0)
         if self.resource is None:
             raise _api_error(api_exceptions.NotFound, "provider reflection")
         return self.resource
 
     def insert(self, *, request: compute_v1.InsertInstanceRequest, **_kwargs: object) -> _Operation:
         self.insert_requests.append(request)
+        if self.insert_failures:
+            failure = self.insert_failures.pop(0)
+            if failure is not None:
+                raise failure
         self.resource = compute_v1.Instance(compute_v1.Instance.to_dict(request.instance_resource))
         self.resource.id = 201
         self.resource.status = "RUNNING"
         self.resource.network_interfaces[0].access_configs[0].nat_i_p = "203.0.113.19"
-        return self._operation(request.request_id, "insert")
+        return self._operation(
+            request.request_id,
+            "insert",
+            self.insert_wait_failures.pop(0) if self.insert_wait_failures else None,
+        )
 
     def start(self, *, request: compute_v1.StartInstanceRequest, **_kwargs: object) -> _Operation:
         self.start_requests.append(request)
@@ -121,11 +159,18 @@ class _Instances:
 
     def delete(self, *, request: compute_v1.DeleteInstanceRequest, **_kwargs: object) -> _Operation:
         self.delete_requests.append(request)
+        if self.delete_failures:
+            raise self.delete_failures.pop(0)
         operation = self._operation(request.request_id, "delete")
         self.resource = None
         return operation
 
-    def _operation(self, request_id: str, operation_type: str) -> _Operation:
+    def _operation(
+        self,
+        request_id: str,
+        operation_type: str,
+        failure: BaseException | None = None,
+    ) -> _Operation:
         name = "vm-a"
         if self.resource is not None:
             name = str(self.resource.name)
@@ -134,6 +179,7 @@ class _Instances:
             operation_type,
             f"projects/{_PROJECT}/zones/{_ZONE}/instances/{name}",
             201,
+            failure,
         )
 
 
@@ -186,13 +232,26 @@ class _Cache:
 
 
 class _Transport:
-    def __init__(self, *, fail_join: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        fail_join: bool = False,
+        failures: dict[str, list[BaseException]] | None = None,
+        events: list[str] | None = None,
+    ) -> None:
         self.calls: list[tuple[str, dict[str, object]]] = []
         self.fail_join = fail_join
+        self.failures = failures if failures is not None else {}
+        self.events = events
         self.host = ""
 
     def run(self, command: str, **kwargs: object) -> SSHResult:
         self.calls.append((command, kwargs))
+        if self.events is not None:
+            self.events.append(f"transport:{command}")
+        failures = self.failures.get(command, [])
+        if failures:
+            raise failures.pop(0)
         if self.fail_join and kwargs.get("input_text") is not None:
             raise SSHError("fixed stdin join failed")
         stdout = "100.64.0.9\n" if command == "tailscale ip -4" else ""
@@ -205,14 +264,31 @@ class _Secrets:
         return _SERVICE_SENTINEL
 
 
-def _ctx() -> RunContext:
+class _Progress:
+    def __init__(self, events: list[str]) -> None:
+        self.events = events
+
+    def step(self, name: str) -> None:
+        self.events.append(f"progress:{name}")
+
+    def output(self, text: str) -> None:
+        self.events.append(f"output:{text}")
+
+    def warning(self, msg: str) -> None:
+        self.events.append(f"warning:{msg}")
+
+    def log_error(self, msg: str) -> None:
+        self.events.append(f"error:{msg}")
+
+
+def _ctx(*ssh_allow_cidrs: str) -> RunContext:
     return RunContext(
-        config=cast("Any", SimpleNamespace(operator=SimpleNamespace(ssh_allow_cidrs=[]))),
+        config=cast("Any", SimpleNamespace(operator=SimpleNamespace(ssh_allow_cidrs=list(ssh_allow_cidrs)))),
         secrets=_Secrets(),
     )
 
 
-def _request(progress: MagicMock | None = None) -> ProvisionRequest:
+def _request(progress: BootstrapProgress | None = None) -> ProvisionRequest:
     return ProvisionRequest(
         vm_name="a",
         hostname="vm-a",
@@ -308,9 +384,138 @@ def test_full_create_retains_secret_free_request_and_joins_once(
     assert GCE_READINESS_COMMAND in [command for command, _kwargs in transport.calls]
     assert result.tailscale_ip == "100.64.0.9"
     assert "203.0.113.19" not in repr(result.platform_metadata)
-    assert "198.18.0.7" not in repr(result.platform_metadata)
+    assert result.platform_metadata["allow_source_ranges"] == "198.18.0.7/32"
     assert _TAILSCALE_SENTINEL not in repr(progress.mock_calls)
     assert _SERVICE_SENTINEL not in repr(progress.mock_calls)
+
+
+def test_progress_reports_readiness_then_join_immediately_before_fixed_stdin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    transport = _Transport(events=events)
+    platform, _cache = _platform(monkeypatch, transport)
+
+    platform.create(_request(_Progress(events)), _ctx())
+
+    readiness = events.index(f"transport:{GCE_READINESS_COMMAND}")
+    join = events.index("progress:Join Tailscale through fixed stdin")
+    delivery = events.index(f"transport:{TAILSCALE_JOIN_STDIN_COMMAND}")
+    assert readiness < join < delivery
+    assert join + 1 == delivery
+
+
+def test_join_progress_and_stdin_are_absent_when_readiness_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    transport = _Transport(
+        failures={GCE_READINESS_COMMAND: [SSHError("startup marker unavailable")]},
+        events=events,
+    )
+    platform, _cache = _platform(monkeypatch, transport)
+
+    with pytest.raises(ProvisioningError):
+        platform.create(_request(_Progress(events)), _ctx())
+
+    assert "progress:Waiting for GCE startup marker" in events
+    assert f"transport:{GCE_READINESS_COMMAND}" in events
+    assert "progress:Join Tailscale through fixed stdin" not in events
+    assert f"transport:{TAILSCALE_JOIN_STDIN_COMMAND}" not in events
+
+
+def test_close_reconstructs_stable_allow_from_original_normalized_prefixes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    platform, cache = _platform(monkeypatch, _Transport())
+    result = platform.create(_request(), _ctx("203.0.113.9"))
+    vm = _vm(result.platform_metadata)
+    allow_name = result.platform_metadata["allow_rule"]
+    assert result.platform_metadata["allow_source_ranges"] == "198.18.0.7/32,203.0.113.9/32"
+
+    platform.post_tailscale_ready(vm, _ctx("192.0.2.44/32"))
+
+    assert allow_name not in cache.firewalls.resources
+
+
+@pytest.mark.parametrize(
+    "failure_stage",
+    ("deny-insert", "allow-insert", "instance-insert", "readiness"),
+)
+def test_create_failures_clean_every_partial_resource_set(
+    monkeypatch: pytest.MonkeyPatch,
+    failure_stage: str,
+) -> None:
+    provider_failure = _api_error(api_exceptions.ServiceUnavailable, "provider-private-detail")
+    transport_failures: dict[str, list[BaseException]] = {}
+    transport = _Transport(failures=transport_failures)
+    platform, cache = _platform(monkeypatch, transport)
+    if failure_stage == "deny-insert":
+        cache.firewalls.insert_failures = [provider_failure, provider_failure]
+    elif failure_stage == "allow-insert":
+        cache.firewalls.insert_failures = [None, provider_failure, provider_failure]
+    elif failure_stage == "instance-insert":
+        cache.instances.insert_failures = [provider_failure, provider_failure]
+    else:
+        transport_failures[GCE_READINESS_COMMAND] = [SSHError("startup marker unavailable")]
+
+    with pytest.raises((ConnectivityError, ProvisioningError)):
+        platform.create(_request(), _ctx())
+
+    assert cache.instances.resource is None
+    assert cache.firewalls.resources == {}
+    assert not any(kwargs.get("input_text") for _command, kwargs in transport.calls)
+    if failure_stage == "readiness":
+        assert len(cache.instances.delete_requests) == 1
+
+
+@pytest.mark.parametrize("interrupt_stage", ("deny-wait", "allow-wait", "instance-wait"))
+def test_first_interrupt_carries_operation_ownership_through_platform_rollback(
+    monkeypatch: pytest.MonkeyPatch,
+    interrupt_stage: str,
+) -> None:
+    platform, cache = _platform(monkeypatch, _Transport())
+    if interrupt_stage == "deny-wait":
+        cache.firewalls.insert_wait_failures = [KeyboardInterrupt(interrupt_stage)]
+    elif interrupt_stage == "allow-wait":
+        cache.firewalls.insert_wait_failures = [None, KeyboardInterrupt(interrupt_stage)]
+    else:
+        cache.instances.insert_wait_failures = [KeyboardInterrupt(interrupt_stage)]
+
+    with pytest.raises(KeyboardInterrupt, match=interrupt_stage):
+        platform.create(_request(), _ctx())
+
+    assert cache.instances.resource is None
+    assert cache.firewalls.resources == {}
+    if interrupt_stage == "deny-wait":
+        assert [request.firewall for request in cache.firewalls.delete_requests] == [
+            cache.firewalls.insert_requests[0].firewall_resource.name
+        ]
+    elif interrupt_stage == "allow-wait":
+        assert len(cache.firewalls.delete_requests) == 2
+    else:
+        assert len(cache.instances.delete_requests) == 1
+        assert len(cache.firewalls.delete_requests) == 2
+
+
+def test_second_interrupt_abandons_platform_rollback_without_mutating_survivors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    warnings: list[str] = []
+    monkeypatch.setattr("agentworks.plugins.gcp.cleanup.output.warn", warnings.append)
+    transport = _Transport(failures={GCE_READINESS_COMMAND: [KeyboardInterrupt("first")]})
+    platform, cache = _platform(monkeypatch, transport)
+    cache.firewalls.delete_failures = [KeyboardInterrupt("second")]
+
+    with pytest.raises(KeyboardInterrupt, match="first"):
+        platform.create(_request(), _ctx())
+
+    assert cache.instances.resource is not None
+    assert len(cache.firewalls.resources) == 2
+    assert cache.instances.delete_requests == []
+    message = "\n".join(warnings)
+    assert "Cleanup abandoned" in message
+    assert "firewall-rules delete" not in message
 
 
 def test_lifecycle_is_idempotent_live_ip_and_transient_routes_are_distinct(
@@ -406,3 +611,157 @@ def test_delete_retains_same_name_different_id_instance_and_lifetime_deny(
     assert cache.instances.delete_requests == []
     assert result.platform_metadata["deny_rule"] in cache.firewalls.resources
     assert "do not delete by name" in (caught.value.hint or "")
+
+
+def test_delete_retains_same_id_mutated_allow_but_still_deletes_instance_and_deny(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    warnings: list[str] = []
+    monkeypatch.setattr("agentworks.plugins.gcp.platform.output.warn", warnings.append)
+    platform, cache = _platform(monkeypatch, _Transport())
+    result = platform.create(_request(), _ctx())
+    vm = _vm(result.platform_metadata)
+    allow_name = result.platform_metadata["allow_rule"]
+    deny_name = result.platform_metadata["deny_rule"]
+    mutated = cache.firewalls.resources[allow_name]
+    mutated.priority = 7
+
+    platform.delete(vm, _ctx())
+
+    assert cache.instances.resource is None
+    assert allow_name in cache.firewalls.resources
+    assert deny_name not in cache.firewalls.resources
+    assert [request.firewall for request in cache.firewalls.delete_requests] == [deny_name]
+    message = "\n".join(warnings)
+    assert "shape mismatch" in message
+    assert "do not delete by name" in message
+
+
+def test_delete_refuses_noncanonical_persisted_allow_sources_before_any_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    platform, cache = _platform(monkeypatch, _Transport())
+    result = platform.create(_request(), _ctx())
+    metadata = dict(result.platform_metadata)
+    metadata["allow_source_ranges"] = "198.18.0.7"
+
+    with pytest.raises(StateError, match="invalid persisted GCE allow-source metadata"):
+        platform.delete(_vm(metadata), _ctx())
+
+    assert cache.instances.delete_requests == []
+    assert cache.firewalls.delete_requests == []
+
+
+@pytest.mark.parametrize("provider_error", (api_exceptions.ServiceUnavailable, api_exceptions.PermissionDenied))
+def test_delete_continues_after_allow_read_failure_and_reports_retained_allow(
+    monkeypatch: pytest.MonkeyPatch,
+    provider_error: type[Exception],
+) -> None:
+    warnings: list[str] = []
+    monkeypatch.setattr("agentworks.plugins.gcp.platform.output.warn", warnings.append)
+    platform, cache = _platform(monkeypatch, _Transport())
+    result = platform.create(_request(), _ctx())
+    vm = _vm(result.platform_metadata)
+    allow_name = result.platform_metadata["allow_rule"]
+    deny_name = result.platform_metadata["deny_rule"]
+    cache.firewalls.get_failures[allow_name] = [_api_error(provider_error, "provider-private-detail")]
+
+    platform.delete(vm, _ctx())
+
+    assert len(cache.instances.delete_requests) == 1
+    assert cache.instances.resource is None
+    assert allow_name in cache.firewalls.resources
+    assert deny_name not in cache.firewalls.resources
+    assert all(request.firewall != allow_name for request in cache.firewalls.delete_requests)
+    message = "\n".join(warnings)
+    assert "Allow rule ownership is unknown" in message
+    assert "do not delete by name" in message
+    assert "provider-private-detail" not in message
+
+
+def test_delete_keeps_deny_when_allow_read_and_instance_delete_are_indeterminate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    platform, cache = _platform(monkeypatch, _Transport())
+    result = platform.create(_request(), _ctx())
+    vm = _vm(result.platform_metadata)
+    allow_name = result.platform_metadata["allow_rule"]
+    deny_name = result.platform_metadata["deny_rule"]
+    unavailable = _api_error(api_exceptions.ServiceUnavailable, "provider-private-detail")
+    cache.firewalls.get_failures[allow_name] = [unavailable]
+    cache.instances.delete_failures = [unavailable]
+
+    with pytest.raises(GCEOperationError, match="not proven absent") as caught:
+        platform.delete(vm, _ctx())
+
+    assert len(cache.instances.delete_requests) == 1
+    assert cache.instances.resource is not None
+    assert {allow_name, deny_name} <= set(cache.firewalls.resources)
+    assert all(request.firewall != deny_name for request in cache.firewalls.delete_requests)
+    assert "Owned deny rule retained while instance absence is unproven" in (caught.value.hint or "")
+    assert "provider-private-detail" not in (caught.value.hint or "")
+
+
+@pytest.mark.parametrize("hook_name", ("post_tailscale_ready", "secure_failed_vm"))
+def test_stable_allow_close_hooks_fail_closed_on_provider_read_error(
+    monkeypatch: pytest.MonkeyPatch,
+    hook_name: str,
+) -> None:
+    warnings: list[str] = []
+    monkeypatch.setattr("agentworks.plugins.gcp.platform.output.warn", warnings.append)
+    platform, cache = _platform(monkeypatch, _Transport())
+    result = platform.create(_request(), _ctx())
+    vm = _vm(result.platform_metadata)
+    allow_name = result.platform_metadata["allow_rule"]
+    cache.firewalls.get_failures[allow_name] = [
+        _api_error(api_exceptions.ServiceUnavailable, "provider-private-detail")
+    ]
+
+    getattr(platform, hook_name)(vm, _ctx())
+
+    assert allow_name in cache.firewalls.resources
+    assert all(request.firewall != allow_name for request in cache.firewalls.delete_requests)
+    assert "not proven absent" in "\n".join(warnings)
+    assert "provider-private-detail" not in "\n".join(warnings)
+
+
+def test_transient_route_open_failure_never_yields_or_mutates_stable_deny(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    platform, cache = _platform(monkeypatch, _Transport())
+    result = platform.create(_request(), _ctx())
+    vm = _vm(result.platform_metadata)
+    platform.post_tailscale_ready(vm, _ctx())
+    unavailable_one = _api_error(api_exceptions.ServiceUnavailable, "first-private-detail")
+    unavailable_two = _api_error(api_exceptions.ServiceUnavailable, "second-private-detail")
+    cache.firewalls.insert_failures = [unavailable_one, unavailable_two]
+    yielded = False
+
+    with pytest.raises(ConnectivityError), platform.transient_route(vm, _ctx()):
+        yielded = True
+
+    assert not yielded
+    assert set(cache.firewalls.resources) == {result.platform_metadata["deny_rule"]}
+    first, second = cache.firewalls.insert_requests[-2:]
+    assert first.request_id == second.request_id
+
+
+def test_transient_route_close_failure_warns_and_retains_only_its_exact_rule(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    warnings: list[str] = []
+    monkeypatch.setattr("agentworks.plugins.gcp.platform.output.warn", warnings.append)
+    platform, cache = _platform(monkeypatch, _Transport())
+    result = platform.create(_request(), _ctx())
+    vm = _vm(result.platform_metadata)
+    platform.post_tailscale_ready(vm, _ctx())
+    cache.firewalls.delete_failures = [_api_error(api_exceptions.ServiceUnavailable, "provider-private-detail")]
+
+    with platform.transient_route(vm, _ctx()):
+        [route_name] = set(cache.firewalls.resources) - {result.platform_metadata["deny_rule"]}
+
+    assert {result.platform_metadata["deny_rule"], route_name} == set(cache.firewalls.resources)
+    message = "\n".join(warnings)
+    assert route_name in message
+    assert "not proven absent" in message
+    assert "provider-private-detail" not in message

@@ -158,7 +158,7 @@ def test_image_architecture_mismatch_is_rejected() -> None:
 
 def test_exact_instance_collision_and_not_found_paths() -> None:
     present = _GetClient(compute_v1.Instance(name="vm-a"))
-    with pytest.raises(AlreadyExistsError, match="already exists"):
+    with pytest.raises(AlreadyExistsError, match="already exists") as caught:
         require_instance_name_available(
             _Cache(instances=present),  # type: ignore[arg-type]
             RunContext(),
@@ -166,6 +166,9 @@ def test_exact_instance_collision_and_not_found_paths() -> None:
             zone="us-central1-a",
             instance_name="vm-a",
         )
+    assert "inspect the existing provider identity" in (caught.value.hint or "")
+    assert "Do not delete the instance by name" in (caught.value.hint or "")
+    assert "remove" not in (caught.value.hint or "").lower()
 
     absent = _GetClient(failure=_api_error(api_exceptions.NotFound, "gone"))
     require_instance_name_available(

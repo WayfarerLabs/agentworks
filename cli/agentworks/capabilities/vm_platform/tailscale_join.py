@@ -10,6 +10,8 @@ from agentworks.errors import ProvisioningError
 from agentworks.ssh import SSHError
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from agentworks.transports import Transport
 
 TAILSCALE_JOIN_STDIN_COMMAND = (
@@ -53,16 +55,21 @@ class EphemeralTailscaleBootstrap:
         self._readiness_command = readiness_command
         self._readiness_label = readiness_label
 
-    def complete(self, auth_key: str) -> str | None:
+    def complete(self, auth_key: str, *, before_join: Callable[[], None] | None = None) -> str | None:
         """Wait for cloud-init, join exactly once, then discover the IP.
 
         Readiness failure raises before sending the key so the platform's
         create rollback can remove the partial VM. Once the join command
         succeeds, later IP-discovery failure remains a completed bootstrap so
-        Phase A cannot deliver the credential a second time.
+        Phase A cannot deliver the credential a second time. ``before_join``
+        runs only after readiness and immediately before fixed-stdin delivery,
+        allowing a platform to report that real boundary without handling the
+        sensitive input itself.
         """
         self._wait_for_readiness()
 
+        if before_join is not None:
+            before_join()
         join_tailscale_ephemerally(self._target, auth_key, timeout=30)
         return self._tailscale_ip()
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import ipaddress
 import sys
 import uuid
 from dataclasses import dataclass
@@ -37,7 +38,6 @@ from agentworks.plugins.gcp.compute import (
     get_project,
     get_zone,
     live_external_ipv4,
-    provider_resource_id,
     require_instance_name_available,
     resolve_balanced_disk_type,
     resolve_debian_image,
@@ -45,7 +45,7 @@ from agentworks.plugins.gcp.compute import (
     verify_zonal_operation,
 )
 from agentworks.plugins.gcp.config import GcpGCEConfig, machine_catalog, select_machine_type
-from agentworks.plugins.gcp.errors import GCEError, GCEOperationError, call_google, call_google_optional
+from agentworks.plugins.gcp.errors import GCEError, GCEOperationError, call_google
 from agentworks.plugins.gcp.instance import (
     InstanceInsertAttempt,
     build_instance_resource,
@@ -97,6 +97,7 @@ class _VMIdentity:
     network_tag: str
     allow_rule: str
     allow_rule_id: str
+    allow_source_ranges: tuple[str, ...]
     deny_rule: str
     deny_rule_id: str
     access_config_name: str
@@ -113,6 +114,7 @@ class _VMIdentity:
             "network_tag",
             "allow_rule",
             "allow_rule_id",
+            "allow_source_ranges",
             "deny_rule",
             "deny_rule_id",
             "access_config_name",
@@ -125,6 +127,25 @@ class _VMIdentity:
                 entity_name=vm.name,
                 hint="restore the persisted provider identities before retrying lifecycle operations",
             )
+        source_ranges = tuple(str(metadata["allow_source_ranges"]).split(","))
+        try:
+            canonical_source_ranges = tuple(
+                str(ipaddress.IPv4Network(source_range, strict=False)) for source_range in source_ranges
+            )
+        except ValueError as exc:
+            raise StateError(
+                f"VM '{vm.name}' has invalid persisted GCE allow-source metadata",
+                entity_kind="vm",
+                entity_name=vm.name,
+                hint="restore the original canonical IPv4 SSH prefixes before retrying lifecycle operations",
+            ) from exc
+        if not source_ranges or source_ranges != canonical_source_ranges:
+            raise StateError(
+                f"VM '{vm.name}' has invalid persisted GCE allow-source metadata",
+                entity_kind="vm",
+                entity_name=vm.name,
+                hint="restore the original canonical IPv4 SSH prefixes before retrying lifecycle operations",
+            )
         return cls(
             project_id=str(metadata["project_id"]),
             zone=str(metadata["zone"]),
@@ -135,6 +156,7 @@ class _VMIdentity:
             network_tag=str(metadata["network_tag"]),
             allow_rule=str(metadata["allow_rule"]),
             allow_rule_id=str(metadata["allow_rule_id"]),
+            allow_source_ranges=source_ranges,
             deny_rule=str(metadata["deny_rule"]),
             deny_rule_id=str(metadata["deny_rule_id"]),
             access_config_name=str(metadata["access_config_name"]),
@@ -365,13 +387,15 @@ class GCEPlatform(VMPlatform):
                 force_tty=sys.platform == "win32",
             )
 
-            request.progress.step("Wait for GCE startup marker")
-            request.progress.step("Join Tailscale through fixed stdin")
+            request.progress.step("Waiting for GCE startup marker")
             tailscale_ip = EphemeralTailscaleBootstrap(
                 transport,
                 readiness_command=GCE_READINESS_COMMAND,
                 readiness_label=GCE_READINESS_LABEL,
-            ).complete(request.tailscale_auth_key)
+            ).complete(
+                request.tailscale_auth_key,
+                before_join=lambda: request.progress.step("Join Tailscale through fixed stdin"),
+            )
             request.progress.output("GCE credential-free bootstrap and Tailscale join completed")
         except KeyboardInterrupt as primary:
             rollback_after_interrupt(
@@ -404,6 +428,9 @@ class GCEPlatform(VMPlatform):
             "network_tag": names.network_tag,
             "allow_rule": names.allow_rule,
             "allow_rule_id": allow_ownership.resource_id,
+            # Preserve the exact normalized request inputs needed to prove the
+            # stable allow's full shape before any later name-based delete.
+            "allow_source_ranges": ",".join(prefixes),
             "deny_rule": names.deny_rule,
             "deny_rule_id": deny_ownership.resource_id,
             "access_config_name": EXTERNAL_ACCESS_CONFIG_NAME,
@@ -454,7 +481,7 @@ class GCEPlatform(VMPlatform):
         identity = _VMIdentity.from_row(vm)
         instances = self._clients.client("instances", ctx)
         firewalls = self._clients.client("firewalls", ctx)
-        expected_allow = self._owned_firewall_or_absence_shape(firewalls, identity, role="allow")
+        expected_allow = self._expected_stable_allow(identity)
         expected_deny = build_deny_firewall(
             rule_name=identity.deny_rule,
             network_url=identity.network_url,
@@ -641,36 +668,21 @@ class GCEPlatform(VMPlatform):
 
         wait_for_extended_operation(operation, label=f"instance {identity.instance_name} {action}", timeout=300.0)
 
-    def _owned_firewall_or_absence_shape(self, firewalls: Any, identity: _VMIdentity, *, role: str) -> Any:
-        name = identity.allow_rule if role == "allow" else identity.deny_rule
-        expected_id = identity.allow_rule_id if role == "allow" else identity.deny_rule_id
-        actual = call_google_optional(
-            lambda: firewalls.get(project=identity.project_id, firewall=name),
-            operation="reading an owned firewall rule",
-            resource=f"firewall rule {identity.project_id}/{name}",
-        )
-        if actual is not None and provider_resource_id(actual.id) == expected_id:
-            return actual
-        if role == "deny":
-            return build_deny_firewall(
-                rule_name=name,
-                network_url=identity.network_url,
-                network_tag=identity.network_tag,
-            )
-        # Only used to classify absence or a provider-ID collision. A matching
-        # live incarnation returned above supplies its complete retained shape.
+    @staticmethod
+    def _expected_stable_allow(identity: _VMIdentity) -> Any:
+        """Rebuild the create-time allow independently of mutable provider state."""
         return build_ssh_allow_firewall(
-            rule_name=name,
+            rule_name=identity.allow_rule,
             network_url=identity.network_url,
             network_tag=identity.network_tag,
-            operator_prefixes=("127.255.255.255/32",),
+            operator_prefixes=identity.allow_source_ranges,
         )
 
     def _close_stable_allow(self, vm: VMRow, ctx: RunContext) -> None:
         try:
             identity = _VMIdentity.from_row(vm)
             firewalls = self._clients.client("firewalls", ctx)
-            expected = self._owned_firewall_or_absence_shape(firewalls, identity, role="allow")
+            expected = self._expected_stable_allow(identity)
             result = delete_matching_firewall(
                 firewalls,
                 project_id=identity.project_id,

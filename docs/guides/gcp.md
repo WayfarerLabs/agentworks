@@ -118,19 +118,27 @@ balanced disk type, and every stable name before its first insert. The final ins
 auto-deleted boot disk, no guest service account, an explicit IPv4-only interface, and one lifetime
 ephemeral external access config. The retained startup metadata contains no Tailscale or Google
 credential. After its durable success marker appears, Agentworks sends the Tailscale key once
-through fixed-command SSH stdin.
+through fixed-command SSH stdin. The resulting VM row records the original canonical operator SSH
+source prefixes so later cleanup can reconstruct the create-time allow independently; it still does
+not store the VM's external IPv4.
 
 The external IPv4 is an outbound and recovery route, not standing inbound exposure. Agentworks reads
-it live after power transitions and never stores it. After Tailscale is ready, only the priority-1
-deny remains; `vm shell --platform` opens a fresh UUID-named scoped SSH allow for that command and
-removes only its own rule on exit.
+it live after power transitions and never stores it. After Tailscale is ready, Agentworks closes the
+bootstrap allow; if closure cannot be proven, it retains and reports the rule. After a successful
+close only the priority-1 deny remains. `vm shell --platform` opens a fresh UUID-named scoped SSH
+allow for that command and removes only its own rule on exit; an unproven close is retained and
+reported rather than sweeping another rule.
 
 ## Recovery and safe cleanup
 
-Use `agw vm delete <name>` first. It closes the stable allow, verifies the persisted instance
-provider ID, deletes that exact incarnation, proves the instance absent, and only then removes the
-lifetime deny. A failed or indeterminate instance deletion keeps the database row and deny for a
-retry. The boot disk is removed by the instance's explicit auto-delete setting.
+Use `agw vm delete <name>` first. It closes the stable allow only when both its persisted provider
+ID and its independently reconstructed full create-time shape still match, verifies the persisted
+instance provider ID, deletes that exact incarnation, proves the instance absent, and only then
+removes the lifetime deny. A same-ID allow whose shape changed is retained and reported, never
+adopted as the expected shape. If reading or closing the allow is unavailable, instance deletion is
+still attempted; the allow remains for inspection. A failed or indeterminate instance deletion keeps
+the database row and deny for a retry. The boot disk is removed by the instance's explicit
+auto-delete setting.
 
 If create rollback or delete cannot prove cleanup, Agentworks prints the project, zone, resource
 names, expected provider IDs, and safe next action. Verify each provider ID before any manual
@@ -152,4 +160,4 @@ If the expected ID is unknown, the observed ID differs, or a same-name resource 
 shape, treat it as a collision: inspect ownership and escalate. Do not delete it by name. Matching
 shape alone never proves that Agentworks owns a resource, and changing the site's subnet or project
 does not change the cleanup target because existing rows retain their canonical project, zone,
-network, subnet, and provider IDs.
+network, subnet, original allow-source prefixes, and provider IDs.
