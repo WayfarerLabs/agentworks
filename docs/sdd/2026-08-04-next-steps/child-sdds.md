@@ -231,11 +231,15 @@ beyond their first capability implementation per the operator ruling recorded in
 bootstrap-fallback-removal effort it spawned (PR #475, merged and locked 2026-08-10, closing
 [issue 471](https://github.com/WayfarerLabs/agentworks/issues/471): the generic secret-bearing Phase
 A fallback deleted and all platforms cut to contract v2), and the continuous-lander website feature
-(PR #486, stacked on #439). Website status (2026-08-10): five-page topology (Home, generated
-Manifesto, Security, 404, and the operator-authorized dedicated Lander page) implemented and
-convergence-verified; operator acceptance ruling moves the Firefox/WebKit/screen-reader/touch matrix
-to post-launch validation against the public host (rows explicit and unchecked, required before that
-effort's lock), with Chrome/Edge preview as the pre-merge browser gate.
+(PR #486, stacked on #439). Website status (2026-08-10, updated at merge): PR #439 MERGED and the
+interim release is live at the default Pages URL. The five-page topology (Home, generated Manifesto,
+Security, 404, and the operator-authorized dedicated Lander page) shipped with the operator's
+Chrome/Edge acceptance recorded and the residual deferred matrix explicitly accepted on the PR;
+domain activation follows the pinned rollback-capable runbook at the operator's choosing.
+Post-launch obligations (Firefox/WebKit, spoken screen reader, physical touch/device rows) stay
+explicit and unchecked, required before that effort's final closeout. The manifesto task's atomic
+rebase obligation (manifesto source path plus Home block re-pins) is now active, and the
+continuous-lander stack entry moves to main.
 
 ## Standing process rulings
 
@@ -322,7 +326,12 @@ open-ended research placeholder.
     consolidation plus the unit-test runtime fix). Open 0.14 gates: installer-plugins
     implementation, the README bootstrap, safer migrations, and the test-consolidation soft gate.
 15. Safer migrations merged (2026-08-10): that gate is satisfied. Open 0.14 gates: the
-    installer-plugins implementation (design endorsed 2026-08-09; no implementation activity since —
+    installer-plugins implementation (design endorsed 2026-08-09; no implementation activity since,
     the current long pole), the README bootstrap (the onboarding effort's Phase 3 design converging
     on PR #480 under the operator's lifecycle-assistance lens), and the test-consolidation soft gate
     (seeds when the hard gates land).
+16. The onboarding bootstrap design gate closed (2026-08-10, PR #480 at 89b41755) after six
+    convergence rounds: the release choreography adopts the normal feat-merge shape, the
+    consent-teaching reconciliation sweep covers every shipped guide topic family, and the
+    operator's R16 ruling keeps one full canonical assistance body as the only source. The last 0.14
+    hard gate is in implementation.
