@@ -45,37 +45,37 @@ foundation is fully typed, secret-free, offline-tested, and the existing platfor
 
 ## Phase 2: complete plugin publication
 
-- [ ] Implement `GCEPlatform` contract v2 create/start/stop/delete/status/display behavior and
+- [x] Implement `GCEPlatform` contract v2 create/start/stop/delete/status/display behavior and
       register it through a new disabled-by-default `gcp` system plugin.
-- [ ] Implement authenticated runup for zone plus configured-subnet or default-network existence,
+- [x] Implement authenticated runup for zone plus configured-subnet or default-network existence,
       plus the inspectable VPC firewall support boundary, with every definitive failure before
       mutation.
-- [ ] Implement machine/image/disk selection, metadata SSH identity, credential-free startup script,
+- [x] Implement machine/image/disk selection, metadata SSH identity, credential-free startup script,
       256 KiB encoded size gate, durable run-once marker, auto-deleted boot disk, empty guest
       service-account list, scoped priority-0 TCP/22 allow plus priority-1 all-ingress deny,
       lifetime ephemeral external access, observable secret-free progress, fixed stdin join, and
       optional Tailscale IP result.
-- [ ] Implement `post_tailscale_ready`, `secure_failed_vm`, and concurrent-safe `transient_route` so
+- [x] Implement `post_tailscale_ready`, `secure_failed_vm`, and concurrent-safe `transient_route` so
       provisioning/native scoped allows are bounded while lifetime external access keeps ordinary
       egress available.
-- [ ] Add provider-shaped retained-request tests using quoting-hostile Tailscale and service-account
+- [x] Add provider-shaped retained-request tests using quoting-hostile Tailscale and service-account
       sentinels; pin one fixed-stdin delivery and secret-free output/log/diagnostic/exception
       graphs.
-- [ ] Add create rollback tests for every partial resource set, bootstrap/join failure, first
+- [x] Add create rollback tests for every partial resource set, bootstrap/join failure, first
       interrupt, second interrupt, realized/absent/mismatched firewall-insert timeout, cleanup
       survivor, and exact manual-removal guidance.
-- [ ] Add lifecycle/idempotency tests for live-IP reads, start, stop, status, delete, already-gone,
+- [x] Add lifecycle/idempotency tests for live-IP reads, start, stop, status, delete, already-gone,
       surviving-VM typed failure, deny retention, exact instance/tag/rule name derivation,
       classic-first policy order, priority-zero allow/deny conflicts, all-ingress deny shape,
       firewall hooks, and concurrent transient routes.
-- [ ] Add registration, plugin enablement/provenance, capability conformance, schema/sample, guide
+- [x] Add registration, plugin enablement/provenance, capability conformance, schema/sample, guide
       catalog/rendering/inertness, and completion-adjacent discovery tests.
-- [ ] Update the installed-plugin index, permanent plugin/platform/capability docs, command
+- [x] Update the installed-plugin index, permanent plugin/platform/capability docs, command
       reference, resources guide, sample teaching, durable six-surface enumeration, `TopicProse`,
       key-file-to-env-var setup, and recovery guidance in the same publication commit.
-- [ ] Confirm shell completion implementation needs no bespoke edit because it remains
+- [x] Confirm shell completion implementation needs no bespoke edit because it remains
       registry-driven; update tests and generated/reference projections that enumerate platforms.
-- [ ] Delete the branch-seeded task brief before the PR leaves draft.
+- [x] Delete the branch-seeded task brief before the PR leaves draft.
 
 **DoD:** enabling plugin `gcp` exposes a fully functional `gcp-gce` platform; disabled behavior is
 honest; no incomplete registration or undocumented operator surface exists; all offline focused
