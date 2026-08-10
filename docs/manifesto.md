@@ -25,6 +25,9 @@ Increasing AI capabilities will make these attacks more frequent and sophisticat
 attacks in particular have become a near-constant backdrop. The registries that developers and their
 agents depend on are under active, sustained attack.
 
+And when things go wrong here, they will do so faster than humans can respond. The operator may not
+even be aware of the problem until it is too late.
+
 All of these risks suggest the same response: strong guardrails that contain the blast radius when
 things go sideways and leave the operator in control.
 
@@ -84,18 +87,26 @@ lifecycle when the operator wants one.
 Reproducible identity setup belongs in a template. The valuable state that cannot be reproduced
 belongs to the identity, while the session remains the disposable unit of work.
 
-### Agentworks Is a Platform, Not a Harness
+### Set the Context, Tools, and Guardrails, Then Get Out of the Way
 
-There are many strong options for running agentic workloads, including first-party harnesses and
-independent alternatives. Agentworks does not try to replace them. It provides the infrastructure to
-run them securely, consistently, and at scale.
+Early agentic systems often relied on lots of custom tooling around the harness itself: Ralph loops,
+managed or brokered delegation, and even fully custom harnesses.
 
-Harnesses are getting better every day. Our belief is that custom harnesses will struggle to compete
-with vanilla harnesses running the latest models. Context will always matter, but harness minutiae
-will matter less, and may get in the way, as models become more capable.
+Starting around fall 2025 with Claude Opus 4.5, it became clear that the model could do much of this
+work itself if given the proper direction. Models such as Claude Fable 5 and GPT-5.6 Sol need even
+less custom orchestration. Simply tell the model how it should work. For example: "Delegate to
+subagents where possible, consider less capable models for simpler tasks, and do not stop until you
+have a merge-ready PR." As has become a theme in the agentic world, what once was necessary is now
+counterproductive.
 
-In that world, standing up and managing least-privilege environments becomes more important.
-Agentworks is designed to solve that problem.
+Today, built-in "auto" and goal-oriented modes for longer-running, more autonomous work have
+proliferated across harnesses. These modes can be useful, but they are still orchestration.
+Agentworks expects their specifics to matter less as models continue to improve.
+
+But while custom orchestration is on its way out, setting the right context, giving the agent the
+right tools, and, critically, establishing appropriate guardrails are more important than ever.
+Agentworks is designed to make that easy while otherwise letting the harness and models operate
+unimpeded.
 
 ### Consistency Beats Unbounded Choice
 
@@ -138,3 +149,32 @@ does. Declarative machinery should rebuild what can be reproduced, but it must n
 state merely because a declaration no longer names it. When reconciliation cannot be both complete
 and safe, Agentworks names a narrower promise instead of pretending the resource is fully
 declarative.
+
+## And Remember
+
+### Agentworks Is a Platform, Not a Harness
+
+There are many strong options for running agentic workloads, including first-party harnesses and
+independent alternatives. Agentworks does not try to replace them. It provides the infrastructure to
+run them securely, consistently, and at scale.
+
+Harnesses are getting better every day. Our belief is that custom harnesses will struggle to compete
+with vanilla harnesses running the latest models. Context will always matter, but harness minutiae
+will matter less, and may get in the way, as models become more capable.
+
+In that world, standing up and managing least-privilege environments becomes more important.
+Agentworks is designed to solve that problem.
+
+### Security Is Everyone's Responsibility
+
+Agentworks is built to support good security practices and to be reasonably secure by default, but
+it cannot guarantee security for every operator in every environment. Given what it handles,
+including agentic workloads with private code and data and sensitive credentials, it should be
+considered a high-value target for attackers.
+
+Your VMs and infrastructure remain your responsibility. Agentworks cannot secure an unsafe host, an
+overly permissive configuration, or credentials exposed outside its boundaries.
+
+Exercise appropriate caution, especially when using agents to configure and operate Agentworks
+itself. The workstation from which you administer Agentworks necessarily holds powerful credentials,
+so an attacker who compromises it can compromise everything it controls.
