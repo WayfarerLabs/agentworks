@@ -948,20 +948,23 @@ that follows.
 
 `concept-onboarding` is repeatable setup and adoption assistance. It renders a pure assessment of
 the projected registry, relationship, and stored-instance facts, reporting each fact as done,
-disabled, not ready, or unverifiable. A clean setup uses the existing non-overwriting
-`agw config init`, presence-only SSH public-key discovery, optional non-overwriting Ed25519
-generation at an operator-selected path, explicit provider/plugin/secret-reference inputs,
-`agw doctor --output json`, and inert first-VM and first-session action records. Rendering never
-performs those operations. Every create input is explicit, readiness and resulting resources use the
-existing JSON v1 surfaces, and reruns skip present VMs, sessions, and other ready work. Verification
-evidence is caller-owned and scoped to one named target; a verified rerun is a no-op, while refusal
-keeps the documented manual alternative without executing or repeating the command.
+disabled, not ready, or unverifiable. A clean setup uses presence-only SSH public-key discovery,
+optional non-overwriting Ed25519 generation at an operator-selected path, the existing
+non-overwriting `agw config init`, ordinary file editing of only the selected SSH,
+provider/plugin/secret-reference settings, and `agw doctor --output json`. Rendering never performs
+those operations. The inert first-VM and first-session actions appear only after caller-owned
+`run-doctor:onboarding/doctor-readiness=verified` evidence records JSON v1 readiness with no
+applicable failure or unavailable status. Every create input is explicit, resulting resources use
+the existing JSON v1 surfaces, and reruns skip present VMs, sessions, and other ready work.
+Verification evidence is caller-owned and scoped to one named target; a verified rerun is a no-op,
+while refusal keeps the documented manual alternative without executing or repeating the command.
 
 The guide service composes a frozen onboarding snapshot from registered exact-resource guide views.
 The assessment receives only their bounded fact records; it cannot traverse the registry, database,
 configuration, or operational capabilities.
 
 Replay a caller-owned verification log with a repeatable, target-scoped flag such as
+`--evidence run-doctor:onboarding/doctor-readiness=verified`,
 `--evidence verify-named-secret:secret/tailscale-auth-key=verified` or
 `--evidence verify-vm-connection:vm/worker=refused`. The accepted outcomes are `verified`, `failed`,
 and `refused`; malformed, duplicate, mismatched, or inapplicable records fail the whole request
@@ -978,9 +981,9 @@ from name discovery, while unaffected topics remain available. This stable strea
 and PowerShell topic completion.
 
 `concept-management` covers day-two operation from live facts instead of duplicating the command
-registry. It combines the current kind and implementation inventory with JSON v1 list/describe
-surfaces and the installed Typer help for the stable `config`, `resource`, `vm`, `workspace`,
-`agent`, `session`, `console`, and `secret` groups. Use `agw GROUP --help` and
+registry. It combines the current kind, implementation, and kind-owned live-instance inventory with
+JSON v1 list/describe surfaces and the installed Typer help for the stable `config`, `resource`,
+`vm`, `workspace`, `agent`, `session`, `console`, and `secret` groups. Use `agw GROUP --help` and
 `agw GROUP COMMAND --help` for exact current syntax, then verify through the applicable live facts.
 
 `concept-migration` is the exceptional 0.14 resource-model rewrite guide, not a general upgrade

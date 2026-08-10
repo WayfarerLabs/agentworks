@@ -184,6 +184,19 @@ def _resource_fact(registry: Registry, kind: str, name: str, resource: object) -
     )
 
 
+def _live_instance_facts(registry: Registry, db: Database) -> tuple[GuideInstanceFact, ...]:
+    """Project every kind-owned live instance through the existing read-only hooks."""
+    instances: dict[GuideInstanceFact, None] = {}
+    for kind, handler in sorted(KIND_REGISTRY.items()):
+        hook = getattr(handler, "instances", None)
+        if hook is None:
+            continue
+        for _name, resource in sorted(registry.iter_kind_items(kind)):
+            for ref in hook(db, registry, resource):
+                instances.setdefault(GuideInstanceFact(ref.instance_kind, ref.instance_name), None)
+    return tuple(sorted(instances, key=lambda item: (item.kind, item.name)))
+
+
 def build_guide_view(contribution: TopicContribution, registry: Registry, db: Database) -> GuideView:
     """Eagerly copy permitted facts from an already-finalized registry."""
     validated = parse_topic_contribution(contribution, "guide-view")
@@ -215,6 +228,8 @@ def build_guide_view(contribution: TopicContribution, registry: Registry, db: Da
             if handler.category == "capability"
             for name, resource in sorted(registry.iter_kind_items(kind))
         )
+    if isinstance(anchor, ConceptAnchor) and anchor.name == "concept-management":
+        instances = _live_instance_facts(registry, db)
 
     if isinstance(anchor, KindAnchor):
         handler = KIND_REGISTRY.get(anchor.kind)

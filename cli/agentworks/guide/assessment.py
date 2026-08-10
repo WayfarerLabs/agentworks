@@ -110,6 +110,9 @@ class OnboardingAssessment:
         return tuple(action.id for action in self.actions)
 
 
+_DOCTOR_READINESS_TARGET = GuideIdentity("onboarding", "doctor-readiness")
+
+
 _ACTION_RECORDS = (
     GuideAction(
         ActionId("run-doctor"),
@@ -118,8 +121,9 @@ _ACTION_RECORDS = (
         ConsentBoundary.EXAMINE_WORKSTATION,
         ("agw", "doctor", "--output", "json"),
         "Before recording VERIFIED, parse exactly one JSON document and require schema_version is the integer "
-        "1, command is exactly doctor, and data is an object. Agentworks reports configuration and "
-        "host-readiness checks without applying repairs.",
+        "1, command is exactly doctor, and data is an object. Require data.counts to be an object, "
+        "data.counts.fail to be the integer 0, and no applicable readiness check to report unavailable or "
+        "not ready. Agentworks reports configuration and host-readiness checks without applying repairs.",
         None,
         "Keep the stored not-ready reason and troubleshoot manually without probing the workstation.",
     ),
@@ -145,8 +149,8 @@ _ACTION_RECORDS = (
     ),
     GuideAction(
         ActionId("create-first-vm"),
-        "No VM instance exists, configured readiness has been verified with doctor, and the operator has "
-        "explicitly selected every target input.",
+        "No VM instance exists, configured readiness has been verified with doctor, the operator has explicitly "
+        "selected every target input, and built-in `agw vm create --help` still confirms this syntax.",
         (
             ActionInput("VM_NAME", "Name for the first VM.", True),
             ActionInput("VM_TEMPLATE", "Existing vm-template selected for the first VM.", True),
@@ -168,19 +172,21 @@ _ACTION_RECORDS = (
         ),
         "Agentworks persists a VM record and asks the selected site provider to create compute and storage. "
         "This changes local and remote state, can incur provider cost, and uses provider network and later "
-        "SSH connectivity without implying privilege elevation. Before recording VERIFIED, parse exactly one "
-        "JSON document and require schema_version is the integer 1, command is exactly vm.describe, and data is "
+        "SSH connectivity under normal secret-reference boundaries without implying privilege elevation. Before "
+        "recording VERIFIED, parse exactly one JSON document and require schema_version is the integer 1, "
+        "command is exactly vm.describe, and data is "
         "an object. Require matching data.vm.name, site, and template, complete provisioning and initialization, "
         "and observed running status. When ADMIN_TEMPLATE is the reserved default, data.vm.admin_template must be "
         "null; every non-default selection must match exactly.",
         ("agw", "vm", "describe", "$VM_NAME", "--output", "json"),
-        "Create nothing. Keep the exact input checklist and command for later; a first session requires an "
-        "operator-selected usable VM.",
+        "Keep the exact inert command and input checklist, make no VM or provider change, and explain that "
+        "session creation requires an operator-selected usable VM.",
     ),
     GuideAction(
         ActionId("create-first-session"),
-        "No session instance exists, an operator-selected VM is usable, and every session, workspace, and "
-        "Agentworks-managed agent input is explicit.",
+        "No session instance exists, an operator-selected VM is usable, every session, workspace, and "
+        "Agentworks-managed agent input is explicit, and built-in `agw session create --help` still confirms "
+        "this syntax.",
         (
             ActionInput("SESSION_NAME", "Name for the first session.", True),
             ActionInput("SESSION_TEMPLATE", "Existing session-template selected for the first session.", True),
@@ -213,8 +219,9 @@ _ACTION_RECORDS = (
         ),
         "Agentworks persists and starts a session, creates the selected workspace and Agentworks-managed "
         "agent, and changes local and remote state. The running session can consume provider resources and "
-        "cost; no attach, delete, or privilege elevation is implied. Before recording VERIFIED, parse exactly "
-        "one JSON document and require schema_version is the integer 1, command is exactly session.describe, "
+        "cost, and needs provider network and SSH connectivity under normal secret-reference boundaries; no "
+        "attach, delete, or privilege elevation is implied. Before recording VERIFIED, parse exactly one JSON "
+        "document and require schema_version is the integer 1, command is exactly session.describe, "
         "and data is an object. Require matching session, template, VM, workspace, and Agentworks-managed agent "
         "identity, plus data.session.status exactly running.",
         ("agw", "session", "describe", "$SESSION_NAME", "--output", "json"),
@@ -230,6 +237,11 @@ def onboarding_actions() -> tuple[GuideAction, ...]:
 
 
 def _applicable_action(identity: GuideIdentity, status: OnboardingStatus) -> ActionId | None:
+    if identity == _DOCTOR_READINESS_TARGET and status in {
+        OnboardingStatus.NOT_READY,
+        OnboardingStatus.UNVERIFIABLE,
+    }:
+        return ActionId("run-doctor")
     if status is OnboardingStatus.NOT_READY:
         return ActionId("run-doctor")
     if status is OnboardingStatus.UNVERIFIABLE and identity.kind == "secret":
@@ -321,6 +333,17 @@ def assess_onboarding(
         findings.append(OnboardingFinding(identity, status, "Stored instance exists."))
         known.add(identity)
 
+    instance_kinds = {instance.kind for instance in snapshot.instances}
+    needs_first_resource = "vm" not in instance_kinds or "session" not in instance_kinds
+    if needs_first_resource:
+        findings.append(
+            OnboardingFinding(
+                _DOCTOR_READINESS_TARGET,
+                OnboardingStatus.UNVERIFIABLE,
+                "Explicit successful doctor JSON v1 readiness proof has not been recorded.",
+            )
+        )
+
     if not findings:
         findings.append(
             OnboardingFinding(
@@ -351,6 +374,8 @@ def assess_onboarding(
             revised.append(
                 OnboardingFinding(finding.identity, OnboardingStatus.NOT_READY, "Explicit verification failed.")
             )
+        elif evidence_item.action_id == ActionId("run-doctor") and finding.identity == _DOCTOR_READINESS_TARGET:
+            revised.append(OnboardingFinding(finding.identity, OnboardingStatus.DONE, None))
         elif evidence_item.action_id == ActionId("run-doctor"):
             revised.append(finding)
         else:
@@ -362,10 +387,27 @@ def assess_onboarding(
         evidence_item = evidence.get(finding.identity)
         if action_id is not None and (evidence_item is None or evidence_item.action_id != action_id):
             selected_ids.add(action_id)
-    instance_kinds = {instance.kind for instance in snapshot.instances}
-    if "vm" not in instance_kinds:
+    doctor_ready = any(
+        finding.identity == _DOCTOR_READINESS_TARGET and finding.status is OnboardingStatus.DONE for finding in revised
+    )
+    projected_readiness_clear = bool(snapshot.resources) and all(
+        not fact.verdict.enabled or fact.verdict.is_available and fact.verdict.ready for fact in snapshot.resources
+    )
+    explicit_proof_clear = all(
+        finding.status in {OnboardingStatus.DONE, OnboardingStatus.DISABLED} for finding in revised
+    )
+    if doctor_ready and projected_readiness_clear and explicit_proof_clear and "vm" not in instance_kinds:
         selected_ids.add(ActionId("create-first-vm"))
-    if "session" not in instance_kinds:
+    vm_is_usable = "vm" not in instance_kinds or any(
+        finding.identity.kind == "vm" and finding.status is OnboardingStatus.DONE for finding in revised
+    )
+    if (
+        doctor_ready
+        and projected_readiness_clear
+        and explicit_proof_clear
+        and vm_is_usable
+        and "session" not in instance_kinds
+    ):
         selected_ids.add(ActionId("create-first-session"))
     selected = tuple(action for action in actions if action.id in selected_ids)
     relationships = tuple(

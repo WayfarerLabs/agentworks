@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import agentworks.guide.view as guide_view_module
 from agentworks.guide import (
     BlockId,
     ConceptAnchor,
@@ -72,6 +73,12 @@ class _CapabilityHandler:
     kind = "guide-capability"
     category = "capability"
     description = "Test capability kind."
+
+
+class _InstanceHandler(_NoInstanceHandler):
+    def instances(self, db: object, registry: object, resource: object):
+        del db, registry, resource
+        return (InstanceRef("vm", "zeta"), InstanceRef("vm", "alpha"), InstanceRef("vm", "alpha"))
 
 
 class _CountingRegistry(_Registry):
@@ -201,8 +208,20 @@ def test_concept_views_materialize_only_their_permitted_global_inventories(
     concept: str,
     expected_roots: frozenset[GuideRoot],
 ) -> None:
-    monkeypatch.setitem(KIND_REGISTRY, "guide-test", _NoInstanceHandler())
-    monkeypatch.setitem(KIND_REGISTRY, "guide-capability", _CapabilityHandler())
+    expected_iteration: tuple[str, ...]
+    if concept == "concept-management":
+        monkeypatch.setattr(
+            guide_view_module,
+            "KIND_REGISTRY",
+            {"guide-test": _NoInstanceHandler(), "guide-capability": _CapabilityHandler()},
+        )
+        expected_iteration = ("guide-capability",)
+    else:
+        monkeypatch.setitem(KIND_REGISTRY, "guide-test", _NoInstanceHandler())
+        monkeypatch.setitem(KIND_REGISTRY, "guide-capability", _CapabilityHandler())
+        expected_iteration = tuple(
+            kind for kind, handler in sorted(KIND_REGISTRY.items()) if handler.category == "capability"
+        )
     registry = _CountingRegistry()
 
     view = build_guide_view(_topic_for(ConceptAnchor(concept), inventory=True), registry, SimpleNamespace())  # type: ignore[arg-type]
@@ -212,9 +231,21 @@ def test_concept_views_materialize_only_their_permitted_global_inventories(
     for root in frozenset(GuideRoot).difference(expected_roots):
         with pytest.raises(GuideTraversalError):
             view.inventory(root)
-    assert tuple(registry.iterated_kinds) == tuple(
-        kind for kind, handler in sorted(KIND_REGISTRY.items()) if handler.category == "capability"
+    assert tuple(registry.iterated_kinds) == expected_iteration
+
+
+def test_management_concept_projects_deduplicated_kind_owned_live_instances(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(guide_view_module, "KIND_REGISTRY", {"guide-test": _InstanceHandler()})
+
+    view = build_guide_view(
+        _topic_for(ConceptAnchor("concept-management"), inventory=True),
+        _Registry(),  # type: ignore[arg-type]
+        SimpleNamespace(),  # type: ignore[arg-type]
     )
+
+    assert view.instances() == (GuideInstanceFact("vm", "alpha"), GuideInstanceFact("vm", "zeta"))
 
 
 def test_concept_roots_must_match_validated_block_plan() -> None:

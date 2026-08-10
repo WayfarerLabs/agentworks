@@ -122,17 +122,17 @@ def test_mixed_projected_facts_relationships_and_instances_keep_individual_statu
         (
             VerificationOutcome.VERIFIED,
             OnboardingStatus.DONE,
-            (ActionId("create-first-vm"), ActionId("create-first-session")),
+            (ActionId("run-doctor"),),
         ),
         (
             VerificationOutcome.FAILED,
             OnboardingStatus.NOT_READY,
-            (ActionId("run-doctor"), ActionId("create-first-vm"), ActionId("create-first-session")),
+            (ActionId("run-doctor"),),
         ),
         (
             VerificationOutcome.REFUSED,
             OnboardingStatus.UNVERIFIABLE,
-            (ActionId("create-first-vm"), ActionId("create-first-session")),
+            (ActionId("run-doctor"),),
         ),
     ],
 )
@@ -161,7 +161,7 @@ def test_guided_and_replayable_outcomes_and_refusal_alternatives_are_equal() -> 
     assert (
         tuple(action.id for action in guided_actions(guided))
         == tuple(action.id for action in replayable_actions(replayable))
-        == (ActionId("create-first-session"),)
+        == (ActionId("run-doctor"),)
     )
     assert guided.findings[0].status is OnboardingStatus.UNVERIFIABLE
     assert guided.findings[0].reason == onboarding_actions()[2].refusal_alternative
@@ -173,7 +173,7 @@ def test_ready_rerun_with_accepted_proof_is_a_clean_no_op() -> None:
         verification_evidence=(_evidence("verify-named-secret", "secret", "token", VerificationOutcome.VERIFIED),),
     )
     assert assessment.findings[0].status is OnboardingStatus.DONE
-    assert assessment.action_ids == (ActionId("create-first-vm"), ActionId("create-first-session"))
+    assert assessment.action_ids == (ActionId("run-doctor"),)
 
 
 @pytest.mark.parametrize("kind", ["secret", "vm"])
@@ -182,10 +182,62 @@ def test_resource_named_after_its_kind_still_requires_explicit_proof(kind: str) 
     assert assessment.findings[0].status is OnboardingStatus.UNVERIFIABLE
     expected = "verify-named-secret" if kind == "secret" else "verify-vm-connection"
     assert assessment.action_ids == (
+        ActionId("run-doctor"),
         ActionId(expected),
-        ActionId("create-first-vm"),
-        ActionId("create-first-session"),
     )
+
+
+@pytest.mark.parametrize(
+    ("outcome", "expected_actions"),
+    [
+        (None, (ActionId("run-doctor"),)),
+        (VerificationOutcome.FAILED, ()),
+        (VerificationOutcome.REFUSED, ()),
+        (
+            VerificationOutcome.VERIFIED,
+            (ActionId("create-first-vm"), ActionId("create-first-session")),
+        ),
+    ],
+)
+def test_first_resource_actions_require_successful_caller_owned_doctor_proof(
+    outcome: VerificationOutcome | None,
+    expected_actions: tuple[ActionId, ...],
+) -> None:
+    evidence = () if outcome is None else (_evidence("run-doctor", "onboarding", "doctor-readiness", outcome),)
+
+    assessment = assess_onboarding(
+        _snapshot(_fact("workspace-template", "ready")),
+        verification_evidence=evidence,
+    )
+
+    assert assessment.action_ids == expected_actions
+
+
+@pytest.mark.parametrize("available", [False, True])
+def test_doctor_proof_does_not_override_unready_or_unavailable_projected_facts(available: bool) -> None:
+    assessment = assess_onboarding(
+        _snapshot(_fact("vm-site", "blocked", ready=False, available=available)),
+        verification_evidence=(
+            _evidence("run-doctor", "onboarding", "doctor-readiness", VerificationOutcome.VERIFIED),
+        ),
+    )
+
+    assert ActionId("create-first-vm") not in assessment.action_ids
+    assert ActionId("create-first-session") not in assessment.action_ids
+
+
+@pytest.mark.parametrize("outcome", [VerificationOutcome.FAILED, VerificationOutcome.REFUSED])
+def test_doctor_proof_does_not_override_failed_or_refused_named_proof(outcome: VerificationOutcome) -> None:
+    assessment = assess_onboarding(
+        _snapshot(_fact("secret", "token")),
+        verification_evidence=(
+            _evidence("run-doctor", "onboarding", "doctor-readiness", VerificationOutcome.VERIFIED),
+            _evidence("verify-named-secret", "secret", "token", outcome),
+        ),
+    )
+
+    assert ActionId("create-first-vm") not in assessment.action_ids
+    assert ActionId("create-first-session") not in assessment.action_ids
 
 
 def test_cli_replays_target_scoped_evidence_end_to_end(monkeypatch: pytest.MonkeyPatch, db: Database) -> None:
@@ -216,6 +268,42 @@ def test_cli_replays_target_scoped_evidence_end_to_end(monkeypatch: pytest.Monke
     assert result.exit_code == 0
     assert "`secret/tailscale-auth-key`: done" in result.stdout
     assert "### `verify-named-secret`" not in result.stdout
+
+
+def test_cli_doctor_readiness_proof_unlocks_inert_first_resource_actions(
+    monkeypatch: pytest.MonkeyPatch,
+    db: Database,
+) -> None:
+    registry = Registry.empty()
+    registry.add(
+        "secret",
+        "tailscale-auth-key",
+        SecretDecl(name="tailscale-auth-key", description=""),
+        Origin.built_in(source="test"),
+    )
+    registry.finalize()
+    monkeypatch.setattr("agentworks.config.load_config", lambda **kwargs: cast("Config", SimpleNamespace()))
+    monkeypatch.setattr("agentworks.bootstrap.load_guide_registry", lambda config: registry)
+    monkeypatch.setattr("agentworks.db.DB_PATH", SimpleNamespace(exists=lambda: True))
+    monkeypatch.setattr("agentworks.db.Database", lambda read_only: db)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "guide",
+            "concept-onboarding",
+            "--agent",
+            "--evidence",
+            "run-doctor:onboarding/doctor-readiness=verified",
+            "--evidence",
+            "verify-named-secret:secret/tailscale-auth-key=verified",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "`onboarding/doctor-readiness`: done" in result.stdout
+    assert "### `create-first-vm`" in result.stdout
+    assert "### `create-first-session`" in result.stdout
 
 
 def test_cli_replays_refusal_as_manual_alternative_without_repeating_action(
