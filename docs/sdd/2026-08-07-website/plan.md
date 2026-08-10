@@ -116,6 +116,11 @@ Operator evidence:
   breadcrumb-adjacent rocket. The repository's long-form Why document is becoming the Agentworks
   Manifesto and should render as a first-class generated `/manifesto/` page, using the same
   canonical-source model as Security rather than linking visitors out to the repository.
+- 2026-08-09: after inspecting the extraction mappings, the operator simplifies long-form content
+  ownership. Manifesto renders the complete `docs/why-agentworks.md` today and Security renders the
+  complete root `SECURITY.md`; neither page selects or duplicates passages in website code. The
+  future Why-to-Manifesto rename changes the one Manifesto source path to `docs/manifesto.md`, with
+  no fallback or simultaneous support for both names.
 
 Definition of done: requirements and architecture are review-clean, operator-significant choices are
 settled, and PR #439 truthfully carries the reviewed contract that implementation follows.
@@ -324,6 +329,35 @@ render the exact same reviewed game subtree, the footer rocket is the only delib
 destination, touch and assistive users can exit and restart, manifest/import and attribute
 boundaries fail closed without circular tests, production/test modules remain below 1,000 lines, and
 the 404 begins directly with its title after a compact natural gap.
+
+## Phase 4D: complete Markdown pages
+
+- [ ] Amend and review the FRD, HLA, this plan, and shell LLD so Manifesto and Security each render
+      one complete Markdown source, including its sole `h1`, while preserving the safe closed
+      renderer and shared site shell.
+- [ ] Expand root `SECURITY.md` into the complete standalone security deep dive, retaining
+      GitHub-only private vulnerability reporting and candid threat, boundary, operator, credential,
+      limitation, scope, and upstream guidance.
+- [ ] Replace Security's selected-passage template and Manifesto's hash/heading inventory with one
+      complete-document projection per page. Keep `docs/why-agentworks.md` as the only current
+      Manifesto path; do not add a `docs/manifesto.md` fallback.
+- [ ] Remove duplicated security prose, source hashes, heading inventories, expected passage
+      sequences, and long-form heading-path selectors from website code and tests. Retain Home's
+      bounded README identity projection and explicit safe-link review.
+- [ ] Prove supported source additions and edits flow into generated HTML without website-code
+      changes, while missing/unreadable input, invalid UTF-8, malformed structure, unsupported
+      Markdown, unsafe links, GitHub-only reporting violations, and token-placement drift fail
+      closed.
+- [ ] Update permanent website documentation and CSS for whole-document ownership; preserve the
+      exact ten-file deterministic artifact, no-JavaScript content, shared navigation, metadata,
+      accessibility, and all Lander/404 behavior.
+- [ ] Run focused and complete repository gates, rebuild the port-8766 preview, and obtain both an
+      `agentworks-reviewer` and fresh-eyes approval before updating the ready PR.
+
+Definition of done: `/manifesto/` is the complete safe HTML rendition of `docs/why-agentworks.md`,
+`/security/` is the complete safe HTML rendition of root `SECURITY.md`, the site contains no second
+long-form prose model, and a future source rename requires changing exactly one configured path from
+`docs/why-agentworks.md` to `docs/manifesto.md`.
 
 ## Phase 5: CI and default Pages deployment
 

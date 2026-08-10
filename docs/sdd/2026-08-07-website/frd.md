@@ -73,9 +73,11 @@ growth path so nothing forecloses it, and none of it is in scope now.
   second site.
 - R11. The main page includes the restrained link text `We take security seriously.` as optional
   depth, not a warning gate or dominant call to action. It leads to a dedicated static security page
-  that explains the actual threat model, isolation and control model, material limitations,
-  credential/secret posture, and vulnerability-reporting path from repository-owned sources. The
-  page is candid and specific without assuming every visitor wants a security lecture.
+  that renders the complete root `SECURITY.md` as HTML. That document is the single authority for
+  the page's threat model, isolation and control model, material limitations, credential/secret
+  posture, and GitHub-only vulnerability-reporting path. The website adds no selected passages or
+  separately maintained security prose. The page is candid and specific without assuming every
+  visitor wants a security lecture.
 - R12. The completed onboarding surface makes the access tradeoff plain before setup: the onboarding
   agent runs on the machine the operator intends to use as their workstation and needs full file
   inspection and command execution access with the permissions of the workstation account running
@@ -114,13 +116,14 @@ growth path so nothing forecloses it, and none of it is in scope now.
   on each page. These placements supersede the Phase 4A combined exploration panel while preserving
   one link per external, manifesto, security, and Lander destination.
 - R16. The footer's `Agentworks Manifesto` link opens a semantic static page at `/manifesto/`, not
-  the repository document. The page renders the long-form argument from the canonical
-  `docs/why-agentworks.md` source at build time, including its problem-space and key-principles
-  structure, without a separately maintained site copy. Relative source links are deliberately
-  mapped to their permanent repository destinations. Missing, duplicate, unsupported, or drifted
-  canonical content fails the build before output replacement. The permanent source may be renamed
-  from `Why Agentworks` to `Agentworks Manifesto`; the website contract follows the reviewed source
-  change rather than maintaining a conflicting title.
+  the repository document. The page renders the complete `docs/why-agentworks.md` document at build
+  time, including its source `h1`, introduction, problem space, and key principles, without a
+  separately maintained site copy or selected-passage contract. Relative source links are
+  deliberately mapped to their permanent repository destinations. Missing or unreadable input,
+  invalid UTF-8, unsupported Markdown, invalid links, or an invalid whole-document structure fails
+  the build before output replacement. A later repository rename changes the single configured
+  source path to `docs/manifesto.md` in that rename's reviewed change; the website has no fallback,
+  autodetection, or simultaneous support for both paths.
 - R17. The builder emits only the complete linked site artifact. The earlier `--only 404` partial
   demo mode is retired because the accepted 404 now shares navigation with Home, Manifesto, and
   Security; emitting only `404.html` would make its sole recovery action and footer links dead. Game
@@ -224,11 +227,13 @@ merged and settled on `main`. The first slice must not build toward them specula
   footer, beside the exact Wayfarer Labs ownership text. The footer rocket remains operable and
   named when its image is unavailable. Link purposes, keyboard focus, accessible names, source
   order, narrow-screen wrapping, and 400-percent zoom stay useful with images or CSS unavailable.
-- AC17. `/manifesto/` renders the canonical `docs/why-agentworks.md` long-form introduction, problem
-  space, and key principles as semantic headings, paragraphs, and lists. Its generated content and
-  mapped links are verified against the permanent source, contain no unexpanded source-relative URL,
-  and remain useful without CSS or JavaScript. Changing a selected canonical passage without
-  updating its reviewed build contract fails closed.
+- AC17. `/manifesto/` renders every supported block in `docs/why-agentworks.md`, and `/security/`
+  renders every supported block in root `SECURITY.md`, including each document's sole source `h1`,
+  as semantic headings, paragraphs, and lists. Generated content and mapped links are verified
+  against the complete permanent source, contain no unexpanded source-relative URL, and remain
+  useful without CSS or JavaScript. Ordinary supported prose or heading edits flow through without a
+  website-code update; malformed document structure, unsupported Markdown, unsafe or unexpected
+  links, invalid encoding, and missing input fail closed.
 - AC18. The builder CLI has no focused or partial-output option, its complete artifact contains
   every local destination exposed by Home, Manifesto, Security, Lander, or 404, and validation
   rejects every absent local reference. Automated game checks build the complete artifact and

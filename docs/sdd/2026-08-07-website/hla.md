@@ -55,12 +55,9 @@ in the shared header; Manifesto and Security appear once in the shared footer. T
 repeat those destinations under different labels.
 
 The home page gives the security posture one calm, visually secondary link labeled
-`We take security seriously.` That link opens a dedicated static security page with this order:
-
-1. a plain statement of the threat model and why isolation matters;
-2. the actual VM, Linux-user, workspace, and operator-control boundaries;
-3. candid current limitations and credential/secret considerations;
-4. practical operator posture and the private vulnerability-reporting path.
+`We take security seriously.` That link opens a dedicated static security page rendered from the
+complete root `SECURITY.md`. That Markdown document owns the page's order and all security claims;
+the HTML template owns only the shared shell and metadata placement.
 
 The Manifesto and security pages are optional depth, not modals, warning gates, prerequisites, or
 long pitches on the home page. A dedicated `/lander/` page exposes the same bounded game used by the
@@ -88,22 +85,18 @@ so the accessible name is not duplicated. The header and footer wrap in source o
 collapsing behind a menu. This is consistent navigation across a tiny static site, not a new
 navigation system.
 
-### D1A. The Manifesto is a generated site page
+### D1A. Long-form pages are complete generated documents
 
-`/manifesto/` renders the long-form introduction, complete problem space, and complete key
-principles from `docs/why-agentworks.md`. The builder selects the reviewed canonical source
-structure by heading path and passes it through the same closed Markdown transform used by other
-repository-derived content. Source-relative links are mapped by an explicit allowlist to permanent
-repository URLs; no generic relative-URL rewriting or second prose copy is introduced. The page owns
-only its `Agentworks Manifesto` presentation title, metadata, breadcrumb label, and connective
-shell. If the permanent document adopts that title, the generated page follows it without a second
-rename mechanism.
+`/manifesto/` renders the complete `docs/why-agentworks.md` document, and `/security/` renders the
+complete root `SECURITY.md`. The same closed Markdown transform emits every supported source block,
+including the one required source `h1`; the templates do not add, replace, select, reorder, or
+duplicate body headings or prose. Source-relative links are mapped by an explicit allowlist to
+permanent repository URLs. The site owns only metadata, breadcrumb labels, and the connective shell.
 
-The Security page deliberately repeats the small canonical threat-model and composable-isolation
-passages that also occur within the complete Manifesto. Security must stand alone for visitors who
-do not read the long-form argument, and both projections are generated from one source rather than
-maintained as twins. Any rewrite or rename of that permanent source forces both reviewed selections
-to be revalidated; the website does not preserve obsolete overlap for its own sake.
+The Manifesto source path is exactly `docs/why-agentworks.md` today. When the repository document is
+renamed, that change updates the one configured path to `docs/manifesto.md`. The builder does not
+probe for alternatives or accept both names. This makes the future rename an ordinary reviewed
+source-path change rather than permanent compatibility machinery.
 
 ### D2. Plain web technologies with a narrow build step
 
@@ -128,9 +121,9 @@ links and would no longer be an honest page. Local game work serves `/lander/` f
 artifact, and fallback acceptance also exercises `/404.html`. Manifest validation has no
 missing-local-reference exception.
 
-The template vocabulary is closed to named placeholders owned by the builder. Shared text is HTML
-escaped before insertion. There is no evaluation of source content as a template, Markdown, Python,
-or JavaScript.
+The template vocabulary is closed to named placeholders owned by the builder. Source text is HTML
+escaped and interpreted only by the closed Markdown subset before insertion. It is never evaluated
+as a template, Python, or JavaScript.
 
 `website/build.py` remains the sole CLI entry point, while content projection/Markdown rendering and
 template/CSS/reference validation live in focused sibling modules. Production and test modules stay
@@ -146,23 +139,24 @@ The site has three content classes:
   canonical bootstrap body directly. The built code element's decoded text, the canonical source,
   and the README's generated fenced block must be byte-identical. The build fails closed on missing,
   duplicate, malformed, or drifted sources. The website does not own or rewrite this text.
-- **Repository-derived product and security content.** The problem, principle, threat-model,
-  boundary, limitation, and operator-posture passages are selected by unique Markdown headings and
-  exact expected text from permanent repository docs, never by paragraph position. The matching
-  passages are normalized by a closed transform, HTML escaped, and generated into the relevant page.
-  `SECURITY.md` remains the authority for private vulnerability reporting. A template cannot supply
-  alternate product or security claims. Missing or duplicate headings, absent or duplicate expected
-  text, unsupported Markdown, or reporting-link drift fail the build. Unrelated insertion or
-  reordering does not. Links point to permanent repository docs, never to this SDD.
+- **Repository-derived product and security content.** The Manifesto and Security pages each render
+  one complete permanent Markdown document through a closed, escaping transform:
+  `docs/why-agentworks.md` and root `SECURITY.md`, respectively. Each source has exactly one `h1`
+  and owns all of its page's body headings, order, and prose; templates cannot supply alternate
+  claims. Supported content edits flow directly to the generated page without synchronized hashes,
+  heading inventories, expected passages, or heading-path selections in website code. Missing or
+  unreadable inputs, invalid UTF-8, an absent or duplicate `h1`, unsupported Markdown, unsafe links
+  or links outside the reviewed set, and reporting-channel violations fail the build. Links point to
+  permanent repository docs, never to this SDD.
 - **Site-owned connective content.** The website owns only presentation-neutral labels and
   instructions such as navigation, link introductions, the operator-approved security-link label,
   the interim onboarding-availability notice and, after integration, "Copy" and copy-status
   feedback. It does not make claims about Agentworks behavior, guarantees, principles, installation,
   security properties, or requirements.
 
-The shell LLD pins the permanent paragraph text and its extraction contract against current `main`.
-The later onboarding-integration LLD pins the exact upstream bootstrap path, extraction contract,
-and README fence semantics after onboarding Phase 3 is merged. README fence-body byte equality is an
+The shell LLD pins the whole-document source and rendering contract against current `main`. The
+later onboarding-integration LLD pins the exact upstream bootstrap path, extraction contract, and
+README fence semantics after onboarding Phase 3 is merged. README fence-body byte equality is an
 assumption until that pickup proves the merged onboarding contract. A branch-only path is not an
 architecture input. Shell implementation and publication do not wait for onboarding; bootstrap
 integration does.
@@ -381,9 +375,8 @@ turning a two-step delivery need into permanent configuration machinery.
 README.md identity selectors --+--> home page
 interim availability notice ---+
 
-docs/why-agentworks.md complete argument ------> Manifesto page
-docs/why-agentworks.md security selectors --+--> security page
-SECURITY.md reporting contract -------------+
+docs/why-agentworks.md complete document --> Manifesto page
+SECURITY.md complete document ------------> security page
 
 shared game fragment + logo/game assets --+-----> Lander page
                                            +-----> 404 page
@@ -410,10 +403,9 @@ fixed here:
 - `.gitignore`: generated site artifact exclusion.
 - repository README and onboarding canonical source: inputs only after onboarding integration, not
   website-owned copies.
-- `docs/why-agentworks.md`: permanent product/security rationale linked and checked as a claim
-  source.
-- `SECURITY.md`: permanent private vulnerability-reporting authority linked and contract-checked by
-  the security page.
+- `docs/why-agentworks.md`: current complete Manifesto source; a later rename updates this one path
+  to `docs/manifesto.md` without fallback.
+- `SECURITY.md`: complete Security page and private vulnerability-reporting authority.
 - this feature directory: temporary design, plan, research, and acceptance evidence only.
 
 ## Verification strategy
@@ -422,9 +414,9 @@ fixed here:
 
 - deterministic clean build in a temporary directory;
 - no unexpanded placeholders or writes outside the requested output;
-- unique source headings and paragraph selectors, closed normalization, and required product links;
-- required security sections, actual-boundary/limitation content, stable security URL, and private
-  vulnerability-reporting link;
+- complete-document rendering, exactly one source `h1`, closed Markdown support, and reviewed links;
+- complete Security source, actual-boundary/limitation content, stable security URL, private
+  vulnerability reporting, and no address-shaped reporting path;
 - valid internal paths, canonical URL, metadata, and no external runtime assets;
 - generated output absent from Git status.
 

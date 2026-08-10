@@ -2,11 +2,11 @@
 
 <!-- cspell:ignore canonicalization keypath keypaths nonblank sdds TUI -->
 
-- Status: Phase 4C approved for implementation; release acceptance remains pending
+- Status: Phase 4D design approved by the operator; implementation in progress
 - Date: 2026-08-09
 - FRD: `frd.md`, specifically R7-R11 and R13-R18
 - HLA: `hla.md`, specifically D1-D5, D7, D8, and D10
-- Source baseline: `95d42370`
+- Source baseline: `5598a12c`
 
 ## 1. Scope and release invariant
 
@@ -123,27 +123,31 @@ the shared three-pixel focus outline and two-pixel offset without clipping. Auto
 template assertions pin its minimum target dimensions and accessible name; manual narrow-width,
 zoom, pointer, and keyboard acceptance verifies computed size, focus visibility, and no overlap.
 
-## 5. Manifesto source contract
+## 5. Whole-document Markdown source contract
 
-`docs/why-agentworks.md` remains the only long-form prose source and retains its repository title.
-The presentation title, document title, `h1`, and canonical route are `Agentworks Manifesto`. The
-template owns only that presentation shell and connective labels.
+The builder renders two complete normalized UTF-8 Markdown documents:
 
-The builder reads the complete normalized UTF-8 source. Its contract pins:
+| Route         | Current source           |
+| ------------- | ------------------------ |
+| `/manifesto/` | `docs/why-agentworks.md` |
+| `/security/`  | `SECURITY.md`            |
 
-- a reviewed SHA-256 of the complete source;
-- the exact ordered heading tree from `# Why Agentworks` through all Problem Space and Key
-  Principles subsections;
-- one top-level source heading, which the presentation `h1` replaces;
-- only the existing closed Markdown blocks: ATX headings, paragraphs, unordered lists, strong and
-  emphasized text, code spans, and links.
+Each source owns every body heading and paragraph on its page, including exactly one source `h1`.
+Each template contains one sourced-content token in `main` and supplies no additional body title,
+section heading, prose, selected passage, or reporting panel. Document titles, descriptions,
+canonical URLs, breadcrumbs, header, and footer remain site-shell responsibilities.
 
-The generated article includes the complete introduction, the complete Problem Space and every
-subsection, and the complete Key Principles and every subsection. The source hash makes a prose,
-link, or whitespace change fail closed until the reviewed contract is updated. Heading changes,
-missing or additional sections, unsupported Markdown, invalid links, invalid UTF-8, and unclosed
-fences also fail before any output replacement. Rendered prose is never maintained in a template or
-Python string.
+The closed renderer supports ATX headings, paragraphs, unordered lists, strong and emphasized text,
+code spans, and links. It escapes source text and rejects raw HTML, images, unsupported block or
+inline syntax, invalid UTF-8, byte-order marks, malformed or unclosed fences, a missing or duplicate
+`h1`, and unsafe or unexpected links before output replacement. It renders every supported source
+block in order. It deliberately does not pin source hashes, heading inventories, expected passages,
+or heading-path selections; ordinary supported document edits therefore appear on the site without a
+website-code edit.
+
+The Manifesto source path is exactly `docs/why-agentworks.md` in this release. A later document
+rename changes that one configuration value to `docs/manifesto.md` in the same reviewed rename.
+There is no dual-path fallback, probing, or autodetection.
 
 Source-relative links use this exact allowlist:
 
@@ -156,18 +160,17 @@ Source-relative links use this exact allowlist:
 The existing absolute issue link is preserved. Any other relative link or unapproved generated
 absolute URL fails. Tests prove all three mappings and prove no source-relative `href` survives.
 
-## 6. Existing repository content contracts
+## 6. Other repository content contracts
 
-The builder still reads exactly three permanent content inputs: `README.md`,
-`docs/why-agentworks.md`, and `SECURITY.md`. README owns the concise Home identity. The Why document
-owns the complete Manifesto plus selected security passages. SECURITY owns private reporting prose
-and its reference URL.
+The builder reads exactly three permanent content inputs: `README.md`, `docs/why-agentworks.md`, and
+`SECURITY.md`. README continues to own the concise selected Home identity. The other two inputs each
+own one complete long-form page. Only Home retains a heading-keypath plus exact-block selection;
+long-form content has no duplicated prose contract in Python or templates.
 
-Home and Security selections continue to use complete heading keypaths plus exact normalized block
-sequences. Their output is escaped and rendered through the same inline and block renderer used by
-the Manifesto. Templates may not move content tokens outside their reviewed metadata or sourced
-containers. All templates use a closed token vocabulary and reject unknown, missing, duplicated, or
-brace-like tokens.
+Templates may not move content tokens outside their reviewed metadata or sourced containers. All
+templates use a closed token vocabulary and reject unknown, missing, duplicated, or brace-like
+tokens. The Security output retains the GitHub-only reporting invariant and rejects address-shaped
+reporting paths.
 
 ## 7. Builder and replacement safety
 
@@ -251,15 +254,15 @@ specified as two to three times the current compact `1.2rem` header mark; no CSS
 
 ## 9. Verification matrix
 
-| Contract                      | Automated evidence                                                                                                             |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| Source completeness and drift | Hash, heading-tree, UTF-8, fence, block, and link-map failure tests                                                            |
-| Template closure              | Token vocabulary, exact shell tree, HTML-hidden CTA, icon, breadcrumb, image, route-duplicate, and ownership mutation tests    |
-| Generated semantics           | Five-page metadata, canonicals, landmarks, headings, skip links, shell, no-duplicate links, scripts, and local-reference tests |
-| Exact artifacts               | The complete ten-file manifest at `/` and `/agentworks/`; no partial API or CLI option                                         |
-| Determinism and safety        | Repeated byte snapshots, hostile output trees, rollback injection, path and symlink tests                                      |
-| Lander/404 preservation       | Shared-subtree identity, Python source/build tests, and Node model/controller contracts                                        |
-| Browser acceptance            | `website/tests/lander-browser-checklist.md` pending five-page manual run                                                       |
+| Contract                       | Automated evidence                                                                                                             |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| Source completeness and safety | Complete-source projection, single-`h1`, UTF-8, fence, syntax, and link-map failure tests                                      |
+| Template closure               | Token vocabulary, exact shell tree, HTML-hidden CTA, icon, breadcrumb, image, route-duplicate, and ownership mutation tests    |
+| Generated semantics            | Five-page metadata, canonicals, landmarks, headings, skip links, shell, no-duplicate links, scripts, and local-reference tests |
+| Exact artifacts                | The complete ten-file manifest at `/` and `/agentworks/`; no partial API or CLI option                                         |
+| Determinism and safety         | Repeated byte snapshots, hostile output trees, rollback injection, path and symlink tests                                      |
+| Lander/404 preservation        | Shared-subtree identity, Python source/build tests, and Node model/controller contracts                                        |
+| Browser acceptance             | `website/tests/lander-browser-checklist.md` pending five-page manual run                                                       |
 
 Before handoff, run:
 
