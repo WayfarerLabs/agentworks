@@ -321,6 +321,42 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             "Do not declare the migration complete until doctor confirms a current database schema and exits "
             "successfully with zero failures.",
         ),
+        GuideAction(
+            ActionId("restore-database-backup"),
+            "Agentworks named an exact schema-compatible BACKUP_PATH after migration failure, or the operator "
+            "selected that backup before downgrading.",
+            (
+                ActionInput(
+                    "BACKUP_PATH",
+                    "The exact schema-compatible SQLite backup selected for the live state database.",
+                    True,
+                ),
+            ),
+            ConsentBoundary.MUTATE_AGENTWORKS,
+            ("agw", "database", "restore", "$BACKUP_PATH"),
+            "After the CLI's separate confirmation, the live state database contains the selected BACKUP_PATH "
+            "state, the command reports the restored path, and no implicit pre-restore backup was created.",
+            None,
+            "Leave the live state database unchanged, preserve BACKUP_PATH, and use a release compatible with "
+            "the current schema instead of downgrading.",
+        ),
+        GuideAction(
+            ActionId("refresh-completions"),
+            "The 0.14 upgrade is installed and the operator has selected replacing the generated completion "
+            "files for the autodetected current shell and, when that shell is PowerShell, allowing its "
+            "completion dot-source line in $PROFILE.",
+            (),
+            ConsentBoundary.MUTATE_AGENTWORKS,
+            ("agw", "completion", "install"),
+            "The generated completion files for the autodetected current shell are replaced with this "
+            "release's scripts, and the command reports the exact installed path. When PowerShell is selected, "
+            "the installer preserves every existing $PROFILE line and, only when Agentworks completions are not "
+            "already sourced, appends the exact absolute dot-source shape '. \"<profile-adjacent "
+            "Completions/agentworks.ps1>\"' and reports the $PROFILE path.",
+            None,
+            "Leave the installed completion files and, for PowerShell, $PROFILE unchanged; avoid database-backed "
+            "completion candidates until the operator refreshes them manually.",
+        ),
     )
 
 

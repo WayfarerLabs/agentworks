@@ -95,6 +95,20 @@ def _late_partial_writer(path: Path, start: Any, acquired: Any) -> None:
     _release_migration_lock(lock)
 
 
+def _released_partial_writer(path: Path, start: Any, released: Any) -> None:
+    from agentworks.db.backup import _acquire_migration_lock, _release_migration_lock
+
+    start.wait()
+    lock = _acquire_migration_lock(path, timeout=5.0)
+    assert lock is not None
+    connection = sqlite3.connect(path)
+    connection.execute("CREATE TABLE released_partial_change (value TEXT)")
+    connection.commit()
+    connection.close()
+    _release_migration_lock(lock)
+    released.set()
+
+
 def test_inspection_matrix_is_non_migrating_and_wal_aware(tmp_path: Path) -> None:
     absent = tmp_path / "absent.db"
     stale = tmp_path / "stale.db"
@@ -185,6 +199,43 @@ def test_late_inspector_refuses_partial_stale_observation(tmp_path: Path, monkey
 
     writer.join(timeout=10)
     assert writer.exitcode == 0
+    assert _version(path) == LATEST_VERSION - 1
+    assert not backup_directory(path).exists()
+
+
+def test_prepare_refuses_changed_stale_state_when_lock_released_before_first_acquire(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.db import backup as backup_module
+
+    path = tmp_path / "state.db"
+    _build_schema(path, LATEST_VERSION - 1)
+    context = multiprocessing.get_context("spawn")
+    start = context.Event()
+    released = context.Event()
+    writer = context.Process(target=_released_partial_writer, args=(path, start, released))
+    writer.start()
+    real_inspect = backup_module.inspect_schema
+    calls = 0
+
+    def _inspect_then_release(database_path: Path, *, immutable: bool = False):
+        nonlocal calls
+        result = real_inspect(database_path, immutable=immutable)
+        calls += 1
+        if calls == 1:
+            start.set()
+            assert released.wait(timeout=5)
+        return result
+
+    monkeypatch.setattr(backup_module, "inspect_schema", _inspect_then_release)
+
+    with pytest.raises(StateError, match="changed before its stale state could be qualified") as raised:
+        prepare_database_open(path)
+
+    writer.join(timeout=10)
+    assert writer.exitcode == 0
+    assert raised.value.hint == "Inspect the database with `agw doctor`, then retry the original command."
     assert _version(path) == LATEST_VERSION - 1
     assert not backup_directory(path).exists()
 

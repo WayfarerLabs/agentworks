@@ -167,6 +167,13 @@ def prepare_database_open(database_path: Path) -> DatabaseOpenPlan:
             "state database remained outdated after an overlapping migration attempt",
             hint="Inspect the database with `agw doctor` before retrying.",
         )
+    initial_tokens = (initial.current_version, initial.schema_cookie)
+    qualified_tokens = (qualified.current_version, qualified.schema_cookie)
+    if qualified.state is SchemaState.STALE and qualified_tokens != initial_tokens:
+        raise StateError(
+            "state database changed before its stale state could be qualified under the migration lock",
+            hint="Inspect the database with `agw doctor`, then retry the original command.",
+        )
     if qualified.state is not SchemaState.STALE or qualified.schema_cookie is None:
         raise StateError("state database changed while its migration state was being qualified")
     return DatabaseOpenPlan(
