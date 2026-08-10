@@ -2,7 +2,8 @@
 name: agentic-dev-process
 description: >-
   How we drive a development effort end to end: sizing the work, SDD for large
-  efforts, delegated implementation, per-step review, and when to escalate
+  efforts, delegated implementation, batched subagent review, and when to
+  escalate
 ---
 # Agentic Development Process
 
