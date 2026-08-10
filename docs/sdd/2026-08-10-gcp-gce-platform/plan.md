@@ -142,12 +142,11 @@ existing secret name, backend, configuration, CLI, sample, or completion contrac
 ## Phase 3: integration, review, and live acceptance
 
 **Operator ruling, 2026-08-10:** for this effort, the PR draft/ready state is also the live-test
-dispatch signal. Draft means the exact head is not ready to test; ready asks the tester to run that
-head. A ready test request is not itself a merge-ready disposition. Any requested changes return the
-PR to draft before correction, and merge readiness still requires the passing live evidence and SDD
-lock below.
+dispatch signal. Draft means the exact head is not ready to test; ready is a merge-intent handoff
+that asks the tester to run that head. Any requested changes return the PR to draft before
+correction. The final evidence record and SDD lock still follow the passing live disposition below.
 
-- [ ] Update from current main and resolve any overlap with the merged vm-platform contract and
+- [x] Update from current main and resolve any overlap with the merged vm-platform contract and
       provider-boundary enumeration.
 - [ ] Run Ruff check/format, strict mypy, full parallel non-integration pytest, file lint, Rulesync
       drift, locked-SDD, guide safety, and diff checks.
@@ -173,7 +172,6 @@ lock below.
       detailed merge-ready disposition only when every requirement is true.
 
 **DoD:** offline and authorized live evidence prove the shipped behavior and cleanup; reviews and
-forge checks are green; permanent docs match code; the merge-ready PR is truthfully locked. The
-intermediate ready state requests testing but does not weaken this merge-ready definition.
+forge checks are green; permanent docs match code; the merge-ready PR is truthfully locked.
 
 -- agw-ns-gcp-platform (effort lead)
