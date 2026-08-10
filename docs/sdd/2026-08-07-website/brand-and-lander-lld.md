@@ -1,7 +1,7 @@
 # LLD: AGW Brand and Continuous Lunar Deployment Lander
 
 <!-- cspell:ignore focusout imul keyup pointerdown PRNG repower -->
-<!-- cspell:ignore substep unitless uint32 quantized quantization -->
+<!-- cspell:ignore nonfallback overspeed substep unitless uint32 quantized quantization -->
 
 - Status: Continuous Lander refinement designed; implementation pending
 - Date: 2026-08-10
@@ -19,7 +19,7 @@ A **run** begins at START and ends at Exit or reload. A run contains successive 
 one checkpoint or the initial approach to one target site. A **site** is one platform, gas can, and
 NOC. **Commanded thrust** is the post-input, post-fuel engine value shared by physics and plumes.
 **Mission time** excludes hidden time. A **demonstrated minimum** is the smallest fuel allowance, at
-the pinned fuel quantum, that replays one successful bounded-search reference plan. It is not a
+the pinned fuel quantum, that completes one checked-in constructive reference schedule. It is not a
 global mathematical optimum over all possible controls.
 
 The semantic 404, breadcrumb home link, and dedicated Lander shell remain independent of the game
@@ -29,23 +29,23 @@ subtree. Both shells render the same game fragment.
 
 Implementation uses these permanent names:
 
-| File                                        | Responsibility                                                   |
-| ------------------------------------------- | ---------------------------------------------------------------- |
-| `website/assets/agw-rocket.svg`             | Canonical selected A, G, W, and twin-plume geometry              |
-| `website/assets/agw-favicon.svg`            | Flame-free browser projection of the selected A/G/W mark         |
-| `website/templates/404.html`                | Semantic 404 shell with the shared game placeholder              |
-| `website/templates/lander.html`             | Dedicated Lander shell with the shared game placeholder          |
-| `website/templates/lander-game.html`        | Sole source for the complete reusable game subtree               |
-| `website/build.py`                          | Standard-library rendering, validation, and asset copying        |
-| `website/site_game_validation.py`           | Focused game DOM, module-closure, and manifest validation        |
-| `website/static/lander.css`                 | Scene layout, state selectors, focus, and SVG presentation       |
-| `website/static/lander-world.js`            | Pure seed, terrain, site, geometry, and window functions         |
-| `website/static/lander-model.js`            | Flight/run state, scheduler, physics, contact, and route planner |
-| `website/static/lander-game.js`             | DOM, clock/input, camera, focus, lifecycle, and rendering        |
-| `website/tests/lander-world.test.mjs`       | Seeded world, window, site, and route-input vectors              |
-| `website/tests/lander-model.test.mjs`       | Scheduler, physics, mission, fuel, and checkpoint vectors        |
-| `website/tests/test_lander_404.py`          | Build, DOM, no-JS, and forbidden-surface checks                  |
-| `website/tests/lander-browser-checklist.md` | Package-free browser, performance, and accessibility acceptance  |
+| File                                        | Responsibility                                                  |
+| ------------------------------------------- | --------------------------------------------------------------- |
+| `website/assets/agw-rocket.svg`             | Canonical selected A, G, W, and twin-plume geometry             |
+| `website/assets/agw-favicon.svg`            | Flame-free browser projection of the selected A/G/W mark        |
+| `website/templates/404.html`                | Semantic 404 shell with the shared game placeholder             |
+| `website/templates/lander.html`             | Dedicated Lander shell with the shared game placeholder         |
+| `website/templates/lander-game.html`        | Sole source for the complete reusable game subtree              |
+| `website/build.py`                          | Standard-library rendering, validation, and asset copying       |
+| `website/site_game_validation.py`           | Focused game DOM, module-closure, and manifest validation       |
+| `website/static/lander.css`                 | Scene layout, state selectors, focus, and SVG presentation      |
+| `website/static/lander-world.js`            | Pure seed, terrain, site, geometry, and window functions        |
+| `website/static/lander-model.js`            | Flight/run state, physics, contact, and constructive proofs     |
+| `website/static/lander-game.js`             | DOM, clock/input, camera, focus, lifecycle, and rendering       |
+| `website/tests/lander-world.test.mjs`       | Seeded world, window, site, and template vectors                |
+| `website/tests/lander-model.test.mjs`       | Scheduler, physics, mission, fuel, and checkpoint vectors       |
+| `website/tests/test_lander_404.py`          | Build, DOM, no-JS, and forbidden-surface checks                 |
+| `website/tests/lander-browser-checklist.md` | Package-free browser, performance, and accessibility acceptance |
 
 The shipped artifact grows by exactly one file, `static/lander-world.js`. Test files are not in the
 artifact. `lander-game.js` imports only `lander-model.js`. `lander-model.js` imports only pure
@@ -152,7 +152,7 @@ section#lander-game[aria-label="Lunar deployment scene"]
         g#mission-agent
       g#crash-flash[aria-hidden="true"]
       g#next-site-cue[aria-hidden="true"]
-    button#lander-start[type="button"][hidden]
+    button#lander-start[type="button"][hidden][disabled]
   p#lander-fuel[hidden]
     span#lander-fuel-label "Fuel reserve"
     output#lander-fuel-value[aria-labelledby="lander-fuel-label"]
@@ -179,10 +179,13 @@ Thrust: Space or Up. Turn: Left/H or Right/L. Tap or hold to thrust; drag to tur
 ```
 
 Preflight hides fuel, controls, actions, direction cue, crash presentation, and all instructions.
-START reveals fuel, controls, and actions, with Exit enabled and Restart hidden. Only `failed`
-reveals and enables Restart. The live fuel output uses `fuel.toFixed(1)` for display but retains the
-unrounded number in the model. A status update does not redundantly announce fuel every frame; the
-named output changes only when its displayed tenth changes.
+Successful JavaScript initialization installs every listener, constructs and renders the preflight
+model, then reveals and enables the transparent Start control as its final step. Failed or absent
+initialization leaves Start hidden and disabled and preserves the static named-scene recovery. START
+reveals fuel, controls, and actions, with Exit enabled and Restart hidden. Only `failed` reveals and
+enables Restart. The live fuel output uses `fuel.toFixed(1)` for display but retains the unrounded
+number in the model. A status update does not redundantly announce fuel every frame; the named
+output changes only when its displayed tenth changes.
 
 On start, the controller hides and disables `#lander-start`, gives `#lander-scene-shell`
 `tabindex="0"`, `role="application"`, `aria-label="Lunar deployment game"`, and
@@ -218,7 +221,7 @@ return (value ^ (value >>> 16)) >>> 0;
 
 `sampleUnit` mixes `seed ^ Math.imul(stream, 0x9e3779b9) ^ Math.imul(index + 1, 0x85ebca6b)` and
 divides by `2 ** 32`. Streams `1`, `2`, `3`, `4`, and `5` are terrain boundaries, terrain
-orientation, site spacing, route tie-breaking, and debris. Indexed samples make regeneration
+orientation, template preference, corridor relief, and debris. Indexed samples make regeneration
 independent of call order. There is no mutable PRNG cursor inside the world module.
 
 The checked-in preflight scene uses `STATIC_WORLD_SEED=0x41475731`. Production START requests one
@@ -251,43 +254,56 @@ platform spans.
 `terrainHeightAt(seed,x)` linearly interpolates the enclosing sampled edge. A chunk path closes at
 world `y=-10`, below the view. Terrain is collision geometry, not merely art.
 
-### 5.3 Sites and bounded candidate generation
+### 5.3 Sites and constructive template selection
 
 Site 0 has fixed platform center `x=36 m`; its top follows the same `0.8 m` terrain-clearance rule
 as every other platform. The checked-in no-JavaScript scene is the exact site-0 descriptor for
 `STATIC_WORLD_SEED`; START reconciles it to the fresh run seed before the first flight frame. Every
-later target is generated from the current site and seed. Candidate `c` in `[0,7]` uses indexed
-streams and never advances ambient state:
+later target is a translation of one of section 10's nine constructive templates. The catalog maps
+center delta to deck-height delta exactly:
 
-- for candidates 0 through 6, let `base=floor(8*sampleUnit(seed,3,siteIndex))` and
-  `slot=1+((base+3*c)%8)`; center delta is `78+3*slot` metres, yielding seven distinct values in
-  `[81,102]` and placing the complete next platform beyond the current 100 m viewport;
-- candidate platform top is `0.8 m` above the greatest native terrain vertex or interpolated
-  boundary under its span;
-- candidate 7 is the distinct deterministic fallback with center delta `78 m`; its deck follows the
-  ordinary native-terrain elevation rule.
+```text
+center delta:  78   81    84    87    90    93    96    99   102 m
+deck delta:     0  +1.6  -0.8  +0.8  -1.6    0   -0.8  +0.8    0 m
+```
 
-For candidates 0 through 6, the model runs section 10's bounded reference search and accepts the
-first candidate with a complete proof. It then tries the fixed candidate 7. There are exactly eight
-attempts, no retry loop. Failure of the fallback proof is an invariant error: site state is left
-unchanged, the run enters `generation-error`, and the live status becomes exactly
+For site index `i`, let `base=floor(8*sampleUnit(seed,3,i))`. Inspect the seven distinct nonfallback
+slots `slot=1+((base+3*c)%8)` for `c=0..6`, then the `78 m` zero-delta template. Select the first
+whose translated deck top is within the closed `TARGET_DECK_BAND=[1.55,8.3] m`. This is at most
+eight constant-time eligibility checks, not route search. Every active deck is already in the band,
+so the final zero-delta template is always eligible. The preference retains seeded distance and
+elevation variety while continuity follows structurally for every seed, not from sampled seeds.
+
+Each template carries a collision-safe terrain envelope. Translate it by the origin deck, constrain
+ordinary seeded samples under the flight corridor with `min(nativeHeight,envelopeHeight)`, and use
+`0.15*sampleUnit(seed,4,sampleIndex)` metres of downward-only relief where the envelope constrains a
+sample. Linear interpolation uses those constrained samples. Under the target platform span, replace
+the collision surface so its maximum is exactly `targetTop-0.8 m`; blend the two boundary samples
+into the ordinary corridor without a discontinuity. This construction cannot intrude into the
+checked schedule, yet native motif, stream-4 relief, distance, and deck delta keep visible seeded
+variation. Section 10's two defensive replays validate the instantiated descriptor. The model passes
+the selected template's frozen geometry into the world's pure
+`instantiateTemplateSite(seed,siteIndex,originSite,templateGeometry)`; the world never imports or
+selects from the model-owned catalog.
+
+A catalog/schema or replay mismatch is an invariant error: site state is left unchanged, the run
+enters `generation-error`, and the live status becomes exactly
 `Mission generation failed. Use Exit mission to start a new run.` No unreachable target appears,
-Restart remains hidden and disabled, and `r` is ignored because deterministic retry would repeat the
-same failure. Exit remains available and the next START gets a fresh seed. Unit tests exhaust at
-least 4,096 consecutive seeds for the fallback contract. No code silently weakens the fuel proof or
-generates a ninth candidate.
+Restart remains hidden and disabled, and `r` is ignored. Exit remains available and the next START
+gets a fresh seed. This path defends against implementation corruption only; ordinary generation
+cannot exhaust its template choices or enter an unbounded retry loop.
 
 Each platform is exactly `3 * 3.2 = 9.6 m` long, centered at the site coordinate, `0.35 m` thick,
-and `0.8 m` above its highest underlying native terrain point. Two narrow pylons connect its
-underside to native terrain. A centered `H` marking and outline make it read as a small elevated
+and `0.8 m` above its highest underlying collision-terrain point. Two `0.6 m`-wide pylons connect
+its underside to native terrain. A centered `H` marking and outline make it read as a small elevated
 helicopter pad. The platform replaces the terrain collision surface on its open horizontal span; its
 top, ends, underside, and pylons are explicit solid geometry.
 
 One gas can sits `3.0 m` right of platform center and does not collide. One NOC begins `2.0 m` right
 of the platform edge. It is a single solid `7.0 m` by `7.2 m` building on a filled foundation up to
 platform height, not separate modules. Its face contains one phone-battery outline, terminal, and
-four fill bars. A `3.2 m` mast, antenna head, and two signal arcs rise from the roof. Building,
-foundation, and mast collide; signal arcs do not.
+four fill bars. A solid `0.5 m`-wide, `3.2 m`-tall mast, antenna head, and two signal arcs rise from
+the roof. Building, foundation, and mast collide; signal arcs do not.
 
 ## 6. Projection, camera, and bounded retention
 
@@ -296,9 +312,9 @@ The SVG uses `viewBox="0 0 1000 640"`, `preserveAspectRatio="xMidYMid meet"`, an
 400 percent zoom. Horizontal scale is `10 scene units/m`; vertical projection is
 `sceneY=548-worldY*10`.
 
-The model tracks `furthestX` and a per-leg `legCameraFloor`. The controller computes
-`cameraLeft=max(0,legCameraFloor,furthestX-35)` only from the rendered model and writes
-`--camera-x=-cameraLeft*10px` on the game root. CSS applies one transform on `#lander-world`:
+The controller computes `cameraLeft=max(0,renderedPose.x-35)` directly from the current immutable
+model result and writes `--camera-x=-cameraLeft*10px` on the game root. CSS applies one transform on
+`#lander-world`:
 
 ```text
 transform: translate(var(--camera-x), 0)
@@ -307,9 +323,9 @@ transform: translate(var(--camera-x), 0)
 All terrain, sites, lander, agent, and debris retain absolute world-derived scene coordinates inside
 that group. The fixed sky, stars, crash flash overlay, and next-site cue remain outside it. The
 camera does not rewrite child coordinates per frame. It begins moving only after the lander passes
-`x=35`, keeps the reference point at scene `x=350`, and never moves backward during a leg. On
-checkpoint restore, `legCameraFloor` and `furthestX` are derived from the active platform center;
-there is no controller camera cache.
+`x=35`, keeps the reference point at scene `x=350`, and may move backward with the vehicle. Contact,
+service, crash, and checkpoint restoration use their frozen or restored pose, with no monotonic
+furthest-X value and no controller camera cache.
 
 The visible interval is `[cameraLeft,cameraLeft+100]`. Retain chunks intersecting the interval plus
 `40 m` on each side, at most ten chunks. Retain the active checkpoint site, target site, and at most
@@ -318,18 +334,29 @@ the fixed layers once; ordinary frames update transforms and attributes only. Th
 discarded terrain or site history beyond `completedSites` and the latest checkpoint snapshot.
 
 Hard runtime ceilings are ten terrain paths, three site groups, eight debris fragments, 80 children
-under `#lander-world`, 64 queued input edges, one pointer, one animation frame, and one pulse timer.
-Input edges beyond 64 are coalesced by physical control to their latest value without changing the
-step-end ordering. A 100-site browser witness must keep these counts constant, show no increasing
-event-listener count, and keep active-game frame work below 4 ms at the 95th percentile on the
-pre-merge Chromium machine. Candidate generation and its route proof must finish below 75 ms at the
-95th percentile and 150 ms maximum over the same witness.
+under `#lander-world`, 64 queued input records, one pointer, one animation frame, and one pulse
+timer. When enqueueing would create record 65, discard all queued edges, sample the controller's
+complete physical keyboard and pointer state, and enqueue exactly one `INPUT_SNAPSHOT` for the next
+integer simulation-step boundary. The snapshot contains the held physical codes plus pointer-active,
+pointer ID, anchor/current X, and pulse-deadline timestamp needed by section 11's mixer.
+Intermediate edges are deliberately lost; subsequent edges append after that record. This is
+deterministic degradation, not an ordering-preservation claim. A 100-site browser witness must keep
+these counts constant, show no increasing event-listener count, and keep active-game frame work
+below 4 ms at the 95th percentile on the pre-merge Chromium machine. Direct template selection,
+corridor construction, and exactly two proof replays together must finish below 25 ms at the 95th
+percentile and 50 ms maximum over the same witness; record actual results rather than weakening the
+ceiling.
 
 The right-edge cue is a fixed `44 by 44` scene-unit target at `(932,280)`. It contains a solid
-right-pointing arrow, not just motion. It is visible only when a target exists and
-`target.platformLeft > cameraLeft+100`; it hides on equality or once the target enters view. The
-controller reveals the visually hidden `#lander-target-direction` on the same predicate, so target
-direction is available without seeing animation or SVG.
+right-pointing arrow, not just motion. It is visible only after a target and its proof exist and
+`target.platformLeft > cameraLeft+100`; it hides on equality or once the target enters view. At a
+settled contact, the pose can be at most `3.2 m` right of platform center. Even the `78 m` template
+puts the next platform's left edge at `center+73.2 m`, at least `5.0 m` beyond that contact-time
+viewport right edge (`pose.x+65 m`). Near the origin, the fixed viewport gives a larger gap. Thus
+the complete target site's leftmost extent is to the right of the viewport for every contact pose,
+including a landing after arbitrary overshoot and return; the camera cannot inherit the overshoot.
+The controller reveals the visually hidden `#lander-target-direction` on the same predicate, so
+target direction is available without seeing animation or SVG.
 
 ## 7. Model shape, mission states, and checkpoint
 
@@ -338,7 +365,7 @@ direction is available without seeing animation or SVG.
 `createRun({seed,reducedMotion=false})` returns a new aggregate with this conceptual shape:
 
 ```text
-state, seed, missionSeconds, completedSites, awardRatio, furthestX, legCameraFloor
+state, seed, missionSeconds, completedSites, awardRatio
 pose, commanded, fuel
 generatorCursor, retainedChunks, retainedSites
 activeSiteId, targetSiteId, targetRouteProof
@@ -371,7 +398,7 @@ The legal mission transitions are:
 | `crashing`  | `CRASH_COMPLETE`                        | `failed`           |
 | `failed`    | `RESTART` with checkpoint               | `launching`        |
 | `failed`    | `RESTART` before first checkpoint       | `flying`           |
-| `flying`    | candidate-proof invariant error         | `generation-error` |
+| `flying`    | catalog/proof invariant error           | `generation-error` |
 | Any active  | `EXIT`                                  | `preflight`        |
 | `flying`    | unsafe contact with reduced motion      | `failed`           |
 | `flying`    | safe target contact with reduced motion | `launching`        |
@@ -393,7 +420,7 @@ result applies. Normal timing is:
    head and static signal arcs activate at 1,000 ms.
 4. At `NOC_POWERED`, write status `Agent deployed. Mission continues.`, mark the NOC powered, and
    create the checkpoint. Enter `launching` immediately afterward.
-5. `launching`, 750 ms: command both engines at `0.82`, consume actual reserve through the ordinary
+5. `launching`, 750 ms: command both engines at `0.72`, consume actual reserve through the ordinary
    fuel path, integrate the same immutable physics, ignore player input, and retain collision
    against platform sides, pylons, and the building. The starting deck-top contact is ignored only
    while velocity is upward and until both feet clear it by `0.05 m`. On completion, return control
@@ -421,8 +448,6 @@ targetSiteId
 targetRouteProof
 retainedChunks = ordered chunk indexes
 retainedSites = ordered descriptors with canCollected and powered flags
-furthestX = active platform center
-legCameraFloor = max(0, active platform center - 35)
 ```
 
 It excludes controller clocks, input, pointer, camera, animation progress, debris, status text, the
@@ -493,6 +518,9 @@ The model retains the one immutable scheduler exported by `lander-model.js`. The
 renders without stepping. A frame delta less than zero or greater than `0.1 s` discards the gap,
 clears active input, and advances no mission time. Otherwise, run at most 12 fixed steps and retain
 the substep residue. Timestamp ties use enqueue sequence; step-end comparison uses `1e-9 ms`.
+`INPUT_SNAPSHOT` atomically replaces every modeled physical control at its assigned next-step
+boundary. The overflow witness floods 65 alternating edges before a step, observes one snapshot plus
+later edges, and produces the same state at 30, 60, and 120 Hz.
 
 When hidden, cancel the animation frame, pointer/tap timer, key state, and active CSS animation; set
 `data-paused="true"`; and retain no accumulator. On visibility, the first frame resets time without
@@ -501,15 +529,18 @@ stepping. Hidden time advances neither physics, service, crash, cue, arrow blink
 ## 9. Swept collision and landing classification
 
 Collision uses previous and next poses from every physics step. Build the transformed hull at both
-ends and a swept broad-phase box against nearby terrain edges, the target platform rectangle and
-pylons, every retained NOC/foundation/mast, and any retained non-target platform.
+ends and a swept broad-phase box against nearby terrain edges, the target platform rectangle and its
+`0.6 m`-wide pylons, every retained NOC/foundation/solid `0.5 m`-wide mast, and any retained
+non-target platform.
 
 For each broad-phase candidate, interpolate position linearly and angle by the shortest normalized
 arc. Choose enough samples that maximum hull-vertex travel is at most `0.2 m` and angular travel is
 at most `1 degree`. Use at most 64 samples. If a step would require more, classify it immediately as
 unsafe `overspeed` rather than permitting tunneling. Find the first intersecting interval, then use
 12 bisections to pin contact time. Segment/polygon intersection and separating-axis rectangle tests
-include equality.
+include equality. Platform thickness `0.35 m`, pylon width `0.6 m`, and mast width `0.5 m` all
+exceed the `0.2 m` maximum hull-vertex sampling gap, so the adaptive sweep cannot step across one
+without an intersecting sample; the 64-sample overspeed result closes the remaining case.
 
 Classify the earliest contact, with equal-time precedence: building or mast, non-top platform
 surface, terrain, then target platform top. The target top is safe only when both transformed feet
@@ -537,82 +568,82 @@ into a fall through the world.
 
 ## 10. Reference route proof and progressive award
 
-### 10.1 Bounded search
+### 10.1 Checked-in constructive catalog
 
-`lander-model.js` owns one pure
-`proveReferenceRoute({physics,originSite,targetSite,seed,siteIndex})`. It uses the exact physics,
-fuel scaling, swept collision, landing envelope, and automatic-launch prefix from sections 8 and 9.
-The immutable profile is not independently configurable.
-
-Before search, construct a provisional checkpoint from the prospective service result. Its seed,
-upright origin pose, completed-site count, generator cursor, active and target IDs, retained chunks,
-collected current can, powered current NOC, and retained-site order are exactly the values the later
-real checkpoint will receive. `targetRouteProof` is the output being computed, not a search input.
-The provisional value also carries the already computed next `awardRatio`, but search does not read
-it. The only route-relevant difference is provisional `fuel=SEARCH_FUEL_RESERVE`, where
-`SEARCH_FUEL_RESERVE=50.0`. The maximum possible scheduled burn is below `49.5`: two engines for the
-750 ms launch plus two engines throughout the full 24-second horizon. Search therefore never depends
-on actual carried fuel, the current ratio, or an early award.
-
-Search resolution is:
-
-- engine commands from `{(0,0),(.55,.55),(.72,.72),(.90,.90),(.90,.45),(.45,.90)}`;
-- one command decision every `0.5 s`, simulated as 60 fixed steps;
-- at most 48 decisions, a 24-second route horizon;
-- beam width 24 after quantizing state by `1 m x`, `1 m y`, `0.5 m/s vx`, `0.5 m/s vy`,
-  `5 degree angle`, and `5 degree/s angular velocity`.
-
-Join these six integers with colons for the exact state-bin key:
+`lander-model.js` owns an immutable `REFERENCE_TEMPLATES` array keyed by the nine distance and deck
+deltas in section 5.3. It is data, not a runtime planner. Every entry contains these literal values:
 
 ```text
-Math.round((x - targetCenter) / 1)
-Math.round((y - targetTop) / 1)
-Math.round(vx / .5)
-Math.round(vy / .5)
-Math.round(normalizeDegrees(angle) / 5)
-Math.round(angularVelocity / 5)
+templateId, centerDelta, deckDelta
+runs = ordered [commandIndex, fixedStepCount] pairs
+clearanceKnots = ordered [relativeX, maximumTerrainYRelativeToOriginDeck] pairs
+demonstratedMinimum, scheduleDigest
+success = contact step, pose, burn, and classification
+smallerFailure = allowance, fuel-exhaustion step, pose, and burn
 ```
 
-The exact numeric score is:
+All run counts are positive integers, adjacent command indexes differ, total schedule length is at
+most `24*120=2,880` fixed steps, and the first run is the automatic launch prefix `[1,90]`. The
+schedule stops at its first target contact. Clearance knots include both corridor endpoints, have
+strictly increasing relative X, and linearly define the upper terrain envelope used in section 5.3.
+The stored successful contact satisfies every inclusive landing limit. The smaller allowance's
+trajectory remains inside its envelope until it exhausts fuel before target contact; replay stops at
+that exhaustion step, which is its exact checked-in failure witness.
 
-```text
-fuelBurn
-  + .08 * Math.abs(x - targetCenter)
-  + .12 * Math.abs(y - targetTop)
-  + .8 * Math.abs(vx)
-  + 1.2 * Math.abs(vy)
-  + .03 * Math.abs(normalizeDegrees(angle))
-  + .02 * Math.abs(angularVelocity)
-```
+The schedule digest starts at `2166136261`. For each `[commandIndex,stepCount]`, fold the command,
+then the low and high step-count bytes, in that order, using
+`digest=Math.imul(digest ^ value,16777619)>>>0`. The stored digest must equal that exact result.
 
-Schedule digest starts at `2166136261`. For each zero-based command-table index `a`, replace it with
-`mixUint32(digest ^ Math.imul(a+1,0x01000193))`. The exact stream-4 tie key is
-`floor(sampleUnit(seed,4,(siteIndex ^ scheduleDigest) >>> 0) * 2 ** 32)`.
+The only catalog command table is the exact stable keyboard state set below. Each state is reachable
+by holding the listed physical controls for an integer number of fixed steps; pointer interpolation,
+synthetic engine values, and substep input changes are forbidden in a template.
 
-Every candidate begins with the exact 750 ms `(0.82,0.82)` automatic-launch schedule. Expand each
-decision layer in parent order and then command-table order. Remove unsafe contacts before binning.
-Collect a safe target contact at the exact fixed substep as a witness, including the truncated final
-command, and do not return that node to the beam. For each state-bin key, retain one survivor by the
-ascending tuple `(score,fuelBurn,tieKey,lexicographic command-index sequence)`. Sort those survivors
-by the same tuple and retain the first 24 for the next layer. Continue through all 48 layers so a
-later lower-burn witness can win. Finally choose across every collected witness by ascending
-`(fuelBurn,elapsed fixed steps,tieKey,lexicographic command-index sequence)`. Return that witness's
-complete fixed-step engine schedule. The search allocates fixed-size arrays and performs no
-recursion or unbounded expansion.
+| Index | Left engine | Right engine | Held controls            |
+| ----- | ----------- | ------------ | ------------------------ |
+| 0     | `0`         | `0`          | none                     |
+| 1     | `0.72`      | `0.72`       | Space                    |
+| 2     | `0`         | `0.45`       | Left or H                |
+| 3     | `0.45`      | `0`          | Right or L               |
+| 4     | `0.72`      | `1`          | Space + Left or H        |
+| 5     | `1`         | `0.72`       | Space + Right or L       |
+| 6     | `0.45`      | `0.45`       | Left/H + Right/L         |
+| 7     | `1`         | `1`          | Space + Left/H + Right/L |
 
-This is a deterministic, conservative reference planner. Beam pruning and control quantization mean
-its result is explicitly not the physical or global minimum.
+During implementation, derive all nine schedules, envelopes, minima, end states, and digests with a
+temporary standalone program that independently encodes the immutable section 8 physics and section
+9 collision contract; it must not import any production or test module. Review its output, then
+check the resulting literals into `lander-model.js` and independent expected copies into
+`lander-model.test.mjs`. The test expected values never call a production generator or compute a
+digest from the catalog under test. Delete the temporary derivation program before the
+implementation commit, but preserve its invocation, version, and output digest in the test fixture
+comment and implementation commit message so the derivation is auditable without becoming runtime
+code.
+
+Catalog tests replay every literal from an upright origin with `fuel=demonstratedMinimum`, using the
+exact production fixed-step physics and the translated corridor. Each must land at its literal
+success vector. A second replay with `fuel=demonstratedMinimum-FUEL_QUANTUM` must match its literal
+fuel-exhaustion witness before target contact. Exhaustively validate all nine entries and command
+indexes. This establishes a conservative demonstrated minimum at the catalog's fixed schedule and
+fuel resolution; it makes no claim about a lower-fuel schedule or a global physical optimum.
+
+At site creation, direct selection translates the chosen literal geometry and constructs a
+provisional checkpoint identical to the future real checkpoint except for fuel and the proof being
+formed. It includes seed, upright origin pose, completed count, next award ratio, generator cursor,
+site IDs, retained descriptors, collected current can, and powered current NOC. For each of exactly
+two defensive replays, replace only fuel: first with the literal demonstrated minimum, then with one
+quantum less. Neither replay reads carried reserve or award ratio. The first must reproduce success
+and the second its checked-in failure. Any mismatch takes the defensive `generation-error` path;
+there is no runtime search, optimization, descent, retry, or alternate-template loop.
 
 ### 10.2 Demonstrated minimum and award
 
-Set `FUEL_QUANTUM=0.05`. Replay the chosen fixed schedule from the same provisional checkpoint, each
-time replacing its trial fuel with an integer multiple of the quantum. Begin at
-`ceil(witnessBurn/FUEL_QUANTUM)*FUEL_QUANTUM` and descend to zero. The **demonstrated minimum** is
-the smallest tested allowance whose replay safely lands on the target. The immediately smaller
-nonnegative allowance must fail to complete that same schedule; otherwise continue downward. Store
-the successful replay, smaller-failure replay, quantum, schedule digest, and burn in
-`targetRouteProof`. Candidate generation accepts no site without both witnesses. Neither replay may
-read the run's carried reserve. The `50/0.05+1=1,001` possible allowances are a hard replay bound.
+Set `FUEL_QUANTUM=0.05`; every catalog minimum is greater than one quantum and is an exact integer
+multiple of it. Independent derivation sets it to
+`ceil(exact successful schedule burn/FUEL_QUANTUM)*FUEL_QUANTUM`; the next lower quantum exhausts
+before contact. Store the template ID, successful replay, smaller-failure replay, quantum, literal
+schedule digest, and burn in `targetRouteProof`. The runtime always performs exactly those two
+replays and no fuel scan. The proof outcome and demonstrated minimum are therefore independent of
+carried excess and of the stored ratio.
 
 Use the run's stored `awardRatio` for the current award, then advance it exactly once with this O(1)
 pure function:
@@ -643,10 +674,10 @@ The contacted site's gas can is consumed only after the proof succeeds. The awar
 new target, so site 0's can funds leg 1. Initial fuel funds the approach to site 0. After the NOC is
 powered, replace provisional trial fuel with `carriedFuelAtContact + award`, attach the proof, and
 freeze the real checkpoint with `nextRatio`. Proofs are byte-identical across different carried
-reserves or ratios because neither is a planner input. With the same current ratio, different
-carried reserves also produce the same award; changing the ratio changes only the award, never the
-proof. Automatic launch spends from real checkpoint fuel in actual play. Carried excess can
-therefore compensate for a later flight that uses more than the reference route.
+reserves or ratios because neither is a proof input. With the same current ratio, different carried
+reserves also produce the same award; changing the ratio changes only the award, never the proof.
+Automatic launch spends from real checkpoint fuel in actual play. Carried excess can therefore
+compensate for a later flight that uses more than the reference route.
 
 ## 11. Input, focus, and lifecycle
 
@@ -756,23 +787,25 @@ and serialized world descriptors are exact. Every schedule includes an explicit 
 | Swept thin obstacle   | Hull crosses a `0.35 m` deck between step endpoints                    | first crossing detected, never tunnels                                                                            |
 | Frame equivalence     | Initial approach, no input, callbacks to 1,000 ms at 30, 60, and 120Hz | 120 steps; `x=30.8`, `y=30.0875`, `vx=0.8`, `vy=-3.4`, fuel `30`                                                  |
 | Checkpoint replay     | Award, launch, crash, RESTART twice                                    | identical post-award fuel/site flags/next ratio; no can, award, ratio, or progress duplication                    |
-| Route quantum         | Accepted representative route                                          | allowance `minimum` lands safely; `minimum-0.05` cannot complete the stored schedule                              |
+| Catalog quantum       | Every checked-in reference template                                    | allowance `minimum` matches literal safe contact; `minimum-0.05` matches literal failure                          |
+| Input overflow        | 65 alternating edges before one step at 30, 60, and 120 Hz             | queue becomes one next-step physical-state snapshot; all frame schedules produce the same result                  |
 | Long run              | 100 successful deterministic sites                                     | fixed work per ratio advance; bounded nodes/edges; reserve equals initial plus awards minus all burn              |
 
 World tests pin complete JSON descriptors and route-proof digests for seeds `1`, `0x12345678`, and
 `0xffffffff`. The independent world fixtures begin with these exact values:
 
-| Seed         | `mixUint32(seed)` | Chunk 0 heights                                                                             | Site 0 top           | Leg-1 candidate deltas     |
+| Seed         | `mixUint32(seed)` | Chunk 0 heights                                                                             | Site 0 top           | Leg-1 template preference  |
 | ------------ | ----------------- | ------------------------------------------------------------------------------------------- | -------------------- | -------------------------- |
 | `1`          | `1753845952`      | `3.632365759695,2.237045118399,4.041724477103,2.046403835807,3.451083194511,2.655762553215` | `4.3452401980757713` | `102,87,96,81,90,99,84,78` |
 | `0x12345678` | `4125564054`      | `2.894239616115,4.222849254729,2.351458893344,4.280068531958,2.808678170573,3.537287809188` | `4.6608121663331987` | `99,84,93,102,87,96,81,78` |
 | `0xffffffff` | `1734902346`      | `2.975416276604,1.709050793713,3.642685310822,1.776319827931,3.309954345040,2.643588862149` | `4.3304941696580501` | `87,96,81,90,99,84,93,78`  |
 
 The static scene seed's site-0 top is exactly `5.119569691829383`. The implementation commit also
-records literal accepted-site descriptors and route-proof digests after independently calculating
-the bounded search results; tests must not generate expected values by calling the function under
-test. For each seed, tests cover at least three accepted sites, terrain diversity, candidate attempt
-count, offscreen placement, proof replay, exact award, and rolling-window eviction.
+records literal template schedules, success/failure vectors, envelopes, instantiated-site
+descriptors, and proof digests from section 10's independent derivation; tests must not generate
+expected values by calling the function under test. For each seed, tests cover at least three sites,
+terrain diversity, preference and eligibility order, guaranteed zero-delta selection, contact-time
+offscreen placement, both proof replays, exact award, and rolling-window eviction.
 
 ## 15. Verification matrix
 
@@ -798,21 +831,22 @@ static/lander-model.js
 static/lander-game.js
 ```
 
-| Layer                                                                   | Required coverage                                                                                                                                                                                                                                                                                                                                                           |
-| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `node --test website/tests/lander-world.test.mjs`                       | Mixer and injected seeds; exact terrain/site vectors; shared boundaries; diversity; 9.6 m elevated replacement; one NOC/can; eight-attempt bound/fallback; viewport/window keys; fixed retention ceilings; target visibility; descriptor immutability                                                                                                                       |
-| `node --test website/tests/lander-model.test.mjs`                       | State/event matrix; 8.4 authority vectors; fuel and uncapped carry; fixed scheduler; swept contacts; provisional 50-unit search; exact beam/witness order; proof independence; smaller failure; O(1) ratio recurrence/floor and checkpoint restore; upright checkpoint; generation-error result; launch burn; eight normal and zero reduced-motion debris; ordinal restore  |
-| `python -m unittest discover -s website/tests -p 'test_*.py'`           | Exact 12-file artifacts at both bases; one-way `site_validation` to `site_game_validation` import; helper-owned game contract; local import closure; byte-equivalent subtree; exact DOM/order/data selectors; no-JS scene; fuel/actions; local SVG/CSS; and forbidden network, storage, audio, canvas, service-worker, navigation, cookie, and uncontrolled-random surfaces |
-| Manual Chrome and Edge pre-merge; Firefox and Safari/WebKit post-launch | Start/focus; Space hold; arrows/vi; touch tap/hold/drag; later braking feel; three successive sites; platform/NOC/can legibility; battery/antenna power; arrow enter-view boundary; excess carry; empty-fuel response; every crash surface; checkpoint replay; Exit fresh run; hidden pause; request log proving zero game-initiated requests                               |
-| Manual responsive and accessibility acceptance                          | 320 CSS pixels, 400 percent zoom, touch landscape, and wide viewport; no overflow or clipped actions; 44-pixel targets; logical focus; no trap; useful no-CSS/no-JS order; named fuel value; restrained live announcements; solid direction cue; static reduced-motion cue; silent decorative SVG; fixed-token 4.5:1 text and 3:1 necessary-graphic contrast                |
-| Performance and longevity witness                                       | 100-site deterministic run; ceilings in section 6 never exceeded; candidate planner timing recorded; hidden tab has no frame or mission progress; normal active frame p95 below 4 ms; teardown leaves no listener, timer, capture, frame, enabled dead action, or growing retained history                                                                                  |
+| Layer                                                                   | Required coverage                                                                                                                                                                                                                                                                                                                                                                         |
+| ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `node --test website/tests/lander-world.test.mjs`                       | Mixer and injected seeds; exact terrain/site vectors; shared boundaries; diversity; template preference/eligibility; structural zero-delta guarantee; corridor envelope/relief; 9.6 m elevated replacement; one NOC/can; pose camera/window keys; fixed retention ceilings; target visibility; descriptor immutability                                                                    |
+| `node --test website/tests/lander-model.test.mjs`                       | State/event matrix; 8.4 authority vectors; fuel and uncapped carry; fixed scheduler and overflow snapshot; swept contacts including 0.6 m pylons/0.5 m mast; literal nine-template schema, reachable commands, independent success/failure fixtures, exactly two runtime replays, proof independence; O(1) ratio/checkpoint; generation error; launch burn; exact debris/ordinal          |
+| `python -m unittest discover -s website/tests -p 'test_*.py'`           | Exact 12-file artifacts at both bases; one-way validation-helper import; helper-owned game contract; local module closure; byte-equivalent subtree; exact DOM/order/data selectors; successful-init Start reveal/enable and failed/no-JS static recovery; fuel/actions; local SVG/CSS; and forbidden network, storage, audio, canvas, service-worker, navigation, cookie, random surfaces |
+| Manual Chrome and Edge pre-merge; Firefox and Safari/WebKit post-launch | Start/focus; Space hold; arrows/vi; touch tap/hold/drag; later braking feel; three successive sites; platform/NOC/can legibility; battery/antenna power; arrow enter-view boundary; excess carry; empty-fuel response; every crash surface; checkpoint replay; Exit fresh run; hidden pause; request log proving zero game-initiated requests                                             |
+| Manual responsive and accessibility acceptance                          | 320 CSS pixels, 400 percent zoom, touch landscape, and wide viewport; no overflow or clipped actions; 44-pixel targets; logical focus; no trap; useful no-CSS/no-JS order; named fuel value; restrained live announcements; solid direction cue; static reduced-motion cue; silent decorative SVG; fixed-token 4.5:1 text and 3:1 necessary-graphic contrast                              |
+| Performance and longevity witness                                       | 100-site deterministic run; ceilings in section 6 never exceeded; direct selection/corridor/two-replay timing recorded; hidden tab has no frame or mission progress; normal active frame p95 below 4 ms; teardown leaves no listener, timer, capture, frame, enabled dead action, or growing retained history                                                                             |
 
 Mutation tests reject duplicated/moved shared markup, a second scheduler/controller/site authority,
 game checks added to the near-limit validator, artifact count drift, pad-width drift, fuel caps, can
 recollection, proof dependence on carried fuel, route proofs that omit launch, ratio recomputation
-from `completedSites`, an unbounded candidate/replay loop, retained-node growth, non-swept contact,
-zero normal-motion debris, animated-only direction, atmospheric crash effects, or a durable/network
-surface.
+from `completedSites`, any runtime planner/search/fuel scan or third proof replay, a catalog command
+outside the reachable table, expected fixtures derived from production values, retained-node growth,
+monotonic-furthest-X camera state, non-swept contact, zero normal-motion debris, animated-only
+direction, atmospheric crash effects, or a durable/network surface.
 
 ## 16. Traceability
 
