@@ -27,12 +27,12 @@ through Phase A with the same redacted log and database result; focused tests an
 
 ## Phase 2: fail closed under the existing result shape
 
-- [ ] Make Azure and AWS readiness exhaustion and cloud-init-wait failure raise inside create and
+- [x] Make Azure and AWS readiness exhaustion and cloud-init-wait failure raise inside create and
       trigger their existing rollback paths.
-- [ ] Make Proxmox bootstrap timeout, parsed failure, or missing Tailscale IP raise and roll back.
-- [ ] Add provider-shaped Azure and AWS regressions that inspect retained payloads, fixed stdin
+- [x] Make Proxmox bootstrap timeout, parsed failure, or missing Tailscale IP raise and roll back.
+- [x] Add provider-shaped Azure and AWS regressions that inspect retained payloads, fixed stdin
       calls, staging calls, diagnostics, exception chains, and cleanup.
-- [ ] Add interrupt and second-interrupt/manual-removal coverage for Azure/AWS readiness waits and
+- [x] Add interrupt and second-interrupt/manual-removal coverage for Azure/AWS readiness waits and
       Proxmox bootstrap.
 
 **DoD:** issue #471's four reproduced cases and Proxmox create-time bootstrap failures cannot return
