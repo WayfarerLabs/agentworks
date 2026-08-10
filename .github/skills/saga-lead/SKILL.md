@@ -32,8 +32,10 @@ below are subagent work; the role itself is not.
   whose next PR is expected. Arm a background watch for each open draft flipping to ready (and for
   unexpected close or merge, so silence cannot mask a surprise). Review a PR when it goes ready
   without waiting for the operator to ask.
-- Re-review on push after an effort absorbs findings. A review verdict stands until the findings are
-  absorbed or successfully pushed back on; track the open verdicts in the ledger.
+- Re-review on the draft-to-ready transition after an effort absorbs findings (the dev-process
+  skill's handoff convention); poll ready PRs' heads against the last head you reviewed as the
+  missed-edge fallback. A review verdict stands until the findings are absorbed or successfully
+  pushed back on; track the open verdicts in the ledger.
 - The lead reviews; the operator merges. Never merge a child PR. When GitHub refuses a formal review
   verdict (a PR owned by the same account), post the review as a comment with the verdict stated in
   the first line.
