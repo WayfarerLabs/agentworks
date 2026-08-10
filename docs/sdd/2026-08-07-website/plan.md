@@ -332,27 +332,32 @@ the 404 begins directly with its title after a compact natural gap.
 
 ## Phase 4D: complete Markdown pages
 
-- [ ] Amend and review the FRD, HLA, this plan, and shell LLD so Manifesto and Security each render
+- [x] Amend and review the FRD, HLA, this plan, and shell LLD so Manifesto and Security each render
       one complete Markdown source, including its sole `h1`, while preserving the safe closed
       renderer and shared site shell.
-- [ ] Expand root `SECURITY.md` into the complete standalone security deep dive, retaining
+- [x] Expand root `SECURITY.md` into the complete standalone security deep dive, retaining
       GitHub-only private vulnerability reporting and candid threat, boundary, operator, credential,
       limitation, scope, and upstream guidance.
-- [ ] Replace Security's selected-passage template and Manifesto's hash/heading inventory with one
+- [x] Replace Security's selected-passage template and Manifesto's hash/heading inventory with one
       complete-document projection per page. Keep `docs/why-agentworks.md` as the only current
       Manifesto path; do not add a `docs/manifesto.md` fallback.
-- [ ] Remove duplicated security prose, source hashes, heading inventories, expected passage
+- [x] Remove duplicated security prose, source hashes, heading inventories, expected passage
       sequences, and long-form heading-path selectors from website code and tests. Retain Home's
       bounded README identity projection and explicit safe-link review.
-- [ ] Prove supported source additions and edits flow into generated HTML without website-code
+- [x] Prove supported source additions and edits flow into generated HTML without website-code
       changes, while missing/unreadable input, invalid UTF-8, malformed structure, unsupported
       Markdown, unsafe links, GitHub-only reporting violations, and token-placement drift fail
       closed.
-- [ ] Update permanent website documentation and CSS for whole-document ownership; preserve the
+- [x] Update permanent website documentation and CSS for whole-document ownership; preserve the
       exact ten-file deterministic artifact, no-JavaScript content, shared navigation, metadata,
       accessibility, and all Lander/404 behavior.
-- [ ] Run focused and complete repository gates, rebuild the port-8766 preview, and obtain both an
+- [x] Run focused and complete repository gates, rebuild the port-8766 preview, and obtain both an
       `agentworks-reviewer` and fresh-eyes approval before updating the ready PR.
+
+Review evidence: the project reviewer and independent fresh-eyes reviewer approved exact head
+`6f3dbcc4` after complete-document coupling, unsupported Markdown, and duplicate-ID findings were
+fixed. Focused suites passed 103 Python and 22 Node tests; the full CLI suite passed 6,565 tests;
+exact root and project-base builds remained deterministic ten-file artifacts.
 
 Definition of done: `/manifesto/` is the complete safe HTML rendition of `docs/why-agentworks.md`,
 `/security/` is the complete safe HTML rendition of root `SECURITY.md`, the site contains no second

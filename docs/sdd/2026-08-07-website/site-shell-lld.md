@@ -2,7 +2,7 @@
 
 <!-- cspell:ignore canonicalization keypath keypaths nonblank sdds TUI -->
 
-- Status: Phase 4D design approved by the operator; implementation in progress
+- Status: Phase 4D implemented and review-approved; release acceptance remains pending
 - Date: 2026-08-09
 - FRD: `frd.md`, specifically R7-R11 and R13-R18
 - HLA: `hla.md`, specifically D1-D5, D7, D8, and D10
