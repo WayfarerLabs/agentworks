@@ -1,6 +1,11 @@
 # ruff: noqa: F405
 
+import html
+import json
+import threading
+from functools import partial
 from html.parser import HTMLParser
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 from site_test_support import *  # noqa: F403
 
@@ -169,6 +174,78 @@ def source_toc(source: str) -> list[tuple[int, str, str]]:
         identifier = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")
         entries.append((len(match.group(1)), f"#{identifier}", label))
     return entries
+
+
+class QuietHandler(SimpleHTTPRequestHandler):
+    def log_message(self, format: str, *args: object) -> None:
+        pass
+
+
+def browser_geometry(output: Path, width: int) -> dict[str, object]:
+    chromium = next(
+        (candidate for name in ("chromium", "chromium-browser", "google-chrome") if (candidate := shutil.which(name))),
+        None,
+    )
+    if chromium is None:
+        raise unittest.SkipTest("Chromium is not installed")
+    harness = output / "geometry.html"
+    harness.write_text(
+        """<!doctype html>
+<html><body style="margin: 0"><iframe id="target" src="/manifesto/"
+style="width: 100vw; height: 100vh; border: 0"></iframe><pre id="result">pending</pre>
+<script>
+const target = document.querySelector("#target");
+target.addEventListener("load", () => {
+    const doc = target.contentDocument;
+    const rect = (selector) => {
+        const value = doc.querySelector(selector).getBoundingClientRect();
+        return {top: value.top, right: value.right, bottom: value.bottom, left: value.left};
+    };
+    const layout = doc.querySelector(".long-form-layout");
+    document.querySelector("#result").textContent = JSON.stringify({
+        display: target.contentWindow.getComputedStyle(layout).display,
+        title: rect(".long-form-layout > h1"),
+        toc: rect(".long-form-layout > .page-toc"),
+        body: rect(".long-form-layout > .long-form-body"),
+    });
+});
+</script></body></html>
+""",
+        encoding="utf-8",
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), partial(QuietHandler, directory=str(output)))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    profile = tempfile.TemporaryDirectory()
+    try:
+        port = server.server_address[1]
+        completed = subprocess.run(
+            (
+                chromium,
+                "--headless",
+                "--disable-gpu",
+                "--no-sandbox",
+                "--hide-scrollbars",
+                f"--user-data-dir={profile.name}",
+                f"--window-size={width},1000",
+                "--virtual-time-budget=3000",
+                "--dump-dom",
+                f"http://127.0.0.1:{port}/geometry.html",
+            ),
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    finally:
+        profile.cleanup()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+    match = re.search(r'<pre id="result">([^<]+)</pre>', completed.stdout)
+    if match is None or match.group(1) == "pending":
+        raise AssertionError(f"Chromium did not return layout geometry: {completed.stderr[-1000:]}")
+    return json.loads(html.unescape(match.group(1)))
 
 
 class GeneratedDocumentTests(RepositoryFixture):
@@ -357,7 +434,7 @@ class GeneratedDocumentTests(RepositoryFixture):
             source = (self.root / contract.source).read_text(encoding="utf-8")
             toc = TocSemantics()
             toc.feed(self.pages[name])
-            direct_article_children = [
+            article_children = [
                 tag
                 for tag, _, ancestors in self.documents[name].elements
                 if ancestors
@@ -367,7 +444,13 @@ class GeneratedDocumentTests(RepositoryFixture):
             with self.subTest(name=name):
                 self.assertEqual(toc.nav_attributes, [{"class": "page-toc", "aria-label": "On this page"}])
                 self.assertEqual(toc.entries, source_toc(source))
-                self.assertEqual(direct_article_children[:2], ["h1", "nav"])
+                self.assertEqual(article_children, ["div"])
+                layout_children = [
+                    tag
+                    for tag, _, ancestors in self.documents[name].elements
+                    if ancestors and ancestors[-1][0] == "div" and ancestors[-1][1].get("class") == "long-form-layout"
+                ]
+                self.assertEqual(layout_children, ["h1", "nav", "div"])
                 for _, destination, _ in toc.entries:
                     self.assertEqual(self.documents[name].ids.count(destination[1:]), 1)
 
@@ -490,17 +573,37 @@ class GeneratedDocumentTests(RepositoryFixture):
 
     def test_long_form_contents_navigation_is_inline_then_becomes_a_left_rail(self) -> None:
         css = (self.output / "static/site.css").read_text(encoding="utf-8")
-        default_article = css.split(".long-form-content {", 1)[1].split("}", 1)[0]
         default_toc = css.split(".page-toc {", 1)[1].split("}", 1)[0]
-        self.assertNotIn("display: grid", default_article)
         self.assertIn("margin-block: 1.5rem 2.5rem", default_toc)
         wide = css.split("@media (min-width: 64rem)", 1)[1]
-        wide_article = wide.split(".long-form-content {", 1)[1].split("}", 1)[0]
-        wide_toc = wide.split(".long-form-content > .page-toc {", 1)[1].split("}", 1)[0]
-        self.assertIn("display: grid", wide_article)
-        self.assertIn("grid-template-columns: minmax(10rem, 13rem) minmax(0, 1fr)", wide_article)
+        wide_layout = wide.split(".long-form-layout {", 1)[1].split("}", 1)[0]
+        wide_toc = wide.split(".long-form-layout > .page-toc {", 1)[1].split("}", 1)[0]
+        wide_body = wide.split(".long-form-body {", 1)[1].split("}", 1)[0]
+        self.assertIn("display: grid", wide_layout)
+        self.assertIn("grid-template-columns: minmax(10rem, 13rem) minmax(0, 1fr)", wide_layout)
         self.assertIn("grid-column: 1", wide_toc)
-        self.assertIn("grid-row: 1", wide_toc)
+        self.assertIn("grid-row: 1 / span 2", wide_toc)
+        self.assertIn("grid-column: 2", wide_body)
+        self.assertIn("grid-row: 2", wide_body)
+
+    def test_chromium_geometry_keeps_wide_body_beside_toc_and_narrow_toc_inline(self) -> None:
+        wide = browser_geometry(self.output, 1600)
+        narrow = browser_geometry(self.output, 390)
+        wide_title = wide["title"]
+        wide_toc = wide["toc"]
+        wide_body = wide["body"]
+        self.assertEqual(wide["display"], "grid")
+        self.assertLess(wide_toc["right"], wide_title["left"])
+        self.assertAlmostEqual(wide_title["left"], wide_body["left"], delta=1)
+        self.assertGreaterEqual(wide_body["top"], wide_title["bottom"])
+        self.assertLess(wide_body["top"], wide_toc["bottom"])
+
+        narrow_title = narrow["title"]
+        narrow_toc = narrow["toc"]
+        narrow_body = narrow["body"]
+        self.assertEqual(narrow["display"], "block")
+        self.assertLessEqual(narrow_title["bottom"], narrow_toc["top"])
+        self.assertLessEqual(narrow_toc["bottom"], narrow_body["top"])
 
     def test_pinned_color_contrasts_meet_text_component_and_status_thresholds(
         self,

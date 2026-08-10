@@ -545,7 +545,7 @@ def _render_document(source: str, contract: DocumentContract) -> tuple[str, str]
     rendered: list[str] = []
     description = ""
     toc = _render_document_toc(blocks, contract, references)
-    for index, block in enumerate(blocks):
+    for block in blocks:
         if block.kind == "heading":
             plain_heading = _plain_inline(str(block.value), contract, references)
             rendered.append(
@@ -561,11 +561,22 @@ def _render_document(source: str, contract: DocumentContract) -> tuple[str, str]
             rendered.append(f"<ul>{items}</ul>")
         else:
             raise ContractError(contract, "unsupported block or inline Markdown")
-        if index == 0 and toc:
-            rendered.append(toc)
     if not description:
         raise ContractError(contract, "missing meaningful paragraph for metadata")
-    output = "\n".join(rendered)
+    if toc:
+        output = "\n".join(
+            (
+                '<div class="long-form-layout">',
+                rendered[0],
+                toc,
+                '<div class="long-form-body">',
+                *rendered[1:],
+                "</div>",
+                "</div>",
+            )
+        )
+    else:
+        output = "\n".join(rendered)
     for source_relative in SOURCE_RELATIVE_URLS:
         if f'href="{html.escape(source_relative, quote=True)}"' in output:
             raise ContractError(contract, "unexpanded source-relative link")
