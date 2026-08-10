@@ -338,7 +338,7 @@ direction is available without seeing animation or SVG.
 `createRun({seed,reducedMotion=false})` returns a new aggregate with this conceptual shape:
 
 ```text
-state, seed, missionSeconds, completedSites, furthestX, legCameraFloor
+state, seed, missionSeconds, completedSites, awardRatio, furthestX, legCameraFloor
 pose, commanded, fuel
 generatorCursor, retainedChunks, retainedSites
 activeSiteId, targetSiteId, targetRouteProof
@@ -352,7 +352,7 @@ JavaScript number measured in engine-seconds. There is no capacity, clamp, or aw
 unused fuel always carries forward.
 
 Preflight uses the checked-in site 0 and initial pose but no active run seed or visible fuel. START
-creates site 0 as target, fuel `30`, `completedSites=0`, and the initial approach:
+creates site 0 as target, fuel `30`, `completedSites=0`, `awardRatio=3`, and the initial approach:
 `(x,y,vx,vy,angle,angularVelocity)=(30,32,0.8,-0.4,0,0)`.
 
 ### 7.2 State machine
@@ -382,8 +382,9 @@ deployment state.
 
 Safe contact performs one indivisible service preparation before `landed` renders: generate and
 prove the next site, mark the contacted can collected, add its award, increment `completedSites`,
-and freeze upright at the deck. If next-site generation hits its invariant error, none of these
-mutations commit and section 5.3's distinct non-restartable error result applies. Normal timing is:
+advance `awardRatio` exactly once, and freeze upright at the deck. If next-site generation hits its
+invariant error, none of these mutations commit and section 5.3's distinct non-restartable error
+result applies. Normal timing is:
 
 1. `landed`, 300 ms: settle, open the G bay, and show the collected-can/fuel result.
 2. `deploying`, 1,800 ms: the agent descends for 300 ms, crosses to the NOC entry by 1,650 ms, and
@@ -409,6 +410,7 @@ The model deep-copies and freezes this exact checkpoint after power and before l
 ```text
 seed
 completedSites
+awardRatio = already advanced ratio for the next site's award
 generatorCursor
 pose.x = clamp(raw contact x, platformLeft + 1.6, platformRight - 1.6)
 pose.y = platform top
@@ -429,9 +431,10 @@ survives checkpoint restore; it cannot affect physics, world, fuel, or awards. R
 other excluded values, restores a fresh checkpoint copy, keeps the current run seed, and enters
 `launching`, so the restored vehicle visibly begins on the last powered pad and pays the same
 automatic-launch fuel again. Repeated restarts restore exactly the same post-award fuel; they never
-recollect the can, add the award, increment progress, or repower the NOC. Before the first powered
-site, RESTART recreates the initial approach with the same run seed and initial `30` fuel. Exit or
-ordinary reload discards the checkpoint and gets a fresh seed and zero crash ordinal.
+recollect the can, add the award, advance `awardRatio`, increment progress, or repower the NOC.
+Before the first powered site, RESTART recreates the initial approach with the same run seed,
+initial `30` fuel, and ratio `3`. Exit or ordinary reload discards the checkpoint and gets a fresh
+seed and zero crash ordinal.
 
 ## 8. Physics, fuel, and fixed-step clock
 
@@ -545,10 +548,11 @@ Before search, construct a provisional checkpoint from the prospective service r
 upright origin pose, completed-site count, generator cursor, active and target IDs, retained chunks,
 collected current can, powered current NOC, and retained-site order are exactly the values the later
 real checkpoint will receive. `targetRouteProof` is the output being computed, not a search input.
-The only route-relevant difference is provisional `fuel=SEARCH_FUEL_RESERVE`, where
+The provisional value also carries the already computed next `awardRatio`, but search does not read
+it. The only route-relevant difference is provisional `fuel=SEARCH_FUEL_RESERVE`, where
 `SEARCH_FUEL_RESERVE=50.0`. The maximum possible scheduled burn is below `49.5`: two engines for the
 750 ms launch plus two engines throughout the full 24-second horizon. Search therefore never depends
-on actual carried fuel or an early award.
+on actual carried fuel, the current ratio, or an early award.
 
 Search resolution is:
 
@@ -610,31 +614,39 @@ the successful replay, smaller-failure replay, quantum, schedule digest, and bur
 `targetRouteProof`. Candidate generation accepts no site without both witnesses. Neither replay may
 read the run's carried reserve. The `50/0.05+1=1,001` possible allowances are a hard replay bound.
 
-For zero-based award index `i=completedSites` before increment, compute:
+Use the run's stored `awardRatio` for the current award, then advance it exactly once with this O(1)
+pure function:
 
 ```js
-let ratio = 3;
-for (let index = 1; index <= i; index += 1) {
-  const raw = 1 + 2 * 0.82 ** index;
-  ratio = Math.max(1 + Number.EPSILON, Math.min(raw, ratio - Number.EPSILON));
+export function nextAwardRatio(current) {
+  const floor = 1 + Number.EPSILON;
+  if (current <= floor) {
+    return floor;
+  }
+  const raw = 1 + (current - 1) * 0.82;
+  return Math.max(floor, Math.min(raw, current - Number.EPSILON));
 }
-const award = demonstratedMinimum * ratio;
+
+const award = demonstratedMinimum * model.awardRatio;
+const nextRatio = nextAwardRatio(model.awardRatio);
 ```
 
-Thus the first award is exactly `3 * minimum`. Ratios are strictly decreasing while
-`ratio > 1+Number.EPSILON`, then constant, and therefore non-increasing, at the `1+Number.EPSILON`
-floor. Every stored ratio is greater than one. Tests cover indexes through underflow and require
-`next < previous` before the floor, then `next === previous`, plus `next > 1` throughout. Add
-`award` to existing fuel without rounding or a capacity clamp. Display only the resulting reserve to
-one decimal place.
+This recurrence is equivalent to `1+2*0.82**i` until finite precision would repeat or cross the
+floor. The explicit `current-Number.EPSILON` branch forces strict decrease before the floor. The
+result then stays constant, and therefore non-increasing, at `1+Number.EPSILON`; it is always
+greater than one. START stores `3`, so the first award is exactly `3*minimum`. Add `award` to
+existing fuel without rounding or a capacity clamp, store `nextRatio` before incrementing to the
+next site, and display only the resulting reserve to one decimal place. No award path loops over
+`completedSites`.
 
 The contacted site's gas can is consumed only after the proof succeeds. The award is based on the
 new target, so site 0's can funds leg 1. Initial fuel funds the approach to site 0. After the NOC is
 powered, replace provisional trial fuel with `carriedFuelAtContact + award`, attach the proof, and
-freeze the real checkpoint. Two otherwise identical proof inputs with different carried reserves
-must produce byte-identical route proofs and awards. Automatic launch spends from real checkpoint
-fuel in actual play. Carried excess can therefore compensate for a later flight that uses more than
-the reference route.
+freeze the real checkpoint with `nextRatio`. Proofs are byte-identical across different carried
+reserves or ratios because neither is a planner input. With the same current ratio, different
+carried reserves also produce the same award; changing the ratio changes only the award, never the
+proof. Automatic launch spends from real checkpoint fuel in actual play. Carried excess can
+therefore compensate for a later flight that uses more than the reference route.
 
 ## 11. Input, focus, and lifecycle
 
@@ -730,22 +742,22 @@ contact task.
 Numerical physics tests use tolerance `1e-10`; strings, integers, states, seed values, DOM order,
 and serialized world descriptors are exact. Every schedule includes an explicit final callback.
 
-| Vector                | Input                                                                  | Expected result                                                                                                            |
-| --------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Gravity, 120 steps    | `(10,30,0,0)`, zero angle/engines, fuel 30                             | `x=10`, `y=28.4875`, `vx=0`, `vy=-3`, fuel `30`                                                                            |
-| Collective, 120 steps | Same pose, engines `(0.72,0.72)`                                       | `y=34.5854`, `vy=9.096`, angle/x unchanged, fuel `28.56`                                                                   |
-| One right-engine step | Same pose, engines `(0,1)`                                             | `y=30.000375`, `vy=0.045`, angular velocity `-0.583333333333`, angle `-0.00486111111111`, fuel `29.9916666666667`          |
-| Exhaustion            | Fuel `0.005`, one step, engines `(1,1)`                                | Effective engines `(0.3,0.3)`, fuel exactly `0`                                                                            |
-| Plumes                | `u=0,0.5,1`                                                            | scales `0.08,0.54,1`; opacities `0.25,0.625,1`                                                                             |
-| First site            | Any normalized seed                                                    | ID `0`, platform center `36`, width `9.6`, top `native maximum+0.8`, NOC count `1`, can present                            |
-| Ratio                 | award indexes `0,1,2,10`                                               | `3`, `2.64`, `2.3448`, `1+2*0.82^10`; every finite index is greater than one                                               |
-| Safe inclusive edge   | Target top; `vx=1.4,vy=-2.2,angle=-8,omega=12`                         | safe contact                                                                                                               |
-| Unsafe epsilon        | Any one safe magnitude increased by `1e-9`                             | unsafe contact                                                                                                             |
-| Swept thin obstacle   | Hull crosses a `0.35 m` deck between step endpoints                    | first crossing detected, never tunnels                                                                                     |
-| Frame equivalence     | Initial approach, no input, callbacks to 1,000 ms at 30, 60, and 120Hz | 120 steps; `x=30.8`, `y=30.0875`, `vx=0.8`, `vy=-3.4`, fuel `30`                                                           |
-| Checkpoint replay     | Award, launch, crash, RESTART twice                                    | each restart starts from identical post-award fuel/site flags; no can, award, or progress duplication                      |
-| Route quantum         | Accepted representative route                                          | allowance `minimum` lands safely; `minimum-0.05` cannot complete the stored schedule                                       |
-| Long run              | 100 successful deterministic sites                                     | at most 10 chunks, 3 sites, 8 debris, 80 world children, 64 input edges; reserve equals initial plus awards minus all burn |
+| Vector                | Input                                                                  | Expected result                                                                                                   |
+| --------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Gravity, 120 steps    | `(10,30,0,0)`, zero angle/engines, fuel 30                             | `x=10`, `y=28.4875`, `vx=0`, `vy=-3`, fuel `30`                                                                   |
+| Collective, 120 steps | Same pose, engines `(0.72,0.72)`                                       | `y=34.5854`, `vy=9.096`, angle/x unchanged, fuel `28.56`                                                          |
+| One right-engine step | Same pose, engines `(0,1)`                                             | `y=30.000375`, `vy=0.045`, angular velocity `-0.583333333333`, angle `-0.00486111111111`, fuel `29.9916666666667` |
+| Exhaustion            | Fuel `0.005`, one step, engines `(1,1)`                                | Effective engines `(0.3,0.3)`, fuel exactly `0`                                                                   |
+| Plumes                | `u=0,0.5,1`                                                            | scales `0.08,0.54,1`; opacities `0.25,0.625,1`                                                                    |
+| First site            | Any normalized seed                                                    | ID `0`, platform center `36`, width `9.6`, top `native maximum+0.8`, NOC count `1`, can present                   |
+| Ratio                 | Start at `3`; apply `nextAwardRatio` successively                      | `3`, `2.64`, `2.3448`, then strict decrease to constant `1+Number.EPSILON`; O(1) per call                         |
+| Safe inclusive edge   | Target top; `vx=1.4,vy=-2.2,angle=-8,omega=12`                         | safe contact                                                                                                      |
+| Unsafe epsilon        | Any one safe magnitude increased by `1e-9`                             | unsafe contact                                                                                                    |
+| Swept thin obstacle   | Hull crosses a `0.35 m` deck between step endpoints                    | first crossing detected, never tunnels                                                                            |
+| Frame equivalence     | Initial approach, no input, callbacks to 1,000 ms at 30, 60, and 120Hz | 120 steps; `x=30.8`, `y=30.0875`, `vx=0.8`, `vy=-3.4`, fuel `30`                                                  |
+| Checkpoint replay     | Award, launch, crash, RESTART twice                                    | identical post-award fuel/site flags/next ratio; no can, award, ratio, or progress duplication                    |
+| Route quantum         | Accepted representative route                                          | allowance `minimum` lands safely; `minimum-0.05` cannot complete the stored schedule                              |
+| Long run              | 100 successful deterministic sites                                     | fixed work per ratio advance; bounded nodes/edges; reserve equals initial plus awards minus all burn              |
 
 World tests pin complete JSON descriptors and route-proof digests for seeds `1`, `0x12345678`, and
 `0xffffffff`. The independent world fixtures begin with these exact values:
@@ -786,20 +798,21 @@ static/lander-model.js
 static/lander-game.js
 ```
 
-| Layer                                                                   | Required coverage                                                                                                                                                                                                                                                                                                                                                                                                         |
-| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `node --test website/tests/lander-world.test.mjs`                       | Mixer and injected seeds; exact terrain/site vectors; shared boundaries; diversity; 9.6 m elevated replacement; one NOC/can; eight-attempt bound/fallback; viewport/window keys; fixed retention ceilings; target visibility; descriptor immutability                                                                                                                                                                     |
-| `node --test website/tests/lander-model.test.mjs`                       | State/event matrix; 8.4 authority vectors; fuel and uncapped carry; fixed scheduler; swept contacts; provisional 50-unit search; exact bins, score, survivor, tie, and witness order; proof independence from carried excess; smaller replay failure; ratio floor; upright checkpoint; generation-error status/disabled Restart; launch burn; exactly eight normal debris and zero reduced-motion debris; ordinal restore |
-| `python -m unittest discover -s website/tests -p 'test_*.py'`           | Exact 12-file artifacts at both bases; one-way `site_validation` to `site_game_validation` import; helper-owned game contract; local import closure; byte-equivalent subtree; exact DOM/order/data selectors; no-JS scene; fuel/actions; local SVG/CSS; and forbidden network, storage, audio, canvas, service-worker, navigation, cookie, and uncontrolled-random surfaces                                               |
-| Manual Chrome and Edge pre-merge; Firefox and Safari/WebKit post-launch | Start/focus; Space hold; arrows/vi; touch tap/hold/drag; later braking feel; three successive sites; platform/NOC/can legibility; battery/antenna power; arrow enter-view boundary; excess carry; empty-fuel response; every crash surface; checkpoint replay; Exit fresh run; hidden pause; request log proving zero game-initiated requests                                                                             |
-| Manual responsive and accessibility acceptance                          | 320 CSS pixels, 400 percent zoom, touch landscape, and wide viewport; no overflow or clipped actions; 44-pixel targets; logical focus; no trap; useful no-CSS/no-JS order; named fuel value; restrained live announcements; solid direction cue; static reduced-motion cue; silent decorative SVG; fixed-token 4.5:1 text and 3:1 necessary-graphic contrast                                                              |
-| Performance and longevity witness                                       | 100-site deterministic run; ceilings in section 6 never exceeded; candidate planner timing recorded; hidden tab has no frame or mission progress; normal active frame p95 below 4 ms; teardown leaves no listener, timer, capture, frame, enabled dead action, or growing retained history                                                                                                                                |
+| Layer                                                                   | Required coverage                                                                                                                                                                                                                                                                                                                                                           |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `node --test website/tests/lander-world.test.mjs`                       | Mixer and injected seeds; exact terrain/site vectors; shared boundaries; diversity; 9.6 m elevated replacement; one NOC/can; eight-attempt bound/fallback; viewport/window keys; fixed retention ceilings; target visibility; descriptor immutability                                                                                                                       |
+| `node --test website/tests/lander-model.test.mjs`                       | State/event matrix; 8.4 authority vectors; fuel and uncapped carry; fixed scheduler; swept contacts; provisional 50-unit search; exact beam/witness order; proof independence; smaller failure; O(1) ratio recurrence/floor and checkpoint restore; upright checkpoint; generation-error result; launch burn; eight normal and zero reduced-motion debris; ordinal restore  |
+| `python -m unittest discover -s website/tests -p 'test_*.py'`           | Exact 12-file artifacts at both bases; one-way `site_validation` to `site_game_validation` import; helper-owned game contract; local import closure; byte-equivalent subtree; exact DOM/order/data selectors; no-JS scene; fuel/actions; local SVG/CSS; and forbidden network, storage, audio, canvas, service-worker, navigation, cookie, and uncontrolled-random surfaces |
+| Manual Chrome and Edge pre-merge; Firefox and Safari/WebKit post-launch | Start/focus; Space hold; arrows/vi; touch tap/hold/drag; later braking feel; three successive sites; platform/NOC/can legibility; battery/antenna power; arrow enter-view boundary; excess carry; empty-fuel response; every crash surface; checkpoint replay; Exit fresh run; hidden pause; request log proving zero game-initiated requests                               |
+| Manual responsive and accessibility acceptance                          | 320 CSS pixels, 400 percent zoom, touch landscape, and wide viewport; no overflow or clipped actions; 44-pixel targets; logical focus; no trap; useful no-CSS/no-JS order; named fuel value; restrained live announcements; solid direction cue; static reduced-motion cue; silent decorative SVG; fixed-token 4.5:1 text and 3:1 necessary-graphic contrast                |
+| Performance and longevity witness                                       | 100-site deterministic run; ceilings in section 6 never exceeded; candidate planner timing recorded; hidden tab has no frame or mission progress; normal active frame p95 below 4 ms; teardown leaves no listener, timer, capture, frame, enabled dead action, or growing retained history                                                                                  |
 
 Mutation tests reject duplicated/moved shared markup, a second scheduler/controller/site authority,
 game checks added to the near-limit validator, artifact count drift, pad-width drift, fuel caps, can
-recollection, proof dependence on carried fuel, route proofs that omit launch, an unbounded
-candidate/replay loop, retained-node growth, non-swept contact, zero normal-motion debris,
-animated-only direction, atmospheric crash effects, or a durable/network surface.
+recollection, proof dependence on carried fuel, route proofs that omit launch, ratio recomputation
+from `completedSites`, an unbounded candidate/replay loop, retained-node growth, non-swept contact,
+zero normal-motion debris, animated-only direction, atmospheric crash effects, or a durable/network
+surface.
 
 ## 16. Traceability
 
