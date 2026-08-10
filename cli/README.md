@@ -85,9 +85,9 @@ agw console delete my-console              # Extra shells are lost but sessions 
 - Python 3.12+ (uv will install one for you if needed)
 - [uv](https://docs.astral.sh/uv/) or [pipx](https://pipx.pypa.io/) for installation
 - [Tailscale](https://tailscale.com/) installed and connected (for VM workspaces)
-- One of: [Lima](https://lima-vm.io/), Azure CLI (`az`), AWS credentials for EC2,
-  [Proxmox](https://www.proxmox.com/), or WSL2 (for VM provisioning; Azure, AWS, and Proxmox also
-  need their [system plugin](#system-plugins) enabled)
+- One of: [Lima](https://lima-vm.io/), Azure CLI (`az`), AWS credentials for EC2, Google Cloud
+  credentials for GCE, [Proxmox](https://www.proxmox.com/), or WSL2 (for VM provisioning; Azure,
+  AWS, GCP, and Proxmox also need their [system plugin](#system-plugins) enabled)
 
 ## Global Options
 
@@ -125,16 +125,16 @@ Pressing Ctrl-C during a long-running operation triggers best-effort cleanup. Wh
 can roll back (e.g. `vm create` during the provisioning phase, `workspace create`, `agent create`,
 `session create`) it undoes the partial DB / on-VM state and prints `Cancelling X... rolling back.`.
 On every platform the `vm create` provisioning-phase rollback also deletes the partially created
-backend state: Azure the cloud resource set (VM, NIC, public IP, NSG, vnet, disk), which can take a
-minute or two; Proxmox the partially cloned VM (cancelling a still-running clone task first); Lima
-the instance (local, or on the site's placement host for an ssh-placed site); WSL2 the distro plus
-its install directory. A second Ctrl-C abandons that cleanup, printing what to remove manually: the
-resource group and name prefix, the node and VMID, or the exact removal command
-(`limactl delete --force <name>`, run on the placement host for an ssh-placed site, or
-`wsl --unregister <name>` plus deleting the install directory it names). Where rollback isn't
-possible (`vm reinit`, `agent reinit`, the init phase of `vm create`) it prints a recovery hint: the
-next command to run (`vm reinit`, `vm delete --force`, ...). Every cancellation exits with the
-conventional SIGINT exit code (130).
+backend state: Azure the cloud resource set (VM, NIC, public IP, NSG, vnet, disk), GCE the
+provider-ID-owned instance and allow/deny rules, which can take a minute or two; Proxmox the
+partially cloned VM (cancelling a still-running clone task first); Lima the instance (local, or on
+the site's placement host for an ssh-placed site); WSL2 the distro plus its install directory. A
+second Ctrl-C abandons that cleanup, printing what to remove manually: the resource group and name
+prefix, the node and VMID, or the exact removal command (`limactl delete --force <name>`, run on the
+placement host for an ssh-placed site, or `wsl --unregister <name>` plus deleting the install
+directory it names). Where rollback isn't possible (`vm reinit`, `agent reinit`, the init phase of
+`vm create`) it prints a recovery hint: the next command to run (`vm reinit`, `vm delete --force`,
+...). Every cancellation exits with the conventional SIGINT exit code (130).
 
 ## Commands
 
@@ -391,17 +391,17 @@ Agentworks ships some vendor- and tool-specific capabilities (VM platforms, harn
 git-credential providers, secret backends) as **system plugins**: separable bundles that are
 installed but off by default. The shipped build installs `azure` (the `azure-vm` VM platform, the
 `azdo` git-credential provider, and the `az-cli` install-command), `proxmox` (the `proxmox` VM
-platform), `aws` (the `aws-ec2` VM platform), `onepassword` (the `onepassword` secret backend),
-`claude` (the `claude-code` harness integration and the `claude` CLI install-command), and `codex`
-(the `codex` harness integration and the `codex` CLI install-command). (This is a different sense of
-"plugin" from [Claude Code Plugins](#claude-code-plugins) below, which installs marketplace plugins
-into Claude Code itself.)
+platform), `aws` (the `aws-ec2` VM platform), `gcp` (the `gcp-gce` VM platform), `onepassword` (the
+`onepassword` secret backend), `claude` (the `claude-code` harness integration and the `claude` CLI
+install-command), and `codex` (the `codex` harness integration and the `codex` CLI install-command).
+(This is a different sense of "plugin" from [Claude Code Plugins](#claude-code-plugins) below, which
+installs marketplace plugins into Claude Code itself.)
 
 Opt in by name in `config.toml`:
 
 ```toml
 [plugins]
-system = ["azure", "aws", "proxmox", "onepassword", "claude", "codex"]   # only the ones you use
+system = ["azure", "aws", "gcp", "proxmox", "onepassword", "claude", "codex"] # only those you use
 ```
 
 A resource that references a not-enabled plugin's contribution (an `azure-vm` vm-site, a
@@ -418,7 +418,9 @@ group listing every installed plugin, its description, and whether it is enabled
 
 See [docs/guides/resources.md](../docs/guides/resources.md#system-plugins) for the full model
 (origins, the disabled-resource semantics, config-error deferral) and the upgrade note for configs
-that relied on Azure, Proxmox, 1Password, or Claude Code before they became opt-in.
+that relied on Azure, Proxmox, 1Password, or Claude Code before they became opt-in. Google Compute
+Engine setup, firewall prerequisites, JSON-secret compaction, and provider-ID-safe recovery are
+covered in [Using Google Compute Engine](../docs/guides/gcp.md).
 
 ### Mise (Polyglot Tool Manager)
 

@@ -87,9 +87,7 @@ class _Instances:
             "instance",
             request_id=request.request_id,
             target_id=201,
-            target_link=(
-                f"projects/{request.project}/zones/{request.zone}/instances/{request.instance}"
-            ),
+            target_link=(f"projects/{request.project}/zones/{request.zone}/instances/{request.instance}"),
         )
 
 

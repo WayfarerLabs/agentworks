@@ -277,9 +277,10 @@ def test_client_construction_failure_is_mode_named_detached_and_not_cached(monke
     assert cache._clients == {}
 
 
-def test_gcp_foundation_import_does_not_publish_plugin_or_platform() -> None:
+def test_gcp_import_publishes_only_through_installed_plugin_registration() -> None:
     from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
     from agentworks.plugins import SYSTEM_PLUGINS
 
-    assert "gcp" not in SYSTEM_PLUGINS
-    assert "gcp-gce" not in VM_PLATFORM_REGISTRY
+    assert "gcp" in SYSTEM_PLUGINS
+    assert "gcp-gce" in VM_PLATFORM_REGISTRY
+    assert SYSTEM_PLUGINS["gcp"].capabilities["vm-platform"] == (VM_PLATFORM_REGISTRY["gcp-gce"],)

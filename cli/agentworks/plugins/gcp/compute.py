@@ -56,8 +56,7 @@ def verify_zonal_operation(
         or (expected_resource_id is not None and target_id != expected_resource_id)
     ):
         raise GCEOperationError(
-            f"Google Cloud returned incomplete ownership identity for instance "
-            f"{project_id}/{zone}/{instance_name}",
+            f"Google Cloud returned incomplete ownership identity for instance {project_id}/{zone}/{instance_name}",
             entity_kind="gcp-instance",
             entity_name=instance_name,
             hint="retain the named instance until its provider identity can be established",
@@ -184,9 +183,7 @@ def resolve_balanced_disk_type(
             hint="select a zone that supports balanced persistent disks",
         )
     if not str(disk_type.self_link):
-        raise GCEError(
-            f"GCE disk type '{config.project_id}/{config.zone}/pd-balanced' returned no self link"
-        )
+        raise GCEError(f"GCE disk type '{config.project_id}/{config.zone}/pd-balanced' returned no self link")
     return disk_type
 
 

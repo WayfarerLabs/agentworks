@@ -8,9 +8,8 @@ per backend kind (``lima``, ``wsl2`` as core built-ins). The declarable
 instances; manager code never imports this registry or the concrete
 classes.
 
-The ``proxmox`` platform (``agentworks.plugins.proxmox``) and the
-``azure-vm`` platform (``agentworks.plugins.azure``) now ship in opt-in
-system plugins; each plugin's adapter re-seats its class into
+The ``proxmox``, ``azure-vm``, ``aws-ec2``, and ``gcp-gce`` platforms ship in opt-in system
+plugins; each plugin's adapter re-seats its class into
 ``VM_PLATFORM_REGISTRY`` at import, so site resolution still finds it by
 registry name, while its ROW publishes with a ``system-plugin`` origin
 (the built-in publisher skips it).

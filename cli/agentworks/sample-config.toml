@@ -80,11 +80,12 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # Claude Code harness integration and its `claude` CLI install-command), `codex`
 # (the Codex harness integration and its `codex` CLI install-command), `proxmox`
 # (the Proxmox VE VM platform), `azure` (the Azure VM platform, the Azure
-# DevOps git-credential provider, and the `az-cli` install-command), and `aws`
-# (the EC2 VM platform). `agw doctor` shows a System plugins roster with each
+# DevOps git-credential provider, and the `az-cli` install-command), `aws`
+# (the EC2 VM platform), and `gcp` (the Google Compute Engine VM platform).
+# `agw doctor` shows a System plugins roster with each
 # plugin's state.
 #[plugins]
-#system = ["onepassword", "claude", "codex", "proxmox", "azure", "aws"]   # names of installed system plugins to enable
+#system = ["onepassword", "claude", "codex", "proxmox", "azure", "aws", "gcp"]   # installed plugins to enable
 
 # --- Default values for CLI flags ---
 

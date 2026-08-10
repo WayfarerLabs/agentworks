@@ -80,17 +80,20 @@ class _Instances:
 
 
 def _resource() -> compute_v1.Instance:
-    return build_instance_resource(
-        instance_name="vm-a",
-        machine_type_url="projects/project-a/zones/us-central1-a/machineTypes/e2-standard-2",
-        image_url="projects/debian-cloud/global/images/debian-12-v1",
-        disk_type_url="projects/project-a/zones/us-central1-a/diskTypes/pd-balanced",
-        disk_gib=40,
-        network=NetworkSelection("us-central1", _NETWORK, None),
-        network_tag="vm-a-tag",
-        admin_username="admin",
-        ssh_public_key="ssh-ed25519 PUBLIC",
-        startup_script="#!/bin/bash\necho ready\n",
+    return cast(
+        compute_v1.Instance,
+        build_instance_resource(
+            instance_name="vm-a",
+            machine_type_url="projects/project-a/zones/us-central1-a/machineTypes/e2-standard-2",
+            image_url="projects/debian-cloud/global/images/debian-12-v1",
+            disk_type_url="projects/project-a/zones/us-central1-a/diskTypes/pd-balanced",
+            disk_gib=40,
+            network=NetworkSelection("us-central1", _NETWORK, None),
+            network_tag="vm-a-tag",
+            admin_username="admin",
+            ssh_public_key="ssh-ed25519 PUBLIC",
+            startup_script="#!/bin/bash\necho ready\n",
+        ),
     )
 
 

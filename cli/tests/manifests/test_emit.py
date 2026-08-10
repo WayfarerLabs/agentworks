@@ -741,7 +741,7 @@ def test_emitted_schemas_accept_every_document_the_full_load_path_accepts(tmp_pa
     from agentworks.bootstrap import build_registry
     from agentworks.config import load_config
 
-    assert {"azure-vm", "aws-ec2", "proxmox"} <= _platform_names()
+    assert {"azure-vm", "aws-ec2", "gcp-gce", "proxmox"} <= _platform_names()
 
     resources = tmp_path / "resources"
     resources.mkdir()

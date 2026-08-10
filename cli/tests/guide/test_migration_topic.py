@@ -264,6 +264,7 @@ def test_migration_secret_paths_match_the_live_implementation_references() -> No
             "vm-platform/proxmox",
             "vm-platform/azure-vm",
             "vm-platform/aws-ec2",
+            "vm-platform/gcp-gce",
             "vm-platform/lima",
         )
     }
@@ -271,9 +272,11 @@ def test_migration_secret_paths_match_the_live_implementation_references() -> No
     assert ("token_secret",) in paths["vm-platform/proxmox"]
     assert ("auth", "secret") in paths["vm-platform/azure-vm"]
     assert ("auth", "access_key_secret") in paths["vm-platform/aws-ec2"]
+    assert ("auth", "secret") in paths["vm-platform/gcp-gce"]
     assert ("placement", "host") in paths["vm-platform/lima"]
     assert ("service_principal", "secret") not in paths["vm-platform/azure-vm"]
     assert ("credentials", "access_key_secret") not in paths["vm-platform/aws-ec2"]
+    assert ("service_account_key",) not in paths["vm-platform/gcp-gce"]
     assert ("vm_host",) not in paths["vm-platform/lima"]
 
 

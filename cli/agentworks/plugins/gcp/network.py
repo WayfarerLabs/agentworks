@@ -414,12 +414,12 @@ def insert_firewall_reconciled(
     attempt.ownership = FirewallOwnership(
         rule_name=attempt.rule_name,
         resource_id=_verify_firewall_operation(
-        operation,
-        request_id=attempt.request_id,
-        operation_type="insert",
-        project_id=project_id,
-        rule_name=attempt.rule_name,
-        expected_resource_id=None,
+            operation,
+            request_id=attempt.request_id,
+            operation_type="insert",
+            project_id=project_id,
+            rule_name=attempt.rule_name,
+            expected_resource_id=None,
         ),
     )
 

@@ -75,7 +75,7 @@ from agentworks.manifests.spec_model import spec_model
 from agentworks.schema import iter_field_docs
 
 assert "agentworks.plugins" not in sys.modules, "the plugins package was already imported"
-expected = {"azure-vm", "aws-ec2", "proxmox"}
+expected = {"azure-vm", "aws-ec2", "gcp-gce", "proxmox"}
 
 docs = {doc.path: doc for doc in iter_field_docs(spec_model("vm-site"))}
 tags = {arm.tag for arm in docs[("platform", "root")].union_arms}
@@ -88,7 +88,7 @@ import sys
 from agentworks.manifests.emit import document_schema
 
 assert "agentworks.plugins" not in sys.modules, "the plugins package was already imported"
-expected = {"azure-vm", "aws-ec2", "proxmox"}
+expected = {"azure-vm", "aws-ec2", "gcp-gce", "proxmox"}
 
 mapping = set(document_schema("vm-site")["$defs"]["VmPlatformConfig"]["discriminator"]["mapping"])
 assert expected <= mapping, f"emitted schema is missing {sorted(expected - mapping)}"
@@ -102,7 +102,7 @@ import sys
 from agentworks.manifests.reference import reference_for
 
 assert "agentworks.plugins" not in sys.modules, "the plugins package was already imported"
-expected = {"azure-vm", "aws-ec2", "proxmox"}
+expected = {"azure-vm", "aws-ec2", "gcp-gce", "proxmox"}
 
 listed = {alt.name for alt in reference_for("vm-platform").alternatives}
 assert expected <= listed, f"describe-kind is missing {sorted(expected - listed)} (got {sorted(listed)})"
@@ -118,7 +118,7 @@ from agentworks.manifests.reference import reference_for
 
 assert "agentworks.plugins" not in sys.modules, "the plugins package was already imported"
 
-for name in ("aws-ec2", "azure-vm", "proxmox"):
+for name in ("aws-ec2", "azure-vm", "gcp-gce", "proxmox"):
     assert reference_for(f"vm-platform/{name}").implementation == name
 """
 

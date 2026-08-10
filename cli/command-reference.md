@@ -286,19 +286,19 @@ default; `--allow-interaction` opts into prompting or provider authentication fo
 
 ### VMs
 
-Manage virtual machines across declared vm-sites (Lima local or remote, Azure, AWS EC2, WSL2,
-Proxmox).
+Manage virtual machines across declared vm-sites (Lima local or remote, Azure, AWS EC2, Google
+Compute Engine, WSL2, Proxmox).
 
 Where VMs are created is declared as `vm-site` resources: YAML manifests under
 `~/.config/agentworks/resources/` that pair a platform (the code that runs VMs on one backend kind)
 with its configuration. The `lima-local` and `wsl2` sites ship built in and are always available;
-the `azure-vm`, `aws-ec2`, and `proxmox` platforms ship as the opt-in `azure`, `aws`, and `proxmox`
-system plugins (see [System Plugins](README.md#system-plugins)) and are not-ready until enabled.
-Every site registers on every host and reports not-ready when this host lacks what it needs (wsl2 is
-Windows-only; a local Lima site needs `limactl`; a platform may simply not be installed, or its
-plugin not enabled): a not-ready site still lists and describes, using it is an error naming the
-requirement, and `agw doctor` shows each platform's and site's state with the reason. Run
-`agw resource sample vm-site` for a commented, ready-to-edit document, and
+the `azure-vm`, `aws-ec2`, `gcp-gce`, and `proxmox` platforms ship as the opt-in `azure`, `aws`,
+`gcp`, and `proxmox` system plugins (see [System Plugins](README.md#system-plugins)) and are
+not-ready until enabled. Every site registers on every host and reports not-ready when this host
+lacks what it needs (wsl2 is Windows-only; a local Lima site needs `limactl`; a platform may simply
+not be installed, or its plugin not enabled): a not-ready site still lists and describes, using it
+is an error naming the requirement, and `agw doctor` shows each platform's and site's state with the
+reason. Run `agw resource sample vm-site` for a commented, ready-to-edit document, and
 `agw resource describe-kind vm-platform/azure-vm` (or any other platform) for that platform's own
 fields. The former `agw vm-host` registry is gone: a remote Lima host is now just a vm-site.
 

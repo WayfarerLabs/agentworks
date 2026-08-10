@@ -1,5 +1,12 @@
-"""Unregistered Google Compute Engine provider foundation.
+"""The opt-in ``gcp`` system plugin and its Compute Engine platform."""
 
-Phase 1 intentionally exposes no ``Plugin`` descriptor. Importing this
-package must not seat a VM platform or add an installed system plugin.
-"""
+from __future__ import annotations
+
+from agentworks.plugins.base import Plugin
+from agentworks.plugins.gcp.platform import GCEPlatform
+
+PLUGIN = Plugin(
+    name="gcp",
+    description="Google Compute Engine VM platform",
+    capabilities={"vm-platform": (GCEPlatform,)},
+)

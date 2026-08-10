@@ -555,12 +555,6 @@ class GCEPlatform(VMPlatform):
         )
         require_classic_first(live_network, project_id=identity.project_id)
         prefixes = operator_ssh_prefixes(config_allow_cidrs(config))
-        reject_priority_zero_conflicts(
-            list_firewalls(self._clients, ctx, identity.project_id),
-            network_url=identity.network_url,
-            operator_prefixes=prefixes,
-            target_tag=identity.network_tag,
-        )
         firewalls = self._clients.client("firewalls", ctx)
         route_name = transient_route_name(vm.hostname)
         require_firewall_name_available(firewalls, project_id=identity.project_id, rule_name=route_name)
