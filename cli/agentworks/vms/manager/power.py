@@ -591,7 +591,6 @@ def rekey_vm(
     """
     interaction = validate_interaction_policy(interaction)
     import ipaddress
-    import shlex
     import time
 
     from agentworks.bootstrap import load_request_registry
@@ -703,8 +702,9 @@ def rekey_vm(
         time.sleep(stabilize_secs)
 
         output.info("Joining new tailnet...")
-        quoted_key = shlex.quote(ts_auth_key)
-        exec_target.run(f"tailscale up --auth-key {quoted_key}", sudo=True, timeout=30)
+        from agentworks.capabilities.vm_platform.tailscale_join import join_tailscale_ephemerally
+
+        join_tailscale_ephemerally(exec_target, ts_auth_key, timeout=30)
         time.sleep(stabilize_secs)
 
         output.info("Restarting Tailscale daemon...")

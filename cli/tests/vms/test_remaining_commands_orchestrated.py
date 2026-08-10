@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from agentworks.capabilities.vm_platform.tailscale_join import TAILSCALE_JOIN_STDIN_COMMAND
 from agentworks.db import VMStatus
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import InteractionPolicy
@@ -260,7 +261,7 @@ def test_rekey_missing_key_fails_at_the_one_resolve_before_status(
 
 def _fake_rekey_transports(
     monkeypatch: pytest.MonkeyPatch,
-) -> list[str]:
+) -> list[tuple[str, dict[str, object]]]:
     """Fake the rekey body's out-of-band transport work: the native
     transport records the tailscale commands, the Tailscale-side
     verification succeeds, and the per-step stabilization sleeps cost
@@ -269,10 +270,10 @@ def _fake_rekey_transports(
 
     from agentworks.transports import SSHTransport
 
-    commands: list[str] = []
+    calls: list[tuple[str, dict[str, object]]] = []
 
     def _run(cmd: str, **kwargs: object) -> object:
-        commands.append(cmd)
+        calls.append((cmd, kwargs))
         if cmd == "tailscale ip -4":
             return SimpleNamespace(stdout="100.64.0.77\n", ok=True)
         return SimpleNamespace(stdout="", ok=True)
@@ -291,7 +292,7 @@ def _fake_rekey_transports(
     import time
 
     monkeypatch.setattr(time, "sleep", lambda secs: None)
-    return commands
+    return calls
 
 
 def test_rekey_one_boundary_burst_covers_key_and_site_secret(
@@ -310,14 +311,21 @@ def test_rekey_one_boundary_burst_covers_key_and_site_secret(
     _seed_vm(db)
     _reachable(monkeypatch, True)
     events = _fake_status(monkeypatch, VMStatus.RUNNING)
-    commands = _fake_rekey_transports(monkeypatch)
+    calls = _fake_rekey_transports(monkeypatch)
 
     vm_manager.rekey_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
 
     assert len(resolve_counter) == 1
     assert sorted(resolve_counter[0]) == ["proxmox-token", "tailscale-auth-key"]
     assert events == ["status"]
-    assert "tailscale up --auth-key tskey-new" in commands
+    sensitive = [(command, kwargs) for command, kwargs in calls if kwargs.get("input_text") is not None]
+    assert sensitive == [
+        (
+            TAILSCALE_JOIN_STDIN_COMMAND,
+            {"sudo": True, "timeout": 30, "input_text": "tskey-new\n"},
+        )
+    ]
+    assert all("tskey-new" not in command for command, _kwargs in calls)
     row = db.get_vm("box")
     assert row is not None and row.tailscale_host == "100.64.0.77"
     assert any("rekeyed successfully" in m for m in captured_output.info)

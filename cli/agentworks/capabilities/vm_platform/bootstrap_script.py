@@ -259,10 +259,10 @@ def generate_bootstrap_script(
 ) -> str:
     """Generate the Phase A bootstrap script with parameters baked in.
 
-    ``tailscale_auth_key=None`` leaves the join step deferred. This is the
-    Lima persistence-safe shape: Lima retains provision scripts in its
-    instance configuration, so its adapter delivers the resolved key through
-    a separate ephemeral boundary after the retained script has run.
+    ``tailscale_auth_key=None`` leaves the join step deferred. Provider
+    adapters use this persistence-safe shape whenever their platform retains
+    the script, then deliver the resolved key through a separate ephemeral
+    boundary after the retained script has run.
 
     ``swap`` (GiB, 0 to disable) is required rather than defaulted: the
     vm-template layer resolves it and every caller has the resolved value

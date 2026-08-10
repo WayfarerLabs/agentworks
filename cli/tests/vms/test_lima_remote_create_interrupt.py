@@ -244,6 +244,107 @@ def test_remote_standalone_logger_close_interrupt_propagates_after_cleanup(
     assert events == ["allocate", "stage", "logger", "run", "close", "cleanup"]
 
 
+def test_remote_template_cleanup_interrupt_preserves_active_failure_and_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks import remote_exec
+
+    events: list[str] = []
+    primary = SSHError("run failed")
+    cleanup_interrupt = KeyboardInterrupt("cleanup interrupted")
+
+    def _ssh_run(target: object, command: str, **kwargs: object) -> SimpleNamespace:
+        del target, kwargs
+        if "mktemp -d" in command:
+            events.append("allocate")
+        elif "cat >" in command:
+            events.append("stage")
+        else:
+            events.append("cleanup")
+            raise cleanup_interrupt
+        return _remote_ssh_success(command)
+
+    class _Logger:
+        display_path = "/tmp/provision.log"
+
+        def __init__(self, vm_name: str, command_stem: str) -> None:
+            del vm_name, command_stem
+            events.append("logger")
+
+        def close(self) -> None:
+            events.append("close")
+
+    def _run(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        events.append("run")
+        raise primary
+
+    _wire_remote_host(monkeypatch, events=[])
+    monkeypatch.setattr(lima_mod, "ssh_run", _ssh_run)
+    monkeypatch.setattr("agentworks.ssh.SSHLogger", _Logger)
+    monkeypatch.setattr(remote_exec, "run_detached", _run)
+
+    with pytest.raises(SSHError) as caught:
+        LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._create_remote(
+            "team-myvm",
+            _PROVIDER_YAML,
+            log_vm_name="myvm",
+        )
+
+    assert caught.value is primary
+    assert events == ["allocate", "stage", "logger", "run", "close", "cleanup"]
+
+
+def test_remote_standalone_template_cleanup_interrupt_remains_visible(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks import remote_exec
+
+    events: list[str] = []
+    cleanup_interrupt = KeyboardInterrupt("cleanup interrupted")
+
+    def _ssh_run(target: object, command: str, **kwargs: object) -> SimpleNamespace:
+        del target, kwargs
+        if "mktemp -d" in command:
+            events.append("allocate")
+        elif "cat >" in command:
+            events.append("stage")
+        else:
+            events.append("cleanup")
+            raise cleanup_interrupt
+        return _remote_ssh_success(command)
+
+    class _Logger:
+        display_path = "/tmp/provision.log"
+
+        def __init__(self, vm_name: str, command_stem: str) -> None:
+            del vm_name, command_stem
+            events.append("logger")
+
+        def close(self) -> None:
+            events.append("close")
+
+    def _run(*args: object, **kwargs: object) -> SimpleNamespace:
+        del args, kwargs
+        events.append("run")
+        return SimpleNamespace(exit_code=0, output="")
+
+    _wire_remote_host(monkeypatch, events=[])
+    monkeypatch.setattr(lima_mod, "ssh_run", _ssh_run)
+    monkeypatch.setattr("agentworks.ssh.SSHLogger", _Logger)
+    monkeypatch.setattr(remote_exec, "run_detached", _run)
+
+    with pytest.raises(KeyboardInterrupt) as caught:
+        LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._create_remote(
+            "team-myvm",
+            _PROVIDER_YAML,
+            log_vm_name="myvm",
+        )
+
+    assert caught.value is cleanup_interrupt
+    assert events == ["allocate", "stage", "logger", "run", "close", "cleanup"]
+
+
 def test_remote_provision_log_is_removed_by_normal_vm_delete(
     db: Database,
     tmp_path: Path,

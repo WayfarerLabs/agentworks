@@ -26,6 +26,7 @@ from agentworks.capabilities.vm_platform.bootstrap_script import (
     parse_bootstrap_output,
 )
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
+from agentworks.capabilities.vm_platform.tailscale_join import TAILSCALE_JOIN_STDIN_COMMAND
 from agentworks.db import VMStatus
 from agentworks.errors import ProvisioningError, StateError
 from agentworks.schema import AgwModel, NonEmptyStr
@@ -101,9 +102,7 @@ provision:
 {provision_script}
 """
 
-_TAILSCALE_JOIN_STDIN_COMMAND = "sudo -n /bin/bash -c " + shlex.quote(
-    'IFS= read -r TAILSCALE_AUTH_KEY && test -n "$TAILSCALE_AUTH_KEY" && tailscale up --auth-key "$TAILSCALE_AUTH_KEY"'
-)
+_TAILSCALE_JOIN_STDIN_COMMAND = "sudo -n /bin/bash -c " + shlex.quote(TAILSCALE_JOIN_STDIN_COMMAND)
 
 
 # Local and SSH placement use different transports, readiness rules, and
@@ -614,8 +613,17 @@ class LimaPlatform(VMPlatform):
                     if active_failure is None:
                         raise
         finally:
-            with contextlib.suppress(SSHError, OSError):
+            # Mirror the logger-close behavior above: cleanup runs after the
+            # primary span, but a second Ctrl-C cannot replace an active
+            # failure. A standalone cleanup interrupt remains visible.
+            active_failure = sys.exc_info()[1]
+            try:
                 self._remove_remote_template_dir(target, remote_template_dir)
+            except (SSHError, OSError):
+                pass
+            except KeyboardInterrupt:
+                if active_failure is None:
+                    raise
 
     def _allocate_remote_template_dir(self, target: SSHTarget) -> str:
         """Atomically allocate and validate a private remote staging directory."""

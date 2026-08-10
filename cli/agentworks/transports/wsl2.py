@@ -49,6 +49,7 @@ class WSL2Transport(Transport):
         check: bool = True,
         timeout: int | None = None,
         env: dict[str, str] | None = None,
+        input_text: str | None = None,
         retries: int | None = None,
         on_retry: Callable[[int, int], None] | None = None,
     ) -> SSHResult:
@@ -77,6 +78,7 @@ class WSL2Transport(Transport):
         try:
             result = subprocess.run(
                 args,
+                input=input_text,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -85,16 +87,24 @@ class WSL2Transport(Transport):
             )
         except subprocess.TimeoutExpired:
             timed_out = True
+        except Exception:
+            if input_text is None:
+                raise
+            raise SSHError(f"WSL2 stdin command could not be executed: {command}") from None
         if timed_out:
+            if input_text is not None:
+                raise SSHError(f"WSL2 stdin command timed out after {t}s: {command}") from None
             raise SSHError(f"WSL2 command timed out after {t}s: {command}") from None
         ssh_result = SSHResult(
             returncode=result.returncode,
-            stdout=result.stdout,
-            stderr=result.stderr,
+            stdout="" if input_text is not None else result.stdout,
+            stderr="" if input_text is not None else result.stderr,
         )
         if self.logger is not None:
             self.logger.log_command(command, ssh_result)
         if check and not ssh_result.ok:
+            if input_text is not None:
+                raise SSHError(f"WSL2 stdin command failed (exit {result.returncode}): {command}") from None
             raise SSHError(
                 f"WSL2 command failed (exit {result.returncode}): {command}\nstderr: {result.stderr.strip()}"
             )

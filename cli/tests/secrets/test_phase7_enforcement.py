@@ -22,7 +22,7 @@ def _object_name(value: object) -> str:
     return cast(_NamedObject, value).__name__
 
 
-# Post-0.14, consolidate these literal exact-caller pins behind a reusable graph contract.
+# The pre-0.14 test-consolidation child owns moving these literal pins behind a reusable graph contract.
 _SERVICE_MANIFEST = {
     "agentworks.secrets.resolver": ("Resolver.__init__",),
     "agentworks.secrets.orchestration": ("resolve_for_command",),
@@ -138,7 +138,7 @@ _STORED_POLICY_MANIFEST = {
     "agentworks.agents.nodes": ("PendingAgentNode.teardown",),
 }
 
-# Post-0.14, consolidate this literal exact-caller pin behind a reusable graph contract.
+# The pre-0.14 test-consolidation child owns moving this literal pin behind a reusable graph contract.
 _PREFLIGHT_CALLER_MANIFEST = {
     ("agentworks.sessions.manager._create", "_preflight_and_resolve"),
     ("agentworks.sessions.manager._lifecycle", "resume_session"),
@@ -154,7 +154,7 @@ _PREFLIGHT_CALLER_MANIFEST = {
     ("agentworks.agents.manager.lifecycle", "reinit_agent"),
 }
 
-# Post-0.14, consolidate this literal exact-caller pin behind a reusable graph contract.
+# The pre-0.14 test-consolidation child owns moving this literal pin behind a reusable graph contract.
 _DIRECTED_EDGE_MANIFEST: dict[tuple[str, str], tuple[tuple[str, str], ...]] = {
     ("agentworks.agents.grants", "grant_workspaces"): (("gated_vm_boundary", "interaction"),),
     ("agentworks.agents.grants", "revoke_workspaces"): (("gated_vm_boundary", "interaction"),),
@@ -334,7 +334,7 @@ _DIRECTED_EDGE_MANIFEST: dict[tuple[str, str], tuple[tuple[str, str], ...]] = {
 
 _DIRECTED_CALLEE_ALIASES = {"_session_logs": "session_logs"}
 
-# Post-0.14, consolidate this literal exact-caller pin behind a reusable graph contract.
+# The pre-0.14 test-consolidation child owns moving this literal pin behind a reusable graph contract.
 _STORED_CALL_EDGE_MANIFEST: dict[tuple[str, str], tuple[str, ...]] = {
     ("agentworks.agents.manager.lifecycle", "create_agent"): ("Resolver.resolve",),
     ("agentworks.agents.manager.lifecycle", "reinit_agent"): ("Resolver.resolve",),
@@ -354,7 +354,7 @@ _STORED_CALL_EDGE_MANIFEST: dict[tuple[str, str], tuple[str, ...]] = {
     ("agentworks.workspaces.manager.create", "create_workspace"): ("Resolver.resolve",),
 }
 
-# Post-0.14 consolidation candidate: replace this exact-caller graph pin.
+# The pre-0.14 test-consolidation child owns replacing this exact-caller graph pin.
 _TAILSCALE_SOURCE_EDGE_MANIFEST = (
     ("agentworks.vms.manager.power", "start_vm", "_ensure_tailscale", "auth_keys", "auth_keys"),
     (
@@ -366,7 +366,7 @@ _TAILSCALE_SOURCE_EDGE_MANIFEST = (
     ),
 )
 
-# Post-0.14 consolidation candidate: replace this exact-caller graph pin.
+# The pre-0.14 test-consolidation child owns replacing this exact-caller graph pin.
 _TAILSCALE_STANDALONE_EDGE_MANIFEST = (("agentworks.vms.manager.power", "start_vm", "resolve_for_command"),)
 
 _TAILSCALE_ENSURE_FORBIDDEN_TARGETS = (
