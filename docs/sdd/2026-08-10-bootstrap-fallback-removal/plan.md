@@ -87,10 +87,10 @@ focused platform, manager, registration, and guide-projection suites pass; the t
 - [x] Run Ruff check and format, strict mypy, the full non-integration test suite, file lint,
       Rulesync drift, locked-SDD, and diff checks.
 - [x] Run the required project review and fresh-eyes review; resolve every valid finding.
-- [ ] Run one bounded operator-gated live lifecycle crux against an available backend after an
+- [x] Run one bounded operator-gated live lifecycle crux against an available backend after an
       `agw-state` snapshot, then independently verify VM/backend/Tailscale cleanup, or record an
       explicit operator-approved process exception.
-- [ ] Record exact gate, review, and live evidence, close issue #471 through the PR, and finalize
+- [x] Record exact gate, review, and live evidence, close issue #471 through the PR, and finalize
       `locked.md` only when the implementation and evidence are complete.
 
 **DoD:** permanent docs and implementation agree; all gates, reviews, and the authorized live crux
