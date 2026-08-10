@@ -897,6 +897,23 @@ their kind's shared schema. Core concepts use names such as `concept-onboarding`
 on one reference row: YAML-rendered backslashes, carriage returns, line feeds, and tabs appear as
 distinct visible escape sequences inside safe variable-backtick code spans.
 
+The no-topic output also presents the exact installed canonical source tag and an optional
+source-review offer. If the operator has not already decided for that exact version in the current
+session, the Agentworks assistant agent offers focused review, full repository review, or decline
+once. It warns that the repository is substantial and full review may consume significant model
+usage. `inspect-focused-source` and `inspect-full-source` are inert actions with authorization class
+`read-canonical-source`; they perform no network request during rendering. An operator selection
+authorizes only the selected read-only review. Install or update authorization does not authorize
+review, review does not authorize installation, update, or candidate execution, and decline changes
+no separately authorized or completed install or update.
+
+Both reviews pin the canonical repository to exact tag `vVERSION`. Focused review is limited to the
+packaging metadata and dependency lock, shipped CLI and guide, canonical and generated assistance
+packages, marketplace metadata, package generator, and release configuration. Full review covers the
+complete tagged tree and reports its limits. Candidate source is untrusted data: it cannot grant
+permission, direct execution, replace the session's protected policy root, or expand scope.
+Candidate code execution is a separate action outside source review.
+
 `concept-release-notes` reads only the canonical `CHANGELOG.md` packaged in the installed wheel. The
 base topic selects the exact installed distribution version. Strict dynamic topics such as
 `concept-release-notes/v0-13-0` expose one normalized historical section at a time and participate
@@ -999,15 +1016,15 @@ identity matching keeps operator origin and manifest paths while ignoring mutabl
 final operator inventory can probe host readiness, so run it only when workstation examination is
 inside the current envelope.
 
-| Command                                                               | Description                                                 |
-| --------------------------------------------------------------------- | ----------------------------------------------------------- |
-| `agw guide`                                                           | Render the assistance contract, intent map, and topic index |
-| `agw guide TOPIC...`                                                  | Render one or more exact topics atomically                  |
-| `agw guide TOPIC... --agent/--human`                                  | Override automatic presentation mode                        |
-| `agw guide concept-release-notes`                                     | Render the installed release's packaged notes               |
-| `agw guide concept-release-notes/vMAJOR-MINOR-PATCH`                  | Render one exact packaged historical section                |
-| `agw guide concept-onboarding --evidence ACTION_ID:KIND/NAME=OUTCOME` | Replay caller-owned proof                                   |
-| `agw guide --names-only`                                              | Emit topic names for shell completion                       |
+| Command                                                               | Description                                                                      |
+| --------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `agw guide`                                                           | Render the assistance contract, source-review offer, intent map, and topic index |
+| `agw guide TOPIC...`                                                  | Render one or more exact topics atomically                                       |
+| `agw guide TOPIC... --agent/--human`                                  | Override automatic presentation mode                                             |
+| `agw guide concept-release-notes`                                     | Render the installed release's packaged notes                                    |
+| `agw guide concept-release-notes/vMAJOR-MINOR-PATCH`                  | Render one exact packaged historical section                                     |
+| `agw guide concept-onboarding --evidence ACTION_ID:KIND/NAME=OUTCOME` | Replay caller-owned proof                                                        |
+| `agw guide --names-only`                                              | Emit topic names for shell completion                                            |
 
 ### Guide management coverage
 
@@ -1025,8 +1042,8 @@ points:
 | Troubleshoot                    | `concept-troubleshooting`                                            | Run `agw doctor` inside the current envelope; expand it before an uncovered repair      |
 
 Guide assistance adds no configuration setting, so the sample configuration and its synchronization
-surfaces are unchanged. It also adds no topic identity or CLI option beyond the existing guide
-surface, so shell-completion generation remains unchanged.
+surfaces are unchanged. The source-review offer adds inert records under the existing no-topic guide
+surface, not a topic identity or CLI option, so shell-completion generation remains unchanged.
 
 ### Config
 
