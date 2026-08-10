@@ -75,6 +75,7 @@ class GuideInstanceFact:
 _CONSTRUCTION_TOKEN = object()
 _CONCEPT_RESOLVER_ROOTS: dict[str, frozenset[GuideRoot]] = {
     "concept-onboarding": frozenset({GuideRoot.KINDS, GuideRoot.IMPLEMENTATIONS}),
+    "concept-management": frozenset({GuideRoot.KINDS, GuideRoot.IMPLEMENTATIONS}),
     "concept-secrets": frozenset({GuideRoot.IMPLEMENTATIONS}),
 }
 

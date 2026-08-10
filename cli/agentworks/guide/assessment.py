@@ -143,6 +143,84 @@ _ACTION_RECORDS = (
         None,
         "Retain the stored VM fact and mark connectivity unverifiable without connecting.",
     ),
+    GuideAction(
+        ActionId("create-first-vm"),
+        "No VM instance exists, configured readiness has been verified with doctor, and the operator has "
+        "explicitly selected every target input.",
+        (
+            ActionInput("VM_NAME", "Name for the first VM.", True),
+            ActionInput("VM_TEMPLATE", "Existing vm-template selected for the first VM.", True),
+            ActionInput("ADMIN_TEMPLATE", "Existing admin-template selected for the first VM.", True),
+            ActionInput("VM_SITE", "Ready vm-site selected for the first VM.", True),
+        ),
+        ConsentBoundary.MUTATE_AGENTWORKS,
+        (
+            "agw",
+            "vm",
+            "create",
+            "$VM_NAME",
+            "--template",
+            "$VM_TEMPLATE",
+            "--admin-template",
+            "$ADMIN_TEMPLATE",
+            "--site",
+            "$VM_SITE",
+        ),
+        "Agentworks persists a VM record and asks the selected site provider to create compute and storage. "
+        "This changes local and remote state, can incur provider cost, and uses provider network and later "
+        "SSH connectivity without implying privilege elevation. Before recording VERIFIED, parse exactly one "
+        "JSON document and require schema_version is the integer 1, command is exactly vm.describe, and data is "
+        "an object. Require matching data.vm.name, site, and template, complete provisioning and initialization, "
+        "and observed running status. When ADMIN_TEMPLATE is the reserved default, data.vm.admin_template must be "
+        "null; every non-default selection must match exactly.",
+        ("agw", "vm", "describe", "$VM_NAME", "--output", "json"),
+        "Create nothing. Keep the exact input checklist and command for later; a first session requires an "
+        "operator-selected usable VM.",
+    ),
+    GuideAction(
+        ActionId("create-first-session"),
+        "No session instance exists, an operator-selected VM is usable, and every session, workspace, and "
+        "Agentworks-managed agent input is explicit.",
+        (
+            ActionInput("SESSION_NAME", "Name for the first session.", True),
+            ActionInput("SESSION_TEMPLATE", "Existing session-template selected for the first session.", True),
+            ActionInput("VM_NAME", "Existing usable VM selected for the first session.", True),
+            ActionInput("WORKSPACE_NAME", "Name for the new workspace.", True),
+            ActionInput("WORKSPACE_TEMPLATE", "Existing workspace-template selected for the workspace.", True),
+            ActionInput("AGENT_NAME", "Name for the new Agentworks-managed agent.", True),
+            ActionInput("AGENT_TEMPLATE", "Existing agent-template selected for the managed agent.", True),
+        ),
+        ConsentBoundary.MUTATE_AGENTWORKS,
+        (
+            "agw",
+            "session",
+            "create",
+            "$SESSION_NAME",
+            "--template",
+            "$SESSION_TEMPLATE",
+            "--vm",
+            "$VM_NAME",
+            "--new-workspace",
+            "--workspace-name",
+            "$WORKSPACE_NAME",
+            "--workspace-template",
+            "$WORKSPACE_TEMPLATE",
+            "--new-agent",
+            "--agent-name",
+            "$AGENT_NAME",
+            "--agent-template",
+            "$AGENT_TEMPLATE",
+        ),
+        "Agentworks persists and starts a session, creates the selected workspace and Agentworks-managed "
+        "agent, and changes local and remote state. The running session can consume provider resources and "
+        "cost; no attach, delete, or privilege elevation is implied. Before recording VERIFIED, parse exactly "
+        "one JSON document and require schema_version is the integer 1, command is exactly session.describe, "
+        "and data is an object. Require matching session, template, VM, workspace, and Agentworks-managed agent "
+        "identity, plus data.session.status exactly running.",
+        ("agw", "session", "describe", "$SESSION_NAME", "--output", "json"),
+        "Create or start nothing. Keep the exact input checklist and command for later, and use the live VM "
+        "and session topics for manual preparation.",
+    ),
 )
 
 
@@ -284,6 +362,11 @@ def assess_onboarding(
         evidence_item = evidence.get(finding.identity)
         if action_id is not None and (evidence_item is None or evidence_item.action_id != action_id):
             selected_ids.add(action_id)
+    instance_kinds = {instance.kind for instance in snapshot.instances}
+    if "vm" not in instance_kinds:
+        selected_ids.add(ActionId("create-first-vm"))
+    if "session" not in instance_kinds:
+        selected_ids.add(ActionId("create-first-session"))
     selected = tuple(action for action in actions if action.id in selected_ids)
     relationships = tuple(
         OnboardingRelationshipFinding(relationship, OnboardingStatus.DONE) for relationship in snapshot.relationships
@@ -292,7 +375,7 @@ def assess_onboarding(
 
 
 def guided_actions(assessment: OnboardingAssessment) -> tuple[GuideAction, ...]:
-    """Return the canonical actions for a consent-prompting consumer."""
+    """Return canonical actions for a consumer applying its current authorization envelope."""
     return assessment.actions
 
 

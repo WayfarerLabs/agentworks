@@ -399,14 +399,15 @@ def guide_contributions() -> tuple[TopicContribution, ...]:
         _concept(
             "concept-onboarding",
             "Agentworks onboarding",
-            "Start safely, inspect the current system, and take one consented step at a time.",
+            "Start safely, assess current adoption, and use one durable authorization envelope for in-scope work.",
             inventory=True,
             related_topics=("concept-migration", "concept-release-notes"),
         ),
         _concept(
             "concept-management",
             "Resource management",
-            "Use declared resources, capability implementations, and live instances deliberately.",
+            "Configure and operate declared resources, capability implementations, and live instances deliberately.",
+            inventory=True,
             related_topics=("concept-migration",),
         ),
         _concept(

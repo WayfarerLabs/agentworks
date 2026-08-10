@@ -192,6 +192,7 @@ def test_each_concept_receives_only_planned_roots(monkeypatch: pytest.MonkeyPatc
     ("concept", "expected_roots"),
     [
         ("concept-onboarding", frozenset({GuideRoot.KINDS, GuideRoot.IMPLEMENTATIONS})),
+        ("concept-management", frozenset({GuideRoot.KINDS, GuideRoot.IMPLEMENTATIONS})),
         ("concept-secrets", frozenset({GuideRoot.IMPLEMENTATIONS})),
     ],
 )
