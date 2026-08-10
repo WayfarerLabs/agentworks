@@ -387,15 +387,12 @@ class GCEPlatform(VMPlatform):
                 force_tty=sys.platform == "win32",
             )
 
-            request.progress.step("Waiting for GCE startup marker")
+            request.progress.step("Wait for GCE startup marker and join Tailscale through fixed stdin")
             tailscale_ip = EphemeralTailscaleBootstrap(
                 transport,
                 readiness_command=GCE_READINESS_COMMAND,
                 readiness_label=GCE_READINESS_LABEL,
-            ).complete(
-                request.tailscale_auth_key,
-                before_join=lambda: request.progress.step("Join Tailscale through fixed stdin"),
-            )
+            ).complete(request.tailscale_auth_key)
             request.progress.output("GCE credential-free bootstrap and Tailscale join completed")
         except KeyboardInterrupt as primary:
             rollback_after_interrupt(

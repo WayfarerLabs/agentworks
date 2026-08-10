@@ -389,7 +389,7 @@ def test_full_create_retains_secret_free_request_and_joins_once(
     assert _SERVICE_SENTINEL not in repr(progress.mock_calls)
 
 
-def test_progress_reports_readiness_then_join_immediately_before_fixed_stdin(
+def test_combined_progress_precedes_readiness_and_fixed_stdin(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     events: list[str] = []
@@ -398,14 +398,14 @@ def test_progress_reports_readiness_then_join_immediately_before_fixed_stdin(
 
     platform.create(_request(_Progress(events)), _ctx())
 
+    combined = events.index("progress:Wait for GCE startup marker and join Tailscale through fixed stdin")
     readiness = events.index(f"transport:{GCE_READINESS_COMMAND}")
-    join = events.index("progress:Join Tailscale through fixed stdin")
     delivery = events.index(f"transport:{TAILSCALE_JOIN_STDIN_COMMAND}")
-    assert readiness < join < delivery
-    assert join + 1 == delivery
+    completed = events.index("output:GCE credential-free bootstrap and Tailscale join completed")
+    assert combined < readiness < delivery < completed
 
 
-def test_join_progress_and_stdin_are_absent_when_readiness_fails(
+def test_combined_progress_does_not_claim_completion_when_readiness_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     events: list[str] = []
@@ -418,10 +418,10 @@ def test_join_progress_and_stdin_are_absent_when_readiness_fails(
     with pytest.raises(ProvisioningError):
         platform.create(_request(_Progress(events)), _ctx())
 
-    assert "progress:Waiting for GCE startup marker" in events
+    assert "progress:Wait for GCE startup marker and join Tailscale through fixed stdin" in events
     assert f"transport:{GCE_READINESS_COMMAND}" in events
-    assert "progress:Join Tailscale through fixed stdin" not in events
     assert f"transport:{TAILSCALE_JOIN_STDIN_COMMAND}" not in events
+    assert "output:GCE credential-free bootstrap and Tailscale join completed" not in events
 
 
 def test_close_reconstructs_stable_allow_from_original_normalized_prefixes(
