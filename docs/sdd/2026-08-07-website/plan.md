@@ -421,6 +421,10 @@ Phase 6 retains the one-time same-run root-base redeployment gate before DNS cut
       verify the same `main` SHA built with `site_base=/`, deployed successfully, and serves
       root-based assets and routes before authorizing any DNS mutation. If the run is no longer
       available for rerun, stop until a separately reviewed activation path exists.
+- [ ] If the custom-domain setting is attached but the root-base rerun fails or cannot be verified,
+      detach the custom domain, use `Re-run all jobs` on that same latest verified `main` push
+      workflow, prove the same SHA rebuilt with `site_base=/agentworks/`, verify the default project
+      URL, leave DNS unchanged, and stop until the complete activation path can be retried.
 - [ ] With explicit operator approval for the recorded cutover, remove only identified conflicting
       parking/forwarding records; add the then-current GitHub-documented apex `A` records and `www`
       CNAME. Do not add a wildcard.

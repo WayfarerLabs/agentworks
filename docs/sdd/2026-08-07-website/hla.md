@@ -317,6 +317,13 @@ root-base build and deployment must succeed and be verified before cutover. No b
 dispatch trigger or second workflow is introduced; if the original run is no longer available for
 rerun, cutover stops until a separately reviewed activation path exists.
 
+The default project URL may be degraded after the custom-domain setting is attached and before the
+root-base rerun succeeds. If that rerun fails or cannot be verified, the operator removes the
+repository custom-domain setting, uses **Re-run all jobs** on that same latest verified `main` push
+workflow so `configure-pages` rebuilds and deploys with `/agentworks/`, verifies the same SHA at the
+default project URL, leaves DNS unchanged, and stops. Activation restarts later through the complete
+reviewed sequence; it never proceeds from a partially changed Pages setting.
+
 The workflow pins current stable major versions of official GitHub actions at implementation time,
 consistent with repository conventions. No third-party deploy action or long-lived cloud credential
 is introduced.
@@ -342,10 +349,12 @@ rollback, and recovery. Setup and go-live are ordered so deployment exists befor
 4. set `agentworks.build` as this repository's custom domain;
 5. rerun all jobs on the verified `main` merge-push workflow, prove it built with site base `/`, and
    verify the expected commit's successful Pages deployment before any DNS mutation;
-6. after explicit operator approval, replace GoDaddy's apex parking record with GitHub's documented
+6. if step 5 fails, detach the custom domain, rerun that same workflow to restore the same SHA at
+   `/agentworks/`, verify the default project URL, leave DNS unchanged, and stop;
+7. after explicit operator approval, replace GoDaddy's apex parking record with GitHub's documented
    `A` records and point `www` by `CNAME` to `wayfarerlabs.github.io`;
-7. verify DNS answers, apex content, `www` redirect, certificate, and HTTPS enforcement;
-8. remove or repoint the DNS records promptly if Pages is ever disabled.
+8. verify DNS answers, apex content, `www` redirect, certificate, and HTTPS enforcement;
+9. remove or repoint the DNS records promptly if Pages is ever disabled.
 
 DNS values are copied from current GitHub documentation during go-live and recorded in acceptance
 evidence. They are not hidden in application code. No wildcard record is created.
@@ -489,6 +498,9 @@ recommendation.
 - **DNS or certificate delay:** the Pages deployment history, status, and captured pre-attachment
   default-URL acceptance remain the diagnostics. Do not weaken HTTPS or add alternate forwarding
   machinery while propagation is incomplete.
+- **Root-base activation fails before DNS cutover:** detach the repository custom domain, rerun the
+  same latest verified `main` push workflow, verify the same SHA rebuilt with `/agentworks/` at the
+  default project URL, leave DNS unchanged, and stop before retrying the reviewed activation path.
 - **Pages disabled or repository moved:** remove the public DNS records immediately if the domain is
   no longer attached, then follow the runbook to restore verified ownership before repointing.
 - **Hosting migration:** deploy the same generated artifact elsewhere, validate it at a temporary
