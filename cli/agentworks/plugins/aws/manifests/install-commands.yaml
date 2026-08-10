@@ -1,6 +1,8 @@
 # Optional guest tooling. EC2 lifecycle uses boto3 and does not call or
 # authenticate aws. `test_exec` is deliberately absent: AWS CLI v1 and v2
 # share the same executable name, so the command performs its own v2 probe.
+# Download and signature verification remain unprivileged; only the final
+# system installation explicitly elevates because install commands are not root.
 apiVersion: agentworks/v1
 kind: system-install-command
 metadata:
@@ -9,8 +11,8 @@ metadata:
 spec:
   command: |
     set -eu
-    install_dir="${AGW_AWS_INSTALL_DIR:-/usr/local/aws-cli}"
-    bin_dir="${AGW_AWS_BIN_DIR:-/usr/local/bin}"
+    install_dir="/usr/local/aws-cli"
+    bin_dir="/usr/local/bin"
     if command -v aws >/dev/null 2>&1 && aws --version 2>&1 | grep -q '^aws-cli/2\.'; then
       exit 0
     fi
@@ -31,7 +33,7 @@ spec:
     key_path="$temp_root/aws-cli-team.asc"
     curl --fail --silent --show-error "https://awscli.amazonaws.com/$archive" -o "$archive_path"
     curl --fail --silent --show-error "https://awscli.amazonaws.com/$archive.sig" -o "$signature_path"
-    cat > "$key_path" <<'AGW_AWS_CLI_TEAM_KEY'
+    cat > "$key_path" <<'AWS_CLI_TEAM_KEY'
     -----BEGIN PGP PUBLIC KEY BLOCK-----
 
     mQINBF2Cr7UBEADJZHcgusOJl7ENSyumXh85z0TRV0xJorM2B/JL0kHOyigQluUG
@@ -61,14 +63,14 @@ spec:
     E91G7bb0hOb/cA==
     =knv7
     -----END PGP PUBLIC KEY BLOCK-----
-    AGW_AWS_CLI_TEAM_KEY
+    AWS_CLI_TEAM_KEY
     GNUPGHOME="$gnupg_home" gpg --batch --import "$key_path"
     primary_fingerprint="$(GNUPGHOME="$gnupg_home" gpg --batch --with-colons --fingerprint --list-keys | awk -F: '$1 == "pub" {primary = 1; next} primary && $1 == "fpr" {print $10; exit}')"
     test "$primary_fingerprint" = "FB5DB77FD5C118B80511ADA8A6310ACC4672475C"
     GNUPGHOME="$gnupg_home" gpg --batch --verify "$signature_path" "$archive_path"
     unzip -q "$archive_path" -d "$temp_root"
-    if test -d "$install_dir"; then
-      "$temp_root/aws/install" --install-dir "$install_dir" --bin-dir "$bin_dir" --update
+    if sudo test -d "$install_dir"; then
+      sudo "$temp_root/aws/install" --install-dir "$install_dir" --bin-dir "$bin_dir" --update
     else
-      "$temp_root/aws/install" --install-dir "$install_dir" --bin-dir "$bin_dir"
+      sudo "$temp_root/aws/install" --install-dir "$install_dir" --bin-dir "$bin_dir"
     fi

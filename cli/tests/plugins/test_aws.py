@@ -107,7 +107,8 @@ def test_aws_bundle_publishes_cli_disabled_with_verified_v2_payload(tmp_path: Pa
     assert 'primary && $1 == "fpr"' in row.command
     assert "trap 'rm -rf \"$temp_root\"' EXIT" in row.command
     assert "trap 'exit 130' INT" in row.command
-    assert 'if test -d "$install_dir"; then' in row.command
+    assert 'if sudo test -d "$install_dir"; then' in row.command
+    assert 'sudo "$temp_root/aws/install"' in row.command
     assert '--install-dir "$install_dir" --bin-dir "$bin_dir" --update' in row.command
     assert "aws configure" not in row.command
 
