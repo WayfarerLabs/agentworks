@@ -227,7 +227,7 @@ def test_retired_vocabulary_match_is_token_aware() -> None:
 
 
 def test_permanent_runtime_vocabulary_and_rendered_secret_guide_are_source_first() -> None:
-    from agentworks.secrets import guide_contributions
+    from agentworks.secrets.guide_contributions import guide_contributions
 
     root = Path(__file__).parents[3]
     permanent = [root / "README.md", root / "docs", root / "cli" / "README.md", root / "cli" / "agentworks"]

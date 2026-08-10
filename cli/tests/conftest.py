@@ -26,6 +26,21 @@ from agentworks.schema import CapabilityBlock
 pytest_plugins = ["tests.orchestrated_fixtures"]
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _isolate_ssh_logs(tmp_path_factory: pytest.TempPathFactory) -> Generator[None, None, None]:
+    """Keep default SSH logs in this worker's temporary directory."""
+    import agentworks.ssh as ssh
+
+    prior = ssh.LOG_DIR
+    log_dir = tmp_path_factory.getbasetemp() / "ssh-logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    ssh.LOG_DIR = log_dir
+    try:
+        yield
+    finally:
+        ssh.LOG_DIR = prior
+
+
 # ---------------------------------------------------------------------------
 # Resource manifest authoring
 #
