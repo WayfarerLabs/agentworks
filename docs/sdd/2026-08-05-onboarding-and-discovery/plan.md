@@ -269,6 +269,11 @@ The completed checkpoint above records the initial onboarding-centered package d
 operator's 2026-08-10 lifecycle-assistance correction supersedes that lens without erasing the
 completed design work; the corrective LLD and implementation boxes below carry the destination.
 
+Phase 3 ships through one pull request. The current artifact review is only a design gate inside
+that draft PR: it does not merge after design approval. The same branch and PR carry implementation,
+review, live validation, release integration, and every remaining Phase 3 gate, and become ready for
+merge only when the entire feature is complete and green.
+
 - [x] Revise `bootstrap-packaging-lld.md` around an always-available Agentworks package: neutral
       package and skill identity, top-level `agw guide --agent` handoff, setup and
       returning-operator probes, and no package-owned intent switchboard or duplicated teaching.

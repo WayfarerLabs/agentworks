@@ -1,6 +1,6 @@
 # HLA: Agentworks Assistance, Discovery, and Management
 
-- Status: Draft for pre-implementation review
+- Status: Draft for the design gate within the full-feature PR
 - FRD: `docs/sdd/2026-08-05-onboarding-and-discovery/frd.md`
 - Prior art: `docs/sdd/2026-08-05-onboarding-and-discovery/prior-art-research.md`
 - Early contract message:

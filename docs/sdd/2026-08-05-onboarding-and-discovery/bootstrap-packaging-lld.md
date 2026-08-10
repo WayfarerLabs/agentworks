@@ -1,6 +1,6 @@
 # Phase 3 Agentworks Assistance Packaging and Guide Companion LLD
 
-- Status: Revised draft for the Phase 3 lifecycle-assistance checkpoint
+- Status: Revised draft for the Phase 3 design gate within the full-feature PR
 - FRD: `docs/sdd/2026-08-05-onboarding-and-discovery/frd.md`
 - HLA: `docs/sdd/2026-08-05-onboarding-and-discovery/hla.md`
 - Plan: `docs/sdd/2026-08-05-onboarding-and-discovery/plan.md`, Phase 3
@@ -630,5 +630,9 @@ not silently change the installation source. Saga and release leads own this coo
 ## Process
 
 A delegated onboarding-and-discovery developer authored this LLD under the effort lead's ownership.
-The lead reviews it before opening the draft artifact checkpoint PR. The artifact merges only after
-the saga review converges; implementation review and release integration remain separate gates.
+PR #480 carries the entire Phase 3 feature. This artifact checkpoint is a design gate inside that
+same draft PR, not an artifact-only merge gate: the PR remains draft and does not merge when design
+review converges. Implementation continues on the same branch and PR, followed by implementation
+review, live validation, release integration, and the remaining plan gates. The PR becomes ready for
+merge only when the complete feature and every Phase 3 definition-of-done requirement are present
+and green.
