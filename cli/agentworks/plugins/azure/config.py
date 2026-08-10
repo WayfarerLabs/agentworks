@@ -11,21 +11,36 @@ from agentworks.schema import AgwModel, NonEmptyStr, PositiveInt, SecretRef
 
 
 class AzureAmbientAuth(AgwModel):
-    """Authenticate with the ambient chain and browser fallback."""
+    """Authenticate with the ambient chain: ``az login``, ``AZURE_*``, or a managed identity.
+
+    The interactive-browser fallback runs when none of those can get a
+    token.
+    """
 
     mode: Literal["ambient"]
 
 
 class AzureServicePrincipalAuth(AgwModel):
-    """Authenticate as an explicit Entra ID service principal."""
+    """Authenticate as an explicit Entra ID service principal.
+
+    It replaces the ambient chain entirely for this site: a rejected
+    client secret fails the command rather than falling back to some other
+    identity.
+    """
 
     mode: Literal["service-principal"]
     tenant_id: NonEmptyStr
+    """The Entra ID tenant the principal lives in."""
+
     client_id: NonEmptyStr
+    """The principal's application (client) id."""
+
     secret: Annotated[
         NonEmptyStr,
         SecretRef(usage="the Azure service-principal client secret", default_template="azure-client-secret"),
     ]
+    """The secret containing the principal's client secret. The default
+    maps to ``AW_SECRET_AZURE_CLIENT_SECRET`` in the env-var backend."""
 
 
 AzureAuth = Annotated[AzureAmbientAuth | AzureServicePrincipalAuth, Field(discriminator="mode")]
@@ -35,23 +50,44 @@ class AzureVMSize(AgwModel):
     """One Azure VM size in a site's selection catalog."""
 
     cpus: PositiveInt
+    """The vCPUs the SKU provides."""
+
     memory: PositiveInt
+    """The memory (GiB) the SKU provides."""
+
     size: NonEmptyStr
+    """The Azure SKU name (e.g. ``Standard_B2ms``)."""
 
 
 class AzureVMConfig(AgwModel):
     """Where an azure-vm site creates VMs, and as whom."""
 
     name: Literal["azure-vm"]
+    """The platform this config is for."""
+
     subscription_id: NonEmptyStr = Field(examples=["00000000-0000-0000-0000-000000000000"])
+    """The subscription new VMs are created in."""
+
     resource_group: NonEmptyStr = Field(examples=["agw-dev"])
+    """The resource group new VMs are created in."""
+
     region: NonEmptyStr = Field(examples=["eastus"])
+    """The Azure region new VMs are created in."""
+
     vm_sizes: Annotated[list[AzureVMSize], Field(min_length=1)] | None = None
+    """An override of the built-in B-series catalog ``vm create`` picks
+    from. Order does not matter; selection uses the smallest matching
+    entry. Must contain at least one entry."""
+
     auth: AzureAuth = AzureAmbientAuth(mode="ambient")
+    """How this site authenticates to Azure: ``{mode: ambient}`` for the
+    ambient credential chain, or ``{mode: service-principal, ...}`` for an
+    explicit principal. Defaults to ambient."""
 
 
 class _VMSize(NamedTuple):
-    """One selectable Azure VM size and its capacity."""
+    """One Azure VM size in the selection catalog: a SKU name plus the
+    cpus and memory (GiB) it provides."""
 
     cpus: int
     memory_gib: int
@@ -71,14 +107,20 @@ _DEFAULT_VM_SIZES: tuple[_VMSize, ...] = (
 
 
 def _size_catalog(config: AzureVMConfig) -> tuple[_VMSize, ...]:
-    """Return the site's declared catalog or the built-in B-series ladder."""
+    """The site's VM-size catalog: its declared override, else the built-in
+    B-series ladder. The default ladder is domain knowledge rather than
+    schema."""
     if config.vm_sizes is None:
         return _DEFAULT_VM_SIZES
     return tuple(_VMSize(entry.cpus, entry.memory, entry.size) for entry in config.vm_sizes)
 
 
 def _select_vm_size(catalog: tuple[_VMSize, ...], *, cpus: int, memory_gib: int) -> _VMSize:
-    """Return the smallest catalog entry satisfying both requested axes."""
+    """Return the smallest catalog entry satisfying both requested axes.
+
+    Selection uses ``min`` so the result is independent of catalog order.
+    Raises ``ConfigError`` when the request exceeds every entry.
+    """
     fits = [size for size in catalog if size.cpus >= cpus and size.memory_gib >= memory_gib]
     if not fits:
         largest = max(catalog, key=lambda size: (size.cpus, size.memory_gib))

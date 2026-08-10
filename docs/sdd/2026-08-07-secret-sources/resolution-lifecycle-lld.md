@@ -383,12 +383,8 @@ The real implementation uses the backend's native exception types. `classify_nat
 `__cause__ is None` and `__context__ is None`; its message, arguments, and attributes are
 value-free. The core's unexpected-exception conversion follows the same exception-object rule.
 
-The workstation process is the trust boundary. Ordinary Python traceback frames, immutable-string
-copies, and process memory are explicitly outside the non-disclosure guarantee. Clearing a local
-reference is an optional courtesy only when it is a one-line, semantics-free operation. The runtime
-MUST NOT add ownership graphs, frame walking, traceback rewriting, broad `BaseException` handling,
-or cleanup abstractions to simulate memory erasure. If a future requirement needs strong in-memory
-erasure, the sanctioned design is a short-lived isolated process whose address space exits.
+The workstation process is the trust boundary. Process memory and ordinary Python traceback locals
+are outside the non-disclosure guarantee.
 
 A client that resolves more than one request discards partial successful results before returning a
 typed failure. Prompt likewise discards answers already collected in that call before propagating
@@ -590,7 +586,7 @@ class ResolutionBatch:
     def complete_or_raise(self) -> dict[str, str]:
         if all(outcome.category is ResolutionCategory.RESOLVED for outcome in self._outcomes):
             return dict(self._values)
-        raise _compatibility_error(self._outcomes)
+        raise complete_resolution_error(self._outcomes)
 
     def __repr__(self) -> str:
         return (
@@ -608,12 +604,12 @@ property, or value-bearing equality/repr. `str(batch)` is the redacted `repr`.
 batch's private values intact on success because the operation-scoped consumer immediately owns the
 fresh copy and the batch then falls out of scope.
 
-On any incomplete outcome, the method constructs and raises the existing `SecretUnavailableError`
-compatibility type from value-free outcomes, with requested names plus stable category/detail codes
-and enum-derived remediation. The error retains no provider exception or value mapping. The private
-batch may remain reachable through ordinary process memory or a traceback; that is inside the
-trusted workstation process and is not an erasure target. Phase 6 owns the final outcome-to-error
-mapping; this compatibility behavior exists only until Phase 7 deletes the dict-returning boundary.
+On any incomplete outcome, the method calls the shared `complete_resolution_error()` projection,
+which selects the operation error taxonomy from value-free outcomes. The error retains no provider
+exception or value mapping. The private batch may remain reachable through ordinary process memory
+or a traceback; that is inside the trusted workstation process. Phase 7 deletes the legacy
+`resolve_secrets`/quiet dictionary wrappers while retaining `complete_or_raise()` as the sole
+complete value projection for operation consumers.
 
 The module-private inspection projection is the only partial-value escape hatch. It receives a
 batch, copies resolved values into the existing explicit reveal path, and converts non-resolved
@@ -989,9 +985,9 @@ Sentinel tests use distinct values in factory, entry, prepare, resolve, cleanup 
 returned secrets, and chained exceptions. Assertions cover `str` and `repr` of batch, outcomes,
 provider failures, compatibility errors, collected output events, `caplog`, human outcome render,
 future JSON conversion, and every reachable exception object's message, arguments, captured-output
-attributes, cause, and context. Tests do not inspect traceback frame locals or claim process-memory
-erasure. The only allowed observable sentinel occurrence is the explicitly authorized value returned
-by successful `complete_or_raise` or the existing value-reveal inspection cell.
+attributes, cause, and context. The only allowed observable sentinel occurrence is the explicitly
+authorized value returned by successful `complete_or_raise` or the existing value-reveal inspection
+cell.
 
 ## Implementation and test matrix
 

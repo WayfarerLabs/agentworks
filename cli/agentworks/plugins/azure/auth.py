@@ -17,14 +17,28 @@ _ARM_SCOPE = "https://management.azure.com/.default"
 
 
 def _quiet_azure_identity_logging() -> None:
-    """Keep duplicate azure-identity warnings quiet outside debug mode."""
+    """Keep azure-identity's credential-failure warning off stderr.
+
+    Agentworks configures no logging handlers, so Python's last-resort handler
+    prints WARNING+ directly. Raising only the ``azure.identity`` logger's
+    threshold leaves the typed Agentworks error as the one operator-facing
+    failure. Debug mode retains the SDK detail. The setting covers both the
+    initial probe and lazy token requests and is safe to apply on every Azure
+    platform construction.
+    """
     if os.environ.get("AGW_DEBUG") == "1":
         return
     logging.getLogger(_AZURE_IDENTITY_LOGGER).setLevel(logging.ERROR)
 
 
 def _build_ambient_credential() -> object:
-    """Build the ambient credential, falling back to browser login."""
+    """Build the ambient credential, falling back to browser login.
+
+    ``DefaultAzureCredential`` is probed once with a real ARM token request.
+    Success returns that credential; a chain that cannot authenticate falls
+    back to ``InteractiveBrowserCredential``, whose interaction remains lazy.
+    The return type avoids importing Azure SDK types at module load time.
+    """
     from azure.core.exceptions import ClientAuthenticationError
     from azure.identity import DefaultAzureCredential, InteractiveBrowserCredential
 
@@ -42,7 +56,15 @@ def _build_service_principal_credential(
     client_secret: str,
     site_name: str,
 ) -> object:
-    """Build and probe the site's explicit service-principal credential."""
+    """Build and probe the site's explicit service-principal credential.
+
+    The selected service principal never falls back to ambient credentials.
+    Construction and the ARM probe share one typed failure boundary so a bad
+    or empty resolved secret carries the site, secret name, and remediation
+    without exposing the value. Azure Identity does not distinguish an Entra
+    rejection from an unreachable token service, so this remains an
+    ``AzureError`` rather than the more specific ``TokenRejectedError``.
+    """
     from azure.core.exceptions import ClientAuthenticationError
     from azure.identity import ClientSecretCredential
 

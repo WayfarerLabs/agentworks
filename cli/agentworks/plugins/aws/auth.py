@@ -11,7 +11,11 @@ if TYPE_CHECKING:
 
 
 def _build_ambient_session(region: str) -> Any:
-    """Build boto3's ambient default-credential session."""
+    """Build boto3's ambient default-credential session.
+
+    AWS has no interactive-browser fallback here, so credential failures
+    surface at runup or the operation.
+    """
     import boto3
 
     return boto3.session.Session(region_name=region)
@@ -23,7 +27,13 @@ def _build_access_key_session(
     site_name: str,
     region: str,
 ) -> Any:
-    """Build the site's explicit session, optionally assuming a role."""
+    """Build the site's explicit session, optionally assuming a role.
+
+    An empty resolved secret is rejected as a typed, site-and-secret-named
+    error without interpolating the value. A configured role uses deferred,
+    auto-refreshing credentials rather than freezing one short-lived STS
+    response into the session.
+    """
     import boto3
 
     if not secret_value:
@@ -49,7 +59,10 @@ def _build_access_key_session(
 
 
 def _assume_role_session(base: Any, role_arn: str, region: str) -> Any:
-    """Build auto-refreshing deferred AssumeRole credentials."""
+    """Build auto-refreshing deferred AssumeRole credentials.
+
+    The assume is lazy, so this constructor performs no network request.
+    """
     import boto3
     import botocore.session
     from botocore.credentials import AssumeRoleCredentialFetcher, DeferredRefreshableCredentials

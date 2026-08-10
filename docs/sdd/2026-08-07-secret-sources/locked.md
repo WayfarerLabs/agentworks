@@ -1,10 +1,7 @@
 # Secret Sources: locked
 
-**Prospective lock record, updated 2026-08-09.** The SDD is not yet complete: Phase 11's
-operator-gated live remote-Lima rerun remains open. Secret Sources is implemented on the single
-ordinary `feat/secret-sources` branch in PR #453. This record will become the final lock only after
-that run, final review, and the remaining Phase 11 boxes complete; the lock binds when the PR lands
-on `main`.
+**Lock record, updated 2026-08-10.** Secret Sources is implemented on the single ordinary
+`feat/secret-sources` branch in PR #453. The lock binds when that PR lands on `main`.
 
 ## What shipped
 
@@ -26,11 +23,15 @@ budget across client setup and backend work, closes the source before proceeding
 first-success precedence, batching, deduplication, soft fallthrough, hard-failure halt, readiness
 skipping, and fail-before-prompt behavior. Shared value-free outcomes report `resolved`,
 `unavailable`, `refused-interaction`, `timeout`, or `resolution-failure`; private batches alone hold
-values for operation-scoped consumers. The workstation process is the trust boundary: in-memory
-references and ordinary traceback locals are best-effort, not a security guarantee. Durable and
-externally observable boundaries remain strict: values do not enter provider-retained configuration,
-argv, logs, rendered diagnostics, or raised exception-object messages, arguments, attributes, cause,
-or context.
+values for operation-scoped consumers. The workstation process is the trust boundary: process memory
+and ordinary traceback locals are outside the security guarantee. Durable and externally observable
+boundaries remain strict: values do not enter provider-retained configuration, host argv, logs,
+rendered diagnostics, or raised exception-object messages, arguments, attributes, cause, or context.
+Lima instance YAML, WSL2 and Proxmox bootstrap staging, Azure `OSProfile.custom_data`, and AWS
+`RunInstances.UserData` are the five final-inspection surfaces pinned by provider-shaped tests.
+Lima, Azure, and AWS retain credential-free bootstrap payloads and join through a fixed command on
+provisioning-transport stdin. WSL2 and Proxmox use private temporary staging with one verified
+removal attempt.
 
 `agw secret verify NAME...` is the explicit read-and-prove surface. It refuses interaction by
 default, accepts the final `--allow-interaction` opt-in unless global non-interactive mode forbids
@@ -53,12 +54,6 @@ guide at `docs/guides/upgrading-to-0.14.md` contains the before/after configurat
 
 ## Acceptance and review evidence
 
-- The exact final local code head `6c1a65b4` passed **7,459 non-integration tests with 3
-  deselected**. Ruff, formatting, strict mypy over 642 files, file lint, Rulesync drift, locked-SDD,
-  and diff checks passed. The independent final re-review is recorded in Phase 11.
-- PR CI passed on Python 3.12, 3.13, and 3.14, including CodeQL and aggregate `ci-success`, at the
-  corrected code-and-SDD head `567779b4`. The following evidence-only commit changes this
-  prospective record, not implementation behavior.
 - The permanent POSIX real-entry harness exercises the shipped console script with isolated config:
   implied environment resolution, prompt refusal, mixed variadic verification, direct OnePassword
   remediation, a declared source through an exact fake-only `op` boundary, doctor, guide output, and
@@ -67,18 +62,17 @@ guide at `docs/guides/upgrading-to-0.14.md` contains the before/after configurat
   opt-out, retired-path enforcement, implied prompt fallback, value-free verification, variadic
   verification, all-shell completion behavior, key-free Lima configuration, or source-only prompt
   broker scope is neutered; each restored tree passed its focused gates.
-- The operator superseded frame-level memory erasure after the earlier hardening review. The final
-  tree removes the resulting state owners, operation fences, traceback rewriting, scrub/discard
-  APIs, and frame-walking tests. One-time structural scans and diff review against the pre-ratchet
-  reference found no residue; no permanent scanner or cleanup framework remains.
 - Proxmox and WSL2 now use private randomized bootstrap staging files and make one verified removal
-  attempt on success, failure, timeout, and interruption. Remote Lima provision logs use the
-  database VM identity, so normal deletion removes the exact log created for the VM. These are
-  narrow durable-artifact guarantees, not process-memory cleanup machinery.
+  attempt on success, failure, timeout, and interruption. Lima, Azure, and AWS retain key-free
+  provider payloads and join through stdin after boot. Remote Lima provision logs use the database
+  VM identity, so normal deletion removes the exact log created for the VM.
+- A real remote-Lima run with a rotated key passed create, initialization, independent SSH and boot
+  checks, and deletion. The retained instance YAML was credential-free, and the independent final
+  sweep found no VM, database row, Lima instance or directory, detached artifact, log, SSH
+  reference, workspace file, or operation temp entry.
 - Marking PR #453 ready triggered the repository's Copilot reviewer. It declined because the diff
   exceeds its 20,000-line limit, so the required fresh-eyes fallback is the independent cold review
-  recorded above. Findings from the pre-correction review and final unwind review are tracked in
-  Phases 10 and 11 rather than omitted from this prospective record.
+  recorded in PR discussion.
 
 ## Permanent record
 
@@ -108,10 +102,6 @@ not edit the saga SDD.
 
 ## Honest residual work
 
-- A final real remote-Lima run must exercise the ephemeral stdin join and inspect the actual
-  retained instance YAML and `limactl list --json` before this record can lock. This session does
-  not have the concrete remote inventory, SSH identity, or a fresh authorized Tailscale key. The key
-  exposed by the earlier provider run must be revoked and must not be reused.
 - The operator still owns merging PR #453 and ensuring release PR #402 refreshes before release.
 - Real 1Password authentication and multi-account parsing were not exercised with operator
   credentials. Tests and the acceptance harness deliberately use a closed fake-provider boundary.

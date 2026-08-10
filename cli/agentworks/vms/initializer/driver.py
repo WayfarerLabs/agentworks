@@ -331,11 +331,11 @@ def _phase_a_bootstrap(
 ) -> Transport:
     """Phase A: Bootstrap (over provisioning transport). All steps are fatal.
 
-    Three paths depending on how much the platform already handled:
+    Two paths depending on how much the platform already handled:
 
-    1. bootstrap_complete=True (Lima/Azure): The platform already ran the
-       full bootstrap. Skip straight to Tailscale SSH verification.
-    2. Otherwise (WSL2): Run full bootstrap script over the provisioning
+    1. ``bootstrap_complete=True``: The platform already ran the full
+       bootstrap. Skip straight to Tailscale SSH verification.
+    2. Otherwise: Run the full bootstrap script over the provisioning
        transport (user, packages, SSH key, swap, Tailscale).
 
     Returns the Tailscale ``Transport`` for Phase B.
@@ -343,9 +343,9 @@ def _phase_a_bootstrap(
     db.update_vm_provisioning_status(vm_name, ProvisioningStatus.IN_PROGRESS)
 
     if bootstrap_complete:
-        # Lima/Azure: platform already ran the full bootstrap. Lima may have
-        # joined successfully but failed its best-effort IP probe; rediscover
-        # the IP without selecting the auth-key-bearing bootstrap script.
+        # The platform already ran the full bootstrap. It may have joined
+        # successfully but failed its best-effort IP probe; rediscover the IP
+        # without selecting the auth-key-bearing bootstrap script.
         logger.step("Bootstrap (platform)")
         if not tailscale_ip:
             logger.output("Tailscale joined; retrying IP discovery")
@@ -354,7 +354,7 @@ def _phase_a_bootstrap(
         db.update_vm_tailscale(vm_name, tailscale_ip)
         db.update_vm_provisioning_status(vm_name, ProvisioningStatus.COMPLETE)
     else:
-        # WSL2: run bootstrap script over the provisioning transport
+        # The platform deferred bootstrap to the provisioning transport.
         tailscale_ip = _run_bootstrap_script(
             db,
             config,
@@ -482,12 +482,10 @@ def _run_bootstrap_script(
                     )
 
         # Run the bootstrap script synchronously over the platform's
-        # provisioning transport. WSL2 is the only consumer here
-        # (Lima/Azure embed the bootstrap in their native delivery
-        # mechanisms and arrive with bootstrap_complete=True), and the WSL2
-        # transport is a local wsl.exe subprocess. There is no network
-        # session to disconnect from, so the detached-poll pattern brings no
-        # benefit. It also actively breaks WSL2 under systemd: each wsl.exe
+        # provisioning transport. WSL2's transport is a local wsl.exe
+        # subprocess. There is no network session to disconnect from, so the
+        # detached-poll pattern brings no benefit there. It also actively
+        # breaks WSL2 under systemd: each wsl.exe
         # invocation is its own systemd-logind user session, and the default
         # KillUserProcesses=yes reaps every process in the session cgroup when
         # the foreground shell exits. Nohup blocks SIGHUP, not cgroup teardown.

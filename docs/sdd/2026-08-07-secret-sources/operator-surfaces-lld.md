@@ -654,17 +654,16 @@ only complete value projection. Verification reads only the immutable outcome tu
 uses one module-private projection for its explicitly authorized value cells. No generic value
 accessor is added.
 
-Consumers use ordinary direct control flow. They do not add cleanup fences, scrub primitives,
-rollback-on-interrupt machinery, or intermediate owner graphs for in-memory erasure. The workstation
-process is trusted, and Python local/reference lifetime is best-effort only.
+Consumers use ordinary direct control flow. The workstation process is trusted, and Python
+local/reference lifetime is outside this contract.
 
 VM providers may stage a bootstrap script containing a resolved credential only for the duration of
 the delivery operation. Any local, host-side, or guest-side staging file is private and receives one
 verified removal attempt on success and every failure or interrupt path. A removal failure surfaces
 standalone or produces one fixed warning without masking an active primary; it cannot honestly
-guarantee that no file remains. This is durable file hygiene, not permission to add process-memory
-owners, traceback rewriting, retry machinery, or generic cleanup fences. Provider-retained
-configuration remains credential-free.
+guarantee that no file remains. This is durable file hygiene. Lima instance YAML, Azure
+`OSProfile.custom_data`, and AWS `RunInstances.UserData` retain only credential-free bootstrap
+payloads; their create-time Tailscale join receives the key over provisioning-transport stdin.
 
 ### Explicit caller policy
 
@@ -1278,7 +1277,7 @@ state MUST:
    late repair, standalone resolution, and partial reveal to first-statement-validated,
    identity-forwarded caller policy, including the complete preflight chain; move conditional
    Tailscale standalone resolution to `start_vm` and require an explicit auth reader at ensure; use
-   typed batches without consumer-side memory-erasure machinery;
+   typed batches without adding a second consumer-side value lifecycle;
 3. replace string/none preview with pure typed previews and migrate orchestration prediction;
 4. migrate list, describe, doctor, and env reveal records and rendering;
 5. migrate the already-existing verification service to validated names and all outcomes while its
@@ -1325,10 +1324,8 @@ fields after a separate interface decision.
 - Errors and rows contain only validated name, category, detail, remediation, source, and safe
   identifier fields. Provider messages, stderr, exceptions, provider/client tracebacks, and values
   never enter; ordinary Python `__traceback__` ownership remains unchanged.
-- The workstation process is trusted. In-memory reference lifetime and traceback locals are
-  best-effort only; application-layer ownership fences, frame rewriting, and adversarial memory
-  erasure are out of scope. Strong erasure, if ever required, belongs in an isolated process whose
-  address space exits.
+- The workstation process is trusted. Process memory and ordinary traceback locals are outside this
+  contract.
 - Source override provenance is derived from the surviving Registry row, never stored as a second
   flag.
 - Partial env reveal holds values only in the explicit reveal record and rendered value cell.

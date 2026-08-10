@@ -408,12 +408,14 @@ No permanent artifact points readers back to this SDD.
   operation-scoped consumers, and the centralized process-input boundary. Values never enter
   outcomes, resource rows, graph nodes, config models, logs, doctor records, describe records, argv,
   or persisted/provider-retained state.
-- The workstation process is inside the trust boundary. In-memory references, immutable-string
-  copies, and ordinary Python traceback locals are best-effort only, not a security guarantee. A
-  workstation-user compromise already grants process access and passwordless administrative access
-  to managed VMs. Opportunistic reference clearing is acceptable only when it is trivial and has no
-  complexity, behavior, performance, or reliability cost; stronger erasure would require a separate
-  short-lived process whose address space exits.
+- Provider-shaped tests enforce that boundary at five final-inspection surfaces: Lima instance YAML,
+  WSL2 and Proxmox bootstrap staging, Azure `OSProfile.custom_data`, and AWS
+  `RunInstances.UserData`. Lima, Azure, and AWS retain credential-free bootstrap payloads and
+  deliver the key after boot through a fixed command on provisioning-transport stdin. WSL2 and
+  Proxmox use private temporary staging with one verified removal attempt.
+- The workstation process is inside the trust boundary. Process memory and ordinary Python traceback
+  locals are outside the security guarantee; a workstation-user compromise already grants process
+  access and passwordless administrative access to managed VMs.
 - Backend registries and graph nodes carry classes, never authenticated clients.
 - Source clients receive only immutable `SecretLookupRequest` projections, never descriptions,
   hints, declarations, registries, graphs, config roots, resolvers, or mappings for other sources;

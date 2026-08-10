@@ -102,6 +102,8 @@ provision:
 {provision_script}
 """
 
+# Lima's lower-level execution boundary needs the complete host command, while
+# the shared helper owns the fixed guest command used by every other Transport.
 _TAILSCALE_JOIN_STDIN_COMMAND = "sudo -n /bin/bash -c " + shlex.quote(TAILSCALE_JOIN_STDIN_COMMAND)
 
 

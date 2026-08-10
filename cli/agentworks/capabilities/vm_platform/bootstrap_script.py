@@ -240,9 +240,9 @@ if [ -n "$TAILSCALE_AUTH_KEY" ]; then
     TS_IP=$(tailscale ip -4)
     echo "##SUCCESS## tailscale-ip=$TS_IP"
 else
-    # Lima persists provision scripts in its instance configuration. Its
-    # platform adapter therefore embeds this script without the resolved key
-    # and delivers the key over a separate post-start stdin boundary.
+    # Provider-retained bootstrap payloads embed this script without the
+    # resolved key. Their platform adapters deliver the key over a separate
+    # post-start stdin boundary.
     echo "##SUCCESS## Tailscale join deferred to platform"
 fi
 """
