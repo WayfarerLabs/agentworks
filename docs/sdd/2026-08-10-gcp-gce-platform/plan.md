@@ -103,7 +103,7 @@ suites and strict typing pass.
 - [x] Update permanent plugin-author, resource, sample, GCP, and AWS operator teaching to
       distinguish optional guest tooling from ambient host ADC/AWS credential sources and optional
       host recovery tooling, and leave completion code registry-driven.
-- [ ] Run focused/full offline gates and both required reviews for the amended publication before
+- [x] Run focused/full offline gates and both required reviews for the amended publication before
       recording this corrective phase complete.
 
 **DoD:** vendor plugins can grow through the existing capability/manifest composition boundary;
@@ -173,24 +173,24 @@ correction. The final evidence record and SDD lock still follow the passing live
 
 ### Phase 3a: second live rejection correction
 
-- [ ] Route a first `KeyboardInterrupt` raised during ordinary-failure rollback into one more
+- [x] Route a first `KeyboardInterrupt` raised during ordinary-failure rollback into one more
       idempotent bounded interrupt rollback attempt after at least one owned artifact was removed;
       preserve that interrupt object's identity, prove convergence from partial cleanup, and prove
       only a second interrupt abandons with exact provider-ID survivor guidance.
-- [ ] Split extended-operation failures into definitive `GCEOperationError`, typed
+- [x] Split extended-operation failures into definitive `GCEOperationError`, typed
       `GCECapacityError`, and indeterminate `GCEIndeterminateOperationError`. Classify the exact
       allowlisted `ZONE_RESOURCE_POOL_EXHAUSTED` code only from a DONE operation's
       `operation.error.errors[*].code`, using the cached `operation.status` rather than another
       provider-refreshing predicate, with no provider text or object retention. Have instance and
       firewall inserts reconcile only the indeterminate type, power operations propagate every
       failure, and delete/rollback continue to use verified final state as their postcondition.
-- [ ] Add provider-shaped DONE/HTTP-503 known-capacity, DONE unknown/malformed, and non-DONE timeout
+- [x] Add provider-shaped DONE/HTTP-503 known-capacity, DONE unknown/malformed, and non-DONE timeout
       regressions; prove classification makes no post-wait provider refresh, definitive insert
       failures cannot become success, partial-cleanup interrupt convergence, second-interrupt
       abandonment, secret-free detached exception graphs, and exact retained coordinates. Update the
       `GCEPlatform` guide contribution and permanent GCP guide with selected-zone capacity recovery,
       and cover rendered wording and safety.
-- [ ] Run focused GCP rollback/operation/platform tests, Ruff, strict mypy, file lint, locked-SDD,
+- [x] Run focused GCP rollback/operation/platform tests, Ruff, strict mypy, file lint, locked-SDD,
       Rulesync, full non-integration tests, and both required code reviews; resolve every valid
       finding.
 - [ ] Merge current main, post a signed exact-head disposition, and flip the PR from draft to ready
