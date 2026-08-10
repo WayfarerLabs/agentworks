@@ -38,10 +38,11 @@ def validate_favicon_asset(favicon_source: str, rocket_source: str) -> None:
     favicon = _parse_svg("assets/agw-favicon.svg", favicon_source)
     rocket = _parse_svg("assets/agw-rocket.svg", rocket_source)
     favicon_children = tuple(favicon)
-    rocket_marks = tuple(element for element in rocket.iter() if element.attrib.get("id") == "agw-mark")
+    rocket_children = tuple(rocket)
+    rocket_marks = tuple(element for element in rocket_children if element.attrib.get("id") == "agw-mark")
     if favicon.tag != SVG_TAG or favicon.attrib != {"viewBox": "0 0 240 425"} or len(favicon_children) != 1:
         raise ValueError("assets/agw-favicon.svg: root contract is invalid")
-    if len(rocket_marks) != 1:
+    if rocket.tag != SVG_TAG or rocket.attrib.get("id") != "agw-rocket" or len(rocket_marks) != 1:
         raise ValueError("assets/agw-rocket.svg: one canonical mark is required")
     mark = favicon_children[0]
     canonical_mark = rocket_marks[0]

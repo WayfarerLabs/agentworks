@@ -79,6 +79,21 @@ class BuildAndInstallTests(RepositoryFixture):
         with self.assertRaisesRegex(ValueError, "canonical mark structure"):
             site_builder._render_artifact(self.root, "/")
 
+    def test_favicon_rejects_noncanonical_rocket_root_or_mark_hierarchy(self) -> None:
+        rocket = self.root / "website/assets/agw-rocket.svg"
+        source = rocket.read_text(encoding="utf-8")
+        wrapped_mark = source.replace(
+            '    <g id="agw-mark"',
+            '    <g>\n        <g id="agw-mark"',
+            1,
+        ).replace("\n    </g>\n</svg>", "\n        </g>\n    </g>\n</svg>", 1)
+        non_svg_root = source.replace("<svg\n", "<g\n", 1).replace("</svg>", "</g>", 1)
+        for mutation in (wrapped_mark, non_svg_root):
+            with self.subTest(mutation=mutation[:40]):
+                rocket.write_text(mutation, encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "one canonical mark"):
+                    site_builder._render_artifact(self.root, "/")
+
     def test_unapproved_external_url_fails_before_output_changes(self) -> None:
         output = self.build()
         before = snapshot(output)
