@@ -282,29 +282,29 @@ architecture has no duplicate destination or hidden menu.
 - [x] Incorporate and review PR-feedback rulings for root-base redeployment, native lifecycle
       controls, module sizing, independent manifest/import and URL-escaping witnesses, honest CSS
       coverage, current topology and overlap, hero baseline, and the widened ready gate.
-- [ ] Before further builder growth, split content projection and site validation into focused
+- [x] Before further builder growth, split content projection and site validation into focused
       sibling modules and split the mirrored tests so every production and test module remains below
       1,000 lines while `website/build.py` remains the sole CLI.
-- [ ] Add a semantic `/lander/` shell and render one validated `#lander-game` template fragment into
+- [x] Add a semantic `/lander/` shell and render one validated `#lander-game` template fragment into
       both it and `404.html`; keep one controller/model/CSS implementation and preserve all game
       mechanics, IDs, no-JavaScript behavior, and lifecycle boundaries.
-- [ ] Add native active-state `Exit mission` and terminal-state `Restart mission` buttons to the
+- [x] Add native active-state `Exit mission` and terminal-state `Restart mission` buttons to the
       shared fragment; keep them hidden during preflight and route clicks through the existing
       controller/model events and focus lifecycle.
-- [ ] Add the final icon-only AGW rocket link to every footer, targeting `/lander/#lander-game`;
+- [x] Add the final icon-only AGW rocket link to every footer, targeting `/lander/#lander-game`;
       give it an independent accessible name, retain one Lander destination per page, and keep it at
       the lower right in wrapping document flow, with a visible-focus target of at least 24 by 24
       CSS pixels without enlarging the mark.
-- [ ] Remove the redundant 404 error-code eyebrow and apply the same compact detail-page
+- [x] Remove the redundant 404 error-code eyebrow and apply the same compact detail-page
       header-to-title inset used by Manifesto and Security while retaining the useful explanatory
       copy below `Page not found`.
-- [ ] Extend the exact template, image, route, fragment, manifest, metadata, CSP, heading,
+- [x] Extend the exact template, image, route, fragment, manifest, metadata, CSP, heading,
       local-link, deterministic-build, and no-JavaScript contracts for five pages and ten emitted
       files.
-- [ ] Replace production-derived manifest expectations with a literal test-owned ten-file contract,
+- [x] Replace production-derived manifest expectations with a literal test-owned ten-file contract,
       prove every local JavaScript import resolves into it, add a malicious URL-attribute escaping
       witness, and narrow CSS automation claims while adding computed browser visibility coverage.
-- [ ] Update permanent website build/demo documentation to use `/lander/` while continuing to test
+- [x] Update permanent website build/demo documentation to use `/lander/` while continuing to test
       the actual `/404.html` fallback; run the complete focused and repository gates.
 - [ ] Obtain `agentworks-reviewer` and fresh-eyes approval for the implementation and resolve every
       valid finding before considering the refinement complete.
