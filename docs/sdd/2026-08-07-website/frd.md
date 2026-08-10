@@ -1,7 +1,7 @@
 # FRD: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander code review-clean, browser acceptance
-  pending
+- Status: Interim implementation complete; continuous Lander final handling and world polish in
+  design
 - Date: 2026-08-07
 - Last revised: 2026-08-10
 - Seeded by: the saga lead, at operator request. This is a standalone effort, deliberately NOT a
@@ -61,8 +61,13 @@ forecloses it, and none of it is in scope now.
   press-and-hold sustains it, and a left or right drag biases the opposite engine while pressed. The
   initial tuning target is approximately twice the original per-engine translational authority
   (nominally `8.4` rather than `4.2` in model units), so a player can brake materially later without
-  changing the fixed-step clock or simply doubling gravity. The LLD may pin a nearby browser-tested
-  value if handling evidence justifies it.
+  changing the fixed-step clock or simply doubling gravity. Differential input also vectors the
+  combined thrust toward the commanded turn while reducing its axial component, so steering does not
+  add more lift than straight collective thrust. A light, deterministic flight-control assist
+  counters residual rotation through visibly differential, fuel-consuming main-engine thrust when
+  collective remains engaged; engine-off coasting and ballistic crash fragments remain undamped in
+  vacuum. The LLD may pin nearby browser-tested authority, vector, and assist values when handling
+  evidence justifies them.
 - R9. The 404 content and route home and the dedicated Lander page work without JavaScript. The game
   has no audio, telemetry, network request, durable storage, or critical content; it pauses physics
   and motion when inactive, can be exited, and honors reduced motion for all nonessential animation.
@@ -154,11 +159,15 @@ forecloses it, and none of it is in scope now.
   presents visibly rising, falling, and sloped lunar-lander terrain between sites and a
   deterministic sequence of sites generated from one fresh in-memory run seed. Each site has one
   slightly elevated helicopter-style landing platform exactly three lander widths long beside one
-  compact NOC building. A safe landing collects that platform's single gas can into the lander's
-  visible fuel reserve, deploys an agent from the G opening, fills a phone-battery-style power
-  indicator on the NOC, and activates its antenna. The powered site remains changed while it is
-  retained in the run's rolling world. A short launch sequence then returns control to flight; there
-  is no terminal success after a deployment.
+  compact NOC building. Terrain changes at deliberately wide intervals with stronger, irregular
+  elevation changes between sites rather than a fine repeated sawtooth; every platform and its NOC
+  occupy one flat site shelf. The elevated platform reads as a supported structure without exposing
+  a long sky-colored slot beneath its deck. A safe landing collects that platform's single gas can
+  into the lander's visible fuel reserve, deploys an agent from the G opening, fills a vertical,
+  multicolor phone-battery-style power indicator upward toward the NOC antenna, and activates that
+  antenna as the final payoff. The powered site remains changed while it is retained in the run's
+  rolling world. A short launch sequence then returns control to flight; there is no terminal
+  success after a deployment.
 - R22. After each safe landing, the next site is deterministically placed beyond the right edge of
   the current view. A visible right-edge arrow blinks while that target remains offscreen and hides
   once the site enters view; under reduced motion it remains a static direction cue. Before issuing
@@ -170,8 +179,10 @@ forecloses it, and none of it is in scope now.
 - R23. Unsafe terrain, platform, or building contact produces a brief vacuum-appropriate crash: a
   compact propellant flash and ballistic fragments, with no smoke cloud, atmospheric shock wave,
   sustained fireball, audio, or page movement. Reduced motion skips fragment travel and exposes the
-  final failed state directly. Restart through either `r` or the native control resumes from the
-  last successfully powered platform with its post-refuel checkpoint; before the first success it
+  final failed state directly. Safe-contact limits remain demanding but modestly more forgiving than
+  the initial continuous-expedition tuning, especially for the angular speed produced by an ordinary
+  steering pulse. Restart through either `r` or the native control resumes from the last
+  successfully powered platform with its post-refuel checkpoint; before the first success it
   restarts the initial approach. Exit or reload starts a fresh run.
 
 ## Settled constraints (inherited; do not reopen)
@@ -223,10 +234,10 @@ merged and settled on `main`. The first slice must not build toward them specula
   control returns either input mode to settled preflight.
 - AC7. A safe upright touchdown on the elevated three-lander-width platform consumes its gas can
   exactly once, increases the visible and programmatically named fuel reserve without discarding
-  carried excess, completes agent entry, fills the single-building NOC battery indicator, activates
-  its antenna, and returns the same lander to controllable flight. Completing three successive sites
-  proves that deployment is not terminal and that powered sites remain visibly changed while they
-  remain in the rolling view.
+  carried excess, completes agent entry, fills the single-building NOC battery indicator from bottom
+  to top through distinct visible colors toward the antenna, activates that antenna, and returns the
+  same lander to controllable flight. Completing three successive sites proves that deployment is
+  not terminal and that powered sites remain visibly changed while they remain in the rolling view.
 - AC8. Automated and browser acceptance cover state transitions, input mapping, consistent
   fixed-step physics across representative frame schedules, seeded terrain and site generation,
   route-home fallback, hidden-until-start instructions, fuel and checkpoint transitions, reduced
@@ -297,12 +308,15 @@ merged and settled on `main`. The first slice must not build toward them specula
   external references are absent.
 - AC22. For fixed seeds, generated terrain, elevated platforms, single NOCs, gas cans, next-site
   positions, and fuel awards are byte-for-byte repeatable. Representative seeds meet the LLD's
-  minimum terrain-diversity constraints and visibly include rising, falling, and sloped non-platform
-  spans. Each award equals the next route's deterministic demonstrated minimum multiplied by a
-  monotonic ratio that is approximately three for the first award and approaches one without
-  crossing it. A test-controlled reference flight reaches and safely lands on every representative
-  generated next platform using no more than the calculated minimum; a one-step-smaller tested
-  allowance cannot complete that same reference plan.
+  minimum terrain-diversity constraints and visibly include coarse rising, falling, and sloped
+  non-platform spans separated by the LLD's wider sample interval. Every retained platform and NOC
+  stands on one flat shelf, while the platform deck remains visibly and physically elevated on its
+  supports without an uninterrupted sky-colored rectangle beneath it. Each award equals the next
+  route's deterministic demonstrated minimum multiplied by a monotonic ratio that is approximately
+  three for the first award and approaches one without crossing it. A test-controlled reference
+  flight reaches and safely lands on every representative generated next platform using no more than
+  the calculated minimum; a one-step-smaller tested allowance cannot complete that same reference
+  plan.
 - AC23. While the next site is right of the viewport, a visible right-pointing cue is present and
   blinks only when motion is allowed and the document is active. It becomes static under reduced
   motion, pauses while hidden, and disappears when the target enters view. Direction is never
@@ -312,7 +326,10 @@ merged and settled on `main`. The first slice must not build toward them specula
   movement, storage, or request. Reduced motion reaches the same final failure atomically. Restart
   restores the exact last post-refuel platform checkpoint without duplicating its can or fuel;
   restart before the first deployment restores the initial approach, while Exit and reload create a
-  fresh run.
+  fresh run. Boundary tests pin the modestly relaxed safe-contact envelope. Browser handling proves
+  that collective-plus-turn vectoring does not exceed straight collective's axial thrust, neutral
+  collective counters residual rotation through the deterministic assist, and engine-off vehicle
+  motion plus crash debris remain undamped and ballistic.
 
 ## Settled implementation rulings
 

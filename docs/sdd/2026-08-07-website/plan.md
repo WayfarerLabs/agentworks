@@ -1,7 +1,7 @@
 # Plan: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander code review-clean, browser acceptance
-  pending
+- Status: Interim implementation complete; continuous Lander final handling and world polish in
+  design
 - Date: 2026-08-07
 - Last revised: 2026-08-10
 - FRD: `frd.md`
@@ -515,6 +515,60 @@ Definition of done: the same accessible game on `/lander/` and `404.html` suppor
 successive generated sites in one run, its demonstrated route allowance and decaying multiplier are
 deterministic, fuel/checkpoint state cannot duplicate, crash and reduced-motion behavior are finite
 and honest for a vacuum, and runtime memory/DOM work remains bounded independent of sites completed.
+
+## Phase 4H: final Lander handling and world polish
+
+- [x] Reproduce and measure the operator's six handling and visual observations against exact
+      runtime head `f353e571`: identify the platform rectangle's rendered source, record current
+      terrain frequency and amplitude, exercise the staged NOC power state, measure a real steering
+      pulse and its post-release inertia, and probe every safe-contact boundary without editing
+      code.
+- [x] Amend the FRD, HLA, and this plan without rewriting completed Phase 4G history. Require a
+      visibly supported elevated platform, one flat site shelf, coarse irregular terrain, a vertical
+      multicolor power-up aimed toward the antenna, actual thrust vectoring with reduced axial
+      force, light vacuum-honest flight-control stabilization, and a modestly relaxed landing
+      envelope.
+- [ ] Delegate and lead-review an exact LLD amendment that pins platform support geometry, terrain
+      sample and shelf construction, battery geometry/colors/stages, engine mixing and gimbal force,
+      powered angular assist, safe-contact limits, deterministic vectors, route and world fixture
+      regeneration, performance bounds, and browser acceptance before implementation.
+- [ ] Obtain an `agentworks-reviewer` approval of the amended LLD and resolve every valid artifact
+      finding before changing production or fixture code.
+- [ ] Delegate implementation to an `agentworks-dev` subagent in an isolated worktree. Preserve one
+      world authority and one immutable physics profile; update the model, controller projection,
+      shared static scene, CSS, independent derivation tool, canonical route/world fixtures, focused
+      tests, permanent documentation, and exact artifact witnesses atomically.
+- [ ] Prove every regenerated constructive route under the changed terrain, platform, force, assist,
+      and landing profile, including collision-aware two-replay success and one-quantum exhaustion.
+      Fail the effort rather than introducing runtime search, weakening deterministic bounds, or
+      retaining stale route/world literals.
+- [ ] Run focused Node and website suites, deterministic root/project builds, complete repository
+      gates, module-size and bounded-DOM checks, then exercise the coherent preview in current
+      Chrome and Edge. Browser acceptance must cover three sites, keyboard/vi/touch input, steering
+      feel, post-release stabilization, safe/crash boundaries, coarse terrain and flat shelves,
+      support appearance, every NOC stage, reduced motion, lifecycle/privacy, and long-run
+      performance.
+- [ ] Obtain fresh-eyes browser evidence and `agentworks-reviewer` code approval, resolve every
+      valid finding through the implementing subagent, update the stacked PR evidence, rebase or
+      merge the latest `main`, mark PR #486 ready, and monitor every required CI and CodeQL check.
+
+Operator evidence (2026-08-10): the operator accepted the continuous-expedition direction and asked
+for this final tuning pass after using the port-8766 preview. Isolated Chromium inspection at exact
+head `f353e571` reproduced the pale rectangle as a `0.45 m` exposed sky slot beneath every platform,
+not a transient node. It measured the current regular `4 m` terrain samples, left-to-right single-
+color battery fill, one-engine steering lift, absence of linear or angular stabilization, and exact
+`1.4 m/s`, `2.2 m/s`, `8 degree`, and `12 degree/s` safe-contact boundaries. A roughly half-second
+steering pulse exceeded the angular limit and then coasted unchanged after release. These
+measurements justify one coupled geometry, world, input-force, stabilization, and tolerance revision
+rather than isolated CSS or threshold patches. Phase 4G's completed implementation and review
+records remain historical evidence; PR #486 stays draft until every Phase 4H gate is complete.
+
+Definition of done: the elevated pad has an intentional supported silhouette with no long pale slot;
+every pad and NOC shares a flat shelf within coarse, stronger, irregular terrain; the NOC energizes
+vertically toward its antenna in visible colored stages; steering vectors thrust without adding
+axial lift above straight collective; neutral collective visibly counters residual rotation while
+engine-off coasting and vacuum crash debris remain ballistic; the modestly relaxed landing envelope
+and every regenerated route/world fixture are exact, reviewed, and browser-accepted.
 
 ## Phase 5: CI and default Pages deployment
 

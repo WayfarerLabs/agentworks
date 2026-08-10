@@ -1,7 +1,7 @@
 # HLA: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander code review-clean, browser acceptance
-  pending
+- Status: Interim implementation complete; continuous Lander final handling and world polish in
+  design
 - Date: 2026-08-07
 - Last revised: 2026-08-10
 - FRD: `frd.md`
@@ -260,15 +260,20 @@ and `r`, preserve the established focus destinations, and make the complete life
 touch and assistive technology.
 
 While active, Space or Up commands equal thrust; Left or `h` increases the right engine to turn
-left; Right or `l` increases the left engine to turn right. Apart from the accepted preflight Space
-event, only active game controls prevent their ordinary browser behavior. A first pointer activation
-starts without also applying thrust. Thereafter, pointer down captures that pointer and starts
-collective thrust; movement applies a bounded horizontal differential after a dead zone; pointer up,
-cancel, lost capture, exit, or page hide cuts both engines and releases capture. A short press with
-little travel receives a pinned minimum impulse so a tap is useful; holding sustains thrust.
-Dragging left biases the right engine, and dragging right biases the left. `touch-action` and scroll
-suppression apply only inside the active game scene. Escape exits to the settled initial state, and
-`r` restarts a crashed mission from its last in-memory checkpoint.
+left; Right or `l` increases the left engine to turn right. Differential input vectors the combined
+force toward the commanded turn and reduces its axial component rather than adding lift above
+straight collective. While neutral collective remains engaged, a small deterministic flight-control
+assist counters residual rotation by redistributing that same fuel-consuming thrust between the two
+visible engines. It is not atmospheric drag; engine-off vehicle coasting and ballistic crash
+fragments remain undamped. Apart from the accepted preflight Space event, only active game controls
+prevent their ordinary browser behavior. A first pointer activation starts without also applying
+thrust. Thereafter, pointer down captures that pointer and starts collective thrust; movement
+applies a bounded horizontal differential after a dead zone; pointer up, cancel, lost capture, exit,
+or page hide cuts both engines and releases capture. A short press with little travel receives a
+pinned minimum impulse so a tap is useful; holding sustains thrust. Dragging left biases the right
+engine, and dragging right biases the left. `touch-action` and scroll suppression apply only inside
+the active game scene. Escape exits to the settled initial state, and `r` restarts a crashed mission
+from its last in-memory checkpoint.
 
 The 404 body begins directly with `Page not found` after the compact detail-page inset. It has no
 error-code, eyebrow, provenance, or other pre-title label; its explanatory copy remains below the
@@ -300,25 +305,31 @@ and only regenerates terrain/site nodes when the rolling window changes. The run
 number of nearby chunks and sites, so an arbitrarily long forward expedition does not imply
 unbounded DOM or terrain history.
 
-Each deterministic site replaces a short terrain span with a slightly elevated flat platform exactly
-three lander widths long and places one solid NOC building beside it. A safe landing under the
-pinned speed and attitude limits consumes that site's one gas can exactly once. The fuel award is
-computed only after the next site exists: a deterministic reference plan starts at the post-refuel,
-post-power platform checkpoint, includes every automatic liftoff impulse, uses the same immutable
-physics profile as play, and demonstrates a safe next landing to establish its conservative minimum
-fuel. The award is that minimum multiplied by a monotonic ratio beginning near three and approaching
-one. It is added to the carried reserve without erasing unused fuel. Fixed-seed tests pin both the
-route proof and the smallest successful allowance within the LLD's search resolution.
+Each deterministic site replaces a deliberately wide terrain span with one flat shelf carrying a
+slightly elevated platform exactly three lander widths long and one solid NOC building beside it.
+Non-site terrain uses wider, irregular samples and stronger bounded elevation changes rather than a
+fine alternating motif. Existing platform geometry renders a substantial support or truss within its
+physical clearance so the elevation reads intentionally without a long exposed sky strip. A safe
+landing under the pinned, modestly relaxed speed and attitude limits consumes that site's one gas
+can exactly once. The fuel award is computed only after the next site exists: a deterministic
+reference plan starts at the post-refuel, post-power platform checkpoint, includes every automatic
+liftoff impulse, uses the same immutable physics profile as play, and demonstrates a safe next
+landing to establish its conservative minimum fuel. The award is that minimum multiplied by a
+monotonic ratio beginning near three and approaching one. It is added to the carried reserve without
+erasing unused fuel. Fixed-seed tests pin both the route proof and the smallest successful allowance
+within the LLD's search resolution.
 
 After refueling, the G opening acts as a deployment bay: a small terminal-inspired agent reaches the
-surface and enters the single NOC. A phone-battery-style indicator fills in stages, followed by the
-antenna signal. The powered appearance remains while the site stays in the rolling window. The model
-then records one immutable checkpoint snapshot containing the vehicle/platform pose, post-award
-fuel, world generator cursor, active and target site identities, retained-site can/power states, and
-mission progress. A short scripted liftoff spends fuel through the same accounting path as player
-thrust, then returns to ordinary flight with the next site already generated offscreen to the right.
-A right-edge direction cue blinks only while that target is outside the viewport; reduced motion
-keeps the useful arrow static. Deployment never enters a terminal success state.
+surface and enters the single NOC. A vertical phone-battery-style indicator fills from bottom to top
+in distinct warm-to-cool stages aimed visually toward the mast, followed by a colorful terminal,
+antenna, and signal payoff. State and timing, not color alone, communicate progress. The powered
+appearance remains while the site stays in the rolling window. The model then records one immutable
+checkpoint snapshot containing the vehicle/platform pose, post-award fuel, world generator cursor,
+active and target site identities, retained-site can/power states, and mission progress. A short
+scripted liftoff spends fuel through the same accounting path as player thrust, then returns to
+ordinary flight with the next site already generated offscreen to the right. A right-edge direction
+cue blinks only while that target is outside the viewport; reduced motion keeps the useful arrow
+static. Deployment never enters a terminal success state.
 
 Unsafe terrain, platform, or building contact enters a finite crash sequence. Normal motion shows a
 compact propellant flash and deterministic fragments following ballistic paths; it has no smoke,
