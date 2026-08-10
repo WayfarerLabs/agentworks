@@ -29,6 +29,13 @@ class InstanceState(Enum):
 
 
 @dataclass(frozen=True)
+class InstanceOwnership:
+    """One server-assigned instance incarnation safe to delete by name."""
+
+    resource_id: str
+
+
+@dataclass(frozen=True)
 class CleanupCoordinates:
     """Every exact provider identity needed for safe manual recovery."""
 
@@ -62,6 +69,16 @@ def probe_instance_state(
     coordinates: CleanupCoordinates,
 ) -> InstanceState:
     """Prove absence, survival, or indeterminacy by exact-name get."""
+    state, _instance = _read_instance(instances, coordinates=coordinates)
+    return state
+
+
+def _read_instance(
+    instances: Any,
+    *,
+    coordinates: CleanupCoordinates,
+) -> tuple[InstanceState, Any | None]:
+    """Read one exact-name instance without turning uncertainty into absence."""
     try:
         instance = call_google_optional(
             lambda: instances.get(
@@ -73,19 +90,27 @@ def probe_instance_state(
             resource=f"instance {coordinates.project_id}/{coordinates.zone}/{coordinates.instance_name}",
         )
     except GCEError:
-        return InstanceState.INDETERMINATE
-    return InstanceState.ABSENT if instance is None else InstanceState.SURVIVING
+        return InstanceState.INDETERMINATE, None
+    if instance is None:
+        return InstanceState.ABSENT, None
+    return InstanceState.SURVIVING, instance
 
 
 def delete_instance_and_verify(
     instances: Any,
     *,
     coordinates: CleanupCoordinates,
+    ownership: InstanceOwnership | None,
     timeout: float,
 ) -> InstanceState:
-    """Request exact instance deletion, then independently prove absence."""
-    if probe_instance_state(instances, coordinates=coordinates) is InstanceState.ABSENT:
-        return InstanceState.ABSENT
+    """Delete only the expected provider incarnation, then prove absence."""
+    state, instance = _read_instance(instances, coordinates=coordinates)
+    if state is not InstanceState.SURVIVING:
+        return state
+    if instance is None:  # pragma: no cover - paired by _read_instance
+        return InstanceState.INDETERMINATE
+    if ownership is None or _provider_resource_id(instance.id) != ownership.resource_id:
+        return InstanceState.SURVIVING
     try:
         operation = call_google(
             lambda: instances.delete(
@@ -111,6 +136,7 @@ def rollback_partial_create(
     expected_deny: Any,
     allow_ownership: FirewallOwnership | None,
     deny_ownership: FirewallOwnership | None,
+    instance_ownership: InstanceOwnership | None,
     instance_possible: bool,
     timeout: float,
 ) -> RollbackReport:
@@ -123,7 +149,12 @@ def rollback_partial_create(
         timeout=timeout,
     )
     instance_state = (
-        delete_instance_and_verify(instances, coordinates=coordinates, timeout=timeout)
+        delete_instance_and_verify(
+            instances,
+            coordinates=coordinates,
+            ownership=instance_ownership,
+            timeout=timeout,
+        )
         if instance_possible
         else InstanceState.ABSENT
     )
@@ -145,6 +176,17 @@ def rollback_partial_create(
     return RollbackReport(instance_state, allow_state, deny_state)
 
 
+def _provider_resource_id(value: object) -> str | None:
+    """Normalize one positive uint64 provider ID without accepting zero."""
+    if isinstance(value, bool) or not isinstance(value, int | str):
+        return None
+    try:
+        normalized = int(value)
+    except ValueError:
+        return None
+    return str(normalized) if normalized > 0 else None
+
+
 def rollback_then_raise(
     primary: Exception,
     rollback: Callable[[], RollbackReport],
@@ -158,7 +200,7 @@ def rollback_then_raise(
     except Exception:
         cleanup_failed = True
     if cleanup_failed:
-        output.warn("GCE rollback failed unexpectedly; provider resources may remain.")
+        output.warn("GCE rollback failed unexpectedly. " + _manual_guidance(coordinates, None))
     if report is not None and not report.clean:
         output.warn(_manual_guidance(coordinates, report))
     raise primary

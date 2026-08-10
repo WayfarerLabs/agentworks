@@ -11,6 +11,7 @@ from google.cloud import compute_v1
 
 from agentworks.plugins.gcp.cleanup import (
     CleanupCoordinates,
+    InstanceOwnership,
     InstanceState,
     RollbackReport,
     rollback_after_interrupt,
@@ -115,12 +116,16 @@ def _deny() -> compute_v1.Firewall:
     )
 
 
+def _instance(resource_id: int = 201) -> compute_v1.Instance:
+    return compute_v1.Instance(id=resource_id, name=_COORDINATES.instance_name)
+
+
 def test_total_rollback_closes_allow_before_instance_and_deny_after_absence() -> None:
     log: list[str] = []
     allow = _allow()
     deny = _deny()
     report = rollback_partial_create(
-        instances=_Instances(iter([object(), None]), log),
+        instances=_Instances(iter([_instance(), None]), log),
         firewalls=_Firewalls(
             {
                 allow.name: iter([allow, None]),
@@ -133,6 +138,7 @@ def test_total_rollback_closes_allow_before_instance_and_deny_after_absence() ->
         expected_deny=deny,
         allow_ownership=FirewallOwnership(allow.name, "101"),
         deny_ownership=FirewallOwnership(deny.name, "102"),
+        instance_ownership=InstanceOwnership("201"),
         instance_possible=True,
         timeout=9,
     )
@@ -158,7 +164,7 @@ def test_surviving_instance_keeps_deny_and_reports_exact_state() -> None:
     allow = _allow()
     deny = _deny()
     report = rollback_partial_create(
-        instances=_Instances(iter([object(), object()]), log),
+        instances=_Instances(iter([_instance(), _instance()]), log),
         firewalls=_Firewalls(
             {
                 allow.name: iter([allow, None]),
@@ -171,6 +177,7 @@ def test_surviving_instance_keeps_deny_and_reports_exact_state() -> None:
         expected_deny=deny,
         allow_ownership=FirewallOwnership(allow.name, "101"),
         deny_ownership=FirewallOwnership(deny.name, "102"),
+        instance_ownership=InstanceOwnership("201"),
         instance_possible=True,
         timeout=9,
     )
@@ -197,6 +204,7 @@ def test_indeterminate_instance_keeps_deny() -> None:
         expected_deny=deny,
         allow_ownership=FirewallOwnership(allow.name, "101"),
         deny_ownership=FirewallOwnership(deny.name, "102"),
+        instance_ownership=InstanceOwnership("201"),
         instance_possible=True,
         timeout=9,
     )
@@ -223,11 +231,52 @@ def test_mismatched_rule_is_retained_not_deleted() -> None:
         expected_deny=deny,
         allow_ownership=FirewallOwnership(allow.name, "101"),
         deny_ownership=FirewallOwnership(deny.name, "102"),
+        instance_ownership=None,
         instance_possible=False,
         timeout=9,
     )
     assert report.allow is FirewallState.MISMATCHED
     assert "firewall:delete:vm-a-allow" not in log
+
+
+@pytest.mark.parametrize(
+    ("instance", "ownership"),
+    [
+        (_instance(202), InstanceOwnership("201")),
+        (compute_v1.Instance(name=_COORDINATES.instance_name), InstanceOwnership("201")),
+        (_instance(201), None),
+    ],
+    ids=("different-id", "missing-id", "missing-ownership"),
+)
+def test_instance_without_matching_provider_ownership_is_retained(
+    instance: compute_v1.Instance,
+    ownership: InstanceOwnership | None,
+) -> None:
+    log: list[str] = []
+    allow = _allow()
+    deny = _deny()
+    report = rollback_partial_create(
+        instances=_Instances(iter([instance]), log),
+        firewalls=_Firewalls(
+            {
+                allow.name: iter([None]),
+                deny.name: iter([deny]),
+            },
+            log,
+        ),
+        coordinates=_COORDINATES,
+        expected_allow=allow,
+        expected_deny=deny,
+        allow_ownership=FirewallOwnership(allow.name, "101"),
+        deny_ownership=FirewallOwnership(deny.name, "102"),
+        instance_ownership=ownership,
+        instance_possible=True,
+        timeout=9,
+    )
+    assert report.instance is InstanceState.SURVIVING
+    assert report.deny is FirewallState.REALIZED
+    assert "instance:delete" not in log
+    assert "firewall:delete:vm-a-deny" not in log
 
 
 def test_ordinary_cleanup_cannot_replace_primary_failure(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -243,7 +292,17 @@ def test_ordinary_cleanup_cannot_replace_primary_failure(monkeypatch: pytest.Mon
         )
 
     assert caught.value is primary
-    assert warnings == ["GCE rollback failed unexpectedly; provider resources may remain."]
+    assert len(warnings) == 1
+    message = warnings[0]
+    assert "GCE rollback failed unexpectedly" in message
+    assert "project 'project-a'" in message
+    assert "zone 'us-central1-a'" in message
+    assert "instance 'vm-a'" in message
+    assert "allow 'vm-a-allow'" in message
+    assert "deny 'vm-a-deny'" in message
+    assert "gcloud compute instances delete vm-a --project project-a --zone us-central1-a" in message
+    assert "firewall-rules describe vm-a-allow --project project-a" in message
+    assert "firewall-rules describe vm-a-deny --project project-a" in message
 
 
 def test_first_interrupt_rolls_back_and_reraises_original_identity(monkeypatch: pytest.MonkeyPatch) -> None:
