@@ -10,6 +10,7 @@ from typing import Final, NamedTuple
 
 from site_content import (
     CLI_SECRETS_URL,
+    EMAIL_ADDRESS_PATTERN,
     IDEMPOTENCY_URL,
     INTERIM_NOTICE,
     PYPI_URL,
@@ -24,11 +25,6 @@ SITE_BASE_PATTERN = re.compile(r"/(?:[A-Za-z0-9][A-Za-z0-9._~-]*/)*\Z", re.ASCII
 TOKEN_PATTERN = re.compile(r"{{[A-Z][A-Z0-9_]*}}")
 HTTP_URL_PATTERN = re.compile(r"(?i)https?://")
 QUOTED_PROTOCOL_RELATIVE_URL_PATTERN = re.compile(r"""["'`]//""")
-EMAIL_ADDRESS_PATTERN = re.compile(
-    r"(?<![A-Z0-9._%+-])[A-Z0-9._%+-]+@[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?"
-    r"(?:\.[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?)+",
-    re.IGNORECASE,
-)
 STATIC_IMPORT_PATTERN = re.compile(
     r"\b(?:import|export)\s+(?:[^;\"']*?\s+from\s+)?([\"'])([^\"']+)\1",
     re.DOTALL,
@@ -85,11 +81,10 @@ MAIN_ATTRIBUTES: Final = {
     "404.html": {"id": "main-content", "class": "detail-main game-main"},
 }
 DETAIL_PAGE_HEADINGS: Final = {
-    "manifesto.html": "Agentworks Manifesto",
-    "security.html": "Security at Agentworks",
     "lander.html": "Lunar deployment",
     "404.html": "Page not found",
 }
+LONG_FORM_TEMPLATES: Final = frozenset({"manifesto.html", "security.html"})
 
 REQUIRED_404_REFERENCES = {
     f'href="{SITE_BASE_TOKEN}"',
@@ -112,11 +107,7 @@ TEMPLATE_TOKENS: Final = {
     "security.html": {
         SITE_BASE_TOKEN,
         "{{SECURITY_META_DESCRIPTION}}",
-        "{{SECURITY_THREATS}}",
-        "{{SECURITY_BOUNDARIES}}",
-        "{{SECURITY_POSTURE}}",
-        "{{SECURITY_SECRETS}}",
-        "{{SECURITY_REPORTING}}",
+        "{{SECURITY_CONTENT}}",
     },
     "404.html": {SITE_BASE_TOKEN, LANDER_GAME_TOKEN},
     "lander.html": {SITE_BASE_TOKEN, LANDER_GAME_TOKEN},
@@ -126,11 +117,8 @@ TEMPLATE_REQUIRED_LITERALS: Final = {
     "index.html": {
         "Guided onboarding is not yet published. You can still explore the repository, PyPI package,",
     },
-    "manifesto.html": {"Agentworks Manifesto"},
-    "security.html": {
-        f'href="{REPORTING_URL}"',
-        f'href="{REPOSITORY_URL}/security/policy"',
-    },
+    "manifesto.html": set(),
+    "security.html": set(),
     "404.html": REQUIRED_404_REFERENCES | {LANDER_GAME_TOKEN},
     "lander.html": REQUIRED_404_REFERENCES | {LANDER_GAME_TOKEN},
     "lander-game.html": {
@@ -149,15 +137,11 @@ CONTENT_TOKEN_PLACEMENTS: Final = {
     },
     "manifesto.html": {
         "{{MANIFESTO_META_DESCRIPTION}}": ("meta", "description"),
-        "{{MANIFESTO_CONTENT}}": ("article-class", "manifesto-content sourced-content"),
+        "{{MANIFESTO_CONTENT}}": ("article-class", "long-form-content sourced-content"),
     },
     "security.html": {
         "{{SECURITY_META_DESCRIPTION}}": ("meta", "description"),
-        "{{SECURITY_THREATS}}": ("section-id", "threat-model"),
-        "{{SECURITY_BOUNDARIES}}": ("section-id", "boundaries"),
-        "{{SECURITY_POSTURE}}": ("section-id", "operator-posture"),
-        "{{SECURITY_SECRETS}}": ("section-id", "credentials"),
-        "{{SECURITY_REPORTING}}": ("section-id", "reporting"),
+        "{{SECURITY_CONTENT}}": ("article-class", "long-form-content sourced-content"),
     },
     "404.html": {},
     "lander.html": {},
@@ -485,7 +469,6 @@ def _validate_shared_shell(name: str, template: str) -> None:
             "content": GAME_CSP,
         }:
             raise ValueError(f"{name}: Content Security Policy is invalid")
-
     body_children = _children(parser, body_index)
     if [elements[index].tag for index in body_children] != [
         "a",
@@ -508,7 +491,17 @@ def _validate_shared_shell(name: str, template: str) -> None:
         raise ValueError(f"{name}: main landmark requires its exact CSS-critical attributes")
     if elements[footer_index].attributes != {"class": "site-footer"}:
         raise ValueError(f"{name}: footer requires the exact site-footer class")
-
+    if name in LONG_FORM_TEMPLATES:
+        main_children = _children(parser, main_index)
+        if len(main_children) != 1 or (
+            elements[main_children[0]].tag != "article"
+            or elements[main_children[0]].attributes != {"class": "long-form-content sourced-content"}
+        ):
+            raise ValueError(f"{name}: main must contain only its complete sourced document")
+        source_token = "{{MANIFESTO_CONTENT}}" if name == "manifesto.html" else "{{SECURITY_CONTENT}}"
+        article_index = main_children[0]
+        if _children(parser, article_index) or _normalized_text(elements[article_index].text) != source_token:
+            raise ValueError(f"{name}: long-form article must contain only its complete source token")
     if expected_heading := DETAIL_PAGE_HEADINGS.get(name):
         main_children = _children(parser, main_index)
         if not main_children or (
@@ -542,7 +535,6 @@ def _validate_shared_shell(name: str, template: str) -> None:
             marker in template for marker in ('class="error-code"', 'class="eyebrow"')
         ):
             raise ValueError(f"{name}: game detail shells cannot include pre-title labels")
-
     header_children = _children(parser, header_index)
     if name == "index.html":
         if [elements[index].tag for index in header_children] != ["nav", "nav"]:
@@ -746,7 +738,7 @@ def _validate_content_token_placements(name: str, template: str) -> _TemplatePla
         container = ancestors[-1][1]
         if placement_kind == "article-class":
             if container.get("class") != placement_value:
-                raise ValueError(f"{name}: block token {token} must be in the reviewed manifesto article")
+                raise ValueError(f"{name}: block token {token} must be in the reviewed long-form article")
             continue
         if container.get("class") != "sourced-content":
             raise ValueError(f"{name}: block token {token} must be in an exact sourced-content container")

@@ -55,47 +55,35 @@ class BuildAndInstallTests(RepositoryFixture):
     def test_unapproved_external_url_fails_before_output_changes(self) -> None:
         output = self.build()
         before = snapshot(output)
-        template = self.root / "website/templates/security.html"
-        source = template.read_text(encoding="utf-8")
-        template.write_text(
-            source.replace(
-                "</main>",
-                '<a href="https://example.com/unapproved">Unapproved</a>\n</main>',
-            ),
+        manifesto = self.root / "docs/why-agentworks.md"
+        source = manifesto.read_text(encoding="utf-8")
+        manifesto.write_text(
+            source + "\nAn [unapproved destination](https://example.com/unapproved).\n",
             encoding="utf-8",
         )
-        with self.assertRaisesRegex(ValueError, "unapproved external URL"):
+        with self.assertRaisesRegex(ValueError, "invalid link"):
             site_builder.build_site(self.root, output, "/agentworks/")
         self.assertEqual(snapshot(output), before)
 
     def test_absent_local_route_has_no_partial_manifest_suppression(self) -> None:
-        output = self.build()
-        before = snapshot(output)
-        template = self.root / "website/templates/security.html"
-        source = template.read_text(encoding="utf-8")
-        template.write_text(
-            source.replace("</main>", '<a href="{{SITE_BASE}}missing/">Missing route</a>\n</main>'),
-            encoding="utf-8",
+        rendered, manifest = site_builder._render_artifact(self.root, "/")
+        changed = dict(rendered)
+        changed[Path("security/index.html")] = changed[Path("security/index.html")].replace(
+            b"</main>", b'<a href="/missing/">Missing route</a>\n</main>', 1
         )
         with self.assertRaisesRegex(ValueError, "local reference is absent from manifest"):
-            site_builder.build_site(self.root, output, "/")
-        self.assertEqual(snapshot(output), before)
+            site_builder._validate_local_references(changed, manifest, "/")
 
     def test_cross_document_fragment_must_exist_on_its_actual_target(self) -> None:
-        output = self.build()
-        before = snapshot(output)
-        template = self.root / "website/templates/security.html"
-        source = template.read_text(encoding="utf-8")
-        template.write_text(
-            source.replace(
-                "</main>",
-                '<a href="{{SITE_BASE}}404.html#not-a-real-id">Missing cross-page fragment</a>\n</main>',
-            ),
-            encoding="utf-8",
+        rendered, manifest = site_builder._render_artifact(self.root, "/agentworks/")
+        changed = dict(rendered)
+        changed[Path("security/index.html")] = changed[Path("security/index.html")].replace(
+            b"</main>",
+            b'<a href="/agentworks/404.html#not-a-real-id">Missing cross-page fragment</a>\n</main>',
+            1,
         )
         with self.assertRaisesRegex(ValueError, "local reference fragment is absent"):
-            site_builder.build_site(self.root, output, "/agentworks/")
-        self.assertEqual(snapshot(output), before)
+            site_builder._validate_local_references(changed, manifest, "/agentworks/")
 
     def test_manifest_without_root_index_cannot_suppress_root_reference_failure(
         self,

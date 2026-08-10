@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import html
 import re
 import stat
@@ -12,7 +11,16 @@ from typing import Final, NamedTuple
 
 HEADING_PATTERN = re.compile(r"^(#{1,6})[ \t]+(.*?)(?:[ \t]+#+[ \t]*)?$")
 FENCE_PATTERN = re.compile(r"^[ ]{0,3}(`{3,}|~{3,})(?:[^`~]*)$")
-REFERENCE_PATTERN = re.compile(r"^[ ]{0,3}\[([^]]+)\]:[ \t]*(\S*)[ \t]*$")
+REFERENCE_PATTERN = re.compile(r"^[ ]{0,3}\[([^]]+)]\:[ \t]*(\S*)[ \t]*$")
+REFERENCE_LINK_PATTERN = re.compile(r"\[([^\[\]\n]+)]\[([^\[\]\n]+)]")
+UNSUPPORTED_BLOCK_PATTERN = re.compile(
+    r"^(?:[ ]{4,}|[ ]{0,3}>[ \t]?|[ ]{0,3}\d+[.)][ \t]+|[ ]{0,3}(?:[-*_][ \t]*){3,}$)"
+)
+EMAIL_ADDRESS_PATTERN = re.compile(
+    r"(?<![A-Z0-9._%+-])[A-Z0-9._%+-]+@[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?"
+    r"(?:\.[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?)+",
+    re.IGNORECASE,
+)
 
 INTERIM_NOTICE: Final = (
     "Guided onboarding is not yet published. You can still explore the repository, PyPI package, "
@@ -24,28 +32,20 @@ README_SOURCE_URL: Final = f"{REPOSITORY_URL}/blob/main/README.md"
 IDEMPOTENCY_URL: Final = f"{REPOSITORY_URL}/blob/main/docs/guides/idempotency.md"
 CLI_SECRETS_URL: Final = f"{REPOSITORY_URL}/blob/main/cli/README.md#environment-variables-and-secrets"
 PYPI_URL: Final = "https://pypi.org/project/agentworks-cli/"
-MANIFESTO_SOURCE_SHA256: Final = "dba90181c0c3fca415d965ac4eb3933525044ffe560ec1ef2561be83e875d207"
-MANIFESTO_HEADINGS: Final = (
-    (1, "Why Agentworks"),
-    (2, "The Problem Space"),
-    (3, "Security"),
-    (3, "Workload Management"),
-    (3, "Consistency"),
-    (3, "Control"),
-    (2, "Key Principles"),
-    (3, "Opinionated Consistency"),
-    (3, "Composable Isolation"),
-    (3, "Ephemerality"),
-    (3, "Declarative Configuration and Templates"),
+REPORTING_URL: Final = (
+    "https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing-"
+    "information-about-vulnerabilities/privately-reporting-a-security-vulnerability"
 )
 SOURCE_RELATIVE_URLS: Final = {
     "../README.md": README_SOURCE_URL,
     "guides/idempotency.md": IDEMPOTENCY_URL,
     "../cli/README.md#environment-variables-and-secrets": CLI_SECRETS_URL,
 }
-REPORTING_URL: Final = (
-    "https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing-"
-    "information-about-vulnerabilities/privately-reporting-a-security-vulnerability"
+SOURCE_ABSOLUTE_URLS: Final = frozenset(
+    {
+        f"{REPOSITORY_URL}/issues/224",
+        REPORTING_URL,
+    }
 )
 
 
@@ -71,12 +71,17 @@ class ContentContract(NamedTuple):
         return " > ".join(f"{'#' * level} {text}" for level, text in self.keypath)
 
 
-MANIFESTO_CONTRACT: Final = ContentContract(
-    "MANIFESTO",
-    Path("docs/why-agentworks.md"),
-    ((1, "Why Agentworks"),),
-    (),
-)
+class DocumentContract(NamedTuple):
+    contract_id: str
+    source: Path
+    references: tuple[tuple[str, str], ...] = ()
+    github_only_reporting: bool = False
+
+
+class DocumentBlock(NamedTuple):
+    kind: str
+    value: str | tuple[str, ...]
+    level: int = 0
 
 
 def paragraph(value: str) -> Block:
@@ -109,129 +114,30 @@ CONTRACTS: Final = (
             ),
         ),
     ),
-    ContentContract(
-        "SECURITY_THREATS",
-        Path("docs/why-agentworks.md"),
-        ((1, "Why Agentworks"), (2, "The Problem Space"), (3, "Security")),
-        (
-            paragraph("Agentic engineering is inherently risky. These risks come from multiple directions, including:"),
-            unordered(
-                "**Honest mistakes** - An agent can simply make a mistake that results in data loss, "
-                "corruption, or unintended side effects. It's very easy to find stories of Claude wiping out "
-                "entire directories or otherwise causing havoc.",
-                "**Prompt injection** - Agents that are exposed to the outside world (e.g. by downloading "
-                "untrusted web content) can potentially be manipulated into doing things outside of their "
-                "operator's intent or control.",
-                "**Supply chain attacks** - Agents may download and run compromised software or dependencies "
-                "from external sources, which could introduce malicious code into the environment, at build "
-                "time, runtime, or both.",
-                "**Rogue agents** - The agent itself could behave maliciously due to a compromise of the model, "
-                "the provider, or emergent behavior.",
-            ),
-        ),
-    ),
-    ContentContract(
-        "SECURITY_BOUNDARIES",
-        Path("docs/why-agentworks.md"),
-        ((1, "Why Agentworks"), (2, "The Problem Space"), (3, "Security")),
-        (
-            paragraph(
-                "All of these suggest similar solutions, though. You need strong guardrails (isolation, "
-                "permissions, etc.) to ensure that _when_ things go sideways, the blast radius is contained "
-                "and the operator retains control."
-            ),
-            paragraph(
-                "Being precise about what those guardrails do is as important as having them. Agentworks builds "
-                "its isolation from VM boundaries plus standard Linux users, groups, and filesystem permissions. "
-                "That separates agents' credentials and state from one another and bounds what a mistaken or "
-                "compromised agent can reach. Two things it deliberately does not do: it is not a kernel-level "
-                "sandbox (agents on one VM share a kernel, so a local privilege escalation is a path between "
-                "them), and it does not yet constrain outbound network access, so an agent that reads untrusted "
-                "content can still reach the network with whatever it can read (tracked in "
-                "[#224](https://github.com/WayfarerLabs/agentworks/issues/224))."
-            ),
-        ),
-    ),
-    ContentContract(
-        "SECURITY_POSTURE",
-        Path("docs/why-agentworks.md"),
-        ((1, "Why Agentworks"), (2, "Key Principles"), (3, "Composable Isolation")),
-        (
-            paragraph(
-                "This model provides several isolation mechanisms, which operators can compose to achieve their "
-                "desired security posture. While the system is optimized around the full isolation model (VMs, "
-                "agents, and workspaces), this is by no means required. Operators are free to use any subset "
-                "that makes sense for their security and operational requirements."
-            ),
-            paragraph(
-                "Composition runs the other way too. Because agents are Linux users and workspaces are Linux "
-                "groups, granting _partial_ access costs no more than withholding it, which makes graduated "
-                "privilege between cooperating agents a practical everyday pattern rather than a special case. "
-                "A research agent can be created with workspace access and nothing else, gather material, and "
-                "leave artifacts behind for a more privileged agent to act on, so the privileged agent never "
-                "crawls untrusted content itself. Models built on container-per-agent isolation can express the "
-                "separation, but pay for the sharing in volumes, networking, or an orchestrator; here both "
-                "halves are ordinary filesystem permissions."
-            ),
-            paragraph(
-                "A handoff like that narrows exposure rather than eliminating it. Whatever the low-privilege "
-                "agent writes is still attacker-influenced input to whoever reads it next, so those artifacts "
-                "are best treated as data to be evaluated, not as instructions to be followed."
-            ),
-        ),
-    ),
-    ContentContract(
-        "SECURITY_SECRETS",
-        Path("docs/why-agentworks.md"),
-        (
-            (1, "Why Agentworks"),
-            (2, "Key Principles"),
-            (3, "Declarative Configuration and Templates"),
-        ),
-        (
-            paragraph(
-                "Environment variables and secrets are first-class in the configuration: env tables can be "
-                "declared at vm, workspace, admin, agent, or session scope and merge in a defined precedence "
-                "order. Secret references (`{ secret: name }`) resolve through a configurable backend chain "
-                "(`env-var` reads from an `AW_SECRET_*` env var; `prompt` asks interactively at run time). Use "
-                "`agw env show` to inspect the merged result for any context. See "
-                "[cli/README.md](../cli/README.md#environment-variables-and-secrets) for the shape, and `agw "
-                "resource describe-kind secret` for the full reference."
-            ),
-        ),
-    ),
-    ContentContract(
-        "SECURITY_REPORTING",
-        Path("SECURITY.md"),
-        ((1, "Security Policy"), (2, "Reporting a Vulnerability")),
-        (
-            paragraph(
-                "If you believe you have found a security vulnerability in Agentworks, please report it "
-                "privately rather than opening a public issue."
-            ),
-            paragraph(
-                "Use GitHub's [private vulnerability reporting][gh-private] on this repository. Please "
-                "include:"
-            ),
-            unordered(
-                "A description of the issue and the impact you believe it has.",
-                "Steps to reproduce (or a proof-of-concept, if applicable).",
-                "The version, commit, or branch you observed it on.",
-                "Any relevant configuration (sanitized of secrets).",
-            ),
-        ),
-    ),
 )
+
+MANIFESTO_CONTRACT: Final = DocumentContract("MANIFESTO", Path("docs/why-agentworks.md"))
+SECURITY_CONTRACT: Final = DocumentContract(
+    "SECURITY",
+    Path("SECURITY.md"),
+    (("gh-private", REPORTING_URL),),
+    True,
+)
+DOCUMENT_CONTRACTS: Final = (MANIFESTO_CONTRACT, SECURITY_CONTRACT)
 
 
 class ContractError(ValueError):
     """A fail-closed repository content contract violation."""
 
-    def __init__(self, contract: ContentContract, reason: str) -> None:
-        super().__init__(f"{contract.contract_id} {contract.source} {contract.keypath_text}: {reason}")
+    def __init__(self, contract: ContentContract | DocumentContract, reason: str) -> None:
+        location = f" {contract.keypath_text}" if isinstance(contract, ContentContract) else ""
+        super().__init__(f"{contract.contract_id} {contract.source}{location}: {reason}")
 
 
-def _read_utf8(path: Path, contract: ContentContract | None = None) -> str:
+def _read_utf8(
+    path: Path,
+    contract: ContentContract | DocumentContract | None = None,
+) -> str:
     try:
         if not stat.S_ISREG(path.lstat().st_mode) or path.is_symlink():
             raise OSError("input is not a regular file")
@@ -357,34 +263,11 @@ def _extract(contract: ContentContract, source: str) -> tuple[Block, ...]:
     return tuple(blocks[matches[0] : matches[0] + len(expected)])
 
 
-def _reference_url(source: str, reporting: ContentContract) -> str:
-    definitions: list[tuple[str, str]] = []
-    lines = source.split("\n")
-    fenced = _fenced_line_indexes(source, reporting)
-    for index, line in enumerate(lines):
-        if index in fenced:
-            continue
-        match = REFERENCE_PATTERN.match(line)
-        if match is None:
-            continue
-        destination = match.group(2)
-        if not destination and index + 1 < len(lines):
-            continuation = lines[index + 1]
-            if index + 1 not in fenced and re.match(r"^[ ]{1,3}\S", continuation):
-                destination = continuation.strip(" \t")
-        definitions.append((match.group(1), destination))
-    matching = [url for label, url in definitions if label == "gh-private"]
-    if len(matching) != 1:
-        raise ContractError(reporting, "missing or duplicate reference definition")
-    if matching[0] != REPORTING_URL:
-        raise ContractError(reporting, "reporting-link drift")
-    selected = "\n\n".join(block.markdown for block in reporting.expected)
-    if selected.count("[private vulnerability reporting][gh-private]") != 1:
-        raise ContractError(reporting, "reporting-link drift")
-    return matching[0]
-
-
-def _render_inline(value: str, contract: ContentContract, references: dict[str, str]) -> str:
+def _render_inline(
+    value: str,
+    contract: ContentContract | DocumentContract,
+    references: dict[str, str],
+) -> str:
     if "![" in value:
         raise ContractError(contract, "unsupported block or inline Markdown")
     result: list[str] = []
@@ -394,7 +277,7 @@ def _render_inline(value: str, contract: ContentContract, references: dict[str, 
         ("emphasis", re.compile(r"_([^_\n]+)_")),
         ("code", re.compile(r"`([^`\n]+)`")),
         ("inline-link", re.compile(r"\[([^\[\]\n]+)]\(([^()\s]+)\)")),
-        ("reference-link", re.compile(r"\[([^\[\]\n]+)]\[([^\[\]\n]+)]")),
+        ("reference-link", REFERENCE_LINK_PATTERN),
     )
     while cursor < len(value):
         candidates = [
@@ -424,19 +307,23 @@ def _render_inline(value: str, contract: ContentContract, references: dict[str, 
         else:
             destination = match.group(2)
             if kind == "reference-link":
-                if destination != "gh-private" or destination not in references:
+                if destination not in references:
                     raise ContractError(contract, "invalid link")
                 destination = references[destination]
             elif destination in SOURCE_RELATIVE_URLS:
                 destination = SOURCE_RELATIVE_URLS[destination]
-            elif not destination.startswith("https://"):
+            elif destination not in SOURCE_ABSOLUTE_URLS:
                 raise ContractError(contract, "invalid link")
             result.append(f'<a href="{html.escape(destination, quote=True)}">{escaped}</a>')
         cursor = match.end()
     return "".join(result)
 
 
-def _render_blocks(blocks: tuple[Block, ...], contract: ContentContract, references: dict[str, str]) -> str:
+def _render_blocks(
+    blocks: tuple[Block, ...],
+    contract: ContentContract,
+    references: dict[str, str],
+) -> str:
     rendered: list[str] = []
     for block in blocks:
         if block.kind == "paragraph":
@@ -453,45 +340,160 @@ def _heading_id(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
 
 
-def _render_manifesto(source: str) -> tuple[str, str]:
+def _reference_definitions(
+    source: str,
+    contract: DocumentContract,
+) -> tuple[dict[str, str], set[int]]:
     lines = source.split("\n")
-    fenced = _fenced_line_indexes(source, MANIFESTO_CONTRACT)
-    headings: list[tuple[int, str, int]] = []
+    references: dict[str, str] = {}
+    definition_lines: set[int] = set()
     for index, line in enumerate(lines):
-        if index in fenced:
+        fence = FENCE_PATTERN.match(line)
+        if fence:
+            marker = fence.group(1)
+            closing = re.compile(rf"^[ ]{{0,3}}{re.escape(marker[0])}{{{len(marker)},}}[ \t]*$")
+            if not any(closing.match(candidate) for candidate in lines[index + 1 :]):
+                raise ContractError(contract, "unsupported block or inline Markdown: unclosed fence")
+            raise ContractError(contract, "unsupported block or inline Markdown: fenced block")
+        match = REFERENCE_PATTERN.match(line)
+        if match is None:
             continue
-        match = HEADING_PATTERN.match(line)
-        if match:
-            headings.append((len(match.group(1)), match.group(2).strip(" \t"), index))
-    if tuple((level, text) for level, text, _ in headings) != MANIFESTO_HEADINGS:
-        raise ContractError(MANIFESTO_CONTRACT, "heading structure drift")
-    if hashlib.sha256(source.encode()).hexdigest() != MANIFESTO_SOURCE_SHA256:
-        raise ContractError(MANIFESTO_CONTRACT, "content drift")
+        label, destination = match.groups()
+        definition_lines.add(index)
+        if not destination:
+            if index + 1 >= len(lines) or re.fullmatch(r"[ ]{1,3}\S+", lines[index + 1]) is None:
+                raise ContractError(contract, "malformed reference definition")
+            destination = lines[index + 1].strip(" \t")
+            definition_lines.add(index + 1)
+        if label in references:
+            raise ContractError(contract, "duplicate reference definition")
+        references[label] = destination
+    if references != dict(contract.references):
+        raise ContractError(contract, "missing or unexpected reference definition")
+    return references, definition_lines
 
+
+def _document_blocks(
+    source: str,
+    contract: DocumentContract,
+) -> tuple[tuple[DocumentBlock, ...], dict[str, str]]:
+    references, definition_lines = _reference_definitions(source, contract)
+    if contract.github_only_reporting:
+        reference_uses = [label for _, label in REFERENCE_LINK_PATTERN.findall(source) if label == "gh-private"]
+        if (
+            len(reference_uses) != 1
+            or re.search(r"\bemail\b", source, re.IGNORECASE)
+            or EMAIL_ADDRESS_PATTERN.search(source)
+        ):
+            raise ContractError(contract, "GitHub-only reporting violation")
+
+    lines = source.split("\n")
+    blocks: list[DocumentBlock] = []
+    index = 0
+    previous_heading_level = 0
+    heading_ids: set[str] = set()
+    h1_count = 0
+    while index < len(lines):
+        if index in definition_lines or not lines[index].strip(" \t"):
+            index += 1
+            continue
+        line = lines[index].rstrip(" \t")
+        heading = HEADING_PATTERN.match(line)
+        if heading:
+            level = len(heading.group(1))
+            value = heading.group(2).strip(" \t")
+            if (
+                not value
+                or (not blocks and level != 1)
+                or (previous_heading_level and level > previous_heading_level + 1)
+            ):
+                raise ContractError(contract, "malformed heading structure")
+            plain_heading = _plain_inline(value, contract, references)
+            identifier = _heading_id(plain_heading)
+            if not identifier or identifier in heading_ids:
+                raise ContractError(contract, "missing or duplicate heading identifier")
+            heading_ids.add(identifier)
+            h1_count += level == 1
+            blocks.append(DocumentBlock("heading", value, level))
+            previous_heading_level = level
+            index += 1
+            continue
+        if not blocks or blocks[0].kind != "heading" or blocks[0].level != 1:
+            raise ContractError(contract, "document must begin with its single h1")
+        if UNSUPPORTED_BLOCK_PATTERN.match(line):
+            raise ContractError(contract, "unsupported block or inline Markdown")
+        if line.startswith("- "):
+            items: list[str] = []
+            while index < len(lines) and index not in definition_lines and lines[index].rstrip(" \t").startswith("- "):
+                item = lines[index].rstrip(" \t")[2:]
+                if not item:
+                    raise ContractError(contract, "unsupported block or inline Markdown")
+                index += 1
+                continuations: list[str] = []
+                while index < len(lines) and index not in definition_lines:
+                    continuation = lines[index].rstrip(" \t")
+                    if re.match(r"^[ ]{2,}\S", continuation):
+                        stripped = continuation.lstrip(" ")
+                        if stripped.startswith("- "):
+                            raise ContractError(contract, "unsupported block or inline Markdown")
+                        continuations.append(stripped)
+                        index += 1
+                    else:
+                        break
+                items.append(" ".join((item, *continuations)))
+            blocks.append(DocumentBlock("list", tuple(items)))
+            continue
+        paragraph_lines = [line]
+        index += 1
+        while index < len(lines) and index not in definition_lines:
+            continuation = lines[index].rstrip(" \t")
+            if not continuation or HEADING_PATTERN.match(continuation) or continuation.startswith("- "):
+                break
+            if FENCE_PATTERN.match(continuation) or UNSUPPORTED_BLOCK_PATTERN.match(continuation):
+                raise ContractError(contract, "unsupported block or inline Markdown")
+            paragraph_lines.append(continuation)
+            index += 1
+        blocks.append(DocumentBlock("paragraph", " ".join(paragraph_lines)))
+
+    if h1_count != 1:
+        raise ContractError(contract, "document requires exactly one h1")
+    return tuple(blocks), references
+
+
+def _render_document(source: str, contract: DocumentContract) -> tuple[str, str]:
+    blocks, references = _document_blocks(source, contract)
     rendered: list[str] = []
-    first_body = headings[0][2] + 1
-    for position, (level, heading, line_index) in enumerate(headings):
-        next_index = headings[position + 1][2] if position + 1 < len(headings) else len(lines)
-        if level > 1:
-            rendered.append(f'<h{level} id="{_heading_id(heading)}">{html.escape(heading)}</h{level}>')
-        body_start = first_body if position == 0 else line_index + 1
-        blocks = tuple(_normalized_blocks(lines[body_start:next_index]))
-        rendered_blocks = _render_blocks(blocks, MANIFESTO_CONTRACT, {})
-        if rendered_blocks:
-            rendered.append(rendered_blocks)
-
+    description = ""
+    for block in blocks:
+        if block.kind == "heading":
+            plain_heading = _plain_inline(str(block.value), contract, references)
+            rendered.append(
+                f'<h{block.level} id="{_heading_id(plain_heading)}">'
+                f"{_render_inline(str(block.value), contract, references)}</h{block.level}>"
+            )
+        elif block.kind == "paragraph":
+            if not description:
+                description = html.escape(_plain_inline(str(block.value), contract, references), quote=True)
+            rendered.append(f"<p>{_render_inline(str(block.value), contract, references)}</p>")
+        elif block.kind == "list":
+            items = "".join(f"<li>{_render_inline(item, contract, references)}</li>" for item in block.value)
+            rendered.append(f"<ul>{items}</ul>")
+        else:
+            raise ContractError(contract, "unsupported block or inline Markdown")
+    if not description:
+        raise ContractError(contract, "missing meaningful paragraph for metadata")
     output = "\n".join(rendered)
     for source_relative in SOURCE_RELATIVE_URLS:
         if f'href="{html.escape(source_relative, quote=True)}"' in output:
-            raise ContractError(MANIFESTO_CONTRACT, "unexpanded source-relative link")
-    intro_blocks = tuple(_normalized_blocks(lines[first_body : headings[1][2]]))
-    if not intro_blocks or intro_blocks[0].kind != "paragraph":
-        raise ContractError(MANIFESTO_CONTRACT, "missing introduction")
-    description = html.escape(_plain_inline(str(intro_blocks[0].value), MANIFESTO_CONTRACT, {}), quote=True)
+            raise ContractError(contract, "unexpanded source-relative link")
     return output, description
 
 
-def _plain_inline(value: str, contract: ContentContract, references: dict[str, str]) -> str:
+def _plain_inline(
+    value: str,
+    contract: ContentContract | DocumentContract,
+    references: dict[str, str],
+) -> str:
     rendered = _render_inline(value, contract, references)
     parser = _TextParser()
     parser.feed(rendered)
@@ -509,30 +511,19 @@ class _TextParser(HTMLParser):
 
 def extract_content(repo_root: Path) -> dict[str, str]:
     """Extract, validate, escape, and render every permanent content contract."""
-    sources: dict[Path, str] = {}
-    extracted: dict[str, tuple[ContentContract, tuple[Block, ...]]] = {}
-    for contract in CONTRACTS:
-        if contract.source not in sources:
-            sources[contract.source] = _read_utf8(repo_root / contract.source, contract)
-        source = sources[contract.source]
-        extracted[contract.contract_id] = (contract, _extract(contract, source))
-    reporting = next(contract for contract in CONTRACTS if contract.contract_id == "SECURITY_REPORTING")
-    reporting_url = _reference_url(sources[reporting.source], reporting)
-    references = {"gh-private": reporting_url}
+    home_contract = CONTRACTS[0]
+    home_source = _read_utf8(repo_root / home_contract.source, home_contract)
+    home_blocks = _extract(home_contract, home_source)
     rendered = {
-        contract_id: _render_blocks(blocks, contract, references)
-        for contract_id, (contract, blocks) in extracted.items()
+        home_contract.contract_id: _render_blocks(home_blocks, home_contract, {}),
+        "HOME_META_DESCRIPTION": html.escape(
+            _plain_inline(str(home_blocks[0].value), home_contract, {}),
+            quote=True,
+        ),
     }
-    home_identity, home_identity_blocks = extracted["HOME_IDENTITY"]
-    security_threats, security_threat_blocks = extracted["SECURITY_THREATS"]
-    rendered["HOME_META_DESCRIPTION"] = html.escape(
-        _plain_inline(str(home_identity_blocks[0].value), home_identity, references),
-        quote=True,
-    )
-    rendered["SECURITY_META_DESCRIPTION"] = html.escape(
-        _plain_inline(str(security_threat_blocks[0].value), security_threats, references),
-        quote=True,
-    )
-    manifesto_source = sources[Path("docs/why-agentworks.md")]
-    rendered["MANIFESTO_CONTENT"], rendered["MANIFESTO_META_DESCRIPTION"] = _render_manifesto(manifesto_source)
+    for contract in DOCUMENT_CONTRACTS:
+        source = _read_utf8(repo_root / contract.source, contract)
+        content, description = _render_document(source, contract)
+        rendered[f"{contract.contract_id}_CONTENT"] = content
+        rendered[f"{contract.contract_id}_META_DESCRIPTION"] = description
     return rendered

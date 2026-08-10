@@ -19,7 +19,7 @@ class TemplateContractTests(RepositoryFixture):
             template + "{{UNKNOWN}}",
             template.replace("{{HOME_IDENTITY}}", ""),
             template.replace("{{HOME_IDENTITY}}", "{{HOME_IDENTITY}}{{HOME_IDENTITY}}"),
-            template.replace("{{HOME_IDENTITY}}", "{{SECURITY_THREATS}}"),
+            template.replace("{{HOME_IDENTITY}}", "{{SECURITY_CONTENT}}"),
             template + "{{not-a-token}}",
             template.replace('href="{{SITE_BASE}}security/"', 'data-base="{{SITE_BASE}}security/"', 1),
         )
@@ -144,8 +144,6 @@ class TemplateContractTests(RepositoryFixture):
 
     def test_detail_page_headings_reject_provenance_eyebrows(self) -> None:
         headings = {
-            "manifesto.html": "Agentworks Manifesto",
-            "security.html": "Security at Agentworks",
             "lander.html": "Lunar deployment",
             "404.html": "Page not found",
         }
@@ -161,6 +159,31 @@ class TemplateContractTests(RepositoryFixture):
                 self.assertRaisesRegex(ValueError, "detail page heading"),
             ):
                 site_builder._validate_template(name, changed)
+
+    def test_long_form_templates_allow_only_the_complete_source_document(self) -> None:
+        for name, token in (
+            ("manifesto.html", "{{MANIFESTO_CONTENT}}"),
+            ("security.html", "{{SECURITY_CONTENT}}"),
+        ):
+            template = (self.root / "website/templates" / name).read_text(encoding="utf-8")
+            variants = (
+                template.replace(token, f"<h1>Template title</h1>{token}", 1),
+                template.replace(token, f"{token}<p>Template prose</p>", 1),
+                template.replace(
+                    '<article class="long-form-content sourced-content">',
+                    '<section class="long-form-content sourced-content">',
+                    1,
+                ),
+            )
+            for changed in variants:
+                with (
+                    self.subTest(name=name, changed=changed[-120:]),
+                    self.assertRaisesRegex(
+                        ValueError,
+                        "complete source|complete sourced document|block token",
+                    ),
+                ):
+                    site_builder._validate_template(name, changed)
 
     def test_service_ctas_reject_hidden_ancestors_and_icon_bypasses(self) -> None:
         extra_icon = '<svg aria-hidden="true" focusable="false" viewBox="0 0 16 16"><path d="M0 0" /></svg>'
@@ -473,22 +496,6 @@ class TemplateContractTests(RepositoryFixture):
             ):
                 site_builder._validate_template("index.html", changed)
 
-    def test_reviewed_destination_and_reporting_literals_cannot_drift(self) -> None:
-        for name, old, new in (
-            ("security.html", site_builder.REPORTING_URL, "https://example.com/report"),
-            (
-                "security.html",
-                "https://github.com/WayfarerLabs/agentworks/security/policy",
-                "https://example.com/policy",
-            ),
-        ):
-            template = (self.root / "website/templates" / name).read_text(encoding="utf-8")
-            with (
-                self.subTest(name=name, old=old),
-                self.assertRaisesRegex(ValueError, "required reviewed literals"),
-            ):
-                site_builder._validate_template(name, template.replace(old, new))
-
     def test_security_template_rejects_email_address_reporting_canary(self) -> None:
         template = (self.root / "website/templates/security.html").read_text(encoding="utf-8")
         for address_text in (
@@ -502,21 +509,32 @@ class TemplateContractTests(RepositoryFixture):
             ):
                 site_builder._validate_template("security.html", changed)
 
-    def test_manifesto_tokens_cannot_move_out_of_reviewed_article_or_metadata(
+    def test_long_form_tokens_cannot_move_out_of_reviewed_article_or_metadata(
         self,
     ) -> None:
-        template = (self.root / "website/templates/manifesto.html").read_text(encoding="utf-8")
-        variants = (
-            template.replace(
-                'content="{{MANIFESTO_META_DESCRIPTION}}"',
-                'data-copy="{{MANIFESTO_META_DESCRIPTION}}"',
-            ),
-            template.replace(
-                '<article class="manifesto-content sourced-content">{{MANIFESTO_CONTENT}}</article>',
-                "<div>{{MANIFESTO_CONTENT}}</div>",
-            ),
-            template.replace("{{MANIFESTO_CONTENT}}", "prefix {{MANIFESTO_CONTENT}}", 1),
-        )
-        for changed in variants:
-            with self.assertRaisesRegex(ValueError, "content token|metadata token|manifesto article|block token"):
-                site_builder._validate_template("manifesto.html", changed)
+        for name, prefix in (
+            ("manifesto.html", "MANIFESTO"),
+            ("security.html", "SECURITY"),
+        ):
+            template = (self.root / "website/templates" / name).read_text(encoding="utf-8")
+            content_token = f"{{{{{prefix}_CONTENT}}}}"
+            variants = (
+                template.replace(
+                    f'content="{{{{{prefix}_META_DESCRIPTION}}}}"',
+                    f'data-copy="{{{{{prefix}_META_DESCRIPTION}}}}"',
+                ),
+                template.replace(
+                    f'<article class="long-form-content sourced-content">{content_token}</article>',
+                    f"<div>{content_token}</div>",
+                ),
+                template.replace(content_token, f"prefix {content_token}", 1),
+            )
+            for changed in variants:
+                with (
+                    self.subTest(name=name),
+                    self.assertRaisesRegex(
+                        ValueError,
+                        "content token|metadata token|long-form article|block token",
+                    ),
+                ):
+                    site_builder._validate_template(name, changed)

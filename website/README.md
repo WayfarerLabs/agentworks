@@ -1,11 +1,11 @@
 # Agentworks Website
 
-<!-- cspell:ignore keypaths sdds -->
+<!-- cspell:ignore sdds -->
 
 This directory owns the static source for `agentworks.build`. A standard-library Python builder
 combines semantic templates, local CSS and JavaScript, the AGW rocket asset, and selected passages
-from permanent repository documentation. Generated output stays outside the repository and can be
-published by any static host.
+and complete documents from permanent repository sources. Generated output stays outside the
+repository and can be published by any static host.
 
 The current release is intentionally useful without guided onboarding. The compact Home page renders
 the repository-sourced identity and states that guided onboarding is not yet published. A generated
@@ -115,18 +115,22 @@ The builder reads three permanent repository inputs:
 
 - `README.md` owns the concise product identity rendered on the landing page. Its short design
   summary remains repository documentation, not additional landing-page content.
-- `docs/why-agentworks.md` owns the complete introduction, Problem Space, and Key Principles
-  rendered on the Manifesto page. It also owns the threat model, isolation boundaries, limitations,
-  operator posture, and credential/secret explanation rendered on the Security page.
-- `SECURITY.md` owns private vulnerability reporting and the reporting URL.
+- `docs/why-agentworks.md` owns every body heading and block rendered on the Manifesto page.
+- `SECURITY.md` owns every body heading and block rendered on the Security page, including the
+  private vulnerability reporting channel and URL.
 
-Home and Security passages are selected by complete heading keypaths and exact normalized blocks.
-The Manifesto contract pins the complete normalized Why document with a reviewed SHA-256 and exact
-ordered heading tree, then renders every introduction, Problem Space, and Key Principles block. All
-repository content is escaped and rendered through a closed Markdown subset. Missing or duplicate
-headings, content drift, unsupported markup, invalid links, and reporting-link drift fail the build
-before output changes. This is intentional. Update the permanent source and its website contract
-together when a selected claim changes; do not paste a second version into a template.
+Home alone selects content by a complete heading path and exact normalized blocks. The Manifesto and
+Security pages each render one complete Markdown document, including its single source `h1`, through
+the same closed transform. Their templates supply only the shared shell and metadata placement.
+Supported document edits appear on the site without synchronized website prose, a source hash, a
+heading inventory, or selected-section configuration.
+
+Repository content is escaped before rendering. Missing, unreadable, symlinked, byte-order-marked,
+or invalid UTF-8 input; a missing or duplicate `h1`; malformed heading structure; unsupported
+Markdown; an invalid or unexpected link; and a GitHub-only reporting violation all fail before
+output changes. The current Manifesto source path is exactly `docs/why-agentworks.md`. When that
+document is renamed, update the one configured path to `docs/manifesto.md` in the same reviewed
+rename. Do not add probing or a dual-path fallback.
 
 The Manifesto maps only these source-relative links:
 
@@ -137,10 +141,11 @@ The Manifesto maps only these source-relative links:
 Allowed absolute source links are preserved. Any other relative link or an unapproved generated URL
 fails closed.
 
-Templates own only headings, navigation, destination labels, presentation-neutral connective text,
-and the bounded interim availability notice. `website/` does not own product behavior, security
-claims, vulnerability contact details, or installation instructions. The selected SVG and lander
-implementation are permanent assets and must not be regenerated from design-history files.
+Templates own only navigation, destination labels, metadata placement, presentation-neutral
+connective text, game-page headings, and the bounded interim availability notice. `website/` does
+not own long-form body headings, product behavior, security claims, vulnerability contact details,
+or installation instructions. The selected SVG and lander implementation are permanent assets and
+must not be regenerated from design-history files.
 
 Home, Manifesto, Security, Lander, and 404 use the same breadcrumb-led header and traditional
 footer. The header has exactly one linked `Agentworks` home crumb, a hidden visual separator, a

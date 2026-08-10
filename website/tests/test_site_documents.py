@@ -177,9 +177,11 @@ class GeneratedDocumentTests(RepositoryFixture):
             self.pages["manifesto"],
         )
         self.assertNotIn("Repository sourced / Long-form argument", self.pages["manifesto"])
+        source = (self.root / site_builder.MANIFESTO_CONTRACT.source).read_text(encoding="utf-8")
         expected_headings = [
-            "Agentworks Manifesto",
-            *[text for _, text in site_builder.MANIFESTO_HEADINGS[1:]],
+            match.group(2).strip()
+            for line in source.splitlines()
+            if (match := re.fullmatch(r"(#{1,6})[ \t]+(.+?)", line))
         ]
         self.assertEqual(document.headings, expected_headings)
         for passage in (
@@ -203,16 +205,17 @@ class GeneratedDocumentTests(RepositoryFixture):
             document.headings,
             [
                 "Security at Agentworks",
+                "Reporting a vulnerability",
                 "Threat model",
                 "Boundaries and current limitations",
                 "Operator posture",
                 "Credentials and secrets",
-                "Report a vulnerability",
+                "Scope and upstream guidance",
             ],
         )
         hrefs = [anchor.get("href") for anchor in document.tags("a")]
-        self.assertEqual(hrefs.count(site_builder.REPORTING_URL), 2)
-        self.assertIn("https://github.com/WayfarerLabs/agentworks/security/policy", hrefs)
+        self.assertEqual(hrefs.count(site_builder.REPORTING_URL), 1)
+        self.assertIn("https://github.com/WayfarerLabs/agentworks/issues/224", hrefs)
         self.assertNotIn("email", self.pages["security"].lower())
         self.assertFalse(document.tags("script"))
 
