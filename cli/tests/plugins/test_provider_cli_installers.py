@@ -59,7 +59,6 @@ case "$1" in
     tee "$AGW_TEST_SYSTEM_ROOT$2"
     ;;
   chmod) : ;;
-  test) test -d "$AGW_TEST_SYSTEM_ROOT$3" ;;
   *) exec "$@" ;;
 esac
 """,
@@ -154,21 +153,27 @@ def test_aws_installer_selects_architecture_and_cleans_private_temp(
     assert f"awscli-exe-linux-{expected_archive}.zip" in (tmp_path / "log").read_text()
     assert "--update" not in (tmp_path / "install-args").read_text()
     sudo_log = (tmp_path / "sudo-log").read_text()
-    assert "sudo test -d /usr/local/aws-cli" in sudo_log
-    assert "aws/install" in sudo_log
-    assert "gpg" not in sudo_log
-    assert "curl" not in sudo_log
-    assert "unzip" not in sudo_log
+    assert sudo_log.splitlines() == [
+        f"sudo {tmp_path}/private-temp/aws/install --install-dir /usr/local/aws-cli --bin-dir /usr/local/bin"
+    ]
+    assert "sudo test" not in sudo_log
+    assert "sudo gpg" not in sudo_log
+    assert "sudo curl" not in sudo_log
+    assert "sudo unzip" not in sudo_log
     assert not (tmp_path / "private-temp").exists()
 
 
 def test_aws_installer_updates_an_existing_explicit_installation(tmp_path: Path) -> None:
-    (tmp_path / "system" / "usr" / "local" / "aws-cli").mkdir(parents=True)
-    result = _run(_command("aws"), tmp_path)
+    install_dir = tmp_path / "system" / "usr" / "local" / "aws-cli"
+    install_dir.mkdir(parents=True)
+    command = _command("aws").replace('install_dir="/usr/local/aws-cli"', f'install_dir="{install_dir}"')
+    result = _run(command, tmp_path)
 
     assert result.returncode == 0, result.stderr
     assert "--update" in (tmp_path / "install-args").read_text()
-    assert "sudo " in (tmp_path / "sudo-log").read_text()
+    assert (tmp_path / "sudo-log").read_text().splitlines() == [
+        f"sudo {tmp_path}/private-temp/aws/install --install-dir {install_dir} --bin-dir /usr/local/bin --update"
+    ]
 
 
 def test_provider_installer_commands_have_no_test_path_overrides() -> None:

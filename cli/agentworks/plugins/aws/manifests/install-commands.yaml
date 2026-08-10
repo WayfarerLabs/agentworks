@@ -69,7 +69,7 @@ spec:
     test "$primary_fingerprint" = "FB5DB77FD5C118B80511ADA8A6310ACC4672475C"
     GNUPGHOME="$gnupg_home" gpg --batch --verify "$signature_path" "$archive_path"
     unzip -q "$archive_path" -d "$temp_root"
-    if sudo test -d "$install_dir"; then
+    if test -d "$install_dir"; then
       sudo "$temp_root/aws/install" --install-dir "$install_dir" --bin-dir "$bin_dir" --update
     else
       sudo "$temp_root/aws/install" --install-dir "$install_dir" --bin-dir "$bin_dir"
