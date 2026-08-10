@@ -217,9 +217,9 @@ assuming that every invocation is first-run onboarding:
 
 - setup, adoption assessment, and installed-release capability questions point to
   `concept-onboarding`;
-- temporal release-change questions point to `concept-release-notes`, which renders the installed
-  release's packaged canonical notes, offers an authorized canonical fallback for older ranges, and
-  then links back to the live adoption assessment;
+- temporal release-change questions point to `concept-release-notes`, which renders installed and
+  normalized historical packaged notes, offers an authorized canonical fallback only for locally
+  missing history, and then links back to the live adoption assessment;
 - configuration, declared-resource changes, and VM or session operation point to
   `concept-management` and the applicable kind or instance topics;
 - diagnosis points to `concept-troubleshooting`;
@@ -234,15 +234,23 @@ while the complete index remains derived.
 
 `concept-release-notes` combines authored connective teaching with one core `ReleaseNotes` block.
 The wheel contains release-please's existing `cli/CHANGELOG.md` as package data; it does not contain
-a separately authored release-note file. The block resolves the installed distribution version,
-requires exactly one matching release section through a bounded parser, sanitizes it through the
-normal guide boundary, renders it as visibly labeled escaped plain-text evidence with links inert,
-and fails soft with the canonical releases URL when the artifact or unique matching section is
-unavailable. Rendering opens no network connection and never renders the whole changelog.
+a separately authored release-note file. Before packaging begins, one bounded normalization folds
+the curated duplicate 0.13 notes into the canonical 0.13 section and proves exactly one section for
+every tagged release from 0.2.0 through 0.13.0. There is no invented 0.1 section because the
+repository has no corresponding tag or release. Release-please remains the only writer afterward.
 
-For an older or missing range, a validated `read-release-notes` action requires operator-supplied
-`FROM_VERSION` and `TO_VERSION`, uses a dedicated `read-canonical-release-notes` authorization class
-in the existing `consent` field, and names only
+The block defaults to the installed distribution version. Strict dynamic
+`concept-release-notes/vMAJOR-MINOR-PATCH` topics expose every exact normalized packaged section,
+and the topic catalog lists those versions for completion and discovery. An Agentworks assistant
+agent answers a multi-release question by requesting the applicable exact-version topics; the
+renderer still emits only one bounded section per topic. Each section requires exactly one matching
+header through a bounded parser, is sanitized through the normal guide boundary, and renders as
+visibly labeled escaped plain-text evidence with links inert. Rendering opens no network connection
+and never renders the whole changelog.
+
+For a version or range absent from local packaged history, a validated `read-release-notes` action
+requires operator-supplied `FROM_VERSION` and `TO_VERSION`, uses a dedicated
+`read-canonical-release-notes` authorization class in the existing `consent` field, and names only
 `https://github.com/WayfarerLabs/agentworks/releases` as the allowed network source. Its manual step
 reads only the requested inclusive release range, summarizes the changes, and does not follow
 embedded links. Fetched or packaged release prose is untrusted evidence. The Agentworks assistant
@@ -294,13 +302,19 @@ available through `GuideView`: resource identity and description from registry r
 enablement and readiness verdicts from graph nodes, declared graph relationships, and existing
 instance rows from kind-owned read-only inventory hooks. The guide never loads raw config to infer
 additional state and never runs doctor while rendering. A fact outside that set is `unverifiable`,
-not permission to reach around the view. Its golden path continues through a usable VM and a started
-first session. Those operations are inert action records with explicit names and selected templates
-or sites, declared impact, a `mutate-agentworks` authorization class, ordinary JSON verification,
-and a refusal alternative. When the operator explicitly asks for first-run setup and accepts the
-startup envelope describing local and remote resource creation, that authorization covers the
-VM-then-session sequence; the records do not force a second conversational approval for each
-command. The action plan does not attach, delete, elevate privileges, or infer operator choices.
+not permission to reach around the view. Its golden path continues through configuration bootstrap,
+a usable VM, and a started first session. When settings are absent, inert actions run the existing
+`agw config init` surface, collect explicit provider and plugin inputs, and select an existing SSH
+key pair by presence-only inspection or offer authorized generation of a new non-overwriting Ed25519
+pair. The path verifies configured readiness with `agw doctor` before resource creation; it does not
+invent a second config writer, read private-key contents, overwrite a key, or infer an identity. VM
+and session operations remain inert action records with explicit names and selected templates or
+sites, declared impact, a `mutate-agentworks` authorization class, ordinary JSON verification, and a
+refusal alternative. When the operator explicitly asks for first-run setup and accepts the startup
+envelope describing local and remote resource creation, that authorization covers the
+configuration-through-session sequence; the records do not force a second conversational approval
+for each command. The action plan does not attach, delete, elevate privileges, or infer operator
+choices.
 
 `concept-management` is the ongoing configuration and operation entry. It presents live kind and
 instance facts, then points to the applicable built-in CLI help entry point for exact current
@@ -451,10 +465,13 @@ minimum CLI version that first supplies the referenced guide contract and no max
 itself owns all evolving teaching.
 
 The wheel build includes release-please's canonical `cli/CHANGELOG.md` at a fixed package-data path.
-The release PR carries the Phase 3 implementation, version bump, and generated changelog together;
-candidate-wheel and live harness gates run from that release PR before it merges. The release tag
-and PyPI publish follow only after those gates pass, so the installed version and its internal
-release section are one reviewed artifact.
+PR #480 carries and validates the complete Phase 3 feature, including historical changelog
+normalization, then merges normally to `main` with a conventional `feat:` title. That merge triggers
+release-please to regenerate its separate release PR from current `main`, so the release branch
+inherits Phase 3 and adds only the generated version, changelog, manifest, and lockfile deltas.
+Candidate-wheel and live harness gates run from that regenerated release PR before it merges. The
+release tag and PyPI publish follow only after those gates pass, so the installed version and its
+internal release section are one reviewed artifact.
 
 Production assistance reviews canonical `vVERSION` before installing exact `VERSION`. A pre-merge
 candidate cannot claim a tag that does not yet exist: candidate probes instead review the exact
@@ -478,9 +495,10 @@ assistance tests cover a generic prompt-only Agentworks assistant agent with no 
 focused and full source-review choices, decline-review with independently authorized installation,
 completed review followed by declined installation, one startup authorization covering an initial
 VM-and-session sequence without repeated prompts, a returning current-capability and adoption
-assessment, offline installed release notes plus the authorized range fallback, an ongoing
-multi-command management operation, a material-expansion prompt, an operator-selected per-action
-confirmation mode, and a refusal at a higher-risk action boundary.
+assessment, offline installed and normalized historical release notes plus the authorized
+missing-history fallback, an ongoing multi-command management operation, a material-expansion
+prompt, an operator-selected per-action confirmation mode, and a refusal at a higher-risk action
+boundary.
 
 ## Feedback decision
 

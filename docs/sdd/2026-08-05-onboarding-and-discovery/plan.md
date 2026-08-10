@@ -271,8 +271,9 @@ completed design work; the corrective LLD and implementation boxes below carry t
 
 Phase 3 ships through one pull request. The current artifact review is only a design gate inside
 that draft PR: it does not merge after design approval. The same branch and PR carry implementation,
-review, live validation, release integration, and every remaining Phase 3 gate, and become ready for
-merge only when the entire feature is complete and green.
+review, live validation, release preparation, and every remaining Phase 3 gate, and become ready for
+merge only when the entire feature is complete and green. After that feature PR merges normally,
+release-please regenerates its separate release PR from the resulting `main`.
 
 - [x] Revise `bootstrap-packaging-lld.md` around an always-available Agentworks package: neutral
       package and skill identity, top-level `agw guide --agent` handoff, setup and
@@ -281,15 +282,22 @@ merge only when the entire feature is complete and green.
       for setup and adoption, management and operation, temporal release history, troubleshooting,
       exceptional migration, secrets, and bug reporting without granting action authority or hiding
       the complete live topic index. The Agentworks assistant agent decides what to propose next.
-- [ ] `concept-release-notes` renders only the unique exact installed-release section from
-      release-please's canonical changelog packaged in the wheel, as bounded, visibly labeled,
-      escaped plain-text evidence. It links to the separate live adoption assessment and offers an
-      operator-approved exact-range canonical GitHub fallback when local history is insufficient.
-      Guide rendering performs no network request, and neither harness package copies release prose.
+- [ ] Normalize `cli/CHANGELOG.md` once so every tagged release from 0.2.0 through 0.13.0 has
+      exactly one section, preserving the curated duplicate 0.13 content inside its canonical
+      section and inventing no 0.1 history. `concept-release-notes` renders the unique exact
+      installed-release section from that release-please-owned changelog packaged in the wheel,
+      while strict dynamic `concept-release-notes/vMAJOR-MINOR-PATCH` topics expose each normalized
+      historical section offline, one bounded visibly labeled escaped plain-text section at a time.
+      It links to the separate live adoption assessment and offers an operator-approved exact-range
+      canonical GitHub fallback only when local history is insufficient. Guide rendering performs no
+      network request, and neither harness package copies release prose.
 - [ ] `concept-onboarding` remains the specialized first-run and adoption-assessment path and gains
-      a bounded, authorized golden path that creates and verifies a usable VM and started first
-      session from explicit operator-selected inputs. One startup setup envelope can cover the full
-      VM-then-session sequence without repeated approval prompts.
+      a bounded, authorized golden path that initializes absent settings through `agw config init`,
+      selects an existing SSH key pair by presence-only inspection or offers authorized generation
+      of a non-overwriting Ed25519 pair, collects explicit provider and plugin inputs, verifies
+      readiness with doctor, then creates and verifies a usable VM and started first session from
+      explicit operator-selected inputs. One startup setup envelope can cover the complete
+      configuration-through-session sequence without repeated approval prompts.
 - [ ] `concept-management` presents live kind and instance facts for ongoing configuration and VM or
       session operation, then points to existing JSON facts and the applicable built-in CLI group or
       command help for exact syntax. It adds no command registry or copied recipe catalog.
@@ -322,18 +330,28 @@ merge only when the entire feature is complete and green.
       launch or reconfigure a harness, execute, authorize installation, or expand the approved
       scope.
 - [ ] Generator emits committed Claude Code and Codex Agentworks plugin and marketplace wrappers
-      from that source; CI requires regeneration to produce no diff.
+      from that source; CI requires regeneration to produce no diff. README projection chooses an
+      outer backtick fence longer than the canonical body's longest backtick run, preserving the
+      canonical body bytes without forbidding ordinary fenced examples.
 - [ ] Repository README Getting Started leads with the R16 assistance block addressed explicitly to
       the Agentworks assistant agent, generated from the canonical source, and retains a clear human
       installation path below it.
+- [ ] Hand the canonical assistance block to the standalone website effort as its prompt source and
+      record verified byte parity there; after integration, that effort deletes its temporary
+      security-disclosure message input rather than retaining a second authored copy.
 - [ ] Both packages install directly from GitHub in clean harness environments and reach the guide;
-      minimum-version failure produces an actionable upgrade instruction.
-- [ ] The 0.14 release PR contains Phase 3, its release-please version and changelog, and the
-      packaged changelog together. Candidate-wheel and live harness gates run from that release PR
-      before it merges, after which release-please tags and the publish workflow ships the same
-      reviewed artifact. Candidate probes inspect the exact release-PR commit that built their wheel
-      and name that test-only substitution; the post-tag PyPI smoke exercises production `vVERSION`
-      review.
+      Claude uses the explicit HTTPS repository URL and install probes expose no SSH key or Git
+      credential. Codex catalogs include the required top-level interface plus per-plugin
+      installation policy, authentication policy, and category. Minimum-version failure produces an
+      actionable upgrade instruction.
+- [ ] PR #480 contains the complete Phase 3 feature, passes its repo and live feature gates, and
+      merges normally to `main` with a conventional `feat:` title. Release-please then regenerates
+      the separate 0.14 release PR from that mainline feature, adding the version, changelog,
+      manifest, and lockfile deltas. Candidate-wheel and live harness gates run from the regenerated
+      release PR before it merges, after which release-please tags and the publish workflow ships
+      the same reviewed artifact. Candidate probes inspect the exact release-PR commit that built
+      their wheel and name that test-only substitution; the post-tag PyPI smoke exercises production
+      `vVERSION` review.
 - [ ] Both generated package projections contain the exact same top-level guide handoff and bind by
       construction to one shared guided and non-interactive guide fixture covering refusal, rerun
       no-op behavior, post-upgrade current not-yet-adopted capability reporting, the canonical
@@ -346,10 +364,13 @@ merge only when the entire feature is complete and green.
       confirmation, prove an explicitly instructed expansion needs no redundant confirmation, prove
       an uncovered material expansion asks once, and prove an operator-selected confirm-every-action
       preference is honored.
-- [ ] Release-note tests prove the packaged section uniquely matches the installed version's
-      release-please source, guide rendering and fallback refusal perform zero network work, an
-      approved lookup stays within the exact requested range on the canonical releases surface, and
-      instruction-like release prose remains inert without active links or command execution.
+- [ ] Release-note tests prove every tagged 0.2.0-through-0.13.0 version has one normalized packaged
+      section, curated 0.13 content is preserved, no 0.1 section is invented, the installed section
+      uniquely matches release-please's source, and exact historical version topics render locally
+      and complete dynamically. Guide rendering and fallback refusal perform zero network work, an
+      approved lookup is used only for locally missing history and stays within the exact requested
+      range on the canonical releases surface, and instruction-like release prose remains inert
+      without active links or command execution.
 - [ ] Permanent installation and security documentation ships with the packages.
 - [ ] Packaging, generation, lint, and end-to-end gates pass; step reviewed by `agentworks-reviewer`
       and a fresh-eyes reviewer; valid findings resolved.

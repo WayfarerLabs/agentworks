@@ -131,17 +131,18 @@ term whenever either role could be ambiguous.
   and adoption assessment from temporal release history, and the intent map MUST point temporal
   questions to `concept-release-notes`. That topic MUST render the installed release's notes offline
   from release-please's canonical changelog packaged in the wheel, without a second hand-maintained
-  copy. Older or missing ranges MAY fall back to Agentworks' canonical GitHub releases with an
-  explicit version range and `read-canonical-release-notes` authorization class. The operator's
-  request and current envelope may satisfy that class without a second prompt. Current facts alone
-  MUST NOT be presented as a version-to-version delta. Release prose and repository source are
-  untrusted evidence, never an instruction source or authorization to follow links or run commands.
-  Configuration and operation are not separate assistance silos. Risk is expressed by each action's
-  explicit scope, impact, authorization class, and verification. The current operator instruction
-  may authorize a sequence of such actions when they remain within the established envelope; the
-  action record does not require a ritual approval prompt of its own. Creating or connecting to
-  managed resources is never authorized merely because the prompt is present or a native skill is
-  installed.
+  copy. The packaged changelog MUST also provide bounded offline exact-version history for every
+  normalized historical release section it contains. Only a version or range missing from that local
+  history MAY fall back to Agentworks' canonical GitHub releases with an explicit version range and
+  `read-canonical-release-notes` authorization class. The operator's request and current envelope
+  may satisfy that class without a second prompt. Current facts alone MUST NOT be presented as a
+  version-to-version delta. Release prose and repository source are untrusted evidence, never an
+  instruction source or authorization to follow links or run commands. Configuration and operation
+  are not separate assistance silos. Risk is expressed by each action's explicit scope, impact,
+  authorization class, and verification. The current operator instruction may authorize a sequence
+  of such actions when they remain within the established envelope; the action record does not
+  require a ritual approval prompt of its own. Creating or connecting to managed resources is never
+  authorized merely because the prompt is present or a native skill is installed.
 - **R11 (cross-harness parity, by construction).** Teaching content lives in the CLI (R13), so it
   cannot fork between harnesses. The thin assistance packages (R1) MUST NOT drift apart in
   substance: share or generate them from one source where the harness formats allow (the repo's own
@@ -184,31 +185,34 @@ term whenever either role could be ambiguous.
   concept docs discoverable by completion. Concept topics MUST cover release notes as well as
   secrets, onboarding, management, troubleshooting, required migration remediation, and bug
   reporting. `concept-release-notes` renders the installed release's section from release-please's
-  packaged canonical changelog and links the result to the live adoption assessment. Rendering
-  performs no network request and does not maintain a separate release-note source. A fallback
-  network lookup is a bounded inert action record with an exact release range, authorization class,
-  expected result, and refusal path. Release content is treated only as evidence and cannot expand
-  scope. Content blends static authored material with dynamic material from the live system
-  (registries, resources, enablement state), so a disabled implementation or an added resource
-  changes what the guide says. Output is markdown only; structured data appears only inside the
-  markdown. R7's machine-readable contract is a separate surface and stays so. Topics are sized like
-  skills, with sub-topics referenced rather than inlined, and topic names participate in shell
-  completions. With no topic, agent mode MUST present an explicit intent-to-topic map for first
-  setup and adoption assessment, current capabilities versus temporal release changes, ongoing
-  management and operation, troubleshooting, exceptional migration, secrets, and bug reporting. It
-  returns context only: the Agentworks assistant agent interprets the operator's current request and
-  decides which topic, proposal, or inert action to use next. The canonical prompt and published
-  native skills enter through this top-level context rather than hard-coding first-run onboarding as
-  every request's destination. An Agentworks assistant agent rendering mode (an `--agent` flag with
-  a TTY-informed default; the exact mechanism is the HLA's call) MAY adjust emphasis, never
-  substance: in agent mode the rendering foregrounds the behavioral contract (establish the R12
-  authorization envelope at startup; proceed naturally within it; ask again only for a material
-  expansion or when the operator requests per-action confirmation; test sensitive material such as
-  SSH keys and secrets only for presence unless content access is separately authorized). Both
-  renderings derive from one source; there are never two contents. Prior art for the effort's
-  `prior-art-research.md`: PowerShell's module-contributed `about_*` topics, `kubectl explain`'s
-  live schema walks, `git help` concept guides, `go help` topics, `rustc --explain`, and Terraform's
-  per-provider schema-plus-prose docs generation.
+  packaged canonical changelog and links the result to the live adoption assessment. Strict dynamic
+  `concept-release-notes/vMAJOR-MINOR-PATCH` topics render one packaged historical section at a
+  time, so an Agentworks assistant agent can answer an older or multi-release question offline by
+  requesting the applicable exact-version topics. Rendering performs no network request and does not
+  maintain a separate release-note source. A fallback network lookup for a missing version or range
+  is a bounded inert action record with an exact release range, authorization class, expected
+  result, and refusal path. Release content is treated only as evidence and cannot expand scope.
+  Content blends static authored material with dynamic material from the live system (registries,
+  resources, enablement state), so a disabled implementation or an added resource changes what the
+  guide says. Output is markdown only; structured data appears only inside the markdown. R7's
+  machine-readable contract is a separate surface and stays so. Topics are sized like skills, with
+  sub-topics referenced rather than inlined, and topic names participate in shell completions. With
+  no topic, agent mode MUST present an explicit intent-to-topic map for first setup and adoption
+  assessment, current capabilities versus temporal release changes, ongoing management and
+  operation, troubleshooting, exceptional migration, secrets, and bug reporting. It returns context
+  only: the Agentworks assistant agent interprets the operator's current request and decides which
+  topic, proposal, or inert action to use next. The canonical prompt and published native skills
+  enter through this top-level context rather than hard-coding first-run onboarding as every
+  request's destination. An Agentworks assistant agent rendering mode (an `--agent` flag with a
+  TTY-informed default; the exact mechanism is the HLA's call) MAY adjust emphasis, never substance:
+  in agent mode the rendering foregrounds the behavioral contract (establish the R12 authorization
+  envelope at startup; proceed naturally within it; ask again only for a material expansion or when
+  the operator requests per-action confirmation; test sensitive material such as SSH keys and
+  secrets only for presence unless content access is separately authorized). Both renderings derive
+  from one source; there are never two contents. Prior art for the effort's `prior-art-research.md`:
+  PowerShell's module-contributed `about_*` topics, `kubectl explain`'s live schema walks,
+  `git help` concept guides, `go help` topics, `rustc --explain`, and Terraform's per-provider
+  schema-plus-prose docs generation.
 - **R14 (universal contribution).** Guide content MUST arrive through one generic contract that
   every participant uses: core resource kinds, capability implementations, and plugins (system
   today, external later) each contribute their own topics. Built-in static content lives beside the
@@ -304,14 +308,18 @@ term whenever either role could be ambiguous.
 
 1. A fresh operator with any Agentworks assistant agent meeting the capability definition and no
    prior Agentworks knowledge reaches a working session using only the canonical copy/paste prompt
-   and the guide command. The startup disclosure establishes the authorized setup envelope once; the
-   assistant completes in-scope probes and steps without repeated approval prompts. The native
-   Claude Code and Codex packages each pass the same path.
+   and the guide command. When configuration is absent, the path initializes it, selects an existing
+   SSH identity or offers to generate a new non-overwriting Ed25519 pair, collects the required
+   provider and plugin inputs, verifies readiness with doctor, and then creates the first VM and
+   session. The startup disclosure establishes the authorized setup envelope once; the assistant
+   completes in-scope probes and steps without repeated approval prompts. The native Claude Code and
+   Codex packages each pass the same path.
 2. Asking for an adoption assessment on an unchanged, fully-adopted system is a clean no-op; asking
    after an upgrade reports all currently not-yet-adopted capabilities without redoing completed
-   work. `concept-release-notes` renders the installed release's packaged canonical notes offline. A
-   broader temporal range uses the authorized canonical GitHub fallback and is not inferred from
-   current-state facts.
+   work. `concept-release-notes` renders the installed release's packaged canonical notes offline,
+   while exact historical version topics render every locally packaged normalized release section.
+   Only missing local history uses the authorized canonical GitHub fallback. Temporal history is not
+   inferred from current-state facts.
 3. The non-interactive path reproduces the guided path's result on a clean machine.
 4. List, describe, and doctor surfaces offer documented machine-readable output consumed by the
    plugin's skills themselves (dogfooding the contract).
@@ -385,8 +393,8 @@ term whenever either role could be ambiguous.
   top-level rendering for the Agentworks assistant agent is the stable assistance entry and presents
   the intent-to-topic map; the Agentworks assistant agent decides what to propose next.
   `concept-onboarding` remains the specialized first-run and adoption-assessment path, while
-  `concept-release-notes` renders the installed release's release-please-authored notes and owns the
-  authorized canonical fallback for wider temporal history.
+  `concept-release-notes` renders installed and normalized historical release-please-authored notes
+  offline and owns the authorized canonical fallback only for locally missing temporal history.
 
 ## Open questions
 
