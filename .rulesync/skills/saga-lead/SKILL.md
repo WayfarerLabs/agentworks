@@ -33,7 +33,8 @@ below are subagent work; the role itself is not.
   whose next PR is expected. Arm a background watch for each open draft flipping to ready (and for
   unexpected close or merge, so silence cannot mask a surprise). Review a PR when it goes ready
   without waiting for the operator to ask, and review a draft PR carrying the `review-requested`
-  label (a checkpoint review; remove the label when the review is delivered).
+  label whose head you have not yet reviewed (a checkpoint review; the label is author-owned and
+  audience-free, so never remove it: track the last head you reviewed, exactly as with ready PRs).
 - Re-review on the draft-to-ready transition after an effort absorbs findings (the dev-process
   skill's handoff convention); poll ready PRs' heads against the last head you reviewed as the
   missed-edge fallback. A review verdict stands until the findings are absorbed or successfully
