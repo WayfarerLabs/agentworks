@@ -1,6 +1,6 @@
 # HLA: Safer Database Migrations
 
-- Status: Draft for phased review
+- Status: Approved for implementation
 - FRD: [frd.md](./frd.md)
 - Prior art: [prior-art-research.md](./prior-art-research.md)
 - Saga: `docs/sdd/2026-08-04-next-steps/`
@@ -25,7 +25,7 @@ interaction policy                 sidecar absence gate
         |                            + sidecars/other state: none
         v
 database safety service
-  lock + recheck + optional snapshot + safe open
+  qualify + lock/recheck + optional snapshot + safe open
         |
         +--> timestamped SQLite snapshot
         |
@@ -85,13 +85,20 @@ recovery artifact or allowing cleanup complexity to mask backup success.
 
 Before restore opens the live destination, it rejects an identical source path and validates the
 selected source read-only: `PRAGMA quick_check` reports `ok`; `schema_version` is a table whose
-maximum is a non-negative integer; and the stable `vms(name)` and `workspaces(name)` schema
-sentinels can be queried. Those sentinels exist in every historical Agentworks schema version and
-reject a generic SQLite file that merely supplies `schema_version`. This is a narrow semantic format
-check, not provenance or hostile-filesystem verification. Restore then copies the selected source
-into a fresh raw connection to the live path and closes without constructing `Database` or creating
-a pre-restore backup. Operators who want a snapshot of the live destination use the on-demand backup
-command before restore.
+maximum is an integer from 1 through `LATEST_VERSION`; and a declarative schema-sentinel map
+requires the tables and critical columns introduced by that completed version. The map lives beside
+the migration ladder and is cumulative by introduction/removal milestone; at the current version it
+includes every durable state table plus current critical columns, including `settings` and
+`sessions`, so a lookalike containing only `schema_version`, `vms(name)`, and `workspaces(name)` is
+rejected. A history test builds every real completed version and proves its corresponding sentinel
+set. A comment on the migration ladder requires future table additions, rebuilds, and removals to
+update the map. This is a narrow semantic format check, not provenance or hostile-filesystem
+verification. A future-schema backup remains preservable by `database backup` but must be restored
+with a release that understands that version.
+
+After validation, restore copies the selected source into a fresh raw connection to the live path
+and closes without constructing `Database` or creating a pre-restore backup. Operators who want a
+snapshot of the live destination use the on-demand backup command before restore.
 
 ### Focused database setting
 
@@ -133,49 +140,68 @@ immutable open is outside the single-operator CLI boundary and at worst produces
 view. Tests compare the containing directory byte-for-byte before and after completion probes and
 pin the no-candidates behavior for WAL and journal sidecars.
 
-For a stale database, safe writable open uses one persistent dedicated SQLite file beside the state
-database as a portable cross-process mutex. The service reserves that file with mode `0600`, opens a
-separate connection, and acquires `BEGIN IMMEDIATE` with one fixed 30-second busy timeout. Failure
-to acquire returns a clean retryable `StateError`. The file is never unlinked, which avoids a waiter
-and a new caller locking different files; no table, owner record, lease, or stale-lock cleanup
-exists. Absent and current opens do not take this migration-only lock.
+For a stale database, the safety service uses one persistent dedicated SQLite file beside the state
+database as a portable cross-process mutex. It reserves that file with mode `0600`, opens a separate
+connection, and acquires `BEGIN IMMEDIATE` with one fixed 30-second busy timeout. Failure to acquire
+returns a clean retryable `StateError`. The file is never unlinked, which avoids a waiter and a new
+caller locking different files; no table, owner record, lease, or stale-lock cleanup exists.
 
-While holding that transaction, safe open rechecks the state database against the initially observed
-Agentworks version and schema cookie. If another process completed migration, the waiter skips
-backup and opens current state. If both tokens are unchanged and state remains stale, the service
-creates the selected snapshot and constructs `Database` while retaining the separate lock through
-the entire migration ladder. If state changed but remains non-current, it refuses without a new
-backup or migration rather than attaching recovery guidance to another process's partial result.
-Future and malformed state are also refused. If construction fails during migration, the failed
-connection closes and the service raises the existing kind-based `StateError` with a recovery hint
-derived from the snapshot path or from the fact that no snapshot was selected. The lock transaction
-rolls back and closes in `finally`. This keeps reusable ordering, failure association, and
-remediation below the CLI without changing migration transactions or adding an activity-specific
-error class.
+A preliminary WAL-aware read can identify absent, current, future, or malformed state without the
+lock. When it identifies stale state, the service qualifies that first observation under the lock
+before the CLI announces or prompts. It first tries non-blocking acquisition. If the lock was
+already held, it waits for the bounded acquisition and rechecks: current state returns as current,
+while still-stale state is refused because the observation overlapped another migration attempt. If
+the lock was free, it rechecks under lock and returns the version plus schema cookie as the
+interaction baseline, then releases while the operator answers. This closes the late-inspector
+window where a caller could otherwise record another process's partial DDL as a legitimate stale
+baseline.
+
+After interaction, safe writable open reacquires the lock and rechecks the state database against
+that qualified Agentworks version and schema cookie. If another process completed migration, the
+waiter skips backup and opens current state. If both tokens are unchanged and state remains stale,
+the service creates the selected snapshot and constructs `Database` while retaining the separate
+lock through the entire migration ladder. If state changed but remains non-current, it refuses
+without a new backup or migration rather than attaching recovery guidance to another process's
+partial result. Future and malformed state are also refused. If construction fails during migration,
+the failed connection closes and the service raises the existing kind-based `StateError` with a
+recovery hint derived from the snapshot path or from the fact that no snapshot was selected. The
+lock transaction rolls back and closes in `finally`.
+
+Absent databases are excluded because they contain no prior operator state to protect or back up;
+their existing initialization path has no interaction gap. Current databases do not migrate. This
+keeps serialization limited to the demonstrated stale-transition race, without changing migration
+transactions or adding an activity-specific error class.
 
 ### Interaction policy at the CLI choke point
 
 Every production writable open already reaches `cli._helpers.get_db()`. That helper becomes the
 interaction boundary:
 
-1. Ask the database safety service to inspect schema without migration.
+1. Ask the database safety service to inspect schema without migration and qualify any stale
+   observation under the migration lock.
 2. For an absent database, request a safe writable open with no notice or backup.
 3. For a current database, request a safe writable open with no backup.
 4. For a future database, raise `StateError` before a writable open, with an on-demand backup and
    older-version recovery hint.
-5. For a stale database, render the current and target versions on stderr.
-6. Interactive: inside `output.suppress_presentation()`, ask
+5. Before stale-state interaction, honor the root callback's legacy completion flag described below.
+   Raise the ordinary completion `StateError` before notice, prompt, backup, or migration.
+6. For a stale database, render the current and target versions through a new semantic
+   `output.notice()` role. It always targets stderr and deliberately survives
+   `suppress_presentation()`, unlike ordinary optional presentation; automatic-backup completion
+   uses the same role. Tests prohibit using raw `typer.echo` at this boundary.
+7. Interactive means both stdin and the prompt's stderr stream are terminals and `--non-interactive`
+   is absent. Inside `output.suppress_presentation()`, ask
    `Back up the state database before migrating?`, default yes. This routes the prompt through the
    existing stderr presentation path even when the command selected JSON or names-only output.
-7. Non-interactive: load the focused database setting and back up when true.
-8. Pass that Boolean to the service's serialized safe writable open. If a selected backup raises the
+8. Otherwise, load the focused database setting and back up when true without prompting.
+9. Pass that Boolean to the service's serialized safe writable open. If a selected backup raises the
    existing `BackupError`, catch it at this interaction boundary and preserve it with a
    mode-specific hint: an interactive retry may explicitly decline, while automation may
    deliberately set the documented config opt-out. The service has not constructed `Database`, so
    migration cannot have started.
-9. Let the service's clean `StateError` propagate. When a snapshot exists, its hint includes the
-   platform-specific exact restore invocation; otherwise it states that no pre-migration backup was
-   created.
+10. Let the service's clean `StateError` propagate. When a snapshot exists, its hint includes the
+    platform-specific exact restore invocation; otherwise it states that no pre-migration backup was
+    created.
 
 Migration notices, backup status, prompts, and remediation go to stderr. The command's stdout stays
 owned by its normal renderer, including JSON envelopes and names-only rows.
@@ -203,6 +229,23 @@ only stdout, so the interactive shell receives an empty candidate set without sp
 `get_db()` follow the same shell-level contract: stderr is discarded, stdout stays empty, and no
 prompt is allowed. Explicit user `--names-only` and JSON commands do not carry the hidden option and
 use the ordinary migration policy.
+
+Completion scripts are installed copies, so a script generated by 0.13 does not gain the marker when
+the binary upgrades. Before subcommand code runs, the root callback classifies a legacy probe only
+when all of these hold: no explicit marker; argv matches one of the exact known database-backed
+names-only source commands (`vm`, `workspace`, `session`, `agent`, `console`, or `resource` `list`,
+including its existing filter options); stdin is a terminal; and stderr is not. The small
+command-path set is shared with completion metadata, and a parity test extracts every old generated
+bash, zsh, and PowerShell database invocation and proves classification, so a new completer cannot
+silently miss the fallback. The callback records the same completion-probe flag before config or
+`get_db()` work; `get_db()` then refuses stale state before prompt or migration.
+
+This conservative fallback may also suppress migration for an explicit interactive names-only list
+whose stderr the operator redirected, which is safe and retryable without that redirection. It does
+not affect non-interactive automation because stdin is not a terminal, or an explicit interactive
+names-only command whose stderr remains a terminal. The 0.14 upgrade guide nevertheless requires
+rerunning `agw completion install`; the marker is the durable contract, and the fallback only
+prevents an old installed script from hanging or migrating during the upgrade window.
 
 Adding the hidden marker to the shared dynamic snippets covers every current database-derived
 completion without teaching individual list commands about completion. Completion generation and
@@ -243,7 +286,8 @@ Permanent teaching changes in the same implementation phase that makes each clai
 - `sample-config.toml` and config reference material document the one default-true setting;
 - the CLI README and command reference document backup, restore, location, retention, confirmation,
   and non-migrating command behavior;
-- the 0.14 upgrade guide explains the pre-migration snapshot and the restore-before-downgrade order;
+- the 0.14 upgrade guide explains the pre-migration snapshot, restore-before-downgrade order, and
+  required `agw completion install` refresh;
 - `concept-migration` distinguishes resource declaration rewrites from SQLite schema migration and
   teaches the exact recovery command;
 - completion tests pin the new group, restore file completion, and hidden non-mutating probes.
@@ -275,24 +319,27 @@ Focused tests establish the contracts at three layers:
 
 1. **Service:** immutable inspection without sidecar changes; WAL-visible backup; bounded busy
    timeout; restrictive creation; manual and automatic naming; collision handling; mixed-version
-   automatic-only retention; historical-schema sentinel validation; generic SQLite rejection;
-   restore direction; identical-path refusal; serialized safe-open recheck; migration-failure
-   association; and failure cleanup.
+   automatic-only retention; version-appropriate historical-schema validation; current-version
+   common-sentinel lookalike rejection; future-version refusal before destination open; restore
+   direction; identical-path refusal; first-observation lock qualification; serialized safe-open
+   recheck; staggered partial-migration refusal; migration-failure association; and failure cleanup.
 2. **Policy and CLI:** fresh/current/stale/future/malformed matrices; interactive accept and
    decline; non-interactive default and opt-out; backup-before-first-migration ordering; backup
    failure prevention; partial-migration failure and exact remediation; confirmation and `--yes`;
-   separate interactive JSON and names-only stdout-purity captures; raw and shell-wrapped completion
-   probes under stale, warning, and invalid-config states; platform-specific recovery-command
-   quoting; and file completion across all shells.
+   separate interactive JSON and names-only stdout-purity captures that require the versioned notice
+   on stderr; raw and shell-wrapped completion probes under stale, warning, invalid-config, and
+   pre-0.14 marker-free states; platform-specific recovery-command quoting; and file completion
+   across all shells.
 3. **Permanent surfaces:** strict config parsing, sample completeness, doctor facts, CLI reference,
-   upgrade guide, guide topic, and operator path rendering.
+   upgrade guide, guide topic, operator path rendering, and a construction-site inventory that
+   permits production writable `Database` construction only inside the database safety service.
 
-Mutation checks neuter the three safety pivots: make migration run before backup, remove the schema
-recheck under the migration lock, and make completion use a writable open. Each mutation must fail a
-focused test. An isolated-home real-CLI drive creates an old-schema fixture, exercises
-non-interactive automatic backup, restores it, exercises opt-out, and verifies JSON/names-only
-stdout without touching operator state. No live VM is needed because the entire feature boundary is
-local SQLite and CLI behavior.
+Mutation checks neuter four safety pivots: make migration run before backup, bypass initial stale
+qualification, remove the post-interaction schema recheck, and make completion use a writable open.
+Each mutation must fail a focused test. An isolated-home real-CLI drive creates an old-schema
+fixture, exercises non-interactive automatic backup, restores it, exercises opt-out, and verifies
+JSON/names-only stdout without touching operator state. No live VM is needed because the entire
+feature boundary is local SQLite and CLI behavior.
 
 ## Complexity guard
 

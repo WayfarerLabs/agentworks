@@ -1,6 +1,6 @@
 # Migration Strategy: Safer Database Migrations
 
-- Status: Draft for phased review
+- Status: Approved for implementation
 - Date: 2026-08-09
 - Target release: 0.14.0
 - Builds on: [frd.md](./frd.md), [hla.md](./hla.md)
@@ -73,17 +73,20 @@ ladder without creating an empty pre-migration backup or showing a migration not
 On the first ordinary 0.14 command that needs writable state:
 
 1. Agentworks reads the current and target schema versions without migration.
-2. It announces the pending transition on stderr.
-3. An interactive operator accepts or declines a default-yes backup prompt. A non-interactive caller
+2. For stale state, it qualifies that first observation under the dedicated migration lock. A caller
+   that had to wait and still sees stale state refuses because it may have observed another
+   process's partial migration.
+3. It announces the pending transition on stderr, including for JSON and names-only output.
+4. An interactive operator accepts or declines a default-yes backup prompt. A non-interactive caller
    uses the default-true focused setting.
-4. Agentworks acquires the dedicated migration lock and rechecks schema. A waiter that now sees
-   current state skips backup and migration. A waiter that sees a changed but still-stale schema
-   refuses without adding another backup or migration attempt.
-5. When selected for still-stale state, Agentworks completes a timestamped SQLite online backup
+5. Agentworks reacquires the migration lock and rechecks schema. A waiter that now sees current
+   state skips backup and migration. A waiter that sees a changed but still-stale schema refuses
+   without adding another backup or migration attempt.
+6. When selected for still-stale state, Agentworks completes a timestamped SQLite online backup
    before the first migration statement and retains only the five newest automatic backups.
-6. Agentworks runs the existing migration ladder while holding the separate migration lock. The
+7. Agentworks runs the existing migration ladder while holding the separate migration lock. The
    original command continues after success.
-7. On migration failure, the error preserves the completed backup and prints an exact executable
+8. On migration failure, the error preserves the completed backup and prints an exact executable
    restore command. If backup was declined or disabled, the error says no pre-migration backup was
    created.
 
@@ -96,6 +99,19 @@ path when a pre-migration backup exists.
 Automation that deliberately accepts migration without a recovery artifact sets the Boolean to
 `false` before opening stale state. Invalid or unreadable database config stops before backup or
 migration because Agentworks cannot safely infer whether the opt-out applies.
+
+### Installed completion refresh
+
+Completion scripts embed the child commands they run, so upgrading the binary does not update a
+script installed by 0.13. After installing 0.14, rerun:
+
+```console
+agw completion install
+```
+
+The 0.14 CLI recognizes the old marker-free interactive/redirected probe shape and refuses stale
+state, preventing Tab completion from prompting or migrating before that refresh. The reinstalled
+script carries the explicit hidden marker and is the durable non-migrating contract.
 
 ## 5. Downgrade and restore
 

@@ -34,7 +34,7 @@ Design consequences:
 - Do not copy the database, WAL, or shared-memory files with filesystem utilities.
 - Use fresh source and destination connections and close both deterministically.
 - Treat restore as an exclusive operator action. Do not add locking or process-coordination
-  machinery in this effort.
+  machinery to restore; the separate stale-migration race is addressed below.
 
 Sources: [SQLite backup overview](https://sqlite.org/backup.html),
 [SQLite backup API](https://sqlite.org/c3ref/backup_finish.html),
@@ -113,19 +113,22 @@ Design consequences:
 Sources: [SQLite backup API](https://sqlite.org/c3ref/backup_finish.html),
 [Python `sqlite3.Connection.backup`](https://docs.python.org/3.14/library/sqlite3.html#sqlite3.Connection.backup)
 
-### Two schema sentinels survive the complete Agentworks history
+### Restore validation must match the claimed Agentworks version
 
-Migration 1 creates `vms(name)` and `workspaces(name)`. Later rebuilds in migrations 26, 27, and 28
-preserve those identifiers, so both columns remain queryable at every completed historical schema
-version. Combined with SQLite integrity checking and a valid `schema_version`, they distinguish an
-Agentworks-shaped backup from an arbitrary SQLite file without adding a manifest or provenance
-format.
+Migration 1 creates `vms(name)` and `workspaces(name)`, and later rebuilds preserve them. They
+reject a generic SQLite file that has only `schema_version`, but they cannot distinguish a
+current-version lookalike that copies those three common sentinels while omitting current tables
+such as `settings` and `sessions`. Restore therefore needs a cumulative table-and-critical-column
+sentinel map keyed by the claimed completed version.
 
 Design consequences:
 
-- Restore validation queries `vms(name)` and `workspaces(name)` before opening the live destination.
-- A test builds every real migration version and proves the invariant instead of maintaining a
-  parallel hand-written schema matrix.
+- Restore validation accepts only versions this binary understands and checks that version's
+  declarative sentinel set before opening the live destination.
+- A test builds every real migration version and proves its corresponding sentinel set, while a
+  current-version common-sentinel lookalike proves the map is semantically meaningful.
+- A migration-ladder comment makes sentinel-map review part of future table addition, rebuild, and
+  removal work.
 - This is not hostile-input authentication; a deliberately forged lookalike remains outside scope.
 
 Source: current `agentworks.db.migrations` history and
@@ -161,8 +164,10 @@ portable mutex without changing those migration transactions.
 Design consequences:
 
 - Acquire bounded `BEGIN IMMEDIATE` on one persistent adjacent lock database only for stale opens.
-- Recheck state schema after acquiring the lock, then hold it across backup and the full existing
-  migration ladder.
+- Qualify the first stale observation under the lock. If acquisition initially reports busy, a
+  still-stale result after waiting is not a trustworthy baseline and must be refused.
+- After interaction, reacquire and compare both application version and SQLite schema cookie; then
+  hold the lock across backup and the full existing migration ladder.
 - Never unlink the lock file; unlinking can let a waiter and a new caller lock different files.
 - Do not add owner records, leases, stale-lock recovery, or platform-specific file-lock branches.
 
@@ -184,9 +189,9 @@ Source:
 
 ## Open research questions
 
-None for this effort. A future requirement for long-running backups under sustained write load may
-need bounded retry or progress policy based on observed databases; current state databases do not
-justify that machinery.
+None for this effort. The fixed backup deadline and finite page batches are intentionally not
+operator-configurable; observed database size or workload would be needed before adding a tuning
+surface.
 
 ## Source quality
 

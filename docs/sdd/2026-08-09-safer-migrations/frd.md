@@ -1,6 +1,6 @@
 # FRD: Safer Database Migrations
 
-- Status: Draft for phased review
+- Status: Approved for implementation
 - Date: 2026-08-09
 - Saga: `docs/sdd/2026-08-04-next-steps/`
 - Delivery: operator-dispatched SDD effort tracked by the saga's pre-0.14 release gate; the effort
@@ -44,9 +44,10 @@ transaction, so the product must not promise that every failure rolls itself bac
   shows both paths and asks for confirmation by default; `--yes` accepts the replacement for
   automation. A non-interactive invocation without `--yes` refuses cleanly. Refusal or an invalid
   backup leaves both paths untouched. Validation requires a structurally sound SQLite database with
-  the stable Agentworks schema sentinels, not merely a caller-supplied `schema_version` table.
-  Restore does not open the restored database through the automatic migration path during the same
-  command.
+  the version-appropriate Agentworks tables and columns, not merely caller-supplied common
+  sentinels. A backup newer than the running release is preserved but refused for restore until a
+  release that understands its schema performs the operation. Restore does not open the restored
+  database through the automatic migration path during the same command.
 - R6. Backups use SQLite's online backup API rather than filesystem copying. A completed backup is a
   consistent SQLite snapshot even when the source uses WAL or another process has it open. Backup
   and restore use one fixed bounded busy deadline; exhausting it returns a clean retryable error
@@ -66,28 +67,35 @@ transaction, so the product must not promise that every failure rolls itself bac
 - R10. Operator teaching lands with the behavior: `sample-config.toml`, the CLI reference and state
   documentation, `docs/guides/upgrading-to-0.14.md`, and `agw guide concept-migration` describe the
   exact command names, configuration default, backup location and retention, restore flow, and
-  downgrade use. The generated completion tree includes the new command group and arguments.
+  downgrade use. The generated completion tree includes the new command group and arguments. The
+  0.14 upgrade guide requires rerunning `agw completion install` so scripts installed by an older
+  release gain the hidden non-migrating probe marker.
 - R11. Shell-completion probes are non-prompting and non-mutating. If dynamic completion encounters
   a stale database, it returns no database-derived candidates and leaves migration to an
   operator-invoked command. The hidden child invocation may fail cleanly with empty stdout;
   generated shell code discards its diagnostic stderr and treats that as no candidates, without
   spreading an optional database through ordinary callers. Configuration warnings or errors before
-  the database gate are equally hidden from the interactive shell. Generating or installing
-  completion scripts does not open state.
+  the database gate are equally hidden from the interactive shell. A stale script installed by an
+  older release also cannot prompt or migrate: an exact known database-backed names-only command,
+  interactive stdin, and redirected non-terminal stderr are classified before command execution as a
+  legacy completion probe and refused. Generating or installing completion scripts does not open
+  state.
 - R12. Migration notices, backup status, prompts, and failure remediation use the presentation and
   error channels without writing to command stdout. JSON commands still emit exactly one JSON
-  document, and names-only commands still emit only candidate names, after migration completes.
+  document, and names-only commands still emit only candidate names, after migration completes. The
+  pre-migration notice is mandatory on stderr even while ordinary presentation is suppressed.
 - R13. If a selected automatic or interactive pre-migration backup fails, Agentworks stops before
   the first migration statement and reports that migration did not start. It never silently falls
   back to migrating without the selected safety artifact. The clean error tells an interactive
   operator that a retry may explicitly decline the offer and tells automation that the documented
   config opt-out is the deliberate escape hatch.
 - R14. Concurrent commands that observe the same stale database serialize at one narrow migration
-  boundary and recheck schema after acquiring it. Exactly one command backs up and migrates that
-  version transition; a waiter that finds current state continues without a second backup or stale
-  failure remediation. If state changed but remains non-current, the waiter refuses without another
-  backup or migration so it cannot attach misleading recovery guidance to another process's partial
-  result.
+  boundary. An initial stale observation is first qualified under that lock, and the service
+  rechecks again after interaction when it reacquires the lock. Exactly one command backs up and
+  migrates that version transition; a waiter that finds current state continues without a second
+  backup or stale failure remediation. A caller whose first stale inspection overlapped an in-flight
+  migration, or whose recorded state changed but remains non-current, refuses without another backup
+  or migration so it cannot attach misleading recovery guidance to another process's partial result.
 
 ## Acceptance
 
@@ -106,8 +114,8 @@ transaction, so the product must not promise that every failure rolls itself bac
   files and a newly restored live database have restrictive POSIX modes.
 - AC6. Restore refusal changes neither source nor destination. Confirmed restore replaces the state
   database with the selected snapshot; the next ordinary command applies any required forward
-  migrations through the normal notice and backup flow. A structurally valid non-Agentworks SQLite
-  file is rejected before the destination opens.
+  migrations through the normal notice and backup flow. A structurally valid current-version
+  lookalike containing only common Agentworks sentinels is rejected before the destination opens.
 - AC7. Doctor does not create, migrate, back up, or restore state, and its human and JSON schema
   facts remain accurate for absent, current, stale, malformed, and newer databases.
 - AC8. Focused tests, the complete repository gates, and an isolated-home drive of the shipped CLI
@@ -115,8 +123,9 @@ transaction, so the product must not promise that every failure rolls itself bac
   doctor, docs, and completion contracts without touching the operator's real state.
 - AC9. Invoking each dynamic completion path against stale state emits no candidates, prompts, or
   notices and leaves the database and backup directory byte-for-byte unchanged. An explicit JSON or
-  names-only command that migrates emits migration UX only on stderr and preserves its stdout
-  contract.
+  names-only command that migrates includes the required versioned migration notice on stderr and
+  preserves its stdout contract. A pre-0.14 installed completion invocation with redirected stderr
+  also returns no candidates without prompting, backing up, or migrating.
 - AC10. An ordinary writable open of a newer schema fails before any database or backup-directory
   change. On-demand backup can still preserve that newer database, and restore can replace it with a
   selected older snapshot.
@@ -125,8 +134,9 @@ transaction, so the product must not promise that every failure rolls itself bac
   to retry with an explicit decline or opt-out rather than continuing automatically.
 - AC12. Two processes opening the same stale database converge on one successful backup and
   migration; the waiter rechecks under serialization, exits successfully, and does not create a
-  second automatic backup. A companion partial-change case makes the waiter refuse without a backup.
-  Removing the locked recheck makes these tests fail.
+  second automatic backup. A staggered case starts the waiter after the first process's initial DDL
+  and makes it refuse without a backup after the first process fails. Removing initial lock
+  qualification or the later locked recheck makes these tests fail.
 - AC13. A held SQLite lock makes backup or restore return the documented retryable error within the
   fixed deadline and leaves no completed partial backup or newly created live destination.
 
