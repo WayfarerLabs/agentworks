@@ -53,6 +53,10 @@ Remove `bootstrap_complete`. Returning the result is the completion signal. Keep
 optional because a successful join and IP discovery are distinct operations; Phase A may safely
 repeat only discovery.
 
+The same rule applies one layer down: delete the shared `BootstrapCompletion` record and make
+`EphemeralTailscaleBootstrap.complete()` return only the discovered `str | None` IP or raise.
+Readiness and join failures cannot be represented as data anywhere in the create path.
+
 ### Contract version 2
 
 The vm-platform descriptor and Lima, WSL2, Proxmox, Azure, and AWS implementations move atomically
@@ -77,8 +81,9 @@ redaction set as defense in depth, but Phase A does not consume it as bootstrap 
 ### Azure and AWS
 
 Their shared `EphemeralTailscaleBootstrap` readiness failure becomes an exception rather than an
-incomplete completion record. The existing create exception arms then perform the established total
-rollback. Successful fixed-stdin joins and best-effort IP discovery remain unchanged.
+incomplete completion record. The helper returns only the discovered `str | None` IP after a
+successful fixed-stdin join. The existing create exception arms then perform the established total
+rollback, and best-effort IP discovery remains unchanged.
 
 ### Lima
 

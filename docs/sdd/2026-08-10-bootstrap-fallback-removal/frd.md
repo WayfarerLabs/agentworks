@@ -40,6 +40,10 @@ contract continues to name this sanctioned seam explicitly.
 `ProvisionResult` does not expose a boolean or other state that lets the manager interpret a failed
 or deferred bootstrap as permission to retry through a different delivery mechanism.
 
+The shared fixed-stdin bootstrap helper also has no completion boolean. It returns the discovered
+`str | None` Tailscale IP after a successful join or raises; the fallback-era `BootstrapCompletion`
+record is removed.
+
 The result may omit a Tailscale IP after a successful join. That means only that IP discovery must
 be retried; it never permits credential redelivery.
 

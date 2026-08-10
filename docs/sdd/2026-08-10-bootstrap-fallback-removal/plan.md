@@ -43,16 +43,17 @@ the still-v1 WSL2 primary path is unchanged; focused suites pass.
 
 - [ ] In one always-green commit, make the resolved Tailscale key and progress sink required in
       `ProvisionRequest`, remove all absent-key provider branches, remove
-      `ProvisionResult.bootstrap_complete`, remove the generic Phase A generated-script branch, and
-      update manager call sites.
+      `ProvisionResult.bootstrap_complete`, delete `BootstrapCompletion`, make
+      `EphemeralTailscaleBootstrap.complete()` return only `str | None` or raise, remove the generic
+      Phase A generated-script branch, and update manager call sites.
 - [ ] In that cutover, move logger construction before platform dispatch and preserve manager
       ownership, exactly-once close, primary-failure mapping, log-path guidance, and the complete
       Tailscale-plus-git-token redaction set; pin the intentionally new log on platform-create
       failures.
 - [ ] In that same commit, move the vm-platform descriptor and every in-tree implementation from
       contract version 1 to version 2; add exact registration rejection coverage for v1.
-- [ ] Add a structural regression proving no incomplete-bootstrap result or generic Phase A
-      generated-script branch remains.
+- [ ] Add a structural regression proving no incomplete-bootstrap result, completion record, or
+      generic Phase A generated-script branch remains; delete fallback-era completion-record tests.
 - [ ] Pin that post-create Tailscale SSH verification failure retains the secured `FAILED` VM
       behavior rather than reopening create rollback.
 - [ ] Add end-to-end coverage for successful join plus missing platform IP: Phase A rediscovers and
