@@ -17,7 +17,7 @@ from agentworks.plugins.gcp.cleanup import (
     rollback_partial_create,
     rollback_then_raise,
 )
-from agentworks.plugins.gcp.network import FirewallState
+from agentworks.plugins.gcp.network import FirewallOwnership, FirewallState
 
 _COORDINATES = CleanupCoordinates(
     project_id="project-a",
@@ -91,6 +91,7 @@ class _Firewalls:
 
 def _allow(*, priority: int = 0) -> compute_v1.Firewall:
     return compute_v1.Firewall(
+        id=101,
         name=_COORDINATES.allow_rule,
         network=_NETWORK,
         direction="INGRESS",
@@ -103,6 +104,7 @@ def _allow(*, priority: int = 0) -> compute_v1.Firewall:
 
 def _deny() -> compute_v1.Firewall:
     return compute_v1.Firewall(
+        id=102,
         name=_COORDINATES.deny_rule,
         network=_NETWORK,
         direction="INGRESS",
@@ -129,6 +131,8 @@ def test_total_rollback_closes_allow_before_instance_and_deny_after_absence() ->
         coordinates=_COORDINATES,
         expected_allow=allow,
         expected_deny=deny,
+        allow_ownership=FirewallOwnership(allow.name, "101"),
+        deny_ownership=FirewallOwnership(deny.name, "102"),
         instance_possible=True,
         timeout=9,
     )
@@ -165,6 +169,8 @@ def test_surviving_instance_keeps_deny_and_reports_exact_state() -> None:
         coordinates=_COORDINATES,
         expected_allow=allow,
         expected_deny=deny,
+        allow_ownership=FirewallOwnership(allow.name, "101"),
+        deny_ownership=FirewallOwnership(deny.name, "102"),
         instance_possible=True,
         timeout=9,
     )
@@ -189,6 +195,8 @@ def test_indeterminate_instance_keeps_deny() -> None:
         coordinates=_COORDINATES,
         expected_allow=allow,
         expected_deny=deny,
+        allow_ownership=FirewallOwnership(allow.name, "101"),
+        deny_ownership=FirewallOwnership(deny.name, "102"),
         instance_possible=True,
         timeout=9,
     )
@@ -213,6 +221,8 @@ def test_mismatched_rule_is_retained_not_deleted() -> None:
         coordinates=_COORDINATES,
         expected_allow=allow,
         expected_deny=deny,
+        allow_ownership=FirewallOwnership(allow.name, "101"),
+        deny_ownership=FirewallOwnership(deny.name, "102"),
         instance_possible=False,
         timeout=9,
     )

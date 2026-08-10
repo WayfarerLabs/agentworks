@@ -8,7 +8,12 @@ from typing import TYPE_CHECKING, NoReturn
 
 from agentworks import output
 from agentworks.plugins.gcp.errors import GCEError, call_google, call_google_optional, wait_for_extended_operation
-from agentworks.plugins.gcp.network import FirewallState, delete_matching_firewall, reconcile_firewall
+from agentworks.plugins.gcp.network import (
+    FirewallOwnership,
+    FirewallState,
+    delete_matching_firewall,
+    reconcile_firewall,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -104,6 +109,8 @@ def rollback_partial_create(
     coordinates: CleanupCoordinates,
     expected_allow: Any,
     expected_deny: Any,
+    allow_ownership: FirewallOwnership | None,
+    deny_ownership: FirewallOwnership | None,
     instance_possible: bool,
     timeout: float,
 ) -> RollbackReport:
@@ -112,6 +119,7 @@ def rollback_partial_create(
         firewalls,
         project_id=coordinates.project_id,
         expected=expected_allow,
+        ownership=allow_ownership,
         timeout=timeout,
     )
     instance_state = (
@@ -124,10 +132,16 @@ def rollback_partial_create(
             firewalls,
             project_id=coordinates.project_id,
             expected=expected_deny,
+            ownership=deny_ownership,
             timeout=timeout,
         )
     else:
-        deny_state = _inspect_firewall(firewalls, coordinates.project_id, expected_deny)
+        deny_state = _inspect_firewall(
+            firewalls,
+            coordinates.project_id,
+            expected_deny,
+            deny_ownership,
+        )
     return RollbackReport(instance_state, allow_state, deny_state)
 
 
@@ -177,9 +191,19 @@ def rollback_after_interrupt(
     raise primary
 
 
-def _inspect_firewall(firewalls: Any, project_id: str, expected: Any) -> FirewallState:
+def _inspect_firewall(
+    firewalls: Any,
+    project_id: str,
+    expected: Any,
+    ownership: FirewallOwnership | None,
+) -> FirewallState:
     try:
-        return reconcile_firewall(firewalls, project_id=project_id, expected=expected)
+        return reconcile_firewall(
+            firewalls,
+            project_id=project_id,
+            expected=expected,
+            ownership=ownership,
+        )
     except GCEError:
         return FirewallState.INDETERMINATE
 

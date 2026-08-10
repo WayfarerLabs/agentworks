@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import uuid
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, NamedTuple
@@ -11,6 +12,7 @@ from agentworks.errors import ConfigError
 from agentworks.plugins.gcp.errors import (
     GCEConflictError,
     GCEError,
+    GCEOperationError,
     call_google,
     call_google_optional,
     wait_for_extended_operation,
@@ -85,6 +87,29 @@ class FirewallState(Enum):
     REALIZED = "realized"
     MISMATCHED = "mismatched"
     INDETERMINATE = "indeterminate"
+
+
+@dataclass(frozen=True)
+class FirewallOwnership:
+    """One server-assigned firewall incarnation safe to reconcile later."""
+
+    rule_name: str
+    resource_id: str
+
+
+@dataclass
+class FirewallInsertAttempt:
+    """The unique request identity and learned resource identity for one insert."""
+
+    rule_name: str
+    request_id: str
+    ownership: FirewallOwnership | None = None
+    submitted: bool = False
+
+    @classmethod
+    def create(cls, rule_name: str) -> FirewallInsertAttempt:
+        """Create a non-zero GCE request ID before the first mutation."""
+        return cls(rule_name=rule_name, request_id=str(uuid.uuid4()))
 
 
 def zone_region(zone: str) -> str:
@@ -239,8 +264,9 @@ def reconcile_firewall(
     *,
     project_id: str,
     expected: Any,
+    ownership: FirewallOwnership | None,
 ) -> FirewallState:
-    """Resolve an exact-name possible rule without deleting a collision."""
+    """Resolve an exact-name rule only when its provider incarnation is owned."""
     actual = call_google_optional(
         lambda: client.get(project=project_id, firewall=expected.name),
         operation="reconciling a possible firewall rule",
@@ -248,7 +274,13 @@ def reconcile_firewall(
     )
     if actual is None:
         return FirewallState.ABSENT
-    if FirewallShape.from_resource(actual) == FirewallShape.from_resource(expected):
+    if ownership is None:
+        return FirewallState.INDETERMINATE
+    if (
+        str(actual.name) == ownership.rule_name
+        and _provider_resource_id(actual.id) == ownership.resource_id
+        and FirewallShape.from_resource(actual) == FirewallShape.from_resource(expected)
+    ):
         return FirewallState.REALIZED
     return FirewallState.MISMATCHED
 
@@ -258,33 +290,90 @@ def insert_firewall_reconciled(
     *,
     project_id: str,
     firewall: Any,
+    attempt: FirewallInsertAttempt,
     timeout: float,
-) -> FirewallState:
-    """Insert a firewall rule, reconciling any indeterminate outcome."""
-    failure: GCEError | None = None
+) -> FirewallOwnership:
+    """Insert once and prove ownership through request, operation, and resource IDs."""
+    from google.cloud import compute_v1
+
+    if attempt.rule_name != str(firewall.name) or attempt.submitted:
+        raise ValueError("firewall insert attempt does not match this fresh rule mutation")
+    request = compute_v1.InsertFirewallRequest(
+        project=project_id,
+        firewall_resource=firewall,
+        request_id=attempt.request_id,
+    )
+    attempt.submitted = True
+
+    operation: Any | None = None
+    initial_failure: GCEError | None = None
     try:
         operation = call_google(
-            lambda: client.insert(project=project_id, firewall_resource=firewall),
+            lambda: client.insert(request=request, retry=None),
             operation="inserting an owned firewall rule",
             resource=f"firewall rule {project_id}/{firewall.name}",
         )
-        wait_for_extended_operation(operation, label=f"firewall rule {firewall.name}", timeout=timeout)
+    except GCEConflictError:
+        raise
     except GCEError as exc:
-        failure = exc
-    if failure is None:
-        return FirewallState.REALIZED
+        initial_failure = exc
 
-    state = reconcile_firewall(client, project_id=project_id, expected=firewall)
+    if operation is None:
+        retry_failed = False
+        try:
+            # GCE documents same-requestId retry as the supported way to recover
+            # a response lost before the operation identity reached the client.
+            operation = call_google(
+                lambda: client.insert(request=request, retry=None),
+                operation="reconciling an indeterminate firewall insert",
+                resource=f"firewall rule {project_id}/{firewall.name}",
+            )
+        except GCEConflictError:
+            raise
+        except GCEError:
+            retry_failed = True
+        if retry_failed:
+            if initial_failure is None:  # pragma: no cover - guarded by operation being absent
+                raise AssertionError("missing initial firewall insert failure")
+            raise initial_failure
+
+    wait_failure: GCEError | None = None
+    try:
+        wait_for_extended_operation(operation, label=f"firewall rule {firewall.name}", timeout=timeout)
+    except GCEConflictError:
+        raise
+    except GCEError as exc:
+        wait_failure = exc
+
+    attempt.ownership = _ownership_from_operation(
+        operation,
+        request_id=attempt.request_id,
+        project_id=project_id,
+        rule_name=attempt.rule_name,
+    )
+
+    state = reconcile_firewall(
+        client,
+        project_id=project_id,
+        expected=firewall,
+        ownership=attempt.ownership,
+    )
     if state is FirewallState.REALIZED:
-        return state
+        return attempt.ownership
     if state is FirewallState.MISMATCHED:
         raise GCEConflictError(
-            f"GCE firewall rule '{firewall.name}' has a different shape after an indeterminate insert",
+            f"GCE firewall rule '{firewall.name}' has a different provider identity or shape after insert",
             entity_kind="gcp-firewall-rule",
             entity_name=str(firewall.name),
-            hint="inspect the colliding rule and do not delete it unless its ownership is established",
+            hint="retain the colliding rule because this insert attempt does not own its provider identity",
         )
-    raise failure
+    if wait_failure is not None:
+        raise wait_failure
+    raise GCEOperationError(
+        f"GCE firewall rule '{firewall.name}' was absent after its insert operation completed",
+        entity_kind="gcp-firewall-rule",
+        entity_name=str(firewall.name),
+    )
 
 
 def delete_matching_firewall(
@@ -292,11 +381,23 @@ def delete_matching_firewall(
     *,
     project_id: str,
     expected: Any,
+    ownership: FirewallOwnership | None,
     timeout: float,
 ) -> FirewallState:
-    """Delete only an exact expected shape and prove the resulting state."""
+    """Delete only a verified provider incarnation, then prove the result.
+
+    GCE delete accepts only a rule name, not a provider-ID precondition. The
+    ownership read therefore closes concurrent identical inserts but is not an
+    atomic defense against a hostile delete/recreate between this read and the
+    name-based delete.
+    """
     try:
-        state = reconcile_firewall(client, project_id=project_id, expected=expected)
+        state = reconcile_firewall(
+            client,
+            project_id=project_id,
+            expected=expected,
+            ownership=ownership,
+        )
     except GCEError:
         return FirewallState.INDETERMINATE
     if state is not FirewallState.REALIZED:
@@ -313,9 +414,50 @@ def delete_matching_firewall(
         pass
 
     try:
-        return reconcile_firewall(client, project_id=project_id, expected=expected)
+        return reconcile_firewall(
+            client,
+            project_id=project_id,
+            expected=expected,
+            ownership=ownership,
+        )
     except GCEError:
         return FirewallState.INDETERMINATE
+
+
+def _ownership_from_operation(
+    operation: Any,
+    *,
+    request_id: str,
+    project_id: str,
+    rule_name: str,
+) -> FirewallOwnership:
+    """Verify the GCE operation belongs to this request and capture its target."""
+    expected_link = f"projects/{project_id}/global/firewalls/{rule_name}"
+    resource_id = _provider_resource_id(getattr(operation, "target_id", None))
+    if (
+        str(getattr(operation, "client_operation_id", "")) != request_id
+        or str(getattr(operation, "operation_type", "")).lower() != "insert"
+        or _canonical_resource_url(str(getattr(operation, "target_link", ""))) != expected_link
+        or resource_id is None
+    ):
+        raise GCEOperationError(
+            f"Google Cloud returned incomplete ownership identity for firewall rule {project_id}/{rule_name}",
+            entity_kind="gcp-firewall-rule",
+            entity_name=rule_name,
+            hint="retain the named rule until its provider identity can be established",
+        )
+    return FirewallOwnership(rule_name=rule_name, resource_id=resource_id)
+
+
+def _provider_resource_id(value: object) -> str | None:
+    """Normalize one positive uint64 provider ID without accepting blank/zero."""
+    if isinstance(value, bool) or not isinstance(value, int | str):
+        return None
+    try:
+        normalized = int(value)
+    except ValueError:
+        return None
+    return str(normalized) if normalized > 0 else None
 
 
 def _canonical_resource_url(value: str) -> str:
