@@ -10,9 +10,9 @@ from google.api_core import exceptions as api_exceptions
 from google.cloud import compute_v1
 
 from agentworks.capabilities.base import RunContext
-from agentworks.errors import ConfigError
+from agentworks.errors import AlreadyExistsError, AuthorizationError, ConfigError
 from agentworks.plugins.gcp.config import GcpGCEConfig
-from agentworks.plugins.gcp.errors import GCEConflictError, GCEOperationError
+from agentworks.plugins.gcp.errors import GCEOperationError
 from agentworks.plugins.gcp.network import (
     FirewallInsertAttempt,
     FirewallOwnership,
@@ -358,7 +358,7 @@ class _FirewallClient:
 def test_firewall_name_collision_and_absence() -> None:
     expected = _owned_rule("allow", priority=0, deny=False)
     present = _FirewallClient(states=iter([expected]))
-    with pytest.raises(GCEConflictError, match="already exists"):
+    with pytest.raises(AlreadyExistsError, match="already exists"):
         require_firewall_name_available(present, project_id="project-a", rule_name="allow")
     absent = _FirewallClient(states=iter([None]))
     require_firewall_name_available(absent, project_id="project-a", rule_name="allow")
@@ -458,7 +458,7 @@ def test_indeterminate_insert_absence_preserves_sanitized_timeout() -> None:
 def test_indeterminate_insert_mismatch_is_collision_and_never_deleted(observed: compute_v1.Firewall) -> None:
     expected = _owned_rule("allow", priority=0, deny=False)
     client = _FirewallClient(states=iter([observed]), operation=_Operation(TimeoutError("provider timeout")))
-    with pytest.raises(GCEConflictError, match="provider identity or shape"):
+    with pytest.raises(AlreadyExistsError, match="provider identity or shape"):
         insert_firewall_reconciled(
             client,
             project_id="project-a",
@@ -475,7 +475,7 @@ def test_definite_already_exists_is_collision_without_shape_reconciliation() -> 
         states=iter([]),
         insert_results=iter([_api_error(api_exceptions.AlreadyExists, "concurrent winner")]),
     )
-    with pytest.raises(GCEConflictError, match="already exists"):
+    with pytest.raises(AlreadyExistsError, match="already exists"):
         insert_firewall_reconciled(
             client,
             project_id="project-a",
@@ -497,7 +497,7 @@ def test_same_request_retry_already_exists_remains_collision() -> None:
             ]
         ),
     )
-    with pytest.raises(GCEConflictError, match="already exists"):
+    with pytest.raises(AlreadyExistsError, match="already exists"):
         insert_firewall_reconciled(
             client,
             project_id="project-a",
@@ -506,6 +506,23 @@ def test_same_request_retry_already_exists_remains_collision() -> None:
             timeout=17,
         )
     assert [name for name, _kwargs in client.calls] == ["insert", "insert"]
+
+
+def test_definite_permission_failure_is_not_retried_or_shape_reconciled() -> None:
+    expected = _owned_rule("allow", priority=0, deny=False)
+    client = _FirewallClient(
+        states=iter([]),
+        insert_results=iter([_api_error(api_exceptions.PermissionDenied, "denied")]),
+    )
+    with pytest.raises(AuthorizationError):
+        insert_firewall_reconciled(
+            client,
+            project_id="project-a",
+            firewall=expected,
+            attempt=FirewallInsertAttempt("allow", _REQUEST_ID),
+            timeout=17,
+        )
+    assert [name for name, _kwargs in client.calls] == ["insert"]
 
 
 @pytest.mark.parametrize(

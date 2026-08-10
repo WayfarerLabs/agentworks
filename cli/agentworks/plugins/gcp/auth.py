@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+from agentworks.errors import ProvisioningError
 from agentworks.plugins.gcp.config import GcpAmbientAuth, GcpGCEConfig, GcpServiceAccountAuth
-from agentworks.plugins.gcp.errors import GCEAuthenticationError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -40,7 +40,7 @@ def build_ambient_credential(site_name: str) -> Credentials:
     except Exception:
         failure = True
     if failure or credential is None:
-        raise GCEAuthenticationError(
+        raise ProvisioningError(
             f"could not construct Application Default Credentials for vm-site '{site_name}'",
             entity_kind="vm-site",
             entity_name=site_name,
@@ -65,7 +65,7 @@ def build_service_account_credential(
     invalid_json = False
     try:
         info = json.loads(secret_value)
-    except (json.JSONDecodeError, TypeError):
+    except (ValueError, TypeError, RecursionError):
         invalid_json = True
 
     if invalid_json or not isinstance(info, dict):
@@ -90,8 +90,8 @@ def _service_account_error(
     auth: GcpServiceAccountAuth,
     site_name: str,
     reason: str,
-) -> GCEAuthenticationError:
-    return GCEAuthenticationError(
+) -> ProvisioningError:
+    return ProvisioningError(
         f"could not authenticate vm-site '{site_name}': secret '{auth.secret}' {reason}",
         entity_kind="vm-site",
         entity_name=site_name,
@@ -151,19 +151,18 @@ class GcpClientCache:
             "instances": compute_v1.InstancesClient,
             "firewalls": compute_v1.FirewallsClient,
         }
+        credential = self.credential(ctx)
         construction_failed = False
         built: Any = None
         try:
-            built = constructors[kind](credentials=self.credential(ctx))
-        except GCEAuthenticationError:
-            raise
+            built = constructors[kind](credentials=credential)
         except Exception:
             construction_failed = True
         if construction_failed or built is None:
             auth = self._config.auth
             mode = auth.mode
             secret = f", secret '{auth.secret}'" if isinstance(auth, GcpServiceAccountAuth) else ""
-            raise GCEAuthenticationError(
+            raise ProvisioningError(
                 f"could not construct Google Compute client '{kind}' for vm-site '{self._site_name}' "
                 f"(auth mode '{mode}'{secret})",
                 entity_kind="vm-site",

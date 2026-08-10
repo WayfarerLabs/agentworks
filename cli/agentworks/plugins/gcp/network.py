@@ -8,11 +8,19 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from agentworks.errors import ConfigError
+from agentworks.errors import (
+    AgentworksError,
+    AlreadyExistsError,
+    AuthorizationError,
+    ConfigError,
+    ConnectivityError,
+    NotFoundError,
+    TokenRejectedError,
+)
 from agentworks.plugins.gcp.errors import (
-    GCEConflictError,
     GCEError,
     GCEOperationError,
+    GCEQuotaError,
     call_google,
     call_google_optional,
     wait_for_extended_operation,
@@ -251,7 +259,7 @@ def require_firewall_name_available(client: Any, *, project_id: str, rule_name: 
         resource=f"firewall rule {project_id}/{rule_name}",
     )
     if existing is not None:
-        raise GCEConflictError(
+        raise AlreadyExistsError(
             f"GCE firewall rule '{rule_name}' already exists in project '{project_id}'",
             entity_kind="gcp-firewall-rule",
             entity_name=rule_name,
@@ -306,16 +314,16 @@ def insert_firewall_reconciled(
     attempt.submitted = True
 
     operation: Any | None = None
-    initial_failure: GCEError | None = None
+    initial_failure: AgentworksError | None = None
     try:
         operation = call_google(
             lambda: client.insert(request=request, retry=None),
             operation="inserting an owned firewall rule",
             resource=f"firewall rule {project_id}/{firewall.name}",
         )
-    except GCEConflictError:
+    except (AlreadyExistsError, AuthorizationError, NotFoundError, TokenRejectedError, GCEQuotaError):
         raise
-    except GCEError as exc:
+    except (ConnectivityError, GCEError) as exc:
         initial_failure = exc
 
     if operation is None:
@@ -328,21 +336,21 @@ def insert_firewall_reconciled(
                 operation="reconciling an indeterminate firewall insert",
                 resource=f"firewall rule {project_id}/{firewall.name}",
             )
-        except GCEConflictError:
+        except (AlreadyExistsError, AuthorizationError, NotFoundError, TokenRejectedError, GCEQuotaError):
             raise
-        except GCEError:
+        except (ConnectivityError, GCEError):
             retry_failed = True
         if retry_failed:
             if initial_failure is None:  # pragma: no cover - guarded by operation being absent
                 raise AssertionError("missing initial firewall insert failure")
             raise initial_failure
 
-    wait_failure: GCEError | None = None
+    wait_failure: AgentworksError | None = None
     try:
         wait_for_extended_operation(operation, label=f"firewall rule {firewall.name}", timeout=timeout)
-    except GCEConflictError:
+    except (AlreadyExistsError, AuthorizationError, NotFoundError, TokenRejectedError, GCEQuotaError):
         raise
-    except GCEError as exc:
+    except GCEOperationError as exc:
         wait_failure = exc
 
     attempt.ownership = _ownership_from_operation(
@@ -361,7 +369,7 @@ def insert_firewall_reconciled(
     if state is FirewallState.REALIZED:
         return attempt.ownership
     if state is FirewallState.MISMATCHED:
-        raise GCEConflictError(
+        raise AlreadyExistsError(
             f"GCE firewall rule '{firewall.name}' has a different provider identity or shape after insert",
             entity_kind="gcp-firewall-rule",
             entity_name=str(firewall.name),
@@ -398,7 +406,7 @@ def delete_matching_firewall(
             expected=expected,
             ownership=ownership,
         )
-    except GCEError:
+    except AgentworksError:
         return FirewallState.INDETERMINATE
     if state is not FirewallState.REALIZED:
         return state
@@ -410,7 +418,7 @@ def delete_matching_firewall(
             resource=f"firewall rule {project_id}/{expected.name}",
         )
         wait_for_extended_operation(operation, label=f"firewall rule {expected.name}", timeout=timeout)
-    except GCEError:
+    except AgentworksError:
         pass
 
     try:
@@ -420,7 +428,7 @@ def delete_matching_firewall(
             expected=expected,
             ownership=ownership,
         )
-    except GCEError:
+    except AgentworksError:
         return FirewallState.INDETERMINATE
 
 

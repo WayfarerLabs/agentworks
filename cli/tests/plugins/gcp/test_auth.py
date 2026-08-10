@@ -8,13 +8,13 @@ from typing import Any
 import pytest
 
 from agentworks.capabilities.base import RunContext
+from agentworks.errors import ProvisioningError
 from agentworks.plugins.gcp.auth import (
     GcpClientCache,
     build_ambient_credential,
     build_service_account_credential,
 )
 from agentworks.plugins.gcp.config import GcpGCEConfig, GcpServiceAccountAuth
-from agentworks.plugins.gcp.errors import GCEAuthenticationError
 from agentworks.schema import RefOwner, filled_defaults
 
 _SENTINEL = "private-key-'quote-\"-newline\\n-SENTINEL"
@@ -92,7 +92,7 @@ def test_ambient_failure_is_safe_and_detached(monkeypatch: pytest.MonkeyPatch) -
     provider.__cause__ = ValueError(_SENTINEL)
     monkeypatch.setattr("google.auth.default", lambda **_kwargs: (_ for _ in ()).throw(provider))
 
-    with pytest.raises(GCEAuthenticationError) as caught:
+    with pytest.raises(ProvisioningError) as caught:
         build_ambient_credential("gcp-site")
 
     assert "gcp-site" in str(caught.value)
@@ -134,7 +134,7 @@ def test_service_account_receives_whole_json_and_cloud_scope(monkeypatch: pytest
 )
 def test_malformed_service_account_is_secret_free(document: str) -> None:
     auth = GcpServiceAccountAuth(mode="service-account", secret="svc-json")
-    with pytest.raises(GCEAuthenticationError) as caught:
+    with pytest.raises(ProvisioningError) as caught:
         build_service_account_credential(auth, document, "gcp-site")
     assert "svc-json" in str(caught.value)
     _assert_sentinel_absent(caught.value)
@@ -151,10 +151,34 @@ def test_sdk_validation_failure_drops_entire_exception_graph(monkeypatch: pytest
     auth = GcpServiceAccountAuth(mode="service-account", secret="svc-json")
     document = json.dumps({"type": "service_account", "private_key": _SENTINEL})
 
-    with pytest.raises(GCEAuthenticationError) as caught:
+    with pytest.raises(ProvisioningError) as caught:
         build_service_account_credential(auth, document, "gcp-site")
 
     _assert_sentinel_absent(caught.value)
+
+
+def test_json_decoder_recursion_failure_drops_entire_exception_graph(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider = RecursionError(_SENTINEL)
+    provider.__cause__ = ValueError(_SENTINEL)
+    monkeypatch.setattr("json.loads", lambda _value: (_ for _ in ()).throw(provider))
+    auth = GcpServiceAccountAuth(mode="service-account", secret="svc-json")
+
+    with pytest.raises(ProvisioningError) as caught:
+        build_service_account_credential(auth, _SENTINEL, "gcp-site")
+
+    _assert_sentinel_absent(caught.value)
+
+
+def test_deeply_nested_json_is_a_typed_detached_auth_failure() -> None:
+    auth = GcpServiceAccountAuth(mode="service-account", secret="svc-json")
+    document = "[" * 2000 + "0" + "]" * 2000
+
+    with pytest.raises(ProvisioningError) as caught:
+        build_service_account_credential(auth, document, "gcp-site")
+
+    assert "svc-json" in str(caught.value)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
 def test_explicit_mode_never_calls_ambient_and_failed_build_is_not_cached(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -168,14 +192,14 @@ def test_explicit_mode_never_calls_ambient_and_failed_build_is_not_cached(monkey
 
     def explicit(*_args: object) -> object:
         calls["explicit"] += 1
-        raise GCEAuthenticationError("safe")
+        raise ProvisioningError("safe")
 
     monkeypatch.setattr("agentworks.plugins.gcp.auth.build_ambient_credential", ambient)
     monkeypatch.setattr("agentworks.plugins.gcp.auth.build_service_account_credential", explicit)
 
-    with pytest.raises(GCEAuthenticationError):
+    with pytest.raises(ProvisioningError):
         cache.credential(_ctx())
-    with pytest.raises(GCEAuthenticationError):
+    with pytest.raises(ProvisioningError):
         cache.credential(_ctx())
 
     assert calls == {"ambient": 0, "explicit": 2}
@@ -243,7 +267,7 @@ def test_client_construction_failure_is_mode_named_detached_and_not_cached(monke
     monkeypatch.setattr("agentworks.plugins.gcp.auth.build_service_account_credential", lambda *_args: object())
     monkeypatch.setattr(compute_v1, "ProjectsClient", FailingProjects)
 
-    with pytest.raises(GCEAuthenticationError) as caught:
+    with pytest.raises(ProvisioningError) as caught:
         cache.client("projects", _ctx())
 
     assert "gcp-site" in str(caught.value)

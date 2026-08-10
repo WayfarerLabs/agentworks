@@ -7,7 +7,8 @@ from enum import Enum
 from typing import TYPE_CHECKING, NoReturn
 
 from agentworks import output
-from agentworks.plugins.gcp.errors import GCEError, call_google, call_google_optional, wait_for_extended_operation
+from agentworks.errors import AgentworksError
+from agentworks.plugins.gcp.errors import call_google, call_google_optional, wait_for_extended_operation
 from agentworks.plugins.gcp.network import (
     FirewallOwnership,
     FirewallState,
@@ -89,7 +90,7 @@ def _read_instance(
             operation="checking instance cleanup",
             resource=f"instance {coordinates.project_id}/{coordinates.zone}/{coordinates.instance_name}",
         )
-    except GCEError:
+    except AgentworksError:
         return InstanceState.INDETERMINATE, None
     if instance is None:
         return InstanceState.ABSENT, None
@@ -122,7 +123,7 @@ def delete_instance_and_verify(
             resource=f"instance {coordinates.project_id}/{coordinates.zone}/{coordinates.instance_name}",
         )
         wait_for_extended_operation(operation, label=f"instance {coordinates.instance_name}", timeout=timeout)
-    except GCEError:
+    except AgentworksError:
         pass
     return probe_instance_state(instances, coordinates=coordinates)
 
@@ -246,7 +247,7 @@ def _inspect_firewall(
             expected=expected,
             ownership=ownership,
         )
-    except GCEError:
+    except AgentworksError:
         return FirewallState.INDETERMINATE
 
 

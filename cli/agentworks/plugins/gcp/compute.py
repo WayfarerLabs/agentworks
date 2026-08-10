@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from agentworks.errors import ConfigError
+from agentworks.errors import AlreadyExistsError, ConfigError
 from agentworks.plugins.gcp.config import IMAGE_PROJECT, MachineTypeSelection, image_family_for_arch
-from agentworks.plugins.gcp.errors import GCEConflictError, GCEError, call_google_optional
+from agentworks.plugins.gcp.errors import GCEError, call_google_optional
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
@@ -129,7 +129,7 @@ def require_instance_name_available(
         resource=f"instance {project_id}/{zone}/{instance_name}",
     )
     if existing is not None:
-        raise GCEConflictError(
+        raise AlreadyExistsError(
             f"GCE instance '{instance_name}' already exists in project '{project_id}', zone '{zone}'",
             entity_kind="gcp-instance",
             entity_name=instance_name,

@@ -8,10 +8,19 @@ from typing import Any, cast
 
 import pytest
 from google.api_core import exceptions as api_exceptions
+from google.auth import exceptions as auth_exceptions
 from google.cloud import compute_v1
 
 from agentworks.capabilities.base import RunContext
-from agentworks.errors import ConfigError
+from agentworks.errors import (
+    AgentworksError,
+    AlreadyExistsError,
+    AuthorizationError,
+    ConfigError,
+    ConnectivityError,
+    NotFoundError,
+    TokenRejectedError,
+)
 from agentworks.plugins.gcp.compute import (
     get_project,
     get_zone,
@@ -22,11 +31,7 @@ from agentworks.plugins.gcp.compute import (
 )
 from agentworks.plugins.gcp.config import GcpGCEConfig, MachineTypeSelection
 from agentworks.plugins.gcp.errors import (
-    GCEAuthenticationError,
-    GCEConflictError,
     GCEError,
-    GCEOperationError,
-    GCEPermissionError,
     GCEQuotaError,
     call_google,
 )
@@ -153,7 +158,7 @@ def test_image_architecture_mismatch_is_rejected() -> None:
 
 def test_exact_instance_collision_and_not_found_paths() -> None:
     present = _GetClient(compute_v1.Instance(name="vm-a"))
-    with pytest.raises(GCEConflictError, match="already exists"):
+    with pytest.raises(AlreadyExistsError, match="already exists"):
         require_instance_name_available(
             _Cache(instances=present),  # type: ignore[arg-type]
             RunContext(),
@@ -194,17 +199,21 @@ def test_external_ipv4_is_read_live_from_named_nat_config() -> None:
 @pytest.mark.parametrize(
     ("provider", "expected"),
     [
-        (_api_error(api_exceptions.Unauthenticated, _SENTINEL), GCEAuthenticationError),
-        (_api_error(api_exceptions.PermissionDenied, _SENTINEL), GCEPermissionError),
-        (_api_error(api_exceptions.AlreadyExists, _SENTINEL), GCEConflictError),
+        (_api_error(api_exceptions.Unauthenticated, _SENTINEL), TokenRejectedError),
+        (_api_error(auth_exceptions.RefreshError, _SENTINEL), TokenRejectedError),
+        (_api_error(api_exceptions.PermissionDenied, _SENTINEL), AuthorizationError),
+        (_api_error(api_exceptions.NotFound, _SENTINEL), NotFoundError),
+        (_api_error(api_exceptions.AlreadyExists, _SENTINEL), AlreadyExistsError),
         (_api_error(api_exceptions.ResourceExhausted, _SENTINEL), GCEQuotaError),
-        (_api_error(api_exceptions.DeadlineExceeded, _SENTINEL), GCEOperationError),
+        (_api_error(api_exceptions.DeadlineExceeded, _SENTINEL), ConnectivityError),
+        (_api_error(api_exceptions.ServiceUnavailable, _SENTINEL), ConnectivityError),
+        (_api_error(auth_exceptions.TransportError, _SENTINEL), ConnectivityError),
         (RuntimeError(_SENTINEL), GCEError),
     ],
 )
 def test_provider_error_mapping_is_typed_and_drops_full_exception_graph(
     provider: Exception,
-    expected: type[GCEError],
+    expected: type[AgentworksError],
 ) -> None:
     provider.__cause__ = ValueError(_SENTINEL)
     provider.extra = {"request": _SENTINEL}  # type: ignore[attr-defined]
