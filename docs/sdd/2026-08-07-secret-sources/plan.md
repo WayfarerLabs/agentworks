@@ -1,6 +1,6 @@
 # Plan: Secret Sources
 
-- Status: Active: final implementation and review in progress
+- Status: Complete
 - FRD: [frd.md](./frd.md)
 - Architecture: [hla.md](./hla.md)
 - Migration: [migration-strategy.md](./migration-strategy.md)
@@ -251,19 +251,19 @@ the new command.
       source without printing any secret value.
 - [x] Integrate current `main`, consume the saga rename message, and resolve every merge conflict
       while preserving both contracts.
-- [ ] Enforce the final boundary at all five provider-shaped inspection surfaces. Lima instance
+- [x] Enforce the final boundary at all five provider-shaped inspection surfaces. Lima instance
       YAML, Azure `OSProfile.custom_data`, and AWS `RunInstances.UserData` retain credential-free
       bootstrap payloads and deliver the key after boot through provisioning-transport stdin. WSL2
       and Proxmox use private temporary staging with one verified removal attempt.
-- [ ] Preserve disabled-plugin remediation, prompt-broker scoping, source vocabulary, retired-module
+- [x] Preserve disabled-plugin remediation, prompt-broker scoping, source vocabulary, retired-module
       enforcement, and provider-name attribution through the final integration and security review.
 - [x] Exercise the remote-Lima path with a rotated Tailscale key; verify create, initialization,
       independent SSH and boot checks, deletion, credential-free retained YAML, and zero residual
       VM, database, log, SSH, workspace, or operation artifacts.
-- [ ] Run Green on every supported Python version through CI. Complete `agentworks-reviewer`,
+- [x] Run Green on every supported Python version through CI. Complete `agentworks-reviewer`,
       saga-lead, integration, and fresh-eyes review (the fallback if Copilot is unavailable) with
       every valid finding resolved.
-- [ ] Finalize `locked.md` with the shipped behavior, the 0.14 break, guide-topic status, exact
+- [x] Finalize `locked.md` with the shipped behavior, the 0.14 break, guide-topic status, exact
       provider-retention boundary, final gates, reviews, and honest residual work. Rewrite PR #453's
       body around that same final design and leave the PR ready and mergeable.
 

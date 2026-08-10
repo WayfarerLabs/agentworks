@@ -1,6 +1,6 @@
 # HLA: Secret Sources
 
-- Status: Implemented; final operator-gated validation pending
+- Status: Implemented and locked
 - FRD: `docs/sdd/2026-08-07-secret-sources/frd.md`
 - Prior art: `docs/sdd/2026-08-07-secret-sources/prior-art-research.md`
 - Saga contract: `docs/sdd/2026-08-04-next-steps/capability-descriptor-contract.md`

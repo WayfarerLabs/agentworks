@@ -54,6 +54,15 @@ guide at `docs/guides/upgrading-to-0.14.md` contains the before/after configurat
 
 ## Acceptance and review evidence
 
+- The implementation candidate is `e7010946`. Its full local non-integration suite passed with 7,472
+  tests and 3 deselected. Ruff check and formatting passed, strict mypy passed across 650 source
+  files, and file lint, Rulesync drift, locked-SDD, and diff checks passed.
+- CI on that exact candidate passed on Python 3.12, 3.13, and 3.14, including CodeQL and the
+  aggregate `ci-success` gate.
+- Independent `agentworks-reviewer` review of the exact candidate found no Blocking, Important,
+  Minor, or open issue. The fresh-eyes fallback findings were resolved before the candidate was
+  pushed and independently checked the provider transports, provider-neutral bootstrap prose, and
+  agreement between the completed plan and this lock.
 - The permanent POSIX real-entry harness exercises the shipped console script with isolated config:
   implied environment resolution, prompt refusal, mixed variadic verification, direct OnePassword
   remediation, a declared source through an exact fake-only `op` boundary, doctor, guide output, and

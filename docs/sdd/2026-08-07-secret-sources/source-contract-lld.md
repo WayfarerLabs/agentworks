@@ -2,7 +2,7 @@
 
 <!-- cspell:ignore abstractmethod isfinite -->
 
-- Status: Reviewed and implemented; final operator-gated validation pending
+- Status: Reviewed, implemented, and locked
 - Scope: Phase 1 source contract LLD, paired with the Phase 2 resolution lifecycle LLD and consumed
   by implementation Phases 3, 4, and 5
 - Governing artifacts: [FRD](./frd.md), [HLA](./hla.md),
