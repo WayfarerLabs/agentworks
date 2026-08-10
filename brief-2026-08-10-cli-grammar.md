@@ -24,9 +24,14 @@ census.
    their config models. Two consumers exist on day one: the secret card absorbs
    `agw secret describe`'s read-only content (backend mappings, inheritance chain), and the env
    scope detail follows the same seam. Every relationship section ("Referenced by", "Used by") moves
-   out; one pointer line hands the reader to `graph`. `agw secret describe` retires in the same
-   change (finish the line; no compat alias); heavyweight kind operations that touch backends
-   (`agw secret verify`, resolution previews) stay kind commands.
+   out; one pointer line hands the reader to `graph`. **The kind-specific spelling stays** (operator
+   ruling, 2026-08-10): `agw secret describe NAME` remains, as thin sugar over exactly the same card
+   renderer as `agw resource describe secret/NAME` — the noun-group idiom (`vm describe`,
+   `workspace describe`) is the dominant grammar here, and for a kind with no instances the resource
+   card IS its describe. What retires is the divergent bespoke implementation, never the entry
+   point: one renderer, two spellings, zero drift, with a test pinning both spellings to identical
+   output. Heavyweight kind operations that touch backends (`agw secret verify`, resolution
+   previews) stay kind commands.
 3. **A new top-level `agw graph` owns every relational view.** One command, the focal point as the
    argument: bare `agw graph` renders the whole graph; `agw graph KIND/NAME [KIND/NAME...]` renders
    the subgraph involving those nodes; `--kind a,b` renders the induced subgraph on kinds. Nodes
