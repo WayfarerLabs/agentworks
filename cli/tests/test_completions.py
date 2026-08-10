@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import os
 import re
+import sqlite3
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -11,10 +14,14 @@ import pytest
 from agentworks.cli import app
 from agentworks.completions import generate
 from agentworks.completions.spec import (
+    DATABASE_BACKED_COMPLETION_PATHS,
+    DATABASE_BACKED_DYNAMIC_COMPLETERS,
+    DATABASE_BACKED_DYNAMIC_COMPLETIONS,
     DYNAMIC_COMPLETIONS,
     CommandSpec,
     build_spec,
     completion_version,
+    is_legacy_database_completion,
 )
 
 
@@ -159,6 +166,26 @@ class TestDynamicCompletionsMapping:
         assert "agw guide --names-only" in BASH_SNIPPETS["guide_topics"]
         assert "agw guide --names-only" in POWERSHELL_SNIPPETS["guide_topics"]
         assert "agw guide --names-only" in DYNAMIC_FUNCTIONS["guide_topics"]
+
+    def test_database_backed_snippets_share_hidden_probe_contract(self) -> None:
+        from agentworks.completions.bash import DYNAMIC_SNIPPETS as BASH_SNIPPETS
+        from agentworks.completions.powershell import DYNAMIC_SNIPPETS as POWERSHELL_SNIPPETS
+        from agentworks.completions.zsh import DYNAMIC_FUNCTIONS
+
+        assert set(BASH_SNIPPETS) == set(POWERSHELL_SNIPPETS) == set(DYNAMIC_FUNCTIONS)
+        for completer in BASH_SNIPPETS:
+            expected = completer in DATABASE_BACKED_DYNAMIC_COMPLETERS
+            assert ("agw --completion-probe" in BASH_SNIPPETS[completer]) is expected
+            assert ("agw --completion-probe" in POWERSHELL_SNIPPETS[completer]) is expected
+            assert ("agw --completion-probe" in DYNAMIC_FUNCTIONS[completer]) is expected
+            if expected:
+                assert "2>/dev/null" in BASH_SNIPPETS[completer]
+                assert "2>$null" in POWERSHELL_SNIPPETS[completer]
+                assert "2>/dev/null" in DYNAMIC_FUNCTIONS[completer]
+
+        assert frozenset(path for _completer, path in DATABASE_BACKED_DYNAMIC_COMPLETIONS) == (
+            DATABASE_BACKED_COMPLETION_PATHS
+        )
 
     def test_database_restore_uses_native_file_completion_in_every_shell(self) -> None:
         from agentworks.completions.bash import DYNAMIC_SNIPPETS as BASH_SNIPPETS
@@ -867,3 +894,188 @@ class TestStaticChoiceCompletion:
         ps = generate_powershell(spec, "t")
         assert "::new('bash', 'bash'" in ps
         assert "::new('pwsh', 'pwsh'" in ps
+
+
+@pytest.mark.parametrize(
+    "command_path",
+    sorted(DATABASE_BACKED_COMPLETION_PATHS),
+)
+def test_legacy_database_completion_recognizes_every_inventory_path(command_path: tuple[str, str]) -> None:
+    assert is_legacy_database_completion([*command_path, "--names-only"])
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["workspace", "list", "--vm", "alpha", "--names-only"],
+        ["session", "list", "--names-only", "--no-status", "--workspace=alpha"],
+        ["agent", "list", "--vm=alpha", "--names-only"],
+        ["console", "list", "--agent", "alpha", "--names-only"],
+        ["resource", "list", "--kind", "vm-site", "--include-disabled", "--names-only"],
+    ],
+)
+def test_legacy_database_completion_recognizes_shipped_option_shapes(argv: list[str]) -> None:
+    assert is_legacy_database_completion(argv)
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["secret", "list", "--names-only"],
+        ["vm", "list"],
+        ["vm", "list", "--names-only", "--output", "json"],
+        ["workspace", "list", "--names-only", "--agent", "alpha"],
+        ["resource", "list", "--names-only", "--unknown"],
+        ["vm", "describe", "--names-only"],
+    ],
+)
+def test_legacy_database_completion_rejects_nearby_operator_invocations(argv: list[str]) -> None:
+    assert not is_legacy_database_completion(argv)
+
+
+def _installed_agw() -> Path:
+    suffix = ".exe" if os.name == "nt" else ""
+    return Path(sys.executable).with_name(f"agw{suffix}")
+
+
+def _write_warning_config(home: Path) -> Path:
+    config_dir = home / ".config" / "agentworks"
+    config_dir.mkdir(parents=True)
+    public_key = home / "id_ed25519.pub"
+    private_key = home / "id_ed25519"
+    public_key.touch()
+    private_key.touch()
+    (config_dir / "config.toml").write_text(
+        "[operator]\n"
+        f"ssh_public_key = {str(public_key)!r}\n"
+        f"ssh_private_key = {str(private_key)!r}\n"
+        "unexpected_completion_test_key = true\n"
+    )
+    return config_dir
+
+
+@pytest.mark.parametrize("command_path", sorted(DATABASE_BACKED_COMPLETION_PATHS))
+def test_marker_probe_refuses_stale_database_for_every_dynamic_path_without_side_effects(
+    tmp_path: Path,
+    command_path: tuple[str, str],
+) -> None:
+    from agentworks.db import LATEST_VERSION, Database, backup_directory
+
+    config_dir = _write_warning_config(tmp_path)
+    database_path = config_dir / "agentworks.db"
+    Database(database_path).close()
+    connection = sqlite3.connect(database_path)
+    connection.execute("DELETE FROM schema_version WHERE version = ?", (LATEST_VERSION,))
+    connection.commit()
+    connection.close()
+    before = {entry.name: entry.read_bytes() for entry in config_dir.iterdir()}
+    env = {**os.environ, "HOME": str(tmp_path)}
+    env["PATH"] = f"{_installed_agw().parent}{os.pathsep}{env.get('PATH', '')}"
+    command = f"agw --completion-probe {' '.join(command_path)} --names-only 2>/dev/null"
+
+    completed = subprocess.run(
+        ["bash", "-c", command],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode != 0
+    assert completed.stdout == ""
+    assert completed.stderr == ""
+    assert {entry.name: entry.read_bytes() for entry in config_dir.iterdir()} == before
+    assert not backup_directory(database_path).exists()
+
+
+def test_shell_wrapped_probe_suppresses_config_warning_and_preserves_database_bytes(tmp_path: Path) -> None:
+    from agentworks.db import Database
+
+    config_dir = _write_warning_config(tmp_path)
+    database_path = config_dir / "agentworks.db"
+    Database(database_path).close()
+    before = {entry.name: entry.read_bytes() for entry in config_dir.iterdir()}
+    env = {**os.environ, "HOME": str(tmp_path)}
+    env["PATH"] = f"{_installed_agw().parent}{os.pathsep}{env.get('PATH', '')}"
+
+    direct = subprocess.run(
+        [str(_installed_agw()), "--completion-probe", "session", "list", "--names-only"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    completed = subprocess.run(
+        ["bash", "-c", "agw --completion-probe session list --names-only 2>/dev/null"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert direct.returncode == 0
+    assert direct.stdout == ""
+    assert "Config: unexpected keys in [operator]" in direct.stderr
+    assert completed.returncode == 0
+    assert completed.stdout == ""
+    assert completed.stderr == ""
+    assert {entry.name: entry.read_bytes() for entry in config_dir.iterdir()} == before
+
+
+def test_shell_wrapped_probe_consumes_empty_stdout_when_config_is_invalid(tmp_path: Path) -> None:
+    from agentworks.db import Database
+
+    config_dir = tmp_path / ".config" / "agentworks"
+    config_dir.mkdir(parents=True)
+    Database(config_dir / "agentworks.db").close()
+    (config_dir / "config.toml").write_text("[database\n")
+    before = {entry.name: entry.read_bytes() for entry in config_dir.iterdir()}
+    env = {**os.environ, "HOME": str(tmp_path)}
+    env["PATH"] = f"{_installed_agw().parent}{os.pathsep}{env.get('PATH', '')}"
+
+    completed = subprocess.run(
+        ["bash", "-c", "agw --completion-probe resource list --names-only 2>/dev/null"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode != 0
+    assert completed.stdout == ""
+    assert completed.stderr == ""
+    assert {entry.name: entry.read_bytes() for entry in config_dir.iterdir()} == before
+
+
+@pytest.mark.skipif(os.name != "posix", reason="legacy completion TTY shape uses a POSIX pseudo-terminal")
+def test_marker_free_legacy_probe_refuses_stale_database_without_side_effects(tmp_path: Path) -> None:
+    import pty
+
+    from agentworks.db import LATEST_VERSION, Database, backup_directory
+
+    config_dir = tmp_path / ".config" / "agentworks"
+    config_dir.mkdir(parents=True)
+    database_path = config_dir / "agentworks.db"
+    Database(database_path).close()
+    connection = sqlite3.connect(database_path)
+    connection.execute("DELETE FROM schema_version WHERE version = ?", (LATEST_VERSION,))
+    connection.commit()
+    connection.close()
+    before = {entry.name: entry.read_bytes() for entry in config_dir.iterdir()}
+    master, slave = pty.openpty()
+    process = subprocess.Popen(
+        [str(_installed_agw()), "vm", "list", "--names-only"],
+        env={**os.environ, "HOME": str(tmp_path)},
+        stdin=slave,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    os.close(slave)
+    stdout, _stderr = process.communicate(timeout=10)
+    os.close(master)
+
+    assert process.returncode != 0
+    assert stdout == ""
+    assert {entry.name: entry.read_bytes() for entry in config_dir.iterdir()} == before
+    assert not backup_directory(database_path).exists()

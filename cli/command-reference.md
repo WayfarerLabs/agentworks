@@ -245,7 +245,8 @@ agw doctor --output json
 ```
 
 Doctor checks the schema before opening current state through the existing read-only database
-connection. It reports a pending migration without applying it.
+connection. Its WAL-aware inspection reports a pending migration without applying it, and future or
+malformed state fails without a writable open.
 
 #### Errors and compatibility
 
@@ -289,13 +290,32 @@ Backups are stored in `database-backups/` beside `agentworks.db`. On-demand name
 backup, only the five newest recognized pre-migration files remain. Manual and unrelated files are
 not part of that retention set.
 
+For an outdated live schema, every ordinary writable open passes through the same safety boundary.
+Agentworks announces the version change on stderr, then either prompts on an interactive stdin and
+stderr terminal (default yes) or reads the focused setting below. A selected snapshot completes
+before the first migration statement:
+
+```toml
+[database]
+auto_backup_before_migration = true
+```
+
+The setting is a strict boolean and defaults to true. A malformed file or invalid `[database]`
+section blocks a non-interactive migration; unrelated settings do not. A selected backup failure
+stops before migration and provides an explicit-decline or config-opt-out retry. A later migration
+failure reports the exact restore command when a snapshot exists, or explicitly says no
+pre-migration backup was created. Notices and prompts stay on stderr, so JSON and `--names-only`
+stdout remain machine-pure.
+
 `database restore` validates SQLite integrity, the claimed supported schema version, and that
 version's Agentworks tables and critical columns before it opens the live destination. It refuses an
 identical path, a generic SQLite file, an incomplete Agentworks lookalike, or a schema newer than
 this release understands. The source remains available after restore. Confirmation is required by
 default; a non-interactive invocation must pass `--yes` (or `-y`). Restore does not create an
 implicit backup of the live destination and does not migrate the restored schema. Run
-`agw database backup` first if you want an additional recovery point before replacement.
+`agw database backup` first if you want an additional recovery point before replacement. Restore a
+schema-compatible backup before running an older Agentworks release against state created by a newer
+release.
 
 ### Secrets
 

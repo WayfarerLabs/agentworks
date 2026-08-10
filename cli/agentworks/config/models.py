@@ -66,6 +66,11 @@ class SessionConfig:
 
 
 @dataclass(frozen=True)
+class DatabaseConfig:
+    auto_backup_before_migration: bool = True
+
+
+@dataclass(frozen=True)
 class Config:
     operator: OperatorConfig
     paths: PathsConfig
@@ -75,6 +80,7 @@ class Config:
     # from tmp paths never pick up the developer's real manifests.
     source_path: Path
     session: SessionConfig
+    database: DatabaseConfig = field(default_factory=DatabaseConfig)
     # config.toml is settings only now (ADR 0022): every resource is a YAML
     # manifest, so Config carries no resource dicts. Resources are read from
     # the registry (built from the bundled + operator manifests), never from

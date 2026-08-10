@@ -10,49 +10,59 @@ if TYPE_CHECKING:
 # PowerShell snippets that provide dynamic completions.
 DYNAMIC_SNIPPETS: dict[str, str] = {
     "files": "([System.Management.Automation.CompletionCompleters]::CompleteFilename($wordToComplete))",
-    "vms": ('(agw vm list --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'),
+    "vms": ('(agw --completion-probe vm list --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'),
     "sites": (
-        "(agw resource list --kind vm-site --names-only 2>$null"
+        "(agw --completion-probe resource list --kind vm-site --names-only 2>$null"
         " | ForEach-Object { ($_ -split '/', 2)[1] }"
         ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
-    "workspaces": ('(agw workspace list --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'),
+    "workspaces": (
+        '(agw --completion-probe workspace list --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'
+    ),
     "ws_templates": (
-        "(agw resource list --kind workspace-template --names-only 2>$null"
+        "(agw --completion-probe resource list --kind workspace-template --names-only 2>$null"
         " | ForEach-Object { ($_ -split '/', 2)[1] }"
         ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "git_credentials": (
-        "(agw resource list --kind git-credential --names-only 2>$null"
+        "(agw --completion-probe resource list --kind git-credential --names-only 2>$null"
         " | ForEach-Object { ($_ -split '/', 2)[1] }"
         ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
-    "sessions": ('(agw session list --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'),
-    "agents": ('(agw agent list --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'),
-    "consoles": ('(agw console list --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'),
+    "sessions": (
+        '(agw --completion-probe session list --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'
+    ),
+    "agents": (
+        '(agw --completion-probe agent list --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'
+    ),
+    "consoles": (
+        '(agw --completion-probe console list --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'
+    ),
     "session_templates": (
-        "(agw resource list --kind session-template --names-only 2>$null"
+        "(agw --completion-probe resource list --kind session-template --names-only 2>$null"
         " | ForEach-Object { ($_ -split '/', 2)[1] }"
         ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "vm_templates": (
-        "(agw resource list --kind vm-template --names-only 2>$null"
+        "(agw --completion-probe resource list --kind vm-template --names-only 2>$null"
         " | ForEach-Object { ($_ -split '/', 2)[1] }"
         ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "agent_templates": (
-        "(agw resource list --kind agent-template --names-only 2>$null"
+        "(agw --completion-probe resource list --kind agent-template --names-only 2>$null"
         " | ForEach-Object { ($_ -split '/', 2)[1] }"
         ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "admin_templates": (
-        "(agw resource list --kind admin-template --names-only 2>$null"
+        "(agw --completion-probe resource list --kind admin-template --names-only 2>$null"
         " | ForEach-Object { ($_ -split '/', 2)[1] }"
         ' | Where-Object { $_ -like "$wordToComplete*" })'
     ),
     "secrets": ('(agw secret list --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'),
     "resource_kinds": ('(agw resource kinds --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'),
-    "resource_refs": ('(agw resource list --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'),
+    "resource_refs": (
+        '(agw --completion-probe resource list --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'
+    ),
     "guide_topics": ('(agw guide --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'),
 }
 

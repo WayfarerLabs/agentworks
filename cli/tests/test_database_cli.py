@@ -15,6 +15,7 @@ from agentworks import output
 from agentworks.cli import app
 from agentworks.cli._typer_output import TyperHandler
 from agentworks.db import Database, backup_directory, create_manual_backup
+from agentworks.db.migrations import LATEST_VERSION, MIGRATIONS, MigrationContext
 
 
 @contextmanager
@@ -39,6 +40,28 @@ def _value(path: Path) -> str | None:
     row = connection.execute("SELECT value FROM settings WHERE key = 'cli-test'").fetchone()
     connection.close()
     return None if row is None else str(row[0])
+
+
+def _build_stale_schema(path: Path) -> None:
+    connection = sqlite3.connect(path)
+    connection.row_factory = sqlite3.Row
+    connection.execute(
+        "CREATE TABLE schema_version ("
+        "version INTEGER NOT NULL, "
+        "applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')))"
+    )
+    context = MigrationContext()
+    for version in range(1, LATEST_VERSION):
+        step = MIGRATIONS[version]
+        if callable(step):
+            step(connection, context)
+        else:
+            for statement in step.split(";"):
+                if statement.strip():
+                    connection.execute(statement)
+        connection.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
+        connection.commit()
+    connection.close()
 
 
 def test_database_backup_stdout_is_only_the_completed_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -134,3 +157,38 @@ def test_database_restore_non_interactive_without_yes_refuses_cleanly(
     assert "database restore requires confirmation" in captured.err
     assert "Pass --yes" in captured.err
     assert not live.exists()
+
+
+@pytest.mark.parametrize("machine_output", [False, True])
+def test_interactive_migration_notice_and_prompt_keep_stdout_machine_pure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, machine_output: bool
+) -> None:
+    import json
+    from types import SimpleNamespace
+
+    import agentworks.config as config_module
+    import agentworks.db as db
+
+    live = tmp_path / "agentworks.db"
+    _build_stale_schema(live)
+    monkeypatch.setattr(db, "DB_PATH", live)
+    monkeypatch.setattr(config_module, "CONFIG_PATH", tmp_path / "absent.toml")
+    monkeypatch.setattr(output, "is_interactive", lambda: True)
+    monkeypatch.setattr("agentworks.cli._helpers.sys", SimpleNamespace(stderr=SimpleNamespace(isatty=lambda: True)))
+    args = ["vm", "list"]
+    if machine_output:
+        args.extend(["--output", "json"])
+    else:
+        args.append("--names-only")
+
+    with _cli_output():
+        result = CliRunner().invoke(app, args, input="\n")
+
+    assert result.exit_code == 0, result.output
+    if machine_output:
+        assert json.loads(result.stdout)["data"] == {"vms": []}
+    else:
+        assert result.stdout == ""
+    assert f"version {LATEST_VERSION - 1} to {LATEST_VERSION}" in result.stderr
+    assert "Back up the state database before migrating? [Y/n]" in result.stderr
+    assert "Pre-migration database backup completed:" in result.stderr

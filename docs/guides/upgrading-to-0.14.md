@@ -11,6 +11,36 @@ outright a release or two after 0.14 ships, along with the compatibility errors 
 Nothing here describes permanent behavior; if you are setting up a new host, or reading to
 understand how resources work, you want [resources.md](resources.md) instead.
 
+## Before the first 0.14 state open
+
+The resource rewrite below is separate from Agentworks' SQLite schema migration. The first normal
+0.14 command that opens an older `~/.config/agentworks/agentworks.db` announces the version change
+on stderr and, by default, completes an online snapshot before migration begins. Interactive
+terminals ask `Back up the state database before migrating?` with yes as the default. Automation
+uses this strict, default-true setting:
+
+```toml
+[database]
+auto_backup_before_migration = true
+```
+
+Automatic snapshots live in `~/.config/agentworks/database-backups/`, use
+`agentworks-pre-migration-...-vN.db` names, and retain the five newest recognized automatic files.
+Manual `agw database backup` snapshots and unrelated files are never pruned by that retention.
+
+If the selected backup fails, migration has not started; follow the error's retry guidance instead
+of guessing. If migration later fails, use the exact `agw database restore ...` command printed in
+the error. When backup was explicitly declined or disabled, the error says that no pre-migration
+backup exists. Before downgrading, restore a backup whose schema the older release understands, then
+install or run that release—never open newer state with the older binary first.
+
+Completion scripts installed before 0.14 do not carry the new non-mutating database probe marker.
+Refresh them after upgrading:
+
+```console
+agw completion install
+```
+
 ## TOML resource sections: removed
 
 Declaring resources in `config.toml` is no longer supported. `config.toml` is settings only. The

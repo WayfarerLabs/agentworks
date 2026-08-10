@@ -66,7 +66,7 @@ class TyperHandler:
         target stream is a real terminal, and the invocation is not
         ``--non-interactive``. ``stream.isatty()`` is checked against the
         actual output stream (stdout for BODY/DETAIL/HEADER/RESULT,
-        stderr for WARNING/ERROR) rather than stdin, because color
+        stderr for NOTICE/WARNING/ERROR) rather than stdin, because color
         depends on where the bytes land; see output-model-lld.md sec 9.
         When this is false, the emit branches below bypass ``click.style``
         entirely so output is byte-identical to the no-color rendering.
@@ -76,7 +76,12 @@ class TyperHandler:
     def emit(self, role: Role, message: str, level: int) -> None:
         # Only the styling is gated on _color_enabled; indentation,
         # decoration, and stream are identical to the plain handlers.
-        if role is Role.WARNING:
+        if role is Role.NOTICE:
+            prefix = "Notice:"
+            if self._color_enabled(sys.stderr):
+                prefix = click.style(prefix, fg="cyan")
+            typer.echo(f"{_pad(level)}{prefix} {message}", err=True)
+        elif role is Role.WARNING:
             prefix = "Warning:"
             if self._color_enabled(sys.stderr):
                 prefix = click.style(prefix, fg="yellow")

@@ -19,6 +19,85 @@ from typing import Any, Protocol
 
 import typer
 
+COMPLETION_PROBE_OPTION = "--completion-probe"
+
+# Database-backed generated completers and the exact command path each runs.
+# This immutable inventory is the single source for shell parity checks and
+# the deliberately conservative pre-0.14 marker-free allow-list. ``secrets``
+# is intentionally absent because it is registry-backed rather than
+# database-backed.
+DATABASE_BACKED_DYNAMIC_COMPLETIONS: tuple[tuple[str, tuple[str, str]], ...] = (
+    ("vms", ("vm", "list")),
+    ("sites", ("resource", "list")),
+    ("workspaces", ("workspace", "list")),
+    ("ws_templates", ("resource", "list")),
+    ("git_credentials", ("resource", "list")),
+    ("sessions", ("session", "list")),
+    ("agents", ("agent", "list")),
+    ("consoles", ("console", "list")),
+    ("session_templates", ("resource", "list")),
+    ("vm_templates", ("resource", "list")),
+    ("agent_templates", ("resource", "list")),
+    ("admin_templates", ("resource", "list")),
+    ("resource_refs", ("resource", "list")),
+)
+DATABASE_BACKED_DYNAMIC_COMPLETERS = frozenset(completer for completer, _path in DATABASE_BACKED_DYNAMIC_COMPLETIONS)
+DATABASE_BACKED_COMPLETION_PATHS = frozenset(path for _completer, path in DATABASE_BACKED_DYNAMIC_COMPLETIONS)
+
+_LEGACY_VALUE_OPTIONS: dict[tuple[str, str], frozenset[str]] = {
+    path: frozenset() for path in DATABASE_BACKED_COMPLETION_PATHS
+}
+_LEGACY_VALUE_OPTIONS.update(
+    {
+        ("workspace", "list"): frozenset({"--vm"}),
+        ("session", "list"): frozenset({"--workspace", "--vm", "--agent"}),
+        ("agent", "list"): frozenset({"--vm"}),
+        ("console", "list"): frozenset({"--vm", "--workspace", "--agent"}),
+        ("resource", "list"): frozenset({"--kind", "--origin"}),
+    }
+)
+
+_LEGACY_FLAG_OPTIONS: dict[tuple[str, str], frozenset[str]] = {
+    path: frozenset() for path in DATABASE_BACKED_COMPLETION_PATHS
+}
+_LEGACY_FLAG_OPTIONS.update(
+    {
+        ("session", "list"): frozenset({"--admin", "--no-status"}),
+        ("resource", "list"): frozenset({"--include-disabled"}),
+    }
+)
+
+
+def is_legacy_database_completion(argv: list[str]) -> bool:
+    """Recognize only the exact marker-free names-only calls we shipped."""
+    if len(argv) < 3:
+        return False
+    path = (argv[0], argv[1])
+    if path not in DATABASE_BACKED_COMPLETION_PATHS:
+        return False
+    tokens = argv[2:]
+    if tokens.count("--names-only") != 1 or "--output" in tokens:
+        return False
+
+    value_options = _LEGACY_VALUE_OPTIONS[path]
+    flag_options = _LEGACY_FLAG_OPTIONS[path]
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token == "--names-only" or token in flag_options:
+            index += 1
+            continue
+        option, separator, value = token.partition("=")
+        if separator and option in value_options and value:
+            index += 1
+            continue
+        if token in value_options and index + 1 < len(tokens) and not tokens[index + 1].startswith("-"):
+            index += 2
+            continue
+        return False
+    return True
+
+
 # -- Structural types for click-like objects ------------------------------
 #
 # Both real click and typer's vendored ``typer._click`` conform to these.
