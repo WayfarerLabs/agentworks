@@ -144,12 +144,11 @@ work inside it as disposable implementation details. Sessions likewise accumulat
 and are managed through an imperative lifecycle via the `resume` command.
 
 Safe convergence is subtractive as well as additive. Revoking an agent's final grant to a workspace
-removes its Linux group membership, and removing one git credential from a larger declared set
-rewrites the Agentworks-managed credential files without it. Apt packages are different: removing a
-package from a template does not automatically uninstall it or its transitive dependencies, because
-doing so can break accumulated machine state. Declarative configuration is a contract to converge as
-far as the resource can do so safely, not a promise to erase everything the declaration no longer
-names.
+removes its Linux group membership, and removing an extra SSH public key from configuration removes
+it from the managed `authorized_keys` file on reinit. Apt packages are different: removing a package
+from a template does not automatically uninstall it or its transitive dependencies, because doing so
+can break accumulated machine state. Declarative configuration is a contract to converge as far as
+the resource can do so safely, not a promise to erase everything the declaration no longer names.
 
 ## And Remember
 
