@@ -74,34 +74,34 @@ behavior. Live validation uses a temporary isolated home and no operator state.
 
 ## Phase 2: Safe automatic migration flow
 
-- [ ] Add WAL-aware non-migrating schema inspection and safe writable-open sequencing to the same
+- [x] Add WAL-aware non-migrating schema inspection and safe writable-open sequencing to the same
       database safety service. Serialize stale opens with one persistent dedicated SQLite lock,
       qualify the first stale observation under that lock, recheck after interaction, refuse an
       overlapped or changed-but-stale observation, refuse malformed and future schema, complete any
       selected backup before `Database` construction, close construction failures, and raise a
       kind-based `StateError` with the exact platform-aware recovery command or the explicit
       no-backup fact.
-- [ ] Add the strict default-true `DatabaseConfig` and focused `[database]` loader. Full config
+- [x] Add the strict default-true `DatabaseConfig` and focused `[database]` loader. Full config
       includes the section; only stale non-interactive opens use the focused projection.
-- [ ] Update `get_db()` to own notice, interactive default-yes prompt, and non-interactive setting
+- [x] Update `get_db()` to own notice, interactive default-yes prompt, and non-interactive setting
       selection while delegating safety ordering to the service. Catch a selected backup's existing
       `BackupError` here and add the mode-specific explicit-decline or config-opt-out retry hint.
       Add suppression-surviving `output.notice()` for the mandatory versioned notice and automatic
       backup status. Prompt only when stdin and the stderr prompt stream are terminals.
-- [ ] Add the hidden completion-probe marker. When sidecars exist, return no candidates; otherwise
+- [x] Add the hidden completion-probe marker. When sidecars exist, return no candidates; otherwise
       use an immutable read-only connection. Unavailable probe state raises a clean error before a
       database caller runs; generated shell code discards its stderr and consumes empty stdout,
       including when config warned or failed earlier. Recognize the pre-0.14 marker-free completion
       argv/TTY shape in the root callback from the shared database-backed command-path set and
       refuse it before prompt or migration. Completion must never prompt, migrate, create a
       database, or create or change SQLite sidecars.
-- [ ] Make `Database` refuse future schema and close on migration failure. Keep the existing
+- [x] Make `Database` refuse future schema and close on migration failure. Keep the existing
       migration ladder and per-version commit behavior unchanged. Make doctor use the shared
       non-migrating, WAL-aware inspection path and align its wording.
-- [ ] Update `sample-config.toml`, config reference material, the 0.14 upgrade guide, and
+- [x] Update `sample-config.toml`, config reference material, the 0.14 upgrade guide, and
       `concept-migration` with backup location, fixed retention, opt-out behavior, failure recovery,
       restore-before-downgrade order, and the required `agw completion install` refresh.
-- [ ] Test fresh/current/stale/future/malformed matrices; interactive accept and decline;
+- [x] Test fresh/current/stale/future/malformed matrices; interactive accept and decline;
       non-interactive default, opt-out, and invalid focused config; backup-before-first-statement;
       backup failure prevention and retry guidance; partial failure recovery; POSIX and PowerShell
       command rendering; two-process serialized recheck with one backup; staggered late-inspector
