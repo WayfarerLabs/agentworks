@@ -34,9 +34,9 @@ below are subagent work; the role itself is not.
   without waiting for the operator to ask.
 - Re-review on push after an effort absorbs findings. A review verdict stands until the findings are
   absorbed or successfully pushed back on; track the open verdicts in the ledger.
-- The lead reviews; the operator merges. Never merge a child PR. When the forge refuses a formal
-  review verdict (a PR owned by the same account), post the review as a comment with the verdict
-  stated in the first line.
+- The lead reviews; the operator merges. Never merge a child PR. When GitHub refuses a formal review
+  verdict (a PR owned by the same account), post the review as a comment with the verdict stated in
+  the first line.
 
 ## The review protocol
 
