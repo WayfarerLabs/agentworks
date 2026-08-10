@@ -96,7 +96,7 @@ function terrainSample(seed, sampleIndex) {
     const chunk = Math.floor(sampleIndex / 5); const local = sampleIndex - chunk * 5;
     const boundary = (index) => 2 + 3 * sampleUnit(seed, 1, index >>> 0);
     if (local === 0) return boundary(chunk);
-    const base = boundary(chunk) + (boundary(chunk + 1) - boundary(chunk)) * local / 5;
+    const base = boundary(chunk) + (boundary(chunk + 1) - boundary(chunk)) * (local / 5);
     const sign = sampleUnit(seed, 2, chunk >>> 0) >= 0.5 ? 1 : -1;
     return Math.max(0.75, Math.min(7.5, base + sign * MOTIF[local]));
 }
