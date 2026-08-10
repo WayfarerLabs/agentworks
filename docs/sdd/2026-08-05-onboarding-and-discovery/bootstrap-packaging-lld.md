@@ -1,501 +1,552 @@
-# Bootstrap Packaging LLD
+# Phase 3 Agentworks Assistance Packaging and Guide Companion LLD
 
-- Status: Draft for Phase 3 implementation
+- Status: Revised draft for the Phase 3 lifecycle-assistance checkpoint
 - FRD: `docs/sdd/2026-08-05-onboarding-and-discovery/frd.md`
 - HLA: `docs/sdd/2026-08-05-onboarding-and-discovery/hla.md`
 - Plan: `docs/sdd/2026-08-05-onboarding-and-discovery/plan.md`, Phase 3
-- Verified against: Claude Code and Codex packaging documentation on 2026-08-10
+- Verified against: Claude Code and Codex packaging tools and official documentation on 2026-08-10
 
 ## Purpose and limits
 
-Phase 3 publishes one small onboarding bootstrap through three entry points: Claude Code, Codex, and
-the repository README. The bootstrap discloses the workstation authority the agent needs,
-establishes consent, installs a compatible Agentworks CLI, and hands all teaching to
-`agw guide concept-onboarding --agent`.
+Phase 3 makes Agentworks assistance available before and after installation through native Claude
+Code and Codex packages and the repository README. One inert body discloses the workstation access
+Agentworks work can require, obtains consent, offers review of the exact intended release source,
+installs or updates a compatible CLI when needed, and hands all teaching to `agw guide --agent`.
 
-This phase does not create another onboarding workflow, template framework, custom installer,
-runtime package loader, network abstraction, or copy of guide content. Both plugins are skills-only
-packages. They contain no hook, command, script, MCP server, app, or pre-approved-tool declaration.
-Installing one can make the inert skill discoverable, but cannot inspect or change the workstation.
+The same phase completes the guide companion needed by that handoff. The no-topic guide routes agent
+requests, `concept-release-notes` renders the installed release's packaged changelog section offline
+and connects older ranges to canonical release notes, `concept-management` connects ordinary
+operations to live facts and built-in CLI help, and `concept-onboarding` can offer bounded first-VM
+and first-session actions.
+
+This design does not add a package intent switchboard, copied recipes, custom installer, Markdown
+parser, bootstrap orchestration driver, command registry, runtime package loader, network renderer,
+or general packaging framework. Packages contain no hooks, commands, scripts, MCP servers, apps, or
+pre-approved tools. Installing a package makes inert instructions discoverable but does not inspect
+or change the workstation.
 
 ## Decisions
 
-| Concern              | Decision                                                                                                                                                                                                                                                          |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Canonical prose      | `packaging/onboarding/bootstrap.md` is the only authored bootstrap body and owns its security posture text and links.                                                                                                                                             |
-| Canonical metadata   | `packaging/onboarding/metadata.json` owns machine metadata only: package identity, bootstrap version, minimum CLI version, and publisher fields.                                                                                                                  |
-| Minimum CLI          | `agentworks-cli >=0.14.0`; no maximum. Version 0.14.0 is the first release containing the guide contract used by the bootstrap.                                                                                                                                   |
-| Package identity     | Marketplace `agentworks`; plugin and skill `agentworks-onboarding`; independent bootstrap package version starts at `1.0.0`.                                                                                                                                      |
-| Cross-harness parity | A deterministic generator emits both native package layouts from the same body and metadata. Generated skill bodies are byte-identical after their generated frontmatter.                                                                                         |
-| README parity        | The first fenced block under `## Getting Started` contains the exact canonical body. The generator owns that fenced region.                                                                                                                                       |
-| Runtime behavior     | The inert skill instructs the agent to obtain consent, check or install a compatible CLI, and run the guide. The skill performs none of those actions itself and contains no day-two teaching.                                                                    |
-| Security posture     | Claude Code uses default/manual approvals without bypass. Codex starts with `workspace-write` and on-request approvals, then requests scoped escalation for account-wide files, network, or SSH. Never change harness security settings on the operator's behalf. |
-| Release ownership    | The Agentworks repository owns the source, wrappers, marketplaces, tests, and version. The CLI release and bootstrap version remain distinct.                                                                                                                     |
+| Concern                 | Decision                                                                                                                                                                                                                                              |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Canonical body          | `packaging/agentworks/assistance.md` is the only authored package body and owns its prose, security posture, and links.                                                                                                                               |
+| Canonical metadata      | `packaging/agentworks/metadata.json` owns machine metadata only: identity, package version, minimum CLI version, and publisher fields.                                                                                                                |
+| Identity                | Both marketplaces, both plugins, and both skills use the neutral name `agentworks`. The native install identity is `agentworks@agentworks`.                                                                                                           |
+| Minimum CLI             | `agentworks-cli >=0.14.0`, with no maximum. Version 0.14.0 first contains the guide companion this package invokes.                                                                                                                                   |
+| Projection              | `scripts/generate-agentworks-package.py` emits two native wrappers from one body and metadata record. Generated skill bodies are byte-identical after frontmatter.                                                                                    |
+| README parity           | One marked region under README `## Getting Started` contains the canonical body exactly. The generator owns only that region.                                                                                                                         |
+| Runtime behavior        | The inert skill tells the agent to disclose, obtain consent, offer bounded review of the exact intended release source, check or install the CLI, and run the guide. It performs no action itself.                                                    |
+| Teaching ownership      | The top-level guide owns routing and the installed guide topics own teaching. Packages contain no intent routes, recipes, or release prose.                                                                                                           |
+| Current versus temporal | Live guide facts answer current capability and adoption questions. The packaged release-please changelog section answers what changed in the installed version; canonical GitHub releases are the consented fallback for older or unavailable ranges. |
+| Security posture        | Claude uses default/manual approvals without bypass. Codex starts with `workspace-write` and `on-request`, using scoped escalation for account files, network, or SSH.                                                                                |
+| Release ownership       | The Agentworks repository owns package source, projections, catalogs, guide companion, tests, and versions. Saga and release leads own integration into the release PR.                                                                               |
 
-The bootstrap version changes whenever an installed generated artifact changes. It is deliberately
-independent of the CLI version. Claude Code and Codex cache installed plugins by version, so a body,
-frontmatter, or manifest change without a bootstrap version bump is a generation error. Marketplace
-entries do not repeat the version.
+The package version starts at `1.0.0` and changes whenever an installed generated artifact changes.
+It remains independent of the CLI version. A focused CI comparison against the merge base rejects a
+changed package fingerprint without a package-version bump. Generator `--check` stays
+checkout-local: it renders the current source and compares current bytes and inventory only.
 
-## Repository layout and ownership
-
-The implementation adds this layout:
+## Repository layout and generated boundaries
 
 ```text
-packaging/onboarding/
-  bootstrap.md                         # authored canonical body
-  metadata.json                        # authored canonical metadata
+packaging/agentworks/
+  assistance.md                       # authored canonical body
+  metadata.json                       # authored machine metadata
 plugins/
-  claude-code/agentworks-onboarding/
-    .claude-plugin/plugin.json         # generated
-    skills/agentworks-onboarding/
-      SKILL.md                         # generated
-  codex/agentworks-onboarding/
-    .codex-plugin/plugin.json          # generated
-    skills/agentworks-onboarding/
-      SKILL.md                         # generated
-.claude-plugin/
-  marketplace.json                    # generated Claude Code catalog
-.agents/plugins/
-  marketplace.json                    # generated Codex catalog
-scripts/
-  generate-onboarding-bootstrap.py    # authored deterministic generator
-cli/tests/bootstrap/
+  claude-code/agentworks/
+    .claude-plugin/plugin.json        # generated
+    skills/agentworks/SKILL.md        # generated
+  codex/agentworks/
+    .codex-plugin/plugin.json         # generated
+    skills/agentworks/SKILL.md        # generated
+.claude-plugin/marketplace.json       # generated Claude catalog
+.agents/plugins/marketplace.json      # generated Codex catalog
+scripts/generate-agentworks-package.py
+cli/tests/assistance/
   test_generation.py
   test_contract.py
+cli/CHANGELOG.md                       # release-please-owned history source
 ```
 
-The root `plugins/` tree is harness distribution packaging and is separate from the in-process
-system plugins under `cli/agentworks/plugins/`.
+The two native plugin roots are intentional. Neither harness documents one dual-manifest directory
+as a cross-harness package contract, so separate generated wrappers are the smallest supported
+layouts.
 
-Neither harness documents one dual-manifest directory as a cross-harness package contract. Two
-generated wrappers under native plugin roots are therefore the smallest supported layouts; they
-share the canonical body rather than sharing an undocumented runtime package root.
-
-Only these seven regions are generated:
+The generator owns exactly these regions:
 
 1. `.claude-plugin/marketplace.json` in full.
 2. `.agents/plugins/marketplace.json` in full.
-3. `plugins/claude-code/agentworks-onboarding/.claude-plugin/plugin.json` in full.
-4. `plugins/claude-code/agentworks-onboarding/skills/agentworks-onboarding/SKILL.md` in full.
-5. `plugins/codex/agentworks-onboarding/.codex-plugin/plugin.json` in full.
-6. `plugins/codex/agentworks-onboarding/skills/agentworks-onboarding/SKILL.md` in full.
-7. The one marked fenced bootstrap region under README `## Getting Started`.
+3. `plugins/claude-code/agentworks/.claude-plugin/plugin.json` in full.
+4. `plugins/claude-code/agentworks/skills/agentworks/SKILL.md` in full.
+5. `plugins/codex/agentworks/.codex-plugin/plugin.json` in full.
+6. `plugins/codex/agentworks/skills/agentworks/SKILL.md` in full.
+7. The README region between `<!-- BEGIN GENERATED AGENTWORKS ASSISTANCE -->` and
+   `<!-- END GENERATED AGENTWORKS ASSISTANCE -->`.
 
-The first six paths contain a generated-file notice where their format permits one. JSON has no
-comments, so its generated ownership is proven by the generator's exact-path list and tests. No
-other README content is rewritten. The generator refuses missing or duplicate README boundary
-markers and refuses an unexpected file below either generated plugin root.
+The generator refuses missing or duplicate README markers and unexpected files under either
+generated plugin root. JSON cannot carry a generated notice, so the exact-path inventory and tests
+establish ownership. No other README content is rewritten.
 
-## Canonical bootstrap contract
+## Canonical assistance contract
 
-`bootstrap.md` is agent-addressed Markdown without YAML frontmatter. It is short enough to appear
-unchanged in the README fenced block and in both generated skills. Its headings and order are part
-of the contract:
+`assistance.md` is agent-addressed Markdown without frontmatter. Its headings and order are stable:
 
-1. `Agentworks setup request`
+1. `Agentworks assistance request`
 2. `Access disclosure and consent`
 3. `Strict harness posture`
-4. `After approval`
+4. `Source review offer`
+5. `After approval`
 
-### Access disclosure and consent
+The body is deliberately thin. It contains no topic choice, operation recipe, generated inventory,
+or historical release text.
 
-Before any command, probe, file read, verification, or configuration action, the body directs the
-agent to restate all of these facts to the operator and wait for affirmative consent:
+### Disclosure before action
 
-- The agent runs on the workstation from which the operator intends to manage Agentworks.
-- It needs the ability to inspect files and execute commands with the permissions of the workstation
-  account running the harness.
-- That account-scoped access is not root access. Any privilege elevation is a separate action that
-  must be disclosed and explicitly approved.
-- The agent can reach everything Agentworks can reach, including managed resources, secret
-  references, and destinations reachable over SSH from the workstation.
-- Sensitive material is checked only for presence when discovery needs it. Values, private-key
-  contents, and secret contents are never viewed.
-- The agent asks before each workstation probe, names its exact scope, and offers a manual
-  alternative when the operator refuses.
+Before a command, probe, file read, verification, installation, or configuration action, the body
+instructs the agent to restate these facts and wait for affirmative operator consent:
 
-A refusal ends automation without penalty. The agent may give the operator the inert manual steps,
-but it does not perform them or treat refusal as verification.
+- Work runs from the workstation from which the operator intends to manage Agentworks.
+- The agent needs the ability to inspect every file available to that workstation account and
+  execute commands as that account, even though each actual probe remains separately scoped.
+- Account access is not root access. Privilege elevation is a separate action that requires its own
+  disclosure and approval.
+- Agentworks work can reach managed resources, secret references, and destinations reachable over
+  SSH from the workstation.
+- Discovery checks sensitive material only for presence. It never views secret values, private-key
+  contents, or secret contents.
+- Each later boundary crossing names its exact scope and offers an inert manual alternative.
 
-### Strict harness posture
+Refusal stops automation without penalty. Manual instructions are not treated as verification.
 
-The canonical body links to both harnesses because the same body appears in both packages and the
-README. It tells the agent to identify its current harness and recommend, not set, the matching
-posture:
+The matching strict harness posture is advice, not a settings mutation:
 
-- Claude Code: use `default` permission mode and the normal manual approval flow. Never use
-  `bypassPermissions` for workstation management. See <https://code.claude.com/docs/en/permissions>
-  and <https://code.claude.com/docs/en/sandboxing>.
-- Codex: start with `sandbox_mode = "workspace-write"` and `approval_policy = "on-request"`. Request
-  a scoped escalation only when an exact operation needs account-wide files, network, or SSH. If the
-  harness cannot support the required bounded escalation, disclose that limitation and ask whether
-  the operator elects `danger-full-access` as a fallback. Explain that full access removes the
-  sandbox boundary and does not create per-command prompts for operations already allowed. Never
-  select it on the operator's behalf or use `approval_policy = "never"`. See
-  <https://learn.chatgpt.com/docs/agent-approvals-security> and
-  <https://learn.chatgpt.com/docs/config-file/config-basic>.
+- Claude Code uses `default` permission mode and normal manual approvals. It never uses
+  `bypassPermissions` for workstation management. The canonical body links
+  <https://code.claude.com/docs/en/permissions> and <https://code.claude.com/docs/en/sandboxing>.
+- Codex starts with `sandbox_mode = "workspace-write"` and `approval_policy = "on-request"`. It
+  requests scoped escalation only when an exact operation needs account-wide files, network, or SSH.
+  If the bounded sandbox and escalation flow cannot support the requested task, the agent discloses
+  that limitation and may ask whether the operator elects `danger-full-access` as a fallback. Full
+  access removes the sandbox boundary and must never be described as retaining on-request prompts
+  for already allowed work. The agent never selects it or `approval_policy = "never"` for the
+  operator. The body links <https://developers.openai.com/codex/security> and
+  <https://developers.openai.com/codex/config-basic>.
 
-These policies preserve manual approval and make each boundary crossing visible. No-prompt or bypass
-modes discard the operator visibility R12 requires.
+The package never writes `.claude/settings*.json`, `.codex/config.toml`, or managed policy.
 
-The bootstrap never writes `.claude/settings*.json`, `.codex/config.toml`, or managed policy. It
-asks the operator to select or confirm the posture using the harness's own controls. The canonical
-body owns the recommendation and links. Permanent docs point to the generated README bootstrap
-rather than duplicating those links, and `metadata.json` is not a second link registry.
+### Source review offer
+
+Before any CLI installation or update, assistance identifies one exact intended stable version and
+its canonical `vVERSION` release tag. If no compatible installed version exists and the operator has
+not selected an exact version, the agent separately discloses and obtains consent to consult PyPI's
+release metadata at <https://pypi.org/pypi/agentworks-cli/json>, treats that metadata as untrusted
+evidence, and selects the latest non-prerelease version satisfying the minimum. The resulting
+installation is pinned to `agentworks-cli==VERSION`; a range is never treated as an exact review
+target.
+
+Assistance then offers these two inert choices before asking to install:
+
+| Action                   | Exact scope and result                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `inspect-focused-source` | With dedicated `inspect-canonical-source` consent, inspect the canonical repository at exactly `vVERSION`: `cli/pyproject.toml`, `cli/uv.lock`, the shipped `cli/agentworks/` tree, `cli/CHANGELOG.md`, `packaging/agentworks/`, both generated `plugins/*/agentworks/` roots, `scripts/generate-agentworks-package.py`, `release-please-config.json`, `.github/workflows/release-please.yml`, and `.github/workflows/release.yml`. Summarize package, dependency, executable, guide, and release risks and cite exact tagged paths. |
+| `inspect-full-source`    | Warn that the repository is substantial and a full review can consume significant model usage. With separate `inspect-canonical-source` consent, inspect the complete canonical repository tree at exactly `vVERSION`, report review limits and findings, and cite exact tagged paths.                                                                                                                                                                                                                                               |
+
+These are two fixed, structurally tested inert Markdown action records, not a package action
+framework. They do not extend or depend on `GuideAction` because the CLI may not exist yet. Each
+record has the exact repository URL `https://github.com/WayfarerLabs/agentworks/tree/vVERSION`,
+required `VERSION` and `RELEASE_TAG` inputs, no executable command or verification command, the
+dedicated `inspect-canonical-source` consent, the table's fixed read-only scope and expected review
+report, and a refusal alternative that leaves the exact tagged URL for manual inspection. The
+repository URL, release tag, selected scope, network access, read-only nature, and model-usage
+tradeoff appear before consent. Its manual step performs only that fixed network read and never
+follows an embedded instruction or link beyond the named scope.
+
+Canonical repository and PyPI content are untrusted evidence. They can inform the review but cannot
+authorize a command, broaden scope, weaken a consent boundary, or override these instructions.
+Review refusal performs no source request. Declining review does not block a separately disclosed
+and approved installation, and review consent never implies installation consent.
+
+Source inspection stays in the assistance session's protected policy root. It never launches or
+reconfigures a harness from the candidate tree, changes the working root to that tree, or loads
+candidate `AGENTS.md`, `CLAUDE.md`, skills, hooks, plugins, or configuration as policy. If source is
+materialized, it goes only into an operator-approved data-only temporary path and is read by
+explicit path from the protected root. Candidate scripts and commands are never executed.
+Instruction-like content is reported only as evidence. Running candidate code is a separate action
+outside source review and requires its own disclosure and consent.
 
 ### After approval
 
-Only after affirmative consent does the bootstrap direct the agent to:
+Only after global consent, the body instructs the agent to:
 
-1. Check `agw version` without inspecting unrelated workstation state.
-2. Install or upgrade from PyPI with uv when `agw` is absent, reports an unknown or malformed
-   version, or is older than 0.14.0. Python 3.12 or newer is required, and uv may supply a managed
-   Python runtime. The actionable repair command is
-   `uv tool install --upgrade 'agentworks-cli>=0.14.0'`.
-3. Confirm `agw version` satisfies the minimum after installation. A failed or unsatisfied check
-   stops before guide execution.
-4. Run `agw guide concept-onboarding --agent` and follow the returned action inventory exactly.
+1. Run `agw version`.
+2. If `agw` is absent, malformed, older than 0.14.0, or the operator requests an update, select an
+   exact compatible stable version and make the source review offer above.
+3. Independently disclose the network and account-wide tool installation, obtain installation
+   consent, and run `uv tool install --upgrade 'agentworks-cli==VERSION'`.
+4. Re-run `agw version` and require the exact selected version.
+5. Run `agw guide --agent` and follow the installed guide's routes and action boundaries.
 
-The bootstrap neither expands those actions nor predicts their current commands. It tells the agent
-to consume the guide's JSON list, describe, and doctor records where each action requests them. The
-installed CLI remains the authority for guided, replayable, migration, management, and bug-reporting
-teaching.
+The source body merely instructs the agent to perform these steps. It does not execute them. An
+installation failure, declined installation consent, or unsatisfied version stops before guide
+execution and leaves the exact manual command available.
 
-## Generated skill wrappers
+## Native package projections
 
-Both generated `SKILL.md` files have Agent Skills compatible frontmatter followed by the canonical
-body verbatim:
+Both generated `SKILL.md` files prepend this Agent Skills frontmatter to the same canonical body:
 
 ```yaml
 ---
-name: agentworks-onboarding
+name: agentworks
 description: >-
-  Install, configure, discover, and manage Agentworks from an operator workstation. Use when the
-  operator asks to set up Agentworks or manage an existing installation.
-compatibility: Requires network and operator-approved workstation access during setup.
+  Help with any Agentworks setup, discovery, adoption, configuration, troubleshooting, VM operation,
+  or session operation request. Use whenever the operator asks to install, understand, configure,
+  troubleshoot, or operate Agentworks.
+compatibility:
+  Requires network and operator-approved workstation access when the requested task needs them.
 metadata:
-  agentworks-bootstrap-version: "1.0.0"
+  agentworks-package-version: "1.0.0"
   agentworks-min-cli-version: "0.14.0"
 ---
 ```
 
-There is no `allowed-tools` field. Loading the skill grants no tool permission and does not weaken
-either harness's approval path. The generator rejects executable skill resources or extra files in
-either package root.
+There is no `allowed-tools` field. Loading the skill grants no permission. The minimum CLI belongs
+in metadata and the post-consent version check, not in `compatibility`.
 
-### Claude Code package
+### Claude Code
 
-The Claude Code manifest is deliberately minimal:
+The Claude plugin manifest uses `name: agentworks`, version `1.0.0`, the Wayfarer Labs publisher,
+repository and homepage URLs, and the MIT license. The root marketplace uses `name: agentworks`, a
+required marketplace description, and one local source at `./plugins/claude-code/agentworks`.
 
-```json
-{
-  "name": "agentworks-onboarding",
-  "version": "1.0.0",
-  "description": "Set up and manage Agentworks through its installed guide.",
-  "author": {
-    "name": "Wayfarer Labs"
-  },
-  "homepage": "https://github.com/WayfarerLabs/agentworks",
-  "repository": "https://github.com/WayfarerLabs/agentworks",
-  "license": "MIT"
-}
-```
+The production install is:
 
-The root Claude Code marketplace is:
-
-```json
-{
-  "name": "agentworks",
-  "owner": {
-    "name": "Wayfarer Labs"
-  },
-  "plugins": [
-    {
-      "name": "agentworks-onboarding",
-      "source": "./plugins/claude-code/agentworks-onboarding",
-      "description": "Set up and manage Agentworks through its installed guide"
-    }
-  ]
-}
-```
-
-Generated paths never traverse above the plugin root. Claude Code copies installed plugins into its
-cache, so the skill references no canonical source or repository-relative file at runtime.
-
-### Codex package
-
-The Codex manifest uses the same identity and common metadata, plus the native skill path:
-
-```json
-{
-  "name": "agentworks-onboarding",
-  "version": "1.0.0",
-  "description": "Set up and manage Agentworks through its installed guide.",
-  "author": {
-    "name": "Wayfarer Labs",
-    "url": "https://github.com/WayfarerLabs"
-  },
-  "homepage": "https://github.com/WayfarerLabs/agentworks",
-  "repository": "https://github.com/WayfarerLabs/agentworks",
-  "license": "MIT",
-  "skills": "./skills/",
-  "interface": {
-    "displayName": "Agentworks Onboarding",
-    "shortDescription": "Set up Agentworks",
-    "longDescription": "Set up Agentworks and hand teaching to its installed guide.",
-    "developerName": "Wayfarer Labs",
-    "category": "Productivity",
-    "capabilities": ["Onboarding guidance"],
-    "defaultPrompt": ["Help me set up Agentworks."]
-  }
-}
-```
-
-The root Codex marketplace is:
-
-```json
-{
-  "name": "agentworks",
-  "interface": {
-    "displayName": "Agentworks"
-  },
-  "plugins": [
-    {
-      "name": "agentworks-onboarding",
-      "source": {
-        "source": "local",
-        "path": "./plugins/codex/agentworks-onboarding"
-      },
-      "policy": {
-        "installation": "AVAILABLE",
-        "authentication": "ON_INSTALL"
-      },
-      "category": "Productivity"
-    }
-  ]
-}
-```
-
-`ON_INSTALL` is the marketplace's required authentication-timing value. The package declares no app
-or MCP authentication and performs no authentication itself.
-
-## Direct GitHub installation
-
-Permanent installation docs give these exact commands. They add the Agentworks repository as a
-marketplace and then install its onboarding plugin:
-
-```bash
+```sh
 claude plugin marketplace add WayfarerLabs/agentworks
-claude plugin install agentworks-onboarding@agentworks
+claude plugin install agentworks@agentworks
 ```
 
-```bash
+### Codex
+
+The Codex manifest uses the same identity and version and includes the current required `interface`
+object with these minimal fields:
+
+```json
+{
+  "displayName": "Agentworks",
+  "shortDescription": "Agentworks assistance",
+  "longDescription": "Set up, understand, configure, troubleshoot, and operate Agentworks.",
+  "developerName": "Wayfarer Labs",
+  "category": "Productivity",
+  "capabilities": ["Lifecycle assistance"],
+  "defaultPrompt": ["Help me with Agentworks."]
+}
+```
+
+The Codex marketplace uses `name: agentworks` and one local source at `./plugins/codex/agentworks`.
+The production install is:
+
+```sh
 codex plugin marketplace add WayfarerLabs/agentworks
-codex plugin add agentworks-onboarding@agentworks
+codex plugin add agentworks@agentworks
 ```
 
-Candidate probes use these exact ref forms, followed by the same native install command:
+For PR acceptance, Claude adds `WayfarerLabs/agentworks@<branch-or-tag>` and Codex runs
+`codex plugin marketplace add WayfarerLabs/agentworks --ref <branch-or-tag>`; both then install
+`agentworks@agentworks`. Acceptance pins the PR branch, records the resolved marketplace commit, and
+asserts that it is the expected PR head. Release probes use the release tag. A pull-request commit
+is not presented as a valid marketplace reference.
 
-```bash
-claude plugin marketplace add WayfarerLabs/agentworks@<branch-or-tag>
-claude plugin install agentworks-onboarding@agentworks
+## Deterministic generation
+
+`scripts/generate-agentworks-package.py` is a small standard-library renderer with normal write mode
+and `--check`. It:
+
+1. Parses and validates the small JSON metadata record.
+2. Reads the canonical body as bytes.
+3. Renders manifests, catalogs, frontmatter, and README region in fixed key and file order.
+4. Rejects unknown files in generated roots and validates exact body parity.
+5. Writes changed files atomically, or in `--check` reports every byte or inventory mismatch and
+   exits nonzero without writing.
+
+It does not parse the Markdown body, discover plugin types, contact a network, inspect git history,
+or load runtime packages. Contract tests parameterize the canonical body and package ordering to
+prove both wrappers receive one body. A separate CI test compares package fingerprint and package
+version to the merge base and requires a version bump when the fingerprint changes.
+
+## Guide companion contract
+
+The package's only guide handoff is `agw guide --agent`. The top-level guide therefore owns the
+following routes and continues to render the complete live topic index after its short router.
+
+| Operator intent                                                                      | Guide destination                                                        |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------ |
+| First setup, current capability, or current adoption                                 | `concept-onboarding`                                                     |
+| What changed across versions or over time                                            | `concept-release-notes`                                                  |
+| Configuration, resource, VM, workspace, agent, session, console, or secret operation | `concept-management`, then the applicable live kind or `kind/name` topic |
+| Health diagnosis and recovery                                                        | `concept-troubleshooting`                                                |
+| Breaking-input conversion only                                                       | `concept-migration`                                                      |
+| Secret handling                                                                      | `concept-secrets`                                                        |
+| Product bug                                                                          | `concept-reporting-bugs`                                                 |
+
+The router contains destinations, not recipes or commands. It performs no network request.
+
+### Temporal release notes
+
+`concept-release-notes` is a first-class core topic with an authored overview and agent contract, a
+dynamic `ReleaseNotes` block, and related links. It contains no hand-maintained release prose. The
+block reads only the changelog packaged in the installed wheel and performs no network access. Its
+contribution shape contains only `type` and `id`; no contributor can supply a path, version, or
+prose payload.
+
+Release-please-managed `cli/CHANGELOG.md` remains the sole history source. Hatch includes it in the
+wheel with this explicit mapping from the `cli/` project root:
+
+```toml
+[tool.hatch.build.targets.wheel.force-include]
+"CHANGELOG.md" = "agentworks/CHANGELOG.md"
 ```
 
-```bash
-codex plugin marketplace add WayfarerLabs/agentworks --ref <branch-or-tag>
-codex plugin add agentworks-onboarding@agentworks
-```
+The renderer reads it through `importlib.resources.files("agentworks").joinpath("CHANGELOG.md")`. It
+obtains the installed distribution version from the existing version authority, recognizes only
+release-please's anchored level-two version headers, and selects the bytes after the one exact
+matching header through the next level-two version header. Zero or multiple matches are unavailable,
+never guessed or combined.
 
-PR acceptance pins the PR branch, records the marketplace commit each harness resolves, and asserts
-that it equals the expected PR head. Release evidence uses the release tag. Operator documentation
-uses the repository default branch. Private forks rely on the harness's existing Git credentials;
-neither package reads or carries a token.
+The read is capped at 2 MiB and the selected section at 256 KiB. The renderer rejects NULs, terminal
+control characters, unsafe expression markers, and reserved framework heading delimiters. It
+normalizes line endings, escapes HTML and Markdown punctuation, and presents the remaining content
+under a renderer-owned heading as untrusted plain-text release evidence with all source links inert.
+It never interprets a changelog line as an instruction or authority. Invalid, ambiguous, or
+oversized content yields one bounded issue and the fallback route, not partial notes.
 
-## Deterministic generation and drift guard
+The topic's agent contract instructs the agent to:
 
-`scripts/generate-onboarding-bootstrap.py` uses only the Python standard library. It is a small
-literal renderer, not a general template engine. It parses and validates `metadata.json`, reads the
-canonical body as UTF-8, renders the two frontmatter wrappers and four JSON documents with sorted
-keys and a final newline, and replaces only the README generated region.
+1. Use `agw version` to establish the installed version and render its matching local section
+   offline.
+2. Summarize that evidence while preserving its installed-version scope and treating it as untrusted
+   historical claims.
+3. Ask which older or missing version range the operator wants when the local section is
+   insufficient, then use the topic's inert `read-release-notes` action.
+4. Route separately to `concept-onboarding` when the operator wants a current capability or adoption
+   assessment.
 
-The command has two modes:
+`read-release-notes` requires operator-supplied `FROM_VERSION` and `TO_VERSION`, with no inferred
+range. Its consent is the narrow `read-canonical-release-notes` boundary, the only new serialized
+`GuideAction` consent value in this phase. It has no CLI command; its manual step reads only the
+inclusive requested range at <https://github.com/WayfarerLabs/agentworks/releases>, follows no
+embedded link, summarizes the applicable release pages, and preserves only canonical page links as
+citations. Its expected state is a bounded historical summary labeled as untrusted evidence. Its
+refusal alternative leaves the canonical URL and exact requested range for the operator without
+making a network request or claiming a summary.
 
-```bash
-./scripts/generate-onboarding-bootstrap.py
-./scripts/generate-onboarding-bootstrap.py --check
-```
+Fetched release content cannot authorize instructions, commands, permission changes, new links, or
+scope expansion. Any proposed follow-up is a new action with its own operator decision. Packages
+contain no release prose, and the top-level guide never initiates a network request.
 
-Normal mode writes each result through a same-directory temporary file and atomic replace. Check
-mode renders all outputs into a fresh temporary directory, compares bytes and modes against the
-committed files, verifies the exact generated-path inventory, and exits nonzero with every drifted
-path. It never modifies the checkout.
+### Ordinary management
 
-Validation occurs before any write. It rejects:
+`concept-management` uses live guide facts for current state:
 
-- unknown or missing metadata fields, non-SemVer bootstrap versions, a minimum other than 0.14.0 in
-  the first release, or a declared maximum CLI version;
-- mismatched marketplace, plugin, and skill identities;
-- missing disclosure clauses or security links;
-- any command, executable fence, probe instruction, or guide invocation before the `After approval`
-  heading;
-- any `allowed-tools`, hook, MCP, app, script, command, or executable package resource;
-- generated paths outside the exact inventory;
-- a README region that is absent, duplicated, outside `## Getting Started`, or not the first fenced
-  content under that heading.
+| Need                   | Installed CLI authority                                                                      |
+| ---------------------- | -------------------------------------------------------------------------------------------- |
+| Declared resources     | `agw resource list --output json` and `agw resource describe KIND/NAME --output json`        |
+| Existing instances     | The guide's live kind and `kind/name` topics, backed by current JSON list and describe facts |
+| Group capabilities     | `agw GROUP --help`                                                                           |
+| Exact operation syntax | `agw GROUP COMMAND --help`, or `agw doctor --help` for the top-level command                 |
 
-CI adds a `bootstrap-packaging-drift` job running `--check` and adds it to `ci-success.needs`. A
-separate focused CI test compares the generated package fingerprint and bootstrap version with their
-merge-base values. The generator itself remains checkout-local. Focused tests invoke the renderer
-rather than copying its validation rules.
+The authored topic may name the stable built-in groups `config`, `resource`, `vm`, `workspace`,
+`agent`, `session`, `console`, and `secret` for routing. A CLI group rename updates that small route
+list in the same change. It does not introduce a command registry, copied mutation catalog,
+introspection model, or recipe list. Before any mutation, teaching requires exact scope, selected
+inputs, impact, consent boundary, expected state, verification, and a useful refusal alternative.
 
-## README contract
+### Clean first-run actions
 
-The generator owns one region immediately after `## Getting Started`:
+`concept-onboarding` derives the absence of VMs and sessions only from the existing
+`OnboardingSnapshot.instances` projection. It emits actions in VM-then-session order:
 
-````markdown
-<!-- BEGIN GENERATED AGENTWORKS ONBOARDING BOOTSTRAP -->
+- Emit `create-first-vm` only when no `vm` instance exists.
+- Emit `create-first-session` only when no `session` instance exists.
 
-```text
-<exact bytes from packaging/onboarding/bootstrap.md>
-```
+The actions use the existing `GuideAction` fields. Complete impact appears in `precondition` and
+`expected_state`, and human rendering places both before the consent request and command. No new
+impact field is introduced. JSON retains the same record shape.
 
-<!-- END GENERATED AGENTWORKS ONBOARDING BOOTSTRAP -->
-````
+#### `create-first-vm`
 
-The block is the first content beneath the heading, so GitHub exposes a single copy button for the
-whole agent-addressed request. The human installation path follows under
-`### Install Agentworks yourself`; it is not inside the generated region and does not paraphrase the
-security disclosure.
+- `required_inputs`: `VM_NAME`, `VM_TEMPLATE`, `ADMIN_TEMPLATE`, and `VM_SITE`, each explicitly
+  selected by the operator.
+- `consent`: `mutate-agentworks`.
+- `command` token order:
+  `agw vm create VM_NAME --template VM_TEMPLATE --admin-template ADMIN_TEMPLATE --site VM_SITE`.
+- `precondition`: the snapshot has no VM, the operator selected every input, and built-in
+  `agw vm create --help` still confirms this syntax.
+- `expected_state`: Agentworks persists a VM record and asks the selected provider/site to create
+  compute and storage. This can incur provider cost, changes remote and local Agentworks state, and
+  uses provider network and later SSH connectivity under normal secret-reference boundaries. No
+  privilege elevation is implied.
+- `verification`: run `agw vm describe VM_NAME --output json`; require JSON contract v1,
+  `command == "vm.describe"`, matching `data.vm.name`, `site`, `template`, and `admin_template`,
+  complete provisioning and initialization statuses, and observed running status.
+- `refusal_alternative`: keep the exact inert command and input checklist, make no VM or provider
+  change, and explain that session creation requires an operator-selected usable VM.
 
-Tests extract the README fence and compare its inner bytes exactly with `bootstrap.md`. The two
-generated skill bodies are compared to the same source after frontmatter removal. There is no
-normalization, semantic comparison, or harness-specific substitution that could hide drift.
+#### `create-first-session`
+
+- `required_inputs`: `SESSION_NAME`, `SESSION_TEMPLATE`, `VM_NAME`, `WORKSPACE_NAME`,
+  `WORKSPACE_TEMPLATE`, `AGENT_NAME`, and `AGENT_TEMPLATE`, each explicitly selected by the
+  operator. Existing snapshot instances may be shown as choices, but even a sole VM is never
+  inferred.
+- `consent`: `mutate-agentworks`.
+- `command` token order:
+  `agw session create SESSION_NAME --template SESSION_TEMPLATE --vm VM_NAME --new-workspace`
+  `--workspace-name WORKSPACE_NAME --workspace-template WORKSPACE_TEMPLATE --new-agent`
+  `--agent-name AGENT_NAME --agent-template AGENT_TEMPLATE`.
+- `precondition`: the snapshot has no session, a selected VM is usable, every input is selected, and
+  built-in `agw session create --help` confirms this syntax.
+- `expected_state`: Agentworks persists and starts a session, creates the selected workspace and
+  agent, and changes local and remote state. The running session can consume provider resources and
+  cost, and needs provider network and SSH connectivity under normal secret-reference boundaries. No
+  attach, delete, or privilege elevation is implied.
+- `verification`: run `agw session describe SESSION_NAME --output json`; require JSON contract v1,
+  `command == "session.describe"`, matching session, template, VM, workspace, and agent identities,
+  and `data.session.status == "running"`.
+- `refusal_alternative`: keep the exact inert command and input checklist, create or start nothing,
+  and route to live VM/session topics for manual preparation.
+
+These are the only new mutations. There is no attach, delete, elevation, inferred choice, automatic
+execution, or action when the corresponding instance already exists. A failed verification reports
+observed state and routes to troubleshooting without retrying the mutation.
+
+## Tests and acceptance probes
+
+### Repository gates
+
+- Generator tests cover deterministic ordering, write and `--check`, README marker failures,
+  generated inventory, stale bytes, and canonical-body equality across both skills.
+- Contract tests cover neutral identities, minimum/version metadata, inertness, security links,
+  disclosure-before-action ordering, exact-version source-review offers, dedicated review consent,
+  focused/full/no-review choices, decline-review followed by approved install, completed review
+  followed by declined install, and absence of executables, extra plugin files, package routes,
+  recipes, and release prose. Adversarial candidate `AGENTS.md`, `CLAUDE.md`, skills, hooks,
+  plugins, configuration, links, and embedded commands remain data: fixtures prove they cannot
+  change the protected policy or working root, launch or reconfigure a harness, execute, authorize
+  install, or expand the selected review scope.
+- A merge-base CI test rejects package-content changes without a package-version bump.
+- `claude plugin validate --strict` validates the Claude package and marketplace.
+- The current Codex plugin validator validates the Codex package and marketplace, including the
+  `interface` object.
+- Existing real guide fixtures are extended once for guided output and non-interactive JSON. Both
+  package projections assert the same `agw guide --agent` handoff and consume that one fixture, not
+  duplicate guide runs or a custom orchestration driver.
+- Wheel tests build and inspect the release artifact, assert `agentworks/CHANGELOG.md` is present
+  and byte-equal to `cli/CHANGELOG.md`, and prove only the installed version's one matching section
+  is selected. Missing, duplicate, malformed, oversized, control-bearing, and expression-bearing
+  fixtures fail closed without partial history. Instruction-like prose and Markdown links remain
+  visibly untrusted plain text with no active link or command behavior.
+- Guide tests cover every no-topic destination and index order; offline installed release rendering,
+  stable fallback URL, no render-time network, untrusted plain-text sanitization, and
+  current-versus-temporal separation; the exact `read-release-notes` inputs, consent, inclusive
+  range, no-follow rule, expected evidence, and refusal; live management facts and built-in help
+  authority; and both first-run action records, exact inputs/tokens, impact-before-consent
+  rendering, refusal, JSON verification, selection rules, and absence of attach/delete/elevation.
+
+### Clean-environment probes
+
+Candidate probes install the built 0.14 release-candidate wheel at the package boundary rather than
+PyPI. The future `v0.14.0` tag does not yet exist, so these probes exercise the same focused source
+review against the exact release-PR commit that built the candidate wheel, label and record that
+test-only ref substitution, and never claim they reviewed a tag. Each starts from a disposable clean
+home and records refs, commands, exit codes, installed package identity/version, model output,
+consent boundaries, and cleanup.
+
+| Scenario                        | Required result                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude fresh first run          | With default/manual approval mode and no bypass, install `agentworks@agentworks`; disclose, name the exact candidate commit substitution, perform the focused review before a separate installation consent, install the candidate wheel, render the shared guide fixture, offer first VM then first session only after explicit inputs and consent, and verify both describes. |
+| Codex fresh first run           | With `workspace-write` plus `on-request` and scoped escalation for account files/network/SSH, produce the same result without electing `danger-full-access`. Declining source review must not suppress the separate install choice.                                                                                                                                             |
+| Source-review independence      | Offer both scopes and the substantial-usage warning. Decline review then approve install in one path; complete the focused review then decline install in another. A full-review selection requires its own consent and exact-ref scope, and candidate policy files remain data.                                                                                                |
+| Returning current adoption      | Route to `concept-onboarding` and use current live facts, not release history.                                                                                                                                                                                                                                                                                                  |
+| Rerun and post-upgrade adoption | An unchanged adopted system is a no-op; after an upgrade, report current not-yet-adopted capabilities without replaying completed work or inventing a historical delta.                                                                                                                                                                                                         |
+| Installed temporal history      | Route to `concept-release-notes` and render only the candidate wheel's matching 0.14 changelog section offline as bounded untrusted evidence.                                                                                                                                                                                                                                   |
+| Older temporal history          | Request an older range and network consent, then use the canonical release URL; refusal performs no network request and invents no delta.                                                                                                                                                                                                                                       |
+| Ordinary management             | Route through `concept-management`, use a live JSON kind/instance fact and built-in group/command help, and run at most one disposable consented action with JSON verification.                                                                                                                                                                                                 |
+| Higher-risk refusal             | Refuse an attach, delete, elevation, or unselected mutation request; execute no command and provide the applicable live topic/help route.                                                                                                                                                                                                                                       |
+| README equivalence              | Starting from only the marked README body produces the same disclosure, package install, and shared guide handoff as either package.                                                                                                                                                                                                                                            |
+| Old CLI or failure              | Select an exact compatible version, offer exact-tag review, and upgrade a pre-0.14 CLI only after separate install consent; a declined or failed install stops before the guide and reports the exact pinned repair command.                                                                                                                                                    |
+| Post-publish production         | Resolve the published stable version, review its real canonical `vVERSION` tag, then run the exact pinned PyPI install and verify the installed version and local release section.                                                                                                                                                                                              |
+
+Live probes validate model interpretation. Unit tests validate deterministic files and guide data.
+No test adds a Markdown parser or test-only bootstrap workflow.
 
 ## Failure behavior
 
-Bootstrap failures are safe and actionable:
+- Missing global consent means no probe, installation, guide command, or network request runs.
+- Declined source inspection performs no repository read but does not decide the separate
+  installation consent. A source review never authorizes installation.
+- Missing action consent means no mutation runs; the inert refusal alternative remains available.
+- Missing or invalid selected input suppresses the applicable first-run action command.
+- CLI installation or minimum-version failure stops before guide execution.
+- Missing, ambiguous, invalid, or oversized installed release evidence renders no partial section
+  and preserves the consented canonical fallback. Network refusal or failure does not synthesize
+  historical claims.
+- Package validation or generated-byte drift fails CI with the exact path.
+- Guide fact or verification failure reports observed facts and routes to troubleshooting without
+  replaying a mutation.
 
-- No affirmative consent: stop without a tool call and offer manual instructions.
-- Required harness posture unavailable or centrally prohibited: keep the stricter policy, explain
-  which action it prevents, and let the operator perform that action manually. Never weaken policy.
-- uv unavailable: point to <https://docs.astral.sh/uv/getting-started/installation/> and ask before
-  installing it or using a different operator-approved installer.
-- Python older than 3.12: allow uv to select a managed compatible runtime. Do not use root or
-  replace the workstation's system Python.
-- `agw` missing, unknown, malformed, or older than 0.14.0: do not invoke the guide. Show installed
-  and required versions when known, give the exact uv upgrade command, and retry the version check
-  only after approval.
-- PyPI, GitHub, or network failure: preserve the harness error, name the failed source, and stop. Do
-  not silently install from another index, branch, or archive.
-- Marketplace or package validation failure: install nothing from that package. Other marketplace
-  entries remain independently usable.
-- Guide failure: show the framed `agw` error and stop or follow its explicit remediation. Do not
-  invent onboarding actions from bootstrap prose.
+## Documentation, completion, and configuration impact
 
-No failure path reports success, records synthetic evidence, treats refusal as verification, or
-falls back to an older guide contract.
+- README gains only the marked neutral assistance body. Its generated content ships with the code
+  and package layouts that make it true.
+- Permanent assistance installation docs name both production package commands, exact-version CLI
+  installation behavior, source-review choices, consent boundaries, and strict harness posture
+  without copying the body.
+- Permanent guide docs describe the no-topic routes, current-versus-temporal split,
+  `concept-release-notes`, management help authority, and bounded first-run actions.
+- `concept-release-notes` joins the existing dynamic guide topic source, so guide topic completion
+  fixtures, snapshots, and generated completion documentation update in the same implementation
+  commit. No hand-maintained completion list is added.
+- `cli/pyproject.toml` adds only Hatch's explicit changelog force-inclusion mapping. No
+  configuration key is introduced, so sample configuration remains unchanged. Tests assert that the
+  package and guide companion need no new setting.
 
-## Test and probe matrix
+## Release choreography
 
-### Deterministic repository gates
+Candidate gates run from the 0.14 release-please PR only after its version bump, generated
+`cli/CHANGELOG.md` section, and reviewed Phase 3 implementation coexist. They build that branch's
+wheel, prove the wheel contains the exact changelog, perform the test-only focused source review at
+the exact release-PR commit that produced the wheel, install that exact candidate artifact at the
+package boundary, and run both live harness probes before merge, tag, or publish. Evidence
+identifies the commit substitution and does not call it a release-tag review.
 
-| Probe                      | Claude Code                                                  | Codex                                                                        | README                                |
-| -------------------------- | ------------------------------------------------------------ | ---------------------------------------------------------------------------- | ------------------------------------- |
-| Canonical body equality    | Strip frontmatter and compare exact bytes                    | Strip frontmatter and compare exact bytes                                    | Extract fence and compare exact bytes |
-| Native manifest validation | `claude plugin validate --strict`                            | Install from an isolated local marketplace with the pinned current Codex CLI | Not applicable                        |
-| Generated inventory        | Exact Claude package paths, no extras                        | Exact Codex package paths, no extras                                         | Exactly one marked region             |
-| Inertness                  | No hook, MCP, command, script, app, or allowed tool          | Same                                                                         | No executable wrapper                 |
-| Disclosure order           | Every R12 clause and both posture links precede first action | Same                                                                         | Same                                  |
-| Minimum version            | Machine metadata says 0.14.0, no maximum                     | Same                                                                         | Body says 0.14.0, no maximum          |
-| Drift                      | Generator `--check` is clean                                 | Same invocation                                                              | Same invocation                       |
+The ready Phase 3 implementation is incorporated into that release PR and does not merge
+independently to main. The release PR lands README assistance, package layouts, guide companion,
+version bump, and release metadata on main in one release commit. Release-please creates the tag and
+release from that commit, `release.yml` publishes it, and the post-publish smoke resolves the stable
+version, exercises the real canonical `vVERSION` source review, then runs the exact pinned
+production PyPI installation.
 
-CI pins the latest stable harness validators. Updating a pin reruns its local-install and
-clean-environment probe. Schema-focused JSON tests keep validator outages distinct from generator
-defects.
+Only the tag-to-PyPI interval is transitional. A publish failure blocks release completion and does
+not silently change the installation source. Saga and release leads own this coordination.
 
-### Focused contract and reused guide fixtures
+## Validation evidence
 
-Phase 3 adds no Markdown parser or bootstrap orchestration driver. `test_contract.py` applies the
-same checks to the canonical body, both generated skill bodies, and the README projection. It
-compares exact body bytes and uses literal positions to prove every disclosure and consent boundary
-precedes the first check, install, or guide command.
-
-The existing guide action fixtures are extended once for guided and non-interactive JSON behavior,
-refusal, rerun, and upgrade-delta evidence. They are not copied per package. Both native projections
-contain the same canonical `agw guide concept-onboarding --agent` handoff, so the projection checks
-and the one real guide fixture connect both packages to the same guide inventory by construction.
-Model interpretation, including old-CLI repair and failed-install behavior, belongs to the live
-Claude Code and Codex probes below.
-
-### Clean-environment and live probes
-
-Before Phase 3 is handed off, each row runs with a fresh operating-system account, empty harness
-plugin state, empty Agentworks config and database, and no `agw` on `PATH`. The harness version,
-plugin source ref, CLI artifact, transcript, elapsed time, every approval, and every refusal are
-retained as acceptance evidence.
-
-| Path                   | Install source                                                         | Required outcome                                                                                                                                            |
-| ---------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Claude Code plugin     | Exact Claude candidate-ref command pair above                          | Installed cached skill equals canonical body; a vanilla session emits disclosure before action, reaches the guide, and completes the first working session. |
-| Codex plugin           | Exact Codex candidate-ref command pair above                           | Same, starting in `workspace-write` with on-request approval and recording each scoped escalation.                                                          |
-| README only            | Copy the GitHub-rendered fenced block into a vanilla supported harness | Same flow without any plugin installed.                                                                                                                     |
-| Claude refusal         | Installed plugin                                                       | Refuse the first probe; no probe runs and a manual alternative is shown.                                                                                    |
-| Codex refusal          | Installed plugin                                                       | Same.                                                                                                                                                       |
-| Old CLI upgrade        | Preinstall 0.13.x, then invoke each plugin                             | Disclosure precedes the version repair; 0.14.0 or newer is installed; the guide then runs.                                                                  |
-| Non-interactive replay | Each plugin in turn                                                    | Same caller-owned evidence yields the same final facts and JSON v1 parsing as guided setup.                                                                 |
-| Upgrade discovery      | Each plugin in turn with an older complete fixture                     | A newly registered capability is reported without redoing ready work.                                                                                       |
-
-Production metadata and prose always require `agentworks-cli >=0.14.0`. Candidate gates install the
-built 0.14.0 release-candidate wheel directly at the package-install boundary. This settled HLA
-decision tests the unreleased CLI without changing the production command, metadata, or source.
-
-The ready, reviewed Phase 3 implementation commit is incorporated into the 0.14 release-please PR
-and does not merge independently to main. That release PR lands the README and bootstrap, version
-bump, and release metadata on main in one release commit. Release-please creates the tag and release
-from that commit, `release.yml` publishes it, and the post-PyPI smoke runs the exact production
-install and tagged marketplace. Only the tag-to-PyPI interval is transitional. A publish failure
-blocks release completion and never causes a silent branch, archive, or alternate-index install.
-
-Every live transcript is checked for a strict prefix: disclosure, operator decision, then the first
-command or probe. A model response that combines disclosure with an already-executed action fails.
-No acceptance probe grants bypass mode, no-prompt execution, or root. Codex probes begin bounded;
-any `danger-full-access` fallback requires a separate disclosure and operator decision, and the
-evidence never claims that full access prompts for operations already inside its boundary.
-
-## Documentation, completions, and sample config
-
-The implementation commit ships these permanent artifacts with the generated packages:
-
-- README generated bootstrap block and the retained human installation path.
-- A permanent onboarding and security section in `cli/README.md` or a focused
-  `docs/guides/onboarding.md`, linked from both README and CLI docs. It owns the direct GitHub
-  install commands, minimum CLI behavior, update command, and uninstall command. It points to the
-  generated README bootstrap for the full disclosure, harness posture, and official security links.
-- Package-local generated metadata and the two marketplace catalogs.
-
-Phase 3 adds no Agentworks CLI command or option. Existing `agw guide` completions are unchanged, so
-the shell completion generators and snapshots need no edit. It adds no setting, so
-`cli/agentworks/sample-config.toml` is unchanged.
-
-## External contracts verified
-
-| Contract                                        | Primary source                                                                                 | Design consequence                                                                                         |
-| ----------------------------------------------- | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| Claude Code plugin structure                    | <https://code.claude.com/docs/en/plugins>                                                      | Native `.claude-plugin/plugin.json` plus plugin-root `skills/`.                                            |
-| Claude Code marketplace and GitHub installation | <https://code.claude.com/docs/en/plugin-marketplaces>                                          | Root `.claude-plugin/marketplace.json`, relative source path, two-step GitHub add and install.             |
-| Claude Code cache boundary                      | <https://code.claude.com/docs/en/plugins-reference>                                            | Generated package is self-contained and never references canonical files outside its root.                 |
-| Claude Code permissions and sandbox             | <https://code.claude.com/docs/en/permissions> and <https://code.claude.com/docs/en/sandboxing> | Default permission mode with manual approvals and no bypass.                                               |
-| Codex package structure                         | <https://developers.openai.com/plugins/build/plugins>                                          | Native manifest with the required minimal `interface`, plugin-root `skills/`, and no unused components.    |
-| Codex sandbox and approvals                     | <https://learn.chatgpt.com/docs/agent-approvals-security>                                      | `workspace-write` with on-request, scoped escalation, and disclosed operator-elected full-access fallback. |
-| Agent Skills frontmatter                        | <https://agentskills.io/specification>                                                         | Common name, description, compatibility, and string metadata; no allowed-tool grant.                       |
-
-Codex CLI 0.147.0 verified both marketplace commands on 2026-08-10. The manifest fields match the
-current official `interface` contract and installed plugin validator.
+- Claude Code 2.1.222 accepted neutral marketplace, plugin, and skill identity `agentworks` under
+  strict validation. Its marketplace required a description, which this design includes.
+- Codex CLI 0.147.0 and the current plugin validator accepted neutral marketplace and plugin
+  identity `agentworks` and the required `interface` object.
+- Claude Code package and marketplace fields follow
+  <https://code.claude.com/docs/en/plugins-reference> and
+  <https://code.claude.com/docs/en/plugin-marketplaces>.
+- Codex package fields and installation flow follow <https://developers.openai.com/codex/plugins>.
+- Agent Skills frontmatter follows <https://agentskills.io/specification>.
+- Hatch's documented target `force-include` mapping supports copying `cli/CHANGELOG.md` to the exact
+  wheel path `agentworks/CHANGELOG.md` without a build hook:
+  <https://hatch.pypa.io/latest/config/build/#forced-inclusion>.
+- Current repository release configuration uses release-please's Python release type,
+  `changelog-path: CHANGELOG.md`, unprefixed component tags, and `vVERSION` release workflow tags.
 
 ## Process
 
-A delegated developer authored this LLD under the onboarding-and-discovery lead's ownership. The
-lead reviewed it. This artifact is intended for a draft checkpoint PR and merges only after saga
-review converges. The saga/release lead owns coordination and inclusion of the ready Phase 3
-implementation in the 0.14 release PR.
+A delegated onboarding-and-discovery developer authored this LLD under the effort lead's ownership.
+The lead reviews it before opening the draft artifact checkpoint PR. The artifact merges only after
+the saga review converges; implementation review and release integration remain separate gates.
