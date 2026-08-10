@@ -191,10 +191,12 @@ ones.
   N: its major review findings incorporated and re-review clean, not its merge. Before that gate,
   stacking bets against exactly the reshaping a review can force; after it, the remaining churn is
   mechanical and stacking is preferred for parallel-yet-dependent work. Keep the stack shallow (one
-  not-yet-merged layer at a time; a stack of unreviewed PRs is the big PR wearing a disguise), and
-  the stack's owner carries the rebases and retargets the base branch as predecessors merge. Work
-  that does not actually depend on the unmerged phase branches off `main` as a sibling instead, and
-  design-time work (LLDs, content, research) needs no branch gate at all: paper does not rebase.
+  not-yet-REVIEWED layer at a time, keyed to that re-review-clean gate; reviewed-but-unmerged
+  entries may accumulate to the stack's normal depth, and a stack of unreviewed PRs is the big PR
+  wearing a disguise), and the stack's owner carries the rebases and retargets the base branch as
+  predecessors merge. Work that does not actually depend on the unmerged phase branches off `main`
+  as a sibling instead, and design-time work (LLDs, content, research) needs no branch gate at all:
+  paper does not rebase.
 - **Open a PR when the work is close to merge-ready**, not before. A PR signals "this is ready for
   eyes," so open it when that is true.
 - **Non-draft by default.** Avoid draft PRs unless specifically asked for one. The single routine
@@ -208,9 +210,10 @@ ones.
   comment says _what changed and why_; a ready flip without both is a false signal. Reviewers treat
   the draft-to-ready transition as the re-review request; nobody has to infer from push traffic
   whether work is mid-flight. The convention supports both consumption styles: edge-trigger on the
-  transition itself, or poll ready PRs and remember the last-reviewed head per PR; a new head on a
-  ready PR always means there is something to review, so a consumer that missed the edge loses
-  nothing.
+  transition itself, or poll ready PRs and remember the last-reviewed head per PR. A new head on a
+  ready PR means a handoff should exist: the poller verifies the matching round comment (or initial
+  body, for a first handoff) before reviewing, and when the head has no matching handoff it reports
+  the process violation rather than reviewing private work or silently ignoring it.
 - **Checkpoint reviews use the author-owned `review-requested` label** (operator convention,
   2026-08-10). Ready keeps its full meaning: round complete, handoff comment posted, believed
   mergeable. When work that is NOT at merge intent needs eyes now (the `sdd` skill's phased artifact
@@ -227,13 +230,14 @@ ones.
   machine-visible event where the author presents an exact head for review, with three required
   components: (1) a pushed head that is complete on its own terms (green, no mid-flight partials),
   (2) a round comment scoping it (what changed, rationale, pushbacks on prior findings), and (3) a
-  state signal: the draft-to-ready flip when the claim is reviewable AND merge-intent, or the
-  `review-requested` label when the claim is a reviewable checkpoint without merge intent.
-  Everything between handoffs is the author's private workspace: reviewers do not look, and nothing
-  there carries claims. PR-level reviews (the saga lead, the integration tester, the operator's
-  disposition) are triggered only by handoffs, never by push traffic, and every PR gets at least one
-  full PR-level pass before merge. Subagent reviews (section 5) are the author's own loop and follow
-  no handoff.
+  state signal: opening a PR ready (the ordinary path) or the draft-to-ready flip when the claim is
+  reviewable AND merge-intent, or the `review-requested` label when the claim is a reviewable
+  checkpoint without merge intent. Opening a ready PR is the first merge-intent handoff, and the
+  initial PR body serves as that round's scoped handoff comment. Everything between handoffs is the
+  author's private workspace: reviewers do not look, and nothing there carries claims. PR-level
+  reviews (the saga lead, the integration tester, the operator's disposition) are triggered only by
+  handoffs, never by push traffic, and every PR gets at least one full PR-level pass before merge.
+  Subagent reviews (section 5) are the author's own loop and follow no handoff.
 
 ## 6a. The three-level layering: commit, PR, PR stack
 
@@ -241,7 +245,7 @@ ones.
   partial work, and even breaking tests, is acceptable between handoffs when the message says so
   plainly. The head at every handoff must be green: partial commits live inside a round, never at
   its boundary.
-- **PR: a significant increment of functionality, business or technical.** Always self-consistent,
+- **PR: a coherent increment of value or change, business or technical.** Always self-consistent,
   and the system works when it merges; for a stack entry, "when it merges" means when its prefix
   lands. An incomplete solution is not a smaller version of a complete one (the
   development-principles rule); every merged PR is complete and honest on its own terms.
