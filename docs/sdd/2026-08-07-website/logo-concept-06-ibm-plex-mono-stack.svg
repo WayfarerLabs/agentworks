@@ -1,0 +1,32 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 240 400"
+  role="img"
+  aria-labelledby="title description"
+>
+  <title id="title">Agentworks IBM Plex Mono AGW rocket study</title>
+  <desc id="description">
+    Outlined IBM Plex Mono Bold letters A, G, and W overlap vertically to form a rocket.
+  </desc>
+  <metadata>Glyph outlines from IBM Plex Mono Bold 2.005, licensed under SIL OFL 1.1.</metadata>
+
+  <g fill="currentColor">
+    <path
+      data-letter="W"
+      transform="translate(45 393) scale(.25 -.18)"
+      d="M54 0 11 698H140L160 280 166 148H175L235 546H370L430 148H439L445 276L465 698H589L546 0H356L305 385H295L244 0Z"
+    />
+
+    <path
+      data-letter="G"
+      transform="translate(45 270) scale(.25 -.18)"
+      d="M411 99H402Q393 77 380 57Q367 37 348 21.5Q329 6 303.5-3Q278-12 246-12Q195-12 155.5 12Q116 36 89 82Q62 128 48.5 194Q35 260 35 343Q35 521 100 615.5Q165 710 301 710Q355 710 396 695.5Q437 681 466.5 654.5Q496 628 515 591Q534 554 545 509L405 475Q399 497 391.5 517.5Q384 538 372 554Q360 570 342 579.5Q324 589 298 589Q241 589 217.5 542Q194 495 194 410V296Q194 211 219.5 160Q245 109 310 109Q361 109 386 139Q411 169 411 216V267H292V373H545V0H411Z"
+    />
+
+    <path
+      data-letter="A"
+      transform="translate(45 143) scale(.25 -.18)"
+      d="M435 0 391 168H200L157 0H5L194 698H406L595 0ZM300 553H292L224 289H368Z"
+    />
+  </g>
+</svg>

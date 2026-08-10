@@ -1,0 +1,134 @@
+name: Deploy website to Pages
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build Pages artifact
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: read
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - name: Check out source commit
+        uses: actions/checkout@v7
+        with:
+          clean: true
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+
+      - name: Python website tests
+        run: python3 -m unittest discover -s website/tests -p 'test_*.py'
+
+      - name: Node website model tests
+        run: node --test website/tests/lander-model.test.mjs
+
+      - name: Verify tested source state
+        id: source
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          checked_out_sha="$(git rev-parse HEAD)"
+          if [[ "$checked_out_sha" != "$EXPECTED_SHA" ]]; then
+            echo "::error::Checked out $checked_out_sha instead of event commit $EXPECTED_SHA."
+            exit 1
+          fi
+          worktree_state="$(git status --porcelain=v1 --untracked-files=all)"
+          if [[ -n "$worktree_state" ]]; then
+            echo "::error::Repository tests left tracked or untracked worktree changes."
+            printf '%s\n' "$worktree_state"
+            exit 1
+          fi
+          printf 'sha=%s\n' "$checked_out_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Configure GitHub Pages
+        id: pages
+        uses: actions/configure-pages@v6
+
+      - name: Normalize Pages base path
+        id: base
+        shell: bash
+        env:
+          PAGES_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+        run: |
+          raw_base="$PAGES_BASE_PATH"
+          if [[ -z "$raw_base" || "$raw_base" == "/" ]]; then
+            site_base="/"
+          elif [[ "$raw_base" =~ ^/([A-Za-z0-9][A-Za-z0-9._~-]*/)*[A-Za-z0-9][A-Za-z0-9._~-]*/?$ ]]; then
+            site_base="${raw_base%/}/"
+          else
+            echo "::error::configure-pages returned an unsafe base path."
+            exit 1
+          fi
+          printf 'site_base=%s\n' "$site_base" >> "$GITHUB_OUTPUT"
+
+      - name: Build deterministic Pages artifact
+        env:
+          SITE_BASE: ${{ steps.base.outputs.site_base }}
+        run: |
+          python3 website/build.py \
+            --repo-root . \
+            --output "${RUNNER_TEMP}/agentworks-site" \
+            --site-base "$SITE_BASE"
+          python3 website/build.py \
+            --repo-root . \
+            --output "${RUNNER_TEMP}/agentworks-site-repeat" \
+            --site-base "$SITE_BASE"
+          diff --recursive --no-dereference \
+            "${RUNNER_TEMP}/agentworks-site" \
+            "${RUNNER_TEMP}/agentworks-site-repeat"
+
+      - name: Verify upload source state
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          checked_out_sha="$(git rev-parse HEAD)"
+          if [[ "$checked_out_sha" != "$EXPECTED_SHA" ]]; then
+            echo "::error::Checked out $checked_out_sha instead of event commit $EXPECTED_SHA."
+            exit 1
+          fi
+          worktree_state="$(git status --porcelain=v1 --untracked-files=all)"
+          if [[ -n "$worktree_state" ]]; then
+            echo "::error::Pages build left tracked or untracked worktree changes."
+            printf '%s\n' "$worktree_state"
+            exit 1
+          fi
+
+      - name: Upload exact Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          name: github-pages
+          path: ${{ runner.temp }}/agentworks-site
+
+  deploy:
+    name: Deploy Pages artifact
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.build.outputs.source_sha == github.sha
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy source commit to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
+        with:
+          artifact_name: github-pages
