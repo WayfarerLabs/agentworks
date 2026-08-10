@@ -316,6 +316,63 @@ def test_start_rejoin_orders_acquisition_reader_ensure_cleanup_and_release(
     assert calls == {"verify": 1, "native": 1, "rejoin": 1, "final-wait": 1, "sync": 1}
 
 
+def test_start_lazy_repair_validates_after_start_and_delivery_before_rejoin_work(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agentworks.secrets as secret_package
+    from agentworks.errors import ValidationError
+    from agentworks.vms.manager.tailscale import _ensure_tailscale as actual_ensure
+
+    auth_key = "tskey-prefix\r\ntskey-suffix\r\n"
+    config = make_config()
+    _seed_vm(db)
+    events: list[str] = []
+    monkeypatch.setattr(
+        ProxmoxPlatform,
+        "status",
+        lambda self, row, ctx: events.append("status") or VMStatus.STOPPED,
+    )
+    monkeypatch.setattr(
+        ProxmoxPlatform,
+        "start",
+        lambda self, row, ctx: events.append("start"),
+    )
+    monkeypatch.setattr(
+        ProxmoxPlatform,
+        "vm_active",
+        lambda self, row, *, config: contextlib.nullcontext(),
+    )
+    monkeypatch.setattr(
+        vm_manager,
+        "_tailscale_rejoin_required",
+        lambda *args, **kwargs: events.append("repair-required") or True,
+    )
+    monkeypatch.setattr(
+        secret_package,
+        "resolve_for_command",
+        lambda *args, **kwargs: events.append("late-resolve") or {"tailscale-auth-key": auth_key},
+    )
+
+    def _ensure(*args: object, **kwargs: object) -> None:
+        events.append("ensure")
+        actual_ensure(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(vm_manager, "_ensure_tailscale", _ensure)
+    monkeypatch.setattr(
+        vm_manager,
+        "verify_tailscale_available",
+        lambda: pytest.fail("line-unsafe late key reached Tailscale availability work"),
+    )
+
+    with pytest.raises(ValidationError) as caught:
+        vm_manager.start_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
+
+    assert events == ["status", "start", "repair-required", "late-resolve", "ensure"]
+    assert auth_key not in repr((caught.value.args, vars(caught.value)))
+
+
 @pytest.mark.parametrize("failure_type", [RuntimeError, KeyboardInterrupt])
 @pytest.mark.parametrize("failure_stage", ["probe", "resolve", "reader-build", "auth-read", "rejoin", "final-wait"])
 def test_start_tailscale_failure_matrix_cleans_before_one_release_without_retry(

@@ -435,6 +435,15 @@ class LimaPlatform(VMPlatform):
         The guest ``tailscale`` process necessarily receives its CLI auth-key
         argument transiently; this boundary makes no guest-process-table claim.
         """
+        from agentworks.secrets.line_safety import (
+            LineOrientedSecretUse,
+            require_line_safe_secret,
+        )
+
+        auth_key = require_line_safe_secret(
+            auth_key,
+            use=LineOrientedSecretUse.TAILSCALE,
+        )
         self._run_lima(
             f"limactl shell {instance_name} {_TAILSCALE_JOIN_STDIN_COMMAND}",
             input_text=f"{auth_key}\n",

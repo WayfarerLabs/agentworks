@@ -15,3 +15,11 @@ after consent for a real batch proof; it reports one value-free typed outcome pe
 exits nonzero if any outcome is not resolved. Verification refuses interactive sources by default.
 Ask separately before adding `--allow-interaction`, then resolve through the ordinary secure input
 boundary and its injected interaction policy. Never inspect a source broadly to find the value.
+
+Secret resolution accepts structured multiline text without compaction or alternate encoding. It
+preserves carriage returns, line feeds, and terminal line endings exactly; NUL is the one globally
+rejected string value. A source-level verification therefore proves resolvability, not suitability
+for every sink. Environment injection and reveal, Git credential headers and files, Proxmox API
+headers, and Tailscale stdin joins each require a single logical line and reject incompatible values
+at their own boundary. SDK consumers that support structured text, including GCP service-account
+authentication, receive the opaque value unchanged.

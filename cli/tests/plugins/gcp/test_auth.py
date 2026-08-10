@@ -124,6 +124,95 @@ def test_service_account_receives_whole_json_and_cloud_scope(monkeypatch: pytest
 
 
 @pytest.mark.parametrize(
+    "newline",
+    [pytest.param("\n", id="lf"), pytest.param("\r\n", id="crlf")],
+)
+def test_real_env_source_and_operation_resolver_deliver_exact_downloaded_json(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    newline: str,
+) -> None:
+    from agentworks.bootstrap import build_registry
+    from agentworks.capabilities.base import RunContext
+    from agentworks.config import load_config
+    from agentworks.orchestration.secrets import ScopedSecrets
+    from agentworks.secrets.policy import InteractionPolicy
+    from agentworks.secrets.resolver import Resolver
+    from tests.conftest import write_cfg
+
+    document = newline.join(
+        (
+            "{",
+            '  "type": "service_account",',
+            '  "client_email": "svc@example.test",',
+            '  "private_key": "-----BEGIN PRIVATE KEY-----\\nSENTINEL\\n-----END PRIVATE KEY-----\\n"',
+            "}",
+            "",
+        )
+    )
+    config = load_config(
+        write_cfg(
+            tmp_path,
+            settings='[secret_config]\nbackends = ["env-var"]\n',
+        ),
+        warn_issues=False,
+        warn_deprecations=False,
+    )
+    registry = build_registry(config)
+    monkeypatch.setenv("AW_SECRET_SVC_JSON", document)
+    resolver = Resolver(config, registry, interaction=InteractionPolicy.REFUSE)
+    resolver.register_name("svc-json")
+    resolver.resolve()
+
+    parsed_inputs: list[str] = []
+    real_loads = json.loads
+
+    def recording_loads(value: str) -> object:
+        parsed_inputs.append(value)
+        return real_loads(value)
+
+    monkeypatch.setattr("agentworks.plugins.gcp.auth.json.loads", recording_loads)
+    factory_inputs: list[dict[str, object]] = []
+    credential = object()
+
+    def fake_from_info(info: dict[str, object], *, scopes: tuple[str, ...]) -> object:
+        factory_inputs.append(info)
+        assert scopes == ("https://www.googleapis.com/auth/cloud-platform",)
+        return credential
+
+    monkeypatch.setattr(
+        "google.oauth2.service_account.Credentials.from_service_account_info",
+        fake_from_info,
+    )
+    cache = GcpClientCache(
+        "gcp-site",
+        _config({"mode": "service-account", "secret": "svc-json"}),
+    )
+    ctx = RunContext(secrets=ScopedSecrets(resolver.values, ("svc-json",)))
+
+    assert cache.credential(ctx) is credential
+    assert parsed_inputs == [document]
+    assert document.endswith(newline)
+    assert factory_inputs == [
+        {
+            "type": "service_account",
+            "client_email": "svc@example.test",
+            "private_key": "-----BEGIN PRIVATE KEY-----\nSENTINEL\n-----END PRIVATE KEY-----\n",
+        }
+    ]
+
+
+def test_service_account_remediation_accepts_downloaded_json_without_compaction() -> None:
+    auth = GcpServiceAccountAuth(mode="service-account", secret="svc-json")
+    with pytest.raises(ProvisioningError) as caught:
+        build_service_account_credential(auth, "not-json", "gcp-site")
+
+    assert caught.value.hint is not None
+    assert "exactly as downloaded" in caught.value.hint
+    assert "do not compact" in caught.value.hint
+
+
+@pytest.mark.parametrize(
     "document",
     [
         _SENTINEL,

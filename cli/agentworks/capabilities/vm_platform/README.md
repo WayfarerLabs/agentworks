@@ -341,9 +341,10 @@ prompting reads ok in the VM sites group, and resolvability is reported once, on
 row in the Secrets group.
 
 **The pattern for a backend client:** memoize the _derived client_, never the raw secret. Proxmox's
-`_api(ctx)` builds a `ProxmoxAPI` from `ctx.secret(token_secret)` on first need and caches the
-client (`self._api_cached`), never the token. GCE follows the same rule: its cache retains the
-derived credential and typed Compute clients, never the service-account JSON.
+`_api(ctx)` reads `ctx.secret(token_secret)` on first need; `_build_api` applies the line-oriented
+consumer guard before `ProxmoxAPI` can construct a header, then `_api` caches only that client
+(`self._api_cached`). GCE follows the same rule: its cache retains the derived credential and typed
+Compute clients, never the service-account JSON.
 
 ### Credentials on a Cloud Platform: The Reference Shape
 
@@ -351,8 +352,12 @@ Azure is the worked example, and a new cloud platform should copy it rather than
 The `aws-ec2` and `gcp-gce` platforms are copies of it. AWS's `access-key` arm is the AWS analogue
 named below, with `access_key_id` as the plain identifier and `access_key_secret` naming the secret
 that holds the secret access key (plus an optional `assume_role_arn`). Read it alongside GCE's
-`service-account` arm, whose one secret is the complete compact service-account JSON document. Four
-rules, in `plugins/azure/platform.py`:
+`service-account` arm, whose one secret is the complete service-account JSON document exactly as
+downloaded, including its ordinary formatting and terminal line ending. Secret resolution preserves
+that opaque text; platforms must not trim, compact, split, or re-encode it. A platform whose own
+credential syntax is line-oriented must instead apply the shared consumer guard immediately after
+delivery and before constructing its client or authentication header. Four rules, in
+`plugins/azure/platform.py`:
 
 **1. Authentication is a REQUIRED tagged union, one arm per mechanism.** The site's platform block
 carries an `auth` table whose `mode` selects the arm:

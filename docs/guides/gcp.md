@@ -95,24 +95,27 @@ spec:
       secret: gcp-service-account-key
 ```
 
-For the default `env-var` secret source, compact a key file into the expected environment variable.
-In Bash with `jq`:
+For the default `env-var` secret source, put the whole downloaded file into the expected environment
+variable unchanged. Bash command substitution normally removes terminal newlines, so append one
+marker inside the substitution and remove only that marker afterward:
 
 ```bash
-export AW_SECRET_GCP_SERVICE_ACCOUNT_KEY="$(jq -c . /secure/path/agentworks-key.json)"
+AW_SECRET_GCP_SERVICE_ACCOUNT_KEY="$(cat /secure/path/agentworks-key.json; printf x)"
+export AW_SECRET_GCP_SERVICE_ACCOUNT_KEY="${AW_SECRET_GCP_SERVICE_ACCOUNT_KEY%x}"
 ```
 
-In native PowerShell (not a Bash-compatible shell), use PowerShell's JSON pipeline:
+In native PowerShell (not a Bash-compatible shell), read the file as one exact string:
 
 ```powershell
-$env:AW_SECRET_GCP_SERVICE_ACCOUNT_KEY = Get-Content -Raw C:\secure\agentworks-key.json |
-    ConvertFrom-Json |
-    ConvertTo-Json -Compress -Depth 100
+$env:AW_SECRET_GCP_SERVICE_ACCOUNT_KEY = [System.IO.File]::ReadAllText(
+    "C:\secure\agentworks-key.json"
+)
 ```
 
 Protect the source file and environment as credentials. Agentworks parses this value only to build
 the selected derived credential; it does not persist the JSON, attach it to the guest, or fall back
-to ADC if the explicit document is rejected.
+to ADC if the explicit document is rejected. Ordinary LF or CRLF formatting, including a terminal
+line ending, is accepted without compaction, base64 encoding, or rewriting.
 
 ## Create and operate a VM
 

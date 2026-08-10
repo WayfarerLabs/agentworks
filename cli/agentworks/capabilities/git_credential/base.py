@@ -191,7 +191,17 @@ class GitCredentialProvider(Capability):
         resolved secrets at all (inspection only?) is the accessor's
         typed ``ConfigError``.
         """
-        self._verify_token(ctx.secret(self.secret_name))
+        from agentworks.secrets.line_safety import (
+            LineOrientedSecretUse,
+            require_line_safe_secret,
+        )
+
+        token = require_line_safe_secret(
+            ctx.secret(self.secret_name),
+            use=LineOrientedSecretUse.GIT_CREDENTIAL,
+            secret_name=self.secret_name,
+        )
+        self._verify_token(token)
 
     def review_remote(self, url: str) -> list[str]:
         """Advisory review of a declared repo remote URL against THIS

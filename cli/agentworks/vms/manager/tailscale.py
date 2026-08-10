@@ -201,9 +201,17 @@ def _ensure_tailscale(
 ) -> None:
     """Rejoin Tailscale using one explicitly scoped auth-key reader."""
     import agentworks.vms.manager as _mgr
+    from agentworks.secrets.line_safety import (
+        LineOrientedSecretUse,
+        require_line_safe_secret,
+    )
     from agentworks.transports import native_transport, transport, wait_for_reconnect
 
-    auth_key = auth_keys.get(auth_key_name)
+    auth_key = require_line_safe_secret(
+        auth_keys.get(auth_key_name),
+        use=LineOrientedSecretUse.TAILSCALE,
+        secret_name=auth_key_name,
+    )
 
     # native_transport() composes Azure's route open/close (heal the
     # public IP, poke and remove the scoped ephemeral SSH allow) via

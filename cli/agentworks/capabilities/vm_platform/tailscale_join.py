@@ -31,6 +31,15 @@ def join_tailscale_ephemerally(
     sensitive-input semantics also keep reflected output and native failures
     out of logs, return values, diagnostics, and chained exception objects.
     """
+    from agentworks.secrets.line_safety import (
+        LineOrientedSecretUse,
+        require_line_safe_secret,
+    )
+
+    auth_key = require_line_safe_secret(
+        auth_key,
+        use=LineOrientedSecretUse.TAILSCALE,
+    )
     target.run(
         TAILSCALE_JOIN_STDIN_COMMAND,
         sudo=True,
@@ -61,6 +70,15 @@ class EphemeralTailscaleBootstrap:
         succeeds, later IP-discovery failure remains a completed bootstrap so
         Phase A cannot deliver the credential a second time.
         """
+        from agentworks.secrets.line_safety import (
+            LineOrientedSecretUse,
+            require_line_safe_secret,
+        )
+
+        auth_key = require_line_safe_secret(
+            auth_key,
+            use=LineOrientedSecretUse.TAILSCALE,
+        )
         self._wait_for_readiness()
 
         join_tailscale_ephemerally(self._target, auth_key, timeout=30)

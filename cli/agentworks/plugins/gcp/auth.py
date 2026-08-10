@@ -97,8 +97,8 @@ def _service_account_error(
         entity_kind="vm-site",
         entity_name=site_name,
         hint=(
-            f"store the complete compact service-account key JSON in secret '{auth.secret}' "
-            "and do not split credential fields into the vm-site"
+            f"store the complete service-account key JSON in secret '{auth.secret}' exactly as downloaded; "
+            "do not compact it or split credential fields into the vm-site"
         ),
     )
 

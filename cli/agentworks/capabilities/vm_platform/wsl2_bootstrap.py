@@ -48,6 +48,15 @@ def run_wsl2_bootstrap(
     staging, execution, cleanup, output parsing, redaction, and progress
     reporting. It does not persist VM state.
     """
+    from agentworks.secrets.line_safety import (
+        LineOrientedSecretUse,
+        require_line_safe_secret,
+    )
+
+    tailscale_auth_key = require_line_safe_secret(
+        tailscale_auth_key,
+        use=LineOrientedSecretUse.TAILSCALE,
+    )
     output.info("Bootstrapping VM...")
 
     script = generate_bootstrap_script(

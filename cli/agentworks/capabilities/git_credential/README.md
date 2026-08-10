@@ -284,15 +284,24 @@ once:
 
 ```python
 def runup(self, ctx: RunContext) -> None:
-    self._verify_token(ctx.secret(self.secret_name))
+    token = require_line_safe_secret(
+        ctx.secret(self.secret_name),
+        use=LineOrientedSecretUse.GIT_CREDENTIAL,
+        secret_name=self.secret_name,
+    )
+    self._verify_token(token)
 ```
 
 `secret_name` is the token secret the credential sources from: a plain read of
 `self.config.token.secret`, which the model layer already resolved to `git-token-<name>` when the
-field was absent. A provider implements exactly one slot, `_verify_token(token)`, and drives it
-through the shared `_probe_pat` helper. `_probe_pat` does the whole HTTP dance and the failure
-classification, so a provider only supplies the URL, the auth headers, the reject-status set, and a
-host label:
+field was absent. The consumer guard rejects CR, LF, and NUL immediately after token delivery,
+before an authenticated request can build a header. `build_credential_materials` repeats the same
+guard before constructing a durable credential line, so direct material-builder callers cannot
+bypass it.
+
+A provider implements exactly one slot, `_verify_token(token)`, and drives it through the shared
+`_probe_pat` helper. `_probe_pat` does the whole HTTP dance and the failure classification, so a
+provider only supplies the URL, the auth headers, the reject-status set, and a host label:
 
 - A single authenticated GET via `_http_probe` (which returns HTTP error statuses rather than
   raising them; only network-level failures raise `OSError`).

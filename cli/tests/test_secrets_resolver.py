@@ -67,6 +67,28 @@ def test_resolve_is_one_pass_and_idempotent(env, monkeypatch: pytest.MonkeyPatch
     assert resolver.get("some-token") == "v1"
 
 
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param("pretty\nvalue\n", id="lf-with-terminal-newline"),
+        pytest.param("pretty\r\nvalue\r\n", id="crlf-with-terminal-newline"),
+    ],
+)
+def test_operation_resolver_preserves_env_var_multiline_value(
+    env,
+    monkeypatch: pytest.MonkeyPatch,
+    value: str,
+) -> None:
+    config, registry = env()
+    monkeypatch.setenv("AW_SECRET_STRUCTURED", value)
+    resolver = Resolver(config, registry, interaction=InteractionPolicy.REFUSE)
+    resolver.register_name("structured")
+
+    resolver.resolve()
+
+    assert resolver.get("structured") == value
+
+
 def test_empty_set_resolves_without_touching_backends(env, monkeypatch: pytest.MonkeyPatch) -> None:
     from agentworks.secrets import resolve as secrets_resolve
 

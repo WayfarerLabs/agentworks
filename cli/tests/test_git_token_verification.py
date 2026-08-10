@@ -24,7 +24,7 @@ from agentworks.bootstrap import build_registry
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.git_credential.github import GitHubCredentialProvider
 from agentworks.config import load_config
-from agentworks.errors import TokenRejectedError
+from agentworks.errors import TokenRejectedError, ValidationError
 from agentworks.plugins.azure.azdo import AzDOCredentialProvider
 from agentworks.secrets.policy import InteractionPolicy
 from tests.conftest import ManifestDoc, write_manifests
@@ -129,6 +129,38 @@ def test_github_runup_without_secrets_is_error() -> None:
     p = GitHubCredentialProvider("gh", {})
     with pytest.raises(ConfigError, match="resolved secrets"):
         p.runup(RunContext())
+
+
+@pytest.mark.parametrize("token", ["prefix\nsuffix", "prefix\rsuffix", "prefix\0suffix"])
+def test_github_runup_rejects_line_unsafe_token_before_authenticated_probe(
+    monkeypatch: pytest.MonkeyPatch,
+    token: str,
+) -> None:
+    def _no_probe(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("line-unsafe token reached the authenticated probe")
+
+    monkeypatch.setattr("agentworks.capabilities.git_credential.base._http_probe", _no_probe)
+    provider = GitHubCredentialProvider("gh", {})
+
+    with pytest.raises(ValidationError) as caught:
+        provider.runup(RunContext(secrets=_StubReader({"git-token-gh": token})))
+
+    assert token not in repr((caught.value.args, vars(caught.value)))
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+
+
+@pytest.mark.parametrize("token", ["prefix\nsuffix", "prefix\rsuffix", "prefix\0suffix"])
+def test_credential_materials_reject_line_unsafe_token_at_final_sink(token: str) -> None:
+    from agentworks.git_credentials import build_credential_materials
+
+    provider = GitHubCredentialProvider("gh", {})
+    with pytest.raises(ValidationError) as caught:
+        build_credential_materials({"gh": provider}, {"gh": token})
+
+    assert token not in repr((caught.value.args, vars(caught.value)))
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
 # -- azdo -------------------------------------------------------------------

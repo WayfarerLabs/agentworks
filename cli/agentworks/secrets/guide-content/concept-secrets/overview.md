@@ -5,4 +5,6 @@ implementation inventory exposes capability readiness. Neither exposes resolved 
 
 Agentworks synthesizes the `env-var` and `prompt` sources, so the simple case needs no source
 manifest. The environment source derives `AW_SECRET_<UPPER_SNAKE_CASE>` unless a secret mapping
-overrides it. The prompt source has no static identifier.
+overrides it. A set environment value is read exactly, including terminal line endings. The prompt
+source has no static identifier. Resolution preserves multiline strings as opaque content and
+rejects NUL.

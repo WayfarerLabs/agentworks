@@ -13,7 +13,7 @@ from agentworks.capabilities.vm_platform.tailscale_join import (
     EphemeralTailscaleBootstrap,
     join_tailscale_ephemerally,
 )
-from agentworks.errors import ProvisioningError
+from agentworks.errors import ProvisioningError, ValidationError
 from agentworks.plugins.gcp.bootstrap import GCE_READINESS_COMMAND, GCE_READINESS_LABEL
 from agentworks.ssh import SSHError, SSHResult
 from agentworks.vms.initializer.credentials import _join_tailscale
@@ -69,6 +69,29 @@ def test_shared_join_preserves_failure_identity_without_secret_diagnostics() -> 
     _assert_fixed_stdin_call(target.calls[0], timeout=30)
     assert _SENTINEL not in str(caught.value)
     assert _SENTINEL not in repr(caught.value)
+
+
+@pytest.mark.parametrize("auth_key", ["prefix\nsuffix", "prefix\rsuffix", "prefix\0suffix"])
+def test_shared_join_rejects_line_unsafe_key_before_transport(auth_key: str) -> None:
+    target = _RecordingTransport()
+
+    with pytest.raises(ValidationError) as caught:
+        join_tailscale_ephemerally(target, auth_key, timeout=30)  # type: ignore[arg-type]
+
+    assert target.calls == []
+    assert auth_key not in repr((caught.value.args, vars(caught.value)))
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+
+
+def test_bootstrap_rejects_line_unsafe_key_before_readiness_transport() -> None:
+    auth_key = "prefix\r\nsuffix"
+    target = _RecordingTransport()
+
+    with pytest.raises(ValidationError):
+        EphemeralTailscaleBootstrap(target).complete(auth_key)  # type: ignore[arg-type]
+
+    assert target.calls == []
 
 
 def test_initializer_join_uses_fixed_stdin_once_then_updates_the_ip() -> None:

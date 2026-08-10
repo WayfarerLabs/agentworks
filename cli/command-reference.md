@@ -283,6 +283,9 @@ resource when a backend needs shared configuration or when you want another name
 `secret verify` resolves every unique requested name in one batch, prints one value-free outcome row
 per name, and exits nonzero when any name does not resolve. It refuses interactive sources by
 default; `--allow-interaction` opts into prompting or provider authentication for that invocation.
+Resolution preserves multiline strings and rejects NUL. A resolved row proves the source contract,
+not that a narrower line-oriented environment, credential, header, or stdin consumer accepts the
+value.
 
 ### VMs
 
