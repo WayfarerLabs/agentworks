@@ -1,4 +1,4 @@
-# Manifesto
+# The Agentworks Manifesto
 
 Agentworks is opinionated, and the opinions come from a specific reading of where agentic
 engineering is going and what it costs to do safely. This is the argument behind the project. The
@@ -70,6 +70,20 @@ run containers, and genuine multi-user collaboration.
 The VM provides the hard isolation boundary. Within it, ordinary Linux users, groups, and filesystem
 permissions provide further separation and controlled collaboration between agents.
 
+### Identity and Workload Are Separate
+
+Agentworks separates who performs work from the unit of work itself. Agents are identities. Sessions
+are workloads that run in a workspace as either an agent or the VM's admin user. Creating an agent
+does not start a workload, and creating a session does not require creating a new identity.
+
+That separation lets identity and workload lifecycles vary independently. A durable agent can carry
+tools, credentials, harness context, memory, and interactive authentication across many disposable
+sessions. A session can also create a new agent alongside itself, supporting a one-off identity
+lifecycle when the operator wants one.
+
+Reproducible identity setup belongs in a template. The valuable state that cannot be reproduced
+belongs to the identity, while the session remains the disposable unit of work.
+
 ### Agentworks Is a Platform, Not a Harness
 
 There are many strong options for running agentic workloads, including first-party harnesses and
@@ -87,7 +101,8 @@ Agentworks is designed to solve that problem.
 
 Broadly applicable systems can spiral into complexity by supporting too many ways to do the same
 thing. Agentworks takes an opinionated stance: one base operating system, a small set of integrated
-tools, declarative configuration, and common extension contracts.
+tools, declarative configuration, a shared command-plan orchestration model, and common extension
+contracts.
 
 The capability model follows the same conviction. Integrations should not accumulate as special
 cases in the core. Shared extension points keep the core understandable and let operators select the
@@ -107,17 +122,19 @@ not crawl untrusted content itself.
 That handoff narrows exposure rather than eliminating it. Anything the low-privilege agent writes is
 still attacker-influenced input. Treat it as data to evaluate, not instructions to follow.
 
-### Durable Identities, Disposable Work
+### Declarative Within Reason
 
-Different resources deserve different lifetimes. Infrastructure and identities can be durable;
-individual work sessions should be cheap to create and discard.
+The DevOps movement demonstrated the power of declarative approaches. Agentworks follows that model
+only where a declaration can be an honest contract.
 
-Reproducible setup belongs in declarative templates. The valuable state that cannot be reproduced,
-including harness context, accumulated memory, and interactive authentication, belongs to a durable
-agent identity. Sessions are the disposable unit of work that runs against it.
+For VMs and agents, `reinit` reruns the full Agentworks initialization contract while preserving
+accumulated state outside that contract. For workspaces, `repair` is deliberately narrower. It
+restores the invariants Agentworks can safely promise without treating the repository clone and the
+work inside it as disposable implementation details. Sessions likewise accumulate harness history
+and are managed through an imperative lifecycle.
 
-### Declare It, Then Converge It
-
-Every layer should be templated and declared. Long-lived resources should be reinitialized
-idempotently so they can evolve without being torn down and rebuilt. Infrastructure that can be
-declared, inspected, and converged is infrastructure an operator can control.
+Who created a piece of state does not decide whether it is safe to converge; the resource contract
+does. Declarative machinery should rebuild what can be reproduced, but it must not erase accumulated
+state merely because a declaration no longer names it. When reconciliation cannot be both complete
+and safe, Agentworks names a narrower promise instead of pretending the resource is fully
+declarative.
