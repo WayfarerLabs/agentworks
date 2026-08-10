@@ -84,6 +84,13 @@ the checked box has merged to `main`, in step with the lock-at-merge paragraph u
 [Lockfile](#lockfile). Key that to the box, not to the plan file: plans routinely merge mid-effort,
 so the plan being on `main` says nothing about whether any particular box has landed there yet.
 
+Supersession is not error (operator ruling, 2026-08-10). When a scope correction expunges work
+before it ever merges, the truthful checked boxes recording that work remain in the plan: the work
+happened, and "it never shipped" does not make a done-work record false. The clean-slate standard
+applies to everything around those boxes instead — narration, correction framing, definitions of
+done, and unchecked boxes of the abandoned direction all strip — with at most a one-line note
+recording the supersession.
+
 Mutability also follows ownership. An agent working an effort edits that effort's SDD artifacts and
 no other's: do not update another SDD's content (a saga SDD's ledger, a sibling effort's plan)
 unless specifically instructed to, and treat such an instruction as the exception, not standard
