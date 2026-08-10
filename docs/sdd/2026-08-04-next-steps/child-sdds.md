@@ -177,7 +177,11 @@ selection in lockstep (CI enforces).
 
 - [x] Ruled and brief seeded (2026-08-09; website-coordination constraint updated 2026-08-09 after
       the website Phase 4B design landed; rough-cut expectation added 2026-08-10)
-- [ ] Survey, rough cut, operator rewrite, merge
+- [x] Survey, rough cut, operator rewrite, merge (PR #470, merged 2026-08-10 with the operator's
+      blessing as the merge itself: docs/manifesto.md is the single conviction-voiced home, the
+      website consumes it with the Home identity re-pinned atomically per the landing order, the
+      kernel-boundary disclosure relocated to SECURITY.md, the concept-manifesto guide topic teaches
+      by pointing, and the development-principles clause names the destination)
 
 ### Dispatched task (not a child SDD): safer migrations
 
