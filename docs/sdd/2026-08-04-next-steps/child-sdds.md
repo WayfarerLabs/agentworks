@@ -122,7 +122,7 @@ locked.
       collection), and the suite parallelized (pytest workers with per-worker log isolation). Two
       review rounds (saga lead + integration, both mutation-verified); CI Python checks fell from
       6-7.5 minutes to about 2 (worst case 7m38s to 2m21s)
-- [ ] Locked
+- [x] Locked (`locked.md` merged with PR #453, 2026-08-10; binds at merge per the sdd skill)
 
 ### Installer plugins (pre-0.14 core slimming): 2026-08-07-installer-plugins
 
