@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from agentworks.bootstrap import build_registry
-from agentworks.config import ConfigError, load_config
+from agentworks.config import ConfigError, load_config, load_database_config
 from agentworks.manifests import RESOURCES_DIRNAME, load_manifests
 from tests.conftest import ManifestDoc, write_manifests
 
@@ -73,6 +73,37 @@ def test_load_valid_config(config_dir: Path) -> None:
     assert registry.lookup("git-credential", "github").provider.name == "github"
     assert registry.lookup("git-credential", "azdo").provider.config == {"org": "my-org"}
     assert admin.git_credentials == ["github"]
+    assert load_config(config_dir).database.auto_backup_before_migration is True
+
+
+def test_database_config_is_strict_and_focused(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        "[database]\nauto_backup_before_migration = false\n[operator]\nunrelated_invalid_shape = 17\n"
+    )
+
+    assert load_database_config(config_path).auto_backup_before_migration is False
+
+
+@pytest.mark.parametrize(
+    ("text", "match"),
+    [
+        ("database = false\n", "must be a table"),
+        ("[database]\nauto_backup_before_migration = 1\n", "must be a boolean"),
+        ("[database]\nunknown = true\n", "unexpected"),
+        ("[database\n", "invalid config"),
+    ],
+)
+def test_focused_database_config_rejects_unsafe_input(tmp_path: Path, text: str, match: str) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(text)
+
+    with pytest.raises(ConfigError, match=match):
+        load_database_config(config_path)
+
+
+def test_focused_database_config_absent_file_uses_safe_default(tmp_path: Path) -> None:
+    assert load_database_config(tmp_path / "absent.toml").auto_backup_before_migration is True
 
 
 def test_missing_config_file(tmp_path: Path) -> None:

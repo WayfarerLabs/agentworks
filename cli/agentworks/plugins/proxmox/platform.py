@@ -89,7 +89,7 @@ class ProxmoxConfig(AgwModel):
 class ProxmoxPlatform(VMPlatform):
     """Runs VMs on a Proxmox VE cluster."""
 
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int] = 2
     name: ClassVar[str] = "proxmox"
     description: ClassVar[str] = "Proxmox VE cluster VMs (clone + cloud-init)"
     config_model: ClassVar[type[ProxmoxConfig]] = ProxmoxConfig
@@ -107,6 +107,10 @@ class ProxmoxPlatform(VMPlatform):
         There is no native interactive transport: the QEMU guest agent's exec interface
         is one-shot and non-interactive, so the Proxmox web UI's serial console is the
         equivalent escape hatch.
+
+        Creation passes the required Tailscale key through a private guest-agent staging
+        file, verifies removal, and returns only after the guest reports its Tailscale IP.
+        A bootstrap failure rolls the cloned VM back before it propagates.
 
         Ships as the opt-in `proxmox` system plugin, so a site stays not-ready until
         `[plugins] system` lists it.
@@ -329,22 +333,19 @@ class ProxmoxPlatform(VMPlatform):
                 self._wait_for_cloud_init(node, newid, ctx)
 
                 # 8. Run bootstrap script via guest agent
-                bootstrap_complete = False
-                tailscale_ip: str | None = None
-                if request.tailscale_auth_key:
-                    output.detail("Running bootstrap via guest agent...")
-                    bootstrap = generate_bootstrap_script(
-                        admin_username=request.admin_username,
-                        ssh_public_key=request.ssh_public_key,
-                        provisioning_packages=PROVISIONING_PACKAGES,
-                        tailscale_auth_key=request.tailscale_auth_key,
-                        hostname=request.hostname,
-                        swap=request.swap_gib,
-                    )
-                    tailscale_ip = self._run_bootstrap_via_agent(node, newid, bootstrap, ctx)
-                    bootstrap_complete = tailscale_ip is not None
-                    if tailscale_ip:
-                        output.detail(f"Tailscale IP: {tailscale_ip}")
+                output.detail("Running bootstrap via guest agent...")
+                bootstrap = generate_bootstrap_script(
+                    admin_username=request.admin_username,
+                    ssh_public_key=request.ssh_public_key,
+                    provisioning_packages=PROVISIONING_PACKAGES,
+                    tailscale_auth_key=request.tailscale_auth_key,
+                    hostname=request.hostname,
+                    swap=request.swap_gib,
+                )
+                tailscale_ip = self._run_bootstrap_via_agent(node, newid, bootstrap, ctx)
+                if not tailscale_ip:
+                    raise ProvisioningError("Proxmox bootstrap did not return a Tailscale IP")
+                output.detail(f"Tailscale IP: {tailscale_ip}")
             except Exception:
                 # Re-raised unwrapped after the rollback: the manager's
                 # create arm wraps EVERY escaping exception in
@@ -358,9 +359,8 @@ class ProxmoxPlatform(VMPlatform):
             rollback_create_on_interrupt(self._api(ctx), node, newid, pending_upid=pending_upid)
             raise
 
-        host = tailscale_ip or ip
         target = SSHTransport(
-            host=host,
+            host=tailscale_ip,
             user=request.admin_username,
             identity_file=request.ssh_private_key,
             force_tty=sys.platform == "win32",
@@ -369,7 +369,6 @@ class ProxmoxPlatform(VMPlatform):
         return ProvisionResult(
             native_transport=target,
             platform_metadata={"vmid": str(newid), "node": node},
-            bootstrap_complete=bootstrap_complete,
             tailscale_ip=tailscale_ip,
         )
 
@@ -446,7 +445,10 @@ class ProxmoxPlatform(VMPlatform):
             except ProxmoxAPIError:
                 pass
             time.sleep(5)
-        # Don't fail: cloud-init may not be installed or may have already finished
+        raise ProvisioningError(
+            f"Timed out waiting for cloud-init on Proxmox VMID {vmid}; "
+            "the template must have cloud-init and the QEMU guest agent installed and enabled"
+        )
 
     def _wait_for_guest_ip(self, node: str, vmid: int, ctx: RunContext, *, timeout: int = 120) -> str:
         """Poll the guest agent until it reports a non-loopback IPv4 address."""
@@ -470,10 +472,11 @@ class ProxmoxPlatform(VMPlatform):
         # to reach readiness during provisioning, not an API failure.
         raise ProvisioningError(f"Timed out waiting for guest agent IP on VMID {vmid}")
 
-    def _run_bootstrap_via_agent(self, node: str, vmid: int, script: str, ctx: RunContext) -> str | None:
+    def _run_bootstrap_via_agent(self, node: str, vmid: int, script: str, ctx: RunContext) -> str:
         """Write and run the bootstrap script via the guest agent.
 
-        Returns the Tailscale IP if bootstrap succeeds, None otherwise.
+        Returns the Tailscale IP if bootstrap succeeds. A timeout, unsuccessful
+        execution, or missing valid Tailscale IP raises so create rolls back.
         """
         from agentworks.capabilities.vm_platform.bootstrap_script import parse_bootstrap_output
 
@@ -529,16 +532,14 @@ class ProxmoxPlatform(VMPlatform):
                 _warn_bootstrap_file_residue()
 
         if result is None:
-            output.warn("bootstrap timed out")
-            return None
+            raise ProvisioningError("Proxmox guest-agent bootstrap timed out")
 
         exit_code = result.get("exitcode", -1)
         stdout = result.get("out-data", "")
         parsed = parse_bootstrap_output(stdout, exit_code)
 
         if parsed.ok:
+            assert parsed.tailscale_ip is not None
             return parsed.tailscale_ip
 
-        output.warn(f"Bootstrap failed (exit {exit_code})")
-
-        return None
+        raise ProvisioningError(f"Proxmox guest-agent bootstrap failed (exit {exit_code})")

@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from agentworks.capabilities.vm_platform import BootstrapProgress
 from agentworks.ssh import SSHLogger, SSHResult
 
 if TYPE_CHECKING:
@@ -54,6 +55,22 @@ def test_close_without_exception_omits_traceback_block(logger: SSHLogger) -> Non
     text = logger.path.read_text()
     assert "EXCEPTION:" not in text
     assert "# Finished:" in text
+
+
+def test_ssh_logger_structurally_satisfies_bootstrap_progress(logger: SSHLogger) -> None:
+    progress: BootstrapProgress = logger
+
+    progress.step("bootstrap step")
+    progress.output("bootstrap output")
+    progress.warning("bootstrap warning")
+    progress.log_error("bootstrap error")
+    logger.close()
+
+    text = logger.path.read_text()
+    assert "bootstrap step" in text
+    assert "bootstrap output" in text
+    assert "bootstrap warning" in text
+    assert "bootstrap error" in text
 
 
 def test_path_retargeting_moves_subsequent_records(

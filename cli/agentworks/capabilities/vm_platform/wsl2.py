@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
+from agentworks.capabilities.vm_platform.wsl2_bootstrap import run_wsl2_bootstrap
 from agentworks.db import VMStatus
 from agentworks.errors import StateError
 from agentworks.schema import AgwModel
@@ -488,7 +489,7 @@ class Wsl2Config(AgwModel):
 class WSL2Platform(VMPlatform):
     """Runs VMs as WSL2 Debian distributions on Windows."""
 
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int] = 2
     name: ClassVar[str] = "wsl2"
     description: ClassVar[str] = "WSL2 Debian distributions on Windows"
     config_model: ClassVar[type[Wsl2Config]] = Wsl2Config
@@ -498,6 +499,10 @@ class WSL2Platform(VMPlatform):
         WSL2 runs each VM as a Debian distribution on the Windows machine agentworks is
         running on. It takes no configuration beyond selecting it: the built-in `wsl2`
         site is all most hosts need.
+
+        Creation runs the generated bootstrap through private local and distro staging,
+        removes both staging files, and returns only after Tailscale reports an IP. A
+        bootstrap failure rolls the new distribution back before it propagates.
 
         It is supported only on Windows, and reports not-ready everywhere else.
         """,
@@ -742,6 +747,21 @@ class WSL2Platform(VMPlatform):
                 _wsl(["--terminate", vm_name])
                 # Run a command to trigger the distro to start with systemd
                 _wsl(["--distribution", vm_name, "--user", "root", "--", "bash", "-c", "echo ok"])
+
+                # WSL2's generated script is its primary create-time bootstrap,
+                # so it stays inside the same distro rollback span. The manager
+                # owns the progress sink and persists the returned IP later.
+                native_transport = WSL2Transport(distro_name=distro_name, user=admin_username)
+                tailscale_ip = run_wsl2_bootstrap(
+                    native_transport,
+                    admin_username=admin_username,
+                    ssh_public_key=request.ssh_public_key,
+                    tailscale_auth_key=request.tailscale_auth_key,
+                    hostname=request.hostname,
+                    swap_gib=0,
+                    progress=request.progress,
+                )
+                output.detail(f"Tailscale IP: {tailscale_ip}")
             except Exception:
                 # WSL2's error convention holds: the RuntimeErrors from
                 # _wsl / _powershell propagate unwrapped; the only new
@@ -755,8 +775,9 @@ class WSL2Platform(VMPlatform):
 
         output.detail(f"WSL2 VM '{vm_name}' provisioned.")
         return ProvisionResult(
-            native_transport=WSL2Transport(distro_name=distro_name, user=admin_username),
+            native_transport=native_transport,
             platform_metadata={"distro_name": distro_name},
+            tailscale_ip=tailscale_ip,
         )
 
     def _cleanup_partial_create(self, distro_name: str) -> None:

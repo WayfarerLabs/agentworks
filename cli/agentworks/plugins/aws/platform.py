@@ -89,7 +89,7 @@ class EC2Platform(VMPlatform):
     services could plausibly back platforms of their own someday (the same
     one-service rationale ``azure-vm`` follows for Azure)."""
 
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int] = 2
     name: ClassVar[str] = "aws-ec2"
     description: ClassVar[str] = "Amazon EC2 instances (region + optional VPC subnet)"
     config_model: ClassVar[type[AwsEC2Config]] = AwsEC2Config
@@ -125,6 +125,10 @@ class EC2Platform(VMPlatform):
         SSO), which is what boto3 does when told nothing. `auth: {mode: access-key,
         ...}` replaces that chain for this site; add `assume_role_arn` to layer an STS
         AssumeRole on top.
+
+        EC2 retains credential-free UserData. After cloud-init is ready, creation sends
+        the required Tailscale key through one fixed SSH command on stdin and returns
+        only after join succeeds. Failure terminates the new instance and security group.
 
         Ships as the opt-in `aws` system plugin, so a site stays not-ready until
         `[plugins] system` lists it.
@@ -373,16 +377,14 @@ class EC2Platform(VMPlatform):
         # users block. When create-time bootstrap is requested, embed the full
         # script with no Tailscale key and deliver the resolved key once over
         # the post-boot provisioning transport below.
-        bootstrap = None
-        if request.tailscale_auth_key:
-            bootstrap = generate_bootstrap_script(
-                admin_username=request.admin_username,
-                ssh_public_key="",
-                provisioning_packages=PROVISIONING_PACKAGES,
-                tailscale_auth_key=None,
-                hostname=request.hostname,
-                swap=swap,
-            )
+        bootstrap = generate_bootstrap_script(
+            admin_username=request.admin_username,
+            ssh_public_key="",
+            provisioning_packages=PROVISIONING_PACKAGES,
+            tailscale_auth_key=None,
+            hostname=request.hostname,
+            swap=swap,
+        )
         user_data = _generate_ec2_user_data(
             admin_username=request.admin_username,
             ssh_public_key=request.ssh_public_key,
@@ -410,7 +412,6 @@ class EC2Platform(VMPlatform):
         instance_id: str | None = None
         prov_transport: Transport | None = None
         tailscale_ip: str | None = None
-        bootstrap_complete = False
         # The WHOLE fallible region is guarded by both arms of the create
         # rollback contract: a failure (including a non-SSHError from transport
         # construction or the inline bootstrap wait) AND an operator interrupt
@@ -482,10 +483,7 @@ class EC2Platform(VMPlatform):
 
             # The provider-retained bootstrap installed Tailscale without a
             # credential. Wait for it, then join once over stdin.
-            if request.tailscale_auth_key:
-                completion = EphemeralTailscaleBootstrap(prov_transport).complete(request.tailscale_auth_key)
-                bootstrap_complete = completion.complete
-                tailscale_ip = completion.tailscale_ip
+            tailscale_ip = EphemeralTailscaleBootstrap(prov_transport).complete(request.tailscale_auth_key)
         except KeyboardInterrupt:
             rollback_create_on_interrupt(ec2, region, backend_name, instance_id, security_group_id)
             raise
@@ -510,7 +508,6 @@ class EC2Platform(VMPlatform):
         return ProvisionResult(
             native_transport=prov_transport,
             platform_metadata=metadata,
-            bootstrap_complete=bootstrap_complete,
             tailscale_ip=tailscale_ip,
         )
 
@@ -636,15 +633,16 @@ class EC2Platform(VMPlatform):
         self._close_provisioning_access(vm, ctx)
 
     def secure_failed_vm(self, vm: VMRow, ctx: RunContext) -> None:
-        """Fail closed: close provisioning access on a kept, not-completed VM.
+        """Fail closed after kept post-create verification failure.
 
         Mirrors :meth:`post_tailscale_ready`, which only fires on success: a VM
-        whose bootstrap or Tailscale verification died (marked FAILED) or was
-        interrupted mid-bootstrap (row status untouched by the abort) is kept
-        for debugging, and this hook revokes exactly the bootstrap allow's tuples
-        so it defaults to zero inbound exposure. Debugging and recovery stay
-        possible: ``vm shell --platform`` and ``vm delete`` poke a fresh
-        transient allow via :meth:`transient_route`.
+        whose Tailscale SSH verification died (marked FAILED) or was interrupted
+        during verification (row status untouched by the abort) is kept for
+        debugging, and this hook revokes exactly the bootstrap allow's tuples so
+        it defaults to zero inbound exposure. Create-time bootstrap failures roll
+        back inside :meth:`create` and never reach this hook. Debugging and
+        recovery stay possible: ``vm shell --platform`` and ``vm delete`` poke a
+        fresh transient allow via :meth:`transient_route`.
 
         ``ctx`` is the create op's own scoped context, whose secrets were
         resolved before Phase A began, so even the interrupt path never resolves

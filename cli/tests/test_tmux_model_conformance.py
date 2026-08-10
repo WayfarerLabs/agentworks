@@ -26,6 +26,7 @@ import shutil
 import subprocess
 import tempfile
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Protocol
 
 import pytest
@@ -62,8 +63,8 @@ class _Tmux(Protocol):
 class RealTmux:
     """Drive a real, isolated tmux server over ``subprocess``.
 
-    The server uses a private ``-L`` socket (per-pid, so parallel or repeated
-    runs never collide) and is started from a temp config that sets only
+    The server uses a private ``-L`` socket (per-test and per-process, so
+    parallel or repeated runs never collide) and is started from a temp config that sets only
     ``base-index`` / ``pane-base-index``. That config, rather than the literal
     ``-f /dev/null`` the task sketched, is required: base-index has to be set
     BEFORE the first window is created, but a tmux server with no session does
@@ -262,9 +263,9 @@ class Pair:
 
 
 @pytest.fixture
-def pair(request: pytest.FixtureRequest) -> Iterator[Pair]:
+def pair(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[Pair]:
     base_index: int = request.param
-    socket = f"aw-conf-{os.getpid()}-{base_index}"
+    socket = f"aw-conf-{os.getpid()}-{tmp_path.name}-{base_index}"
     real = RealTmux(socket, base_index)
     try:
         yield Pair(base_index, real)

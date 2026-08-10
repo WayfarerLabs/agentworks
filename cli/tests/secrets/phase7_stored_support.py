@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import ast
-from pathlib import Path
 
 from tests.secrets.phase7_lexical_support import (
     _enclosing_function,
-    _module_identity,
+    _object,
+    _production_modules,
     _qualified_function_name,
     _semantic_object,
     _semantic_type_indexes,
@@ -19,7 +19,6 @@ from tests.secrets.phase7_resolver_support import (
     _resolver_bindings,
     _resolver_usage_violations_from_tree,
 )
-from tests.secrets.test_phase7_enforcement import _object
 
 
 def _stored_call_edges_from_tree(
@@ -96,16 +95,14 @@ def _stored_call_edges_from_tree(
 
 
 def _stored_call_edges() -> dict[tuple[str, str], tuple[str, ...]]:
-    root = Path(__file__).parents[2] / "agentworks"
     returns, fields = _semantic_type_indexes()
     discovered: dict[tuple[str, str], tuple[str, ...]] = {}
-    for path in root.rglob("*.py"):
-        module, current_package = _module_identity(path, root)
+    for source in _production_modules():
         discovered.update(
             _stored_call_edges_from_tree(
-                ast.parse(path.read_text()),
-                module=module,
-                current_package=current_package,
+                source.tree,
+                module=source.module,
+                current_package=source.current_package,
                 returns=returns,
                 fields=fields,
             )
@@ -114,17 +111,15 @@ def _stored_call_edges() -> dict[tuple[str, str], tuple[str, ...]]:
 
 
 def _resolver_usage_violations() -> list[tuple[str, str, str, int, str]]:
-    root = Path(__file__).parents[2] / "agentworks"
     returns, fields = _semantic_type_indexes()
     violations: list[tuple[str, str, str, int, str]] = []
-    for path in root.rglob("*.py"):
-        module, current_package = _module_identity(path, root)
-        tree = ast.parse(path.read_text())
-        parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    for source in _production_modules():
+        tree = source.tree
+        parents = source.parents
         for expression, lineno, reason in _resolver_usage_violations_from_tree(
             tree,
-            module=module,
-            current_package=current_package,
+            module=source.module,
+            current_package=source.current_package,
             returns=returns,
             inherited_fields=fields,
         ):
@@ -138,5 +133,5 @@ def _resolver_usage_violations() -> list[tuple[str, str, str, int, str]]:
             assert len(matching) == 1
             function = _enclosing_function(parents, matching[0])
             owner = _qualified_function_name(parents, function) if function is not None else "<module>"
-            violations.append((module, owner, expression, lineno, reason))
+            violations.append((source.module, owner, expression, lineno, reason))
     return violations

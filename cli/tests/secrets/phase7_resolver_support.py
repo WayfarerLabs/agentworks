@@ -6,22 +6,20 @@ import ast
 from typing import cast
 
 from tests.secrets.phase7_lexical_support import (
+    _RESOLVER_CONTAINER_TYPE,
+    _RESOLVER_TYPE,
     _binding_targets,
-    _dotted_attribute,
     _enclosing_function,
     _lexically_shadowed_names,
+    _object,
+    _object_name,
     _scope_nodes,
     _semantic_aliases,
     _semantic_annotation_type,
+    _semantic_call_name,
     _semantic_object,
     _semantic_reference,
     _visible_semantic_aliases,
-)
-from tests.secrets.test_phase7_enforcement import (
-    _RESOLVER_CONTAINER_TYPE,
-    _RESOLVER_TYPE,
-    _object,
-    _object_name,
 )
 
 
@@ -575,24 +573,3 @@ def _resolver_usage_violations_from_tree(
                 reason = f"unsupported-{kind}" if kind != "direct" else "first-class-extraction"
                 violations.append((ast.unparse(node), node.lineno, reason))
     return sorted(violations, key=lambda violation: violation[1])
-
-
-def _semantic_call_name(
-    call: ast.Call,
-    *,
-    aliases: dict[str, str],
-    module: str,
-    local_definitions: set[str],
-) -> str | None:
-    if isinstance(call.func, ast.Name):
-        if call.func.id in aliases:
-            return aliases[call.func.id]
-        if call.func.id in local_definitions:
-            return f"{module}.{call.func.id}"
-        return None
-    if not isinstance(call.func, ast.Attribute):
-        return None
-    parts = _dotted_attribute(call.func)
-    if parts is None or parts[0] not in aliases:
-        return None
-    return ".".join((aliases[parts[0]], *parts[1:]))
