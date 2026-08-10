@@ -270,7 +270,7 @@ description: >-
   or session operation request. Use whenever the operator asks to install, understand, configure,
   troubleshoot, or operate Agentworks.
 compatibility:
-  Requires network and operator-approved workstation access when the requested task needs them.
+  Requires Python 3.12 or newer and network access only when installing or updating the CLI.
 metadata:
   agentworks-package-version: "1.0.0"
   agentworks-min-cli-version: "0.14.0"

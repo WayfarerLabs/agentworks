@@ -1,7 +1,7 @@
-At assistance startup, give the workstation-access disclosure once. The operator's explicit setup or
-adoption instruction then establishes the current authorization envelope. Proceed through reasonably
-necessary in-scope reads, presence checks, commands, verification, and mutations without asking
-again before every action. A materially ambiguous request gets one resolving scope question.
+The operator's explicit setup or adoption instruction establishes the current authorization
+envelope. Proceed through reasonably necessary in-scope reads, presence checks, commands,
+verification, and mutations without asking again before every action. A materially ambiguous request
+gets one resolving scope question.
 
 Ask again only for an uncovered material expansion or when the operator requested confirmation for
 every action. A clear operator instruction that covers an expansion is already the decision: state

@@ -30,9 +30,9 @@ def test_onboarding_authored_blocks_cover_durable_authorization_and_clean_setup(
     topic = _topic("concept-onboarding")
     blocks = {type(block): block.markdown for block in topic.blocks if hasattr(block, "markdown")}
     contract = " ".join(blocks[AgentContract].split())
-    assert "intended workstation" in blocks[Overview]
-    assert "not root access" in blocks[Overview]
-    assert "State this disclosure once" in blocks[Overview]
+    assert "Security disclosure" not in blocks[Overview]
+    assert "intended workstation" not in blocks[Overview]
+    assert "At assistance startup" not in contract
     assert "without asking again before every action" in contract
     assert "one resolving scope question" in contract
     assert "authorization class" in contract
@@ -155,7 +155,7 @@ def test_action_contract_pins_authorization_refusal_and_first_resources() -> Non
     assert "no attach, delete, or privilege elevation" in actions[4].expected_state
 
 
-def test_rendered_disclosure_precedes_ordered_action_records() -> None:
+def test_selected_onboarding_omits_startup_disclosure_and_orders_action_records() -> None:
     rendered = render_topic(
         _topic("concept-onboarding"),
         None,
@@ -163,7 +163,8 @@ def test_rendered_disclosure_precedes_ordered_action_records() -> None:
         unavailable="test snapshot",
         onboarding_snapshot=OnboardingSnapshot((), (GuideInstanceFact("vm", "worker"),), ()),
     )
-    assert rendered.markdown.index("## Security disclosure") < rendered.markdown.index("### `verify-vm-connection`")
+    assert "## Security disclosure" not in rendered.markdown
+    assert "At assistance startup" not in rendered.markdown
     assert "Authorization class: `connect-named-vm`" in rendered.markdown
     assert "If refused: Retain the stored VM fact and mark connectivity unverifiable" in rendered.markdown
     action = rendered.markdown[rendered.markdown.index("### `verify-vm-connection`") :]

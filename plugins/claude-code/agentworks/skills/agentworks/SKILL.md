@@ -4,7 +4,7 @@ description: >-
   Install or update the Agentworks CLI, verify its version, and run its built-in agent guide. Use
   when the operator wants to bootstrap Agentworks assistance.
 compatibility: >-
-  Requires network and operator-approved workstation access when the requested task needs them.
+  Requires Python 3.12 or newer and network access only when installing or updating the CLI.
 metadata:
   agentworks-package-version: "1.0.0"
   agentworks-min-cli-version: "0.14.0"

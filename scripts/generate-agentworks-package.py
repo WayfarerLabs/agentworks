@@ -227,7 +227,7 @@ def _skill(metadata: Metadata, body: bytes) -> bytes:
         + _folded_yaml("description", metadata.skill_description)
         + _folded_yaml(
             "compatibility",
-            "Requires network and operator-approved workstation access when the requested task needs them.",
+            "Requires Python 3.12 or newer and network access only when installing or updating the CLI.",
         )
         + "metadata:\n"
         f"  agentworks-package-version: {json.dumps(metadata.package_version)}\n"
