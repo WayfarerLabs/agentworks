@@ -622,12 +622,10 @@ class AzureVMPlatform(VMPlatform):
             # allow still open, so a failure that ESCAPES this span must
             # tear the whole set down (VM first: it holds the NIC and
             # disk) exactly as the interrupt arm does.
-            # The shared bootstrap finisher absorbs SSHError only while
-            # waiting for readiness (an unreachable or slow bootstrap is
-            # tolerated: Phase A retries). Once it sends the key, join failure
-            # escapes and rolls the VM back rather than risking a second
-            # delivery. Raw local failures escape too. Re-raised wrapped,
-            # matching the creation arm. A
+            # The shared bootstrap finisher raises on readiness or join
+            # failure so neither can escape this create-time rollback window
+            # or risk a second delivery in Phase A. Raw local failures escape
+            # too. Re-raised wrapped, matching the creation arm. A
             # second Ctrl-C DURING this arm's rollback escapes to the
             # outer interrupt arm, which re-runs the rollback in full;
             # that repeat is safe because every teardown step is

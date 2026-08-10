@@ -123,6 +123,18 @@ def _assert_teardown_ran(calls: _Calls) -> None:
     assert str(wsl2._wsl_base_path() / "vm1") in remove
 
 
+def test_success_keeps_the_v1_phase_a_bootstrap_seam(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Phase 2 does not move WSL2 bootstrap ownership: create still returns
+    the contract-v1 incomplete result that selects its Phase A primary path."""
+    _wire(monkeypatch)
+
+    result = WSL2Platform("wsl2", {}).create(_request(), RunContext())
+
+    assert WSL2Platform.contract_version == 1
+    assert result.bootstrap_complete is False
+    assert result.tailscale_ip is None
+
+
 def test_failure_mid_provision_cleans_up_and_reraises(
     monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
 ) -> None:

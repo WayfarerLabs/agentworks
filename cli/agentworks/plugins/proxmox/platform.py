@@ -342,9 +342,10 @@ class ProxmoxPlatform(VMPlatform):
                         swap=request.swap_gib,
                     )
                     tailscale_ip = self._run_bootstrap_via_agent(node, newid, bootstrap, ctx)
-                    bootstrap_complete = tailscale_ip is not None
-                    if tailscale_ip:
-                        output.detail(f"Tailscale IP: {tailscale_ip}")
+                    if not tailscale_ip:
+                        raise ProvisioningError("Proxmox bootstrap did not return a Tailscale IP")
+                    bootstrap_complete = True
+                    output.detail(f"Tailscale IP: {tailscale_ip}")
             except Exception:
                 # Re-raised unwrapped after the rollback: the manager's
                 # create arm wraps EVERY escaping exception in
@@ -446,7 +447,7 @@ class ProxmoxPlatform(VMPlatform):
             except ProxmoxAPIError:
                 pass
             time.sleep(5)
-        # Don't fail: cloud-init may not be installed or may have already finished
+        raise ProvisioningError(f"Timed out waiting for cloud-init on Proxmox VMID {vmid}")
 
     def _wait_for_guest_ip(self, node: str, vmid: int, ctx: RunContext, *, timeout: int = 120) -> str:
         """Poll the guest agent until it reports a non-loopback IPv4 address."""
@@ -470,10 +471,11 @@ class ProxmoxPlatform(VMPlatform):
         # to reach readiness during provisioning, not an API failure.
         raise ProvisioningError(f"Timed out waiting for guest agent IP on VMID {vmid}")
 
-    def _run_bootstrap_via_agent(self, node: str, vmid: int, script: str, ctx: RunContext) -> str | None:
+    def _run_bootstrap_via_agent(self, node: str, vmid: int, script: str, ctx: RunContext) -> str:
         """Write and run the bootstrap script via the guest agent.
 
-        Returns the Tailscale IP if bootstrap succeeds, None otherwise.
+        Returns the Tailscale IP if bootstrap succeeds. A timeout, unsuccessful
+        execution, or missing valid Tailscale IP raises so create rolls back.
         """
         from agentworks.capabilities.vm_platform.bootstrap_script import parse_bootstrap_output
 
@@ -529,16 +531,14 @@ class ProxmoxPlatform(VMPlatform):
                 _warn_bootstrap_file_residue()
 
         if result is None:
-            output.warn("bootstrap timed out")
-            return None
+            raise ProvisioningError("Proxmox guest-agent bootstrap timed out")
 
         exit_code = result.get("exitcode", -1)
         stdout = result.get("out-data", "")
         parsed = parse_bootstrap_output(stdout, exit_code)
 
         if parsed.ok:
+            assert parsed.tailscale_ip is not None
             return parsed.tailscale_ip
 
-        output.warn(f"Bootstrap failed (exit {exit_code})")
-
-        return None
+        raise ProvisioningError(f"Proxmox guest-agent bootstrap failed (exit {exit_code})")
