@@ -112,7 +112,13 @@ def _prepare_vm(
         )
 
     registry = load_request_registry(config)
-    with gated_vm_boundary(db, config, registry, vm, scope=_session_scope(db, session, ws, vm)):
+    with gated_vm_boundary(
+        db,
+        config,
+        registry,
+        vm,
+        scope=_session_scope(db, session, ws, vm),
+    ):
         logger = SSHLogger(vm.name, operation) if operation else None
         target = _mgr.transport(vm, config, logger=logger)
         run_command: RunCommand = target.run
@@ -210,7 +216,11 @@ def _distinct_vms_for_sessions(db: Database, sessions: list[SessionRow]) -> list
 
 
 @contextlib.contextmanager
-def _batch_vm_boundary(db: Database, config: Config, vms: Sequence[VMRow]) -> Iterator[None]:
+def _batch_vm_boundary(
+    db: Database,
+    config: Config,
+    vms: Sequence[VMRow],
+) -> Iterator[None]:
     """The batch session ops' composition root (stop_all_sessions,
     resume_all_sessions, list_sessions' status pass): ONE boundary
     over the distinct VMs, then each VM's activation gate and
@@ -318,7 +328,11 @@ def _batch_vm_boundary(db: Database, config: Config, vms: Sequence[VMRow]) -> It
 
             (decl,) = secret_declarations([secret_name], registry)
             # ``registry`` powers the disabled-plugin failure hint (LLD b).
-            return resolve_secrets([decl], active_backends(config, registry), registry=registry)[secret_name]
+            return resolve_secrets(
+                [decl],
+                active_backends(config, registry),
+                registry=registry,
+            )[secret_name]
 
         return _resolve
 

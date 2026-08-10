@@ -8,6 +8,7 @@ import typer
 
 from agentworks.cli._app import app
 from agentworks.cli._helpers import get_db, parse_csv_filter, prompt_vm
+from agentworks.machine_output import OutputFormat
 
 console_app = typer.Typer(
     name="console",
@@ -116,31 +117,67 @@ def console_list(
             "Used by shell completion; the order matches the table's row order.",
         ),
     ] = False,
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option("--output", help="Output format: human or json. Default: human."),
+    ] = OutputFormat.HUMAN,
 ) -> None:
     """List consoles. Filters compose with AND; name filters accept comma-separated values for OR-within-filter.
 
     --workspace and --agent match a console when at least one of its member
     sessions matches. When both are passed, the SAME session must satisfy both.
     """
-    from agentworks.sessions.multi_console import list_consoles
+    if names_only and output_format is OutputFormat.JSON:
+        raise typer.BadParameter("cannot be used with --output json", param_hint="--names-only")
 
-    list_consoles(
+    from agentworks.sessions.multi_console import console_listing, render_console_listing
+
+    listing = console_listing(
         get_db(),
         vm_name=parse_csv_filter(vm),
         workspace_name=parse_csv_filter(workspace),
         agent_name=parse_csv_filter(agent),
-        names_only=names_only,
     )
+    if output_format is OutputFormat.JSON:
+        from click import get_binary_stream
+
+        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+        from agentworks.sessions.multi_console.attach import console_listing_data
+
+        write_json_envelope(
+            MachineOutputCommand.CONSOLE_LIST,
+            console_listing_data(listing),
+            get_binary_stream("stdout"),
+        )
+        return
+    render_console_listing(listing, names_only=names_only)
 
 
 @console_app.command("describe")
 def console_describe(
     name: Annotated[str, typer.Argument(help="Console name")],
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option("--output", help="Output format: human or json. Default: human."),
+    ] = OutputFormat.HUMAN,
 ) -> None:
     """Show a console's membership and shell layout."""
-    from agentworks.sessions.multi_console import describe_console
+    from agentworks.sessions.multi_console import console_description, render_console_description
 
-    describe_console(get_db(), name=name)
+    description = console_description(get_db(), name=name)
+    if output_format is OutputFormat.JSON:
+        from click import get_binary_stream
+
+        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+        from agentworks.sessions.multi_console.attach import console_description_data
+
+        write_json_envelope(
+            MachineOutputCommand.CONSOLE_DESCRIBE,
+            console_description_data(description),
+            get_binary_stream("stdout"),
+        )
+        return
+    render_console_description(description)
 
 
 @console_app.command("attach")

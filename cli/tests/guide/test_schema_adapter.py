@@ -137,6 +137,16 @@ def _implementation_field_topic(target: str, section: tuple[str, ...] = ()) -> T
     )
 
 
+def _kind_field_topic(kind: str) -> TopicContribution:
+    return TopicContribution(
+        TopicSlug(kind),
+        kind,
+        "Declarable schema.",
+        KindAnchor(kind),
+        (FieldReference(BlockId("fields")),),
+    )
+
+
 @pytest.mark.parametrize(
     ("target", "default", "arms", "fields"),
     [
@@ -175,6 +185,50 @@ def test_schema_fields_render_every_nested_union_arm_from_the_live_reference(
         assert f"Alternative `{arm}`" in payload
     for field in fields:
         assert f"`{field}`" in payload
+
+
+@pytest.mark.parametrize(
+    ("topic", "token_path", "mode_path", "secret_path"),
+    [
+        pytest.param(
+            _kind_field_topic("git-credential"),
+            "spec.provider.token",
+            "spec.provider.token.mode",
+            "spec.provider.token.secret",
+            id="declarable-git-credential",
+        ),
+        pytest.param(
+            _implementation_field_topic("git-credential-provider/github"),
+            "config.token",
+            "config.token.mode",
+            "config.token.secret",
+            id="github-provider",
+        ),
+        pytest.param(
+            _implementation_field_topic("git-credential-provider/azdo"),
+            "config.token",
+            "config.token.mode",
+            "config.token.secret",
+            id="azdo-provider",
+        ),
+    ],
+)
+def test_git_token_structural_union_renders_without_dropping_untagged_arm_fields(
+    topic: TopicContribution,
+    token_path: str,
+    mode_path: str,
+    secret_path: str,
+) -> None:
+    rendered = render_topic(topic, None, GuideMode.AGENT)
+    payload = rendered.blocks[0].source_payload
+
+    assert rendered.issues == ()
+    assert payload is not None
+    assert f"`{token_path}`: optional; `string or table`; default `{{mode: stored}}`" in payload
+    assert payload.count("Alternative `stored`") == 1
+    assert f"`{mode_path}`: required; `one of: stored`; choices `stored`" in payload
+    assert f"`{secret_path}`: optional; `string or null`; owner default `git-token-<name>`" in payload
+    assert "Alternative `minted`" not in payload
 
 
 @pytest.mark.parametrize(

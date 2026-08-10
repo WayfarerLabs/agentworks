@@ -11,7 +11,14 @@ import click
 import typer
 
 from agentworks.errors import UserAbort
-from agentworks.output import Role, StatusStyle, _pad, _render_header, non_interactive
+from agentworks.output import (
+    Role,
+    StatusStyle,
+    _pad,
+    _render_header,
+    non_interactive,
+    presentation_suppressed,
+)
 from agentworks.terminal import MOUSE_TRACKING_DISABLE
 
 if TYPE_CHECKING:
@@ -125,10 +132,17 @@ class TyperHandler:
         # lives in ``agentworks.terminal`` alongside the post-attach
         # sanitize payload that supersets it, so "mouse reporting off"
         # has one definition.
-        if sys.stdout.isatty() and not non_interactive():
-            typer.echo(MOUSE_TRACKING_DISABLE, nl=False)
+        prompt_on_stderr = presentation_suppressed()
+        prompt_stream = sys.stderr if prompt_on_stderr else sys.stdout
+        if prompt_stream.isatty() and not non_interactive():
+            typer.echo(MOUSE_TRACKING_DISABLE, nl=False, err=prompt_on_stderr)
         try:
-            return typer.confirm(f"{_pad(level)}{message}", default=default)
+            confirm = click.confirm if prompt_on_stderr else typer.confirm
+            return confirm(
+                f"{_pad(level)}{message}",
+                default=default,
+                err=prompt_on_stderr,
+            )
         except (click.exceptions.Abort, typer.Abort):
             # typer.confirm/typer.prompt raise typer's vendored Abort (a
             # different class from the top-level click's), so catching only
@@ -138,24 +152,41 @@ class TyperHandler:
             raise UserAbort("interrupted") from None
 
     def choose(self, message: str, options: list[str], level: int) -> int:
-        typer.echo(f"{_pad(level)}{message}")
+        prompt_on_stderr = presentation_suppressed()
+        typer.echo(f"{_pad(level)}{message}", err=prompt_on_stderr)
         for i, option in enumerate(options, 1):
-            typer.echo(f"{_pad(level + 1)}{i}) {option}")
+            typer.echo(f"{_pad(level + 1)}{i}) {option}", err=prompt_on_stderr)
         while True:
             try:
-                choice = int(typer.prompt(f"{_pad(level)}Choice", type=int))
+                prompt = click.prompt if prompt_on_stderr else typer.prompt
+                choice = int(
+                    prompt(
+                        f"{_pad(level)}Choice",
+                        type=int,
+                        err=prompt_on_stderr,
+                    )
+                )
                 if 1 <= choice <= len(options):
                     return choice - 1
             except (click.exceptions.Abort, typer.Abort):
                 raise UserAbort("interrupted") from None
             except ValueError:
                 pass
-            typer.echo(f"{_pad(level)}Invalid choice. Enter 1-{len(options)}.")
+            typer.echo(
+                f"{_pad(level)}Invalid choice. Enter 1-{len(options)}.",
+                err=prompt_on_stderr,
+            )
 
     def pause(self, message: str, level: int) -> None:
         try:
-            input(f"{_pad(level)}{message}")
-        except (EOFError, KeyboardInterrupt):
+            click.prompt(
+                f"{_pad(level)}{message}",
+                default="",
+                show_default=False,
+                prompt_suffix="",
+                err=presentation_suppressed(),
+            )
+        except (click.exceptions.Abort, typer.Abort):
             raise UserAbort("interrupted") from None
 
     def prompt(self, label: str, level: int, default: str | None = None) -> str:
@@ -163,11 +194,13 @@ class TyperHandler:
             # An empty default is a valid answer (e.g. declining the
             # system slug) but "[]" as a rendered default suffix is
             # noise, so suppress it.
+            prompt = click.prompt if presentation_suppressed() else typer.prompt
             return str(
-                typer.prompt(
+                prompt(
                     f"{_pad(level)}{label}",
                     default=default or "",
                     show_default=bool(default),
+                    err=presentation_suppressed(),
                 )
             )
         except (click.exceptions.Abort, typer.Abort):

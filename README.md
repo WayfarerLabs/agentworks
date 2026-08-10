@@ -177,7 +177,8 @@ from independently of the underlying sessions' lifecycles. Consoles reference se
 owning them: a session can appear in any number of consoles (or none), and adding or removing it
 never affects the session itself, so you can slice the same pool of running work into whatever
 task-focused views make sense (one per feature, incident, or review). See
-[Named Consoles](cli/README.md#named-consoles) in the CLI reference for the command surface.
+[Named Consoles](cli/command-reference.md#named-consoles) in the CLI reference for the command
+surface.
 
 ### Agentworks Is Not a Harness
 
@@ -245,7 +246,7 @@ these choices rather than work around them.
 - **[tmux](https://github.com/tmux/tmux)** is the persistence layer. Every session maps 1:1 to a
   tmux session on the VM with the same lifecycle (agent sessions on per-agent sockets for
   isolation), and consoles layer over them for multitasking. See
-  [tmux Architecture](cli/README.md#tmux-architecture) for the full picture.
+  [tmux Architecture](cli/command-reference.md#tmux-architecture) for the full picture.
 
 A few other integrations are useful but not fundamental: **Git** (workspace templates around
 repositories, plus scoped git credential management for GitHub, Azure DevOps, and more), **VS Code**

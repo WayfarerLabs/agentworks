@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from typing import Annotated
+
 import typer
 
 from agentworks.cli._app import app
 from agentworks.cli._helpers import get_db
+from agentworks.machine_output import OutputFormat
 
 secret_app = typer.Typer(
     name="secret",
@@ -23,6 +26,13 @@ def secret_list(
         help="Emit one secret name per line (no header, no formatting). "
         "Used by shell completion; the order matches the table's row order.",
     ),
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option(
+            "--output",
+            help="Output format: human or json. Default: human.",
+        ),
+    ] = OutputFormat.HUMAN,
 ) -> None:
     """Show declared secrets and how each active backend would look them up.
 
@@ -34,17 +44,27 @@ def secret_list(
     (a ``false`` opt-out, or a mapping-required backend with no mapping).
     Values are never resolved.
     """
+    if names_only and output_format is OutputFormat.JSON:
+        raise typer.BadParameter("cannot be used with --output json", param_hint="--names-only")
+
     from agentworks import output
     from agentworks.bootstrap import load_request_registry
     from agentworks.config import load_config
-    from agentworks.secrets.inspect import build_secret_table, render_secret_table
+    from agentworks.secrets.inspect import build_secret_table, render_secret_table, secret_table_data
 
-    config = load_config()
-    registry = load_request_registry(config)
+    config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
+    registry = load_request_registry(config, warn=output_format is OutputFormat.HUMAN)
     table = build_secret_table(config, registry)
     if names_only:
         for row in table.rows:
             output.info(row.name)
+        return
+    if output_format is OutputFormat.JSON:
+        from click import get_binary_stream
+
+        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+
+        write_json_envelope(MachineOutputCommand.SECRET_LIST, secret_table_data(table), get_binary_stream("stdout"))
         return
     render_secret_table(table)
 
@@ -52,6 +72,13 @@ def secret_list(
 @secret_app.command("describe")
 def secret_describe(
     name: str = typer.Argument(..., help="Secret name to describe."),
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option(
+            "--output",
+            help="Output format: human or json. Default: human.",
+        ),
+    ] = OutputFormat.HUMAN,
 ) -> None:
     """Show the full per-secret detail view.
 
@@ -73,12 +100,23 @@ def secret_describe(
     """
     from agentworks.bootstrap import load_request_registry
     from agentworks.config import load_config
-    from agentworks.secrets.inspect import describe_secret, render_secret_description
+    from agentworks.secrets.inspect import describe_secret, render_secret_description, secret_description_data
 
-    config = load_config()
-    registry = load_request_registry(config)
+    config = load_config(warn_issues=output_format is OutputFormat.HUMAN)
+    registry = load_request_registry(config, warn=output_format is OutputFormat.HUMAN)
     db = get_db()
     desc = describe_secret(config, registry, name, db=db)
+    if output_format is OutputFormat.JSON:
+        from click import get_binary_stream
+
+        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+
+        write_json_envelope(
+            MachineOutputCommand.SECRET_DESCRIBE,
+            secret_description_data(desc),
+            get_binary_stream("stdout"),
+        )
+        return
     render_secret_description(desc)
 
 

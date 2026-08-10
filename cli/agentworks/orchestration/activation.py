@@ -1,11 +1,15 @@
 """The activation gate: power-state convergence plus the held-active
 span.
 
-Commands that touch an EXISTING VM converge its power state first, so
-every readiness probe that reaches the target queries a live
-environment. The gate OPENS after build and BEFORE the preflight
-sweep, and it is a SPAN, not a point: it stays open through the whole
-command (WSL2 must be HELD active, not merely started) and closes at
+Ordinary singular commands that touch an EXISTING VM converge its power
+state before their preflight and boundary resolve, so every readiness
+probe that reaches the target queries a live environment. Their gate
+OPENS after build and BEFORE the preflight sweep. Batch session status is
+the deliberate inverse: it completes one shared preflight and boundary
+resolve before opening each VM gate, then serves ordinary gate credentials
+from that cache and resolves only a conditionally-needed repair key late.
+In either ordering the gate is a SPAN, not a point: it stays open through
+the command (WSL2 must be HELD active, not merely started) and closes at
 the end, on success or failure, after any unwind.
 
 It is not a protocol stage and not a preflight side effect (preflight
@@ -29,35 +33,33 @@ Three properties are load-bearing:
   refuses with a typed error raised within the node's own scope
   (:meth:`GateTarget.auto_start`), including the same re-read-the-flag
   race guard the retired imperative ``ensure_active`` carried.
-- **Gate secrets resolve JUST-IN-TIME, outside the boundary pass.**
-  Observing and starting a stopped VM may need the platform's API
-  credential (the common case) or the Tailscale auth key (the rejoin
-  repair case). This is the one sanctioned resolution outside the
-  boundary pass: narrow, known names, resolved through the normal
-  backend chain, entirely pre-walk-away, and skipped altogether on the
-  fast path (a confirmed-active VM costs no resolution and no
-  interaction). Resolving here, ahead of the preflight sweep, is
+- **Gate secrets are delivered just-in-time, with caller ordering explicit.**
+  Observing and starting a stopped VM may need the platform's API credential
+  (the common case) or the Tailscale auth key (the rejoin repair case). For an
+  ordinary singular command, the gate opens before preflight and boundary
+  resolution. Its narrow, known names resolve through the normal backend
+  chain only after the secret-free fast path fails. Resolving there is
   INHERENT rather than a resolve/preflight-ordering gap (issue #202):
-  on-target preflight needs a live target, and bringing the target up
-  can need these very secrets. Each name also resolves as its own
-  single-declaration pass, so the multi-secret "prompt for A, then fail
-  on an already-doomed B" class does not arise at the gate. The two
-  cases resolve at DIFFERENT moments, matching
-  HEAD (``vms.manager._ensure_tailscale``'s documented
-  conditional-need exception): the observe/start credentials
-  (:meth:`GateTarget.gate_secret_refs`) resolve eagerly once the fast
-  path fails, while the repair secrets
-  (:meth:`GateTarget.repair_secret_refs`) resolve LAZILY, on first
-  read by the repair path, because whether a rejoin (and therefore a
-  new key) is needed is only knowable after starting the VM and
-  watching it fail to reconnect; resolving eagerly would prompt every
-  start for a key that is almost never used. Either way the node only
-  reads from a reader the gate handed it (declare/receive holds) and
-  resolution stays orchestrator-owned. Everything resolved, eager or
-  lazy, lands in the values the gate returns, so the orchestrator can
-  SEED the boundary pass and no secret resolves or prompts twice in
-  one command (``Resolver.seed`` is that path: the orchestrator's
-  resolve callback seeds the boundary resolver as it resolves).
+  on-target preflight needs a live target, and bringing the target up can need
+  these very secrets. Each name is its own single-declaration pass, so the
+  multi-secret "prompt for A, then fail on an already-doomed B" class does not
+  arise. :func:`gate_secret_resolver` SEEDS each value into the later boundary
+  resolver as it lands, so no secret resolves or prompts twice.
+
+  Batch session status is deliberately different: its shared preflight and
+  boundary resolve complete first, then each VM gate reads ordinary gate
+  credentials from that boundary cache. Only a repair key whose need becomes
+  known after a start resolves late through the batch callback; it never seeds
+  after resolution. The post-boundary cache/late-repair path lives in
+  ``sessions.manager._scope._batch_vm_boundary`` and is not an expansion of
+  :func:`gate_secret_resolver`.
+
+  In both orderings, repair names (:meth:`GateTarget.repair_secret_refs`) are
+  consulted and resolved LAZILY on first read by the repair path, because
+  whether a rejoin is needed is knowable only after starting and watching the
+  VM fail to reconnect. Resolving eagerly would prompt every start for a key
+  almost never used. The node reads only the reader the gate hands it
+  (declare/receive holds), and resolution stays orchestrator-owned.
 """
 
 from __future__ import annotations
@@ -138,13 +140,16 @@ class GateTarget(Protocol):
 
 class _GateSecrets:
     """The reader ``auto_start`` receives: eager gate values served
-    from the gate's seed mapping, repair names resolved lazily on
-    first read. Lazily-resolved values are recorded into the SAME
-    mapping :func:`ensure_active` returns, so they reach the boundary
-    seed and nothing resolves or prompts twice. Even the repair-name
-    DECLARATION is consulted lazily (on a read the eager set does not
-    cover), so an untaken repair path costs neither a resolve nor the
-    state lookup the declaration may need.
+    from the gate's values mapping, repair names resolved lazily on
+    first read. Lazily-resolved values are recorded into the same mapping
+    :func:`ensure_active` returns. What the resolve callback does with them is
+    caller-specific: an ordinary pre-boundary gate uses
+    :func:`gate_secret_resolver`, which seeds its later boundary resolver;
+    batch session status has already completed its boundary and instead
+    serves cache hits or performs the one permitted late repair resolve,
+    without seeding. Even the repair-name DECLARATION is consulted lazily (on
+    a read the eager set does not cover), so an untaken repair path costs
+    neither a resolve nor the state lookup the declaration may need.
 
     Satisfies ``SecretReader``. Anything outside the declared gate and
     repair names is refused, same contract as
@@ -184,9 +189,11 @@ def ensure_active(target: GateTarget, resolve_secret: Callable[[str], str]) -> d
     target's gate secrets just-in-time and drive observe-then-start,
     with the operator-stopped refusal raised from the node's own
     ``auto_start`` and the repair secrets resolving lazily only if the
-    repair path reads them. Returns every gate-resolved value, eager
-    and lazy alike (empty on the fast path), for the orchestrator to
-    seed the boundary pass with.
+    repair path reads them. Returns every gate-resolved value, eager and lazy
+    alike (empty on the fast path). A singular pre-boundary caller's resolve
+    callback seeds its later boundary as each value lands; a batch
+    post-boundary caller uses its completed cache and never seeds after
+    resolution.
     """
     if target.confirmed_active():
         return {}
@@ -196,7 +203,11 @@ def ensure_active(target: GateTarget, resolve_secret: Callable[[str], str]) -> d
     return values
 
 
-def gate_secret_resolver(config: Config, registry: Registry, resolver: Resolver) -> Callable[[str], str]:
+def gate_secret_resolver(
+    config: Config,
+    registry: Registry,
+    resolver: Resolver,
+) -> Callable[[str], str]:
     """The gate's just-in-time resolve callback, shared by every
     command whose gate opens BEFORE its boundary resolve: resolve
     through the normal backend chain and SEED the boundary resolver as
@@ -223,7 +234,11 @@ def gate_secret_resolver(config: Config, registry: Registry, resolver: Resolver)
         (decl,) = secret_declarations([secret_name], registry)
         # ``registry`` powers the disabled-plugin failure hint (LLD b) if this
         # gate secret's only backend is a disabled plugin.
-        value = resolve_secrets([decl], active_backends(config, registry), registry=registry)[secret_name]
+        value = resolve_secrets(
+            [decl],
+            active_backends(config, registry),
+            registry=registry,
+        )[secret_name]
         resolver.seed({secret_name: value})
         return value
 

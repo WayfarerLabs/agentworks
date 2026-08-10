@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import pytest
+
+from agentworks.capabilities.config import capability_config_references, validate_capability_config
+from agentworks.errors import ConfigError
 from agentworks.guide import ActionList, ConsentBoundary, GuideMode, Teaching, TopicLinks
 from agentworks.guide.contributions import guide_contributions
 from agentworks.guide.render import render_topic
 from agentworks.manifests.field_tree import FieldEntry
 from agentworks.manifests.reference import reference_for
+from agentworks.schema import RefOwner
 
 
 def _topic(slug: str):
@@ -14,6 +19,7 @@ def _topic(slug: str):
 def test_migration_is_a_colocated_exception_topic_linked_without_teaching_duplication() -> None:
     migration = _topic("concept-migration")
     migration_teaching = next(block.markdown for block in migration.blocks if isinstance(block, Teaching))
+    assert "`data.counts.fail` to equal `0`" in migration_teaching
     for slug in ("concept-onboarding", "concept-management"):
         topic = _topic(slug)
         assert "concept-migration" in topic.related_topics
@@ -42,14 +48,18 @@ def test_migration_actions_pin_order_consent_operations_and_no_execution_authori
     ]
     assert action_block.actions[0].command is None
     assert action_block.actions[0].manual_steps is not None
-    assert action_block.actions[5].command == ("agw", "doctor")
+    assert action_block.actions[5].command == ("agw", "doctor", "--output", "json")
+    assert action_block.actions[5].verification is None
     assert action_block.actions[8].command == (
         "agw",
         "resource",
         "list",
         "--origin",
         "operator",
+        "--output",
+        "json",
     )
+    assert action_block.actions[9].command == ("agw", "doctor", "--output", "json")
 
 
 def test_migration_actions_make_inventory_backups_and_verification_distinct() -> None:
@@ -110,15 +120,50 @@ def test_migration_actions_make_inventory_backups_and_verification_distinct() ->
     assert "whether it is pre-existing or TOML-derived" in edit.manual_steps
     assert "apply that hard error's exact rewrite" in edit.manual_steps
     assert "delete the retired line and write auth ambient, auth ambient, or placement local" in edit.manual_steps
+    assert "canonical tagged stored arm" in edit.manual_steps
+    assert "token: {mode: stored, secret: <existing-name>}" in edit.manual_steps
+    assert "Delete an outer token: null line or replace it exactly with token: {mode: stored}" in edit.manual_steps
+    assert "an omitted or null inner token.secret selects the default" in edit.manual_steps
+    assert "No minted arm exists" in edit.manual_steps
     assert "MANIFEST_PATH to equal" in edit.manual_steps
     assert "pre-recorded file" in edit.manual_steps
     assert "Never add, remove, or change a baseline entry" in edit.manual_steps
     assert "EXPECTED_IDENTITIES remains byte-for-byte unchanged" in edit.expected_state
 
+    validation = by_id["validate-manifest-set"]
+    assert validation.command == ("agw", "doctor", "--output", "json")
+    assert validation.verification is None
+    assert "config.toml declares resources" in validation.expected_state
+    assert "config.toml is settings only now" in validation.expected_state
+    assert "names the retained sections" in validation.expected_state
+    assert "command must exit 1" in validation.expected_state
+    assert "one JSON document" in validation.expected_state
+    assert "data.groups contains the Configuration group" in validation.expected_state
+    assert "Config file with status ok" in validation.expected_state
+    assert "Config with status fail" in validation.expected_state
+    assert "require no check with either name" in validation.expected_state
+    assert "status warn or fail" in validation.expected_state
+    assert "Use the Manifest and Resource registry facts for precise diagnostics" in validation.expected_state
+    assert "hard error leaves this action unverified" in validation.expected_state
+    assert "returns the selected manifest to edit-one-manifest" in validation.expected_state
+
     comparison = by_id["compare-operator-inventory"]
     assert comparison.consent is ConsentBoundary.EXAMINE_WORKSTATION
     assert [item.name for item in comparison.required_inputs] == ["EXPECTED_IDENTITIES"]
-    assert comparison.command == ("agw", "resource", "list", "--origin", "operator")
+    assert comparison.command == (
+        "agw",
+        "resource",
+        "list",
+        "--origin",
+        "operator",
+        "--output",
+        "json",
+    )
+
+    finish = by_id["finish-doctor"]
+    assert finish.command == ("agw", "doctor", "--output", "json")
+    assert "data.counts.fail equals 0" in finish.expected_state
+    assert "command exits 0" in finish.expected_state
 
 
 def test_only_inventory_can_author_an_expected_manifest_path() -> None:
@@ -195,6 +240,23 @@ def _schema_paths(target: str) -> set[tuple[str, ...]]:
     return found
 
 
+def _schema_entries(target: str, wanted: tuple[str, ...]) -> tuple[FieldEntry, ...]:
+    reference = reference_for(target)
+    found: list[FieldEntry] = []
+
+    def visit(entries: tuple[FieldEntry, ...], prefix: tuple[str, ...] = ()) -> None:
+        for entry in entries:
+            path = (*prefix, entry.name)
+            if path == wanted:
+                found.append(entry)
+            visit(entry.children, path)
+            for alternative in entry.alternatives:
+                visit(alternative.fields, path)
+
+    visit(reference.spec)
+    return tuple(found)
+
+
 def test_migration_secret_paths_match_the_live_implementation_references() -> None:
     paths = {
         target: _schema_paths(target)
@@ -215,6 +277,73 @@ def test_migration_secret_paths_match_the_live_implementation_references() -> No
     assert ("vm_host",) not in paths["vm-platform/lima"]
 
 
+@pytest.mark.parametrize(
+    ("provider", "base"),
+    [pytest.param("github", {}, id="github"), pytest.param("azdo", {"org": "acme"}, id="azdo")],
+)
+def test_migration_git_token_teaching_matches_live_reference_and_services(
+    provider: str,
+    base: dict[str, object],
+) -> None:
+    target = f"git-credential-provider/{provider}"
+    token_entries = _schema_entries(target, ("token",))
+    assert len(token_entries) == 1
+    token = token_entries[0]
+    assert token.doc.default == {"mode": "stored"}
+    assert not token.doc.required
+    assert [alternative.name for alternative in token.alternatives] == ["stored"]
+    assert _schema_paths(target) >= {("token",), ("token", "mode"), ("token", "secret")}
+    assert "minted" not in repr(reference_for(target))
+
+    owner = RefOwner(kind="git-credential", name="dev")
+
+    def refs(token_value: object = ...) -> list[tuple[str, str]]:
+        config = {"name": provider, **base}
+        if token_value is not ...:
+            config["token"] = token_value
+        return [
+            (ref.kind, ref.name)
+            for ref in capability_config_references(
+                kind="git-credential-provider",
+                config=config,
+                owner=owner,
+            )
+        ]
+
+    assert refs() == [("secret", "git-token-dev")]
+    assert refs("gh-pat") == [("secret", "gh-pat")]
+    assert refs({"mode": "stored"}) == [("secret", "git-token-dev")]
+    assert refs({"mode": "stored", "secret": None}) == [("secret", "git-token-dev")]
+
+    with pytest.raises(ConfigError, match=r"replace the null line with the explicit choice: token: \{mode: stored\}"):
+        validate_capability_config(
+            kind="git-credential-provider",
+            config={"name": provider, **base, "token": None},
+            owner=owner,
+        )
+    with pytest.raises(ConfigError, match="unknown mode 'minted'; registered: 'stored'"):
+        validate_capability_config(
+            kind="git-credential-provider",
+            config={"name": provider, **base, "token": {"mode": "minted"}},
+            owner=owner,
+        )
+
+
+def test_declarable_git_credential_reference_keeps_structural_token_union() -> None:
+    paths = _schema_paths("git-credential")
+    token_entries = _schema_entries("git-credential", ("provider", "token"))
+
+    assert paths >= {
+        ("provider",),
+        ("provider", "token"),
+        ("provider", "token", "mode"),
+        ("provider", "token", "secret"),
+    }
+    assert len(token_entries) == 1
+    assert token_entries[0].doc.default == {"mode": "stored"}
+    assert [alternative.name for alternative in token_entries[0].alternatives] == ["stored"]
+
+
 def test_migration_review_action_covers_all_sites_and_distinguishes_outer_from_inner_null() -> None:
     actions = next(block for block in _topic("concept-migration").blocks if isinstance(block, ActionList)).actions
     review = next(action for action in actions if action.id == "review-null-secret-fields")
@@ -231,6 +360,8 @@ def test_migration_review_action_covers_all_sites_and_distinguishes_outer_from_i
     assert "Do not modify a manifest during this review" in manual
     assert "apply that hard error's exact rewrite" not in manual
     assert "delete the retired line" not in manual
+    assert "provider.token" not in manual
+    assert "token: null" not in manual
     for stale in ("service_principal.secret", "credentials.access_key_secret"):
         assert stale not in manual
 
@@ -252,6 +383,14 @@ def test_migration_teaching_covers_cutover_validation_backends_and_auth_choices(
         "without changing the baseline",
         "one manifest at a time",
         "after each edit",
+        "must say that `config.toml` declares resources",
+        "`config.toml` is settings only now",
+        "name the retained sections",
+        "`Resource registry` facts for precise diagnostics",
+        "retained-section checkpoint exits `1`",
+        "`Config file` with status `ok`",
+        "`Config` with status `fail`",
+        "no check with either name to have status `warn` or `fail`",
         "`[secret_backends.*]`",
         "`[secret_config].backends`",
         "Inspect every pre-existing and TOML-derived site manifest",
@@ -270,6 +409,15 @@ def test_migration_teaching_covers_cutover_validation_backends_and_auth_choices(
         "strict types",
         "`spec.platform.name: azure-vm`",
         "`spec.provider`",
+        "An omitted `provider.token` still selects a stored token and the default secret name",
+        "A scalar such as `token: gh-pat` is still accepted as shorthand",
+        "canonical current spelling is the tagged shape",
+        "omitting `token.secret` or writing `secret: null` selects the default secret name",
+        "The old outer spelling `token: null` is retired",
+        "`token: {mode: stored}`",
+        "A retired TOML scalar may still become the accepted scalar shorthand",
+        "No `minted` arm exists in the current contract",
+        "Any manifest validation hard error returns that manifest to this edit loop",
     ):
         assert required in flowed
     for stale in ("`service_principal.secret`", "`credentials.access_key_secret`"):

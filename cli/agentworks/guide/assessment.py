@@ -116,8 +116,10 @@ _ACTION_RECORDS = (
         "A projected resource is not ready and the stored reason needs host diagnosis.",
         (),
         ConsentBoundary.EXAMINE_WORKSTATION,
-        ("agw", "doctor"),
-        "Agentworks reports configuration and host-readiness checks without applying repairs.",
+        ("agw", "doctor", "--output", "json"),
+        "Before recording VERIFIED, parse exactly one JSON document and require schema_version is the integer "
+        "1, command is exactly doctor, and data is an object. Agentworks reports configuration and "
+        "host-readiness checks without applying repairs.",
         None,
         "Keep the stored not-ready reason and troubleshoot manually without probing the workstation.",
     ),

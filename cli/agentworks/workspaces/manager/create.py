@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import subprocess
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH
+from agentworks.db.projections import project_session_mode
 from agentworks.errors import AlreadyExistsError, NotFoundError
 from agentworks.name_filters import validate_name_filters
 from agentworks.naming import validate_name
@@ -14,12 +16,111 @@ from agentworks.workspaces.manager._common import _guard_vm_status, _resolve_vm,
 
 if TYPE_CHECKING:
     from agentworks.config import Config
-    from agentworks.db import Database
+    from agentworks.db import Database, WorkspaceRow
+    from agentworks.machine_output import JsonObject
 
 # NAME-column truncation cap for ``workspace list``, derived from the
 # workspace-name cap so the two cannot drift: a valid name (<= 29) never
 # truncates, and the dynamically-sized column stays bounded.
 _NAME_CELL_WIDTH = MAX_WORKSPACE_NAME_LENGTH
+
+
+@dataclass(frozen=True)
+class WorkspaceListRow:
+    name: str
+    vm_name: str
+    template: str | None
+    created_at: str
+
+    @classmethod
+    def from_row(cls, workspace: WorkspaceRow) -> WorkspaceListRow:
+        return cls(workspace.name, workspace.vm_name, workspace.template, workspace.created_at)
+
+
+@dataclass(frozen=True)
+class WorkspaceListing:
+    """Ordered facts backing the workspace list renderers."""
+
+    workspaces: tuple[WorkspaceListRow, ...]
+
+
+@dataclass(frozen=True)
+class WorkspaceSession:
+    name: str
+    template: str
+    mode: str
+    agent_name: str | None
+
+
+@dataclass(frozen=True)
+class WorkspaceAgent:
+    name: str
+    linux_user: str
+
+
+@dataclass(frozen=True)
+class WorkspaceDetailFacts:
+    name: str
+    vm_name: str
+    template: str | None
+    path: str
+    created_at: str
+
+    @classmethod
+    def from_row(cls, workspace: WorkspaceRow) -> WorkspaceDetailFacts:
+        return cls(
+            workspace.name,
+            workspace.vm_name,
+            workspace.template,
+            workspace.workspace_path,
+            workspace.created_at,
+        )
+
+
+@dataclass(frozen=True)
+class WorkspaceDescription:
+    workspace: WorkspaceDetailFacts
+    sessions: tuple[WorkspaceSession, ...]
+    agents: tuple[WorkspaceAgent, ...]
+
+
+def workspace_listing_data(listing: WorkspaceListing) -> JsonObject:
+    """Project workspace list facts into the closed JSON v1 shape."""
+    return {
+        "workspaces": [
+            {
+                "name": workspace.name,
+                "vm_name": workspace.vm_name,
+                "template": workspace.template,
+                "created_at": workspace.created_at,
+            }
+            for workspace in listing.workspaces
+        ],
+    }
+
+
+def workspace_description_data(description: WorkspaceDescription) -> JsonObject:
+    """Project workspace detail facts into the closed JSON v1 shape."""
+    workspace = description.workspace
+    return {
+        "workspace": {
+            "name": workspace.name,
+            "vm_name": workspace.vm_name,
+            "template": workspace.template,
+            "path": workspace.path,
+            "created_at": workspace.created_at,
+            "sessions": [
+                {
+                    "name": session.name,
+                    "template": session.template,
+                    "mode": project_session_mode(session.mode),
+                    "agent_name": session.agent_name,
+                }
+                for session in description.sessions
+            ],
+            "agents": [{"name": agent.name, "linux_user": agent.linux_user} for agent in description.agents],
+        },
+    }
 
 
 def create_workspace(
@@ -147,11 +248,8 @@ def create_workspace(
             subprocess.run(["code", str(vscode_path)], check=False)
 
 
-def describe_workspace(
-    db: Database,
-    name: str,
-) -> None:
-    """Show workspace details."""
+def workspace_description(db: Database, name: str) -> WorkspaceDescription:
+    """Collect the ordered workspace detail facts without presentation."""
     ws = db.get_workspace(name)
     if ws is None:
         raise NotFoundError(
@@ -160,49 +258,77 @@ def describe_workspace(
             entity_name=name,
         )
 
+    sessions = tuple(
+        WorkspaceSession(
+            name=session.name,
+            template=session.template,
+            mode=project_session_mode(session.mode),
+            agent_name=session.agent_name,
+        )
+        for session in db.list_sessions(workspace_name=name)
+    )
+    agents = tuple(
+        WorkspaceAgent(name=agent.name, linux_user=agent.linux_user)
+        for agent in db.list_agents(vm_name=ws.vm_name)
+        if db.has_any_grant(agent.name, name)
+    )
+    return WorkspaceDescription(workspace=WorkspaceDetailFacts.from_row(ws), sessions=sessions, agents=agents)
+
+
+def render_workspace_description(description: WorkspaceDescription) -> None:
+    """Render workspace detail facts with the legacy human layout."""
+    ws = description.workspace
     output.info(f"Name:       {ws.name}")
     output.info(f"VM:         {ws.vm_name}")
     output.info(f"Template:   {ws.template or 'default'}")
-    output.info(f"Path:       {ws.workspace_path}")
+    output.info(f"Path:       {ws.path}")
     output.info(f"Created:    {ws.created_at}")
 
     # Sessions
-    sessions = db.list_sessions(workspace_name=name)
+    sessions = description.sessions
     output.info(f"\nSessions ({len(sessions)}):")
     if sessions:
         for s in sessions:
-            mode_label = f"agent: {s.agent_name}" if s.agent_name else "admin"
+            mode_label = s.mode if s.mode == "unknown" else f"agent: {s.agent_name}" if s.agent_name else "admin"
             output.detail(f"{s.name}  [{s.template}]  {mode_label}")
     else:
         output.detail("(none)")
 
     # Agents with grants
-    agents = db.list_agents(vm_name=ws.vm_name)
-    granted = [a for a in agents if db.has_any_grant(a.name, name)]
-    output.info(f"\nAgents with access ({len(granted)}):")
-    if granted:
-        for agent in granted:
+    agents = description.agents
+    output.info(f"\nAgents with access ({len(agents)}):")
+    if agents:
+        for agent in agents:
             output.detail(f"{agent.name}  (user: {agent.linux_user})")
     else:
         output.detail("(none)")
 
 
-def list_workspaces(
+def describe_workspace(db: Database, name: str) -> None:
+    """Show workspace details."""
+    render_workspace_description(workspace_description(db, name))
+
+
+def workspace_listing(
     db: Database,
     *,
     vm_name: str | list[str] | None = None,
-    names_only: bool = False,
-) -> None:
-    """List workspaces.
+) -> WorkspaceListing:
+    """Collect the ordered workspace list facts.
 
     An unknown name in the VM filter raises ``NotFoundError`` rather
     than matching nothing (issue #304).
 
-    With ``names_only=True``, emit one workspace name per line and
-    skip the table render. Used by shell completion (see issue #147).
     """
     validate_name_filters(db, vm_name=vm_name)
-    workspaces = db.list_workspaces(vm_name=vm_name)
+    return WorkspaceListing(
+        workspaces=tuple(WorkspaceListRow.from_row(workspace) for workspace in db.list_workspaces(vm_name=vm_name))
+    )
+
+
+def render_workspace_listing(listing: WorkspaceListing, *, names_only: bool = False) -> None:
+    """Render workspace list facts with the legacy human layout."""
+    workspaces = listing.workspaces
 
     if names_only:
         # Empty / fully-filtered-out result prints nothing under
@@ -238,3 +364,13 @@ def list_workspaces(
     output.info("-" * len(header))
     for ws_name, ws_vm, tpl, created in rows:
         output.info(f"{ws_name:<{name_w}}  {ws_vm:<{vm_w}}  {tpl:<{tpl_w}}  {created}")
+
+
+def list_workspaces(
+    db: Database,
+    *,
+    vm_name: str | list[str] | None = None,
+    names_only: bool = False,
+) -> None:
+    """List workspaces with the legacy human renderer."""
+    render_workspace_listing(workspace_listing(db, vm_name=vm_name), names_only=names_only)
