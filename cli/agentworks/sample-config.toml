@@ -12,7 +12,7 @@
 # resources is a hard error at load now (they were previously deprecated
 # with a warning); the resources guide walks through rewriting them. This
 # file is the permanent home for SETTINGS: operator identity, paths,
-# defaults, enabled plugins, and the secret source chain.
+# defaults, database safety, enabled plugins, and the secret source chain.
 #
 # Comment convention: examples are written as `#key = "value"` (no space
 # after `#`), so you can uncomment a line in place by deleting one `#`.
@@ -104,6 +104,16 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #runup_git_credentials = true               # run the git-credential runup: authenticate each
                                             # token against its provider API before it is
                                             # written (false for airgapped setups)
+
+# --- State database safety ---
+#
+# Normal commands migrate an older SQLite state schema automatically. Before
+# migration, Agentworks announces the version change and creates an online
+# snapshot by default. Set this false only when automation deliberately accepts
+# migration without that recovery point.
+
+#[database]
+#auto_backup_before_migration = true
 
 # =============================================================================
 # Secrets

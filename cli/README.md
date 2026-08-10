@@ -150,8 +150,8 @@ surfaces, valid values retain their existing human bytes and corrupt values rend
 
 Configuration splits into two surfaces:
 
-- **Settings** live in `~/.config/agentworks/config.toml`: your identity, paths, defaults, and the
-  secret source chain. Run `agw config init` to generate a sample; see
+- **Settings** live in `~/.config/agentworks/config.toml`: your identity, paths, defaults, database
+  safety policy, and the secret source chain. Run `agw config init` to generate a sample; see
   [sample-config.toml](agentworks/sample-config.toml) for the full reference.
 - **Resources** (secrets, templates, git credentials, vm-sites, apt / install-command entries) are
   declared as YAML manifests under `~/.config/agentworks/resources/`, auto-loaded whenever a command
@@ -166,6 +166,7 @@ Settings sections (`config.toml`, permanent):
 - `[operator]` -- SSH keys (required), additional authorized keys, SSH config management
 - `[paths]` -- VM workspace, VS Code workspace file, and backup directories
 - `[defaults]`: `site`, the default vm-site for `vm create`
+- `[database]`: automatic pre-migration backup policy (safe default: enabled)
 - `[session.config]` -- session defaults (history limit)
 - `[secret_config]` -- active secret source chain; its `backends` key keeps the established spelling
   but contains `secret-source` names
@@ -510,11 +511,45 @@ Completions include dynamic VM, vm-site, workspace, session, secret, and templat
 ## State
 
 All state is stored in `~/.config/agentworks/agentworks.db` (SQLite). Schema migrations are
-forward-only and run automatically when a normal Agentworks command opens state. `agw doctor` checks
-the schema first and uses the existing read-only database connection only when the schema is
-current, so doctor does not run migrations. Doctor reports a pending migration and tells the
-operator to run a normal Agentworks command. See the
-[doctor JSON contract](command-reference.md#doctor-json-schema) for the machine-readable result.
+forward-only and run automatically when a normal Agentworks command opens stale state. Before the
+first migration statement, Agentworks announces the source and target versions on stderr and, by
+default, completes an online snapshot. An interactive terminal asks
+`Back up the state database before migrating?` with yes as the default. Automation uses
+`[database] auto_backup_before_migration = true`; set it to `false` only when deliberately accepting
+migration without that recovery point. `agw doctor` uses a WAL-aware read-only inspection and never
+runs migrations. See the [doctor JSON contract](command-reference.md#doctor-json-schema) for the
+machine-readable result.
+
+Create a consistent on-demand snapshot, including committed WAL content, with:
+
+```console
+agw database backup
+```
+
+The command prints the completed backup path to stdout. Backups live in
+`~/.config/agentworks/database-backups/` beside the live database. On-demand files use the
+`agentworks-manual-...db` prefix and are never removed by automatic retention. Automatic
+pre-migration files use `agentworks-pre-migration-...-vN.db`; only that category is pruned, keeping
+the five newest automatic files. Unrecognized files in the directory are left alone.
+
+If a selected automatic backup fails, migration does not start; the error explains how an
+interactive retry can explicitly decline or how automation can use the documented opt-out. If a
+migration itself fails, the error either prints an exact `agw database restore ...` command for the
+completed pre-migration snapshot or states explicitly that no snapshot was selected.
+
+Restore a selected snapshot with `agw database restore BACKUP_PATH`. The command validates the
+backup, shows the backup and live paths on stderr, and asks before replacing the live database. Pass
+`--yes` (or `-y`) for intentional non-interactive recovery. Restore does not first back up the
+database it replaces and does not run schema migrations. If the restored snapshot is older, the next
+ordinary command owns any forward migration. A backup from a newer schema is preserved but must be
+restored by an Agentworks release that understands that schema. Before downgrading Agentworks,
+restore a backup whose schema the older release understands; do not open newer state with the older
+release first.
+
+SQLite may leave user-only `-shm` and zero-byte `-wal` coordination files beside a selected backup
+after validation or restore. This is expected: the backup database remains unchanged, valid, and
+retryable. Agentworks uses an ordinary read-only open here so committed WAL content is not ignored,
+and it does not race SQLite by deleting those coordination files.
 
 ## Environment Variables
 

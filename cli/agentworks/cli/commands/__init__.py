@@ -16,6 +16,7 @@ from . import workspace  # noqa: F401
 from . import agent  # noqa: F401
 from . import session  # noqa: F401
 from . import console  # noqa: F401
+from . import database  # noqa: F401
 from . import config  # noqa: F401
 from . import env  # noqa: F401
 from . import secret  # noqa: F401

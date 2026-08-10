@@ -21,6 +21,8 @@ import path ``agentworks.config`` unchanged:
   now-empty ``publish_to``), and ``_SectionLineMap``.
 - ``loaders_core``: generic TOML-loading helpers (the unknown-key pair) and
   the ``[operator]`` / ``[paths]`` / ``[defaults]`` settings loaders.
+- ``loaders_database``: the strict ``[database]`` loader and focused
+  migration-safety projection.
 - ``loaders_sessions``: the ``[session.config]`` settings loader.
 - ``loaders_secrets``: the ``[secret_config]`` and ``[plugins]`` settings
   loaders.
@@ -58,6 +60,10 @@ from agentworks.config.loaders_core import (
     _require_string_list,
     _warn_unexpected_keys,
 )
+from agentworks.config.loaders_database import (
+    _load_database_config,
+    load_database_config,
+)
 from agentworks.config.loaders_secrets import (
     _load_plugins,
     _load_secret_config,
@@ -67,6 +73,7 @@ from agentworks.config.loaders_sessions import (
 )
 from agentworks.config.models import (
     Config,
+    DatabaseConfig,
     DefaultsConfig,
     OperatorConfig,
     PathsConfig,
@@ -95,6 +102,7 @@ __all__ = [
     "CONFIG_PATH",
     "Config",
     "ConfigError",
+    "DatabaseConfig",
     "DefaultsConfig",
     "EXPECTED_TOP_LEVEL_KEYS",
     "OperatorConfig",
@@ -103,6 +111,7 @@ __all__ = [
     "SettingReference",
     "_SectionLineMap",
     "_load_defaults",
+    "_load_database_config",
     "_load_operator",
     "_load_paths",
     "_load_plugins",
@@ -113,6 +122,7 @@ __all__ = [
     "_warn_unexpected_keys",
     "_raise_unexpected_top_level_keys",
     "load_config",
+    "load_database_config",
     "setting_references",
     "validate_admin_username",
     "validate_setting_references",

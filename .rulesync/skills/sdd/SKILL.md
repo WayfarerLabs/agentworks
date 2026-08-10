@@ -381,6 +381,16 @@ Work driven via SDD should be done in one or more feature branches. The general 
    that future work should update the existing SDD specs to indicate that the remaining work is
    superseded.
 
+## Choosing the PR vehicle
+
+An SDD effort picks its delivery vehicle deliberately (the dev-process skill defines the layering):
+a **single PR** remains the default for small and medium efforts; a **PR stack** fits multi-phase
+efforts whose phases are honest working increments, and the phased artifact review can be the
+stack's base entry (FRD/HLA/plan at the bottom, implementation entries stacked on top, one visible
+sequence instead of two review streams); **coordinated non-stacked PRs** fit genuinely independent
+slices, and are the only form available across repositories in a poly-repo environment. Record the
+choice in the plan.
+
 ## PR Review
 
 Significant changes to SDD artifacts -- whether net-new specs or material revisions to existing ones
