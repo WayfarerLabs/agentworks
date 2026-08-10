@@ -200,6 +200,29 @@ def test_done_capacity_failure_never_reconciles_matching_instance_to_success() -
     assert [name for name, _kwargs in client.calls] == ["insert"]
 
 
+def test_non_done_permission_poll_failure_reconciles_matching_instance() -> None:
+    realized = _resource()
+    realized.id = 201
+    operation = _Operation(
+        failure=_api_error(api_exceptions.PermissionDenied, "provider-private-detail"),
+        status="RUNNING",
+    )
+    client = _Instances(iter([realized]), operation=operation)
+
+    result, ownership = insert_instance_reconciled(
+        client,
+        project_id="project-a",
+        zone="us-central1-a",
+        instance=_resource(),
+        attempt=InstanceInsertAttempt("vm-a", _REQUEST_ID),
+        timeout=17,
+    )
+
+    assert result is realized
+    assert ownership.resource_id == "201"
+    assert [name for name, _kwargs in client.calls] == ["insert", "get"]
+
+
 @pytest.mark.parametrize(
     "operation",
     [

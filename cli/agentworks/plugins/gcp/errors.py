@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 from agentworks.errors import (
@@ -39,6 +40,14 @@ class GCEIndeterminateOperationError(GCEError):
 
 
 _ZONE_CAPACITY_CODE = "ZONE_RESOURCE_POOL_EXHAUSTED"
+
+
+class _StructuredOperationError(Enum):
+    """The safe classification of a cached structured error collection."""
+
+    NONE = "none"
+    OTHER = "other"
+    CAPACITY = "capacity"
 
 
 def google_error(exc: Exception, *, operation: str, resource: str | None = None) -> AgentworksError:
@@ -130,20 +139,25 @@ def wait_for_extended_operation(operation: Any, *, label: str, zone: str, timeou
     failure: AgentworksError | None = None
     try:
         operation.result(timeout=timeout)
-    except Exception as exc:
+    except Exception:
         if _cached_operation_is_done(operation):
-            failure = _completed_operation_failure(operation, label=label, zone=zone)
+            failure = _completed_operation_failure(
+                _structured_operation_error(operation),
+                label=label,
+                zone=zone,
+            )
         else:
-            mapped = google_error(exc, operation=f"waiting for {label}", resource=label)
-            if isinstance(mapped, ConnectivityError) or type(mapped) is GCEError:
-                failure = GCEIndeterminateOperationError(
-                    f"Google Cloud operation did not complete while waiting for {label}",
-                    entity_kind="gcp-resource",
-                    entity_name=label,
-                    hint=("inspect the named resource before retrying because the operation outcome is indeterminate"),
-                )
-            else:
-                failure = mapped
+            failure = GCEIndeterminateOperationError(
+                f"Google Cloud operation did not complete while waiting for {label}",
+                entity_kind="gcp-resource",
+                entity_name=label,
+                hint="inspect the named resource before retrying because the operation outcome is indeterminate",
+            )
+    else:
+        if _cached_operation_is_done(operation):
+            structured_error = _structured_operation_error(operation)
+            if structured_error is not _StructuredOperationError.NONE:
+                failure = _completed_operation_failure(structured_error, label=label, zone=zone)
     if failure is not None:
         raise failure
 
@@ -158,9 +172,14 @@ def _cached_operation_is_done(operation: Any) -> bool:
         return False
 
 
-def _completed_operation_failure(operation: Any, *, label: str, zone: str) -> GCEOperationError:
+def _completed_operation_failure(
+    structured_error: _StructuredOperationError,
+    *,
+    label: str,
+    zone: str,
+) -> GCEOperationError:
     """Classify one DONE failure from its allowlisted structured code only."""
-    if _has_zone_capacity_code(operation):
+    if structured_error is _StructuredOperationError.CAPACITY:
         return GCECapacityError(
             f"Google Cloud had insufficient capacity in zone '{zone}' while waiting for {label}",
             entity_kind="gcp-resource",
@@ -174,13 +193,18 @@ def _completed_operation_failure(operation: Any, *, label: str, zone: str) -> GC
     )
 
 
-def _has_zone_capacity_code(operation: Any) -> bool:
-    """Match the one safe capacity code without reading provider diagnostics."""
+def _structured_operation_error(operation: Any) -> _StructuredOperationError:
+    """Classify nonempty cached error entries from their code fields only."""
     try:
         details = operation.error.errors
-        for detail in details:
-            if detail.code == _ZONE_CAPACITY_CODE:
-                return True
     except Exception:
-        return False
-    return False
+        return _StructuredOperationError.NONE
+    found = False
+    try:
+        for detail in details:
+            found = True
+            if detail.code == _ZONE_CAPACITY_CODE:
+                return _StructuredOperationError.CAPACITY
+    except Exception:
+        pass
+    return _StructuredOperationError.OTHER if found else _StructuredOperationError.NONE

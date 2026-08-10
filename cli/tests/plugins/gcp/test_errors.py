@@ -8,6 +8,7 @@ from typing import Any, cast
 
 import pytest
 from google.api_core import exceptions as api_exceptions
+from google.api_core import extended_operation
 from google.cloud import compute_v1
 
 from agentworks.plugins.gcp.errors import (
@@ -49,17 +50,46 @@ class _ExtendedOperation:
         raise AssertionError("classification must not read provider error text")
 
 
-def _provider_503() -> api_exceptions.ServiceUnavailable:
-    provider = cast(
-        "Callable[[str], api_exceptions.ServiceUnavailable]",
-        api_exceptions.ServiceUnavailable,
-    )(_SENTINEL)
+def _provider_error(kind: type[Exception]) -> Exception:
+    provider = cast("Callable[[str], Exception]", kind)(_SENTINEL)
     provider.__cause__ = RuntimeError(_SENTINEL)
     return provider
 
 
+def _provider_503() -> Exception:
+    return _provider_error(api_exceptions.ServiceUnavailable)
+
+
 def _operation_error(*details: object) -> SimpleNamespace:
     return SimpleNamespace(errors=list(details), message=_SENTINEL, details=_SENTINEL)
+
+
+def _real_done_operation(*details: compute_v1.Errors) -> tuple[Any, list[str]]:
+    """Build the exact ExtendedOperation shape returned by Compute clients."""
+    raw = compute_v1.Operation(
+        name="operation-a",
+        status=compute_v1.Operation.Status.DONE,
+        error=compute_v1.Error(errors=list(details)),
+    )
+    refresh_calls: list[str] = []
+
+    def refresh(*_args: object, **_kwargs: object) -> compute_v1.Operation:
+        refresh_calls.append("refresh")
+        return raw
+
+    def cancel() -> None:
+        return None
+
+    class _ComputeOperation(extended_operation.ExtendedOperation):
+        @property
+        def error_message(self) -> str:
+            return str(self._extended_operation.http_error_message)
+
+        @property
+        def error_code(self) -> int:
+            return int(self._extended_operation.http_error_status_code)
+
+    return _ComputeOperation.make(refresh, cancel, raw), refresh_calls  # type: ignore[no-untyped-call]
 
 
 def _assert_detached_and_safe(error: BaseException) -> None:
@@ -148,8 +178,67 @@ def test_non_done_timeout_is_the_only_indeterminate_operation_outcome() -> None:
     _assert_detached_and_safe(caught.value)
 
 
-def test_successful_wait_does_not_probe_error_fields_or_refresh() -> None:
-    operation = _ExtendedOperation(status=compute_v1.Operation.Status.DONE, error=None, failure=None)
+@pytest.mark.parametrize(
+    "provider",
+    [
+        _provider_error(api_exceptions.PermissionDenied),
+        _provider_error(api_exceptions.ResourceExhausted),
+    ],
+    ids=("permission-denied", "resource-exhausted"),
+)
+def test_non_done_provider_poll_failure_is_indeterminate_and_safe(provider: Exception) -> None:
+    operation = _ExtendedOperation(status="RUNNING", error=None, failure=provider)
+
+    with pytest.raises(GCEIndeterminateOperationError) as caught:
+        wait_for_extended_operation(operation, label="instance vm-a", zone=_ZONE, timeout=27)
+
+    assert "inspect the named resource before retrying" in (caught.value.hint or "")
+    assert operation.result_calls == [27]
+    assert operation.done_calls == 0
+    _assert_detached_and_safe(caught.value)
+
+
+def test_normal_return_done_capacity_error_is_still_definitive_and_safe() -> None:
+    operation, refresh_calls = _real_done_operation(
+        compute_v1.Errors(
+            code="ZONE_RESOURCE_POOL_EXHAUSTED",
+            message=_SENTINEL,
+            location=_SENTINEL,
+        )
+    )
+
+    with pytest.raises(GCECapacityError) as caught:
+        wait_for_extended_operation(operation, label="instance vm-a", zone=_ZONE, timeout=29)
+
+    assert _ZONE in str(caught.value)
+    assert "ZONE_RESOURCE_POOL_EXHAUSTED" not in str(caught.value)
+    assert refresh_calls == []
+    _assert_detached_and_safe(caught.value)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        _operation_error(SimpleNamespace(code="UNKNOWN_CODE", message=_SENTINEL)),
+        _operation_error(SimpleNamespace(message=_SENTINEL, details=_SENTINEL)),
+    ],
+    ids=("unknown-code", "malformed-entry"),
+)
+def test_normal_return_done_unknown_or_malformed_nonempty_error_is_definitive(error: object) -> None:
+    operation = _ExtendedOperation(status=compute_v1.Operation.Status.DONE, error=error, failure=None)
+
+    with pytest.raises(GCEOperationError) as caught:
+        wait_for_extended_operation(operation, label="instance vm-a", zone=_ZONE, timeout=31)
+
+    assert type(caught.value) is GCEOperationError
+    assert operation.result_calls == [31]
+    assert operation.done_calls == 0
+    _assert_detached_and_safe(caught.value)
+
+
+@pytest.mark.parametrize("error", [None, _operation_error()], ids=("no-error", "empty-errors"))
+def test_true_normal_success_does_not_refresh_or_probe_http_error_fields(error: object) -> None:
+    operation = _ExtendedOperation(status=compute_v1.Operation.Status.DONE, error=error, failure=None)
 
     wait_for_extended_operation(operation, label="instance vm-a", zone=_ZONE, timeout=29)
 
