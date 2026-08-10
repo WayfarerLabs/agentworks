@@ -256,7 +256,7 @@ existing VM-platform interface is sufficient.
 ## Lifecycle mapping
 
 - `status`: live `instances.get`, mapping provider states to Agentworks states; not-found is
-  deleted.
+  `VMStatus.UNKNOWN` because the shared enum has no deleted member.
 - `start` / `stop`: live status guards avoid invalid-state provider calls and make already-running
   or already-stopped success; real transitions use bounded operation waits.
 - `delete`: close the provisioning allow, request instance deletion, verify absence, then delete the
@@ -296,16 +296,26 @@ interrupt. Manual delete commands are emitted only for resources whose provider 
 persisted owned IDs; collisions or unknown identities receive inspect/escalate guidance without a
 name-based delete recommendation.
 
+A `KeyboardInterrupt` raised during the ordinary-failure rollback is the first operator interrupt,
+not an unhandled cleanup failure. The ordinary rollback helper routes that exact object into the
+same idempotent bounded interrupt rollback path for one more cleanup attempt. A second interrupt in
+that attempt is the only abandon signal and still reports exact provider-ID recovery coordinates.
+
 Every later stable-allow cleanup reconstructs the original expected shape independently from the
 persisted canonical network, target tag, normalized provisioning prefixes, and fixed firewall
 contract. A live same-ID rule is not its own expectation; any shape change is retained as a
 collision.
 
-Google API authentication/permission, not-found, quota, collision, operation, readiness, and cleanup
-failures map to existing Agentworks error categories where one fits. Provider exceptions are
-sanitized before chaining; errors that may retain request or credential objects are not attached as
-cause/context. No provider error text is allowed to reflect service-account JSON or the Tailscale
-key.
+Google API authentication/permission, not-found, quota, capacity, collision, operation, readiness,
+and cleanup failures map to existing Agentworks error categories where one fits. A completed
+extended operation with a nonempty structured error is definitive even when `result()` raises an
+HTTP transport-shaped exception. Safe structured capacity codes, including zonal resource-pool
+exhaustion, map to a typed provider-capacity failure with zone-change or later-retry guidance.
+Unknown completed-operation failures remain definitive typed operation failures. Only an operation
+whose outcome cannot be established uses the indeterminate inspect-before-retry path. Provider
+exceptions are sanitized before chaining; errors that may retain request or credential objects are
+not attached as cause/context. No provider error text is allowed to reflect service-account JSON or
+the Tailscale key.
 
 ## Discovery and documentation
 

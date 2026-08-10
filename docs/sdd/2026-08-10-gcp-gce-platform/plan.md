@@ -165,11 +165,30 @@ correction. The final evidence record and SDD lock still follow the passing live
       prove both installers are idempotent; prove they created no guest authentication state; and
       prove the operator's pre-existing host credential baseline is unchanged. Watch the existing
       120-second install-command timeout explicitly during the `gcloud-cli` live pass.
-- [ ] Once the offline gates, code reviews, and operator prerequisites are green, post the exact
+- [x] Once the offline gates, code reviews, and operator prerequisites are green, post the exact
       head and flip the PR from draft to ready as the explicit request for this bounded live
       acceptance.
 - [ ] After the live pass, record exact offline/live/review evidence, add `locked.md`, and post the
       detailed merge-ready disposition only when every requirement is true.
+
+### Phase 3a: second live rejection correction
+
+- [ ] Route a first `KeyboardInterrupt` raised during ordinary-failure rollback into one more
+      idempotent bounded interrupt rollback attempt; preserve that interrupt object's identity,
+      prove cleanup success, and prove only a second interrupt abandons with exact provider-ID
+      survivor guidance.
+- [ ] Preserve safe structured errors from completed extended operations. Map zonal resource-pool
+      exhaustion to a typed capacity failure with zone/retry guidance, retain a definitive generic
+      operation failure for other completed errors, and reserve inspect-before-retry guidance for
+      truly indeterminate outcomes.
+- [ ] Add provider-shaped DONE-with-error, ordinary-failure cleanup-interrupt success, and
+      second-interrupt abandonment regressions with secret-free exception graphs and exact retained
+      coordinates; align permanent operator guidance if the new capacity type is exposed there.
+- [ ] Run focused GCP rollback/operation/platform tests, Ruff, strict mypy, file lint, locked-SDD,
+      Rulesync, full non-integration tests, and both required code reviews; resolve every valid
+      finding.
+- [ ] Merge current main, post a signed exact-head disposition, and flip the PR from draft to ready
+      for the next operator-gated live acceptance.
 
 **DoD:** offline and authorized live evidence prove the shipped behavior and cleanup; reviews and
 forge checks are green; permanent docs match code; the merge-ready PR is truthfully locked.

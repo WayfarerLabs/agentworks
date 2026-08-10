@@ -154,6 +154,11 @@ for resources whose provider IDs prove ownership. A same-name different-ID colli
 provider ID receives inspect/escalate guidance only, never an unconditional name-based delete
 command.
 
+A `KeyboardInterrupt` escaping the first ordinary-failure rollback attempt counts as the first
+interrupt. The ordinary-failure helper passes that exact object to the idempotent interrupt rollback
+path for one more bounded cleanup attempt. Success re-raises the same interrupt after clean
+rollback; a second interrupt is the sole abandon case and emits the survivor guidance above.
+
 ## Native transient route
 
 `transient_route` has four states:
