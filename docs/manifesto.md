@@ -154,16 +154,14 @@ the resource can do so safely, not a promise to erase everything the declaration
 
 ### Agentworks Is a Platform, Not a Harness
 
-There are many strong options for running agentic workloads, including first-party harnesses and
-independent alternatives. Agentworks does not try to replace them. It provides the infrastructure to
-run them securely, consistently, and at scale.
+Harness is a bit of an overloaded term in the agentic world. Here it means the tooling within which
+an agentic workload operates. By that definition, Claude Code, Codex, OpenCode, and the like are
+harnesses.
 
-Harnesses are getting better every day. Our belief is that custom harnesses will struggle to compete
-with vanilla harnesses running the latest models. Context will always matter, but harness minutiae
-will matter less, and may get in the way, as models become more capable.
-
-In that world, standing up and managing least-privilege environments becomes more important.
-Agentworks is designed to solve that problem.
+Harnesses, both first-party and independent, are getting better by the hour. In keeping with our
+conviction to set the context, tools, and guardrails, then get out of the way, Agentworks does not
+try to be a harness. It is a platform that provides the infrastructure to run harnesses securely,
+consistently, and efficiently at scale.
 
 ### Security Is Everyone's Responsibility
 
