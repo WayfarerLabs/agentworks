@@ -1,7 +1,7 @@
 # LLD: AGW Brand and Continuous Lunar Deployment Lander
 
 <!-- cspell:ignore focusout imul keyup pointerdown PRNG repower -->
-<!-- cspell:ignore lerp Minkowski nonfallback overspeed subinterval unhashed unmarginated -->
+<!-- cspell:ignore lerp Minkowski overspeed subinterval unhashed unmarginated -->
 <!-- cspell:ignore substep unitless uint32 quantized quantization -->
 
 - Status: Continuous Lander refinement designed; implementation pending
@@ -277,12 +277,15 @@ center delta:  78   81    84    87    90    93    96    99   102 m
 deck delta:     0  +1.6  -0.8  +0.8  -1.6    0   -0.8  +0.8    0 m
 ```
 
-For site index `i`, let `base=floor(8*sampleUnit(seed,3,i))`. Inspect the seven distinct nonfallback
-slots `slot=1+((base+3*c)%8)` for `c=0..6`, then the `78 m` zero-delta template. Select the first
-whose translated deck top is within the closed `TARGET_DECK_BAND=[1.55,8.3] m`. This is at most
-eight constant-time eligibility checks, not route search. Every active deck is already in the band,
-so the final zero-delta template is always eligible. The preference retains seeded distance and
-elevation variety while continuity follows structurally for every seed, not from sampled seeds.
+For site index `i`, let `base=floor(9*sampleUnit(seed,3,i))` and inspect all nine catalog slots in
+the order `slot=(base+4*c)%9` for `c=0..8`. Four and nine are relatively prime, so this is one
+complete seed-rotated permutation with no duplicate or omitted template. Select the first whose
+translated deck top is within the closed `TARGET_DECK_BAND=[1.55,8.3] m`. This is at most nine
+constant-time eligibility checks, not route search. The catalog contains zero-delta routes at `78`,
+`93`, and `102 m`; every active deck is already in the band, so all three are eligible and every
+permutation must reach one. The preference retains seeded distance and elevation variety while
+continuity follows structurally for every seed, not from sampled seeds. No entry is a dead fallback
+or a special retry path.
 
 Each template carries collision-safe `clearanceKnots` relative to the origin center/deck. Relative
 knot heights are at least `-0.65 m`, so every eligible translation has absolute cap at least
@@ -848,7 +851,7 @@ and serialized world descriptors are exact. Every schedule includes an explicit 
 | Vector                | Input                                                                  | Expected result                                                                                                   |
 | --------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | Gravity, 120 steps    | `(10,30,0,0)`, zero angle/engines, fuel 30                             | `x=10`, `y=28.4875`, `vx=0`, `vy=-3`, fuel `30`                                                                   |
-| Collective, 120 steps | Same pose, engines `(0.72,0.72)`                                       | `y=34.5854`, `vy=9.096`, angle/x unchanged, fuel `28.56`                                                          |
+| Collective, 120 steps | Same pose, engines `(0.72,0.72)`                                       | `y=34.5859`, `vy=9.096`, angle/x unchanged, fuel `28.56`                                                          |
 | One right-engine step | Same pose, engines `(0,1)`                                             | `y=30.000375`, `vy=0.045`, angular velocity `-0.583333333333`, angle `-0.00486111111111`, fuel `29.9916666666667` |
 | Exhaustion            | Fuel `0.005`, one step, engines `(1,1)`                                | Effective engines `(0.3,0.3)`, fuel exactly `0`                                                                   |
 | Plumes                | `u=0,0.5,1`                                                            | scales `0.08,0.54,1`; opacities `0.25,0.625,1`                                                                    |
@@ -867,11 +870,11 @@ and serialized world descriptors are exact. Every schedule includes an explicit 
 World tests pin complete JSON descriptors and route-proof digests for seeds `1`, `0x12345678`, and
 `0xffffffff`. The independent world fixtures begin with these exact values:
 
-| Seed         | `mixUint32(seed)` | Chunk 0 heights                                                                             | Site 0 top           | Leg-1 template preference  |
-| ------------ | ----------------- | ------------------------------------------------------------------------------------------- | -------------------- | -------------------------- |
-| `1`          | `1753845952`      | `3.632365759695,2.237045118399,4.041724477103,2.046403835807,3.451083194511,2.655762553215` | `4.3452401980757713` | `102,87,96,81,90,99,84,78` |
-| `0x12345678` | `4125564054`      | `2.894239616115,4.222849254729,2.351458893344,4.280068531958,2.808678170573,3.537287809188` | `4.6608121663331987` | `99,84,93,102,87,96,81,78` |
-| `0xffffffff` | `1734902346`      | `2.975416276604,1.709050793713,3.642685310822,1.776319827931,3.309954345040,2.643588862149` | `4.3304941696580501` | `87,96,81,90,99,84,93,78`  |
+| Seed         | `mixUint32(seed)` | Chunk 0 heights                                                                             | Site 0 top           | Leg-1 template preference     |
+| ------------ | ----------------- | ------------------------------------------------------------------------------------------- | -------------------- | ----------------------------- |
+| `1`          | `1753845952`      | `3.632365759695,2.237045118399,4.041724477103,2.046403835807,3.451083194511,2.655762553215` | `4.3452401980757713` | `102,87,99,84,96,81,93,78,90` |
+| `0x12345678` | `4125564054`      | `2.894239616115,4.222849254729,2.351458893344,4.280068531958,2.808678170573,3.537287809188` | `4.6608121663331987` | `99,84,96,81,93,78,90,102,87` |
+| `0xffffffff` | `1734902346`      | `2.975416276604,1.709050793713,3.642685310822,1.776319827931,3.309954345040,2.643588862149` | `4.3304941696580501` | `87,99,84,96,81,93,78,90,102` |
 
 The static scene seed's site-0 top is exactly `5.119569691829383`. The implementation commit also
 records literal template schedules, success/failure vectors, envelopes, instantiated-site
