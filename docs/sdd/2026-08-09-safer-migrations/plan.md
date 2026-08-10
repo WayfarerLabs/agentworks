@@ -55,7 +55,8 @@ behavior. Live validation uses a temporary isolated home and no operator state.
       CLI README and command reference with the now-shipped command behavior.
 - [ ] Test WAL-visible copy, validation-before-destination-open, source/destination direction,
       identical-path refusal, collision handling, cleanup, mixed-version retention ordering, manual
-      retention immunity, confirmation, stdout purity, and all generated completion surfaces.
+      retention immunity, confirmation without an implicit pre-restore backup, stdout purity, and
+      all generated completion surfaces.
 - DoD: on-demand backup and confirmed restore work without migration side effects; targeted tests,
   the complete gate, project-specific review, and mutation of the copy direction all pass.
 
@@ -68,8 +69,9 @@ behavior. Live validation uses a temporary isolated home and no operator state.
 - [ ] Add the strict default-true `DatabaseConfig` and focused `[database]` loader. Full config
       includes the section; only stale non-interactive opens use the focused projection.
 - [ ] Update `get_db()` to own notice, interactive default-yes prompt, and non-interactive setting
-      selection while delegating safety ordering to the service. Route interaction through stderr
-      even for JSON and names-only commands.
+      selection while delegating safety ordering to the service. Catch a selected backup's existing
+      `BackupError` here and add the mode-specific explicit-decline or config-opt-out retry hint.
+      Route interaction through stderr even for JSON and names-only commands.
 - [ ] Add the hidden completion-probe marker. When sidecars exist, return no candidates; otherwise
       use an immutable read-only connection. Completion must never prompt, migrate, create a
       database, or create or change SQLite sidecars.
@@ -81,8 +83,9 @@ behavior. Live validation uses a temporary isolated home and no operator state.
       and restore-before-downgrade order.
 - [ ] Test fresh/current/stale/future/malformed matrices; interactive accept and decline;
       non-interactive default, opt-out, and invalid focused config; backup-before-first-statement;
-      backup failure prevention; partial failure recovery; POSIX and PowerShell command rendering;
-      interactive JSON and names-only stdout purity; doctor; and byte-identical completion probes.
+      backup failure prevention and retry guidance; partial failure recovery; POSIX and PowerShell
+      command rendering; interactive JSON and names-only stdout purity; doctor; and byte-identical
+      completion probes.
 - DoD: every writable production open follows the reviewed safety flow, every completion probe is
   non-mutating, all permanent teaching matches behavior, and the complete gate and project-specific
   review have no unresolved valid finding.
@@ -128,6 +131,7 @@ behavior. Live validation uses a temporary isolated home and no operator state.
 - R10: Phases 1 and 2.
 - R11: Phase 2.
 - R12: Phases 1 and 2.
+- R13: Phase 2.
 - AC1: Phase 2 and Phase 3 isolated CLI validation.
 - AC2: Phase 2 and Phase 3 isolated CLI validation.
 - AC3: Phase 2 partial-failure test and Phase 3 mutation and CLI validation.
@@ -138,3 +142,4 @@ behavior. Live validation uses a temporary isolated home and no operator state.
 - AC8: Phases 1 and 2 focused tests and Phase 3 full pipeline.
 - AC9: Phase 2 completion and stdout-purity tests and Phase 3 CLI validation.
 - AC10: Phases 1 and 2 future-schema tests and Phase 3 CLI validation.
+- AC11: Phase 2 backup-failure ordering tests and Phase 3 mutation validation.

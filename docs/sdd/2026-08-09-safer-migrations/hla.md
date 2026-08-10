@@ -77,7 +77,8 @@ selected source read-only: the database opens, `PRAGMA quick_check` reports `ok`
 is a table, and its maximum version is a non-negative integer. This is a narrow
 fail-before-destruction check, not provenance or hostile-filesystem verification. Restore then
 copies the selected source into a fresh raw connection to the live path and closes without
-constructing `Database`.
+constructing `Database` or creating a pre-restore backup. Operators who want a snapshot of the live
+destination use the on-demand backup command before restore.
 
 ### Focused database setting
 
@@ -141,7 +142,10 @@ interaction boundary:
    `Back up the state database before migrating?`, default yes. This routes the prompt through the
    existing stderr presentation path even when the command selected JSON or names-only output.
 7. Non-interactive: load the focused database setting and back up when true.
-8. Pass that Boolean to the service's safe writable open; backup failure stops before construction.
+8. Pass that Boolean to the service's safe writable open. If a selected backup raises the existing
+   `BackupError`, catch it at this interaction boundary and preserve it with a mode-specific hint:
+   an interactive retry may explicitly decline, while automation may deliberately set the documented
+   config opt-out. The service has not constructed `Database`, so migration cannot have started.
 9. Let the service's clean `StateError` propagate. When a snapshot exists, its hint includes the
    platform-specific exact restore invocation; otherwise it states that no pre-migration backup was
    created.
@@ -217,7 +221,7 @@ Permanent teaching changes in the same implementation phase that makes each clai
 | Point                                   | Outcome                                                                |
 | --------------------------------------- | ---------------------------------------------------------------------- |
 | Focused config cannot be interpreted    | Fail before backup or migration                                        |
-| Backup source or destination fails      | Remove any incomplete new destination best-effort; do not migrate      |
+| Backup source or destination fails      | Remove incomplete output; mode-specific retry hint; do not migrate     |
 | Retention cleanup fails                 | Service returns cleanup fact; CLI warns and continues to migration     |
 | Operator declines interactive backup    | Continue without a snapshot; say so if migration later fails           |
 | Non-interactive setting disables backup | Continue without a snapshot; say so if migration later fails           |

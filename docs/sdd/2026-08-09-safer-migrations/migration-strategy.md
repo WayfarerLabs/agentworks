@@ -113,7 +113,8 @@ version. The rollback order is:
 Restore validates the source before opening the live destination, copies through SQLite's online
 backup API, and exits without running migrations. The selected backup remains available for retry.
 Agentworks does not coordinate other processes during restore; exclusive operator use is a stated
-precondition.
+precondition. Restore does not automatically back up the database it replaces; an operator who wants
+that additional artifact runs `agw database backup` first.
 
 An on-demand manual backup can be restored through the same command. Manual backups are never
 removed by automatic retention.

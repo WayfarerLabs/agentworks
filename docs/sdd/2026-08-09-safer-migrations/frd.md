@@ -68,6 +68,11 @@ transaction, so the product must not promise that every failure rolls itself bac
 - R12. Migration notices, backup status, prompts, and failure remediation use the presentation and
   error channels without writing to command stdout. JSON commands still emit exactly one JSON
   document, and names-only commands still emit only candidate names, after migration completes.
+- R13. If a selected automatic or interactive pre-migration backup fails, Agentworks stops before
+  the first migration statement and reports that migration did not start. It never silently falls
+  back to migrating without the selected safety artifact. The clean error tells an interactive
+  operator that a retry may explicitly decline the offer and tells automation that the documented
+  config opt-out is the deliberate escape hatch.
 
 ## Acceptance
 
@@ -98,6 +103,9 @@ transaction, so the product must not promise that every failure rolls itself bac
 - AC10. An ordinary writable open of a newer schema fails before any database or backup-directory
   change. On-demand backup can still preserve that newer database, and restore can replace it with a
   selected older snapshot.
+- AC11. A forced online-backup or destination failure after the operator or config selected backup
+  leaves the schema and representative data unchanged, creates no completed backup, and explains how
+  to retry with an explicit decline or opt-out rather than continuing automatically.
 
 ## Constraints and non-goals
 
@@ -112,6 +120,10 @@ transaction, so the product must not promise that every failure rolls itself bac
   database so an operator can find the recovery artifact beside the state it protects.
 - Do not add a retention setting until an operator need demonstrates that five automatic snapshots
   is the wrong fixed policy.
+- Restore does not automatically snapshot the database it is about to replace. The operator already
+  selected a recovery artifact and confirms the replacement; adding recursively layered safety
+  copies would blur automatic-retention semantics. An operator who wants that extra artifact can run
+  `agw database backup` before restore.
 - The command group is `database`, not `state`: it acts on one SQLite database and must not imply it
   captures every form of Agentworks state.
 
@@ -120,6 +132,9 @@ transaction, so the product must not promise that every failure rolls itself bac
 - The operator approved the corrected partial-failure framing, the `agw database backup` and
   `agw database restore` command home, fixed retention of five automatic backups, preservation of
   on-demand backups, and confirmation before restore on 2026-08-09.
+- The effort lead settled the saga lead's restore question on 2026-08-09: confirmed restore does not
+  create an automatic pre-restore backup; the explicit on-demand command already covers that choice
+  without adding a second retention category.
 
 ## Open questions
 
