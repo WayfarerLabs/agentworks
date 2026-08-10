@@ -11,10 +11,8 @@
 
 ## What Is a Harness Integration?
 
-In the world of agentic engineering, the term "harness" is a bit overloaded but is generally used to
-refer to the tooling within which agentic workloads operate. Agentworks **does not** aim to be this
-tooling. Rather, Agentworks aims to provide the infrastructure to support whatever tooling the
-operator chooses to run.
+In agentic engineering, "harness" generally refers to the tooling within which an agentic workload
+operates. Agentworks is infrastructure for running that tooling, not a harness itself.
 
 In the simplest (and default) case, Agentworks just runs a plain shell as the session's workload.
 From here, the operator can do whatever they want in terms of configuring the environment and
@@ -26,10 +24,9 @@ including checking dependencies, configuring it, and implementing its exact star
 This allows tight integration with harnesses such as Claude Code or Codex without confusing the
 Agentworks integration layer with the harness it drives.
 
-The initial implementation focuses narrowly on basic configuration and start/resume semantics, but
-the integration is designed to grow: richer per-session behavior now, and, as the scope model
-described below matures, tooling logic at the user and workspace levels too (auth, rule/skill/hook
-publishing, and the like).
+The current integration contract covers session-scoped configuration and start/resume semantics.
+Broader user- and workspace-scoped tooling behavior remains outside that contract, as described
+below.
 
 And note that regardless of integration, all sessions run inside the standard tmux session. This
 provides both access to stdin/stdout/stderr for interactivity as well as the persistent execution
@@ -50,10 +47,8 @@ shared user state (a login written into the user's home that every one of that u
 inherits) is not, because it reaches past the session. The same line rules out installing a plugin
 into the workspace (every session there would see it) or changing anything machine-wide.
 
-This is a real current limitation, not the end state. Tooling logic legitimately lives at the
-machine, user, and workspace scopes too, and a model to support those cleanly is in active design.
-It will expand what harness integrations can do; until it lands, keep every integration effect
-session-scoped.
+The current contract does not support machine-, user-, or workspace-scoped effects. Keep every
+integration effect session-scoped.
 
 ## Available Integrations
 

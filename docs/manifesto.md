@@ -1,0 +1,178 @@
+# The Agentworks Manifesto
+
+Agentworks is opinionated, and the opinions come from a specific reading of where agentic
+engineering is going and what it costs to do safely. This is the argument behind the project. The
+[README](../README.md) describes what Agentworks does; this document explains why it exists and the
+convictions that shape it.
+
+## Why Are We Doing This?
+
+AI can be an extraordinary force multiplier for software engineering. A capable model can explore
+unfamiliar systems, implement and test changes, review work, and sustain several lines of effort in
+parallel, all much faster than any human. Used well, it lets individual developers and small teams
+attempt work that would otherwise require far more time, people, and coordination or, more likely,
+be deemed impossible.
+
+That opportunity is not simply about making individual tasks faster. It is about increasing both the
+amount and ambition of work one operator can direct. Realizing that potential takes more than
+opening more chat windows. Operators need to know which agents are doing what, which workloads are
+active, what tools and credentials each can access, how work is separated or shared, and how to keep
+it running when the workstation disconnects.
+
+Agentworks exists to make that kind of leverage practical: give capable agents real environments,
+establish context and tools, contain failure and compromise, and leave the operator in control. The
+rest of this document states the convictions that shape that approach.
+
+## Our Convictions
+
+### Agentic Engineering Is Risky
+
+Agentic engineering is inherently risky. These risks come from multiple directions, including:
+
+- **Honest mistakes** - An agent can simply make a mistake that results in data loss, corruption, or
+  unintended side effects. It's very easy to find stories of agents wiping out entire directories or
+  otherwise causing havoc.
+- **Prompt injection** - Agents exposed to untrusted content can potentially be manipulated into
+  doing things outside their operator's intent or control.
+- **Supply chain attacks** - Agents may download and run compromised software or dependencies,
+  introducing malicious code at build time, runtime, or both.
+- **Rogue agents** - The agent itself could behave maliciously because of a compromised model or
+  provider, or because of emergent behavior.
+
+Increasing AI capabilities will make these attacks more frequent and sophisticated. Supply chain
+attacks in particular have become a near-constant backdrop. The registries that developers and their
+agents depend on are under active, sustained attack.
+
+And when things go wrong here, they will do so faster than humans can respond. The operator may not
+even be aware of the problem until it is too late.
+
+All of these risks suggest the same response: strong guardrails that contain the blast radius when
+things go sideways and leave the operator in control.
+
+### Autonomy and Control Are Not a Tradeoff
+
+Agentworks is built on the conviction that autonomy, security, and control are not mutually
+exclusive. A good platform should make it possible and straightforward to have all three.
+
+The operator should retain control over what agents are doing, how workloads are executed, and what
+resources they can access even as those workloads become more autonomous. Without reliable knowledge
+of what agents are doing, consistent environments, and a contained blast radius, control is lost in
+practice even if it is notionally retained.
+
+A significant and growing part of the ecosystem treats loss of control as an inevitable cost of
+agentic autonomy. Agentworks takes the opposite position.
+
+### Give Agents Real Environments
+
+You would not seal a good developer inside a single locked-down container and expect their best
+work. A capable agent is no different. Agentworks gives workloads a full-featured Linux VM with
+standard software, system services, room to install a real development environment, the ability to
+run containers, and genuine multi-user collaboration.
+
+The VM provides the hard isolation boundary. Within it, ordinary Linux users, groups, and filesystem
+permissions provide further separation and controlled collaboration between agents.
+
+### Identity and Workload Are Separate
+
+Agentworks separates who performs work from the unit of work itself. Agents are identities. Sessions
+are workloads that run in a workspace as either an agent or the VM's admin user. Creating an agent
+does not start a workload, and creating a session does not require creating a new identity.
+
+That separation lets identity and workload lifecycles vary independently. A durable agent can carry
+tools, credentials, harness context, memory, and interactive authentication across many disposable
+sessions. A session can also create a new agent alongside itself, supporting a one-off identity
+lifecycle when the operator wants one.
+
+Reproducible identity setup belongs in a template. The valuable state that cannot be reproduced
+belongs to the identity, while the session remains the disposable unit of work.
+
+### Set the Context, Tools, and Guardrails, Then Get Out of the Way
+
+Early agentic systems often relied on lots of custom tooling around the harness itself: Ralph loops,
+managed or brokered delegation, and even fully custom harnesses.
+
+Starting around fall 2025 with Claude Opus 4.5, it became clear that the model could do much of this
+work itself if given the proper direction. Models such as Claude Fable 5 and GPT-5.6 Sol need even
+less custom orchestration. Simply tell the model how it should work. For example: "Delegate to
+subagents where possible, consider less capable models for simpler tasks, and do not stop until you
+have a merge-ready PR." As has become a theme in the agentic world, what once was necessary is now
+counterproductive.
+
+Today, built-in "auto" and goal-oriented modes for longer-running, more autonomous work have
+proliferated across harnesses. These modes can be useful, but they are still orchestration.
+Agentworks expects their specifics to matter less as models continue to improve.
+
+But while custom orchestration is on its way out, setting the right context, giving the agent the
+right tools, and, critically, establishing appropriate guardrails are more important than ever.
+Agentworks is designed to make that easy while otherwise letting the harness and models operate
+unimpeded.
+
+### Consistency Beats Unbounded Choice
+
+Broadly applicable systems can spiral into complexity by supporting too many ways to do the same
+thing. Agentworks takes an opinionated stance: one base operating system, a small set of integrated
+tools, declarative configuration, a shared command-plan orchestration model, and common extension
+contracts.
+
+The capability model follows the same conviction. Integrations should not accumulate as special
+cases in the core. Shared extension points keep the core understandable and let operators select the
+functionality they need without installing, configuring, or even seeing everything else.
+
+### Isolation Should Be Composable
+
+Operators should be able to compose the isolation mechanisms that match their security and
+operational requirements. Agentworks is optimized around VMs, agents, and workspaces together, but
+does not require every operator to use every layer.
+
+Composition runs the other way too. Because agents are Linux users and workspaces are Linux groups,
+granting partial access costs no more than withholding it. A low-privilege research agent can gather
+material and leave artifacts for a more privileged agent to evaluate, so the privileged agent does
+not crawl untrusted content itself.
+
+That handoff narrows exposure rather than eliminating it. Anything the low-privilege agent writes is
+still attacker-influenced input. Treat it as data to evaluate, not instructions to follow.
+
+### Declarative Within Reason
+
+The DevOps movement demonstrated the power of declarative approaches. Agentworks follows that model
+only where a declaration can be an honest contract.
+
+For VMs and agents, `reinit` reruns the full Agentworks initialization contract while preserving
+accumulated state outside that contract. For workspaces, `repair` is deliberately narrower. It
+restores the invariants Agentworks can safely promise without treating the repository clone and the
+work inside it as disposable implementation details. Sessions likewise accumulate harness history
+and are managed through an imperative lifecycle via the `resume` command.
+
+Safe convergence is subtractive as well as additive. Revoking an agent's final grant to a workspace
+removes its Linux group membership, and removing an extra SSH public key from configuration removes
+it from the managed `authorized_keys` file on reinit. Apt packages are different: removing a package
+from a template does not automatically uninstall it or its transitive dependencies, because doing so
+can break accumulated machine state. Declarative configuration is a contract to converge as far as
+the resource can do so safely, not a promise to erase everything the declaration no longer names.
+
+## And Remember
+
+### Agentworks Is a Platform, Not a Harness
+
+Harness is a bit of an overloaded term in the agentic world. Here it means the tooling within which
+an agentic workload operates. By that definition, Claude Code, Codex, OpenCode, and the like are
+harnesses.
+
+Harnesses, both first-party and independent, are getting better by the hour. In keeping with our
+conviction to set the context, tools, and guardrails, then get out of the way, Agentworks does not
+try to be a harness. It is a platform that provides the infrastructure to run harnesses securely,
+consistently, and efficiently at scale.
+
+### Security Is Everyone's Responsibility
+
+Agentworks is built to support good security practices and to be reasonably secure by default, but
+it cannot guarantee security for every operator in every environment. Given what it handles,
+including agentic workloads with private code and data and sensitive credentials, it should be
+considered a high-value target for attackers.
+
+Your VMs and infrastructure remain your responsibility. Agentworks cannot secure an unsafe host, an
+overly permissive configuration, or credentials exposed outside its boundaries.
+
+Exercise appropriate caution, especially when using agents to configure and operate Agentworks
+itself. The workstation from which you administer Agentworks necessarily holds powerful credentials,
+so an attacker who compromises it can compromise everything it controls.

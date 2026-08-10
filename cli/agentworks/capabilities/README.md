@@ -3,25 +3,13 @@
 The capability model is the conceptual and practical framework for extending Agentworks to new
 backends and providers without modifying its core logic.
 
-## Motivation
+## Role
 
-The surrounding ecosystem provides many potentially useful agentic harnesses, VM-provisioning
-mechanisms, credential providers, secret backends, and related integrations. The naive path of just
-building all that into the core app presents several problems:
-
-- First and foremost, Agentworks must remain secure and reliable. Integrating all this stuff
-  directly into the core would make it harder to maintain, audit, and generally reason about.
-- Every operator has different needs across this universe of possibility. The system must let
-  operators select what they need without forcing them to install, configure, or even just see
-  everything.
-- Overly-specific integrations into the core might not scale to similar integrations, resulting in
-  multiple, slightly different implementations of the same concept, each needing to be tested and
-  maintained for all core development.
-
-The capability model is the solution to these problems. By identifying and designing flexible and
-powerful extension abstractions, it lets Agentworks integrate new functionality without bloating or
-destabilizing the core, and significantly reduces the risk of operators getting negatively impacted
-by functionality they do not need or want.
+Agentic harnesses, VM-provisioning mechanisms, credential providers, secret backends, and related
+integrations vary independently. The capability model keeps those implementations outside core
+orchestration behind shared extension contracts. Operators can enable the implementations they need
+without installing or configuring unrelated integrations, and new implementations reuse an existing
+kind's lifecycle and conformance checks.
 
 The plugin system lets third parties implement and distribute capabilities without changing the
 Agentworks repository.
