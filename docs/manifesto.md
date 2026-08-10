@@ -9,8 +9,9 @@ convictions that shape it.
 
 AI can be an extraordinary force multiplier for software engineering. A capable model can explore
 unfamiliar systems, implement and test changes, review work, and sustain several lines of effort in
-parallel. Used well, it lets individual developers and small teams attempt work that would otherwise
-require far more time, people, and coordination.
+parallel, all much faster than any human. Used well, it lets individual developers and small teams
+attempt work that would otherwise require far more time, people, and coordination or, more likely,
+be deemed impossible.
 
 That opportunity is not simply about making individual tasks faster. It is about increasing both the
 amount and ambition of work one operator can direct. Realizing that potential takes more than
@@ -20,7 +21,7 @@ it running when the workstation disconnects.
 
 Agentworks exists to make that kind of leverage practical: give capable agents real environments,
 establish context and tools, contain failure and compromise, and leave the operator in control. The
-rest of this document states the convictions behind that approach.
+rest of this document states the convictions that shape that approach.
 
 ## Our Convictions
 
@@ -140,13 +141,15 @@ For VMs and agents, `reinit` reruns the full Agentworks initialization contract 
 accumulated state outside that contract. For workspaces, `repair` is deliberately narrower. It
 restores the invariants Agentworks can safely promise without treating the repository clone and the
 work inside it as disposable implementation details. Sessions likewise accumulate harness history
-and are managed through an imperative lifecycle.
+and are managed through an imperative lifecycle via the `resume` command.
 
-Who created a piece of state does not decide whether it is safe to converge; the resource contract
-does. Declarative machinery should rebuild what can be reproduced, but it must not erase accumulated
-state merely because a declaration no longer names it. When reconciliation cannot be both complete
-and safe, Agentworks names a narrower promise instead of pretending the resource is fully
-declarative.
+Safe convergence is subtractive as well as additive. Revoking an agent's final grant to a workspace
+removes its Linux group membership, and removing one git credential from a larger declared set
+rewrites the Agentworks-managed credential files without it. Apt packages are different: removing a
+package from a template does not automatically uninstall it or its transitive dependencies, because
+doing so can break accumulated machine state. Declarative configuration is a contract to converge as
+far as the resource can do so safely, not a promise to erase everything the declaration no longer
+names.
 
 ## And Remember
 
