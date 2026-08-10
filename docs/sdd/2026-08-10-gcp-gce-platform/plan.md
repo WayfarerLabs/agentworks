@@ -111,6 +111,34 @@ enabling `gcp` publishes both current GCP contributions, enabling `aws` publishe
 platform and optional CLI, and neither guest CLI becomes a provisioning or authentication
 dependency.
 
+## Phase 2b: opaque multiline secret correction
+
+- [ ] Amend the shared secret-value contract so the env-var source preserves terminal CR/LF and
+      resolution preserves all CR/LF as opaque string content while continuing to reject NUL, with
+      value-free outcomes and exception graphs.
+- [ ] Move line-safety enforcement to the environment composition/reveal, Git credential, Proxmox
+      HTTP-header, and Tailscale stdin consumers whose syntax requires a single logical line; prove
+      each rejection happens through pure consumer-owned validation immediately after delivery and
+      preserves that path's existing resolve-to-mutation ordering, as well as happening before
+      transport, client/header construction, authenticated probing, or rendering, and cannot retain
+      the value in its exception graph. Pin zero-mutation VM-create and Tailscale-rekey paths; prove
+      conditional repair stays lazy and validates immediately after late delivery but before any
+      rejoin-specific mutation; retain final-sink checks as defense in depth.
+- [ ] Prove the GCP explicit-auth path accepts the exact pretty-printed LF and CRLF JSON downloaded
+      from Google, including its terminal line ending, through the real env-var secret source and
+      operation resolver, without compaction, base64 encoding, fallback, persistence, or value
+      reflection.
+- [ ] Update the permanent secret contract, SSH environment ADR, GCP guide, samples or command
+      references if affected, colocated Secrets guide contribution, VM-platform author contract, and
+      GCP auth remediation so every operator surface teaches direct whole-document storage and
+      sink-local restrictions accurately; pin guide rendering and safety.
+- [ ] Run focused secret/env/Git/Tailscale/GCP tests, Ruff, strict mypy, file lint, locked-SDD, and
+      full non-integration gates; obtain both required code reviews and resolve every valid finding.
+
+**DoD:** structured text secrets remain unchanged from source to capable consumer; GCP accepts the
+downloaded JSON directly; line-oriented consumers still fail closed without exposing values; no
+existing secret name, backend, configuration, CLI, sample, or completion contract changes.
+
 ## Phase 3: integration, review, and live acceptance
 
 - [ ] Update from current main and resolve any overlap with the merged vm-platform contract and

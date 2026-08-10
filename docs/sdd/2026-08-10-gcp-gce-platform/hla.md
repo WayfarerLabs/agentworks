@@ -111,22 +111,41 @@ mapping are not retained by the platform.
 No fallback crosses modes. Client construction and runup failures name the site, mode, secret name
 when applicable, and remediation, but never the value.
 
-The ordinary secret-resolution boundary rejects carriage returns and line feeds, so a multi-line key
-file cannot be exported verbatim. Operator docs require validating and compacting it into the
-default env-var value in one step:
+The env-var source returns the configured value unchanged rather than stripping terminal CR or LF.
+Secret resolution then preserves carriage returns and line feeds as ordinary string content and
+rejects NUL before a value becomes resolved. The explicit arm therefore receives the complete Google
+JSON document through the ordinary secret-source chain exactly as stored. The path and document
+never enter the site manifest, and no compaction or alternate encoding is required.
 
-```bash
-# Requires jq.
-export AW_SECRET_GCP_SERVICE_ACCOUNT_KEY="$(jq -c . /path/to/service-account-key.json)"
-```
+This is a shared contract correction rather than a GCP exception. `secrets/resolve.py` owns the
+source boundary and rejects only the value shape that cannot be represented by the process and
+string-oriented runtime, NUL. Consumers own narrower syntax constraints:
 
-```powershell
-$env:AW_SECRET_GCP_SERVICE_ACCOUNT_KEY = Get-Content -Raw C:\path\to\service-account-key.json |
-    ConvertFrom-Json | ConvertTo-Json -Compress -Depth 100
-```
+- environment composition and reveal reject a resolved secret containing CR, LF, or NUL before it
+  can enter SSH `SetEnv`, tmux environment arguments, a shell assignment, or tabular output;
+- Git credential material rejects CR, LF, or NUL before an authenticated header probe or
+  `~/.git-credentials` line is built;
+- Proxmox explicit auth rejects CR, LF, or NUL with fixed typed text before its API client can build
+  the HTTP `Authorization` header, and its exception graph cannot retain the value;
+- Tailscale bootstrap rejects CR, LF, or NUL before appending its one command-owned stdin newline;
+- SDK credential consumers, including GCP service-account JSON, receive the opaque string unchanged.
 
-The explicit arm then receives that complete JSON value through the ordinary secret-source chain;
-the path and document never enter the site manifest.
+Every rejection names only the secret reference or consumer and uses fixed remediation. No error,
+outcome, log, render input, or exception graph includes the value. Secret verification may prove a
+multiline value resolvable because it does not transport or reveal the value. The permanent secret
+contract and the SSH environment ADR record this source-versus-sink ownership split.
+
+Moving validation out of resolution does not move failure later than its existing ordering. Each
+line-oriented path validates its delivered values through a pure consumer-owned helper immediately
+after that path's resolve. VM create validates the Tailscale key and Git tokens before DB insertion
+and platform create; rekey validates the Tailscale key before status-dependent daemon
+restart/logout; eager Git and environment paths validate before their first mutation or transport;
+Proxmox validates while constructing the runup client before create mutation. The sanctioned
+conditional Tailscale repair keeps its lazy contract: a healthy or already-running path never
+resolves or prompts for the repair key, while a stopped VM may start before the gate discovers that
+repair is required. That late path validates immediately after its conditional delivery and before
+any rejoin route, transport, install, or daemon action. Final Tailscale and Git material sinks
+retain the same guard as defense in depth so direct callers cannot bypass the invariant.
 
 ## Runup and resolution
 
@@ -329,8 +348,13 @@ Offline fakes retain the final typed Compute request and record operations. Test
   signing-key/signature rejection, and contract-v2 conformance;
 - exact schema, omission-only outer-auth default, in-arm secret null/default, `SecretRef`,
   schema/sample/guide projection;
-- ambient and service-account construction, no fallback, caching, malformed JSON, and secret-free
-  full exception graphs;
+- ambient and service-account construction, exact internal and terminal LF/CRLF downloaded JSON
+  through the real env-var source and operation resolver, no fallback, caching, malformed JSON, NUL
+  rejection, and secret-free full exception graphs;
+- multiline secret resolution plus sink-local, value-free environment, reveal, Git credential,
+  Proxmox HTTP-header, and Tailscale line-safety rejection;
+- zero-mutation VM create and Tailscale rekey rejection for incompatible line-oriented values, plus
+  direct-sink defense-in-depth coverage;
 - runup default-network/subnet behavior and pre-mutation failures;
 - network-policy enforcement order plus priority-zero allow/deny conflicts; exact retained-identity
   derivation/collision behavior; live machine CPU/memory/architecture verification; `debian-cloud`

@@ -4,8 +4,10 @@
 
 Agentworks ships cloud VM platforms for Azure and AWS but no Google Cloud implementation. Operators
 need a Compute Engine site with the same declared capability, secret-source, bootstrap, lifecycle,
-and discovery behavior as its siblings. This is additive: existing configuration and platform
-contracts do not change.
+and discovery behavior as its siblings. Existing configuration and platform contracts remain
+compatible. This effort also corrects the shared secret-value boundary so structured credentials can
+retain their ordinary multiline representation while line-oriented consumers keep enforcing their
+own transport constraints.
 
 The implementation is a new opt-in `gcp` system plugin publishing `vm-platform/gcp-gce` and an
 optional guest-side Google Cloud CLI install command. The plugin name identifies the vendor bundle;
@@ -66,6 +68,16 @@ and architecture as deterministic tie-breakers when CPU and memory are equal.
 whose value is one complete Google service-account JSON document. Client email, private key, token
 URI, and every other credential field come from that document; none is duplicated in plain site
 config. The site's common `project_id` remains the target project, not part of the credential arm.
+
+The secret accepts the JSON document exactly as Google downloads it, including ordinary LF or CRLF
+formatting. Operators do not have to compact, base64-encode, split, or otherwise rewrite the
+credential before storing it. Secret sources do not trim its terminal line ending. Secret resolution
+treats line breaks as opaque value content and continues to reject NUL. Consumers whose own syntax
+is line-oriented, including environment, credential-line, and HTTP-header injection, reject
+incompatible values at that consumer boundary with value-free diagnostics instead of imposing that
+restriction on every secret. Operation composition performs that pure validation immediately after
+delivery, preserving each path's existing resolve-to-mutation ordering; final sinks may repeat it as
+defense in depth.
 
 An explicit service-account rejection fails as that identity. It never falls back to ambient
 credentials. Malformed JSON, missing service-account fields, SDK errors, logs, diagnostics, and the
@@ -175,10 +187,11 @@ precisely without replacing a more important primary failure.
 `resource list`, `describe-kind`, schema emission, guide topics, samples, and plugin enablement show
 the new plugin, `gcp-gce` platform, and both `gcloud-cli` and `aws-cli` install commands from their
 authoritative descriptors and manifests. Permanent docs teach both auth modes, the default-network
-behavior, the service-account secret format, provisioning exposure, required IAM/API setup, an
-ergonomic key-file-to-env-var workflow, optional guest CLI use, AWS guest-tooling boundaries, and
-recovery. Shell completion remains registry-driven; tests prove the new names are discoverable
-without a bespoke completion branch.
+behavior, the service-account secret format, provisioning exposure, required IAM/API setup, an exact
+downloaded-key-to-secret workflow without compaction, optional guest CLI use, AWS guest-tooling
+boundaries, and recovery. Shared secret docs teach multiline values as ordinary opaque content and
+locate line-safety enforcement at the consumers that need it. Shell completion remains
+registry-driven; tests prove the new names are discoverable without a bespoke completion branch.
 
 ### R11: verification and live acceptance
 
@@ -187,7 +200,11 @@ payloads plus disabled/enabled recipe gating, schema discrimination/defaults, se
 auth failure, client caching, size/image selection, request retention, fixed stdin, lifecycle,
 rollback, interrupts, cleanup survivors, exposure hooks, output/log/exception non-reflection, guide
 rendering, startup-script size enforcement, indeterminate firewall inserts, pre-classic policy
-ordering, priority-zero allow/deny conflicts, and full repository gates.
+ordering, priority-zero allow/deny conflicts, exact LF/CRLF service-account JSON through the real
+secret resolver, NUL rejection, sink-local line-safety failures for environment, Git credential,
+Proxmox HTTP-header, and Tailscale consumers, and full repository gates. Create and Tailscale rekey
+tests prove an incompatible line-oriented secret fails before any DB, provider, daemon, or
+durable-material mutation.
 
 One operator-approved live acceptance run creates and initializes a bounded VM, verifies Tailscale
 reachability and platform lifecycle, queries the realized instance to prove that no guest service
@@ -200,7 +217,9 @@ gate.
 - Other GCP compute mechanisms, managed instance groups, GPUs, Spot VMs, reservations, shared VPC
   host-project indirection, OS Login, custom images, IPv6, static external IPs, or service account
   attachment to the guest.
-- General credential scrubbing or a new secret-lifecycle framework.
+- Binary secret values, a new secret encoding, secret persistence, or a new secret-lifecycle
+  framework. This correction keeps the existing string-valued resolver and moves only the over-broad
+  CR/LF rejection to the line-oriented consumers that require it.
 - A provider-specific Agentworks CLI command family or imperative site configuration. The bundled
   guest-side `gcloud-cli` and `aws-cli` install commands are ordinary plugin data, not new
   Agentworks command families.
@@ -218,8 +237,9 @@ contributions of the extensible vendor plugin `gcp`, and `system-install-command
 equivalent contribution of the existing `aws` vendor plugin; both auth modes and the reviewed schema
 are enforced; create is complete-or-raise with credential-free retained metadata and one fixed-stdin
 join; lifecycle and rollback are provider-shaped and secret-free; neither guest CLI is a
-provisioning or authentication dependency; docs, samples, guide, and completions agree; offline
-gates and reviews pass; operator-gated live acceptance leaves zero residue; the SDD is locked
-truthfully.
+provisioning or authentication dependency; the exact downloaded multiline service-account JSON is
+accepted without rewriting while line-oriented sinks fail safely; docs, samples, guide, and
+completions agree; offline gates and reviews pass; operator-gated live acceptance leaves zero
+residue; the SDD is locked truthfully.
 
 -- agw-ns-gcp-platform (effort lead)
