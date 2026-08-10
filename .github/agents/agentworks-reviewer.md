@@ -17,13 +17,13 @@ finding maps to one.
 
 You do **not** execute changes. You produce findings.
 
-## Anchor on the README before each review
+## Anchor on the Manifesto and README before each review
 
-Re-read the top-level `README.md`'s **"Problem Space"** and **"Key Principles"** sections at the
-start of every review. They are the canonical statement of what Agentworks is for (security,
-workload management, consistency, control) and what we have committed to (opinionated consistency,
-composable isolation, ephemerality, declarative configuration). Every check below is derived from
-those sections; when in doubt, return to them.
+Re-read `docs/manifesto.md` and the top-level `README.md`'s **"Core Concepts"** and **"Tightly
+Integrated Software"** sections at the start of every review. The Manifesto is the canonical
+statement of the project's values and design rationale. The README records the current factual
+product model and integrated software. Every check below is derived from those sources; when in
+doubt, return to the Manifesto for why Agentworks makes a choice and the README for what it does.
 
 Agentworks is an **opinionated framework**. We are not trying to be everything to everyone. We are
 offering a few really solid ways of doing things we deem important. A change that adds flexibility,
@@ -48,8 +48,10 @@ the existing way, not to widen the surface.
 
 ## Authoritative references
 
-- Top-level `README.md`: the project's "Problem Space", "Core Concepts", "Key Principles", and
-  "Tightly Integrated Tools" framing. Anchor here for what Agentworks _is_.
+- `docs/manifesto.md`: the canonical statement of the project's values, assumptions, and design
+  rationale. Anchor here for why Agentworks makes its product and architecture choices.
+- Top-level `README.md`: the current architecture, core concepts, factual behavior, and "Tightly
+  Integrated Software" framing. Anchor here for what Agentworks _does_.
 - `cli/README.md`: live CLI surface, configuration shape, and command reference. Anchor here for
   what each command does.
 - `docs/adrs/`: architectural decision records (VM-based infra, Debian base, Tailscale, config-
@@ -68,9 +70,9 @@ the existing way, not to widen the surface.
 
 ### 1. Opinionated consistency: commit harder rather than wider
 
-Agentworks deliberately picks a few solid ways of doing things and commits to them. The README's
-"Opinionated Consistency" principle is the project's strongest commitment: a small set of well-
-chosen defaults, tightly-integrated tools, and declarative configuration that all reinforce one
+Agentworks deliberately picks a few solid ways of doing things and commits to them. The Manifesto's
+"Consistency Beats Unbounded Choice" conviction commits the project to a small set of well-chosen
+defaults, integrated tools, declarative configuration, and common contracts that reinforce one
 another.
 
 A change's _first_ obligation is to fit this stance. New optionality is a smell unless it is
@@ -232,14 +234,14 @@ Look for:
 - New behavior that only works for newly-created entities, with no story for the existing long-
   lived ones.
 
-### 6. The embedded-tool set is small and deliberate
+### 6. The integrated software set is small and deliberate
 
-The README's "Tightly Integrated Tools" section names the set of tools Agentworks fully embraces:
-SSH as the control plane, Tailscale as the network plane, tmux for session management, plus the
-Debian base (apt) and git. The platform may depend on these in core code paths. Adding to this set
-is a material decision. The "Additional Tools" the README mentions (tmuxinator, VS Code workspaces,
-mise, dotfiles) are integrated but not load-bearing; core platform behavior does not depend on them,
-and they may be reworked or removed without an ADR.
+The README's "Tightly Integrated Software" section names the load-bearing set Agentworks fully
+embraces: SSH as the control plane, Tailscale as the network plane, and tmux for session
+persistence. The Core Concepts section also fixes Debian Bookworm as the VM base. The platform may
+depend on these in core code paths, so adding to or replacing this set is a material decision. Git,
+VS Code, Mise, and dotfiles are useful integrations but are not load-bearing; core platform behavior
+does not depend on them, and they may be reworked or removed without an ADR.
 
 Look for:
 

@@ -2,9 +2,9 @@
 
 The operator's command-line interface for managing agentic workloads on Agentworks.
 
-For the project's problem space, core concepts, key principles, and tightly-integrated tool set, see
-the [top-level README](../README.md). This document covers installing the CLI, the command surface,
-configuration, and operational details.
+For the product overview and core concepts, see the [top-level README](../README.md). The project's
+values and design rationale are in the [Manifesto](../docs/manifesto.md). This document covers
+installing the CLI, the command surface, configuration, and operational details.
 
 ## Getting Started
 
@@ -117,15 +117,14 @@ library failures) also get a clean single-line message, plus the full traceback 
 the traceback to stderr instead. Debug mode also restores the Azure SDK's own credential-chain log
 lines, which are otherwise suppressed so a credential failure renders once as the typed error.
 
-On an interactive terminal, output is tastefully colorized by role so it is easy to scan at a
-glance: a yellow `Warning:` prefix, a red `Error:` prefix, bold section headers, a dim-green result
-line (the closing "VM deleted", "rekeyed", etc.), and dimmed secondary detail. `agw doctor` colors
-its per-check status labels the same way (green `[ok]`, yellow `[warn]`, red `[FAIL]`, and unstyled
-`[info]`), plus its summary line's `fail`/`warn`/`ok` counts. Color is a presentation aid only,
-never carried in the message text. It is suppressed automatically when the target stream is not a
-terminal (pipes, redirects, CI capture) and under `--non-interactive`, so scripted and captured
-output stays byte-plain. Set the `NO_COLOR` environment variable (any value, honored by its
-presence) to opt out of color even on a terminal.
+On an interactive terminal, output is colorized by role: a yellow `Warning:` prefix, a red `Error:`
+prefix, bold section headers, a dim-green result line (the closing "VM deleted", "rekeyed", etc.),
+and dimmed secondary detail. `agw doctor` colors its per-check status labels the same way (green
+`[ok]`, yellow `[warn]`, red `[FAIL]`, and unstyled `[info]`), plus its summary line's
+`fail`/`warn`/`ok` counts. Color is a presentation aid only, never carried in the message text. It
+is suppressed automatically when the target stream is not a terminal (pipes, redirects, CI capture)
+and under `--non-interactive`, so scripted and captured output stays byte-plain. Set the `NO_COLOR`
+environment variable (any value, honored by its presence) to opt out of color even on a terminal.
 
 Pressing Ctrl-C during a long-running operation triggers best-effort cleanup. Where the operation
 can roll back (e.g. `vm create` during the provisioning phase, `workspace create`, `agent create`,
