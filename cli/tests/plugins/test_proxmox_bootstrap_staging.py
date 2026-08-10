@@ -161,6 +161,26 @@ def test_failure_output_is_not_repeated_to_observable_error_text(
     assert api.files == {}
 
 
+def test_forged_success_ip_is_not_returned_or_repeated(
+    monkeypatch: pytest.MonkeyPatch,
+    warnings: list[str],
+) -> None:
+    api = _GuestAgent(
+        execute_result={
+            "exitcode": 0,
+            "out-data": f"##STEP## Tailscale\n##SUCCESS## tailscale-ip={_AUTH_KEY}\n",
+            "err-data": "",
+        }
+    )
+
+    result = _platform(monkeypatch, api)._run_bootstrap_via_agent("pve1", 100, _SCRIPT, RunContext())
+
+    assert result is None
+    assert warnings == ["Bootstrap failed (exit 0)"]
+    assert _AUTH_KEY not in repr(warnings)
+    assert api.files == {}
+
+
 @pytest.mark.parametrize(
     "execute_result",
     [

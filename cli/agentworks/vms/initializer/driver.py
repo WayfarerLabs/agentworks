@@ -503,17 +503,11 @@ def _run_bootstrap_script(
         #   2>&1         - merge stderr into captured stdout so apt-get noise
         #                  lands beside the structured step markers.
         output.detail("Running bootstrap script...")
-        execution_failed = False
-        try:
-            result = exec_target.run(
-                f"setsid sudo -n /bin/bash {shlex.quote(remote_script)} </dev/null 2>&1",
-                check=False,
-                timeout=900,
-            )
-        except SSHError:
-            execution_failed = True
-        if execution_failed:
-            raise SSHError("Bootstrap script execution failed") from None
+        result = exec_target.run(
+            f"setsid sudo -n /bin/bash {shlex.quote(remote_script)} </dev/null 2>&1",
+            check=False,
+            timeout=900,
+        )
     finally:
         active_failure = sys.exc_info()[1]
         cleanup_command = f"rm -f -- {shlex.quote(remote_script)} && test ! -e {shlex.quote(remote_script)}"

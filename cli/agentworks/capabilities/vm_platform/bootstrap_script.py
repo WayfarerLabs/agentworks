@@ -13,6 +13,7 @@ Markers:
 
 from __future__ import annotations
 
+import ipaddress
 import shlex
 from dataclasses import dataclass, field
 
@@ -322,7 +323,12 @@ def parse_bootstrap_output(stdout: str, exit_code: int) -> BootstrapResult:
             if current_step is not None:
                 current_step.success_msg = msg
             if msg.startswith("tailscale-ip="):
-                result.tailscale_ip = msg.split("=", 1)[1].strip()
+                candidate = msg.split("=", 1)[1].strip()
+                try:
+                    ipaddress.ip_address(candidate)
+                except ValueError:
+                    continue
+                result.tailscale_ip = candidate
         elif line.startswith("##WARN## "):
             if current_step is not None:
                 current_step.warnings.append(line[9:])

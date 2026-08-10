@@ -73,6 +73,7 @@ class WSL2Transport(Transport):
             f"{env_prefix}{command}",
         ]
         t = self._resolve_timeout(timeout)
+        timed_out = False
         try:
             result = subprocess.run(
                 args,
@@ -82,8 +83,10 @@ class WSL2Transport(Transport):
                 errors="replace",
                 timeout=t,
             )
-        except subprocess.TimeoutExpired as err:
-            raise SSHError(f"WSL2 command timed out after {t}s: {command}") from err
+        except subprocess.TimeoutExpired:
+            timed_out = True
+        if timed_out:
+            raise SSHError(f"WSL2 command timed out after {t}s: {command}") from None
         ssh_result = SSHResult(
             returncode=result.returncode,
             stdout=result.stdout,

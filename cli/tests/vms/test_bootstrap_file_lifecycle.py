@@ -17,6 +17,7 @@ from agentworks.transports.wsl2 import WSL2Transport
 from agentworks.vms.initializer import driver
 
 if TYPE_CHECKING:
+    from agentworks.db import Database
     from tests.conftest import CapturedOutput
 
 _AUTH_KEY = "tskey-bootstrap-file-sentinel"
@@ -98,6 +99,7 @@ def _call(
     monkeypatch: pytest.MonkeyPatch,
     transport: _RecordingTransport,
     *,
+    db: Database | None = None,
     logger: SSHLogger | None = None,
 ) -> str:
     public_key = tmp_path / "id.pub"
@@ -107,7 +109,7 @@ def _call(
         lambda: SimpleNamespace(hex="a" * 32),
     )
     return driver._run_bootstrap_script(
-        MagicMock(),
+        db if db is not None else MagicMock(),
         SimpleNamespace(operator=SimpleNamespace(ssh_public_key=public_key)),
         SimpleNamespace(),
         "vm1",
@@ -245,7 +247,7 @@ def test_copy_failure_removes_both_stages_and_preserves_error(
     ],
     ids=("failure", "timeout", "interrupt", "system-exit", "generator-exit"),
 )
-def test_execute_unwind_removes_both_stages_and_preserves_safe_error(
+def test_execute_unwind_removes_both_stages_and_preserves_error(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     failure: BaseException,
@@ -255,13 +257,7 @@ def test_execute_unwind_removes_both_stages_and_preserves_safe_error(
     with pytest.raises(type(failure)) as caught:
         _call(tmp_path, monkeypatch, transport)
 
-    if isinstance(failure, SSHError):
-        assert caught.value is not failure
-        assert str(caught.value) == "Bootstrap script execution failed"
-        assert caught.value.__cause__ is None
-        assert caught.value.__context__ is None
-    else:
-        assert caught.value is failure
+    assert caught.value is failure
     _assert_no_residue(transport)
 
 
@@ -300,12 +296,46 @@ def test_real_wsl_timeout_drops_reflected_output_and_removes_both_stages(
     with pytest.raises(SSHError) as caught:
         _call(tmp_path, monkeypatch, WSL2Transport("vm1"))
 
-    assert str(caught.value) == "Bootstrap script execution failed"
+    assert str(caught.value).startswith("WSL2 command timed out after 900s:")
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
     _assert_exception_graph_is_value_free(caught.value)
     assert guest_files == {}
     assert list(tmp_path.glob("agentworks-bootstrap-*.sh")) == []
+
+
+def test_invalid_reflected_tailscale_ip_never_reaches_output_db_or_return(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    database = MagicMock()
+    transport = _RecordingTransport(
+        execute_result=SSHResult(
+            returncode=0,
+            stdout="\n".join(
+                (
+                    "##STEP## Tailscale",
+                    f"##SUCCESS## tailscale-ip={_AUTH_KEY}",
+                    "",
+                )
+            ),
+            stderr="",
+        )
+    )
+
+    with pytest.raises(SSHError) as caught:
+        _call(tmp_path, monkeypatch, transport, db=database)
+
+    assert str(caught.value) == "Bootstrap script failed (exit 0)"
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    _assert_exception_graph_is_value_free(caught.value)
+    assert _AUTH_KEY not in repr(captured_output)
+    assert not any(message.startswith("Tailscale IP:") for message in captured_output.detail)
+    database.update_vm_tailscale.assert_not_called()
+    database.update_vm_provisioning_status.assert_not_called()
+    _assert_no_residue(transport)
 
 
 @pytest.mark.parametrize(
@@ -373,10 +403,7 @@ def test_guest_removal_failure_does_not_mask_primary(
     with pytest.raises(SSHError) as caught:
         _call(tmp_path, monkeypatch, transport)
 
-    assert caught.value is not failure
-    assert str(caught.value) == "Bootstrap script execution failed"
-    assert caught.value.__cause__ is None
-    assert caught.value.__context__ is None
+    assert caught.value is failure
     assert transport.guest_files
     assert warnings == [
         "could not verify removal of the guest bootstrap staging file; primary failure unchanged; plaintext may remain"
@@ -463,4 +490,57 @@ def test_local_removal_failure_surfaces_after_guest_cleanup(
         assert _AUTH_KEY not in repr(caught.value)
     finally:
         for path in transport.local_paths:
+            real_unlink(path, missing_ok=True)
+
+
+@pytest.mark.parametrize("operation", ["write", "copy"])
+@pytest.mark.parametrize(
+    "cleanup_failure_type",
+    [OSError, SystemExit],
+    ids=("ordinary-cleanup", "control-flow-cleanup"),
+)
+def test_local_removal_failure_does_not_mask_staging_primary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    warnings: list[str],
+    operation: str,
+    cleanup_failure_type: type[BaseException],
+) -> None:
+    real_unlink = Path.unlink
+    local_path = tmp_path / "agentworks-bootstrap-write.sh"
+    if operation == "write":
+        primary: BaseException = OSError("write failed")
+        monkeypatch.setattr(
+            "agentworks.vms.initializer.driver.tempfile.NamedTemporaryFile",
+            lambda **kwargs: _FailingTempFile(local_path, primary),
+        )
+        transport = _RecordingTransport()
+    else:
+        primary = SSHError("copy failed")
+        transport = _RecordingTransport(copy_failure=primary)
+
+    cleanup_failure = cleanup_failure_type("local cleanup failed")
+
+    def _fail_bootstrap_unlink(path: Path, *, missing_ok: bool = False) -> None:
+        if path.name.startswith("agentworks-bootstrap-"):
+            raise cleanup_failure
+        real_unlink(path, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", _fail_bootstrap_unlink)
+    try:
+        with pytest.raises(type(primary)) as caught:
+            _call(tmp_path, monkeypatch, transport)
+
+        assert caught.value is primary
+        assert transport.guest_files == {}
+        staged_paths = [local_path] if operation == "write" else transport.local_paths
+        assert len(staged_paths) == 1
+        assert staged_paths[0].exists()
+        assert warnings == [
+            "could not verify removal of the local bootstrap staging file; "
+            "primary failure unchanged; plaintext may remain"
+        ]
+        assert _AUTH_KEY not in repr(warnings)
+    finally:
+        for path in [local_path] if operation == "write" else transport.local_paths:
             real_unlink(path, missing_ok=True)
