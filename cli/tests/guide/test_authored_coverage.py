@@ -79,12 +79,16 @@ def test_action_contract_pins_authorization_refusal_and_first_resources() -> Non
     ]
     assert all(action.refusal_alternative for action in actions)
     assert actions[0].command == ("agw", "doctor", "--output", "json")
+    assert "First-resource creation needs explicit configured-readiness proof" in actions[0].precondition
     assert "parse exactly one JSON document" in actions[0].expected_state
     assert "schema_version is the integer 1" in actions[0].expected_state
     assert "command is exactly doctor" in actions[0].expected_state
     assert "data is an object" in actions[0].expected_state
     assert "data.counts.fail to be the integer 0" in actions[0].expected_state
     assert "no applicable readiness check to report unavailable or not ready" in actions[0].expected_state
+    assert "Keep first-resource readiness unverified or retain the stored not-ready reason" in (
+        actions[0].refusal_alternative
+    )
     assert actions[3].command == (
         "agw",
         "vm",
