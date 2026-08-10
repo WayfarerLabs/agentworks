@@ -24,10 +24,10 @@ to review every tool call.
 
 Agentworks adds an enforcement layer below the harness. Linux identities, group membership,
 filesystem permissions, credential scope, and VM boundaries constrain every process running as the
-workload, whether it is a supported harness, another application, or a plain shell. Those controls
-do not depend on the application recognizing or cooperating with them. They complement security at
-the application layer rather than replace it, and remain subject to lower-layer vulnerabilities such
-as kernel or hypervisor compromise.
+workload, whether it is a supported harness, another application, a plain shell, or code executed
+from a compromised npm package. Those controls do not depend on the application recognizing or
+cooperating with them. They complement security at the application layer rather than replace it, and
+remain subject to lower-layer vulnerabilities such as kernel or hypervisor compromise.
 
 ### Isolation Model and Current Limitations
 
