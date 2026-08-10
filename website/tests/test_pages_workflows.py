@@ -12,7 +12,7 @@ CI_PATH = REPO_ROOT / ".github/workflows/ci.yml"
 PAGES_PATH = REPO_ROOT / ".github/workflows/pages.yml"
 
 PYTHON_TEST_COMMAND = "python3 -m unittest discover -s website/tests -p 'test_*.py'"
-NODE_TEST_COMMAND = "node --test website/tests/lander-model.test.mjs"
+NODE_TEST_COMMAND = "node --test website/tests/lander-world.test.mjs website/tests/lander-model.test.mjs"
 
 CI_DETERMINISTIC_BUILD_SCRIPT = '''\
 python3 website/build.py --repo-root . --output "${RUNNER_TEMP}/site-root-a" --site-base /
@@ -457,7 +457,7 @@ class WorkflowContractTests(unittest.TestCase):
         website = block(self.ci, "website:", 2)
         self.assertIn("actions/checkout@v7", website)
         self.assertIn("python3 -m unittest discover -s website/tests -p 'test_*.py'", website)
-        self.assertIn("node --test website/tests/lander-model.test.mjs", website)
+        self.assertIn(NODE_TEST_COMMAND, website)
         self.assertEqual(website.count("python3 website/build.py"), 4)
         self.assertIn("--site-base /", website)
         self.assertIn("--site-base /agentworks/", website)
@@ -529,7 +529,7 @@ class WorkflowContractTests(unittest.TestCase):
     def test_pages_build_tests_determinism_and_exact_artifact_boundary(self) -> None:
         build = block(self.pages, "build:", 2)
         self.assertIn("python3 -m unittest discover -s website/tests -p 'test_*.py'", build)
-        self.assertIn("node --test website/tests/lander-model.test.mjs", build)
+        self.assertIn(NODE_TEST_COMMAND, build)
         self.assertEqual(build.count("python3 website/build.py"), 2)
         self.assertIn('"${RUNNER_TEMP}/agentworks-site"', build)
         self.assertIn('"${RUNNER_TEMP}/agentworks-site-repeat"', build)

@@ -29,6 +29,7 @@ EXPECTED_FILES = frozenset(
         Path("assets/agw-rocket.svg"),
         Path("static/lander-game.js"),
         Path("static/lander-model.js"),
+        Path("static/lander-world.js"),
         Path("static/lander.css"),
         Path("static/site.css"),
     }
@@ -308,7 +309,8 @@ class StaticDocumentTests(unittest.TestCase):
         controls = " ".join(self.document.text_by_id["lander-controls"].split())
         self.assertEqual(
             controls,
-            "Thrust: Space or Up. Turn: Left/H or Right/L. Escape exits. R restarts after success or failure.",
+            "Thrust: Space or Up. Turn: Left/H or Right/L. Tap or hold to thrust; drag to turn. "
+            "R restarts after a crash. Escape exits.",
         )
 
     def test_accessible_names_live_region_and_initial_focus_surface_are_pinned(
@@ -328,7 +330,7 @@ class StaticDocumentTests(unittest.TestCase):
         self.assertEqual(self.element("lander-exit")[0], "button")
         self.assertEqual(self.element("lander-restart")[0], "button")
         description = " ".join(self.document.text_by_id["lander-scene-description"].split()).lower()
-        for word in ("lander", "surface", "zone", "dark", "network operations center"):
+        for word in ("lander", "surface", "helipad", "gas can", "dark", "network operations center"):
             self.assertIn(word, description)
         self.assertNotIn("space", description)
         self.assertNotIn("control", description)
@@ -348,14 +350,16 @@ class StaticDocumentTests(unittest.TestCase):
         self.assertIn("#lander-start:focus-visible", self.css)
         self.assertIn("transform-origin: 82px 401px", self.css)
         self.assertIn("transform-origin: 158px 401px", self.css)
-        self.assertEqual(self.element("scene-terrain")[1]["d"], "M0 548H1000V640H0Z")
+        terrain = next(attributes for _, attributes in self.document.tags if attributes.get("class") == "terrain-chunk")
+        self.assertEqual(terrain["data-chunk-index"], "0")
+        self.assertIn("L40 495.556", terrain["d"])
 
     def test_css_has_only_bounded_keyframes_and_reduced_motion_preserves_live_plumes(
         self,
     ) -> None:
         self.assertEqual(
             set(re.findall(r"@keyframes\s+([\w-]+)", self.css)),
-            {"agw-preflight-cue", "agw-agent-route"},
+            {"agw-preflight-cue", "agw-target-cue"},
         )
         reduced = self.css.split("@media (prefers-reduced-motion: reduce)", 1)[1]
         self.assertIn("animation: none !important", reduced)
@@ -364,40 +368,39 @@ class StaticDocumentTests(unittest.TestCase):
         self.assertNotIn("#mission-right-engine", reduced)
         self.assertNotIn("scale(1, 0.08)", reduced)
         self.assertIn('[data-paused="true"]', self.css)
-        powered_rule = self.css.split('#lander-game[data-noc-stage="4"] #noc-signals {', 1)[1].split("}", 1)[0]
+        powered_rule = self.css.split('.lander-site[data-power="on"] .antenna-signal {', 1)[1].split("}", 1)[0]
         self.assertIn("opacity: 1", powered_rule)
         self.assertNotIn("animation", powered_rule)
 
     def test_input_clear_restores_zero_command_and_renders(self) -> None:
         clear_input = self.game.split("clearAllInput(timestamp) {", 1)[1].split("\n    }", 1)[0]
         self.assertIn("commanded: { ...ZERO_INPUT }", clear_input)
-        self.assertIn("this.render()", clear_input)
+        self.assertIn("clearSimulationInput", clear_input)
 
     def test_native_actions_share_keyboard_controller_operations_and_focus_lifecycle(
         self,
     ) -> None:
         listeners = self.game.split("installListeners() {", 1)[1].split("\n    }", 1)[0]
-        self.assertIn('this.exitButton.addEventListener("click", () => this.exit()', listeners)
+        self.assertIn('this.listen(this.lander_exit, "click", () => this.exit()', listeners)
         self.assertIn(
-            'this.restartButton.addEventListener("click", () => this.restart()',
+            'this.listen(this.lander_restart, "click", () => this.restart()',
             listeners,
         )
         keyboard = self.game.split("onKeyDown(event) {", 1)[1].split("onKeyUp(event) {", 1)[0]
         self.assertIn("this.exit()", keyboard)
         self.assertIn("this.restart()", keyboard)
         start = self.game.split("start(holdSpace, timestamp) {", 1)[1].split("exit() {", 1)[0]
-        self.assertIn("this.actions.hidden = false", start)
-        self.assertIn("this.exitButton.disabled = false", start)
-        self.assertIn("this.restartButton.hidden = true", start)
+        self.assertIn("this.lander_actions.hidden = false", start)
+        self.assertIn("this.lander_exit.disabled = false", start)
         exit_method = self.game.split("exit() {", 1)[1].split("restart() {", 1)[0]
-        self.assertIn("this.actions.hidden = true", exit_method)
-        self.assertIn("this.startButton.focus({ preventScroll: true })", exit_method)
+        self.assertIn("this.lander_actions.hidden = true", exit_method)
+        self.assertIn("this.lander_start.focus({ preventScroll: true })", exit_method)
         restart = self.game.split("restart() {", 1)[1].split("onKeyDown(event) {", 1)[0]
-        self.assertIn("this.restartButton.hidden = true", restart)
-        self.assertIn("this.shell.focus({ preventScroll: true })", restart)
+        self.assertIn("this.lander_restart.hidden = true", restart)
+        self.assertIn("this.lander_scene_shell.focus({ preventScroll: true })", restart)
         render = self.game.split("render() {", 1)[1].split("destroy() {", 1)[0]
-        self.assertIn('["failed", "succeeded"].includes(this.model.state)', render)
-        self.assertIn("this.restartButton.disabled = !terminal", render)
+        self.assertIn('this.model.state === "failed"', render)
+        self.assertIn("this.lander_restart.disabled = !failed", render)
 
     def test_fixed_color_contrast_meets_text_and_graphic_thresholds(self) -> None:
         self.assertGreaterEqual(contrast("#292b30", "#f5f2e8"), 4.5)

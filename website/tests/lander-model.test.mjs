@@ -1,530 +1,467 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import {
+    ENGINE_ACCELERATION,
     FAILURE_STATUS,
-    FUEL_CAPACITY,
-    MAX_CATCH_UP_STEPS,
+    FUEL_QUANTUM,
+    REFERENCE_TEMPLATES,
+    ROUTE_DIGESTS,
     STEP_SECONDS,
-    SUCCESS_STATUS,
-    DeploymentMission,
-    advanceCue,
     advanceMissionSequence,
     advanceSimulation,
-    contactForPose,
+    classifySweptContact,
     createCueState,
-    createFlightModel,
     createPreflightModel,
+    createRun,
     createSimulationClock,
     effectiveThrust,
     enqueueInputEdge,
+    integratePose,
     mixDigitalInput,
-    mixEngineRequests,
-    normalizeDegrees,
+    nextAwardRatio,
     plumeForThrust,
-    pointerEngineRequests,
-    settleCue,
+    proveTemplate,
+    removeQueuedInputEdges,
     stepFlight,
-    transformLocalPoint,
     transitionMission,
+    updateRetention,
 } from "../static/lander-model.js";
 
-const TOLERANCE = 1e-10;
-const ZERO_INPUT = { left: 0, right: 0 };
+const ROOT = new URL("../", import.meta.url).pathname;
 
-function close(actual, expected, tolerance = TOLERANCE) {
-    assert.ok(Math.abs(actual - expected) <= tolerance, `expected ${actual} to be within ${tolerance} of ${expected}`);
+function close(actual, expected, tolerance = 1e-10) {
+    assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} differs from ${expected}`);
 }
 
-function vectorModel(overrides = {}) {
-    return {
-        ...createFlightModel(),
-        pose: {
-            x: 10,
-            y: 30,
-            vx: 0,
-            vy: 0,
-            angle: 0,
-            angularVelocity: 0,
-            ...overrides,
-        },
-    };
-}
-
-function runSteps(model, count, input) {
-    let current = model;
+function stepMany(pose, request, fuel, count) {
+    let current = pose;
+    let reserve = fuel;
     for (let index = 0; index < count; index += 1) {
-        current = stepFlight(current, input);
+        const result = integratePose(current, request, reserve);
+        current = result.pose;
+        reserve = result.thrust.fuel;
     }
-    return current;
-}
-
-function schedule(hertz, edges = []) {
-    let model = createFlightModel();
-    let clock = createSimulationClock(0);
-    for (const edge of edges) {
-        clock = enqueueInputEdge(clock, edge);
-    }
-    for (let frame = 1; frame <= hertz; frame += 1) {
-        const result = advanceSimulation(clock, model, (frame * 1000) / hertz);
-        clock = result.clock;
-        model = result.model;
-    }
-    return { clock, model };
+    return { pose: current, fuel: reserve };
 }
 
 class FakeElement {
     constructor(parentElement = null) {
-        this.parentElement = parentElement;
-        this.hidden = false;
-        this.disabled = false;
-        this.tabIndex = -1;
-        this.textContent = "";
-        this.dataset = {};
-        this.attributes = new Map();
-        this.style = { setProperty() {} };
+        this.parentElement = parentElement; this.hidden = false; this.disabled = false; this.tabIndex = -1;
+        this.textContent = ""; this.value = "0.0"; this.dataset = {}; this.attributes = new Map(); this.children = [];
+        this.setCount = 0;
+        const properties = new Map();
+        this.style = { setProperty: (name, value) => properties.set(name, value),
+            removeProperty: (name) => properties.delete(name), properties };
     }
-
-    addEventListener() {}
-
+    addEventListener() {} removeEventListener() {}
     setAttribute(name, value) {
-        this.attributes.set(name, value);
+        this.setCount += 1;
+        this.attributes.set(name, String(value));
+        if (name === "class") this.className = String(value);
+        if (name.startsWith("data-")) this.dataset[name.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = String(value);
     }
-
-    removeAttribute(name) {
-        this.attributes.delete(name);
+    removeAttribute(name) { this.attributes.delete(name); }
+    append(...nodes) { for (const node of nodes) { node.parentElement = this; this.children.push(node); } }
+    replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
+    replaceWith(node) { this.replacement = node; }
+    remove() { if (this.parentElement) this.parentElement.children = this.parentElement.children.filter((node) => node !== this); }
+    focus() { globalThis.document.activeElement = this; }
+    hasPointerCapture() { return false; }
+    get firstElementChild() { return this.children[0] ?? null; }
+    get lastElementChild() { return this.children.at(-1) ?? null; }
+    querySelector(selector) {
+        const matches = (node) => selector.startsWith(".") ? node.className?.split(" ").includes(selector.slice(1)) :
+            selector.startsWith("[data-site-id=") ? node.dataset.siteId === selector.match(/"(.*)"/)[1] :
+                node.tagName === selector;
+        for (const child of this.children) {
+            if (matches(child)) return child;
+            const nested = child.querySelector(selector); if (nested) return nested;
+        }
+        return null;
     }
-
-    focus() {
-        document.activeElement = this;
+    cloneNode(deep = false) {
+        const clone = new FakeElement(); clone.hidden = this.hidden; clone.disabled = this.disabled;
+        clone.tabIndex = this.tabIndex; clone.textContent = this.textContent; clone.value = this.value;
+        clone.dataset = { ...this.dataset }; clone.attributes = new Map(this.attributes); clone.className = this.className;
+        if (deep) clone.append(...this.children.map((child) => child.cloneNode(true)));
+        return clone;
     }
 }
 
-function createControllerFixture() {
-    const root = new FakeElement();
-    const actions = new FakeElement(root);
-    const elements = {
-        "#lander-scene-shell": new FakeElement(root),
-        "#lander-scene": new FakeElement(root),
-        "#lander-start": new FakeElement(root),
-        "#lander-controls": new FakeElement(root),
-        "#lander-actions": actions,
-        "#lander-exit": new FakeElement(actions),
-        "#lander-restart": new FakeElement(actions),
-        "#lander-status": new FakeElement(root),
-    };
-    root.querySelector = (selector) => elements[selector];
-    return { root, ...Object.fromEntries(Object.entries(elements).map(([key, value]) => [key.slice(1), value])) };
+function controllerFixture() {
+    const root = new FakeElement(); const actions = new FakeElement(root);
+    const ids = ["lander-scene-shell", "lander-scene", "lander-start", "lander-fuel", "lander-fuel-value",
+        "lander-target-direction", "lander-controls", "lander-actions", "lander-exit", "lander-restart", "lander-status",
+        "terrain-layer", "site-layer", "debris-layer", "mission-agent"];
+    const elements = Object.fromEntries(ids.map((id) => [id, new FakeElement(root)]));
+    elements["lander-actions"] = actions; elements["lander-exit"].parentElement = actions;
+    elements["lander-restart"].parentElement = actions;
+    elements["lander-start"].hidden = true; elements["lander-start"].disabled = true;
+    actions.hidden = true; elements["lander-exit"].disabled = true;
+    elements["lander-restart"].hidden = true; elements["lander-restart"].disabled = true;
+    root.querySelector = (selector) => elements[selector.slice(1)] ?? FakeElement.prototype.querySelector.call(root, selector);
+    root.cloneNode = () => controllerFixture().root;
+    root.elements = elements;
+    return { root, elements };
 }
 
 let controllerModule;
-
-async function loadControllerModule() {
+async function controllerClasses() {
     if (!controllerModule) {
-        const automaticFixture = createControllerFixture();
         globalThis.Element = FakeElement;
-        globalThis.document = {
-            activeElement: null,
-            body: new FakeElement(),
-            hidden: true,
-            addEventListener() {},
-            querySelector: () => automaticFixture.root,
-        };
-        globalThis.window = {
-            addEventListener() {},
-            setTimeout,
-        };
-        globalThis.matchMedia = () => ({
-            matches: false,
-            addEventListener() {},
-        });
-        globalThis.requestAnimationFrame = () => 1;
-        globalThis.cancelAnimationFrame = () => {};
+        globalThis.document = { activeElement: null, body: new FakeElement(), hidden: true,
+            addEventListener() {}, removeEventListener() {}, createElementNS: (_, name) => {
+                const element = new FakeElement(); element.tagName = name; return element;
+            }, querySelector: (selector) =>
+                selector === "#lander-scene" ? { namespaceURI: "http://www.w3.org/2000/svg" } : null };
+        globalThis.window = { addEventListener() {}, removeEventListener() {} };
+        globalThis.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+        globalThis.requestAnimationFrame = () => 1; globalThis.cancelAnimationFrame = () => {};
         controllerModule = await import("../static/lander-game.js");
     }
     return controllerModule;
 }
 
-function isEffectivelyVisible(element) {
-    for (let current = element; current; current = current.parentElement) {
-        if (current.hidden) {
-            return false;
-        }
-    }
-    return true;
+function focusable(element) {
+    for (let current = element; current; current = current.parentElement) if (current.hidden) return false;
+    return !element.disabled;
 }
 
-function isEffectivelyFocusable(element) {
-    return isEffectivelyVisible(element) && !element.disabled;
-}
-
-function assertDestroyedActions(fixture) {
-    assert.equal(fixture["lander-actions"].hidden, true);
-    assert.equal(isEffectivelyVisible(fixture["lander-exit"]), false);
-    assert.equal(fixture["lander-exit"].disabled, true);
-    assert.equal(isEffectivelyFocusable(fixture["lander-exit"]), false);
-    assert.equal(fixture["lander-restart"].hidden, true);
-    assert.equal(isEffectivelyVisible(fixture["lander-restart"]), false);
-    assert.equal(fixture["lander-restart"].disabled, true);
-    assert.equal(isEffectivelyFocusable(fixture["lander-restart"]), false);
-}
-
-test("the controller imports the one model scheduler instead of duplicating it", async () => {
-    const controller = await readFile(new URL("../static/lander-game.js", import.meta.url), "utf8");
-    assert.match(controller, /advanceSimulation/);
-    assert.doesNotMatch(controller, /STEP_SECONDS|MAX_CATCH_UP_STEPS|while \(accumulator/);
-});
-
-test("DeploymentMission accepts only the legal event matrix", () => {
-    const machine = new DeploymentMission();
-    const preflight = machine.model;
-    assert.equal(machine.send("RESTART"), preflight);
-    assert.equal(machine.send("START").state, "flying");
-    const flying = machine.model;
-    assert.equal(machine.send("LANDING_SETTLED"), flying);
-    assert.equal(machine.send("UNSAFE_CONTACT", { cause: "noc" }).state, "failed");
-    assert.equal(machine.model.failureCause, "noc");
-    assert.equal(machine.model.status, FAILURE_STATUS);
-    assert.equal(machine.send("RESTART").state, "flying");
-    assert.equal(machine.send("OUT_OF_BOUNDS").failureCause, "bounds");
-    assert.equal(machine.send("EXIT").state, "preflight");
-});
-
-test("normal and reduced-motion success transitions enforce entry invariants", () => {
-    const angle = -8;
-    const y = 1.6 * Math.abs(Math.sin((angle * Math.PI) / 180));
-    const flying = {
-        ...createFlightModel(),
-        pose: {
-            x: 30,
-            y,
-            vx: 1.4,
-            vy: -2.2,
-            angle,
-            angularVelocity: 12,
-        },
-    };
-    const landed = transitionMission(flying, "SAFE_CONTACT");
-    assert.equal(landed.state, "landed");
-    assert.deepEqual(landed.commanded, { left: 0, right: 0 });
-    assert.equal(landed.status, "Touchdown confirmed. Deploying agent.");
-    const deploying = transitionMission(landed, "LANDING_SETTLED");
-    assert.equal(deploying.bayOpen, true);
-    assert.equal(deploying.agentVisible, true);
-    const powering = transitionMission(deploying, "AGENT_ENTERED");
-    assert.equal(powering.agentVisible, false);
-    const departing = transitionMission(powering, "NOC_POWERED");
-    assert.equal(departing.nocPower, true);
-    assert.equal(departing.nocStage, 4);
-    assert.deepEqual(departing.commanded, { left: 0.82, right: 0.82 });
-    const succeeded = transitionMission(departing, "LANDER_DEPARTED");
-    assert.equal(succeeded.state, "succeeded");
-    assert.equal(succeeded.landerVisible, false);
-    assert.equal(succeeded.status, SUCCESS_STATUS);
-
-    const reduced = transitionMission(flying, "SAFE_CONTACT", { reducedMotion: true });
-    assert.equal(reduced.state, "succeeded");
-    assert.equal(reduced.nocPower, true);
-    assert.equal(reduced.nocStage, 4);
-    assert.equal(reduced.agentVisible, false);
-    assert.equal(reduced.landerVisible, false);
-    assert.equal(reduced.status, SUCCESS_STATUS);
-});
-
-test("digital aliases, hold-through-start, pointer bias, and source mixing are exact", () => {
-    assert.deepEqual(mixDigitalInput({ Space: true }), { left: 0.72, right: 0.72 });
-    assert.deepEqual(mixDigitalInput({ ArrowUp: true, ArrowLeft: true }), {
-        left: 0.72,
-        right: 1,
-    });
-    assert.deepEqual(mixDigitalInput({ Space: true, ArrowUp: true, KeyH: true, KeyL: true }), {
-        left: 1,
-        right: 1,
-    });
-    assert.deepEqual(pointerEngineRequests(0, 1000), { left: 0.72, right: 0.72 });
-    assert.deepEqual(pointerEngineRequests(180, 1000), { left: 1, right: 0.43999999999999995 });
-    assert.deepEqual(pointerEngineRequests(-180, 1000), { left: 0.43999999999999995, right: 1 });
-    assert.deepEqual(mixEngineRequests({ left: 0.72, right: 1 }, { left: 0.9, right: 0.4 }), { left: 0.9, right: 1 });
-
-    let clock = enqueueInputEdge(createSimulationClock(0), {
-        timestamp: 0,
-        left: 0.72,
-        right: 0.72,
-    });
-    const result = advanceSimulation(clock, createFlightModel(), 1000 / 120);
-    assert.deepEqual(result.model.commanded, { left: 0.72, right: 0.72 });
-});
-
-test("gravity vector is deterministic for 120 steps", () => {
-    const model = runSteps(vectorModel(), 120, { left: 0, right: 0 });
-    close(model.pose.x, 10);
-    close(model.pose.y, 28.4875);
-    close(model.pose.vx, 0);
-    close(model.pose.vy, -3);
-    close(model.fuel, 30);
-});
-
-test("collective vector is deterministic for 120 steps", () => {
-    const model = runSteps(vectorModel(), 120, { left: 0.72, right: 0.72 });
-    close(model.pose.y, 31.5367);
-    close(model.pose.vy, 3.048);
-    close(model.pose.x, 10);
-    close(model.pose.angle, 0);
-    close(model.fuel, 28.56);
-});
-
-test("one right-engine step matches the pinned semi-implicit vector", () => {
-    const model = stepFlight(vectorModel(), { left: 0, right: 1 });
-    close(model.pose.x, 10);
-    close(model.pose.y, 30.0000833333333);
-    close(model.pose.vy, 0.01);
-    close(model.pose.angularVelocity, -0.583333333333);
-    close(model.pose.angle, -0.00486111111111);
-    close(model.fuel, 29.9916666666667);
-});
-
-test("fuel exhaustion scales engines equally and never goes negative", () => {
-    const thrust = effectiveThrust({ left: 1, right: 1 }, 0.005);
-    close(thrust.left, 0.3);
-    close(thrust.right, 0.3);
-    assert.equal(thrust.fuel, 0);
-    assert.deepEqual(effectiveThrust({ left: 1, right: 1 }, 0), {
-        left: 0,
-        right: 0,
-        fuel: 0,
-    });
-});
-
-test("plume mapping is exact and clamps requests", () => {
-    assert.deepEqual(plumeForThrust(0), { scaleY: 0.08, opacity: 0.25 });
+test("8.4 engine physics, fuel exhaustion, input, and plumes match fixed vectors", () => {
+    assert.equal(ENGINE_ACCELERATION, 8.4);
+    const pose = { x: 10, y: 30, vx: 0, vy: 0, angle: 0, angularVelocity: 0 };
+    const gravity = stepMany(pose, { left: 0, right: 0 }, 30, 120);
+    close(gravity.pose.y, 28.4875); close(gravity.pose.vy, -3); close(gravity.fuel, 30);
+    const collective = stepMany(pose, { left: 0.72, right: 0.72 }, 30, 120);
+    close(collective.pose.y, 34.5859); close(collective.pose.vy, 9.096); close(collective.fuel, 28.56);
+    const exhausted = effectiveThrust({ left: 1, right: 1 }, 0.005);
+    close(exhausted.left, 0.3); close(exhausted.right, 0.3); assert.equal(exhausted.fuel, 0);
+    assert.deepEqual(mixDigitalInput({ Space: true, ArrowLeft: true }), { left: 0.72, right: 1 });
     assert.deepEqual(plumeForThrust(0.5), { scaleY: 0.54, opacity: 0.625 });
-    assert.deepEqual(plumeForThrust(1), { scaleY: 1, opacity: 1 });
-    assert.deepEqual(plumeForThrust(2), plumeForThrust(1));
 });
 
-test("clockwise local transforms define feet, hull, render, and bay geometry", () => {
-    assert.deepEqual(transformLocalPoint({ x: 10, y: 20, angle: 0 }, 2, 3), { x: 12, y: 23 });
-    const rotated = transformLocalPoint({ x: 10, y: 20, angle: 90 }, 2, 3);
-    close(rotated.x, 13);
-    close(rotated.y, 18);
-    assert.equal(normalizeDegrees(180), -180);
-    assert.equal(normalizeDegrees(540), -180);
-});
-
-test("safe landing includes every envelope edge and epsilon violations fail", () => {
-    const angle = -8;
-    const y = 1.6 * Math.abs(Math.sin((angle * Math.PI) / 180));
-    const edgePose = {
-        x: 30,
-        y,
-        vx: 1.4,
-        vy: -2.2,
-        angle,
-        angularVelocity: 12,
-    };
-    assert.equal(contactForPose(edgePose).safe, true);
-    for (const [field, value] of [
-        ["vx", 1.4 + 1e-9],
-        ["vy", -2.2 - 1e-9],
-        ["angle", -8 - 1e-9],
-        ["angularVelocity", 12 + 1e-9],
-    ]) {
-        assert.equal(contactForPose({ ...edgePose, [field]: value }).safe, false, field);
+test("award ratio starts at three, strictly decays, and remains above one", () => {
+    let ratio = 3;
+    close(nextAwardRatio(ratio), 2.64);
+    ratio = nextAwardRatio(ratio); close(nextAwardRatio(ratio), 2.3448);
+    for (let index = 0; index < 1000; index += 1) {
+        const next = nextAwardRatio(ratio);
+        assert.ok(next <= ratio); assert.ok(next > 1); ratio = next;
     }
-    const outsideZone = { ...edgePose, x: 43.7 };
-    assert.equal(contactForPose(outsideZone).safe, false);
+    assert.equal(ratio, 1 + Number.EPSILON);
 });
 
-test("a lower ground crossing settles safely from the raw pose instead of failing bounds", () => {
-    const landed = stepFlight(
-        vectorModel({ x: 30, y: 0.001, vx: 0, vy: -1, angle: 0, angularVelocity: 0 }),
-        ZERO_INPUT,
-    );
+test("all nine copied route literals pass exactly two defensive replays", () => {
+    assert.equal(REFERENCE_TEMPLATES.length, 9);
+    for (const template of REFERENCE_TEMPLATES) {
+        assert.deepEqual(template.runs[0], [1, 90]);
+        assert.ok(template.runs.reduce((total, run) => total + run[1], 0) <= 2880);
+        close(template.demonstratedMinimum / FUEL_QUANTUM, Math.round(template.demonstratedMinimum / FUEL_QUANTUM));
+        const proof = proveTemplate(template);
+        assert.equal(proof.success.classification, "safe");
+        assert.ok(proof.smallerFailure.exhaustionStep < proof.success.contactStep);
+    }
+    assert.match(ROUTE_DIGESTS.outputDigest, /^[0-9a-f]{64}$/);
+});
+
+test("independent derivation CLI reproduces canonical bytes and rejects misuse", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "agw-route-test-"));
+    const output = join(directory, "routes.json");
+    const tool = join(ROOT, "tools/derive_lander_routes.mjs");
+    const geometry = join(ROOT, "tests/fixtures/lander-route-geometry-v1.json");
+    const fixture = join(ROOT, "tests/fixtures/lander-route-derived-v1.json");
+    execFileSync(process.execPath, [tool, "--geometry", geometry, "--output", output, "--verify", fixture]);
+    assert.equal(await readFile(output, "utf8"), await readFile(fixture, "utf8"));
+    const derived = JSON.parse(await readFile(fixture, "utf8"));
+    assert.deepEqual(REFERENCE_TEMPLATES, derived.routes);
+    assert.equal(ROUTE_DIGESTS.outputDigest, derived.outputDigest);
+    assert.equal(ROUTE_DIGESTS.physicsDigest, derived.physicsDigest);
+    assert.equal(ROUTE_DIGESTS.geometryDigest, derived.geometryDigest);
+    assert.equal(derived.routes[0].runs[1][1], 200, "the selected route is not the first ranged candidate");
+    assert.equal(spawnSync(process.execPath, [tool, "--bogus"]).status, 2);
+
+    const blockedGeometry = join(directory, "blocked-geometry.json");
+    const blocked = JSON.parse(await readFile(geometry, "utf8"));
+    blocked.templates[0].clearanceKnots[2][1] = 50;
+    await writeFile(blockedGeometry, `${JSON.stringify(blocked)}\n`, "utf8");
+    assert.equal(spawnSync(process.execPath, [tool, "--geometry", blockedGeometry, "--output", output]).status, 1);
+
+    const changedTool = join(directory, "changed-recipes.mjs");
+    const changedSource = (await readFile(tool, "utf8")).replace("[3,199,201]", "[3,1,1]");
+    assert.notEqual(changedSource, await readFile(tool, "utf8"));
+    await writeFile(changedTool, changedSource, "utf8");
+    assert.equal(spawnSync(process.execPath, [changedTool, "--geometry", geometry, "--output", output]).status, 1);
+});
+
+test("the old route-78 target crossing is rejected by the exact landing envelope", () => {
+    const current = REFERENCE_TEMPLATES[0];
+    const unsafe = { ...current, runs: [[1,90],[3,200],[2,200],[1,20],[2,274],[3,274],[1,44],
+        [3,189],[2,189],[0,362],[1,118]], success: { ...current.success, contactStep: 1960,
+        burn: 8.236500000000081, classification: "safe", pose: { x: 77.81635462654064, y: 0,
+            vx: -0.16132550005166613, vy: -2.0400613638522276, angle: 1.4109374999979991,
+            angularVelocity: 9.658940314238862e-15 } } };
+    assert.throws(() => proveTemplate(unsafe), /Route proof mismatch/);
+    const originSite = { id: 0, center: 0, platformLeft: -4.8, platformRight: 4.8,
+        platformTop: 0, platformBottom: -0.35, canCollected: true, powered: true, nocStage: 5 };
+    const targetSite = { id: 1, center: 78, platformLeft: 73.2, platformRight: 82.8,
+        platformTop: 0, platformBottom: -0.35, clearanceKnots: current.clearanceKnots };
+    assert.throws(() => proveTemplate(current, { seed: 1, originSite, targetSite,
+        terrainVertices: [[4.8,-0.8],[72,50],[73.2,-0.8],[82.8,-0.8]] }), /Route proof mismatch/);
+});
+
+test("safe target top is inclusive and epsilon excess is unsafe", () => {
+    const model = createRun({ seed: 1 });
+    const target = model.retainedSites[0];
+    const previous = { x: target.center, y: target.platformTop + 0.25, vx: 1.4, vy: -2.2,
+        angle: -8, angularVelocity: 12 };
+    const next = { ...previous, y: target.platformTop + 0.2 };
+    assert.equal(classifySweptContact(model, previous, next).kind, "safe");
+    assert.equal(classifySweptContact(model, { ...previous, vx: 1.400000001 }, { ...next, vx: 1.400000001 }).kind, "unsafe");
+    const tangent = { x: target.center, y: target.platformTop, vx: 0, vy: 0, angle: 0, angularVelocity: 0 };
+    assert.equal(classifySweptContact(model, tangent, { ...tangent, x: tangent.x + 0.01 }).cause, "grazing");
+
+    const isolated = { ...model, terrainVertices: [[-100, -20], [200, -20]] };
+    for (const x of [target.platformLeft - 20, target.platformRight + 20]) {
+        const clear = { x, y: target.platformTop + 0.1, vx: 0, vy: -1, angle: 0, angularVelocity: 0 };
+        assert.equal(classifySweptContact(isolated, clear, { ...clear, y: target.platformTop - 0.1 }), null);
+    }
+});
+
+test("closed unsafe geometry catches slopes, platform equality, pylons, mast, and precedence", () => {
+    const base = createRun({ seed: 1 });
+    const site = base.retainedSites[0];
+    const slopeModel = { ...base, retainedSites: [], targetSiteId: null, terrainVertices: [[0, 0], [10, 10]] };
+    const slopePose = { x: 5, y: 6.62, vx: 0, vy: 0, angle: 0, angularVelocity: 0 };
+    assert.equal(classifySweptContact(slopeModel, slopePose, slopePose).cause, "terrain");
+    const sidePose = { x: site.platformLeft - 1.6 - 0.02, y: site.platformTop - 0.1,
+        vx: 0, vy: 0, angle: 0, angularVelocity: 0 };
+    assert.equal(classifySweptContact(base, sidePose, sidePose).cause, "platform");
+    const pylonPose = { x: site.platformLeft + 1.4, y: site.platformTop - 0.6,
+        vx: 0, vy: 0, angle: 180, angularVelocity: 0 };
+    assert.equal(classifySweptContact(base, pylonPose, pylonPose).cause, "pylon");
+    const buildingLeft = site.platformRight + 2;
+    const roof = site.platformTop + 7.2;
+    const mastPose = { x: buildingLeft + 3.5, y: roof + 0.1,
+        vx: 0, vy: 0, angle: 0, angularVelocity: 0 };
+    assert.equal(classifySweptContact(base, mastPose, mastPose).cause, "mast");
+    const earlierUnsafe = { x: site.platformRight - 0.8, y: site.platformTop + 0.7,
+        vx: 0, vy: -1, angle: 20, angularVelocity: 0 };
+    const laterTop = { ...earlierUnsafe, y: site.platformTop + 0.1 };
+    assert.equal(classifySweptContact(base, earlierUnsafe, laterTop).cause, "noc");
+});
+
+test("safe landing creates next target, adds uncapped award, and begins service", () => {
+    let model = createRun({ seed: 1 });
+    const target = model.retainedSites[0];
+    model = { ...model, pose: { x: target.center, y: target.platformTop + 0.001, vx: 0, vy: -1,
+        angle: 0, angularVelocity: 0 }, fuel: 100 };
+    const landed = stepFlight(model, { left: 0, right: 0 });
     assert.equal(landed.state, "landed");
-    assert.equal(landed.failureCause, null);
-    const lowerFoot = Math.min(...contactForPose(landed.pose).feet.map((foot) => foot.y));
-    assert.equal(lowerFoot, 0);
+    assert.equal(landed.completedSites, 1);
+    assert.equal(landed.retainedSites.length, 2);
+    assert.equal(landed.retainedSites[0].canCollected, true);
+    assert.ok(landed.fuel > 100);
+    close(landed.awardRatio, 2.64);
+    assert.equal(landed.targetSiteId, 1);
+    assert.ok(landed.targetRouteProof);
 });
 
-test("contact precedence is NOC, unsafe surface, bounds, then safe touchdown", () => {
-    const noc = stepFlight(vectorModel({ x: 55, y: 0.01, vx: 0, vy: -1, angle: 0, angularVelocity: 0 }), ZERO_INPUT);
-    assert.equal(noc.failureCause, "noc");
-
-    const surfaceAndBound = stepFlight(
-        vectorModel({ x: 94, y: 0.001, vx: 0, vy: -2.2, angle: 0, angularVelocity: 0 }),
-        ZERO_INPUT,
-    );
-    assert.equal(surfaceAndBound.failureCause, "surface");
-    assert.equal(surfaceAndBound.pose.x, 93);
-    assert.equal(surfaceAndBound.pose.y, 0);
-
-    const bound = stepFlight(vectorModel({ x: 30, y: 48, vx: 0, vy: 1, angle: 0, angularVelocity: 0 }), ZERO_INPUT);
-    assert.equal(bound.failureCause, "bounds");
-    assert.equal(bound.pose.y, 48);
+test("service powers the NOC, freezes a checkpoint, and launches with actual fuel", () => {
+    let model = createRun({ seed: 1, reducedMotion: true });
+    const target = model.retainedSites[0];
+    model = { ...model, pose: { x: target.center, y: target.platformTop + 0.001, vx: 0, vy: -1,
+        angle: 0, angularVelocity: 0 } };
+    model = stepFlight(model, { left: 0, right: 0 });
+    assert.equal(model.state, "launching");
+    assert.equal(model.retainedSites[0].powered, true);
+    assert.ok(Object.isFrozen(model.checkpoint));
+    const fuel = model.fuel;
+    for (let index = 0; index < 90; index += 1) model = stepFlight(model, { left: 0, right: 0 });
+    assert.equal(model.state, "flying");
+    assert.ok(model.fuel < fuel);
 });
 
-test("30, 60, and 120 Hz schedules produce the same 120-step flight", () => {
-    for (const hertz of [30, 60, 120]) {
-        const { clock, model } = schedule(hertz);
-        assert.equal(clock.cursor, 120);
-        close(model.pose.x, 30.8);
-        close(model.pose.y, 30.0875);
-        close(model.pose.vx, 0.8);
-        close(model.pose.vy, -3.4);
-        close(model.pose.angle, 0);
-        close(model.pose.angularVelocity, 0);
-        close(model.fuel, FUEL_CAPACITY);
+test("automatic launch ignores only its rising start top and keeps other collisions", () => {
+    let model = createRun({ seed: 1, reducedMotion: true });
+    const target = model.retainedSites[0];
+    model = { ...model, pose: { x: target.center, y: target.platformTop + 0.001, vx: 0, vy: -1,
+        angle: 0, angularVelocity: 0 } };
+    const launching = stepFlight(model, { left: 0, right: 0 });
+    assert.equal(launching.state, "launching");
+    assert.equal(stepFlight({ ...launching, fuel: 0 }, { left: 0, right: 0 }).state, "failed");
+    const active = launching.retainedSites.find((site) => site.id === launching.activeSiteId);
+    const side = { ...launching, pose: { ...launching.pose, x: active.platformLeft + 1.6, vy: 1 } };
+    assert.equal(stepFlight(side, { left: 0, right: 0 }).failureCause, "platform");
+    const pylon = { ...launching, pose: { ...launching.pose, x: active.platformLeft + 1.4,
+        y: active.platformTop - 0.6, vy: 1, angle: 180 } };
+    assert.equal(stepFlight(pylon, { left: 0, right: 0 }).failureCause, "pylon");
+    const buildingLeft = active.platformRight + 2;
+    const noc = { ...launching, pose: { ...launching.pose, x: buildingLeft + 3.5,
+        y: active.platformTop + 1, vy: 1 } };
+    assert.equal(stepFlight(noc, { left: 0, right: 0 }).failureCause, "noc");
+});
+
+test("destroy restores the pristine static DOM from active and failed controllers", async () => {
+    const { LanderGameController } = await controllerClasses();
+    for (const terminal of [false, true]) {
+        const fixture = controllerFixture();
+        const controller = new LanderGameController(fixture.root);
+        const elements = fixture.elements;
+        elements["lander-scene-shell"].setAttribute("role", "application");
+        elements["lander-actions"].hidden = false; elements["lander-exit"].disabled = false;
+        elements["lander-status"].textContent = terminal ? FAILURE_STATUS : "Mission underway.";
+        if (terminal) { elements["lander-restart"].hidden = false; elements["lander-restart"].disabled = false; }
+        fixture.root.style.setProperty("--lander-x", "999px");
+        assert.equal(focusable(elements["lander-exit"]), true);
+        controller.destroy();
+        const restored = fixture.root.replacement;
+        assert.equal(controller.model.state, "preflight");
+        assert.ok(restored); assert.equal(restored.style.properties.size, 0);
+        assert.equal(restored.elements["lander-start"].hidden, true);
+        assert.equal(restored.elements["lander-start"].disabled, true);
+        assert.equal(restored.elements["lander-actions"].hidden, true);
+        assert.equal(restored.elements["lander-exit"].disabled, true);
+        assert.equal(restored.elements["lander-restart"].hidden, true);
+        assert.equal(restored.elements["lander-restart"].disabled, true);
+        assert.equal(focusable(restored.elements["lander-exit"]), false);
+        assert.equal(restored.elements["lander-status"].textContent, "");
     }
 });
 
-test("timestamped input ties are frame-schedule independent", () => {
-    const edges = [
-        { timestamp: 125, left: 0.72, right: 0.72 },
-        { timestamp: 375, left: 0.72, right: 1 },
-        { timestamp: 625, left: 0.72, right: 0.72 },
-        { timestamp: 875, left: 0, right: 0 },
-    ];
-    for (const hertz of [30, 60, 120]) {
-        const { clock, model } = schedule(hertz, edges);
-        assert.equal(clock.cursor, 120);
-        close(model.pose.x, 30.789294822951447);
-        close(model.pose.y, 32.5627822785585);
-        close(model.pose.vx, 0.7612478269876443);
-        close(model.pose.vy, 1.4296050729753735);
-        close(model.pose.angle, -2.5112500000010414);
-        close(model.pose.angularVelocity, -4.9);
-        close(model.fuel, 28.85);
-    }
-});
-
-test("edge timestamp ties retain enqueue sequence", () => {
-    let clock = createSimulationClock(0);
-    clock = enqueueInputEdge(clock, { timestamp: 1000 / 120, left: 1, right: 0 });
-    clock = enqueueInputEdge(clock, { timestamp: 1000 / 120, left: 0, right: 1 });
-    const result = advanceSimulation(clock, createFlightModel(), 1000 / 120);
-    assert.deepEqual(result.model.commanded, { left: 0, right: 1 });
-});
-
-test("catch-up is bounded and a stall discards time before one clean resume step", () => {
-    const capped = advanceSimulation(createSimulationClock(0), createFlightModel(), 100);
-    assert.equal(capped.steps, MAX_CATCH_UP_STEPS);
-
-    let clock = createSimulationClock(0);
-    let model = createFlightModel();
-    let result = advanceSimulation(clock, model, 100.000001);
-    assert.equal(result.discarded, true);
-    assert.equal(result.steps, 0);
-    assert.equal(result.model, model);
-    clock = result.clock;
-    result = advanceSimulation(clock, model, 108.333335);
-    assert.equal(result.discarded, false);
-    assert.equal(result.steps, 1);
-});
-
-test("deployment clocks route the agent, power each stage, and script departure", () => {
-    const touchdown = {
-        ...createFlightModel(),
-        state: "landed",
-        pose: { x: 30, y: 0, vx: 0, vy: 0, angle: 6, angularVelocity: 0 },
-        touchdownPose: { x: 30, y: 0, vx: 0, vy: 0, angle: 6, angularVelocity: 0 },
-        status: "Touchdown confirmed. Deploying agent.",
-    };
-    const deploying = advanceMissionSequence(touchdown, 0.3);
-    assert.equal(deploying.state, "deploying");
-    assert.equal(deploying.bayOpen, true);
-    const descending = advanceMissionSequence(deploying, 0.35);
-    close(descending.agentPosition.y, 0);
-    const powering = advanceMissionSequence(deploying, 2.2);
-    assert.equal(powering.state, "powering");
-    assert.equal(powering.agentVisible, false);
-    assert.equal(advanceMissionSequence(powering, 0.199).nocStage, 0);
-    assert.equal(advanceMissionSequence(powering, 0.2).nocStage, 1);
-    assert.equal(advanceMissionSequence(powering, 0.4).nocStage, 2);
-    assert.equal(advanceMissionSequence(powering, 0.6).nocStage, 3);
-    assert.equal(advanceMissionSequence(powering, 0.8).nocStage, 4);
-    const departing = advanceMissionSequence(powering, 1);
-    assert.equal(departing.state, "departing");
-    assert.equal(departing.nocPower, true);
-    const midpoint = advanceMissionSequence(departing, 0.9);
-    close(midpoint.pose.x, 33);
-    close(midpoint.pose.y, 31);
-    close(midpoint.pose.angle, 3);
-    assert.deepEqual(midpoint.commanded, { left: 0.82, right: 0.82 });
-    const succeeded = advanceMissionSequence(midpoint, 0.9);
-    assert.equal(succeeded.state, "succeeded");
-    assert.equal(succeeded.landerVisible, false);
-    assert.deepEqual(succeeded.commanded, ZERO_INPUT);
-    assert.equal(succeeded.status, SUCCESS_STATUS);
-});
-
-test("reduced motion atomically completes any decorative sequence", () => {
-    for (const state of ["landed", "deploying", "powering", "departing"]) {
-        const model = { ...createFlightModel(), state };
-        const result = advanceMissionSequence(model, 0, true);
-        assert.equal(result.state, "succeeded");
-        assert.equal(result.nocPower, true);
-        assert.equal(result.nocStage, 4);
-        assert.equal(result.landerVisible, false);
-        assert.equal(result.status, SUCCESS_STATUS);
-    }
-});
-
-test("the subtle cue is one-shot and exit creates strict settled preflight", () => {
-    const cue = createCueState(false);
-    assert.equal(advanceCue(cue, 2.399).state, "running");
-    assert.deepEqual(advanceCue(cue, 2.4), { state: "settled", elapsed: 2.4 });
-    assert.equal(createCueState(true).state, "settled");
-    assert.equal(settleCue().state, "settled");
-
-    const powered = {
-        ...createFlightModel(),
-        state: "succeeded",
-        nocPower: true,
-        nocStage: 4,
-        fuel: 1,
-        landerVisible: false,
-        status: SUCCESS_STATUS,
-    };
-    const exited = transitionMission(powered, "EXIT");
-    assert.deepEqual(exited, createPreflightModel());
-    const restarted = transitionMission(powered, "RESTART");
-    assert.deepEqual(restarted, createFlightModel());
-});
-
-test("destroy hides and disables native actions from an active controller", async () => {
-    const { LanderGameController } = await loadControllerModule();
-    const fixture = createControllerFixture();
+test("render clears stale live status on crash entry", async () => {
+    const { LanderGameController } = await controllerClasses();
+    const fixture = controllerFixture();
     const controller = new LanderGameController(fixture.root);
-    controller.start(false, 0);
-
-    assert.equal(fixture["lander-actions"].hidden, false);
-    assert.equal(isEffectivelyFocusable(fixture["lander-exit"]), true);
-    assert.equal(fixture["lander-restart"].hidden, true);
-    assert.equal(isEffectivelyFocusable(fixture["lander-restart"]), false);
-
-    controller.destroy();
-
-    assert.equal(controller.model.state, "preflight");
-    assertDestroyedActions(fixture);
-});
-
-test("destroy removes focusable native actions from a terminal controller", async () => {
-    const { LanderGameController } = await loadControllerModule();
-    const fixture = createControllerFixture();
-    const controller = new LanderGameController(fixture.root);
-    controller.start(false, 0);
-    controller.model = transitionMission(controller.model, "UNSAFE_CONTACT");
+    fixture.elements["lander-status"].textContent = "Mission underway.";
+    controller.model = { ...createPreflightModel(), state: "crashing", status: "", crash: null };
     controller.render();
-
-    assert.equal(controller.model.state, "failed");
-    assert.equal(fixture["lander-actions"].hidden, false);
-    assert.equal(isEffectivelyFocusable(fixture["lander-exit"]), true);
-    assert.equal(fixture["lander-restart"].hidden, false);
-    assert.equal(isEffectivelyFocusable(fixture["lander-restart"]), true);
-
+    assert.equal(fixture.elements["lander-status"].textContent, "");
     controller.destroy();
+});
 
-    assert.equal(controller.model.state, "preflight");
-    assertDestroyedActions(fixture);
+test("vacuum crash has exactly eight deterministic fragments and finite duration", () => {
+    let model = createRun({ seed: 7 });
+    model = { ...model, pose: { x: -4.99, y: 20, vx: -10, vy: 0, angle: 0, angularVelocity: 0 } };
+    model = stepFlight(model, { left: 0, right: 0 });
+    assert.equal(model.state, "crashing");
+    assert.equal(model.crash.fragments.length, 8);
+    assert.equal(model.crashOrdinal, 1);
+    model = advanceMissionSequence(model, 0.6);
+    assert.equal(model.state, "failed");
+    assert.equal(model.status, FAILURE_STATUS);
+});
+
+test("reduced motion crashes atomically with zero debris", () => {
+    let model = createRun({ seed: 7, reducedMotion: true });
+    model = { ...model, pose: { x: -4.99, y: 20, vx: -10, vy: 0, angle: 0, angularVelocity: 0 } };
+    model = stepFlight(model, { left: 0, right: 0 });
+    assert.equal(model.state, "failed");
+    assert.equal(model.crash, null);
+});
+
+test("checkpoint restart restores post-award fuel without duplicating progress", () => {
+    let model = createRun({ seed: 1, reducedMotion: true });
+    const target = model.retainedSites[0];
+    model = { ...model, pose: { x: target.center, y: target.platformTop + 0.001, vx: 0, vy: -1,
+        angle: 0, angularVelocity: 0 } };
+    model = stepFlight(model, { left: 0, right: 0 });
+    const expected = { fuel: model.checkpoint.fuel, completed: model.completedSites, ratio: model.awardRatio };
+    model = { ...model, state: "failed", fuel: 0 };
+    const restarted = transitionMission(model, "RESTART");
+    assert.equal(restarted.state, "launching");
+    assert.equal(restarted.fuel, expected.fuel);
+    assert.equal(restarted.completedSites, expected.completed);
+    assert.equal(restarted.awardRatio, expected.ratio);
+    assert.equal(restarted.retainedSites[0].canCollected, true);
+});
+
+test("fixed scheduler is frame-rate equivalent and bounds its input queue", () => {
+    for (const rate of [30, 60, 120]) {
+        let clock = createSimulationClock(0);
+        let model = createRun({ seed: 1 });
+        for (let frame = 1; frame <= rate; frame += 1) {
+            const result = advanceSimulation(clock, model, (frame * 1000) / rate);
+            clock = result.clock; model = result.model;
+        }
+        close(model.pose.x, 30.8); close(model.pose.y, 30.0875); close(model.pose.vy, -3.4);
+    }
+    let clock = createSimulationClock(0);
+    for (let index = 0; index < 64; index += 1) clock = enqueueInputEdge(clock, { timestamp: 1, left: index % 2, right: 0 });
+    const physical = Object.freeze({ heldCodes: Object.freeze(["Space"]),
+        pointer: Object.freeze({ active: true, id: 7, anchorX: 10, currentX: 90, pulseDeadline: null }) });
+    clock = enqueueInputEdge(clock, { timestamp: 1, left: 1, right: 0.72, token: 7, physical });
+    assert.equal(clock.queue.length, 1);
+    assert.equal(clock.queue[0].snapshot, true);
+    assert.equal(clock.queue[0].token, 7); assert.equal(clock.queue[0].physical, physical);
+    clock = removeQueuedInputEdges(clock, 7);
+    clock = enqueueInputEdge(clock, { timestamp: 2, left: 0.72, right: 0.72,
+        physical: { heldCodes: ["Space"], pointer: { active: false } } });
+    const continued = advanceSimulation(clock, createRun({ seed: 1 }), 1000 / 120);
+    assert.deepEqual(continued.clock.input, { left: 0.72, right: 0.72 });
+});
+
+test("cue, preflight transition, and retention remain bounded", () => {
+    assert.deepEqual(createCueState(true), { state: "settled", elapsed: 0 });
+    const run = updateRetention(transitionMission(createPreflightModel(), "START", { seed: 1 }));
+    assert.equal(run.state, "flying");
+    assert.ok(run.retainedChunks.length <= 10);
+    assert.ok(run.retainedSites.length <= 3);
+    assert.ok(run.terrainVertices.length > 0);
+    close(STEP_SECONDS, 1 / 120);
+});
+
+test("retention and DOM reconciliation change only at bounded window keys", async () => {
+    let model = updateRetention(createRun({ seed: 1 }));
+    const vertices = model.terrainVertices; const key = model.retentionKey;
+    model = updateRetention({ ...model, pose: { ...model.pose, x: model.pose.x + 1 } });
+    assert.equal(model.retentionKey, key); assert.equal(model.terrainVertices, vertices);
+    const changed = updateRetention({ ...model, pose: { ...model.pose, x: model.pose.x + 25 } });
+    assert.notEqual(changed.retentionKey, key); assert.notEqual(changed.terrainVertices, vertices);
+
+    const { LanderGameController } = await controllerClasses();
+    const fixture = controllerFixture(); const controller = new LanderGameController(fixture.root);
+    controller.model = model; controller.render();
+    const terrainPath = fixture.elements["terrain-layer"].children[0];
+    const writes = terrainPath.setCount;
+    controller.model = updateRetention({ ...model, pose: { ...model.pose, x: model.pose.x + 1 } });
+    controller.render();
+    assert.equal(terrainPath.setCount, writes);
+    controller.model = changed; controller.render();
+    assert.notEqual(controller.worldWindowKey, key);
+    controller.root.style.setProperty("--crash-x", "900px");
+    controller.exit();
+    assert.equal(controller.model.state, "preflight"); assert.equal(controller.worldWindowKey, null);
+    assert.equal(fixture.elements["terrain-layer"].children.length, 0);
+    assert.equal(fixture.elements["site-layer"].children.length, 0);
+    assert.equal(controller.root.style.properties.has("--crash-x"), false);
+    assert.equal(fixture.elements["lander-start"].hidden, false);
+    controller.destroy();
+});
+
+test("100-site deterministic mission keeps generation and retention bounded", () => {
+    let model = updateRetention(createRun({ seed: 0x12345678, reducedMotion: true }));
+    let maximumGenerationMilliseconds = 0;
+    for (let completed = 0; completed < 100; completed += 1) {
+        if (model.state === "launching") {
+            for (let step = 0; step < 90; step += 1) model = updateRetention(stepFlight(model, { left: 0, right: 0 }));
+        }
+        const target = model.retainedSites.find((site) => site.id === model.targetSiteId);
+        model = { ...model, pose: { x: target.center, y: target.platformTop + 0.001, vx: 0, vy: -1,
+            angle: 0, angularVelocity: 0 } };
+        const started = performance.now();
+        model = updateRetention(stepFlight(model, { left: 0, right: 0 }));
+        maximumGenerationMilliseconds = Math.max(maximumGenerationMilliseconds, performance.now() - started);
+        assert.equal(model.state, "launching");
+        assert.ok(model.retainedSites.length <= 3);
+        assert.ok(model.retainedChunks.length <= 10);
+        assert.ok(model.fuel >= 0);
+    }
+    assert.equal(model.completedSites, 100);
+    assert.ok(model.awardRatio > 1);
+    assert.ok(maximumGenerationMilliseconds < 50);
 });

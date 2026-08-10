@@ -7,6 +7,7 @@ import {
     createPreflightModel,
     createSimulationClock,
     enqueueInputEdge,
+    GRAVITY,
     mixDigitalInput,
     mixEngineRequests,
     plumeForThrust,
@@ -15,27 +16,24 @@ import {
     resetSimulationAccumulator,
     settleCue,
     transitionMission,
+    updateRetention,
 } from "./lander-model.js";
+import { cameraLeftForPose, mixUint32, terrainPath, targetIsOffscreen } from "./lander-world.js";
 
-const ACTIVE_KEYS = new Map([
-    ["Space", "Space"],
-    ["ArrowUp", "ArrowUp"],
-    ["ArrowLeft", "ArrowLeft"],
-    ["ArrowRight", "ArrowRight"],
-    ["KeyH", "KeyH"],
-    ["KeyL", "KeyL"],
-]);
-const ZERO_INPUT = { left: 0, right: 0 };
+const SVG_NAMESPACE = document.querySelector("#lander-scene")?.namespaceURI;
+const ACTIVE_STATES = new Set(["flying", "landed", "deploying", "powering", "launching", "crashing", "failed", "generation-error"]);
+const FLIGHT_CODES = new Set(["Space", "ArrowUp", "ArrowLeft", "ArrowRight", "KeyH", "KeyL"]);
+const ZERO_INPUT = Object.freeze({ left: 0, right: 0 });
+
+function svg(name, attributes = {}) {
+    if (!SVG_NAMESPACE) throw new Error("SVG namespace is unavailable");
+    const element = document.createElementNS(SVG_NAMESPACE, name);
+    for (const [key, value] of Object.entries(attributes)) element.setAttribute(key, String(value));
+    return element;
+}
 
 function eventTime(event) {
     return Number.isFinite(event.timeStamp) ? event.timeStamp : performance.now();
-}
-
-function isEditable(target) {
-    return (
-        target instanceof Element &&
-        Boolean(target.closest("a, button, input, select, textarea, [contenteditable='true']"))
-    );
 }
 
 function unmodified(event, allowShift = false) {
@@ -43,447 +41,423 @@ function unmodified(event, allowShift = false) {
 }
 
 function physicalControl(event) {
-    if (["Space", "ArrowUp", "ArrowLeft", "ArrowRight"].includes(event.code)) {
-        return event.code;
-    }
-    const key = event.key.toLowerCase();
-    if (key === "h") {
-        return "KeyH";
-    }
-    if (key === "l") {
-        return "KeyL";
-    }
+    if (["Space", "ArrowUp", "ArrowLeft", "ArrowRight"].includes(event.code)) return event.code;
+    if (event.key.toLowerCase() === "h") return "KeyH";
+    if (event.key.toLowerCase() === "l") return "KeyL";
     return null;
 }
 
+function isEditable(target) {
+    return target instanceof Element && Boolean(target.closest("a, button, input, select, textarea, [contenteditable='true']"));
+}
+
+function freshSeed() {
+    if (globalThis.crypto?.getRandomValues) {
+        const words = new Uint32Array(2);
+        globalThis.crypto.getRandomValues(words);
+        const rotated = ((words[1] << 13) | (words[1] >>> 19)) >>> 0;
+        return mixUint32(words[0] ^ rotated);
+    }
+    const now = Date.now() >>> 0;
+    const fine = Math.floor(performance.now() * 1000) >>> 0;
+    return mixUint32(now ^ fine);
+}
+
+function createSiteGroup(site) {
+    const group = svg("g", { class: "lander-site", "data-site-id": site.id });
+    const platform = svg("g", { class: "landing-platform" });
+    platform.append(svg("rect"), svg("path", { class: "helipad-mark" }));
+    group.append(platform, svg("path", { class: "platform-supports" }));
+    const can = svg("g", { class: "gas-can" });
+    can.append(svg("path", { d: "M-7 0h14v15H-7Zm4-5h7v5h-7Zm10 7h4v8H7" }));
+    group.append(can);
+    const building = svg("g", { class: "noc-building" });
+    building.append(svg("path"), svg("path", { class: "noc-entry" }));
+    group.append(building);
+    const battery = svg("g", { class: "noc-battery" });
+    battery.append(svg("rect", { rx: 2 }), svg("path", { class: "battery-terminal" }));
+    for (let index = 1; index <= 4; index += 1) battery.append(svg("path", { class: `battery-bar battery-bar-${index}` }));
+    group.append(battery);
+    const antenna = svg("g", { class: "noc-antenna" });
+    antenna.append(svg("path", { class: "antenna-mast" }), svg("circle", { class: "antenna-head", r: 4 }),
+        svg("path", { class: "antenna-signal" }));
+    group.append(antenna);
+    return group;
+}
+
+function positionSite(group, site) {
+    const left = site.platformLeft * 10;
+    const right = site.platformRight * 10;
+    const top = 548 - site.platformTop * 10;
+    const bottom = 548 - site.platformBottom * 10;
+    const center = site.center * 10;
+    group.dataset.can = site.canCollected ? "collected" : "present";
+    group.dataset.power = site.powered ? "on" : "off";
+    group.dataset.nocStage = String(site.nocStage ?? (site.powered ? 5 : 0));
+    const platform = group.querySelector(".landing-platform");
+    const deck = platform.querySelector("rect");
+    deck.setAttribute("x", left); deck.setAttribute("y", top); deck.setAttribute("width", right - left); deck.setAttribute("height", bottom - top);
+    platform.querySelector(".helipad-mark").setAttribute("d", `M${center - 9} ${top + 1.7}v-20m18 20v-20m-18 10h18`);
+    group.querySelector(".platform-supports").setAttribute("d", `M${left + 14} ${bottom}v4.5m${right - left - 28} -4.5v4.5`);
+    group.querySelector(".gas-can").setAttribute("transform", `translate(${center + 30} ${top - 15})`);
+    const buildingLeft = right + 20;
+    const roof = top - 72;
+    const building = group.querySelector(".noc-building");
+    building.firstElementChild.setAttribute("d", `M${buildingLeft} ${top}v-72h70v72Z`);
+    building.lastElementChild.setAttribute("d", `M${buildingLeft} ${top - 18}h13v18h-13Z`);
+    const battery = group.querySelector(".noc-battery");
+    battery.querySelector("rect").setAttribute("x", buildingLeft + 13); battery.querySelector("rect").setAttribute("y", roof + 18);
+    battery.querySelector("rect").setAttribute("width", 40); battery.querySelector("rect").setAttribute("height", 22);
+    battery.querySelector(".battery-terminal").setAttribute("d", `M${buildingLeft + 53} ${roof + 24}h5v10h-5`);
+    for (let index = 1; index <= 4; index += 1) battery.querySelector(`.battery-bar-${index}`).setAttribute("d", `M${buildingLeft + 18 + (index - 1) * 8} ${roof + 23}h5v12h-5Z`);
+    const antenna = group.querySelector(".noc-antenna");
+    antenna.querySelector(".antenna-mast").setAttribute("d", `M${buildingLeft + 35} ${roof}v-32`);
+    antenna.querySelector(".antenna-head").setAttribute("cx", buildingLeft + 35); antenna.querySelector(".antenna-head").setAttribute("cy", roof - 34);
+    antenna.querySelector(".antenna-signal").setAttribute("d", `M${buildingLeft + 44} ${roof - 38}a15 15 0 0 1 0 16m8-24a26 26 0 0 1 0 32`);
+}
+
 export class LanderGameController {
-    constructor(root = document.querySelector("#lander-game")) {
-        if (!root) {
-            throw new Error("Lunar deployment game root is missing");
-        }
+    constructor(root, cleanups = [], snapshot = root?.cloneNode(true)) {
+        if (!root) throw new Error("Lunar deployment game root is missing");
         this.root = root;
-        this.shell = root.querySelector("#lander-scene-shell");
-        this.scene = root.querySelector("#lander-scene");
-        this.startButton = root.querySelector("#lander-start");
-        this.controls = root.querySelector("#lander-controls");
-        this.actions = root.querySelector("#lander-actions");
-        this.exitButton = root.querySelector("#lander-exit");
-        this.restartButton = root.querySelector("#lander-restart");
-        this.status = root.querySelector("#lander-status");
+        this.pristine = snapshot;
+        for (const id of ["lander-scene-shell", "lander-scene", "lander-start", "lander-fuel", "lander-fuel-value",
+            "lander-target-direction", "lander-controls", "lander-actions", "lander-exit", "lander-restart", "lander-status",
+            "terrain-layer", "site-layer", "debris-layer", "mission-agent"]) {
+            const name = id.replaceAll("-", "_");
+            this[name] = root.querySelector(`#${id}`);
+            if (!this[name]) throw new Error(`Missing #${id}`);
+        }
         this.model = createPreflightModel();
         this.clock = createSimulationClock();
-        this.cue = createCueState(false);
         this.heldKeys = new Set();
         this.pointerInput = ZERO_INPUT;
         this.pointer = null;
-        this.pointerToken = 0;
         this.pulseTimer = null;
         this.frameId = null;
         this.previousFrame = null;
-        this.destroyed = false;
+        this.worldWindowKey = null;
         this.paused = document.hidden;
-        this.abortController = new AbortController();
+        this.destroyed = false;
+        this.cleanups = cleanups;
         this.motion = matchMedia("(prefers-reduced-motion: reduce)");
         this.cue = createCueState(this.motion.matches);
+        this.cleanups.push(() => {
+            if (this.frameId !== null) cancelAnimationFrame(this.frameId);
+            if (this.pulseTimer !== null) clearTimeout(this.pulseTimer);
+        });
         this.installListeners();
-        this.startButton.hidden = false;
-        this.actions.hidden = true;
-        this.exitButton.disabled = true;
-        this.restartButton.hidden = true;
-        this.restartButton.disabled = true;
         this.render();
-        if (!this.paused) {
-            this.requestFrame();
-        }
+        if (!this.paused) this.requestFrame();
+        this.lander_start.hidden = false;
+        this.lander_start.disabled = false;
+    }
+
+    listen(target, type, listener, options) {
+        target.addEventListener(type, listener, options);
+        this.cleanups.push(() => target.removeEventListener(type, listener, options));
     }
 
     installListeners() {
-        const options = { signal: this.abortController.signal };
-        this.startButton.addEventListener("click", () => this.start(false, performance.now()), options);
-        this.exitButton.addEventListener("click", () => this.exit(), options);
-        this.restartButton.addEventListener("click", () => this.restart(), options);
-        document.addEventListener("keydown", (event) => this.onKeyDown(event), options);
-        document.addEventListener("keyup", (event) => this.onKeyUp(event), options);
-        window.addEventListener("blur", () => this.clearAllInput(performance.now()), options);
-        this.shell.addEventListener("focusout", () => this.clearAllInput(performance.now()), options);
-        this.shell.addEventListener("pointerdown", (event) => this.onPointerDown(event), options);
-        this.shell.addEventListener("pointermove", (event) => this.onPointerMove(event), options);
-        this.shell.addEventListener("pointerup", (event) => this.onPointerUp(event), options);
-        this.shell.addEventListener("pointercancel", (event) => this.onPointerAbort(event), options);
-        this.shell.addEventListener("lostpointercapture", (event) => this.onLostCapture(event), options);
-        document.addEventListener("visibilitychange", () => this.onVisibilityChange(), options);
-        this.motion.addEventListener("change", (event) => this.onMotionChange(event), options);
-    }
-
-    eventUsesActiveShell(event) {
-        return this.model.state !== "preflight" && event.composedPath().includes(this.shell);
+        this.listen(this.lander_start, "click", () => this.start(false, performance.now()));
+        this.listen(this.lander_exit, "click", () => this.exit());
+        this.listen(this.lander_restart, "click", () => this.restart());
+        this.listen(document, "keydown", (event) => this.onKeyDown(event));
+        this.listen(document, "keyup", (event) => this.onKeyUp(event));
+        this.listen(window, "blur", () => this.clearAllInput(performance.now()));
+        this.listen(this.lander_scene_shell, "focusout", () => this.clearAllInput(performance.now()));
+        for (const type of ["pointerdown", "pointermove", "pointerup", "pointercancel", "lostpointercapture"]) {
+            this.listen(this.lander_scene_shell, type, (event) => this.onPointer(event));
+        }
+        this.listen(document, "visibilitychange", () => this.onVisibilityChange());
+        this.listen(this.motion, "change", (event) => this.onMotionChange(event));
     }
 
     queueInput(timestamp, token = null) {
-        const keyboard = mixDigitalInput(Object.fromEntries([...this.heldKeys].map((key) => [key, true])));
-        const request = mixEngineRequests(keyboard, this.pointerInput);
-        this.clock = enqueueInputEdge(this.clock, { timestamp, ...request, token });
+        const held = Object.fromEntries([...this.heldKeys].map((key) => [key, true]));
+        const request = mixEngineRequests(mixDigitalInput(held), this.pointerInput);
+        const physical = Object.freeze({ heldCodes: Object.freeze([...this.heldKeys].sort()),
+            pointer: this.pointer ? Object.freeze({ active: true, id: this.pointer.id,
+                anchorX: this.pointer.x, currentX: this.pointer.currentX,
+                pulseDeadline: this.pointer.pulseDeadline }) : Object.freeze({ active: false }) });
+        this.clock = enqueueInputEdge(this.clock, { timestamp, ...request, token, physical });
     }
 
     start(holdSpace, timestamp) {
-        if (this.model.state !== "preflight") {
-            return;
-        }
+        if (this.model.state !== "preflight") return;
         this.cue = settleCue();
-        this.model = transitionMission(this.model, "START");
+        this.model = updateRetention(transitionMission(this.model, "START", { seed: freshSeed(), reducedMotion: this.motion.matches }));
         this.clock = createSimulationClock();
         this.previousFrame = null;
         this.heldKeys.clear();
-        this.pointerInput = ZERO_INPUT;
-        if (holdSpace) {
-            this.heldKeys.add("Space");
-            this.queueInput(timestamp);
-        }
-        this.startButton.hidden = true;
-        this.startButton.disabled = true;
-        this.controls.hidden = false;
-        this.actions.hidden = false;
-        this.exitButton.disabled = false;
-        this.restartButton.hidden = true;
-        this.restartButton.disabled = true;
-        this.shell.tabIndex = 0;
-        this.shell.setAttribute("role", "application");
-        this.shell.setAttribute("aria-label", "Lunar deployment game");
-        this.shell.setAttribute("aria-describedby", "lander-controls lander-status");
-        this.scene.setAttribute("aria-hidden", "true");
-        this.status.textContent = "Mission underway.";
-        this.shell.focus({ preventScroll: true });
-        this.render();
-        this.requestFrame();
+        if (holdSpace) { this.heldKeys.add("Space"); this.queueInput(timestamp); }
+        this.lander_start.hidden = true; this.lander_start.disabled = true;
+        this.lander_fuel.hidden = false; this.lander_controls.hidden = false; this.lander_actions.hidden = false;
+        this.lander_exit.disabled = false;
+        this.lander_scene_shell.tabIndex = 0;
+        this.lander_scene_shell.setAttribute("role", "application");
+        this.lander_scene_shell.setAttribute("aria-label", "Lunar deployment game");
+        this.lander_scene_shell.setAttribute("aria-describedby", "lander-controls lander-fuel lander-target-direction lander-status");
+        this.lander_scene.setAttribute("aria-hidden", "true");
+        this.lander_scene_shell.focus({ preventScroll: true });
+        this.render(); this.requestFrame();
     }
 
     exit() {
-        if (this.model.state === "preflight") {
-            return;
-        }
+        if (this.model.state === "preflight") return;
         this.clearAllInput(performance.now());
         this.model = transitionMission(this.model, "EXIT");
-        this.clock = createSimulationClock();
-        this.previousFrame = null;
-        this.cue = settleCue();
-        this.shell.tabIndex = -1;
-        this.shell.removeAttribute("role");
-        this.shell.removeAttribute("aria-label");
-        this.shell.removeAttribute("aria-describedby");
-        this.scene.removeAttribute("aria-hidden");
-        this.controls.hidden = true;
-        this.actions.hidden = true;
-        this.exitButton.disabled = true;
-        this.restartButton.hidden = true;
-        this.restartButton.disabled = true;
-        this.startButton.disabled = false;
-        this.startButton.hidden = false;
-        this.status.textContent = "";
-        this.render();
-        this.startButton.focus({ preventScroll: true });
-        this.requestFrame();
+        this.clock = createSimulationClock(); this.previousFrame = null;
+        this.lander_scene_shell.tabIndex = -1;
+        for (const attribute of ["role", "aria-label", "aria-describedby"]) this.lander_scene_shell.removeAttribute(attribute);
+        this.lander_scene.removeAttribute("aria-hidden");
+        this.lander_fuel.hidden = true; this.lander_target_direction.hidden = true; this.lander_controls.hidden = true;
+        this.lander_actions.hidden = true; this.lander_exit.disabled = true;
+        this.lander_restart.hidden = true; this.lander_restart.disabled = true;
+        this.lander_start.hidden = false; this.lander_start.disabled = false;
+        this.lander_status.textContent = "";
+        const staticTerrain = this.pristine.querySelector("#terrain-layer");
+        const staticSites = this.pristine.querySelector("#site-layer");
+        this.terrain_layer.replaceChildren(...[...staticTerrain.children].map((node) => node.cloneNode(true)));
+        this.site_layer.replaceChildren(...[...staticSites.children].map((node) => node.cloneNode(true)));
+        this.debris_layer.replaceChildren(); this.worldWindowKey = null;
+        for (const property of ["--agent-x", "--agent-y", "--crash-x", "--crash-y", "--crash-progress"]) {
+            this.root.style.removeProperty(property);
+        }
+        this.render(); this.lander_start.focus({ preventScroll: true }); this.requestFrame();
     }
 
     restart() {
-        if (!["failed", "succeeded"].includes(this.model.state)) {
-            return;
-        }
+        if (this.model.state !== "failed") return;
         this.clearAllInput(performance.now());
-        this.model = transitionMission(this.model, "RESTART");
-        this.clock = createSimulationClock();
-        this.previousFrame = null;
-        this.status.textContent = "Mission underway.";
-        this.restartButton.hidden = true;
-        this.restartButton.disabled = true;
-        this.render();
-        this.shell.focus({ preventScroll: true });
-        this.requestFrame();
+        this.model = updateRetention(transitionMission(this.model, "RESTART"));
+        this.clock = createSimulationClock(); this.previousFrame = null;
+        this.lander_restart.hidden = true; this.lander_restart.disabled = true;
+        this.render(); this.lander_scene_shell.focus({ preventScroll: true }); this.requestFrame();
     }
+
+    activePath(event) { return ACTIVE_STATES.has(this.model.state) && event.composedPath().includes(this.lander_scene_shell); }
 
     onKeyDown(event) {
         if (this.model.state === "preflight") {
-            const targets = [document.body, this.root, this.shell, this.scene];
-            const accepted =
-                event.code === "Space" &&
-                !event.repeat &&
-                unmodified(event) &&
-                targets.includes(event.target) &&
-                !isEditable(event.target);
-            if (accepted) {
-                event.preventDefault();
-                this.start(true, eventTime(event));
+            const acceptedTargets = [document.body, this.root, this.lander_scene_shell, this.lander_scene];
+            if (event.code === "Space" && !event.repeat && unmodified(event) && acceptedTargets.includes(event.target) && !isEditable(event.target)) {
+                event.preventDefault(); this.start(true, eventTime(event));
             }
             return;
         }
-        if (!this.eventUsesActiveShell(event)) {
-            return;
-        }
-        if (event.key === "Escape" && unmodified(event)) {
-            event.preventDefault();
-            this.exit();
-            return;
-        }
-        if (
-            event.key.toLowerCase() === "r" &&
-            unmodified(event) &&
-            ["failed", "succeeded"].includes(this.model.state)
-        ) {
-            event.preventDefault();
-            this.restart();
-            return;
-        }
+        if (!this.activePath(event)) return;
+        if (event.key === "Escape" && unmodified(event)) { event.preventDefault(); this.exit(); return; }
+        if (event.key.toLowerCase() === "r" && unmodified(event) && this.model.state === "failed") { event.preventDefault(); this.restart(); return; }
         const control = physicalControl(event);
-        if (this.model.state !== "flying" || !control || !unmodified(event, true)) {
-            return;
-        }
+        if (this.model.state !== "flying" || !control || !unmodified(event, true)) return;
         event.preventDefault();
-        if (event.repeat || this.heldKeys.has(control)) {
-            return;
-        }
-        this.heldKeys.add(ACTIVE_KEYS.get(control));
-        this.queueInput(eventTime(event));
+        if (event.repeat || this.heldKeys.has(control)) return;
+        this.heldKeys.add(control); this.queueInput(eventTime(event));
     }
 
     onKeyUp(event) {
         const control = physicalControl(event);
-        if (!control || !this.heldKeys.has(control)) {
-            return;
-        }
-        this.heldKeys.delete(control);
-        if (this.model.state === "flying") {
-            this.queueInput(eventTime(event));
-        }
+        if (!control || !this.heldKeys.delete(control)) return;
+        if (this.model.state === "flying") this.queueInput(eventTime(event));
     }
 
-    onPointerDown(event) {
-        if (this.model.state !== "flying" || !event.isPrimary || event.button !== 0 || this.pointer) {
-            return;
+    onPointer(event) {
+        if (event.type === "pointerdown") {
+            if (this.model.state !== "flying" || !event.isPrimary || event.button !== 0 || this.pointer) return;
+            event.preventDefault();
+            this.pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, currentX: event.clientX,
+                started: eventTime(event), token: event.pointerId, pulseDeadline: null };
+            this.lander_scene_shell.setPointerCapture(event.pointerId);
+            this.pointerInput = { left: 0.72, right: 0.72 }; this.queueInput(eventTime(event), event.pointerId); return;
         }
+        if (!this.pointer || event.pointerId !== this.pointer.id) return;
         event.preventDefault();
-        this.pointerToken += 1;
-        this.pointer = {
-            id: event.pointerId,
-            x: event.clientX,
-            y: event.clientY,
-            timestamp: eventTime(event),
-            token: this.pointerToken,
-            captured: true,
-        };
-        this.shell.setPointerCapture(event.pointerId);
-        this.pointerInput = { left: 0.72, right: 0.72 };
-        this.queueInput(eventTime(event), this.pointerToken);
+        if (event.type === "pointermove") {
+            this.pointer.currentX = event.clientX;
+            this.pointerInput = pointerEngineRequests(event.clientX - this.pointer.x, this.lander_scene.getBoundingClientRect().width);
+            this.queueInput(eventTime(event), this.pointer.token); return;
+        }
+        if (event.type === "pointerup") {
+            const pointer = this.pointer;
+            const elapsed = eventTime(event) - pointer.started;
+            const distance = Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y);
+            if (this.lander_scene_shell.hasPointerCapture(pointer.id)) this.lander_scene_shell.releasePointerCapture(pointer.id);
+            if (elapsed <= 180 && distance <= 10 && elapsed < 140) {
+                this.pointer.currentX = event.clientX; this.pointer.pulseDeadline = eventTime(event) + 140 - elapsed;
+                this.pulseTimer = setTimeout(() => this.finishPointer(pointer.token, performance.now()), 140 - elapsed); return;
+            }
+        }
+        this.finishPointer(this.pointer.token, eventTime(event));
     }
 
-    onPointerMove(event) {
-        if (!this.pointer || event.pointerId !== this.pointer.id || this.model.state !== "flying") {
-            return;
-        }
-        event.preventDefault();
-        const width = this.scene.getBoundingClientRect().width;
-        this.pointerInput = pointerEngineRequests(event.clientX - this.pointer.x, width);
-        this.queueInput(eventTime(event), this.pointer.token);
-    }
-
-    onPointerUp(event) {
-        if (!this.pointer || event.pointerId !== this.pointer.id) {
-            return;
-        }
-        event.preventDefault();
-        const pointer = this.pointer;
-        const elapsed = eventTime(event) - pointer.timestamp;
-        const distance = Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y);
-        pointer.captured = false;
-        this.pointer = null;
-        if (this.shell.hasPointerCapture(event.pointerId)) {
-            this.shell.releasePointerCapture(event.pointerId);
-        }
-        if (elapsed <= 180 && distance <= 10 && elapsed < 140) {
-            this.pulseTimer = window.setTimeout(() => {
-                this.pulseTimer = null;
-                this.finishPointerGesture(performance.now(), pointer.token);
-            }, 140 - elapsed);
-            this.pointer = { ...pointer, logicalOnly: true };
-            return;
-        }
-        this.finishPointerGesture(eventTime(event), pointer.token);
-    }
-
-    onPointerAbort(event) {
-        if (this.pointer && event.pointerId === this.pointer.id) {
-            this.clearAllInput(eventTime(event));
-        }
-    }
-
-    onLostCapture(event) {
-        if (this.pointer && !this.pointer.logicalOnly && event.pointerId === this.pointer.id) {
-            this.clearAllInput(eventTime(event));
-        }
-    }
-
-    finishPointerGesture(timestamp, token) {
-        if (this.pointer?.token === token) {
-            this.pointer = null;
-        }
-        this.pointerInput = ZERO_INPUT;
+    finishPointer(token, timestamp) {
+        if (this.pulseTimer !== null) { clearTimeout(this.pulseTimer); this.pulseTimer = null; }
+        this.pointer = null; this.pointerInput = ZERO_INPUT;
         this.clock = removeQueuedInputEdges(this.clock, token);
-        this.queueInput(timestamp);
-    }
-
-    teardownPointer(timestamp) {
-        if (this.pulseTimer !== null) {
-            clearTimeout(this.pulseTimer);
-            this.pulseTimer = null;
-        }
-        const pointer = this.pointer;
-        this.pointer = null;
-        if (pointer?.captured && this.shell.hasPointerCapture(pointer.id)) {
-            this.shell.releasePointerCapture(pointer.id);
-        }
-        this.pointerInput = ZERO_INPUT;
-        if (pointer) {
-            this.clock = removeQueuedInputEdges(this.clock, pointer.token);
-        }
-        if (this.model.state === "flying") {
-            this.queueInput(timestamp);
-        }
+        if (this.model.state === "flying") this.queueInput(timestamp);
     }
 
     clearAllInput(timestamp) {
         this.heldKeys.clear();
-        this.teardownPointer(timestamp);
+        if (this.pointer && this.lander_scene_shell.hasPointerCapture(this.pointer.id)) this.lander_scene_shell.releasePointerCapture(this.pointer.id);
+        this.finishPointer(this.pointer?.token, timestamp);
         this.clock = clearSimulationInput(this.clock, timestamp);
         this.model = { ...this.model, commanded: { ...ZERO_INPUT } };
-        this.render();
     }
 
     onVisibilityChange() {
-        this.paused = document.hidden;
-        this.root.dataset.paused = String(this.paused);
+        this.paused = document.hidden; this.root.dataset.paused = String(this.paused);
         if (this.paused) {
-            if (this.frameId !== null) {
-                cancelAnimationFrame(this.frameId);
-                this.frameId = null;
-            }
-            this.clearAllInput(performance.now());
-            this.clock = resetSimulationAccumulator(this.clock, null);
-            this.previousFrame = null;
-        } else {
-            this.clock = createSimulationClock();
-            this.previousFrame = null;
-            this.requestFrame();
-        }
+            if (this.frameId !== null) cancelAnimationFrame(this.frameId);
+            this.frameId = null; this.clearAllInput(performance.now());
+            this.clock = resetSimulationAccumulator(this.clock, null); this.previousFrame = null;
+        } else { this.clock = createSimulationClock(); this.previousFrame = null; this.requestFrame(); }
     }
 
     onMotionChange(event) {
-        if (event.matches) {
-            this.cue = settleCue();
-            this.model = advanceMissionSequence(this.model, 0, true);
-            if (this.model.state === "succeeded") {
-                this.clearAllInput(performance.now());
-            }
-            this.render();
-        }
+        this.root.dataset.reducedMotion = String(event.matches);
+        if (event.matches) { this.cue = settleCue(); this.model = advanceMissionSequence(this.model, 3.1, true); this.render(); }
     }
 
     requestFrame() {
-        if (this.frameId === null && !this.paused && !this.destroyed) {
-            this.frameId = requestAnimationFrame((timestamp) => this.frame(timestamp));
-        }
+        if (this.frameId === null && !this.paused && !this.destroyed) this.frameId = requestAnimationFrame((time) => this.frame(time));
     }
 
     frame(timestamp) {
         this.frameId = null;
-        const previousState = this.model.state;
-        let elapsed = 0;
-        if (this.previousFrame !== null) {
-            const frameSeconds = (timestamp - this.previousFrame) / 1000;
-            elapsed = frameSeconds >= 0 && frameSeconds <= 0.1 ? frameSeconds : 0;
-        }
+        const elapsed = this.previousFrame === null ? 0 : Math.max(0, Math.min(0.1, (timestamp - this.previousFrame) / 1000));
         this.previousFrame = timestamp;
-        if (this.model.state === "preflight") {
-            this.cue = advanceCue(this.cue, elapsed);
-        } else if (this.model.state === "flying") {
-            const result = advanceSimulation(this.clock, this.model, timestamp, {
-                reducedMotion: this.motion.matches,
-            });
-            this.clock = result.clock;
-            this.model = result.model;
-            if (result.discarded) {
-                this.clearAllInput(timestamp);
-            }
-        } else if (["landed", "deploying", "powering", "departing"].includes(this.model.state)) {
-            this.model = advanceMissionSequence(this.model, elapsed, this.motion.matches);
+        const previousState = this.model.state;
+        if (this.model.state === "preflight") this.cue = advanceCue(this.cue, elapsed);
+        else if (["flying", "launching"].includes(this.model.state)) {
+            const result = advanceSimulation(this.clock, this.model, timestamp);
+            this.clock = result.clock; this.model = result.model;
+            if (result.discarded) this.clearAllInput(timestamp);
+        } else if (["landed", "deploying", "powering", "crashing"].includes(this.model.state)) {
+            this.model = updateRetention(advanceMissionSequence(this.model, elapsed, this.motion.matches));
         }
-        if (previousState === "flying" && this.model.state !== "flying") {
-            this.clearAllInput(timestamp);
-        }
+        if (previousState === "flying" && this.model.state !== "flying") this.clearAllInput(timestamp);
         this.render();
-        const needsFrame =
-            this.model.state === "flying" ||
-            ["landed", "deploying", "powering", "departing"].includes(this.model.state) ||
-            (this.model.state === "preflight" && this.cue.state === "running");
-        if (needsFrame) {
-            this.requestFrame();
+        if (["flying", "landed", "deploying", "powering", "launching", "crashing"].includes(this.model.state) ||
+            (this.model.state === "preflight" && this.cue.state === "running")) this.requestFrame();
+    }
+
+    reconcileWorld() {
+        if (!this.model.terrainVertices) return;
+        if (this.worldWindowKey === this.model.retentionKey) {
+            for (const site of this.model.retainedSites) {
+                const group = this.site_layer.querySelector(`[data-site-id="${site.id}"]`);
+                if (group) {
+                    group.dataset.can = site.canCollected ? "collected" : "present";
+                    group.dataset.power = site.powered ? "on" : "off";
+                    group.dataset.nocStage = String(site.nocStage ?? (site.powered ? 5 : 0));
+                }
+            }
+            return;
         }
+        const indexes = this.model.retainedChunks;
+        const existingChunks = new Map([...this.terrain_layer.children].map((node) => [Number(node.dataset.chunkIndex), node]));
+        for (const index of indexes) {
+            let path = existingChunks.get(index);
+            if (!path) { path = svg("path", { class: "terrain-chunk", "data-chunk-index": index }); this.terrain_layer.append(path); }
+            const left = index * 20; const right = left + 20;
+            const vertices = this.model.terrainVertices.filter(([x]) => x >= left && x <= right);
+            path.setAttribute("d", terrainPath(vertices)); existingChunks.delete(index);
+        }
+        for (const node of existingChunks.values()) node.remove();
+        const existingSites = new Map([...this.site_layer.children].map((node) => [Number(node.dataset.siteId), node]));
+        for (const site of this.model.retainedSites) {
+            let group = existingSites.get(site.id);
+            if (!group) { group = createSiteGroup(site); this.site_layer.append(group); }
+            positionSite(group, site); existingSites.delete(site.id);
+        }
+        for (const node of existingSites.values()) node.remove();
+        this.worldWindowKey = this.model.retentionKey;
+    }
+
+    renderCrash(cameraLeft) {
+        if (this.model.state !== "crashing" || !this.model.crash) {
+            if (this.debris_layer.children.length) this.debris_layer.replaceChildren();
+            return;
+        }
+        const time = this.model.sequenceSeconds;
+        const existing = new Map([...this.debris_layer.children].map((node) => [Number(node.dataset.fragmentId), node]));
+        for (const fragment of this.model.crash.fragments) {
+            const x = fragment.x + fragment.vx * time;
+            const y = fragment.y + fragment.vy * time - 0.5 * GRAVITY * time * time;
+            let node = existing.get(fragment.id);
+            if (!node) {
+                node = svg("rect", { width: 8, height: 8, fill: fragment.color, "data-fragment-id": fragment.id });
+                this.debris_layer.append(node);
+            }
+            node.setAttribute("x", x * 10 - 4); node.setAttribute("y", 548 - y * 10 - 4);
+            node.setAttribute("transform", `rotate(${fragment.angularVelocity * time} ${x * 10} ${548 - y * 10})`);
+            existing.delete(fragment.id);
+        }
+        for (const node of existing.values()) node.remove();
+        this.root.style.setProperty("--crash-x", `${(this.model.crash.pose.x - cameraLeft) * 10}px`);
+        this.root.style.setProperty("--crash-y", `${548 - this.model.crash.pose.y * 10}px`);
+        this.root.style.setProperty("--crash-progress", String(Math.min(1, time / 0.14)));
     }
 
     render() {
         const pose = this.model.pose;
-        const leftPlume = plumeForThrust(this.model.commanded.left);
-        const rightPlume = plumeForThrust(this.model.commanded.right);
-        this.root.dataset.missionState = this.model.state;
-        this.root.dataset.nocPower = this.model.nocPower ? "on" : "off";
-        this.root.dataset.nocStage = String(this.model.nocStage);
-        this.root.dataset.cue = this.cue.state;
-        this.root.dataset.paused = String(this.paused);
-        this.root.style.setProperty("--lander-x", `${pose.x * 10}px`);
-        this.root.style.setProperty("--lander-y", `${548 - pose.y * 10}px`);
+        const cameraLeft = cameraLeftForPose(pose);
+        const left = plumeForThrust(this.model.commanded.left); const right = plumeForThrust(this.model.commanded.right);
+        this.root.dataset.missionState = this.model.state; this.root.dataset.cue = this.cue.state;
+        this.root.dataset.paused = String(this.paused); this.root.dataset.reducedMotion = String(this.motion.matches);
+        this.root.style.setProperty("--camera-x", `${-cameraLeft * 10}px`);
+        this.root.style.setProperty("--lander-x", `${pose.x * 10}px`); this.root.style.setProperty("--lander-y", `${548 - pose.y * 10}px`);
         this.root.style.setProperty("--lander-angle", `${pose.angle}deg`);
-        this.root.style.setProperty("--left-plume-scale", String(leftPlume.scaleY));
-        this.root.style.setProperty("--right-plume-scale", String(rightPlume.scaleY));
-        this.root.style.setProperty("--left-plume-opacity", String(leftPlume.opacity));
-        this.root.style.setProperty("--right-plume-opacity", String(rightPlume.opacity));
-        if (this.model.agentPosition) {
-            this.root.style.setProperty("--agent-x", `${this.model.agentPosition.x * 10}px`);
-            this.root.style.setProperty("--agent-y", `${548 - this.model.agentPosition.y * 10}px`);
+        for (const [name, value] of [["left-plume-scale", left.scaleY], ["right-plume-scale", right.scaleY],
+            ["left-plume-opacity", left.opacity], ["right-plume-opacity", right.opacity]]) this.root.style.setProperty(`--${name}`, String(value));
+        this.reconcileWorld(); this.renderCrash(cameraLeft);
+        const active = this.model.retainedSites?.find((site) => site.id === this.model.activeSiteId);
+        if (this.model.agent && active) {
+            const startX = this.model.touchdownPose.x + 1.1; const endX = active.platformRight + 2;
+            const progress = this.model.agent.progress;
+            this.root.style.setProperty("--agent-x", `${(startX + (endX - startX) * progress) * 10}px`);
+            this.root.style.setProperty("--agent-y", `${548 - (active.platformTop + 0.2) * 10}px`);
         }
-        if (this.status.textContent !== this.model.status && this.model.status) {
-            this.status.textContent = this.model.status;
-        }
-        const terminal = ["failed", "succeeded"].includes(this.model.state);
-        this.restartButton.hidden = !terminal;
-        this.restartButton.disabled = !terminal;
+        const target = this.model.retainedSites?.find((site) => site.id === this.model.targetSiteId);
+        const offscreen = targetIsOffscreen(target, cameraLeft);
+        this.root.dataset.targetOffscreen = String(offscreen);
+        this.lander_target_direction.hidden = !offscreen;
+        const fuel = this.model.state === "preflight" ? "0.0" : this.model.fuel.toFixed(1);
+        if (this.lander_fuel_value.value !== fuel) this.lander_fuel_value.value = fuel;
+        if (this.lander_status.textContent !== this.model.status) this.lander_status.textContent = this.model.status;
+        const failed = this.model.state === "failed";
+        this.lander_restart.hidden = !failed; this.lander_restart.disabled = !failed;
     }
 
     destroy() {
-        if (this.destroyed) {
-            return;
-        }
+        if (this.destroyed) return;
         this.destroyed = true;
-        if (this.frameId !== null) {
-            cancelAnimationFrame(this.frameId);
-            this.frameId = null;
-        }
-        this.abortController.abort();
+        if (this.frameId !== null) { cancelAnimationFrame(this.frameId); this.frameId = null; }
         this.clearAllInput(performance.now());
-        this.model = createPreflightModel();
-        this.cue = settleCue();
-        this.paused = false;
-        this.shell.tabIndex = -1;
-        this.shell.removeAttribute("role");
-        this.shell.removeAttribute("aria-label");
-        this.shell.removeAttribute("aria-describedby");
-        this.scene.removeAttribute("aria-hidden");
-        this.startButton.disabled = true;
-        this.startButton.hidden = true;
-        this.controls.hidden = true;
-        this.actions.hidden = true;
-        this.exitButton.disabled = true;
-        this.restartButton.hidden = true;
-        this.restartButton.disabled = true;
-        this.status.textContent = "";
-        this.render();
+        while (this.cleanups.length) { try { this.cleanups.pop()(); } catch (error) { console.error(error); } }
+        this.model = createPreflightModel(); this.clock = createSimulationClock(); this.cue = settleCue();
+        this.previousFrame = null; this.paused = false;
+        const restored = this.pristine.cloneNode(true);
+        this.root.replaceWith(restored);
+        this.root = restored;
     }
 }
 
-export const landerGameController = new LanderGameController();
+export function initializeLanderGame(root = document.querySelector("#lander-game")) {
+    if (!root) return null;
+    const snapshot = root.cloneNode(true);
+    const cleanups = [];
+    try { return new LanderGameController(root, cleanups, snapshot); }
+    catch (error) {
+        console.error(error);
+        while (cleanups.length) {
+            try { cleanups.pop()(); } catch (cleanupError) { console.error(cleanupError); }
+        }
+        root.replaceWith(snapshot);
+        return null;
+    }
+}
+
+export const landerGameController = initializeLanderGame();

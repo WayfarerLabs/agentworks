@@ -11,10 +11,43 @@ Use this package-free checklist against `/lander/` for ordinary game work and `/
 fallback in the complete built site. Record each execution so a future reader can distinguish
 verified behavior from an expectation that has not been run.
 
-Phase 4C adds `/lander/`, the final footer icon link, shared native Exit and Restart controls, and a
-compact 404 heading. Automated source, generated-document, and model checks pass, but no browser
-execution has been recorded for that source. All five-page shared-shell rows and every row that
-names the new route, footer link, or native controls are pending.
+The continuous expedition materially replaces Phase 4C's one-shot mission. Its terrain, sites, fuel,
+route proofs, offscreen cue, checkpoint restart, vacuum crash, and rolling retention require a new
+browser record. Older checked rows below remain historical evidence for their named source only;
+they do not accept the current game.
+
+## Continuous expedition acceptance
+
+- [ ] Record the exact source SHA and current Chrome and Edge versions. Exercise both `/lander/` and
+      `/404.html`; confirm their `#lander-game` subtrees are byte-equivalent.
+- [ ] Fly and safely service at least three sites. Each target has one elevated H platform exactly
+      three lander widths long, one gas can, and one solid NOC with a four-bar phone battery and
+      antenna. The can disappears once, fuel increases once, the agent enters, all four bars fill,
+      the antenna powers, and actual-fuel launch returns to player-controlled flight.
+- [ ] Confirm the next site begins fully offscreen right after service. The solid arrow blinks only
+      while that target remains offscreen; it is static with reduced motion and has equivalent
+      visually hidden direction text.
+- [ ] Confirm visible fuel changes by tenths without repetitive live announcements. Spend fuel on
+      thrust, carry excess through multiple sites, and verify empty fuel produces no thrust.
+- [ ] Crash on terrain, a platform end or underside, a pylon, the NOC, and the mast. Normal motion
+      shows one brief compact flash and exactly eight ballistic fragments for 600 milliseconds, with
+      no smoke, dust, sound, shake, or page movement. Reduced motion reaches the same failed state
+      with no moving debris.
+- [ ] Restart after crashes before and after a powered site. Before the first checkpoint, restart
+      restores the same seeded initial approach. Afterward, it starts on the last powered pad,
+      relaunches using fuel, and never duplicates the can, award, progress, ratio, or power
+      sequence.
+- [ ] Fly far enough for the camera and rolling window to move in both directions. At every sampled
+      point, count at most ten terrain paths, three site groups, eight debris nodes, and 80 children
+      under `#lander-world`; discarded sites do not return as retained history.
+- [ ] Hide and restore the tab during flight, arrow blink, service, launch, and crash. Hidden time
+      advances none of them, input and pointer capture clear, and the first visible frame only
+      resets timing.
+- [ ] Keep the network panel open for the complete three-site run. After initial same-origin HTML,
+      CSS, three modules, and SVG loads, the game makes no request and creates no durable storage.
+- [ ] Record active frame p95, 100-site retention counts, and direct generation plus two-proof
+      replay p95/max on the pre-merge Chromium machine. Required ceilings are 4 ms frame p95, 25 ms
+      generation p95, and 50 ms generation maximum.
 
 ## Local demo
 

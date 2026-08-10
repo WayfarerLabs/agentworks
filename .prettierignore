@@ -17,3 +17,7 @@ AGENTS.md
 # Virtual envs
 cli/.venv/
 cli/.venv64/
+
+# Canonical one-line route bytes are hashed and independently verified.
+website/tests/fixtures/lander-route-derived-v1.json
+website/tests/fixtures/lander-route-geometry-v1.json

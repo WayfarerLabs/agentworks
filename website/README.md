@@ -11,11 +11,11 @@ The current release is intentionally useful without guided onboarding. The compa
 the repository-sourced identity and states that guided onboarding is not yet published. A generated
 Manifesto presents the complete long-form argument from `docs/why-agentworks.md`, while a separate
 Security page provides practical depth and a GitHub reporting route. The shared header places the
-GitHub and PyPI destinations once per page. A dedicated Lander page presents the same bounded
-lunar-deployment game used as progressive enhancement on the useful 404 fallback. The shared footer
-places the Manifesto, Security, and icon-only Lander destinations once per page. Home contains no
-substitute command or copy control. A later change will replace the notice with the canonical
-onboarding source after that source is available on `main`.
+GitHub and PyPI destinations once per page. A dedicated Lander page presents the same continuous
+lunar-deployment expedition used as progressive enhancement on the useful 404 fallback. The shared
+footer places the Manifesto, Security, and icon-only Lander destinations once per page. Home
+contains no substitute command or copy control. A later change will replace the notice with the
+canonical onboarding source after that source is available on `main`.
 
 ## Local build and test
 
@@ -39,14 +39,15 @@ Then open `http://localhost:8000/`, `http://localhost:8000/manifesto/`,
 
 Game work normally uses `/lander/` from this complete build; fallback acceptance also exercises the
 actual `/404.html`. Both shells receive one already-rendered `lander-game.html` fragment and load
-the same CSS, controller, and model. The builder has no partial-output mode because every breadcrumb
-and footer links to the other generated pages.
+the same CSS, controller, model, and pure world generator. The builder has no partial-output mode
+because every breadcrumb and footer links to the other generated pages.
 
 Run the automated suites and repository checks:
 
 ```bash
 python3 -m unittest discover -s website/tests -p 'test_*.py'
 node --test website/tests/lander-model.test.mjs
+node --test website/tests/lander-world.test.mjs
 ./scripts/lint-files.sh
 ./scripts/check-locked-sdds.sh
 ./scripts/rulesync-upgen.sh --check
@@ -85,12 +86,37 @@ lander/index.html
 security/index.html
 static/lander-game.js
 static/lander-model.js
+static/lander-world.js
 static/lander.css
 static/site.css
 ```
 
 This is the builder's only output shape. The manifest is explicit in `build.py`; the builder never
 recursively copies source directories or permits a generated local link outside the manifest.
+
+The game keeps its route catalog reviewable and independent from runtime generation. Geometry lives
+in `tests/fixtures/lander-route-geometry-v1.json`; it contains no schedule or fuel result.
+Regenerate to a temporary path and verify the reviewed fixture with:
+
+```bash
+node website/tools/derive_lander_routes.mjs \
+  --geometry website/tests/fixtures/lander-route-geometry-v1.json \
+  --output /tmp/lander-route-derived-v1.json \
+  --verify website/tests/fixtures/lander-route-derived-v1.json
+```
+
+The deriver uses Node built-ins, versioned finite phase ranges, reachable keyboard commands, and an
+independent copy of the physics. A deliberate route change updates geometry, the reviewed derived
+fixture, and the copied production literals together. Runtime code performs exactly the successful
+and one-quantum-smaller proof replays for the directly selected literal. It never imports the tool,
+scans fuel allowances, or plans a route in the browser.
+
+During a run, the model retains at most ten terrain chunks, the active and target sites plus one
+previous powered site, one input queue of at most 64 records, and eight crash fragments. Fuel has no
+capacity cap: unused reserve carries forward. Each collected can adds the next route's demonstrated
+minimum multiplied by a ratio that starts at three and decays monotonically toward one. Exit and
+reload discard the in-memory run; crash restart restores the last powered pad without recollecting
+fuel or advancing progress.
 
 All three CLI paths are required. The output must be outside the repository. The site base is an
 ASCII, slash-bounded same-origin path such as `/` or `/agentworks/`; absolute URLs, dot segments,
@@ -216,7 +242,7 @@ the publishing workflow first runs from a merged `main` commit.
 5. Set `agentworks.build` as this repository's custom domain. Do not mutate DNS yet.
 6. On the same already verified implementation merge-push workflow, use GitHub's **Re-run all
    jobs**. Prove the rerun checked out the same source SHA, normalized `site_base=/`, built and
-   uploaded the exact root-base eleven-file artifact, and deployed that artifact successfully. If
+   uploaded the exact root-base twelve-file artifact, and deployed that artifact successfully. If
    the deployment fails or cannot be verified, execute the activation rollback below.
 7. Re-inventory DNS. Only after the same-SHA root deployment is proven, obtain explicit operator
    approval for the exact cutover and then change only the identified parking records.
@@ -240,7 +266,7 @@ verified, leave all DNS records unchanged and detach the repository custom-domai
 the WayfarerLabs organization verification and its TXT record, along with every unrelated DNS
 record. On the same latest verified `main` push workflow, use **Re-run all jobs** again. Verify that
 `configure-pages` selected `/agentworks/`, that the rerun checked out the same source SHA, and that
-the exact project-base eleven-file artifact deployed successfully. Verify that same SHA at
+the exact project-base twelve-file artifact deployed successfully. Verify that same SHA at
 `https://wayfarerlabs.github.io/agentworks/`, then stop. Retry custom-domain activation only through
 the full reviewed sequence above.
 

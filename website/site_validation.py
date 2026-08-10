@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Final, NamedTuple
 
 from site_asset_validation import validate_head_links
+from site_game_validation import validate_game_contract
 from site_content import (
     CLI_SECRETS_URL,
     EMAIL_ADDRESS_PATTERN,
@@ -128,7 +129,7 @@ TEMPLATE_REQUIRED_LITERALS: Final = {
         f'href="{SITE_BASE_TOKEN}assets/agw-rocket.svg#agw-engine-right"',
         'id="lander-actions" hidden',
         'id="lander-exit" type="button">Exit mission</button>',
-        'id="lander-restart" type="button" hidden>Restart mission</button>',
+        'id="lander-restart" type="button" hidden disabled>Restart mission</button>',
     },
 }
 CONTENT_TOKEN_PLACEMENTS: Final = {
@@ -883,7 +884,7 @@ def _validate_template(name: str, template: str) -> None:
     _validate_interim_template(name, parser)
     _validate_game_shell_placement(name, parser)
     if name == "lander-game.html":
-        _validate_lander_fragment(template)
+        validate_game_contract(template)
         return
     _validate_shared_shell(name, template)
 
