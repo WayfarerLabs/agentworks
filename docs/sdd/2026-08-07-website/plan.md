@@ -1,8 +1,8 @@
 # Plan: The agentworks.build Website
 
-- Status: Interim implementation complete; release acceptance in progress
+- Status: Interim implementation complete; continuous Lander refinement in design
 - Date: 2026-08-07
-- Last revised: 2026-08-09
+- Last revised: 2026-08-10
 - FRD: `frd.md`
 - HLA: `hla.md`
 - Research: `prior-art-research.md`
@@ -10,20 +10,21 @@
 ## Delivery shape
 
 This effort now uses two complete website releases, a small interim acceptance-evidence PR, and a
-final closeout PR. The operator's 2026-08-08 direction still governs incomplete design/demo work:
-the existing website PR (number 439) remains draft and does not merge merely to publish artifacts or
-the game. The 2026-08-09 direction defines a new complete first release: that PR may become ready
-and merge when the useful interim Home, Manifesto, Security, dedicated Lander, selected brand,
-accepted custom 404, shared footer/game contracts, CI, automatic Pages deployment, runbook, and
-default-host acceptance are all complete. The custom-domain activation then publishes that honest
-interim release at `agentworks.build`, and the small evidence PR records the observed result.
+final closeout PR. PR #439 is the reviewed first-release vehicle: it may merge when the useful
+interim Home, Manifesto, Security, dedicated Lander, selected brand, accepted custom 404, shared
+footer/game contracts, CI, automatic Pages deployment, runbook, and default-host acceptance are all
+complete. The continuous-Lander refinement proceeds as one stacked PR so its material game redesign
+does not make #439's already-reviewed website scope unready. Once #439 merges, the stacked PR
+changes its base to `main`; it still ships only as part of the same site artifact. Custom-domain
+activation then publishes the complete approved interim release at `agentworks.build`, and the small
+evidence PR records the observed result.
 
 After onboarding Phase 3 lands on `main`, a separately reviewed integration PR replaces the bounded
 availability notice with the canonical README bootstrap and copy enhancement. It does not redesign
 the page, fork the content, or create another deployment path. A final closeout PR records complete
 production acceptance, final truthful checkbox flips, and `locked.md`.
 
-`locked.md` never merges before AC1-AC19 and R1-R18 are accepted in production. Every earlier merge
+`locked.md` never merges before AC1-AC24 and R1-R23 are accepted in production. Every earlier merge
 is independently useful and operable: the interim release does not claim onboarding exists, and the
 onboarding release consumes only the eventual canonical contract from `main`. No website code binds
 to the onboarding feature branch.
@@ -422,6 +423,57 @@ Definition of done: every page advertises the same local SVG favicon, the emitte
 selected A/G/W rocket mark without flames, and the deterministic site artifact contains exactly
 eleven files at either supported site base.
 
+## Phase 4G: continuous Lander expedition
+
+- [ ] Amend and review the FRD, HLA, this plan, and `brand-and-lander-lld.md` for one continuous
+      forward expedition: seeded rolling terrain, elevated three-lander-width pads, single-building
+      NOCs, carried fuel, progressive awards, repeated deployment, checkpoints, and vacuum crashes.
+- [ ] Delegate the LLD revision to an `agentworks-dev` subagent. It must pin the world seed and
+      generator, minimum terrain diversity, rolling-window and camera boundaries,
+      terrain/platform/building collision, stronger engine constants, site lifecycle, route-fuel
+      proof and search resolution, difficulty curve, checkpoint semantics, DOM/SVG contract,
+      animation timing, accessibility, reduced motion, deterministic vectors, and performance
+      ceilings without changing completed plan records.
+- [ ] Lead-review the LLD against R7-R9/R21-R23, D7, AC5-AC8/AC18-AC19/AC22-AC24, the shared
+      Lander/404 subtree, the no-framework constraint, and the in-memory-only privacy boundary;
+      resolve every requirements or architecture conflict before implementation.
+- [ ] Obtain pre-implementation `agentworks-reviewer` approval of the material SDD revision through
+      the stacked draft PR; address every valid artifact finding and re-review before coding.
+- [ ] Delegate implementation to an `agentworks-dev` subagent with ownership of the pure world
+      module, flight/mission model, controller, shared scene, Lander CSS, focused tests, browser
+      checklist, builder manifest/validation, and permanent `website/README.md` updates. Isolate its
+      worktree and preserve concurrent changes.
+- [ ] Add a pure seeded world module and split model/world tests so focused production and test
+      files target the preferred 500-line scale and remain below the hard 1,000-line ceiling. Expand
+      both deterministic site-base artifacts by exactly the one reviewed local module and retain one
+      builder CLI, one scheduler, one controller, and one byte-equivalent shared game subtree.
+- [ ] Implement a bounded rolling SVG world with varied terrain, a stable camera transform, one
+      slightly elevated pad exactly three lander widths long, one solid battery-style NOC, one
+      consumable gas can, and a right-edge next-site cue; never append unbounded terrain, sites,
+      debris, event queues, or DOM nodes.
+- [ ] Implement repeated safe-landing cycles, visible/programmatic fuel, stronger thrust authority,
+      deterministic conservative route-fuel proofs, a ratio beginning near three and monotonically
+      approaching one, exact excess carryover, single-consumption cans, powered-NOC retention, and
+      post-deployment return to controllable flight.
+- [ ] Implement finite vacuum crash presentation and checkpoint recovery: compact flash,
+      deterministic ballistic fragments, no atmosphere/audio/page movement, reduced-motion atomic
+      failure, and restart at the exact last post-refuel pad without duplicating fuel or the can.
+- [ ] Add independent seeded-world, minimum-award, ratio, carryover, checkpoint, swept-contact,
+      repeated-site, camera/window, arrow, fuel-accessibility, motion, lifecycle, and performance
+      witnesses. Preserve the existing input-timestamp, frame-schedule, pause, no-JavaScript,
+      privacy, local-reference, focus, reflow, and shared-fragment contracts.
+- [ ] Update permanent game/demo documentation in lockstep with the implementation. Run focused and
+      complete gates, deterministic root/project builds, current Chrome and Edge acceptance, and a
+      long-run browser performance/memory audit with an explicit fixed-window witness.
+- [ ] Obtain `agentworks-reviewer` and fresh-eyes code approval, resolve valid findings through the
+      implementing subagent, mark the stacked PR ready, rebase it and change its base after PR #439
+      merges, and monitor every required CI and CodeQL check.
+
+Definition of done: the same accessible game on `/lander/` and `404.html` supports at least three
+successive generated sites in one run, its demonstrated route allowance and decaying multiplier are
+deterministic, fuel/checkpoint state cannot duplicate, crash and reduced-motion behavior are finite
+and honest for a vacuum, and runtime memory/DOM work remains bounded independent of sites completed.
+
 ## Phase 5: CI and default Pages deployment
 
 - [x] Delegate workflow implementation to an `agentworks-dev` subagent with ownership of the Pages
@@ -499,8 +551,9 @@ Phase 6 retains the one-time same-run root-base redeployment gate before DNS cut
       24 CSS-pixel target, visible focus, and no narrow-width or zoom overlap.
 - [ ] Verify the production `/lander/` metadata/CSP, compact heading, static no-JavaScript scene,
       original twin-plume mark, hidden preflight, keyboard/vi and touch controls, independent plume
-      response, deployment sequence, exact success status, reset boundaries, lifecycle pause, and
-      reduced-motion presentation.
+      response, continuous seeded terrain, repeated deployments, elevated pads, carried fuel and
+      route-sized awards, next-site cue, powered NOCs, checkpoint restart, finite vacuum crash,
+      bounded rolling world, lifecycle pause, and reduced-motion presentation.
 - [ ] Verify the production custom 404 compact title, explanatory copy, route-home fallback, and
       byte-equivalent shared game subtree preserve the same game and no-JavaScript contracts.
 - [ ] Run the deferred production compatibility pass in Firefox and Safari/WebKit, with a spoken
@@ -517,7 +570,7 @@ Phase 6 retains the one-time same-run root-base redeployment gate before DNS cut
       `website/README.md` and this feature directory on the existing evidence branch; mark its draft
       PR ready, obtain review, and merge it. Do not create `locked.md` or claim AC3/AC4.
 
-Definition of done: R3-R11 and R13-R18 plus AC1, AC2, AC5-AC11, and AC13-AC19's interim conditions
+Definition of done: R3-R11 and R13-R23 plus AC1, AC2, AC5-AC11, and AC13-AC24's interim conditions
 hold at `https://agentworks.build`; the public site is useful and honest while onboarding remains
 pending.
 
@@ -565,7 +618,7 @@ with no branch-only dependency or duplicated bootstrap.
       metadata/CSP, byte-equivalent Lander/404 game subtree, and compact 404 title after onboarding
       integration.
 
-Definition of done: R1-R18, AC2-AC3, and AC5-AC19 hold in production through the existing site and
+Definition of done: R1-R23, AC2-AC3, and AC5-AC24 hold in production through the existing site and
 pipeline, with the temporary notice removed rather than retained as configuration.
 
 ## Phase 9: complete acceptance and closeout
@@ -589,7 +642,7 @@ pipeline, with the temporary notice removed rather than retained as configuratio
       run final gates, obtain the required closeout review, and hand the ready PR to the operator
       for merge.
 
-Definition of done: AC1-AC19 hold at `https://agentworks.build`, R1-R18 and C1-C5 are production
+Definition of done: AC1-AC24 hold at `https://agentworks.build`, R1-R23 and C1-C5 are production
 facts, the deployment is operable without this SDD, all plan boxes are truthful, and the effort is
 locked.
 

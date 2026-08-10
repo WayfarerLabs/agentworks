@@ -1,6 +1,6 @@
 # HLA: The agentworks.build Website
 
-- Status: Interim implementation complete; release acceptance in progress
+- Status: Interim implementation complete; continuous Lander refinement in design
 - Date: 2026-08-07
 - Last revised: 2026-08-10
 - FRD: `frd.md`
@@ -60,13 +60,13 @@ complete root `SECURITY.md`. That Markdown document owns the page's order and al
 the HTML template owns only the shared shell and metadata placement.
 
 The Manifesto and security pages are optional depth, not modals, warning gates, prerequisites, or
-long pitches on the home page. A dedicated `/lander/` page exposes the same bounded game used by the
-host-required 404 without turning the error route into a navigation destination. These are the only
-separate pages in the first slice; the primary product experience stays on the compact landing page.
-Pages have in-page navigation only if their final length makes it useful. A custom `404.html` is an
-error surface, not a content page or client-side route. There is no blog, documentation hierarchy,
-release feed, search, or client-side routing. Growth-path content gets its own design when its
-authoritative contracts have landed.
+long pitches on the home page. A dedicated `/lander/` page exposes the same continuous game used by
+the host-required 404 without turning the error route into a navigation destination. These are the
+only separate pages in the first slice; the primary product experience stays on the compact landing
+page. Pages have in-page navigation only if their final length makes it useful. A custom `404.html`
+is an error surface, not a content page or client-side route. There is no blog, documentation
+hierarchy, release feed, search, or client-side routing. Growth-path content gets its own design
+when its authoritative contracts have landed.
 
 Home, Manifesto, Security, Lander, and 404 share one landmark shape. A breadcrumb sits at the upper
 left: one linked `Agentworks` home crumb, a visual separator hidden from the accessibility tree, and
@@ -235,26 +235,28 @@ success or failure in an `aria-live` status region without moving focus. If the 
 the button is absent or explains that manual selection remains available. No clipboard content is
 read.
 
-### D7. One bounded deployment game renders on Lander and 404
+### D7. One continuous deployment expedition renders on Lander and 404
 
 The built artifact includes a semantic `404.html` that identifies the missing page and exposes a
 normal link home without CSS or JavaScript, plus a deliberate `/lander/` play surface. One reviewed
 template fragment owns the complete `#lander-game` subtree and is rendered into both shells; the
-controller and model remain page-agnostic. The selected twin-plume mark hovers over a minimal lunar
-surface. No visual instructions, score, or game chrome appear initially. On arrival, the plumes run
-a subtle cue for less than five seconds and settle; `prefers-reduced-motion: reduce` suppresses that
-cue entirely. This bounded cue preserves the surprise without requiring a pre-game pause control.
+controller, flight model, and world model remain page-agnostic. The selected twin-plume mark hovers
+over a static first slice of varied lunar terrain with one elevated platform and one compact NOC. No
+visual instructions, fuel readout, direction cue, or other game chrome appear initially. On arrival,
+the plumes run a subtle cue for less than five seconds and settle; `prefers-reduced-motion: reduce`
+suppresses that cue entirely. This bounded cue preserves the surprise without requiring a pre-game
+pause control.
 
 An unmodified, non-repeated Space key starts the game from the initial state on either shell when
 its event target is the document body or lander scene, never when focus is on the home link or
 another interactive/editable element. The lander is also an operable, accessibly named start control
 without visible instruction text. Activating it provides the pointer and assistive-technology path.
 The accepted preflight Space event is consumed so it cannot also scroll the page. Starting moves
-focus to the game scene and reveals concise controls, status, and a native `Exit mission` button. A
-native `Restart mission` button is also revealed after failure or success. Both remain hidden during
-preflight. They invoke the same EXIT and RESTART model events as Escape and `r`, preserve the
-established focus destinations, and make the complete lifecycle available to touch and assistive
-technology.
+focus to the game scene and reveals concise controls, a programmatically named fuel reserve, status,
+and a native `Exit mission` button. A native `Restart mission` button is revealed after a crash.
+Both remain hidden during preflight. They invoke the same EXIT and RESTART model events as Escape
+and `r`, preserve the established focus destinations, and make the complete lifecycle available to
+touch and assistive technology.
 
 While active, Space or Up commands equal thrust; Left or `h` increases the right engine to turn
 left; Right or `l` increases the left engine to turn right. Apart from the accepted preflight Space
@@ -265,7 +267,7 @@ cancel, lost capture, exit, or page hide cuts both engines and releases capture.
 little travel receives a pinned minimum impulse so a tap is useful; holding sustains thrust.
 Dragging left biases the right engine, and dragging right biases the left. `touch-action` and scroll
 suppression apply only inside the active game scene. Escape exits to the settled initial state, and
-`r` restarts a completed or failed mission.
+`r` restarts a crashed mission from its last in-memory checkpoint.
 
 The 404 body begins directly with `Page not found` after the compact detail-page inset. It has no
 error-code, eyebrow, provenance, or other pre-title label; its explanatory copy remains below the
@@ -273,28 +275,63 @@ title. The dedicated page similarly begins with `Lunar deployment`. Both titles 
 game remain semantic and useful before JavaScript runs.
 
 The game is a small DOM/SVG state machine, not canvas and not a general engine. A timestamp-driven
-animation loop integrates a fixed-step two-dimensional model with bounded catch-up: gravity,
+animation loop integrates a fixed-step two-dimensional flight model with bounded catch-up: gravity,
 position, velocity, attitude, angular velocity, collective thrust, differential torque, fuel, and
-landing contact. The loop pauses when the document is hidden and resumes without accumulating hidden
-time. Within the pinned catch-up bound, the same timestamped input timeline produces equivalent
-fixed-step simulation across representative 30, 60, and 120 Hz frame schedules. A larger stall
-discards accumulated wall time and resumes from the last state rather than pretending to simulate
-unseen play. Each plume group scales independently from the commanded engine thrust.
+terrain contact. Per-engine translational authority initially doubles from `4.2` to a nominal `8.4`
+model units while gravity and the fixed-step clock retain their roles, giving later braking without
+changing the scheduler. The LLD may pin a nearby value only when recorded browser handling evidence
+justifies the tolerance. The loop pauses when the document is hidden and resumes without
+accumulating hidden time. Within the pinned catch-up bound, the same timestamped input timeline
+produces equivalent simulation across representative 30, 60, and 120 Hz frame schedules. A larger
+stall discards accumulated wall time and resumes from the last state rather than pretending to
+simulate unseen play. Each plume group scales independently from the commanded engine thrust.
 
-A valid landing requires contact within the marked zone, left of a small dark NOC cluster, under
-pinned speed and attitude limits. After touchdown, the G opening acts as a deployment bay: a small
-terminal-inspired agent reaches the surface and enters the NOC. Its windows and server-status lights
-illuminate in sequence, followed by a restrained antenna signal. The powered appearance remains for
-the rest of the in-memory run while the lander lifts away. The accessible status then becomes
-exactly `Agent deployed. Mission continues.` Reduced motion skips the decorative travel and
-departure and presents the powered NOC and status directly. An unsafe contact produces a restrained
-failure state without flashing, sound, debris, or page damage. The home link remains available in
-every state.
+A new pure world module owns deterministic functions for the run seed, terrain chunks, site
+positions, landing-platform and building geometry, and the bounded rolling world projection. It owns
+no mutable singleton and imports no flight or controller module. The flight model imports those pure
+world functions, owns the immutable physics profile and reference-route calculation, and is the sole
+authority for the mutable run aggregate: vehicle physics, fuel, mission sequence, world cursor,
+retained site records and their can/power state, and the last successful checkpoint. The controller
+imports the flight model and remains the sole browser clock, input, camera, and DOM adapter. This
+one-way controller-to-flight-to-world dependency prevents a physics/world cycle and split-brain site
+state. The controller translates one stable nearby-world SVG group as the camera follows the lander
+and only regenerates terrain/site nodes when the rolling window changes. The runtime retains a fixed
+number of nearby chunks and sites, so an arbitrarily long forward expedition does not imply
+unbounded DOM or terrain history.
 
-Game constants, DOM states, collision rules, agent-deployment geometry, and test vectors belong in
-`brand-and-lander-lld.md`. The game makes no product claim and carries no analytics, storage,
-network request, randomness that affects acceptance, or critical content. Restart or reload returns
-the NOC to its initial dark state; there is no cross-run persistence or level system.
+Each deterministic site replaces a short terrain span with a slightly elevated flat platform exactly
+three lander widths long and places one solid NOC building beside it. A safe landing under the
+pinned speed and attitude limits consumes that site's one gas can exactly once. The fuel award is
+computed only after the next site exists: a deterministic reference plan starts at the post-refuel,
+post-power platform checkpoint, includes every automatic liftoff impulse, uses the same immutable
+physics profile as play, and demonstrates a safe next landing to establish its conservative minimum
+fuel. The award is that minimum multiplied by a monotonic ratio beginning near three and approaching
+one. It is added to the carried reserve without erasing unused fuel. Fixed-seed tests pin both the
+route proof and the smallest successful allowance within the LLD's search resolution.
+
+After refueling, the G opening acts as a deployment bay: a small terminal-inspired agent reaches the
+surface and enters the single NOC. A phone-battery-style indicator fills in stages, followed by the
+antenna signal. The powered appearance remains while the site stays in the rolling window. The model
+then records one immutable checkpoint snapshot containing the vehicle/platform pose, post-award
+fuel, world generator cursor, active and target site identities, retained-site can/power states, and
+mission progress. A short scripted liftoff spends fuel through the same accounting path as player
+thrust, then returns to ordinary flight with the next site already generated offscreen to the right.
+A right-edge direction cue blinks only while that target is outside the viewport; reduced motion
+keeps the useful arrow static. Deployment never enters a terminal success state.
+
+Unsafe terrain, platform, or building contact enters a finite crash sequence. Normal motion shows a
+compact propellant flash and deterministic fragments following ballistic paths; it has no smoke,
+atmospheric shock wave, sustained fireball, sound, or page movement. Reduced motion atomically shows
+the final failed state. Restart restores the last post-refuel checkpoint on its powered pad without
+duplicating the consumed can or fuel; before any successful site it restores the initial approach.
+Exit and reload discard all world, fuel, checkpoint, and powered-site state. The home link remains
+available in every state.
+
+Game constants, seed progression, terrain generation, route search resolution, DOM states, collision
+rules, deployment geometry, crash timing, and test vectors belong in `brand-and-lander-lld.md`. The
+game makes no product claim and carries no analytics, durable storage, network request, uncontrolled
+per-frame randomness, or critical content. Seed injection keeps automated acceptance exact while
+each ordinary run receives a fresh in-memory world.
 
 ### D8. GitHub Pages is the replaceable delivery adapter
 
@@ -453,8 +490,9 @@ recommendation.
 - after onboarding integration, copy behavior exercised for success, unavailable API, and rejected
   write without changing the source text;
 - custom 404 fallback, initial hidden controls, bounded idle cue, keyboard/vi/pointer mappings,
-  deterministic physics vectors, plume-to-thrust mapping, success/failure/restart/exit states,
-  background pause, and agent-deployment completion asserted;
+  deterministic flight and world vectors, plume-to-thrust mapping, repeated deployment, generated
+  route fuel proofs, checkpoint restart, finite crash/exit states, bounded rolling geometry,
+  background pause, and reduced-motion equivalents asserted;
 - keyboard-only traversal, visible focus, narrow-width reflow, zoom, reduced motion, and screen
   reader landmarks checked in acceptance;
 - color tokens verified with computed contrast evidence for normal text, large text, components, and

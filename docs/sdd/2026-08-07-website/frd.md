@@ -1,6 +1,6 @@
 # FRD: The agentworks.build Website
 
-- Status: Interim implementation complete; release acceptance in progress
+- Status: Interim implementation complete; continuous Lander refinement in design
 - Date: 2026-08-07
 - Last revised: 2026-08-10
 - Seeded by: the saga lead, at operator request. This is a standalone effort, deliberately NOT a
@@ -17,7 +17,7 @@ site gives them useful product/security depth, permanent project links, and an h
 notice.
 
 The operator's sizing mandate is the controlling constraint: **super simple at first**. The first
-slice is a small static site, its publishing pipeline, and one bounded interactive surprise shared
+slice is a small static site, its publishing pipeline, and one optional interactive surprise shared
 by a dedicated Lander page and the otherwise useful 404 page. It may ship in two complete stages: a
 useful public landing page while the onboarding contract is still in development, followed by the
 canonical bootstrap as soon as that contract lands. Every ambition beyond that is recorded as a
@@ -54,16 +54,18 @@ growth path so nothing forecloses it, and none of it is in scope now.
 - R8. During flight, Space or Up fires both engines; Left or `h` increases right-engine thrust to
   turn left; Right or `l` increases left-engine thrust to turn right. The visible twin plumes track
   collective and differential thrust. On touch, a tap produces a short collective-thrust pulse,
-  press-and-hold sustains it, and a left or right drag biases the opposite engine while pressed. A
-  safe landing left of a small dark NOC cluster deploys a small agent from the G opening. The agent
-  enters the NOC, which powers up and remains visibly active while the lander departs. The sequence
-  concludes with the exact status `Agent deployed. Mission continues.`
+  press-and-hold sustains it, and a left or right drag biases the opposite engine while pressed. The
+  initial tuning target is approximately twice the original per-engine translational authority
+  (nominally `8.4` rather than `4.2` in model units), so a player can brake materially later without
+  changing the fixed-step clock or simply doubling gravity. The LLD may pin a nearby browser-tested
+  value if handling evidence justifies it.
 - R9. The 404 content and route home and the dedicated Lander page work without JavaScript. The game
-  has no audio, telemetry, network request, storage, or critical content; it pauses when inactive,
-  can be exited, and honors reduced motion for all nonessential animation. Powered-NOC state lasts
-  only for the current run. After activation, native visible `Exit mission` and terminal-state
-  `Restart mission` buttons provide touch and assistive-technology equivalents to Escape and `r`;
-  they remain hidden during hint-free preflight.
+  has no audio, telemetry, network request, durable storage, or critical content; it pauses physics
+  and motion when inactive, can be exited, and honors reduced motion for all nonessential animation.
+  World generation, powered sites, checkpoints, fuel, and progress last only for the current
+  in-memory run. After activation, native visible `Exit mission` and crash-state `Restart mission`
+  buttons provide touch and assistive-technology equivalents to Escape and `r`; they remain hidden
+  during hint-free preflight.
 - R10. Before the onboarding effort's canonical bootstrap source lands, an **interim public
   release** may serve the complete site shell, repository-sourced problem and principle content,
   selected brand, permanent links, custom 404, deployment pipeline, and custom domain. It states
@@ -144,6 +146,29 @@ growth path so nothing forecloses it, and none of it is in scope now.
   A/G/W rocket mark without exhaust. The favicon preserves the exact selected mark geometry, has no
   flame paths or colors, resolves beneath both supported site bases, and adds no remote request,
   runtime script, font, or hand-maintained raster fallback.
+- R21. The game is one continuous, forward-moving lunar expedition rather than a terminal level. It
+  presents visibly rising, falling, and sloped lunar-lander terrain between sites and a
+  deterministic sequence of sites generated from one fresh in-memory run seed. Each site has one
+  slightly elevated helicopter-style landing platform exactly three lander widths long beside one
+  compact NOC building. A safe landing collects that platform's single gas can into the lander's
+  visible fuel reserve, deploys an agent from the G opening, fills a phone-battery-style power
+  indicator on the NOC, and activates its antenna. The powered site remains changed while it is
+  retained in the run's rolling world. A short launch sequence then returns control to flight; there
+  is no terminal success after a deployment.
+- R22. After each safe landing, the next site is deterministically placed beyond the right edge of
+  the current view. A visible right-edge arrow blinks while that target remains offscreen and hides
+  once the site enters view; under reduced motion it remains a static direction cue. Before issuing
+  the departing site's gas can, the game calculates a conservative minimum fuel requirement for a
+  demonstrated reference flight to the generated next platform. The can adds that requirement
+  multiplied by a difficulty ratio that starts near three and monotonically approaches one as sites
+  advance. Unused fuel carries forward and is never discarded merely because another site was
+  completed.
+- R23. Unsafe terrain, platform, or building contact produces a brief vacuum-appropriate crash: a
+  compact propellant flash and ballistic fragments, with no smoke cloud, atmospheric shock wave,
+  sustained fireball, audio, or page movement. Reduced motion skips fragment travel and exposes the
+  final failed state directly. Restart through either `r` or the native control resumes from the
+  last successfully powered platform with its post-refuel checkpoint; before the first success it
+  restarts the initial approach. Exit or reload starts a fresh run.
 
 ## Settled constraints (inherited; do not reopen)
 
@@ -192,13 +217,16 @@ merged and settled on `main`. The first slice must not build toward them specula
   specified collective and differential thrust; tap, hold, and horizontal drag provide equivalent
   touch control; visible plume length reflects the commanded engine thrust; and the native Exit
   control returns either input mode to settled preflight.
-- AC7. A safe, upright touchdown left of the NOC completes the agent exit, NOC power-up, and lander
-  departure sequence; the powered NOC remains visibly changed for the rest of the run; and the exact
-  success status is exposed. An unsafe touchdown has a distinct non-destructive failure state and
-  can restart through either `r` or the native Restart control.
+- AC7. A safe upright touchdown on the elevated three-lander-width platform consumes its gas can
+  exactly once, increases the visible and programmatically named fuel reserve without discarding
+  carried excess, completes agent entry, fills the single-building NOC battery indicator, activates
+  its antenna, and returns the same lander to controllable flight. Completing three successive sites
+  proves that deployment is not terminal and that powered sites remain visibly changed while they
+  remain in the rolling view.
 - AC8. Automated and browser acceptance cover state transitions, input mapping, consistent
-  fixed-step physics across representative frame schedules, route-home fallback, hidden-until-start
-  instructions, reduced motion, keyboard focus, narrow screens, and paused background behavior.
+  fixed-step physics across representative frame schedules, seeded terrain and site generation,
+  route-home fallback, hidden-until-start instructions, fuel and checkpoint transitions, reduced
+  motion, keyboard focus, narrow screens, bounded runtime work, and paused background behavior.
 - AC9. Before onboarding is available, `https://agentworks.build` serves the useful interim release
   described by R10 over TLS. The page contains no bootstrap code region, copy control, installation
   instruction, empty onboarding container, or unexpanded template token, and its availability notice
@@ -263,6 +291,24 @@ merged and settled on `main`. The first slice must not build toward them specula
   base. Automated asset checks prove its A/G/W path and presentation attributes equal the selected
   mark in `agw-rocket.svg`, while plume identifiers, flame colors, scripts, animation, images, and
   external references are absent.
+- AC22. For fixed seeds, generated terrain, elevated platforms, single NOCs, gas cans, next-site
+  positions, and fuel awards are byte-for-byte repeatable. Representative seeds meet the LLD's
+  minimum terrain-diversity constraints and visibly include rising, falling, and sloped non-platform
+  spans. Each award equals the next route's deterministic demonstrated minimum multiplied by a
+  monotonic ratio that is approximately three for the first award and approaches one without
+  crossing it. A test-controlled reference flight reaches and safely lands on every representative
+  generated next platform using no more than the calculated minimum; a one-step-smaller tested
+  allowance cannot complete that same reference plan.
+- AC23. While the next site is right of the viewport, a visible right-pointing cue is present and
+  blinks only when motion is allowed and the document is active. It becomes static under reduced
+  motion, pauses while hidden, and disappears when the target enters view. Direction is never
+  communicated by animation alone.
+- AC24. Every unsafe terrain, pad, or building impact reaches a finite crash sequence with a brief
+  flash and deterministic ballistic debris but no smoke, shock wave, sustained fire, sound, page
+  movement, storage, or request. Reduced motion reaches the same final failure atomically. Restart
+  restores the exact last post-refuel platform checkpoint without duplicating its can or fuel;
+  restart before the first deployment restores the initial approach, while Exit and reload create a
+  fresh run.
 
 ## Settled implementation rulings
 
