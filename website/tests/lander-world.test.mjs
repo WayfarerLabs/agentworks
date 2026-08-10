@@ -45,6 +45,8 @@ test("seed mixer and sampled terrain match independent fixed vectors", () => {
     assert.equal(mixUint32(0xffffffff), 1734902346);
     const expected = [3.632365759695, 2.237045118399, 4.041724477103, 2.046403835807, 3.451083194511, 2.655762553215];
     expected.forEach((value, index) => close(terrainSample(1, index), value, 5e-13));
+    assert.equal(terrainSample(1, 24), 2.736853299895301);
+    assert.equal(terrainSample(0x12345678, 14), 3.1070248072035613);
     close(sampleUnit(1, 1, 0), 0.5441219198983163);
     close(sampleUnit(1, 4, 7), 0.29075191100127995);
     close(sampleUnit(0x12345678, 3, 99), 0.38062425260432065);

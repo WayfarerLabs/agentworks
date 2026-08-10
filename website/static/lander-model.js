@@ -69,9 +69,9 @@ const FAILURE_LITERALS = [
 
 export const ROUTE_DIGESTS = Object.freeze({
     geometryDigest: "a45465787699a9b737b22bb32e0f40ae50913ce14cc3c6c2aeb9300f287ed8d8",
-    outputDigest: "783c3fd249a3e9dd0fc92c35a26ed9121e0a526ac65c9e704ba512143c3b7a1a",
+    outputDigest: "377c9c74bb5da3ea00fc657dfc8949a672510f3fb97bd95708804f3c2a133daf",
     physicsDigest: "390d39bcacade9ebf38e6c8715a9f09bd6aeae4dea9a9e426c6d2f5707499ec1",
-    worldDigest: "391ddc99e2b94d4a9bebde67e6def8d439cf37dd7235bf34bd0159ef557962fc",
+    worldDigest: "7a759a077c44a57f60b00de7c949f784583a8a6d58bcca97fcb116eb625c8797",
 });
 
 function freeze(value) {

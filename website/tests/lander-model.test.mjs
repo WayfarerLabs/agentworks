@@ -35,8 +35,10 @@ import {
 } from "../static/lander-model.js";
 import {
     STATIC_WORLD_SEED,
+    corridorVertices,
     instantiateTemplateSite,
     siteFoundationBottom,
+    terrainSample,
 } from "../static/lander-world.js";
 
 const ROOT = new URL("../", import.meta.url).pathname;
@@ -258,7 +260,7 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
     assert.equal(digest(derived.worldWitnesses), derived.worldDigest);
     assert.deepEqual([derived.worldWitnesses[0].digest, derived.worldWitnesses[40].digest,
         derived.worldWitnesses.at(-1).digest], [
-        "1e3ed8b97aea43fd56d1fb29e6a34f7cd77cff4e54079547b8637cb97f4bf66e",
+        "f5064b62812de3329b7fcd65fe880bd1098b589db98d55d33e5b2307f05bda57",
         "f1cdffa74c42cf133bdb3fc264d25227cf8d0df980b9b8a9db8db0f753dfda57",
         "115173e8c5d9177f1660d5fb917dd89cfcc8d331155eb4e53b77ededf65cca8a",
     ]);
@@ -266,11 +268,21 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
         descriptor.corridorSamples.some((sample) => sample.relieved)));
     for (const witness of derived.worldWitnesses) {
         const { descriptor } = witness;
+        const template = REFERENCE_TEMPLATES.find((candidate) => candidate.templateId === descriptor.templateId);
+        const originSite = { id: 0, center: descriptor.origin.center,
+            platformLeft: descriptor.origin.center - 4.8, platformRight: descriptor.origin.center + 4.8,
+            platformTop: descriptor.origin.top, platformBottom: descriptor.origin.top - 0.35,
+            canCollected: true, powered: true, nocStage: 5 };
+        const targetSite = instantiateTemplateSite(descriptor.seed, 1, originSite, template);
+        assert.deepEqual({ center: targetSite.center, top: targetSite.platformTop }, descriptor.target);
+        assert.deepEqual(descriptor.vertices.slice(0, -descriptor.nativeResumeSamples.length),
+            corridorVertices(descriptor.seed, originSite, targetSite));
         assert.equal(digest(descriptor), witness.digest);
         assert.ok(descriptor.corridorSamples.length > 0);
         assert.ok(descriptor.corridorSamples.every((sample) => sample.y === (sample.relieved ?
             Math.max(0.75, sample.cap - 0.15 * sample.reliefUnit) : sample.raw)));
         for (const sample of descriptor.corridorSamples.concat(descriptor.nativeResumeSamples)) {
+            assert.equal(sample.raw ?? sample.y, terrainSample(descriptor.seed, sample.index));
             assert.ok(descriptor.vertices.some(([x, y]) => x === sample.x && y === sample.y));
         }
         assert.deepEqual(descriptor.blendSegments.left[1],
