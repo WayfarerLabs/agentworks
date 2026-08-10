@@ -41,36 +41,36 @@ the still-v1 WSL2 primary path is unchanged; focused suites pass.
 
 ## Phase 3: atomic vm-platform v2 cutover
 
-- [ ] In one always-green commit, make the resolved Tailscale key and progress sink required in
+- [x] In one always-green commit, make the resolved Tailscale key and progress sink required in
       `ProvisionRequest`, remove all absent-key provider branches, remove
       `ProvisionResult.bootstrap_complete`, delete `BootstrapCompletion`, make
       `EphemeralTailscaleBootstrap.complete()` return only `str | None` or raise, remove the generic
       Phase A generated-script branch, and update manager call sites.
-- [ ] In that cutover, move logger construction before platform dispatch and preserve manager
+- [x] In that cutover, move logger construction before platform dispatch and preserve manager
       ownership, exactly-once close, primary-failure mapping, log-path guidance, and the complete
       Tailscale-plus-git-token redaction set; pin the intentionally new log on platform-create
       failures.
-- [ ] In that same commit, move the vm-platform descriptor and every in-tree implementation from
+- [x] In that same commit, move the vm-platform descriptor and every in-tree implementation from
       contract version 1 to version 2; add exact registration rejection coverage for v1.
-- [ ] Add a structural regression proving no incomplete-bootstrap result, completion record, or
+- [x] Add a structural regression proving no incomplete-bootstrap result, completion record, or
       generic Phase A generated-script branch remains; delete fallback-era completion-record tests.
-- [ ] Pin that post-create Tailscale SSH verification failure retains the secured `FAILED` VM
+- [x] Pin that post-create Tailscale SSH verification failure retains the secured `FAILED` VM
       behavior rather than reopening create rollback.
-- [ ] Add end-to-end coverage for successful join plus missing platform IP: Phase A rediscovers and
+- [x] Add end-to-end coverage for successful join plus missing platform IP: Phase A rediscovers and
       records the IP without receiving the key as bootstrap input or touching staging.
-- [ ] Move WSL2's intentional primary bootstrap under `WSL2Platform.create()` ownership while
+- [x] Move WSL2's intentional primary bootstrap under `WSL2Platform.create()` ownership while
       preserving its accepted private staging, cleanup, redaction, and observable progress.
-- [ ] Simplify Lima to the required-key, complete-or-raise contract.
-- [ ] Add Lima/Azure/AWS fixed-stdin success and join-failure sentinel coverage for command text,
+- [x] Simplify Lima to the required-key, complete-or-raise contract.
+- [x] Add Lima/Azure/AWS fixed-stdin success and join-failure sentinel coverage for command text,
       returned output, logs, diagnostics, and exception chains; pin Azure/AWS rollback.
-- [ ] Add WSL2 and Proxmox sentinel coverage across success, bootstrap failure, cleanup failure,
+- [x] Add WSL2 and Proxmox sentinel coverage across success, bootstrap failure, cleanup failure,
       returned output, diagnostics, exception chains, and their accepted private staging cleanup.
-- [ ] Add interrupt and second-interrupt/manual-removal coverage for Azure/AWS readiness waits,
+- [x] Add interrupt and second-interrupt/manual-removal coverage for Azure/AWS readiness waits,
       WSL2's moved bootstrap, and Proxmox bootstrap.
-- [ ] In the same cutover commit, update the VM-platform README, plugin author example, general
+- [x] In the same cutover commit, update the VM-platform README, plugin author example, general
       capability secret-delivery contract, nearby docstrings, vm-platform kind prose, and affected
       platform `TopicProse`; run guide catalog/rendering and inertness/safety coverage.
-- [ ] Confirm sample config, CLI command reference, and shell completions need no change because the
+- [x] Confirm sample config, CLI command reference, and shell completions need no change because the
       operator CLI/config grammar is unchanged.
 
 **DoD:** every shipped platform returns only after successful bootstrap; all failure paths stay in
