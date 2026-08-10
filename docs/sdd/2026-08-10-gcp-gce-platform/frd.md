@@ -35,7 +35,8 @@ service-account arm, omitted or explicit-null `secret` selects the well-known
 
 Each machine-type entry declares positive `cpus` and `memory`, a non-empty Compute Engine `type`,
 and `arch` of `x86_64` or `arm64`. The built-in catalog is an x86 E2 standard ladder. Selection is
-order-independent and chooses the smallest entry satisfying both requested axes.
+order-independent and chooses the smallest entry satisfying both requested axes, using provider type
+and architecture as deterministic tie-breakers when CPU and memory are equal.
 
 ### R3: authentication modes
 
@@ -167,8 +168,9 @@ startup-script size enforcement, indeterminate firewall inserts, pre-classic pol
 priority-zero allow/deny conflicts, and full repository gates.
 
 One operator-approved live acceptance run creates and initializes a bounded VM, verifies Tailscale
-reachability and platform lifecycle, deletes it, and confirms zero GCP firewall, instance, disk, and
-external-address residue. Live credentials and cloud state are never used without that explicit
+reachability and platform lifecycle, queries the realized instance to prove that no guest service
+account or OAuth scopes were attached, deletes it, and confirms zero GCP firewall, instance, disk,
+and external-address residue. Live credentials and cloud state are never used without that explicit
 gate.
 
 ## Non-goals

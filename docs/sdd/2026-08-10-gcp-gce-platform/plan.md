@@ -10,8 +10,9 @@ offline gates, and operator-gated live acceptance are complete; the SDD is locke
 ## Phase 0: contract and schema gates
 
 - [x] Rebase or stack on the review-clean vm-platform v2 complete-or-raise contract from issue #471.
-- [x] Review the latest stable `google-cloud-compute` and `google-auth` releases and select only the
-      direct dependencies the implementation will import; actual dependency edits remain Phase 1.
+- [x] Review the latest stable `google-cloud-compute`, `google-auth`, and `google-api-core` releases
+      and select only the direct dependencies the implementation will import; actual dependency
+      edits remain Phase 1.
 - [x] Review and approve `prior-art-research.md` plus `provider-state-machine-lld.md`, which pin the
       official provider semantics and bounded bootstrap/network/cleanup state machine.
 - [x] Obtain saga-lead approval for the exact `gcp-gce` config schema in the HLA before code begins.
@@ -34,8 +35,8 @@ contract and no schema guesswork.
       subnet, network-policy enforcement order, live machine shape, `debian-cloud` image, exact
       retained-name collision, priority-zero allow/deny conflict, and external-IP helpers.
 - [ ] Implement bounded instance/firewall rollback, including exact-shape reconciliation after
-      indeterminate deny/allow inserts, plus first/second-interrupt cleanup helpers with exact
-      survivor/manual-removal tests.
+      indeterminate deny/allow inserts only after request/operation/provider-ID ownership proof,
+      plus first/second-interrupt cleanup helpers with exact survivor/manual-removal tests.
 - [ ] Generalize `EphemeralTailscaleBootstrap` with the approved non-secret readiness command/label
       while preserving Azure/AWS defaults and all stdin/non-reflection tests.
 
@@ -93,7 +94,8 @@ suites and strict typing pass.
       conflicting organization/folder terminal rules, set explicit resource/time/cost budgets, and
       obtain operator authorization before any live mutation or credential use.
 - [ ] Run one bounded create/init/Tailscale/lifecycle/delete acceptance, then independently query
-      the project to prove zero instance, disk, firewall, and address residue.
+      the realized instance to prove it has no guest service account or OAuth scopes, and query the
+      project after delete to prove zero instance, disk, firewall, and address residue.
 - [ ] Record exact offline/live/review evidence, add `locked.md`, post the detailed ready-for-review
       disposition, and flip the PR from draft only when every requirement is true.
 

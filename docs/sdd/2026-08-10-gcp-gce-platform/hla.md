@@ -85,8 +85,9 @@ zone set and remains an explicit override. Unsupported size requests fail before
 
 ## Dependency and credential boundary
 
-The reviewed latest stable floors are `google-cloud-compute>=1.50.0` and `google-auth>=2.56.0`. The
-implementation imports both, so both are direct dependencies and enter the lock file.
+The reviewed latest stable floors are `google-cloud-compute>=1.50.0`, `google-auth>=2.56.3`, and
+`google-api-core>=2.34.0`. The implementation imports all three directly, so all three are direct
+dependencies and enter the lock file.
 
 Ambient construction uses Application Default Credentials with the cloud-platform scope.
 Service-account construction parses `ctx.secret(auth.secret)` as JSON and calls
@@ -104,7 +105,13 @@ file cannot be exported verbatim. Operator docs require validating and compactin
 default env-var value in one step:
 
 ```bash
+# Requires jq.
 export AW_SECRET_GCP_SERVICE_ACCOUNT_KEY="$(jq -c . /path/to/service-account-key.json)"
+```
+
+```powershell
+$env:AW_SECRET_GCP_SERVICE_ACCOUNT_KEY = Get-Content -Raw C:\path\to\service-account-key.json |
+    ConvertFrom-Json | ConvertTo-Json -Compress -Depth 100
 ```
 
 The explicit arm then receives that complete JSON value through the ordinary secret-source chain;
@@ -134,9 +141,10 @@ SSH prefixes, and firewall-name collision, finishes before the first mutation.
 
 The complete-or-raise sequence is:
 
-1. Select the smallest machine type satisfying `ProvisionRequest.cpus` and `memory_gib`; resolve the
-   live machine type and verify its CPU, memory, and architecture match the catalog declaration;
-   resolve `projects/debian-cloud/global/images/family/debian-12` or
+1. Select the smallest machine type satisfying `ProvisionRequest.cpus` and `memory_gib`, ordered by
+   `(cpus, memory, type, arch)` so equal-shape catalogs remain order-independent; resolve the live
+   machine type and verify its CPU, memory, and architecture match the catalog declaration; resolve
+   `projects/debian-cloud/global/images/family/debian-12` or
    `projects/debian-cloud/global/images/family/debian-12-arm64` and the zonal `pd-balanced` disk
    request.
 2. Derive every retained identity from `request.hostname` with the exact formulas in the provider
@@ -150,10 +158,11 @@ The complete-or-raise sequence is:
    larger than 256 KiB before mutation.
 4. Create a priority-1 deny for all ingress targeting the instance tag. Create a unique priority-0
    TCP/22 provisioning allow for only the operator prefixes.
-5. Insert the instance with one lifetime ephemeral external IPv4 access config, the target tag, an
-   explicit `IPV4_ONLY` interface, metadata SSH key, project-key blocking, OS Login disabled for
-   this instance, and the key-free startup script. The boot disk is `auto_delete=True`;
-   `service_accounts` is explicitly empty.
+5. Insert the instance with a unique request UUID, one lifetime ephemeral external IPv4 access
+   config, the target tag, an explicit `IPV4_ONLY` interface, metadata SSH key, project-key
+   blocking, OS Login disabled for this instance, and the key-free startup script. Accept only an
+   operation whose client request ID and target identity match the realized instance. The boot disk
+   is `auto_delete=True`; `service_accounts` is explicitly empty.
 6. Wait for the operation and RUNNING state, then read the external IPv4 address live and construct
    the provisioning `SSHTransport`.
 7. Use `EphemeralTailscaleBootstrap` to wait for SSH and the local GCP startup marker, deliver the
@@ -223,8 +232,10 @@ existing VM-platform interface is sufficient.
   deny. Already-gone is success. A surviving/indeterminate instance raises typed and keeps the deny;
   auxiliary rule residue after proven absence warns precisely.
 - `display_backend_name`: `<instance>@<zone>`.
-- `platform_metadata`: instance name, project, zone, network tag, allow rule, deny rule, and access
-  config name. It excludes IP addresses and credentials.
+- `platform_metadata`: instance name and provider ID, project, zone, canonical network and optional
+  subnet URLs, network tag, allow/deny rule names and provider IDs, and access-config name. It
+  excludes IP addresses and credentials. Later lifecycle and cleanup use these persisted network and
+  provider identities rather than mutable site configuration or same-name resource shape.
 - native transport: live external IP from the lifetime access config; `transient_route` owns only
   the per-operation scoped inbound allow.
 
@@ -232,16 +243,22 @@ The external IP is never cached because GCE may replace an ephemeral address acr
 
 ## Rollback and errors
 
-Firewall creation and instance insertion are one guarded mutation region. A firewall insert timeout
-is reconciled by exact-name `get`: a rule is deleted only when its complete network, direction,
-target, priority, source, and allow/deny shape matches the request this operation owned. A missing
-rule is absent; a mismatched rule is retained and reported as a collision. Ordinary exceptions first
-close the scoped allow, then request bounded instance deletion even when allow close fails. The deny
-is deleted only after `instances.get` proves absence; deletion failure or indeterminate timeout
-retains it around the possible survivor. Cleanup raises a typed `GCEError` preserving secret-free
-diagnostics and exact retained identities. A first `KeyboardInterrupt` runs the same rollback and
-re-raises the original object. A second interrupt stops waiting, reports project/zone/instance and
-both firewall rules, retains the deny when needed, and preserves the first interrupt.
+Firewall creation and instance insertion are one guarded mutation region. Each insert carries a
+unique request UUID. A pre-response indeterminate firewall failure is retried once with that same
+UUID; a definite already-exists response is a collision. Success requires an operation whose
+`clientOperationId`, operation type, and target link match this attempt, and whose `targetId` equals
+the realized firewall provider ID. Rollback deletes only when that provider ID and the complete
+network, direction, target, priority, source, and allow/deny shape still match. A missing rule is
+absent; missing ownership proof or any mismatch is retained and reported as a collision. GCE has no
+firewall resource-ID precondition on name-based delete, so this closes the ordinary concurrent
+insert race but does not claim atomic protection against a hostile delete/recreate between the
+verification read and delete. Ordinary exceptions first close the scoped allow, then request bounded
+instance deletion even when allow close fails. The deny is deleted only after `instances.get` proves
+absence; deletion failure or indeterminate timeout retains it around the possible survivor. Cleanup
+raises an existing Agentworks error category where one fits, preserving secret-free diagnostics and
+exact retained identities. A first `KeyboardInterrupt` runs the same rollback and re-raises the
+original object. A second interrupt stops waiting, reports project/zone/instance and both firewall
+rules, retains the deny when needed, and preserves the first interrupt.
 
 Google API authentication/permission, not-found, quota, collision, operation, readiness, and cleanup
 failures map to existing Agentworks error categories where one fits. Provider exceptions are

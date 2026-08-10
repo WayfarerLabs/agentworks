@@ -10,9 +10,9 @@ in `prior-art-research.md`.
 
 For one VM, derive before mutation and store after create:
 
-- `project_id`, `zone`, and normalized `backend_name`;
+- `project_id`, `zone`, normalized `backend_name`, and learned instance provider ID;
 - unique instance `network_tag`;
-- stable `deny_rule` and provisioning `allow_rule` names;
+- stable `deny_rule` and provisioning `allow_rule` names plus learned provider IDs;
 - network/subnet resource URL and access-config name `External NAT`.
 
 Every retained name starts from the UTF-8 `request.hostname`. Define `stem` by lowercasing,
@@ -78,6 +78,11 @@ The retained insert request includes:
 - network tag, metadata SSH key, `block-project-ssh-keys=TRUE`, `enable-oslogin=FALSE`;
 - a key-free startup wrapper.
 
+The instance insert also carries its own unique request UUID. Its accepted operation must expose the
+same `clientOperationId`, identify the expected zonal insert target, and provide a `targetId` equal
+to the realized instance provider ID. That instance ID is persisted and must match before later
+rollback or lifecycle deletion; a same-name different-ID instance is a collision and is retained.
+
 The wrapper checks `/var/lib/agentworks/gce-bootstrap-v1.complete` first. If present it exits zero.
 Otherwise it runs the shared generated bootstrap and atomically renames a temporary marker into
 place only after success. Failure or interruption leaves no success marker, so a later boot may
@@ -110,22 +115,30 @@ failure retained separately:
 
 | Realized state        | Required cleanup and result                                                                    |
 | --------------------- | ---------------------------------------------------------------------------------------------- |
-| possible deny         | exact-name get; delete only an exact request-shape match; retain/report a mismatch             |
-| deny + possible allow | exact-name get; delete matching allow, then deny; retain/report a mismatch                     |
+| possible deny         | require this insert's provider ID plus exact shape; otherwise retain/report                    |
+| deny + possible allow | require each insert's provider ID plus exact shape; delete allow, then deny                    |
 | possible instance     | delete allow first; request instance delete; verify absence; delete deny only after proof      |
 | surviving instance    | retain deny, report instance + deny + manual actions; re-raise original failure/interrupt      |
 | absent instance       | delete deny; boot disk disappears through explicit auto-delete                                 |
 | auxiliary rule leak   | name exact rule; never claim zero residue; preserve more important original failure if present |
 
-An instance insert timeout is a possible instance, not “none.” Rollback resolves it by normalized
-name. An instance-delete operation error or timeout is followed by `instances.get`; only not-found
-proves absence.
+An instance insert timeout is a possible instance, not “none.” Reconciliation uses the insert's
+request UUID and operation target ID, then requires the realized instance provider ID to match. An
+instance-delete operation error or timeout is followed by `instances.get`; only not-found proves
+absence, while a same-name different-ID instance is retained as a collision.
 
-A deny/allow insert error or timeout is likewise a possible rule. Reconciliation reads the exact
-name and treats it as owned only when network, ingress direction, target tag, priority, source
-ranges, and complete allowed/denied protocol and port sets match the submitted request. Not-found is
-absent. A mismatch is a collision and is never deleted. Tests cover both realized and absent timeout
-outcomes for each rule plus mismatched concurrent replacement.
+A deny/allow insert error or timeout is likewise a possible rule. Every insert carries a unique
+request UUID. A pre-response indeterminate call retries the same request once with the same UUID;
+definite `ALREADY_EXISTS` remains a collision. An accepted operation must match the UUID through
+`clientOperationId`, name an insert of the expected target link, and expose a nonzero `targetId`.
+The realized firewall's provider ID must equal that `targetId`, and its network, ingress direction,
+target tag, priority, source ranges, and complete allowed/denied protocol and port sets must match
+the request. That provider ID is retained for later cleanup. Not-found is absent. Missing ownership
+proof or any mismatch is a collision and is never deleted. Tests cover realized and absent
+indeterminate outcomes, a same-name/same-shape different-ID race, and mismatched concurrent
+replacement. GCE has no resource-ID precondition on firewall delete, so verification immediately
+before name-based delete addresses ordinary concurrent insertion but cannot make hostile
+delete/recreate replacement atomic.
 
 A second `KeyboardInterrupt` stops cleanup promptly. The original interrupt object remains the one
 re-raised. Output names project, zone, instance, allow, deny, and exact console/CLI deletion

@@ -13,8 +13,11 @@ Research date: 2026-08-10. Sources are official Google Cloud, Google Auth, and P
 - [`google-cloud-compute` 1.50.0](https://pypi.org/project/google-cloud-compute/) is the latest
   stable Compute client release reviewed for this effort. `InstancesClient.insert` returns an
   `ExtendedOperation` and accepts a typed `Instance` body.
-- [`google-auth` 2.56.0](https://pypi.org/project/google-auth/) is the latest stable authentication
+- [`google-auth` 2.56.3](https://pypi.org/project/google-auth/) is the latest stable authentication
   release reviewed for this effort.
+- [`google-api-core` 2.34.0](https://pypi.org/project/google-api-core/) is imported directly for
+  provider exception categories and is therefore a direct dependency rather than an undeclared
+  transitive implementation detail.
 - [Application Default Credentials](https://docs.cloud.google.com/docs/authentication/application-default-credentials)
   is the ambient mechanism supported by Google client libraries.
 - [`Credentials.from_service_account_info`](https://google-auth.readthedocs.io/en/latest/reference/google.oauth2.service_account.html)
@@ -22,7 +25,7 @@ Research date: 2026-08-10. Sources are official Google Cloud, Google Auth, and P
   secret the natural explicit arm and removes any reason to split private key, email, token URI, or
   project fields across config.
 
-Decision: declare both imported packages directly, use ADC only for the ambient arm, use one
+Decision: declare all three imported packages directly, use ADC only for the ambient arm, use one
 complete JSON secret only for the explicit arm, and never fall back across arms.
 
 ## Instance metadata and bootstrap
@@ -142,10 +145,14 @@ Decisions:
   the deny; proven absence permits deny cleanup;
 - already-not-found remains idempotent success.
 
-The same possible-resource rule applies to firewall inserts. After an error or timeout, exact-name
-`get` distinguishes absence from realization. Cleanup deletes a realized rule only when its full
-network, direction, target, priority, source, and allow/deny request shape matches the operation's
-owned request; a mismatch is retained and reported as a collision.
+The same possible-resource rule applies to firewall inserts, but exact name and shape do not prove
+ownership. Each attempt supplies a unique `requestId`. A pre-response indeterminate call is retried
+once with that same ID; the accepted operation must expose it as `clientOperationId`, identify an
+insert of the expected target link, and expose a `targetId` equal to the realized firewall's
+provider ID. Cleanup requires that provider ID plus the full network, direction, target, priority,
+source, and allow/deny request shape. Missing proof or a mismatch is retained and reported as a
+collision. Because firewall delete has no provider-ID precondition, the verification-to-delete gap
+cannot protect against hostile delete/recreate replacement and is not represented as atomic.
 
 ## Resulting shared seam
 
