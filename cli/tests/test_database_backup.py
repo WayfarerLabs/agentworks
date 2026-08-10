@@ -176,6 +176,83 @@ def test_restore_rejects_current_common_sentinel_lookalike(tmp_path: Path) -> No
         restore_backup(lookalike, tmp_path / "live.db")
 
 
+def test_restore_rejects_v1_with_first_committed_v2_ddl_before_destination_open(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    partial = tmp_path / "partial-v2.db"
+    live = tmp_path / "live.db"
+    _build_schema(partial, 1)
+    connection = sqlite3.connect(partial)
+    connection.execute("ALTER TABLE vms ADD COLUMN cpus INTEGER")
+    connection.commit()
+    connection.close()
+    monkeypatch.setattr(
+        "agentworks.db.backup._online_copy",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("destination opened")),
+    )
+
+    with pytest.raises(StateError, match="unexpected columns for completed schema version 1: cpus") as raised:
+        restore_backup(partial, live)
+
+    assert raised.value.hint == "Select an unmodified backup captured after a completed Agentworks migration."
+    assert not live.exists()
+
+
+def test_restore_rejects_v3_with_first_committed_v4_table_before_destination_open(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    partial = tmp_path / "partial-v4.db"
+    live = tmp_path / "live.db"
+    _build_schema(partial, 3)
+    connection = sqlite3.connect(partial)
+    connection.execute(
+        "CREATE TABLE agents ("
+        "name TEXT NOT NULL, "
+        "workspace_name TEXT NOT NULL, "
+        "linux_user TEXT NOT NULL UNIQUE, "
+        "created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')), "
+        "PRIMARY KEY (workspace_name, name), "
+        "FOREIGN KEY (workspace_name) REFERENCES workspaces(name))"
+    )
+    connection.commit()
+    connection.close()
+    monkeypatch.setattr(
+        "agentworks.db.backup._online_copy",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("destination opened")),
+    )
+
+    with pytest.raises(StateError, match="unexpected tables for completed schema version 3: agents") as raised:
+        restore_backup(partial, live)
+
+    assert raised.value.hint == "Select an unmodified backup captured after a completed Agentworks migration."
+    assert not live.exists()
+
+
+def test_restore_rejects_missing_column_before_destination_open(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    incomplete = tmp_path / "incomplete-v2.db"
+    live = tmp_path / "live.db"
+    _build_schema(incomplete, 2)
+    connection = sqlite3.connect(incomplete)
+    connection.execute("ALTER TABLE vms DROP COLUMN disk_gib")
+    connection.commit()
+    connection.close()
+    monkeypatch.setattr(
+        "agentworks.db.backup._online_copy",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("destination opened")),
+    )
+
+    with pytest.raises(StateError, match="table 'vms' is missing required columns: disk_gib") as raised:
+        restore_backup(incomplete, live)
+
+    assert raised.value.hint == "Select an unmodified backup captured after a completed Agentworks migration."
+    assert not live.exists()
+
+
 def test_restore_refuses_future_version_before_destination_open(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -312,6 +389,42 @@ def test_failed_backup_and_absent_restore_remove_incomplete_files(
     with pytest.raises(BackupError, match="forced"):
         restore_backup(selected, absent)
     assert not absent.exists()
+
+
+@pytest.mark.parametrize("operation", ["manual", "automatic", "absent-restore"])
+def test_interrupted_copy_preserves_interrupt_and_removes_all_reserved_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+) -> None:
+    source = tmp_path / "source.db"
+    Database(source).close()
+    interruption = KeyboardInterrupt("copy interrupted")
+    destinations: list[Path] = []
+
+    def interrupt_copy(_source: Path, destination: Path) -> None:
+        destinations.append(destination)
+        destination.write_bytes(b"partial")
+        destination.with_name(f"{destination.name}-wal").write_bytes(b"partial wal")
+        destination.with_name(f"{destination.name}-shm").write_bytes(b"partial shm")
+        destination.with_name(f"{destination.name}-journal").write_bytes(b"partial journal")
+        raise interruption
+
+    monkeypatch.setattr("agentworks.db.backup._online_copy", interrupt_copy)
+
+    with pytest.raises(KeyboardInterrupt) as raised:
+        if operation == "manual":
+            create_manual_backup(source)
+        elif operation == "automatic":
+            create_pre_migration_backup(source, LATEST_VERSION)
+        else:
+            restore_backup(source, tmp_path / "absent" / "live.db")
+
+    assert raised.value is interruption
+    assert len(destinations) == 1
+    destination = destinations[0]
+    for suffix in ("", "-wal", "-shm", "-journal"):
+        assert not destination.with_name(f"{destination.name}{suffix}").exists()
 
 
 def test_retention_cleanup_failure_does_not_discard_completed_backup(

@@ -384,17 +384,43 @@ def validate_restore_source(backup_path: Path) -> int:
                 hint="Preserve this backup and restore it with a release that understands its schema.",
             )
 
-        sentinels = SCHEMA_SENTINELS[version]
-        table_types = dict(connection.execute("SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view')"))
-        for table, required_columns in sentinels.items():
-            if table_types.get(table) != "table":
-                raise StateError(f"database backup is missing required Agentworks table '{table}'")
+        expected_tables = SCHEMA_SENTINELS[version]
+        actual_tables = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+            )
+        }
+        missing_tables = sorted(set(expected_tables) - actual_tables)
+        unexpected_tables = sorted(actual_tables - set(expected_tables))
+        if missing_tables:
+            raise StateError(
+                f"database backup is missing required Agentworks tables: {', '.join(missing_tables)}",
+                hint="Select an unmodified backup captured after a completed Agentworks migration.",
+            )
+        if unexpected_tables:
+            raise StateError(
+                f"database backup has unexpected tables for completed schema version {version}: "
+                f"{', '.join(unexpected_tables)}",
+                hint="Select an unmodified backup captured after a completed Agentworks migration.",
+            )
+        for table, expected_columns in expected_tables.items():
             columns = {
                 str(column[1]) for column in connection.execute(f"PRAGMA table_info({_quote_identifier(table)})")
             }
-            missing = sorted(required_columns - columns)
-            if missing:
-                raise StateError(f"database backup table '{table}' is missing required columns: {', '.join(missing)}")
+            missing_columns = sorted(expected_columns - columns)
+            unexpected_columns = sorted(columns - expected_columns)
+            if missing_columns:
+                raise StateError(
+                    f"database backup table '{table}' is missing required columns: {', '.join(missing_columns)}",
+                    hint="Select an unmodified backup captured after a completed Agentworks migration.",
+                )
+            if unexpected_columns:
+                raise StateError(
+                    f"database backup table '{table}' has unexpected columns for completed schema version "
+                    f"{version}: {', '.join(unexpected_columns)}",
+                    hint="Select an unmodified backup captured after a completed Agentworks migration.",
+                )
         return version
     except sqlite3.DatabaseError as error:
         _raise_sqlite_error(error, source_kind="database backup")
