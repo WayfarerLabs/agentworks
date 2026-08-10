@@ -2,7 +2,7 @@
 
 - Status: Interim implementation complete; release acceptance in progress
 - Date: 2026-08-07
-- Last revised: 2026-08-09
+- Last revised: 2026-08-10
 - Seeded by: the saga lead, at operator request. This is a standalone effort, deliberately NOT a
   child of the 2026-08-04-next-steps saga (see that saga's `target-state.md` out-of-scope section
   for the recorded relationship). It follows the ordinary SDD process: the effort lead owns the HLA

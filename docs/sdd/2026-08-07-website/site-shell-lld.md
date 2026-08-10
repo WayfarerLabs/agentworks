@@ -2,9 +2,9 @@
 
 <!-- cspell:ignore canonicalization keypath keypaths nonblank sdds TUI -->
 
-- Status: Phase 4D implemented and review-approved; release acceptance remains pending
-- Date: 2026-08-09
-- FRD: `frd.md`, specifically R7-R11 and R13-R18
+- Status: Phase 4F implemented; release acceptance remains pending
+- Date: 2026-08-10
+- FRD: `frd.md`, specifically R7-R11 and R13-R20
 - HLA: `hla.md`, specifically D1-D5, D7, D8, and D10
 - Source baseline: `5598a12c`
 

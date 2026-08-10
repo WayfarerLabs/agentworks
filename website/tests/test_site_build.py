@@ -52,6 +52,21 @@ class BuildAndInstallTests(RepositoryFixture):
         site_builder.build_site(self.root, second, "/agentworks/")
         self.assertEqual(snapshot(second), before)
 
+    def test_favicon_rejects_every_unreviewed_svg_node(self) -> None:
+        favicon = self.root / "website/assets/agw-favicon.svg"
+        source = favicon.read_text(encoding="utf-8")
+        mutations = (
+            source.replace("</g>", '<path d="M0 0" />\n    </g>', 1),
+            source.replace("</g>", '<animateTransform attributeName="transform" />\n    </g>', 1),
+            source.replace("</g>", '<set attributeName="fill" to="red" />\n    </g>', 1),
+            source.replace("</g>", "<!-- anonymous extra node -->\n    </g>", 1),
+        )
+        for mutation in mutations:
+            with self.subTest(mutation=mutation[-80:]):
+                favicon.write_text(mutation, encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "agw-favicon.svg"):
+                    site_builder._render_artifact(self.root, "/")
+
     def test_unapproved_external_url_fails_before_output_changes(self) -> None:
         output = self.build()
         before = snapshot(output)

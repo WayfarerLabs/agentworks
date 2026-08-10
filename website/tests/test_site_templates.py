@@ -464,6 +464,11 @@ class TemplateContractTests(RepositoryFixture):
                 template.replace("assets/agw-favicon.svg", "assets/agw-rocket.svg", 1),
                 template.replace('type="image/svg+xml"', 'type="image/png"', 1),
                 template.replace(favicon, f"{favicon}\n        {favicon}", 1),
+                template.replace(
+                    favicon,
+                    f'{favicon}\n        <link rel="shortcut icon" href="{{{{SITE_BASE}}}}assets/agw-favicon.svg" />',
+                    1,
+                ),
             )
             for changed in variants:
                 with (

@@ -2,7 +2,7 @@
 
 - Status: Interim implementation complete; release acceptance in progress
 - Date: 2026-08-07
-- Last revised: 2026-08-09
+- Last revised: 2026-08-10
 - FRD: `frd.md`
 - Research: `prior-art-research.md`
 - Brand direction: `brand-direction.md`

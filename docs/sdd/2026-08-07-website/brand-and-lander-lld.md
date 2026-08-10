@@ -2,9 +2,9 @@
 
 <!-- cspell:ignore focusout keyup pointerdown unitless -->
 
-- Status: Phase 4C approved for implementation
-- Date: 2026-08-08
-- FRD: `frd.md`, specifically R6-R9 and R15-R18
+- Status: Phase 4F implemented; release acceptance remains pending
+- Date: 2026-08-10
+- FRD: `frd.md`, specifically R6-R9 and R15-R20
 - HLA: `hla.md`, specifically D5 and D7
 - Selected geometry: `logo-concept-10-twin-flame.svg`
 

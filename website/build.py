@@ -16,6 +16,7 @@ WEBSITE_DIR = Path(__file__).resolve().parent
 if str(WEBSITE_DIR) not in sys.path:
     sys.path.insert(0, str(WEBSITE_DIR))
 
+from site_asset_validation import validate_favicon_asset  # noqa: E402
 from site_content import (  # noqa: E402
     CLI_SECRETS_URL,
     CONTRACTS,
@@ -122,8 +123,12 @@ def _render_artifact(repo_root: Path, site_base: str) -> tuple[dict[Path, bytes]
         Path("static/lander.css"): website / "static/lander.css",
         Path("static/site.css"): website / "static/site.css",
     }
-    for destination, source in copies.items():
-        content = _read_utf8(source)
+    copy_content = {destination: _read_utf8(source) for destination, source in copies.items()}
+    validate_favicon_asset(
+        copy_content[Path("assets/agw-favicon.svg")],
+        copy_content[Path("assets/agw-rocket.svg")],
+    )
+    for destination, content in copy_content.items():
         _validate_runtime_asset(destination, content)
         rendered[destination] = content.encode()
     if set(rendered) != manifest:
