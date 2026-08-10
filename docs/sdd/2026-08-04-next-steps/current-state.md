@@ -1,10 +1,10 @@
 # Current State
 
-- Snapshot date: 2026-08-08, post-variant-rework (update at wave boundaries)
+- Snapshot date: 2026-08-10, post-machine-output (update at wave boundaries)
 - Baseline: Agentworks 0.13.0 plus the phase 1 TOML sunset (PR #316), the 0.14 expired-compat
-  removals (PR #406), declarative-schema phase 2 through the descriptor (PR #414), and the
-  onboarding guide first slice (PR #428); the 0.14.0 release itself is pending per the `phasing.md`
-  release mapping
+  removals (PR #406), declarative-schema phase 2 through the descriptor (PR #414), the onboarding
+  guide first slice (PR #428), and the operational JSON output contract (PR #462); the 0.14.0
+  release itself is pending per the `phasing.md` release mapping
 
 This document records where the system actually is, verified by code reconnaissance rather than
 assumed from the perspectives. It is the ground truth the phasing rests on; when a wave lands,
@@ -52,8 +52,17 @@ command core with package-owned topic contributions, `concept-onboarding`, safe 
 (`build_guide_view` materializes global inventories only for concept roots the traversal plan
 permits; denied data is never constructed), verification surfaces with typed evidence, and the
 `guide-contributions` always-on rule requiring topic updates to ride the changes that make them
-true. Later phases (machine-readable output contract, bootstraps, schema-derived depth) proceed per
-that effort's per-phase PR plan.
+true.
+
+The operational JSON output contract landed via PR #462 (2026-08-10) after an operator scope
+correction removed the doctor database-snapshot subsystem: all 16 covered commands emit one
+deterministic JSON document from the same domain fact record the human renderer consumes (message
+and hint carry identical text in both formats, so JSON inherits the human transcript's trust posture
+— documented in `cli/command-reference.md`), errors ride the ordinary stderr route, and doctor is
+non-migrating by authorized behavior: a scalar schema gate plus `Database(read_only=True)` behind a
+12-line local context manager, failing closed on malformed schema state. Guide actions consume
+doctor JSON directly. Remaining onboarding phases (bootstraps including the README bootstrap, wave 2
+adoption, closeout) proceed per that effort's per-phase PR plan.
 
 ## Deprecation removal targets
 
