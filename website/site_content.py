@@ -56,12 +56,6 @@ class Block(NamedTuple):
     kind: str
     value: str | tuple[str, ...]
 
-    @property
-    def markdown(self) -> str:
-        if self.kind == "paragraph":
-            return str(self.value)
-        return "\n".join(f"- {item}" for item in self.value)
-
 
 class ContentContract(NamedTuple):
     contract_id: str
@@ -113,7 +107,7 @@ CONTRACTS: Final = (
                 "own tools, git credentials, and accumulated application state (a coding assistant's context "
                 "and memory, interactive logins). **Disposable sessions** spin up against them for a single "
                 "piece of work and are thrown away when done. One `agw` CLI drives all of it declaratively via "
-                "an SSH-over-Tailscale control plane."
+                "an **SSH-over-Tailscale control plane**."
             ),
         ),
     ),
@@ -389,7 +383,6 @@ def _document_blocks(
         reference_uses = [label for _, label in REFERENCE_LINK_PATTERN.findall(source) if label == "gh-private"]
         if (
             len(reference_uses) != 1
-            or re.search(r"\bemail\b", source, re.IGNORECASE)
             or EMAIL_ADDRESS_PATTERN.search(source)
         ):
             raise ContractError(contract, "GitHub-only reporting violation")

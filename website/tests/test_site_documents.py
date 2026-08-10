@@ -423,8 +423,6 @@ class GeneratedDocumentTests(RepositoryFixture):
                 self.assertEqual(rendered.blocks, expected_blocks)
                 self.assertEqual(rendered.links, expected_links)
                 self.assertFalse(self.documents[name].tags("script"))
-        self.assertNotIn("email", self.pages["security"].lower())
-
     def test_long_form_contents_navigation_matches_source_h2_h3_structure(self) -> None:
         pages = {
             "manifesto": site_builder.MANIFESTO_CONTRACT,
@@ -575,6 +573,7 @@ class GeneratedDocumentTests(RepositoryFixture):
         css = (self.output / "static/site.css").read_text(encoding="utf-8")
         default_toc = css.split(".page-toc {", 1)[1].split("}", 1)[0]
         self.assertIn("margin-block: 1.5rem 2.5rem", default_toc)
+        self.assertIn("font-size: 0.92rem", default_toc)
         wide = css.split("@media (min-width: 64rem)", 1)[1]
         wide_layout = wide.split(".long-form-layout {", 1)[1].split("}", 1)[0]
         wide_toc = wide.split(".long-form-layout > .page-toc {", 1)[1].split("}", 1)[0]

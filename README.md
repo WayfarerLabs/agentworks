@@ -14,7 +14,7 @@ Create and manage an agentic fleet from your own workstation. **Durable agents**
 Linux users in **VMs** on infrastructure you choose and control. They retain their own tools, git
 credentials, and accumulated application state (a coding assistant's context and memory, interactive
 logins). **Disposable sessions** spin up against them for a single piece of work and are thrown away
-when done. One `agw` CLI drives all of it declaratively via an SSH-over-Tailscale control plane.
+when done. One `agw` CLI drives all of it declaratively via an **SSH-over-Tailscale control plane**.
 
 ## Architecture at a Glance
 

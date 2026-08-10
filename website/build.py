@@ -33,7 +33,6 @@ from site_content import (  # noqa: E402
     extract_content,
 )
 from site_validation import (  # noqa: E402
-    APPROVED_EXTERNAL_URLS,
     GAME_DESCRIPTIONS,
     MAIN_ATTRIBUTES,
     REQUIRED_404_REFERENCES,
@@ -50,7 +49,6 @@ from site_validation import (  # noqa: E402
 )
 
 __all__ = (
-    "APPROVED_EXTERNAL_URLS",
     "CLI_SECRETS_URL",
     "CONTRACTS",
     "ContractError",
