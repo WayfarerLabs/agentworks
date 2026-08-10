@@ -1,7 +1,7 @@
 # Plan: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander final handling and world polish in
-  design
+- Status: Interim implementation complete; continuous Lander final tuning design approved,
+  implementation pending
 - Date: 2026-08-07
 - Last revised: 2026-08-10
 - FRD: `frd.md`
@@ -528,11 +528,11 @@ and honest for a vacuum, and runtime memory/DOM work remains bounded independent
       multicolor power-up aimed toward the antenna, actual thrust vectoring with reduced axial
       force, light vacuum-honest flight-control stabilization, and a modestly relaxed landing
       envelope.
-- [ ] Delegate and lead-review an exact LLD amendment that pins platform support geometry, terrain
+- [x] Delegate and lead-review an exact LLD amendment that pins platform support geometry, terrain
       sample and shelf construction, battery geometry/colors/stages, engine mixing and gimbal force,
       powered angular assist, safe-contact limits, deterministic vectors, route and world fixture
       regeneration, performance bounds, and browser acceptance before implementation.
-- [ ] Obtain an `agentworks-reviewer` approval of the amended LLD and resolve every valid artifact
+- [x] Obtain an `agentworks-reviewer` approval of the amended LLD and resolve every valid artifact
       finding before changing production or fixture code.
 - [ ] Delegate implementation to an `agentworks-dev` subagent in an isolated worktree. Preserve one
       world authority and one immutable physics profile; update the model, controller projection,
@@ -562,6 +562,18 @@ steering pulse exceeded the angular limit and then coasted unchanged after relea
 measurements justify one coupled geometry, world, input-force, stabilization, and tolerance revision
 rather than isolated CSS or threshold patches. Phase 4G's completed implementation and review
 records remain historical evidence; PR #486 stays draft until every Phase 4H gate is complete.
+
+Design-review evidence (2026-08-10): lead review found and removed a mixed keyboard/pointer merge
+that could exceed straight collective thrust. Cold fresh-eyes review then found and closed four
+artifact gaps: the production import DAG, synchronous lost-capture handling after a short tap, exact
+ordering of all 81 world witnesses, and a nominally coarse but still repetitive terrain motif. The
+final design uses four distinct seeded terrain profiles across every four consecutive chunks and
+separates steer-release powered stabilization from release-all vacuum coasting. The project reviewer
+and cold reviewer approved exact pushed head `b1cd82c7` with no findings after independently
+recomputing every published physics/world vector, negative-index motif traversal, structural target
+band and zero-delta termination, input ceilings, touch token ordering, and witness cardinality. A
+100,000-seed probe observed no diversity or target-band failure. File lint, locked-SDD, Rulesync,
+and diff gates passed. This is pre-implementation approval only.
 
 Definition of done: the elevated pad has an intentional supported silhouette with no long pale slot;
 every pad and NOC shares a flat shelf within coarse, stronger, irregular terrain; the NOC energizes
