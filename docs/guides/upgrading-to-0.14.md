@@ -32,7 +32,7 @@ If the selected backup fails, migration has not started; follow the error's retr
 of guessing. If migration later fails, use the exact `agw database restore ...` command printed in
 the error. When backup was explicitly declined or disabled, the error says that no pre-migration
 backup exists. Before downgrading, restore a backup whose schema the older release understands, then
-install or run that release—never open newer state with the older binary first.
+install or run that release. Never open newer state with the older binary first.
 
 Completion scripts installed before 0.14 do not carry the new non-mutating database probe marker.
 Refresh them after upgrading:

@@ -5,9 +5,11 @@ from __future__ import annotations
 import ast
 import multiprocessing
 import os
+import queue
 import sqlite3
 import stat
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -17,6 +19,7 @@ import pytest
 from agentworks.db import (
     LATEST_VERSION,
     MIGRATION_LOCK_NAME,
+    MIGRATION_LOCK_TIMEOUT_SECONDS,
     MIGRATIONS,
     Database,
     MigrationContext,
@@ -93,6 +96,18 @@ def _late_partial_writer(path: Path, start: Any, acquired: Any) -> None:
     acquired.set()
     time.sleep(0.25)
     _release_migration_lock(lock)
+
+
+def _unchanged_lock_holder(path: Path, acquired: Any, release: Any) -> None:
+    from agentworks.db.backup import _acquire_migration_lock, _release_migration_lock
+
+    lock = _acquire_migration_lock(path, timeout=5.0)
+    assert lock is not None
+    acquired.set()
+    try:
+        assert release.wait(timeout=10)
+    finally:
+        _release_migration_lock(lock)
 
 
 def _released_partial_writer(path: Path, start: Any, released: Any) -> None:
@@ -183,6 +198,53 @@ def test_two_process_safe_open_serializes_with_exactly_one_backup(tmp_path: Path
     assert results == [("ok", False), ("ok", True)]
     assert len(tuple(backup_directory(path).glob("*.db"))) == 1
     assert _version(path) == LATEST_VERSION
+
+
+def test_prepare_waits_for_unchanged_lock_holder_and_qualifies_stale_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agentworks.db import backup as backup_module
+
+    path = tmp_path / "state.db"
+    _build_schema(path, LATEST_VERSION - 1)
+    expected = inspect_schema(path)
+    context = multiprocessing.get_context("spawn")
+    acquired = context.Event()
+    release = context.Event()
+    holder = context.Process(target=_unchanged_lock_holder, args=(path, acquired, release))
+    holder.start()
+    try:
+        assert acquired.wait(timeout=5)
+        real_acquire = backup_module._acquire_migration_lock
+        acquisition_events: queue.Queue[tuple[str, float]] = queue.Queue()
+
+        def _acquire_after_proving_busy(database_path: Path, *, timeout: float):
+            if timeout != MIGRATION_LOCK_TIMEOUT_SECONDS:
+                acquisition_events.put(("unexpected timeout", timeout))
+                raise AssertionError(f"unexpected migration lock timeout: {timeout}")
+            assert real_acquire(database_path, timeout=0.0) is None
+            acquisition_events.put(("busy", timeout))
+            return real_acquire(database_path, timeout=timeout)
+
+        monkeypatch.setattr(backup_module, "_acquire_migration_lock", _acquire_after_proving_busy)
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            pending_plan = executor.submit(prepare_database_open, path)
+            assert acquisition_events.get(timeout=5) == ("busy", MIGRATION_LOCK_TIMEOUT_SECONDS)
+            assert not pending_plan.done()
+            release.set()
+            plan = pending_plan.result(timeout=10)
+    finally:
+        release.set()
+        holder.join(timeout=10)
+        if holder.is_alive():
+            holder.terminate()
+            holder.join(timeout=5)
+
+    assert holder.exitcode == 0
+    assert plan.inspection == expected
+    assert plan.stale_baseline == (expected.current_version, expected.schema_cookie)
+    assert not backup_directory(path).exists()
 
 
 def test_stale_inspector_waits_then_refuses_changed_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
