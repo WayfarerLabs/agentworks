@@ -10,3 +10,8 @@ exists. Verification and manifest edits consume that immutable union and never a
 expected path. Preserve operator-declared origin and manifest path while ignoring mutable source
 lines. Never resolve secret values while reviewing secret references, and never remove the retired
 TOML sections until the growing manifest set has been validated one manifest at a time.
+
+Do not conflate the resource rewrite backups with SQLite recovery. Preserve or restore the exact
+database snapshot named by Agentworks, restore compatible state before any downgrade, and require a
+fresh `agw completion install` after the 0.14 upgrade. Never disable the default automatic database
+backup without explicit authority for that separate recovery tradeoff.

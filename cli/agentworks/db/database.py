@@ -48,14 +48,21 @@ DatabaseDriverError = sqlite3.DatabaseError
 class Database:
     """Typed interface to the Agentworks state database."""
 
-    def __init__(self, path: Path | None = None, *, read_only: bool = False) -> None:
+    def __init__(
+        self,
+        path: Path | None = None,
+        *,
+        read_only: bool = False,
+        immutable: bool = False,
+    ) -> None:
         db_path = path or _db.DB_PATH
         if read_only:
             from agentworks.errors import StateError
 
             connection: sqlite3.Connection | None = None
             try:
-                connection = sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True)
+                query = "mode=ro&immutable=1" if immutable else "mode=ro"
+                connection = sqlite3.connect(f"{db_path.resolve().as_uri()}?{query}", uri=True)
                 row = connection.execute("SELECT MAX(version) FROM schema_version").fetchone()
             except sqlite3.DatabaseError as error:
                 if connection is not None:
@@ -70,6 +77,12 @@ class Database:
             elif type(current) is not int or current < 0:
                 connection.close()
                 raise StateError("state database schema version is invalid")
+            if current > LATEST_VERSION:
+                connection.close()
+                raise StateError(
+                    f"state database schema is newer than this release ({current}/{LATEST_VERSION})",
+                    hint="Use a release that understands this database schema.",
+                )
             if current != LATEST_VERSION:
                 connection.close()
                 raise StateError(
@@ -85,9 +98,14 @@ class Database:
         self._conn = sqlite3.connect(str(db_path))
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON")
-        self._conn.execute("PRAGMA journal_mode = WAL")
         self._tx_depth = 0
-        self._migrate()
+        try:
+            self._reject_future_schema()
+            self._conn.execute("PRAGMA journal_mode = WAL")
+            self._migrate()
+        except BaseException:
+            self._conn.close()
+            raise
 
     def close(self) -> None:
         self._conn.close()
@@ -125,32 +143,39 @@ class Database:
 
         Returns (exists, current_version, latest_version).
         """
+        db_path = path or _db.DB_PATH
+        from agentworks.db.backup import SchemaState, inspect_schema
         from agentworks.errors import StateError
 
-        db_path = path or _db.DB_PATH
-        if not db_path.exists():
-            return (False, 0, LATEST_VERSION)
-        connection: sqlite3.Connection | None = None
-        try:
-            connection = sqlite3.connect(str(db_path))
-            entry = connection.execute("SELECT type FROM sqlite_master WHERE name = 'schema_version'").fetchone()
-            if entry is None:
-                current = 0
-            elif entry[0] != "table":
-                raise StateError("state database schema is unavailable or malformed")
-            else:
-                row = connection.execute("SELECT MAX(version) FROM schema_version").fetchone()
-                current = row[0]
-                if current is None:
-                    current = 0
-                elif type(current) is not int or current < 0:
-                    raise StateError("state database schema version is invalid")
-        except sqlite3.DatabaseError as error:
-            raise StateError("state database schema is unavailable or malformed") from error
-        finally:
-            if connection is not None:
-                connection.close()
-        return (True, current, LATEST_VERSION)
+        inspection = inspect_schema(db_path)
+        if inspection.state is SchemaState.MALFORMED:
+            raise StateError(inspection.error_message or "state database schema is unavailable or malformed")
+        return (
+            inspection.state is not SchemaState.ABSENT,
+            inspection.current_version,
+            inspection.latest_version,
+        )
+
+    def _reject_future_schema(self) -> None:
+        """Refuse a schema newer than this facade understands."""
+        from agentworks.errors import StateError
+
+        entry = self._conn.execute("SELECT type FROM sqlite_master WHERE name = 'schema_version'").fetchone()
+        if entry is None:
+            return
+        if entry[0] != "table":
+            raise StateError("state database schema is unavailable or malformed")
+        row = self._conn.execute("SELECT MAX(version) FROM schema_version").fetchone()
+        current = row[0]
+        if current is None:
+            return
+        if type(current) is not int or current < 0:
+            raise StateError("state database schema version is invalid")
+        if current > LATEST_VERSION:
+            raise StateError(
+                f"state database schema is newer than this release ({current}/{LATEST_VERSION})",
+                hint="Use `agw database backup` to preserve it, then use a compatible release.",
+            )
 
     def _migrate(self) -> None:
         self._conn.execute(
@@ -161,6 +186,10 @@ class Database:
         )
         row = self._conn.execute("SELECT MAX(version) FROM schema_version").fetchone()
         current = row[0] or 0
+        if type(current) is not int or current < 0:
+            from agentworks.errors import StateError
+
+            raise StateError("state database schema version is invalid")
 
         if current >= LATEST_VERSION:
             return

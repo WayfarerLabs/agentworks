@@ -116,10 +116,13 @@ locked.
 - [x] Merged (2026-08-10) with the plan-history restore and the #462 conflict integration; the
       saga-lead spot-check confirmed both seam suites (UserAbort pins, five-platform retention)
       green at the merged head. The breaking reference slice's 0.14 gate is satisfied
-- [ ] Post-merge follow-up by the same lead (operator-coordinated, 2026-08-10): consolidate the
-      structural enforcement suite per the revised ruling AND fix the significant unit-test runtime
-      increase identified at merge; one small PR while context is loaded
-- [ ] Locked
+- [x] Post-merge follow-up delivered and merged (PR #469, 2026-08-10): the enforcement suite's
+      hand-duplicated manifests replaced by signature-derived semantic discovery (root domain
+      independent of the protected edge; seam matching by object identity, a same-named fake fails
+      collection), and the suite parallelized (pytest workers with per-worker log isolation). Two
+      review rounds (saga lead + integration, both mutation-verified); CI Python checks fell from
+      6-7.5 minutes to about 2 (worst case 7m38s to 2m21s)
+- [x] Locked (`locked.md` merged with PR #453, 2026-08-10; binds at merge per the sdd skill)
 
 ### Installer plugins (pre-0.14 core slimming): 2026-08-07-installer-plugins
 
@@ -223,7 +226,10 @@ operator acceptance ruling moves the Firefox/WebKit/screen-reader/touch matrix t
 validation against the public host (rows explicit and unchecked, required before that effort's
 lock), with Chrome/Edge preview as the pre-merge browser gate.
 
-## Standing process rulings (recorded here; skill/rule changes ride the next governance pass)
+## Standing process rulings
+
+Permanent homes landed via PRs #473/#474: the sdd skill's supersession paragraph, and the
+dev-process draft/ready handoff and review-requested label conventions.
 
 - **Plan-history ruling (operator, 2026-08-10):** completed plan steps may never be removed — no
   exception for never-merged, superseded, or expunged work. Everything else strips clean under a

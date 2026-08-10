@@ -26,6 +26,21 @@ from agentworks.schema import CapabilityBlock
 pytest_plugins = ["tests.orchestrated_fixtures"]
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _isolate_ssh_logs(tmp_path_factory: pytest.TempPathFactory) -> Generator[None, None, None]:
+    """Keep default SSH logs in this worker's temporary directory."""
+    import agentworks.ssh as ssh
+
+    prior = ssh.LOG_DIR
+    log_dir = tmp_path_factory.getbasetemp() / "ssh-logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    ssh.LOG_DIR = log_dir
+    try:
+        yield
+    finally:
+        ssh.LOG_DIR = prior
+
+
 # ---------------------------------------------------------------------------
 # Resource manifest authoring
 #
@@ -199,6 +214,7 @@ class CapturedOutput:
     lines: list[tuple[Role, int, str]] = field(default_factory=list)
     info: list[str] = field(default_factory=list)
     detail: list[str] = field(default_factory=list)
+    notices: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     progress_items: list[_CapturedProgress] = field(default_factory=list)
     confirm_response: bool = True  # what confirm() returns in tests
@@ -225,6 +241,8 @@ class _TestHandler:
             self._captured.info.append(_render_header(message, level))
         elif role is Role.DETAIL:
             self._captured.detail.append(message)
+        elif role is Role.NOTICE:
+            self._captured.notices.append(message)
         elif role is Role.WARNING:
             self._captured.warnings.append(message)
 

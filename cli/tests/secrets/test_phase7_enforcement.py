@@ -9,376 +9,18 @@ import textwrap
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from enum import Enum, StrEnum
-from typing import Protocol, cast
+from functools import cache
+from pathlib import Path
+from typing import cast
 
 import pytest
 
+from tests.secrets.phase7_lexical_support import (
+    _interaction_calls,
+    _object,
+)
 
-class _NamedObject(Protocol):
-    __name__: str
-
-
-def _object_name(value: object) -> str:
-    return cast(_NamedObject, value).__name__
-
-
-# The pre-0.14 test-consolidation child owns moving these literal pins behind a reusable graph contract.
-_SERVICE_MANIFEST = {
-    "agentworks.secrets.resolver": ("Resolver.__init__",),
-    "agentworks.secrets.orchestration": ("resolve_for_command",),
-    "agentworks.env.show": ("show_env",),
-    "agentworks.secrets.verification": ("verify_secrets",),
-    "agentworks.vms.manager.lifecycle": ("create_vm", "reinit_vm"),
-    "agentworks.vms.manager.power": ("rekey_vm", "start_vm", "stop_vm", "delete_vm"),
-    "agentworks.vms.manager.inspect": ("describe_vm",),
-    "agentworks.vms.backup": ("backup_vm",),
-    "agentworks.vms.manager.exec": ("shell_vm", "exec_vm", "add_git_credential"),
-    "agentworks.vms.manager.tailscale": ("port_forward_vm",),
-    "agentworks.workspaces.manager.create": ("create_workspace",),
-    "agentworks.workspaces.manager.repair": ("repair_workspace",),
-    "agentworks.workspaces.manager.rehome": ("rehome_workspace",),
-    "agentworks.workspaces.manager.copy": ("copy_workspace",),
-    "agentworks.workspaces.manager.delete": ("delete_workspace",),
-    "agentworks.agents.manager.lifecycle": ("create_agent", "reinit_agent", "delete_agent"),
-    "agentworks.agents.manager.access": ("shell_agent", "exec_agent"),
-    "agentworks.agents.grants": ("grant_workspaces", "revoke_workspaces"),
-    "agentworks.sessions.manager._create": ("create_session",),
-    "agentworks.sessions.manager._lifecycle": (
-        "resume_session",
-        "resume_all_sessions",
-        "stop_session",
-        "stop_all_sessions",
-    ),
-    "agentworks.sessions.manager._queries": (
-        "delete_session",
-        "describe_session",
-        "attach_session",
-        "list_sessions",
-    ),
-    "agentworks.sessions.manager._logs": ("session_logs",),
-    "agentworks.sessions.multi_console.attach": ("attach_console",),
-    "agentworks.sessions.multi_console.restore": ("restore_session",),
-    "agentworks.sessions.multi_console.crud": ("add_sessions", "add_shell"),
-}
-
-_CLI_MANIFEST = {
-    "agentworks.cli.commands.env": ("env_show",),
-    "agentworks.cli.commands.vm": (
-        "vm_create",
-        "vm_backup",
-        "vm_describe",
-        "vm_start",
-        "vm_stop",
-        "vm_delete",
-        "vm_rekey",
-        "vm_reinit",
-        "vm_exec",
-        "vm_shell",
-        "vm_port_forward",
-        "vm_add_git_credential",
-    ),
-    "agentworks.cli.commands.workspace": (
-        "workspace_create",
-        "workspace_rehome",
-        "workspace_repair",
-        "workspace_delete",
-        "workspace_copy",
-    ),
-    "agentworks.cli.commands.agent": (
-        "agent_create",
-        "agent_reinit",
-        "agent_grant_workspaces",
-        "agent_revoke_workspaces",
-        "agent_exec",
-        "agent_shell",
-        "agent_delete",
-    ),
-    "agentworks.cli.commands.session": (
-        "session_create",
-        "session_describe",
-        "session_list",
-        "session_stop",
-        "session_resume",
-        "session_attach",
-        "session_delete",
-        "session_logs",
-    ),
-    "agentworks.cli.commands.console": (
-        "console_attach",
-        "console_add_sessions",
-        "console_add_shell",
-        "console_restore_session",
-    ),
-}
-
-_VERIFY_CLI_MANIFEST = {
-    "agentworks.cli.commands.secret": ("secret_verify",),
-}
-
-_INTERNAL_MANIFEST = {
-    "agentworks.env.show": ("_reveal_values",),
-    "agentworks.orchestration.secrets": ("predict_resolution", "require_predicted_refs"),
-    "agentworks.orchestration.readiness": ("preflight_all",),
-    "agentworks.secrets.preview": ("preview_operation_resolution",),
-    "agentworks.secrets.resolve": ("resolve_partial_for_reveal",),
-    "agentworks.vms.manager.boundary": ("gated_vm_boundary", "_live_vm_boundary"),
-    "agentworks.workspaces.manager.rehome": ("_rehome_vm",),
-    "agentworks.sessions.multi_console.attach": ("_prepare_vm_target_for_attach",),
-    "agentworks.sessions.manager._create_build": ("_build_session_graph",),
-    "agentworks.sessions.manager._scope": ("_prepare_vm", "_batch_vm_boundary"),
-    "agentworks.sessions.manager._create": ("_preflight_and_resolve",),
-    "agentworks.sessions.manager._queries": (
-        "_cleanup_now_empty_workspace",
-        "_cleanup_now_empty_agent",
-        "session_description",
-        "session_listing",
-    ),
-    "agentworks.vms.manager.inspect": ("vm_description",),
-    "agentworks.cli.commands.session": ("_resume_sessions",),
-    "agentworks.workspaces.nodes": ("PendingWorkspaceNode.__init__", "pending_workspace_node"),
-    "agentworks.agents.nodes": ("PendingAgentNode.__init__", "pending_agent_node"),
-}
-
-_STORED_POLICY_MANIFEST = {
-    "agentworks.secrets.resolver": ("Resolver.resolve", "Resolver.resolve_gate", "Resolver.resolve_late_repair"),
-    "agentworks.workspaces.nodes": ("PendingWorkspaceNode.teardown",),
-    "agentworks.agents.nodes": ("PendingAgentNode.teardown",),
-}
-
-# The pre-0.14 test-consolidation child owns moving this literal pin behind a reusable graph contract.
-_PREFLIGHT_CALLER_MANIFEST = {
-    ("agentworks.sessions.manager._create", "_preflight_and_resolve"),
-    ("agentworks.sessions.manager._lifecycle", "resume_session"),
-    ("agentworks.sessions.manager._scope", "_batch_vm_boundary"),
-    ("agentworks.workspaces.manager.create", "create_workspace"),
-    ("agentworks.vms.manager.exec", "add_git_credential"),
-    ("agentworks.vms.manager.power", "rekey_vm"),
-    ("agentworks.vms.manager.inspect", "vm_description"),
-    ("agentworks.vms.manager.boundary", "gated_vm_boundary"),
-    ("agentworks.vms.manager.boundary", "_live_vm_boundary"),
-    ("agentworks.vms.manager.lifecycle", "create_vm"),
-    ("agentworks.vms.manager.lifecycle", "reinit_vm"),
-    ("agentworks.agents.manager.lifecycle", "create_agent"),
-    ("agentworks.agents.manager.lifecycle", "reinit_agent"),
-}
-
-# The pre-0.14 test-consolidation child owns moving this literal pin behind a reusable graph contract.
-_DIRECTED_EDGE_MANIFEST: dict[tuple[str, str], tuple[tuple[str, str], ...]] = {
-    ("agentworks.agents.grants", "grant_workspaces"): (("gated_vm_boundary", "interaction"),),
-    ("agentworks.agents.grants", "revoke_workspaces"): (("gated_vm_boundary", "interaction"),),
-    ("agentworks.agents.manager.access", "exec_agent"): (("gated_vm_boundary", "interaction"),),
-    ("agentworks.agents.manager.access", "shell_agent"): (("gated_vm_boundary", "interaction"),),
-    ("agentworks.agents.manager.lifecycle", "create_agent"): (
-        ("Resolver", "interaction"),
-        ("pending_agent_node", "interaction"),
-        ("preflight_all", "interaction"),
-    ),
-    ("agentworks.agents.manager.lifecycle", "delete_agent"): (("gated_vm_boundary", "interaction"),),
-    ("agentworks.agents.manager.lifecycle", "reinit_agent"): (
-        ("Resolver", "interaction"),
-        ("preflight_all", "interaction"),
-    ),
-    ("agentworks.agents.nodes", "PendingAgentNode.teardown"): (("delete_agent", "interaction"),),
-    ("agentworks.agents.nodes", "pending_agent_node"): (("PendingAgentNode", "interaction"),),
-    ("agentworks.cli.commands.agent", "agent_create"): (("create_agent", "interaction"),),
-    ("agentworks.cli.commands.agent", "agent_delete"): (("delete_agent", "interaction"),),
-    ("agentworks.cli.commands.agent", "agent_exec"): (("exec_agent", "interaction"),),
-    ("agentworks.cli.commands.agent", "agent_grant_workspaces"): (("grant_workspaces", "interaction"),),
-    ("agentworks.cli.commands.agent", "agent_reinit"): (("reinit_agent", "interaction"),),
-    ("agentworks.cli.commands.agent", "agent_revoke_workspaces"): (("revoke_workspaces", "interaction"),),
-    ("agentworks.cli.commands.agent", "agent_shell"): (("shell_agent", "interaction"),),
-    ("agentworks.cli.commands.console", "console_add_sessions"): (("add_sessions", "interaction"),),
-    ("agentworks.cli.commands.console", "console_add_shell"): (("add_shell", "interaction"),),
-    ("agentworks.cli.commands.console", "console_attach"): (("attach_console", "interaction"),),
-    ("agentworks.cli.commands.console", "console_restore_session"): (("restore_session", "interaction"),),
-    ("agentworks.cli.commands.env", "env_show"): (("show_env", "interaction"),),
-    ("agentworks.cli.commands.secret", "secret_verify"): (("verify_secrets", "interaction"),),
-    ("agentworks.cli.commands.session", "_resume_sessions"): (
-        ("resume_all_sessions", "interaction"),
-        ("resume_session", "interaction"),
-    ),
-    ("agentworks.cli.commands.session", "session_attach"): (("attach_session", "interaction"),),
-    ("agentworks.cli.commands.session", "session_create"): (("create_session", "interaction"),),
-    ("agentworks.cli.commands.session", "session_delete"): (("delete_session", "interaction"),),
-    ("agentworks.cli.commands.session", "session_describe"): (
-        ("describe_session", "interaction"),
-        ("session_description", "interaction"),
-    ),
-    ("agentworks.cli.commands.session", "session_list"): (
-        ("list_sessions", "interaction"),
-        ("session_listing", "interaction"),
-    ),
-    ("agentworks.cli.commands.session", "session_logs"): (("_session_logs", "interaction"),),
-    ("agentworks.cli.commands.session", "session_resume"): (("_resume_sessions", "interaction"),),
-    ("agentworks.cli.commands.session", "session_stop"): (
-        ("stop_all_sessions", "interaction"),
-        ("stop_session", "interaction"),
-    ),
-    ("agentworks.cli.commands.vm", "vm_add_git_credential"): (("add_git_credential", "interaction"),),
-    ("agentworks.cli.commands.vm", "vm_backup"): (("backup_vm", "interaction"),),
-    ("agentworks.cli.commands.vm", "vm_create"): (("create_vm", "interaction"),),
-    ("agentworks.cli.commands.vm", "vm_delete"): (("delete_vm", "interaction"),),
-    ("agentworks.cli.commands.vm", "vm_describe"): (
-        ("describe_vm", "interaction"),
-        ("vm_description", "interaction"),
-    ),
-    ("agentworks.cli.commands.vm", "vm_exec"): (("exec_vm", "interaction"),),
-    ("agentworks.cli.commands.vm", "vm_port_forward"): (("port_forward_vm", "interaction"),),
-    ("agentworks.cli.commands.vm", "vm_reinit"): (("reinit_vm", "interaction"),),
-    ("agentworks.cli.commands.vm", "vm_rekey"): (("rekey_vm", "interaction"),),
-    ("agentworks.cli.commands.vm", "vm_shell"): (("shell_vm", "interaction"),),
-    ("agentworks.cli.commands.vm", "vm_start"): (("start_vm", "interaction"),),
-    ("agentworks.cli.commands.vm", "vm_stop"): (("stop_vm", "interaction"),),
-    ("agentworks.cli.commands.workspace", "workspace_copy"): (("copy_workspace", "interaction"),),
-    ("agentworks.cli.commands.workspace", "workspace_create"): (("create_workspace", "interaction"),),
-    ("agentworks.cli.commands.workspace", "workspace_delete"): (("delete_workspace", "interaction"),),
-    ("agentworks.cli.commands.workspace", "workspace_rehome"): (("rehome_workspace", "interaction"),),
-    ("agentworks.cli.commands.workspace", "workspace_repair"): (("repair_workspace", "interaction"),),
-    ("agentworks.env.show", "_reveal_values"): (("resolve_partial_for_reveal", "interaction"),),
-    ("agentworks.env.show", "show_env"): (("_reveal_values", "interaction"),),
-    ("agentworks.orchestration.readiness", "preflight_all"): (("require_predicted_refs", "interaction"),),
-    ("agentworks.orchestration.secrets", "predict_resolution"): (("preview_operation_resolution", "interaction"),),
-    ("agentworks.orchestration.secrets", "require_predicted_refs"): (("predict_resolution", "interaction"),),
-    ("agentworks.secrets.orchestration", "resolve_for_command"): (("ResolutionPolicy", "interaction"),),
-    ("agentworks.secrets.preview", "preview_operation_resolution"): (("_preview", "interaction"),),
-    ("agentworks.secrets.resolve", "resolve_partial_for_reveal"): (("ResolutionPolicy", "interaction"),),
-    ("agentworks.secrets.resolver", "Resolver.resolve"): (("ResolutionPolicy", "interaction"),),
-    ("agentworks.secrets.resolver", "Resolver.resolve_gate"): (("ResolutionPolicy", "interaction"),),
-    ("agentworks.secrets.resolver", "Resolver.resolve_late_repair"): (("ResolutionPolicy", "interaction"),),
-    ("agentworks.secrets.verification", "verify_secrets"): (("ResolutionPolicy", "interaction"),),
-    ("agentworks.sessions.manager._create", "_preflight_and_resolve"): (("preflight_all", "interaction"),),
-    ("agentworks.sessions.manager._create", "create_session"): (
-        ("_build_session_graph", "interaction"),
-        ("_preflight_and_resolve", "interaction"),
-    ),
-    ("agentworks.sessions.manager._create_build", "_build_session_graph"): (
-        ("Resolver", "interaction"),
-        ("pending_workspace_node", "interaction"),
-        ("pending_agent_node", "interaction"),
-    ),
-    ("agentworks.sessions.manager._lifecycle", "resume_all_sessions"): (
-        ("_mgr._batch_vm_boundary", "interaction"),
-        ("resume_session", "interaction"),
-    ),
-    ("agentworks.sessions.manager._lifecycle", "resume_session"): (
-        ("Resolver", "interaction"),
-        ("preflight_all", "interaction"),
-        ("resolve_for_command", "interaction"),
-    ),
-    ("agentworks.sessions.manager._lifecycle", "stop_all_sessions"): (("_mgr._batch_vm_boundary", "interaction"),),
-    ("agentworks.sessions.manager._lifecycle", "stop_session"): (("_mgr._prepare_vm", "interaction"),),
-    ("agentworks.sessions.manager._logs", "session_logs"): (("_mgr._prepare_vm", "interaction"),),
-    ("agentworks.sessions.manager._queries", "_cleanup_now_empty_agent"): (("delete_agent", "interaction"),),
-    ("agentworks.sessions.manager._queries", "_cleanup_now_empty_workspace"): (("delete_workspace", "interaction"),),
-    ("agentworks.sessions.manager._queries", "attach_session"): (("_mgr._prepare_vm", "interaction"),),
-    ("agentworks.sessions.manager._queries", "delete_session"): (
-        ("_mgr._prepare_vm", "interaction"),
-        ("_cleanup_now_empty_workspace", "interaction"),
-        ("_cleanup_now_empty_agent", "interaction"),
-    ),
-    ("agentworks.sessions.manager._queries", "describe_session"): (("session_description", "interaction"),),
-    ("agentworks.sessions.manager._queries", "list_sessions"): (("_mgr.session_listing", "interaction"),),
-    ("agentworks.sessions.manager._queries", "session_description"): (("_mgr._prepare_vm", "interaction"),),
-    ("agentworks.sessions.manager._queries", "session_listing"): (("_mgr._batch_vm_boundary", "interaction"),),
-    ("agentworks.sessions.manager._scope", "_batch_vm_boundary"): (
-        ("Resolver", "interaction"),
-        ("preflight_all", "interaction"),
-    ),
-    ("agentworks.sessions.manager._scope", "_prepare_vm"): (("gated_vm_boundary", "interaction"),),
-    ("agentworks.sessions.multi_console.attach", "_prepare_vm_target_for_attach"): (
-        ("gated_vm_boundary", "interaction"),
-    ),
-    ("agentworks.sessions.multi_console.attach", "attach_console"): (
-        ("_mc._prepare_vm_target_for_attach", "interaction"),
-        ("resolve_for_command", "interaction"),
-    ),
-    ("agentworks.sessions.multi_console.crud", "add_sessions"): (("resolve_for_command", "interaction"),),
-    ("agentworks.sessions.multi_console.crud", "add_shell"): (("resolve_for_command", "interaction"),),
-    ("agentworks.sessions.multi_console.restore", "restore_session"): (
-        ("_mc._prepare_vm_target_for_attach", "interaction"),
-        ("resolve_for_command", "interaction"),
-        ("resolve_for_command", "interaction"),
-    ),
-    ("agentworks.vms.backup", "backup_vm"): (("gated_vm_boundary", "interaction"),),
-    ("agentworks.vms.manager.boundary", "_live_vm_boundary"): (
-        ("Resolver", "interaction"),
-        ("preflight_all", "interaction"),
-    ),
-    ("agentworks.vms.manager.boundary", "gated_vm_boundary"): (
-        ("Resolver", "interaction"),
-        ("preflight_all", "interaction"),
-    ),
-    ("agentworks.vms.manager.exec", "add_git_credential"): (
-        ("Resolver", "interaction"),
-        ("preflight_all", "interaction"),
-    ),
-    ("agentworks.vms.manager.exec", "exec_vm"): (("gated_vm_boundary", "interaction"),),
-    ("agentworks.vms.manager.exec", "shell_vm"): (("gated_vm_boundary", "interaction"),),
-    ("agentworks.vms.manager.lifecycle", "create_vm"): (
-        ("Resolver", "interaction"),
-        ("preflight_all", "interaction"),
-    ),
-    ("agentworks.vms.manager.lifecycle", "reinit_vm"): (
-        ("Resolver", "interaction"),
-        ("preflight_all", "interaction"),
-    ),
-    ("agentworks.vms.manager.power", "delete_vm"): (("_live_vm_boundary", "interaction"),),
-    ("agentworks.vms.manager.inspect", "describe_vm"): (("vm_description", "interaction"),),
-    ("agentworks.vms.manager.inspect", "vm_description"): (
-        ("Resolver", "interaction"),
-        ("preflight_all", "interaction"),
-    ),
-    ("agentworks.vms.manager.power", "rekey_vm"): (
-        ("Resolver", "interaction"),
-        ("preflight_all", "interaction"),
-    ),
-    ("agentworks.vms.manager.power", "start_vm"): (
-        ("_live_vm_boundary", "interaction"),
-        ("resolve_for_command", "interaction"),
-    ),
-    ("agentworks.vms.manager.power", "stop_vm"): (("_live_vm_boundary", "interaction"),),
-    ("agentworks.vms.manager.tailscale", "port_forward_vm"): (("gated_vm_boundary", "interaction"),),
-    ("agentworks.workspaces.manager.copy", "copy_workspace"): (
-        ("gated_vm_boundary", "interaction"),
-        ("gated_vm_boundary", "interaction"),
-    ),
-    ("agentworks.workspaces.manager.create", "create_workspace"): (
-        ("Resolver", "interaction"),
-        ("pending_workspace_node", "interaction"),
-        ("preflight_all", "interaction"),
-    ),
-    ("agentworks.workspaces.manager.delete", "delete_workspace"): (("gated_vm_boundary", "interaction"),),
-    ("agentworks.workspaces.manager.rehome", "_rehome_vm"): (("gated_vm_boundary", "interaction"),),
-    ("agentworks.workspaces.manager.rehome", "rehome_workspace"): (("_rehome_vm", "interaction"),),
-    ("agentworks.workspaces.manager.repair", "repair_workspace"): (("gated_vm_boundary", "interaction"),),
-    ("agentworks.workspaces.nodes", "PendingWorkspaceNode.teardown"): (("delete_workspace", "interaction"),),
-    ("agentworks.workspaces.nodes", "pending_workspace_node"): (("PendingWorkspaceNode", "interaction"),),
-}
-
-_DIRECTED_CALLEE_ALIASES = {"_session_logs": "session_logs"}
-
-# The pre-0.14 test-consolidation child owns moving this literal pin behind a reusable graph contract.
-_STORED_CALL_EDGE_MANIFEST: dict[tuple[str, str], tuple[str, ...]] = {
-    ("agentworks.agents.manager.lifecycle", "create_agent"): ("Resolver.resolve",),
-    ("agentworks.agents.manager.lifecycle", "reinit_agent"): ("Resolver.resolve",),
-    ("agentworks.orchestration.activation", "gate_secret_resolver.resolve_gate_secret"): ("Resolver.resolve_gate",),
-    ("agentworks.sessions.manager._create", "_preflight_and_resolve"): ("Resolver.resolve",),
-    ("agentworks.sessions.manager._lifecycle", "resume_session"): ("Resolver.resolve",),
-    ("agentworks.sessions.manager._scope", "_batch_vm_boundary"): ("Resolver.resolve",),
-    ("agentworks.sessions.manager._scope", "_batch_vm_boundary._gate_resolver._resolve"): (
-        "Resolver.resolve_late_repair",
-    ),
-    ("agentworks.vms.manager.boundary", "_live_vm_boundary"): ("Resolver.resolve",),
-    ("agentworks.vms.manager.boundary", "gated_vm_boundary"): ("Resolver.resolve",),
-    ("agentworks.vms.manager.exec", "add_git_credential"): ("Resolver.resolve",),
-    ("agentworks.vms.manager.lifecycle", "create_vm"): ("Resolver.resolve",),
-    ("agentworks.vms.manager.lifecycle", "reinit_vm"): ("Resolver.resolve",),
-    ("agentworks.vms.manager.inspect", "vm_description"): ("Resolver.resolve",),
-    ("agentworks.vms.manager.power", "rekey_vm"): ("Resolver.resolve",),
-    ("agentworks.workspaces.manager.create", "create_workspace"): ("Resolver.resolve",),
-}
-
-# The pre-0.14 test-consolidation child owns replacing this exact-caller graph pin.
+# The immediate follow-up retains this narrow exact-owner pin for the credential boundary.
 _TAILSCALE_SOURCE_EDGE_MANIFEST = (
     ("agentworks.vms.manager.power", "start_vm", "_ensure_tailscale", "auth_keys", "auth_keys"),
     (
@@ -390,7 +32,7 @@ _TAILSCALE_SOURCE_EDGE_MANIFEST = (
     ),
 )
 
-# The pre-0.14 test-consolidation child owns replacing this exact-caller graph pin.
+# This narrow exact-owner pin keeps standalone resolution out of reusable VM lifecycle code.
 _TAILSCALE_STANDALONE_EDGE_MANIFEST = (("agentworks.vms.manager.power", "start_vm", "resolve_for_command"),)
 
 _TAILSCALE_ENSURE_FORBIDDEN_TARGETS = (
@@ -398,10 +40,6 @@ _TAILSCALE_ENSURE_FORBIDDEN_TARGETS = (
     "resolve_for_command",
     "resolve_template",
 )
-
-_RESOLVER_TYPE = "agentworks.secrets.resolver.Resolver"
-_RESOLVER_CONTAINER_TYPE = f"{_RESOLVER_TYPE}[]"
-
 
 _RETIRED_SYMBOLS = {
     "ActiveBackend",
@@ -451,13 +89,6 @@ _PACKAGE_EXPORT_MANIFEST = (
 )
 
 
-def _object(module_name: str, dotted_name: str) -> object:
-    value: object = importlib.import_module(module_name)
-    for part in dotted_name.split("."):
-        value = getattr(value, part)
-    return value
-
-
 def _first_statement(value: object) -> ast.stmt:
     tree = ast.parse(textwrap.dedent(inspect.getsource(value)))
     function = next(node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)))
@@ -472,12 +103,78 @@ def _function_node(value: object) -> ast.FunctionDef | ast.AsyncFunctionDef:
     return next(node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)))
 
 
-def _manifest_entries(manifest: dict[str, tuple[str, ...]]) -> list[tuple[str, str]]:
-    return [(module, name) for module, names in manifest.items() for name in names]
+@cache
+def _parameter_boundary_entries() -> tuple[tuple[str, str], ...]:
+    """Discover every production boundary that accepts interaction policy."""
+    root = Path(__file__).parents[2] / "agentworks"
+    discovered: list[tuple[str, str]] = []
+    for path in sorted(root.rglob("*.py")):
+        relative = path.relative_to(root).with_suffix("")
+        module_parts = relative.parts[:-1] if relative.parts[-1] == "__init__" else relative.parts
+        module = ".".join(("agentworks", *module_parts))
+        tree = ast.parse(path.read_text())
+        parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+        for function in (node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))):
+            parameters = (*function.args.args, *function.args.kwonlyargs)
+            if not any(parameter.arg == "interaction" for parameter in parameters):
+                continue
+            if module == "agentworks.secrets.preview" and function.name == "_preview":
+                continue
+            names = [function.name]
+            current = parents.get(function)
+            while isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                names.append(current.name)
+                current = parents.get(current)
+            discovered.append((module, ".".join(reversed(names))))
+    return tuple(sorted(discovered))
 
 
-def _combined_entries(*manifests: dict[str, tuple[str, ...]]) -> list[tuple[str, str]]:
-    return [entry for manifest in manifests for entry in _manifest_entries(manifest)]
+_VERIFY_CLI_BOUNDARY = ("agentworks.cli.commands.secret", "secret_verify")
+
+
+@cache
+def _cli_boundary_entries() -> tuple[tuple[str, str], ...]:
+    """Discover CLI roots from the signatures of their production callees."""
+    discovered = {
+        site.owner
+        for site in _interaction_calls()
+        if site.owner[0].startswith("agentworks.cli.commands.")
+        and "interaction" not in inspect.signature(_object(*site.owner)).parameters
+    }
+    return tuple(sorted(discovered))
+
+
+def _ordinary_cli_boundary_entries() -> tuple[tuple[str, str], ...]:
+    return tuple(entry for entry in _cli_boundary_entries() if entry != _VERIFY_CLI_BOUNDARY)
+
+
+_STORED_INVOCATION_MANIFEST = (
+    ("agentworks.secrets.resolver", "Resolver", "resolve", ()),
+    ("agentworks.secrets.resolver", "Resolver", "resolve_gate", (object(),)),
+    ("agentworks.secrets.resolver", "Resolver", "resolve_late_repair", (object(),)),
+    ("agentworks.workspaces.nodes", "PendingWorkspaceNode", "teardown", ()),
+    ("agentworks.agents.nodes", "PendingAgentNode", "teardown", ()),
+)
+
+
+def _stored_policy_entries() -> tuple[tuple[str, str], ...]:
+    return tuple(
+        (module_name, f"{class_name}.{method_name}")
+        for module_name, class_name, method_name, _arguments in _STORED_INVOCATION_MANIFEST
+    )
+
+
+def test_boundary_discovery_is_non_vacuous_across_supported_shapes() -> None:
+    assert {
+        ("agentworks.secrets.resolver", "Resolver.__init__"),
+        ("agentworks.orchestration.readiness", "preflight_all"),
+        ("agentworks.cli.commands.session", "_resume_sessions"),
+    } <= set(_parameter_boundary_entries())
+    assert {
+        ("agentworks.cli.commands.vm", "vm_create"),
+        ("agentworks.cli.commands.session", "session_list"),
+        _VERIFY_CLI_BOUNDARY,
+    } <= set(_cli_boundary_entries())
 
 
 def _assert_validation_assignment(statement: ast.stmt, *, ordinary: bool) -> None:
@@ -509,11 +206,8 @@ def _assert_stored_validation_assignment(statement: ast.stmt) -> None:
     assert source.attr == "_interaction"
 
 
-@pytest.mark.parametrize(
-    ("module_name", "function_name"),
-    _manifest_entries(_SERVICE_MANIFEST),
-)
-def test_service_manifest_requires_and_first_validates_exact_policy(
+@pytest.mark.parametrize(("module_name", "function_name"), _parameter_boundary_entries())
+def test_discovered_parameter_boundary_requires_and_first_validates_exact_policy(
     module_name: str,
     function_name: str,
 ) -> None:
@@ -529,24 +223,7 @@ def test_service_manifest_requires_and_first_validates_exact_policy(
     _assert_validation_assignment(_first_statement(function), ordinary=False)
 
 
-@pytest.mark.parametrize(("module_name", "function_name"), _manifest_entries(_INTERNAL_MANIFEST))
-def test_internal_manifest_requires_and_first_validates_exact_policy(
-    module_name: str,
-    function_name: str,
-) -> None:
-    function = _object(module_name, function_name)
-    signature = inspect.signature(function)
-    parameter = signature.parameters["interaction"]
-    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
-    assert parameter.default is inspect.Parameter.empty
-    assert parameter.annotation in {
-        "InteractionPolicy",
-        importlib.import_module("agentworks.secrets.policy").InteractionPolicy,
-    }
-    _assert_validation_assignment(_first_statement(function), ordinary=False)
-
-
-@pytest.mark.parametrize(("module_name", "function_name"), _manifest_entries(_STORED_POLICY_MANIFEST))
+@pytest.mark.parametrize(("module_name", "function_name"), _stored_policy_entries())
 def test_stored_policy_manifest_revalidates_as_first_statement(
     module_name: str,
     function_name: str,
@@ -556,7 +233,7 @@ def test_stored_policy_manifest_revalidates_as_first_statement(
 
 @pytest.mark.parametrize(
     ("module_name", "function_name"),
-    _manifest_entries(_CLI_MANIFEST),
+    _ordinary_cli_boundary_entries(),
 )
 def test_ordinary_cli_manifest_derives_policy_once_as_first_statement(
     module_name: str,
@@ -565,7 +242,7 @@ def test_ordinary_cli_manifest_derives_policy_once_as_first_statement(
     _assert_validation_assignment(_first_statement(_object(module_name, function_name)), ordinary=True)
 
 
-@pytest.mark.parametrize(("module_name", "function_name"), _manifest_entries(_VERIFY_CLI_MANIFEST))
+@pytest.mark.parametrize(("module_name", "function_name"), (_VERIFY_CLI_BOUNDARY,))
 def test_verify_cli_manifest_selects_and_validates_explicit_policy_first(
     module_name: str,
     function_name: str,
@@ -634,7 +311,7 @@ def _invoke_with_opaque_arguments(function: object, interaction: object) -> obje
 
 @pytest.mark.parametrize(
     ("module_name", "function_name"),
-    _combined_entries(_SERVICE_MANIFEST, _INTERNAL_MANIFEST),
+    _parameter_boundary_entries(),
 )
 @pytest.mark.parametrize("rejected", _REJECTED_POLICIES)
 def test_every_parameter_boundary_rejects_wrong_type_before_opaque_work(
@@ -653,7 +330,7 @@ def test_every_parameter_boundary_rejects_wrong_type_before_opaque_work(
 
 @pytest.mark.parametrize(
     ("module_name", "function_name"),
-    _combined_entries(_SERVICE_MANIFEST, _INTERNAL_MANIFEST),
+    _parameter_boundary_entries(),
 )
 def test_every_parameter_boundary_runtime_revalidates_the_exact_sentinel(
     monkeypatch: pytest.MonkeyPatch,
@@ -681,15 +358,6 @@ def test_every_parameter_boundary_runtime_revalidates_the_exact_sentinel(
     assert seen == [sentinel]
 
 
-_STORED_INVOCATION_MANIFEST = (
-    ("agentworks.secrets.resolver", "Resolver", "resolve", ()),
-    ("agentworks.secrets.resolver", "Resolver", "resolve_gate", (object(),)),
-    ("agentworks.secrets.resolver", "Resolver", "resolve_late_repair", (object(),)),
-    ("agentworks.workspaces.nodes", "PendingWorkspaceNode", "teardown", ()),
-    ("agentworks.agents.nodes", "PendingAgentNode", "teardown", ()),
-)
-
-
 @pytest.mark.parametrize(("module_name", "class_name", "method_name", "arguments"), _STORED_INVOCATION_MANIFEST)
 @pytest.mark.parametrize("rejected", _REJECTED_POLICIES)
 def test_every_stored_policy_boundary_rejects_corruption_before_work(
@@ -711,7 +379,7 @@ def test_every_stored_policy_boundary_rejects_corruption_before_work(
     assert caught.value.entity_kind is None and caught.value.entity_name is None and caught.value.hint is None
 
 
-@pytest.mark.parametrize(("module_name", "function_name"), _manifest_entries(_CLI_MANIFEST))
+@pytest.mark.parametrize(("module_name", "function_name"), _ordinary_cli_boundary_entries())
 def test_every_cli_root_rejects_wrong_derivation_before_opaque_work(
     monkeypatch: pytest.MonkeyPatch,
     module_name: str,
@@ -726,7 +394,7 @@ def test_every_cli_root_rejects_wrong_derivation_before_opaque_work(
     assert caught.value.__cause__ is None and caught.value.__context__ is None
 
 
-def test_exact_twelve_preflight_callers_forward_the_validated_local() -> None:
+def test_every_preflight_caller_forwards_the_validated_local() -> None:
     from pathlib import Path
 
     from tests.secrets.phase7_lexical_support import _enclosing_function
@@ -746,11 +414,15 @@ def test_exact_twelve_preflight_callers_forward_the_validated_local() -> None:
             discovered.add((module, function.name))
             interaction = next((keyword.value for keyword in call.keywords if keyword.arg == "interaction"), None)
             assert isinstance(interaction, ast.Name) and interaction.id == "interaction"
-    assert discovered == _PREFLIGHT_CALLER_MANIFEST
+    # Per-call forwarding is asserted above; this only prevents a vacuous scan.
+    assert discovered
+    assert discovered <= set(_parameter_boundary_entries())
 
 
-def test_manifest_forwarding_edges_use_only_the_validated_local() -> None:
-    """Every policy-bearing edge exactly matches the literal directed graph."""
+def test_discovered_forwarding_edges_use_only_the_validated_local() -> None:
+    """Every discovered policy-bearing edge forwards the validated local."""
     from tests.secrets.phase7_lexical_support import _interaction_call_edges
 
-    assert _interaction_call_edges() == _DIRECTED_EDGE_MANIFEST
+    # The helper validates every semantically discovered edge; this only pins
+    # that production still contains at least one policy-bearing edge.
+    assert _interaction_call_edges()

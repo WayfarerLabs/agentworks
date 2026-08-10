@@ -36,7 +36,10 @@ FORBIDDEN_CALL_NAMES = {
     "write_text",
 }
 FORBIDDEN_CALL_PREFIXES = ("delete_", "insert_", "remove_", "set_", "update_")
-ALLOWED_INERT_IMPORTS = {"agentworks.secrets.guide_contributions"}
+ALLOWED_INERT_IMPORTS = {
+    "agentworks.secrets._load_guide_contributions",
+    "agentworks.secrets.guide_contributions",
+}
 FORBIDDEN_BOUND_NAMES = {"__import__", "compile", "eval", "exec", "open"}
 
 
@@ -214,6 +217,7 @@ def test_power_boundary_rejects_relative_import_beyond_package_root() -> None:
 
 def test_power_boundary_allows_only_the_inert_secret_topic_contribution_import() -> None:
     assert not _power_boundary_violations("from agentworks.secrets import guide_contributions as secret_topics")
+    assert not _power_boundary_violations("from agentworks.secrets import _load_guide_contributions as secret_topics")
     assert not _power_boundary_violations("from ..secrets import guide_contributions as secret_topics")
     assert not _power_boundary_violations(
         "from ...secrets import guide_contributions as secret_topics",

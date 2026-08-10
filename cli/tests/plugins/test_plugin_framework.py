@@ -151,7 +151,7 @@ class _NotAPlatform:
     nothing of the vm-platform contract. This is the class the old
     ``isinstance(impl, type)`` gate and ``cast`` waved through."""
 
-    contract_version = 1
+    contract_version = 2
     name = "not-a-platform"
     description = "has the metadata and none of the contract"
 
@@ -163,7 +163,7 @@ class _PlatformWithoutAConfigModel(ConformingVMPlatform):
 
     name = "no-config-model-platform"
     description = "declares no config model"
-    contract_version = 1
+    contract_version = 2
     config_model = None  # type: ignore[assignment]
 
 
@@ -171,7 +171,7 @@ class _AbstractPlatform(VMPlatform):
     """Derives from the contract but implements none of its power ops, so it
     can never be constructed."""
 
-    contract_version = 1
+    contract_version = 2
     name = "abstract-platform"
     description = "abstract: no power ops implemented"
 
@@ -216,7 +216,7 @@ class _BackendWithoutInteractive:
 class _PlatformOnAnOldContract(ConformingVMPlatform):
     name = "old-contract-platform"
     description = "written against a contract this build no longer supports"
-    contract_version = 0
+    contract_version = 1
 
 
 class _BackendWithInstanceReadiness(ConformingSecretBackend):
@@ -328,7 +328,6 @@ class _PlatformWithAMistaggedModel(ConformingVMPlatform):
         ("vm-platform", _PlatformWithoutADescription, "'description' class attribute"),
         ("secret-backend", _BackendMissingItsOperations, "does not derive from SecretBackend"),
         ("secret-backend", _BackendWithoutInteractive, "does not derive from SecretBackend"),
-        ("vm-platform", _PlatformOnAnOldContract, "declares contract_version 0"),
         ("git-credential-provider", _GitProviderOnV1, "declares contract_version 1"),
         ("git-credential-provider", _GitProviderOnOldShapeV2, "not a TokenAcquiringConfig subclass"),
         ("vm-platform", _PlatformWithoutAConfigModel, "declares no config_model"),
@@ -342,7 +341,6 @@ class _PlatformWithAMistaggedModel(ConformingVMPlatform):
         "missing-metadata",
         "missing-operations",
         "missing-attribute",
-        "unsupported-version",
         "old-git-provider-contract",
         "old-git-provider-shape",
         "no-config-model",
@@ -361,6 +359,19 @@ def test_rejects_a_non_conforming_impl_naming_the_plugin(kind: str, impl: type, 
     assert "'p'" in message
     assert impl.__name__ in message
     assert expected in message
+
+
+def test_registration_rejects_vm_platform_contract_v1_exactly() -> None:
+    plugin = Plugin(name="p", capabilities={"vm-platform": (_PlatformOnAnOldContract,)})
+
+    with pytest.raises(PluginError) as exc:
+        register_plugin(plugin)
+
+    assert str(exc.value) == (
+        "system plugin 'p' vm-platform impl '_PlatformOnAnOldContract' does not satisfy "
+        "the vm-platform capability contract: it declares contract_version 1, but this build "
+        "supports vm-platform contract version 2"
+    )
 
 
 def test_a_non_conforming_impl_is_refused_before_any_registry_write() -> None:

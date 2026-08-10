@@ -9,23 +9,36 @@ if TYPE_CHECKING:
 
 # Shell snippets that provide dynamic completions.
 DYNAMIC_SNIPPETS: dict[str, str] = {
-    "vms": ("$(agw vm list --names-only 2>/dev/null)"),
-    "sites": ("$(agw resource list --kind vm-site --names-only 2>/dev/null | awk -F/ '{print $2}')"),
-    "workspaces": ("$(agw workspace list --names-only 2>/dev/null)"),
-    "ws_templates": ("$(agw resource list --kind workspace-template --names-only 2>/dev/null | awk -F/ '{print $2}')"),
-    "git_credentials": ("$(agw resource list --kind git-credential --names-only 2>/dev/null | awk -F/ '{print $2}')"),
-    "sessions": ("$(agw session list --names-only 2>/dev/null)"),
-    "agents": ("$(agw agent list --names-only 2>/dev/null)"),
-    "consoles": ("$(agw console list --names-only 2>/dev/null)"),
-    "session_templates": (
-        "$(agw resource list --kind session-template --names-only 2>/dev/null | awk -F/ '{print $2}')"
+    "files": '$(compgen -f -- "$cur")',
+    "vms": ("$(agw --completion-probe vm list --names-only 2>/dev/null)"),
+    "sites": ("$(agw --completion-probe resource list --kind vm-site --names-only 2>/dev/null | awk -F/ '{print $2}')"),
+    "workspaces": ("$(agw --completion-probe workspace list --names-only 2>/dev/null)"),
+    "ws_templates": (
+        "$(agw --completion-probe resource list --kind workspace-template --names-only "
+        "2>/dev/null | awk -F/ '{print $2}')"
     ),
-    "vm_templates": ("$(agw resource list --kind vm-template --names-only 2>/dev/null | awk -F/ '{print $2}')"),
-    "agent_templates": ("$(agw resource list --kind agent-template --names-only 2>/dev/null | awk -F/ '{print $2}')"),
-    "admin_templates": ("$(agw resource list --kind admin-template --names-only 2>/dev/null | awk -F/ '{print $2}')"),
+    "git_credentials": (
+        "$(agw --completion-probe resource list --kind git-credential --names-only 2>/dev/null | awk -F/ '{print $2}')"
+    ),
+    "sessions": ("$(agw --completion-probe session list --names-only 2>/dev/null)"),
+    "agents": ("$(agw --completion-probe agent list --names-only 2>/dev/null)"),
+    "consoles": ("$(agw --completion-probe console list --names-only 2>/dev/null)"),
+    "session_templates": (
+        "$(agw --completion-probe resource list --kind session-template --names-only "
+        "2>/dev/null | awk -F/ '{print $2}')"
+    ),
+    "vm_templates": (
+        "$(agw --completion-probe resource list --kind vm-template --names-only 2>/dev/null | awk -F/ '{print $2}')"
+    ),
+    "agent_templates": (
+        "$(agw --completion-probe resource list --kind agent-template --names-only 2>/dev/null | awk -F/ '{print $2}')"
+    ),
+    "admin_templates": (
+        "$(agw --completion-probe resource list --kind admin-template --names-only 2>/dev/null | awk -F/ '{print $2}')"
+    ),
     "secrets": ("$(agw secret list --names-only 2>/dev/null)"),
     "resource_kinds": ("$(agw resource kinds --names-only 2>/dev/null)"),
-    "resource_refs": ("$(agw resource list --names-only 2>/dev/null)"),
+    "resource_refs": ("$(agw --completion-probe resource list --names-only 2>/dev/null)"),
     "guide_topics": ("$(agw guide --names-only 2>/dev/null)"),
 }
 
@@ -42,7 +55,7 @@ def generate_bash(spec: CommandSpec, version: str) -> str:
     lines.append("")
 
     lines.append("_agentworks() {")
-    lines.append("    local cur prev words cword")
+    lines.append("    local cur prev words cword candidate")
     lines.append("    if type _init_completion &>/dev/null; then")
     lines.append("        _init_completion || return")
     lines.append("    else")
@@ -157,7 +170,14 @@ def _emit_leaf_completions(lines: list[str], spec: CommandSpec, token_offset: in
             words = DYNAMIC_SNIPPETS[param.dynamic_completer]
         if words:
             lines.append(f'{indent}if [[ $cword {cmp_op} {pos_token} && "$cur" != -* ]]; then')
-            lines.append(f'{indent}    COMPREPLY=($(compgen -W "{words}" -- "$cur"))')
+            if param.dynamic_completer == "files":
+                lines.append(f"{indent}    COMPREPLY=()")
+                lines.append(f"{indent}    while IFS= read -r candidate; do")
+                lines.append(f'{indent}        COMPREPLY+=("$candidate")')
+                lines.append(f'{indent}    done < <(compgen -f -- "$cur")')
+                lines.append(f"{indent}    compopt -o filenames 2>/dev/null || true")
+            else:
+                lines.append(f'{indent}    COMPREPLY=($(compgen -W "{words}" -- "$cur"))')
             lines.append(f"{indent}    return")
             lines.append(f"{indent}fi")
 

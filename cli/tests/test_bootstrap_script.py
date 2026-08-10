@@ -35,7 +35,7 @@ def test_generate_bootstrap_script_all_steps() -> None:
     assert "lima--myvm" in script
 
 
-def test_generate_bootstrap_script_can_defer_tailscale_join_without_key() -> None:
+def test_generate_bootstrap_script_can_omit_join_from_retained_payload() -> None:
     """Lima's retained bootstrap shape installs Tailscale but omits the key."""
     sentinel = "tskey-persistence-sentinel"
     keyed_script = generate_bootstrap_script(

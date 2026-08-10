@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import MagicMock
 
 import pytest
 import yaml
@@ -29,7 +30,7 @@ from agentworks.capabilities.vm_platform.lima import (
 from agentworks.ssh import SSHError
 
 
-def _request(*, tailscale_auth_key: str | None = "tskey-test") -> ProvisionRequest:
+def _request(*, tailscale_auth_key: str = "tskey-test") -> ProvisionRequest:
     return ProvisionRequest(
         vm_name="myvm",
         hostname="lima--myvm",
@@ -38,6 +39,7 @@ def _request(*, tailscale_auth_key: str | None = "tskey-test") -> ProvisionReque
         ssh_public_key="ssh-ed25519 AAAA test",
         ssh_private_key=Path("/dev/null"),
         tailscale_auth_key=tailscale_auth_key,
+        progress=MagicMock(),
         # The vm-template layer's resolved defaults, which is the only
         # shape a platform ever sees (the hardware fields are required).
         cpus=4,
@@ -179,7 +181,7 @@ def test_submitted_lima_configuration_never_contains_tailscale_key(
         RunContext(),
     )
 
-    assert result.bootstrap_complete is True
+    assert result.tailscale_ip == "100.64.0.1"
     assert submitted and len(submitted) == 1
     submitted_yaml = submitted[0]
     persisted_config = cast("dict[str, Any]", yaml.safe_load(submitted_yaml))
@@ -200,41 +202,7 @@ def test_submitted_lima_configuration_never_contains_tailscale_key(
     assert secret not in sensitive_calls[0][0]
 
 
-def test_lima_without_auth_key_keeps_join_deferred_to_phase_a(
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output: object,
-) -> None:
-    submitted: list[str] = []
-    ran: list[tuple[str, dict[str, object]]] = []
-
-    monkeypatch.setattr(LimaPlatform, "_ensure_limactl", lambda self: None)
-    monkeypatch.setattr(LimaPlatform, "_instance_exists", lambda self, name: False)
-    monkeypatch.setattr(
-        LimaPlatform,
-        "_create_local",
-        lambda self, name, lima_yaml: submitted.append(lima_yaml),
-    )
-    monkeypatch.setattr(LimaPlatform, "_transport_for", lambda self, name: SimpleNamespace())
-
-    def _fake_run(self: LimaPlatform, command: str, **kwargs: object) -> str:
-        ran.append((command, kwargs))
-        if REBOOT_SENTINEL_PATH in command:
-            return f"{_REBOOT_CLEAR_MARKER}\n"
-        return ""
-
-    monkeypatch.setattr(LimaPlatform, "_run_lima", _fake_run)
-
-    result = LimaPlatform("lima", {"placement": {"mode": "local"}}).create(
-        _request(tailscale_auth_key=None),
-        RunContext(),
-    )
-
-    assert result.bootstrap_complete is False
-    assert submitted and "no-op (deferred to Phase A)" in submitted[0]
-    assert not any(kwargs.get("input_text") is not None for _command, kwargs in ran)
-
-
-def test_ip_probe_failure_keeps_ephemeral_join_bootstrap_complete(
+def test_ip_probe_failure_returns_missing_ip_after_successful_join(
     monkeypatch: pytest.MonkeyPatch,
     warnings: list[str],
 ) -> None:
@@ -266,7 +234,6 @@ def test_ip_probe_failure_keeps_ephemeral_join_bootstrap_complete(
         RunContext(),
     )
 
-    assert result.bootstrap_complete is True
     assert result.tailscale_ip is None
     assert submitted and secret not in submitted[0]
     assert sum(kwargs.get("input_text") == f"{secret}\n" for _command, kwargs in calls) == 1

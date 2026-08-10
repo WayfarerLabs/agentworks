@@ -6,7 +6,11 @@ import ast
 
 import pytest
 
-from tests.secrets.phase7_lexical_support import _interaction_binding_sites, _semantic_type_indexes
+from tests.secrets.phase7_lexical_support import (
+    _interaction_binding_sites,
+    _object,
+    _semantic_type_indexes,
+)
 from tests.secrets.phase7_resolver_support import _resolver_usage_violations_from_tree
 from tests.secrets.phase7_stored_support import (
     _resolver_usage_violations,
@@ -14,20 +18,17 @@ from tests.secrets.phase7_stored_support import (
     _stored_call_edges_from_tree,
 )
 from tests.secrets.test_phase7_enforcement import (
-    _CLI_MANIFEST,
-    _INTERNAL_MANIFEST,
-    _SERVICE_MANIFEST,
-    _STORED_CALL_EDGE_MANIFEST,
-    _STORED_POLICY_MANIFEST,
-    _VERIFY_CLI_MANIFEST,
-    _combined_entries,
+    _cli_boundary_entries,
     _function_node,
-    _object,
+    _parameter_boundary_entries,
+    _stored_policy_entries,
 )
 
 
-def test_stored_policy_callback_callers_exactly_match_literal_graph() -> None:
-    assert _stored_call_edges() == _STORED_CALL_EDGE_MANIFEST
+def test_stored_policy_callback_callers_follow_the_supported_resolver_seam() -> None:
+    # Each discovered call is validated by the semantic scanner; this only
+    # prevents the production domain from becoming wholly empty.
+    assert _stored_call_edges()
     assert _resolver_usage_violations() == []
 
 
@@ -191,16 +192,8 @@ after_global = Resolver.resolve
     ]
 
 
-def test_validated_interaction_local_is_never_rebound_in_any_manifest_caller() -> None:
-    entries = set(
-        _combined_entries(
-            _SERVICE_MANIFEST,
-            _INTERNAL_MANIFEST,
-            _CLI_MANIFEST,
-            _VERIFY_CLI_MANIFEST,
-            _STORED_POLICY_MANIFEST,
-        )
-    )
+def test_validated_interaction_local_is_never_rebound_in_any_boundary() -> None:
+    entries = set(_parameter_boundary_entries()) | set(_cli_boundary_entries()) | set(_stored_policy_entries())
     for module_name, function_name in entries:
         function = _function_node(_object(module_name, function_name))
         bindings = _interaction_binding_sites(function)

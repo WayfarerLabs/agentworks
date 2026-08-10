@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -34,7 +35,7 @@ def _remote_ssh_success(command: str) -> SimpleNamespace:
     return SimpleNamespace(returncode=0, stdout=stdout, stderr="", ok=True)
 
 
-def _request(*, tailscale_auth_key: str | None = "tskey-test") -> ProvisionRequest:
+def _request(*, tailscale_auth_key: str = "tskey-test") -> ProvisionRequest:
     return ProvisionRequest(
         vm_name="myvm",
         hostname="lima--myvm",
@@ -43,6 +44,7 @@ def _request(*, tailscale_auth_key: str | None = "tskey-test") -> ProvisionReque
         ssh_public_key="ssh-ed25519 AAAA test",
         ssh_private_key=Path("/dev/null"),
         tailscale_auth_key=tailscale_auth_key,
+        progress=MagicMock(),
         cpus=4,
         memory_gib=8,
         disk_gib=50,

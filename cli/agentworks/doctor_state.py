@@ -76,10 +76,15 @@ def check_database() -> HealthGroup:
                 group.warn(
                     "Schema",
                     f"at version {current}, latest is {latest}; "
-                    "a normal Agentworks command that opens state will migrate it",
+                    "a normal Agentworks command will announce migration and offer or automatically "
+                    "create a backup first",
                 )
             else:
-                group.fail("Schema", f"version {current} is newer than latest {latest} (downgrade?)")
+                group.fail(
+                    "Schema",
+                    f"version {current} is newer than latest {latest} (downgrade?)",
+                    hint="Back it up, restore a compatible backup before downgrading, or use a newer release.",
+                )
     except Exception as error:
         group.fail("Database", str(error))
     return group

@@ -5,6 +5,7 @@ looks. Every line carries a semantic **role**, never baked-in presentation:
 
 - ``info`` -> body (a normal step/status line)
 - ``detail`` -> de-emphasized / secondary body (a supporting aside)
+- ``notice`` -> mandatory operation notice on stderr, even during suppression
 - ``warn`` / ``error`` -> a warning / a failed-outcome line (both on stderr)
 - ``result`` -> a command's terminal outcome line
 - ``section(title)`` -> a header that groups the lines emitted inside its
@@ -111,6 +112,7 @@ class Role(Enum):
 
     BODY = auto()  # info(): a normal body line / step
     DETAIL = auto()  # detail(): de-emphasized / secondary body
+    NOTICE = auto()  # notice(): mandatory operation notice, stderr
     WARNING = auto()  # warn(): non-fatal warning, stderr
     ERROR = auto()  # error(): failed terminal outcome, stderr (entry catch)
     HEADER = auto()  # section() header
@@ -280,7 +282,9 @@ class _SilentProgress:
 
 class _DefaultHandler:
     def emit(self, role: Role, message: str, level: int) -> None:
-        if role is Role.WARNING:
+        if role is Role.NOTICE:
+            print(f"{_pad(level)}Notice: {message}", file=sys.stderr)
+        elif role is Role.WARNING:
             print(f"{_pad(level)}Warning: {message}", file=sys.stderr)
         elif role is Role.ERROR:
             print(f"{_pad(level)}Error: {message}", file=sys.stderr)
@@ -505,6 +509,11 @@ def warn(message: str) -> None:
     """Emit a non-fatal warning."""
     if not presentation_suppressed():
         _handler.emit(Role.WARNING, message, _current_level())
+
+
+def notice(message: str) -> None:
+    """Emit a mandatory stderr notice, including during presentation suppression."""
+    _handler.emit(Role.NOTICE, message, _current_level())
 
 
 def result(message: str) -> None:

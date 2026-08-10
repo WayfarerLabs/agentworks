@@ -14,9 +14,9 @@ two Exception arms (#347): a mid-creation failure runs the name-based
 cleanup and raises the wrapped error (the pre-#338 arm, unchanged),
 and a failure escaping the post-creation span (transport construction
 plus the inline wait, e.g. a raw OSError from a missing local ssh
-binary) tears the full set down VM-first; only ``SSHError``, absorbed
-inside ``_wait_for_bootstrap`` as the tolerated defer-to-Phase-A path,
-never rolls back.
+binary) tears the full set down VM-first. Readiness ``SSHError`` now
+becomes a typed failure in the shared bootstrap helper and takes the
+same rollback path before the key is delivered.
 
 Fakes come from ``tests._azure_platform_support`` (shared with
 test_azure_nsg_exposure.py); egress detection is stubbed, no test hits
@@ -25,9 +25,11 @@ the network.
 
 from __future__ import annotations
 
+import base64
 import time
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -44,6 +46,22 @@ if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
 
 _CONFIG = {"subscription_id": "sub-A", "resource_group": "rg1", "region": "eastus", "auth": {"mode": "ambient"}}
+_SENTINEL = "tskey-azure-readiness-'sentinel"
+
+
+def _assert_exception_graph_is_value_free(failure: BaseException) -> None:
+    pending = [failure]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        assert _SENTINEL not in repr(current)
+        if current.__cause__ is not None:
+            pending.append(current.__cause__)
+        if current.__context__ is not None:
+            pending.append(current.__context__)
 
 
 @pytest.fixture(autouse=True)
@@ -54,14 +72,19 @@ def _stub_egress_detection(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ssh_exposure, "_egress_ip_cache", None)
     monkeypatch.setattr(ssh_exposure, "detect_egress_ip", lambda: "198.18.0.7")
 
+    def _successful_bootstrap(self: SSHTransport, command: str, **kwargs: object) -> object:
+        del self, kwargs
+        return SimpleNamespace(stdout="100.64.0.5\n" if command == "tailscale ip -4" else "", returncode=0)
+
+    monkeypatch.setattr(SSHTransport, "run", _successful_bootstrap)
+
 
 def _platform() -> AzureVMPlatform:
     return AzureVMPlatform("az-site", dict(_CONFIG))
 
 
 def _request(*, tailscale: bool) -> ProvisionRequest:
-    """With a Tailscale key create runs the inline bootstrap wait;
-    without one it returns straight after the resources are up."""
+    """Use the sentinel for reflection checks, otherwise a regular required key."""
     return ProvisionRequest(
         vm_name="vm1",
         hostname="vm1",
@@ -69,7 +92,8 @@ def _request(*, tailscale: bool) -> ProvisionRequest:
         admin_username="agentworks",
         ssh_public_key="ssh-ed25519 AAAA test",
         ssh_private_key=None,
-        tailscale_auth_key="tskey-test" if tailscale else None,
+        tailscale_auth_key=_SENTINEL if tailscale else "tskey-test",
+        progress=MagicMock(),
         # The vm-template layer's resolved defaults, which is the only
         # shape a platform ever sees (the hardware fields are required).
         cpus=4,
@@ -92,22 +116,48 @@ def _interrupt_the_wait(monkeypatch: pytest.MonkeyPatch) -> KeyboardInterrupt:
 
 
 class TestInterruptDuringInlineWait:
+    @pytest.mark.parametrize(
+        ("failure_command", "expected_commands"),
+        [
+            ("echo ok", ["echo ok"]),
+            ("cloud-init status --wait", ["echo ok", "cloud-init status --wait"]),
+        ],
+        ids=("ssh-readiness", "cloud-init-wait"),
+    )
     def test_rolls_back_the_full_resource_set_and_reraises(
-        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        captured_output: CapturedOutput,
+        failure_command: str,
+        expected_commands: list[str],
     ) -> None:
-        """The issue's scenario: every resource exists when the wait is
-        interrupted, so the rollback deletes the VM first (it holds the
-        NIC and disk) and then the name-based set, and the interrupt
-        propagates for the caller's row unwind."""
+        """A real readiness-command interrupt rolls back the full resource
+        set before fixed-stdin delivery can run."""
         fakes = _install_fakes(monkeypatch, vm_exists_lookup=False)
         # A managed OS disk with the owner tag, as Azure names them.
         fakes.compute.disks.disks = [SimpleNamespace(name="vm1_OsDisk_1", tags={"owner": "agentworks"})]
-        interrupt = _interrupt_the_wait(monkeypatch)
+        interrupt = KeyboardInterrupt(f"interrupted during {failure_command}")
+        calls: list[tuple[str, dict[str, object]]] = []
 
+        def _interrupt_readiness(self: SSHTransport, command: str, **kwargs: object) -> object:
+            calls.append((command, kwargs))
+            if command == failure_command:
+                raise interrupt
+            return SimpleNamespace(stdout="", returncode=0)
+
+        monkeypatch.setattr(SSHTransport, "run", _interrupt_readiness)
         with pytest.raises(KeyboardInterrupt) as exc:
             _platform().create(_request(tailscale=True), RunContext())
 
         assert exc.value is interrupt
+        assert [command for command, _kwargs in calls] == expected_commands
+        assert all("input_text" not in kwargs for _command, kwargs in calls)
+        assert not any("agentworks-bootstrap" in command for command, _kwargs in calls)
+        vm = fakes.compute.virtual_machines.created[0][2]
+        retained_cloud_init = base64.b64decode(vm.os_profile.custom_data).decode()
+        assert _SENTINEL not in retained_cloud_init
+        assert _SENTINEL not in repr(calls)
+        assert _SENTINEL not in repr(captured_output.lines)
         assert fakes.compute.virtual_machines.deleted == [("rg1", "vm1")]
         assert fakes.network.network_interfaces.deleted == [("rg1", "vm1-nic")]
         assert fakes.network.public_ip_addresses.deleted == [("rg1", "vm1-ip")]
@@ -122,27 +172,50 @@ class TestInterruptDuringInlineWait:
         assert set(kinds[1:]) == {"nic", "ip", "nsg", "vnet", "disk"}
         assert any("Ctrl-C again to abandon" in w for w in captured_output.warnings)
 
+    @pytest.mark.parametrize(
+        ("failure_command", "expected_commands"),
+        [
+            ("echo ok", ["echo ok"]),
+            ("cloud-init status --wait", ["echo ok", "cloud-init status --wait"]),
+        ],
+        ids=("ssh-readiness", "cloud-init-wait"),
+    )
     def test_second_interrupt_abandons_cleanup_loudly(
-        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        captured_output: CapturedOutput,
+        failure_command: str,
+        expected_commands: list[str],
     ) -> None:
-        """A second Ctrl-C during the cleanup abandons it instead of
-        wedging: no further deletes are attempted, the warning names the
-        resource group and name prefix for manual cleanup, and the
-        ORIGINAL interrupt still propagates."""
+        """A readiness interrupt followed by cleanup interruption preserves
+        the first interrupt and gives exact manual-removal coordinates."""
         fakes = _install_fakes(monkeypatch, vm_exists_lookup=False)
-        interrupt = _interrupt_the_wait(monkeypatch)
+        interrupt = KeyboardInterrupt(f"interrupted during {failure_command}")
+        calls: list[tuple[str, dict[str, object]]] = []
+
+        def _interrupt_readiness(self: SSHTransport, command: str, **kwargs: object) -> object:
+            calls.append((command, kwargs))
+            if command == failure_command:
+                raise interrupt
+            return SimpleNamespace(stdout="", returncode=0)
+
+        monkeypatch.setattr(SSHTransport, "run", _interrupt_readiness)
         fakes.compute.virtual_machines.delete_error = KeyboardInterrupt("second")
 
         with pytest.raises(KeyboardInterrupt) as exc:
             _platform().create(_request(tailscale=True), RunContext())
 
         assert exc.value is interrupt
+        assert [command for command, _kwargs in calls] == expected_commands
+        assert all("input_text" not in kwargs for _command, kwargs in calls)
         # Abandoned at the first cleanup step: nothing else was touched.
         assert fakes.network.network_interfaces.deleted == []
         assert fakes.network.public_ip_addresses.deleted == []
-        (abandoned,) = [w for w in captured_output.warnings if "Cleanup abandoned" in w]
-        assert "'vm1*'" in abandoned
-        assert "resource group 'rg1'" in abandoned
+        abandoned = [warning for warning in captured_output.warnings if "Cleanup abandoned" in warning]
+        assert abandoned == [
+            "Cleanup abandoned: Azure resources named 'vm1*' may remain in resource group "
+            "'rg1'; delete them there manually."
+        ]
 
     def test_vm_delete_failure_during_rollback_warns_and_reraises(
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
@@ -201,8 +274,8 @@ class TestFailureDuringInlineWait:
     """#347: the failure arm spans the transport construction and the
     inline bootstrap wait, so a non-SSHError escaping the wait rolls the
     full resource set back (closing the bootstrap ingress with it)
-    instead of leaking a running VM; the SSHError paths the wait absorbs
-    itself stay tolerated (defer to Phase A, no rollback)."""
+    instead of leaking a running VM. Readiness SSHError paths now raise
+    typed too, keeping them in the same rollback window."""
 
     def test_non_ssh_error_escaping_the_wait_rolls_back_vm_first_and_wraps(
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
@@ -238,30 +311,74 @@ class TestFailureDuringInlineWait:
         assert not any("Interrupted" in w for w in captured_output.warnings)
         assert not any("Cleanup abandoned" in w for w in captured_output.warnings)
 
-    def test_tolerated_ssh_unavailability_defers_to_phase_a_without_rollback(
+    def test_ssh_readiness_exhaustion_fails_closed_without_key_delivery(
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
     ) -> None:
-        """The wait's own SSHError absorption is NOT a rollback trigger:
-        an SSH connection that never comes up exhausts the probe retries,
-        warns, and create still returns a ProvisionResult with
-        bootstrap_complete=False (Phase A retries), every resource kept."""
+        """SSH exhaustion raises before key delivery and removes every retained
+        Azure resource, so Phase A cannot select generated-script staging."""
         fakes = _install_fakes(monkeypatch, vm_exists_lookup=False)
+        calls: list[tuple[str, dict[str, object]]] = []
 
-        def _ssh_down(self: SSHTransport, command: str, **_kw: object) -> object:
+        def _ssh_down(self: SSHTransport, command: str, **kw: object) -> object:
+            calls.append((command, kw))
             raise SSHError("connect timed out")
 
         monkeypatch.setattr(SSHTransport, "run", _ssh_down)
         # The wait sleeps 10s between its 30 probes; don't.
         monkeypatch.setattr(time, "sleep", lambda _s: None)
 
-        result = _platform().create(_request(tailscale=True), RunContext())
+        with pytest.raises(AzureError, match="SSH did not become ready") as caught:
+            _platform().create(_request(tailscale=True), RunContext())
 
-        assert result.bootstrap_complete is False
-        assert result.tailscale_ip is None
-        assert fakes.compute.virtual_machines.deleted == []
-        assert fakes.network.network_interfaces.deleted == []
-        assert fakes.network.network_security_groups.deleted == []
-        assert any("deferring bootstrap to Phase A" in w for w in captured_output.warnings)
+        assert len(calls) == 30
+        assert {command for command, _kwargs in calls} == {"echo ok"}
+        assert all("input_text" not in kwargs for _command, kwargs in calls)
+        self._assert_safe_provider_failure(fakes, calls, caught.value, captured_output)
+
+    def test_cloud_init_wait_failure_fails_closed_without_key_delivery(
+        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+    ) -> None:
+        fakes = _install_fakes(monkeypatch, vm_exists_lookup=False)
+        calls: list[tuple[str, dict[str, object]]] = []
+
+        def _cloud_init_fails(self: SSHTransport, command: str, **kwargs: object) -> object:
+            calls.append((command, kwargs))
+            if command == "cloud-init status --wait":
+                raise SSHError("cloud-init exited 1")
+            return SimpleNamespace(stdout="", returncode=0)
+
+        monkeypatch.setattr(SSHTransport, "run", _cloud_init_fails)
+
+        with pytest.raises(AzureError, match="cloud-init did not complete") as caught:
+            _platform().create(_request(tailscale=True), RunContext())
+
+        assert calls == [
+            ("echo ok", {"check": True, "timeout": 10}),
+            ("cloud-init status --wait", {"check": True, "timeout": 600}),
+        ]
+        assert all("input_text" not in kwargs for _command, kwargs in calls)
+        self._assert_safe_provider_failure(fakes, calls, caught.value, captured_output)
+
+    @staticmethod
+    def _assert_safe_provider_failure(
+        fakes: Any,
+        calls: list[tuple[str, dict[str, object]]],
+        failure: AzureError,
+        captured_output: CapturedOutput,
+    ) -> None:
+        azure = fakes
+        vm = azure.compute.virtual_machines.created[0][2]
+        retained_cloud_init = base64.b64decode(vm.os_profile.custom_data).decode()
+        assert _SENTINEL not in retained_cloud_init
+        assert _SENTINEL not in repr(calls)
+        assert not any("agentworks-bootstrap" in command for command, _kwargs in calls)
+        assert azure.compute.virtual_machines.deleted == [("rg1", "vm1")]
+        assert azure.network.network_interfaces.deleted == [("rg1", "vm1-nic")]
+        assert azure.network.public_ip_addresses.deleted == [("rg1", "vm1-ip")]
+        assert azure.network.network_security_groups.deleted == [("rg1", "vm1-nsg")]
+        assert azure.network.virtual_networks.deleted == [("rg1", "vm1-vnet")]
+        _assert_exception_graph_is_value_free(failure)
+        assert _SENTINEL not in repr(captured_output.lines)
 
 
 class TestPlainFailureArmUnchanged:
