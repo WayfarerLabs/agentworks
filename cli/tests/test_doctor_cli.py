@@ -119,7 +119,8 @@ class TestDoctorColorOnATty:
         out = _run_doctor(capsys)
         expected = (
             f"Results: {click.style('1', fg='green')} ok, 1 info, "
-            f"{click.style('1', fg='yellow')} warn, {click.style('1', fg='red')} fail\n"
+            f"{click.style('1', fg='yellow')} warn, "
+            f"{click.style('1', fg='red')} fail\n"
         )
         assert expected in out
         assert "Results: 1 ok, 1 info, 1 warn, 1 fail\n" in _plain(out)

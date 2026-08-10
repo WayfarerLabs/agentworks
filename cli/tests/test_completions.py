@@ -287,6 +287,35 @@ class TestOptionFlagsInSpec:
         opts = [opt for param in resource_list.params for opt in param.opts]
         assert "--include-disabled" in opts
 
+    def test_machine_output_options_reach_every_shell_completion(self) -> None:
+        """Every JSON v1 command exposes the closed output choices to generated shells."""
+        spec = build_spec(app)
+        commands = _walk_commands(spec)
+        expected_paths = (
+            "agentworks.resource.list",
+            "agentworks.resource.kinds",
+            "agentworks.resource.describe",
+            "agentworks.secret.list",
+            "agentworks.secret.describe",
+            "agentworks.vm.list",
+            "agentworks.vm.describe",
+            "agentworks.workspace.list",
+            "agentworks.workspace.describe",
+            "agentworks.agent.list",
+            "agentworks.agent.describe",
+            "agentworks.session.list",
+            "agentworks.session.describe",
+            "agentworks.console.list",
+            "agentworks.console.describe",
+            "agentworks.doctor",
+        )
+        for path in expected_paths:
+            output_param = next(param for param in commands[path].params if "--output" in param.opts)
+            assert output_param.choices == ["human", "json"]
+
+        for shell in ("bash", "zsh", "powershell"):
+            assert "--output" in generate(shell)
+
     def test_session_resume_is_discoverable_and_restart_is_absent(self) -> None:
         spec = build_spec(app)
         session = _walk_commands(spec)["agentworks.session"]

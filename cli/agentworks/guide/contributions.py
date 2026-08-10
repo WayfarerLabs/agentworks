@@ -202,6 +202,8 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             "MANIFEST_PATH contains one resource rewritten against the live sample and field reference for "
             "MANIFEST_KIND and, when present, the separate field reference for CAPABILITY_TARGET. "
             "Any retired presence shape uses the exact hard-error rewrite, including the outer-null mode mapping. "
+            "A git-credential token uses the canonical tagged stored arm; an outer token null is deleted or "
+            "rewritten exactly as token: {mode: stored}, while an existing scalar's secret name is preserved. "
             "EXPECTED_IDENTITIES remains byte-for-byte unchanged.",
             None,
             "Keep the last validated manifest set and do not remove any retired TOML section.",
@@ -210,7 +212,12 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             "separate field-reference topic for CAPABILITY_TARGET. If validation reports a retired "
             "service_principal, credentials, or vm_host shape, apply that hard error's exact rewrite in "
             "MANIFEST_PATH. For an outer explicit null, delete the retired line and write auth ambient, auth "
-            "ambient, or placement local, respectively. Require MANIFEST_PATH to equal the selected "
+            "ambient, or placement local, respectively. For a git-credential, consult its provider reference. "
+            "Omission still selects the stored default, and a scalar token remains accepted shorthand, but write "
+            "the canonical tagged stored arm. Preserve a scalar's secret name as token: {mode: stored, secret: "
+            "<existing-name>}. Delete an outer token: null line or replace it exactly with token: {mode: stored}; "
+            "an omitted or null inner token.secret selects the default. No minted arm exists. Require "
+            "MANIFEST_PATH to equal the selected "
             "EXPECTED_IDENTITIES entry's pre-recorded file. Never add, remove, or change a baseline entry. Do "
             "not copy a schema from this migration topic.",
         ),
@@ -219,9 +226,15 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             "One manifest has been added or changed while all retired TOML sections remain in place.",
             (),
             ConsentBoundary.EXAMINE_WORKSTATION,
-            ("agw", "doctor"),
-            "Doctor gives precise feedback for the growing manifest set even while the retired-section "
-            "config error remains.",
+            ("agw", "doctor", "--output", "json"),
+            "The command must exit 1 for this retained-section checkpoint and emit one JSON document. Before recording "
+            "VERIFIED, require schema_version is the integer 1, command is exactly doctor, data is an object, "
+            "data.groups contains the Configuration group, that group contains Config file with status ok and "
+            "Config with status fail. That Config message must be the expected migration hard error: it says "
+            "config.toml declares resources, says config.toml is settings only now, and names the retained "
+            "sections. Use the Manifest and Resource registry facts for precise diagnostics, and require no check "
+            "with either name to have status warn or fail. Any such hard error leaves this action unverified and "
+            "returns the selected manifest to edit-one-manifest; repeat this validation after the edit.",
             None,
             "Leave the edit unverified, keep every retired TOML section, and block cutover.",
         ),
@@ -286,9 +299,11 @@ def _migration_actions() -> tuple[GuideAction, ...]:
                 ),
             ),
             ConsentBoundary.EXAMINE_WORKSTATION,
-            ("agw", "resource", "list", "--origin", "operator"),
-            "The operator inventory matches EXPECTED_IDENTITIES exactly by kind/name, operator-declared origin "
-            "variant, and intended manifest file path, with source line ignored and no missing or extra resource.",
+            ("agw", "resource", "list", "--origin", "operator", "--output", "json"),
+            "Before recording VERIFIED, parse exactly one JSON document and require schema_version is the "
+            "integer 1, command is exactly resource.list, and data is an object. The operator inventory matches "
+            "EXPECTED_IDENTITIES exactly by kind/name, operator-declared origin variant, and intended manifest "
+            "file path, with source line ignored and no missing or extra resource.",
             None,
             "Stop completion and use the backups to investigate any missing or extra resource.",
         ),
@@ -297,10 +312,14 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             "The operator inventory matches the caller-owned expected identities.",
             (),
             ConsentBoundary.EXAMINE_WORKSTATION,
-            ("agw", "doctor"),
-            "Doctor reports zero failures for the migrated installation.",
+            ("agw", "doctor", "--output", "json"),
+            "Before recording VERIFIED, parse exactly one JSON document and require schema_version is the "
+            "integer 1, command is exactly doctor, data is an object, data.counts.fail equals 0, and the "
+            "Database group contains a Schema check whose status is exactly ok, and the command exits 0. "
+            "Doctor then reports a current database schema and zero failures for the migrated installation.",
             None,
-            "Leave host readiness unverified and do not declare the migration complete.",
+            "Do not declare the migration complete until doctor confirms a current database schema and exits "
+            "successfully with zero failures.",
         ),
     )
 

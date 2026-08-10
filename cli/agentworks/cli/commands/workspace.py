@@ -13,6 +13,7 @@ from agentworks.cli._helpers import (
     parse_csv_filter,
     prompt_vm,
 )
+from agentworks.machine_output import OutputFormat
 from agentworks.secrets.policy import validate_interaction_policy
 
 workspace_app = typer.Typer(
@@ -60,25 +61,58 @@ def workspace_list(
             "Used by shell completion; the order matches the table's row order.",
         ),
     ] = False,
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option("--output", help="Output format: human or json. Default: human."),
+    ] = OutputFormat.HUMAN,
 ) -> None:
     """List workspaces. --vm accepts comma-separated values for OR-within-filter."""
-    from agentworks.workspaces.manager import list_workspaces
+    if names_only and output_format is OutputFormat.JSON:
+        raise typer.BadParameter("cannot be used with --output json", param_hint="--names-only")
 
-    list_workspaces(
-        get_db(),
-        vm_name=parse_csv_filter(vm),
-        names_only=names_only,
-    )
+    from agentworks.workspaces.manager import render_workspace_listing, workspace_listing
+
+    listing = workspace_listing(get_db(), vm_name=parse_csv_filter(vm))
+    if output_format is OutputFormat.JSON:
+        from click import get_binary_stream
+
+        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+        from agentworks.workspaces.manager.create import workspace_listing_data
+
+        write_json_envelope(
+            MachineOutputCommand.WORKSPACE_LIST,
+            workspace_listing_data(listing),
+            get_binary_stream("stdout"),
+        )
+        return
+    render_workspace_listing(listing, names_only=names_only)
 
 
 @workspace_app.command("describe")
 def workspace_describe(
     name: Annotated[str, typer.Argument(help="Workspace name")],
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option("--output", help="Output format: human or json. Default: human."),
+    ] = OutputFormat.HUMAN,
 ) -> None:
     """Show workspace details, sessions, and agent access."""
-    from agentworks.workspaces.manager import describe_workspace
+    from agentworks.workspaces.manager import render_workspace_description, workspace_description
 
-    describe_workspace(get_db(), name)
+    description = workspace_description(get_db(), name)
+    if output_format is OutputFormat.JSON:
+        from click import get_binary_stream
+
+        from agentworks.machine_output import MachineOutputCommand, write_json_envelope
+        from agentworks.workspaces.manager.create import workspace_description_data
+
+        write_json_envelope(
+            MachineOutputCommand.WORKSPACE_DESCRIBE,
+            workspace_description_data(description),
+            get_binary_stream("stdout"),
+        )
+        return
+    render_workspace_description(description)
 
 
 @workspace_app.command("rehome")

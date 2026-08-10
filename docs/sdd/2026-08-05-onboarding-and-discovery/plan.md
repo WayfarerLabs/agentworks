@@ -1,12 +1,12 @@
 # Plan: Onboarding, Discovery, and Management
 
-- Status: Draft for pre-implementation review
+- Status: Active, Phase 2
 - FRD: `docs/sdd/2026-08-05-onboarding-and-discovery/frd.md`
 - HLA: `docs/sdd/2026-08-05-onboarding-and-discovery/hla.md`
 
 ## Working rules
 
-- The lead owns this plan and never edits the roadmap ledger or another effort's artifacts.
+- The lead owns this plan and never edits the saga ledger or another effort's artifacts.
 - Every implementation step receives an `agentworks-dev` implementation pass and an
   `agentworks-reviewer` review before its checkbox is completed.
 - Run `./scripts/lint-files.sh --fix` and check its exit code before every commit.
@@ -170,7 +170,10 @@ to `main`. It has no provisional branch dependency.
       default secret reference; Azure and AWS select ambient authentication through the defaulted
       `auth` union, Lima selects local placement through the defaulted `placement` union, and
       Proxmox has no no-secret mode. Written legacy authentication and placement fields receive
-      their exact hard-error rewrites before cutover.
+      their exact hard-error rewrites before cutover. Git credential token acquisition preserves
+      omission and scalar shorthand, retires an outer explicit null with its exact stored-mode
+      rewrite, and keeps omitted or null inner `secret` on the well-known default; no minted arm is
+      taught before one exists.
 - [x] Prove the topic remains available when operator config does not load, names exact live
       remediation surfaces, and verifies results through normal loading and doctor rather than a
       frozen migration oracle.
@@ -180,6 +183,9 @@ to `main`. It has no provisional branch dependency.
 - [x] Reconcile schema rendering and migration teaching with the final PR #444 union surfaces,
       confirm PR #446's context-free validation boundary adds no guide-side filling, then rerun the
       full Phase 1 and CI gates before requesting roadmap-lead re-review.
+- [x] Revalidate schema rendering and migration teaching after PR #455's structural-union and git
+      credential token-acquisition contracts land, including the retained shorthand/default paths,
+      exact outer-null rewrite, stored arm, and absence of a minted arm.
 - [x] Round-3 performance follow-up: materialize global kind and implementation inventories only for
       concept views permitted to read them, replace snapshot list-membership deduplication with
       insertion-ordered identity maps, and pin bounded work and stable ordering structurally without
@@ -190,26 +196,59 @@ blocks and the migration workflow only; the broader registry-inventory scope rem
 
 ## Phase 2: machine-readable operational output
 
-- [ ] `machine-output-lld.md` inventories every covered list/describe service, pins JSON v1 schemas,
+- [x] `machine-output-lld.md` inventories every covered list/describe service, pins JSON v1 schemas,
       enum spellings, ordering, nullability, error behavior, and human-output compatibility
       fixtures.
-- [ ] Shared `--output human|json` option and v1 envelope serializer implemented without changing
-      the global output handler or implying support on mutation commands.
-- [ ] Resource list, kinds, and instance describe serialize their existing service fact records;
+- [x] Shared `--output human|json` option and v1 envelope serializer implemented without replacing
+      the global output handler, adding a process-global output mode or renderer, or implying
+      support on mutation commands; narrow request-scoped state controls presentation suppression
+      and error styling only for covered JSON commands.
+- [x] Resource list, kinds, and instance describe serialize their existing service fact records;
       human output remains byte-compatible.
-- [ ] VM, workspace, agent, session, console, and secret list/describe paths return fact records and
+- [x] VM, workspace, agent, session, console, and secret list/describe paths return fact records and
       gain JSON v1 while preserving human output and read-only behavior.
-- [ ] Doctor gains JSON v1 from `HealthReport`, emits a complete failing report, and preserves its
+- [x] Doctor gains JSON v1 from `HealthReport`, emits a complete failing report, and preserves its
       current exit status semantics.
-- [ ] Guide action records direct the agent to consume covered list, describe, and doctor JSON at
+- [x] Guide action records direct the agent to consume covered list, describe, and doctor JSON at
       applicable verification steps; an end-to-end fixture parses and asserts each v1 document.
-- [ ] `--names-only` and JSON mutual exclusion, deterministic output, no ANSI bytes, stderr error
+- [x] `--names-only` and JSON mutual exclusion, deterministic output, no ANSI bytes, stderr error
       routing, and schema-version compatibility covered by CLI tests.
-- [ ] JSON v1 documented as a permanent contract with examples and compatibility rules; command docs
+- [x] JSON v1 documented as a permanent contract with examples and compatibility rules; command docs
       and completions updated in the same commits.
-- [ ] All focused and full gates pass; step reviewed by `agentworks-reviewer` and a fresh-eyes
+- [x] All focused and full gates pass; step reviewed by `agentworks-reviewer` and a fresh-eyes
       reviewer; valid findings resolved.
-- [ ] Always-green ready-to-merge PR opened and roadmap-lead review requested.
+- [x] Always-green ready-to-merge PR opened and roadmap-lead review requested.
+- [x] Resolve the saga and installed-CLI review round: propagate failing JSON entrypoint status,
+      reject invalid and special database paths without blocking, share one verified database
+      snapshot across doctor groups, restore focused module sizes, reconcile final artifacts, and
+      rerun project, fresh-eyes, full, and PR gates before requesting re-review.
+- [x] Resolve the native-Windows and malformed-schema re-review round: represent unavailable secure
+      database inspection as a first-class non-failing doctor outcome, reject non-integer schema
+      versions through a complete path-free report, clean the accepted inspection seams, and rerun
+      project, fresh-eyes, full, and PR gates before requesting re-review.
+- [x] Resolve the pinned-parent, complete schema-history, and persisted-enum re-review round: carry
+      the resolved database directory identity through snapshot acquisition, distinguish an absent
+      schema history from malformed shape or rows, close corrupted persisted JSON enum values with
+      documented sentinels, and rerun project, fresh-eyes, full, and PR gates before requesting
+      re-review.
+
+The checked review rounds above record work later superseded by the operator scope correction below.
+
+- [x] Close corrupted persisted operational JSON enum values with documented sentinels and preserve
+      human-output compatibility.
+- [x] Apply the operator scope correction: remove the database-copying and hostile-filesystem
+      inspection subsystem, its unavailable-result protocol, tests, and documentation; retain only
+      straightforward non-migrating doctor reads and the independently required JSON projections;
+      then rerun project, fresh-eyes, full, and PR gates before requesting re-review.
+- [x] Resolve the simplified-doctor review round: share one ordinary read-only schema gate, fail
+      closed on malformed scalar schema versions, retain a closed warning for unexpected VM
+      initialization states, require a current schema before migration completion, and rerun focused
+      and full project gates.
+- [x] Doctor serializes the same `HealthReport` facts for human and JSON output, reports a stale
+      scalar schema version without migrating, fails closed on malformed or newer versions, and
+      requires a current Schema check before migration completion.
+- [x] Resolve final review findings, rerun focused and full gates, and obtain clean project,
+      fresh-eyes, integration, and PR re-review.
 
 Definition of done: R7 and AC4 hold across the named commands, with human and JSON renderers sharing
 one fact source.
@@ -218,9 +257,13 @@ one fact source.
 
 - [ ] `bootstrap-packaging-lld.md` pins the canonical source, generated Claude Code and Codex
       layouts, marketplace metadata, install commands, security-setting links, minimum CLI version,
-      regeneration guard, and clean-environment probe matrix.
+      regeneration guard, README derivation or equivalence check, and clean-environment probe
+      matrix.
 - [ ] Canonical thin bootstrap contains installation, the complete R12 disclosure, strict harness
-      posture, and `agw guide concept-onboarding --agent`, with no duplicated teaching content.
+      posture, and `agw guide concept-onboarding --agent`, with no duplicated teaching content. The
+      disclosure names the intended workstation, full file inspection and command execution under
+      the harness account, separate explicit privilege elevation, and the strictest practical
+      approval and visibility posture that preserves the required workstation access.
 - [ ] Generator emits committed Claude Code and Codex plugin/marketplace wrappers from that source;
       CI requires regeneration to produce no diff.
 - [ ] Repository README Getting Started leads with the R16 agent-addressed fenced block generated
@@ -231,11 +274,12 @@ one fact source.
       non-interactive fixture runs, exercising consent boundaries, refusal handling, rerun no-op
       behavior, post-upgrade newly available capability reporting, and JSON v1 consumption.
 - [ ] Every bootstrap fixture asserts the R12 disclosure is emitted before its first setup command,
-      probe, verification command, or other action.
+      probe, verification command, or other action, and pins every workstation-access and privilege
+      boundary from the canonical source.
 - [ ] Permanent installation and security documentation ships with the packages.
 - [ ] Packaging, generation, lint, and end-to-end gates pass; step reviewed by `agentworks-reviewer`
       and a fresh-eyes reviewer; valid findings resolved.
-- [ ] Always-green ready-to-merge PR opened and roadmap-lead review requested.
+- [ ] Always-green ready-to-merge PR opened and saga-lead review requested.
 
 Definition of done: R1, R11, R12, R16, AC1, AC3, AC7, AC8, and AC10 hold for both harnesses and the
 zero-plugin README path.
@@ -253,7 +297,7 @@ specific-resource depth that does not block the first release.
       switchboard edit, pinned by fixture-plugin tests.
 - [ ] Full registry integration gates pass; step reviewed by `agentworks-reviewer` and a fresh-eyes
       reviewer; valid findings resolved.
-- [ ] Always-green ready-to-merge PR opened and roadmap-lead review requested.
+- [ ] Always-green ready-to-merge PR opened and saga-lead review requested.
 
 Definition of done: R8 and AC5 project runtime registry and specific-resource facts without a
 hand-maintained switchboard.
@@ -275,7 +319,7 @@ hand-maintained switchboard.
       resolved; Copilot comments on ready PRs triaged.
 - [ ] `locked.md` created with final state and date, while recognizing the lock takes effect only
       after merge to `main`.
-- [ ] Final ready-to-merge PR reviewed by roadmap lead and handed off with commit and test evidence.
+- [ ] Final ready-to-merge PR reviewed by saga lead and handed off with commit and test evidence.
 
 Definition of done: every FRD requirement and acceptance criterion is evidenced, permanent docs are
 self-sufficient, and the effort is ready to merge and lock.

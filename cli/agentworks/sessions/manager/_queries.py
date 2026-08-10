@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import shlex
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import agentworks.sessions.manager as _mgr
 from agentworks import output
 from agentworks.db import PID_STOPPED, SessionStatus
+from agentworks.db.projections import project_session_mode, project_session_status
 from agentworks.errors import (
     BrokenStateError,
     ExternalError,
@@ -21,7 +23,78 @@ from agentworks.sessions.tmux import AGENT_SOCKET_ROOT
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow, VMRow
+    from agentworks.machine_output import JsonObject
     from agentworks.sessions.tmux import RunCommand
+
+
+@dataclass(frozen=True)
+class SessionListRow:
+    name: str
+    workspace_name: str
+    vm_name: str
+    template: str
+    harness_integration: str | None
+    mode: str
+    agent_name: str | None
+    status: str
+
+
+@dataclass(frozen=True)
+class SessionListing:
+    sessions: tuple[SessionListRow, ...]
+
+
+@dataclass(frozen=True)
+class SessionDescription:
+    name: str
+    workspace_name: str
+    vm_name: str
+    template: str
+    harness_integration: str | None
+    mode: str
+    agent_name: str | None
+    status: str
+    pid: int | None
+    created_at: str
+    updated_at: str
+
+
+def session_listing_data(listing: SessionListing) -> JsonObject:
+    """Project session list facts into the closed JSON v1 shape."""
+    return {
+        "sessions": [
+            {
+                "name": session.name,
+                "workspace_name": session.workspace_name,
+                "vm_name": session.vm_name,
+                "template": session.template,
+                "harness_integration": session.harness_integration,
+                "mode": project_session_mode(session.mode),
+                "agent_name": session.agent_name,
+                "status": project_session_status(session.status, allow_unavailable=True),
+            }
+            for session in listing.sessions
+        ],
+    }
+
+
+def session_description_data(description: SessionDescription) -> JsonObject:
+    """Project session detail facts into the closed JSON v1 shape."""
+    return {
+        "session": {
+            "name": description.name,
+            "workspace_name": description.workspace_name,
+            "vm_name": description.vm_name,
+            "template": description.template,
+            "harness_integration": description.harness_integration,
+            "mode": project_session_mode(description.mode),
+            "agent_name": description.agent_name,
+            "status": project_session_status(description.status, allow_unavailable=False),
+            "pid": description.pid,
+            "created_at": description.created_at,
+            "updated_at": description.updated_at,
+        },
+    }
 
 
 def delete_session(
@@ -333,14 +406,14 @@ def _cleanup_now_empty_agent(
     )
 
 
-def describe_session(
+def session_description(
     db: Database,
     config: Config,
     *,
     name: str,
     interaction: InteractionPolicy,
-) -> None:
-    """Show session details.
+) -> SessionDescription:
+    """Collect session detail facts while retaining the live status behavior.
 
     Runs inside ``_prepare_vm``'s gate span: a hold the imperative
     body did not take (it gated and discarded the platform). The
@@ -357,7 +430,7 @@ def describe_session(
     # needs a valid registry to probe live status, so a truly broken
     # registry aborts describe there regardless. The "-" fallback here
     # is thus defensive, not a graceful-degrade path describe can reach.
-    harness_integration_label = _mgr._display_harness_integration(_mgr._display_registry(config), session.template)
+    harness_integration = _mgr._display_harness_integration(_mgr._display_registry(config), session.template)
     with _mgr._prepare_vm(
         db,
         config,
@@ -375,30 +448,59 @@ def describe_session(
 
         status = _mgr.check_session_status(session, target=target)
 
-        # Build status label with PID if running and current boot
-        if status == SessionStatus.OK and session.pid and session.pid > 0:
-            status_label = f"running (PID {session.pid})"
-        elif status == SessionStatus.BROKEN and session.pid and session.pid > 0:
-            status_label = f"broken (PID {session.pid} alive, tmux unreachable)"
-        else:
-            status_label = {
+        return SessionDescription(
+            name=session.name,
+            workspace_name=session.workspace_name,
+            vm_name=vm.name,
+            template=session.template,
+            harness_integration=None if harness_integration == "-" else harness_integration,
+            mode=project_session_mode(session.mode),
+            agent_name=session.agent_name,
+            status={
                 SessionStatus.OK: "running",
                 SessionStatus.STOPPED: "stopped",
                 SessionStatus.BROKEN: "broken",
                 SessionStatus.UNKNOWN: "unknown",
-            }[status]
+            }[status],
+            pid=session.pid if session.pid is not None and session.pid > 0 else None,
+            created_at=session.created_at,
+            updated_at=session.updated_at,
+        )
 
-        mode_label = f"agent ({session.agent_name})" if session.agent_name else "admin"
 
-        output.info(f"Name:       {session.name}")
-        output.info(f"Workspace:  {session.workspace_name}")
-        output.info(f"VM:         {vm.name}")
-        output.info(f"Template:   {session.template}")
-        output.info(f"Harness integration: {harness_integration_label}")
-        output.info(f"Mode:       {mode_label}")
-        output.info(f"Status:     {status_label}")
-        output.info(f"Created:    {session.created_at}")
-        output.info(f"Updated:    {session.updated_at}")
+def render_session_description(description: SessionDescription) -> None:
+    """Render session detail facts with the legacy human layout."""
+    status = project_session_status(description.status, allow_unavailable=False)
+    status_label = status
+    if status == "running" and description.pid is not None:
+        status_label = f"running (PID {description.pid})"
+    elif status == "broken" and description.pid is not None:
+        status_label = f"broken (PID {description.pid} alive, tmux unreachable)"
+    mode = project_session_mode(description.mode)
+    mode_label = (
+        mode if mode == "unknown" else f"agent ({description.agent_name})" if description.agent_name else "admin"
+    )
+    output.info(f"Name:       {description.name}")
+    output.info(f"Workspace:  {description.workspace_name}")
+    output.info(f"VM:         {description.vm_name}")
+    output.info(f"Template:   {description.template}")
+    output.info(f"Harness integration: {description.harness_integration or '-'}")
+    output.info(f"Mode:       {mode_label}")
+    output.info(f"Status:     {status_label}")
+    output.info(f"Created:    {description.created_at}")
+    output.info(f"Updated:    {description.updated_at}")
+
+
+def describe_session(
+    db: Database,
+    config: Config,
+    *,
+    name: str,
+    interaction: InteractionPolicy,
+) -> None:
+    """Show session details."""
+    interaction = validate_interaction_policy(interaction)
+    render_session_description(session_description(db, config, name=name, interaction=interaction))
 
 
 def list_sessions(
@@ -424,15 +526,14 @@ def list_sessions(
     workspace-grouped order so completion stays stable.
     """
     interaction = validate_interaction_policy(interaction)
-    sessions = _mgr.filter_sessions(
-        db,
-        workspace_name=workspace_name,
-        vm_name=vm_name,
-        agent_name=agent_name,
-        admin_only=admin_only,
-    )
-
     if names_only:
+        sessions = _mgr.filter_sessions(
+            db,
+            workspace_name=workspace_name,
+            vm_name=vm_name,
+            agent_name=agent_name,
+            admin_only=admin_only,
+        )
         # Empty / fully-filtered-out result prints nothing under
         # names-only; the friendly "No sessions found" line below is
         # for human readers only. Match the table's workspace-grouped
@@ -444,17 +545,45 @@ def list_sessions(
             for session in names_by_ws[ws_name]:
                 output.info(session.name)
         return
+    render_session_listing(
+        _mgr.session_listing(
+            db,
+            config,
+            workspace_name=workspace_name,
+            vm_name=vm_name,
+            agent_name=agent_name,
+            admin_only=admin_only,
+            no_status=no_status,
+            interaction=interaction,
+        )
+    )
 
+
+def session_listing(
+    db: Database,
+    config: Config,
+    *,
+    workspace_name: str | list[str] | None = None,
+    vm_name: str | list[str] | None = None,
+    agent_name: str | list[str] | None = None,
+    admin_only: bool = False,
+    no_status: bool = False,
+    interaction: InteractionPolicy,
+) -> SessionListing:
+    """Collect ordered session list facts with the existing status repair pass."""
+    interaction = validate_interaction_policy(interaction)
+    sessions = _mgr.filter_sessions(
+        db,
+        workspace_name=workspace_name,
+        vm_name=vm_name,
+        agent_name=agent_name,
+        admin_only=admin_only,
+    )
     if not sessions:
-        output.info("No sessions found.")
-        return
-
-    # Auto-repair sessions with missing PIDs, then batch check.
-    # The status path SSHes to every involved VM; anchor each one (no-op
-    # on non-WSL2) so the probe doesn't lose them mid-check.
-    status_keepalive_vms: list[VMRow] = [] if no_status else _mgr._distinct_vms_for_sessions(db, sessions)
+        return SessionListing(sessions=())
 
     status_map: dict[str, SessionStatus] = {}
+    status_keepalive_vms: list[VMRow] = [] if no_status else _mgr._distinct_vms_for_sessions(db, sessions)
     with _mgr._batch_vm_boundary(
         db,
         config,
@@ -465,70 +594,77 @@ def list_sessions(
             sessions = _mgr.ensure_pids_batch(sessions, db=db, config=config)
             status_map = _mgr.batch_check_all_sessions(sessions, db=db, config=config)
 
-    # Resolve each session's concrete harness integration for the display column.
-    # build_registry and resolve_template are config-only (no SSH), so
-    # this is cheap; still, resolve each DISTINCT template at most once
-    # and guard both the registry build and each resolution so a bad
-    # registry or one bad template shows "-" rather than aborting the
-    # whole listing.
     registry = _mgr._display_registry(config)
-    harness_integration_by_template: dict[str, str] = {}
+    harness_by_template: dict[str, str] = {}
 
-    def _harness_integration_for(template_name: str) -> str:
-        if template_name not in harness_integration_by_template:
-            harness_integration_by_template[template_name] = _mgr._display_harness_integration(registry, template_name)
-        return harness_integration_by_template[template_name]
+    def harness_for(template_name: str) -> str | None:
+        if template_name not in harness_by_template:
+            harness_by_template[template_name] = _mgr._display_harness_integration(registry, template_name)
+        label = harness_by_template[template_name]
+        return None if label == "-" else label
 
-    # Build table rows grouped by workspace
-    by_workspace: dict[str, list[SessionRow]] = {}
+    facts: list[SessionListRow] = []
     for session in sessions:
-        by_workspace.setdefault(session.workspace_name, []).append(session)
-
-    rows: list[tuple[str, str, str, str, str, str, str]] = []
-    broken_names = []
-    unknown_names = []
-    for ws_name, ws_sessions in sorted(by_workspace.items()):
-        ws = db.get_workspace(ws_name)
-        vm_name = ws.vm_name if ws else "-"
-
-        for session in ws_sessions:
-            if no_status:
-                status = "-"
-            elif session.pid == PID_STOPPED:
-                status = "stopped"
-            elif session.pid is None or session.boot_id is None:
-                status = "unknown"
-            elif session.name in status_map:
-                s_status = status_map[session.name]
-                status = {
-                    SessionStatus.OK: "running",
-                    SessionStatus.STOPPED: "stopped",
-                    SessionStatus.BROKEN: "broken",
-                    SessionStatus.UNKNOWN: "unknown",
-                }[s_status]
-            else:
-                # No status available (VM unreachable or SSH failure during batch check)
-                status = "-"
-            mode_label = f"agent ({session.agent_name})" if session.agent_name else "admin"
-            rows.append(
-                (
-                    session.name,
-                    ws_name,
-                    vm_name,
-                    session.template,
-                    _harness_integration_for(session.template),
-                    mode_label,
-                    status,
-                )
+        workspace = db.get_workspace(session.workspace_name)
+        resolved_vm_name = workspace.vm_name if workspace is not None else ""
+        if no_status:
+            status = "unavailable"
+        elif session.pid == PID_STOPPED:
+            status = "stopped"
+        elif session.pid is None or session.boot_id is None:
+            status = "unknown"
+        elif session.name in status_map:
+            status = {
+                SessionStatus.OK: "running",
+                SessionStatus.STOPPED: "stopped",
+                SessionStatus.BROKEN: "broken",
+                SessionStatus.UNKNOWN: "unknown",
+            }[status_map[session.name]]
+        else:
+            status = "unavailable"
+        facts.append(
+            SessionListRow(
+                name=session.name,
+                workspace_name=session.workspace_name,
+                vm_name=resolved_vm_name,
+                template=session.template,
+                harness_integration=harness_for(session.template),
+                mode=project_session_mode(session.mode),
+                agent_name=session.agent_name,
+                status=status,
             )
-            if status == "broken":
-                broken_names.append(session.name)
-            elif status == "unknown":
-                unknown_names.append(session.name)
+        )
+    return SessionListing(sessions=tuple(facts))
 
-    if not rows:
+
+def render_session_listing(listing: SessionListing) -> None:
+    """Render session list facts with the legacy human layout."""
+    if not listing.sessions:
         output.info("No sessions found.")
         return
+
+    rows: list[tuple[str, str, str, str, str, str, str]] = []
+    broken_names: list[str] = []
+    unknown_names: list[str] = []
+    for session in listing.sessions:
+        status = "-" if session.status == "unavailable" else session.status
+        mode = project_session_mode(session.mode)
+        mode_label = mode if mode == "unknown" else f"agent ({session.agent_name})" if session.agent_name else "admin"
+        rows.append(
+            (
+                session.name,
+                session.workspace_name,
+                session.vm_name,
+                session.template,
+                session.harness_integration or "-",
+                mode_label,
+                status,
+            )
+        )
+        if status == "broken":
+            broken_names.append(session.name)
+        elif status == "unknown":
+            unknown_names.append(session.name)
 
     headers = ["NAME", "WORKSPACE", "VM", "TEMPLATE", "HARNESS INTEGRATION", "MODE", "STATUS"]
     for line in output.render_table(headers, rows):

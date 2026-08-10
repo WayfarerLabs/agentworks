@@ -1,8 +1,8 @@
 # Low-Level Design: Declarative-Schema Guide Adapter
 
 - Status: Implemented for Phase 1 release-gate review
-- Authoritative dependency: `main` at `75c6edd1`, including the field-tree contract from PR #444 and
-  boundary default filling from PR #446
+- Authoritative dependency: merged `main` at `25e47637`, including the field-tree contract from PR
+  #444, boundary default filling from PR #446, and git-token structural unions from PR #455
 - Parent design: `hla.md` and `guide-contract-lld.md`
 
 ## Scope
@@ -46,6 +46,13 @@ PR #446 moved owner-templated default filling to the decode boundary through `fi
 guide does not fill a payload, validate a model, or pass Pydantic context. It renders the
 declarative `default_template` from `FieldDoc` with `<name>` as the owner placeholder, exactly as it
 did before that internal lifecycle change.
+
+PR #455 uses the same `FieldEntry.alternatives` contract for an untagged structural union. The
+git-credential provider `token` field is a scalar-or-table field whose table has one tagged `stored`
+arm. Its `mode` and `secret` rows therefore arrive as that arm's `Alternative.fields`, not as
+ordinary children and not as a copied guide-only schema. The adapter applies the same exhaustive
+alternative traversal to `git-credential`, `git-credential-provider/github`, and
+`git-credential-provider/azdo`.
 
 ## Topic and block target resolution
 
@@ -101,10 +108,11 @@ The field renderer then reads only the remaining `SchemaReference` records. Its 
 target and emits stable rows for path, required or optional status, type, default or owner-templated
 default, description, choices, constraints, examples, and reference marker when those facts exist.
 Defaults remain visible on block-valued tagged fields, including `auth: {mode: ambient}` and
-`placement: {mode: local}`. Nested paths come from the existing `FieldEntry` tree. Capability-kind
-references render their live alternatives and exact `kind/name` targets. Root-valued implementation
-config renders its one root entry without inventing a `spec` wrapper. Only projected plain-text
-field facts and alternative summaries are escaped for Markdown.
+`placement: {mode: local}`, and on PR #455's scalar-or-table token field as `{mode: stored}`. Nested
+paths come from the existing `FieldEntry` tree. Capability-kind references render their live
+alternatives and exact `kind/name` targets. Root-valued implementation config renders its one root
+entry without inventing a `spec` wrapper. Only projected plain-text field facts and alternative
+summaries are escaped for Markdown.
 
 Literal defaults, examples, choices, and constraints never pass through `plain_text`. Their document
 form comes from `agentworks.manifests.yaml_value.render_value`, the same wire-value serializer used
@@ -146,18 +154,18 @@ The core topic contributes these records in order. Command actions use only the 
 Agentworks CLI. Manual actions name their exact inputs and outcomes but let the operator choose
 platform-native copy, inspection, and editing tools.
 
-| Action ID                     | Consent                 | Operation                                                                                                                                                                                                                                                                                                                                                                              | Verification or refusal boundary                                                                                                                                                                                                         |
-| ----------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `inventory-retired-resources` | `READ_CONFIGURED_STATE` | Manual: read `CONFIG_PATH` plus existing manifests under optional `RESOURCES_PATH`. Before backup or editing, record the complete union: every pre-existing manifest and every manifest-producing retired section as canonical `kind/name`, `operator-declared`, and the existing or operator-chosen intended manifest file. Exclude `[secret_backends.*]` and collapse nested tables. | The caller owns one immutable expected identity-and-origin set; refusal stops before backup or editing.                                                                                                                                  |
-| `backup-config`               | `MUTATE_AGENTWORKS`     | Manual: copy `CONFIG_PATH` to a fresh operator-selected `CONFIG_BACKUP_PATH` outside and distinct from the active config and resources trees.                                                                                                                                                                                                                                          | Refusal leaves config untouched and stops migration.                                                                                                                                                                                     |
-| `backup-resources`            | `MUTATE_AGENTWORKS`     | Manual: when `RESOURCES_PATH` exists, copy it to a fresh `RESOURCES_BACKUP_PATH` outside and distinct from both active trees. Otherwise record an absent resources baseline and create no active path.                                                                                                                                                                                 | Refusal leaves resources untouched and stops migration.                                                                                                                                                                                  |
-| `verify-migration-inputs`     | `READ_CONFIGURED_STATE` | Manual: compare config backup with source, verify a matching resources copy or recorded absent baseline, and review the already-complete expected identity-and-origin set before any edit.                                                                                                                                                                                             | Every present backup must match; destinations must be outside active trees; verification must not add or rewrite expected entries. Otherwise stop.                                                                                       |
-| `edit-one-manifest`           | `MUTATE_AGENTWORKS`     | Manual: edit only the pre-recorded `MANIFEST_PATH` for a pre-existing or TOML-derived manifest, using its live sample and optional implementation reference. Apply any retired presence shape's exact hard-error rewrite here, including deletion of an outer null line and its ambient, ambient, or local tagged mode.                                                                | Consume but never change the expected entry; leave the last validated manifests unchanged on refusal and do not remove TOML.                                                                                                             |
-| `validate-manifest-set`       | `EXAMINE_WORKSTATION`   | `agw doctor`                                                                                                                                                                                                                                                                                                                                                                           | The new manifest receives precise feedback while the retired-section config failure remains; refusal leaves the edit unverified and blocks cutover.                                                                                      |
-| `review-null-secret-fields`   | `READ_CONFIGURED_STATE` | Manual: inspect every pre-existing and TOML-derived site manifest. Classify current `token_secret`, `auth.mode`, service-principal `auth.secret`, access-key `auth.access_key_secret`, and `placement.mode`. If a retired shape remains, record the exact required rewrite and return it to the earlier edit action without changing the manifest.                                     | Confirm default, custom, ambient, or local intent. An outer legacy null maps to ambient, ambient, or local; an inner secret-reference null selects its well-known default. Refusal leaves the site unchanged and blocks cutover.         |
-| `remove-retired-sections`     | `MUTATE_AGENTWORKS`     | Manual: remove every retired resource section from `CONFIG_PATH` in one edit and update `[secret_config].backends` when needed.                                                                                                                                                                                                                                                        | Refusal restores or retains the untouched config and its hard error.                                                                                                                                                                     |
-| `compare-operator-inventory`  | `EXAMINE_WORKSTATION`   | `agw resource list --origin operator`                                                                                                                                                                                                                                                                                                                                                  | The normal inventory may probe host readiness. Compare identity, `operator-declared`, and manifest file with the expected set while ignoring source line; any missing or extra row stops completion and uses the backups to investigate. |
-| `finish-doctor`               | `EXAMINE_WORKSTATION`   | `agw doctor`                                                                                                                                                                                                                                                                                                                                                                           | Zero failures completes the migration; refusal leaves host readiness unverified.                                                                                                                                                         |
+| Action ID                     | Consent                 | Operation                                                                                                                                                                                                                                                                                                                                                                                                                            | Verification or refusal boundary                                                                                                                                                                                                         |
+| ----------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `inventory-retired-resources` | `READ_CONFIGURED_STATE` | Manual: read `CONFIG_PATH` plus existing manifests under optional `RESOURCES_PATH`. Before backup or editing, record the complete union: every pre-existing manifest and every manifest-producing retired section as canonical `kind/name`, `operator-declared`, and the existing or operator-chosen intended manifest file. Exclude `[secret_backends.*]` and collapse nested tables.                                               | The caller owns one immutable expected identity-and-origin set; refusal stops before backup or editing.                                                                                                                                  |
+| `backup-config`               | `MUTATE_AGENTWORKS`     | Manual: copy `CONFIG_PATH` to a fresh operator-selected `CONFIG_BACKUP_PATH` outside and distinct from the active config and resources trees.                                                                                                                                                                                                                                                                                        | Refusal leaves config untouched and stops migration.                                                                                                                                                                                     |
+| `backup-resources`            | `MUTATE_AGENTWORKS`     | Manual: when `RESOURCES_PATH` exists, copy it to a fresh `RESOURCES_BACKUP_PATH` outside and distinct from both active trees. Otherwise record an absent resources baseline and create no active path.                                                                                                                                                                                                                               | Refusal leaves resources untouched and stops migration.                                                                                                                                                                                  |
+| `verify-migration-inputs`     | `READ_CONFIGURED_STATE` | Manual: compare config backup with source, verify a matching resources copy or recorded absent baseline, and review the already-complete expected identity-and-origin set before any edit.                                                                                                                                                                                                                                           | Every present backup must match; destinations must be outside active trees; verification must not add or rewrite expected entries. Otherwise stop.                                                                                       |
+| `edit-one-manifest`           | `MUTATE_AGENTWORKS`     | Manual: edit only the pre-recorded `MANIFEST_PATH` for a pre-existing or TOML-derived manifest, using its live sample and optional implementation reference. Apply any retired presence shape's exact hard-error rewrite here. For git credentials, preserve omission/default behavior and scalar secret names while writing the canonical tagged stored arm; delete outer `token: null` or replace it with `token: {mode: stored}`. | Consume but never change the expected entry; leave the last validated manifests unchanged on refusal and do not remove TOML.                                                                                                             |
+| `validate-manifest-set`       | `EXAMINE_WORKSTATION`   | `agw doctor`                                                                                                                                                                                                                                                                                                                                                                                                                         | The new manifest receives precise feedback while the retired-section config failure remains. Any manifest validation hard error routes the manifest back to `edit-one-manifest`; refusal leaves the edit unverified and blocks cutover.  |
+| `review-null-secret-fields`   | `READ_CONFIGURED_STATE` | Manual: inspect every pre-existing and TOML-derived site manifest. Classify current `token_secret`, `auth.mode`, service-principal `auth.secret`, access-key `auth.access_key_secret`, and `placement.mode`. If a retired shape remains, record the exact required rewrite and return it to the earlier edit action without changing the manifest.                                                                                   | Confirm default, custom, ambient, or local intent. An outer legacy null maps to ambient, ambient, or local; an inner secret-reference null selects its well-known default. Refusal leaves the site unchanged and blocks cutover.         |
+| `remove-retired-sections`     | `MUTATE_AGENTWORKS`     | Manual: remove every retired resource section from `CONFIG_PATH` in one edit and update `[secret_config].backends` when needed.                                                                                                                                                                                                                                                                                                      | Refusal restores or retains the untouched config and its hard error.                                                                                                                                                                     |
+| `compare-operator-inventory`  | `EXAMINE_WORKSTATION`   | `agw resource list --origin operator`                                                                                                                                                                                                                                                                                                                                                                                                | The normal inventory may probe host readiness. Compare identity, `operator-declared`, and manifest file with the expected set while ignoring source line; any missing or extra row stops completion and uses the backups to investigate. |
+| `finish-doctor`               | `EXAMINE_WORKSTATION`   | `agw doctor`                                                                                                                                                                                                                                                                                                                                                                                                                         | Zero failures completes the migration; refusal leaves host readiness unverified.                                                                                                                                                         |
 
 The teaching covers:
 
@@ -174,19 +182,24 @@ The teaching covers:
    `agw resource describe-kind KIND/NAME` or `agw guide KIND/NAME` for tagged capability config;
 4. write one pre-existing or TOML-derived manifest at a time while leaving all retired TOML sections
    in place; apply retired presence-shape hard-error rewrites only inside this mutation, then run
-   `agw doctor` after each edit so its degraded config path validates the growing set;
+   `agw doctor` after each edit so its degraded config path validates the growing set; any manifest
+   validation hard error returns to the same edit loop;
 5. treat `[secret_backends.*]` as the one section family with no manifest: delete those empty
    declarations during the final TOML cutover and activate desired backends through
    `[secret_config].backends`;
 6. fix closed-world fields, strict types, non-nullable nulls, and the retired sibling capability
    shape from the emitted error and live field reference;
-7. inspect every pre-existing and TOML-derived site without changing it; classify Proxmox
+7. preserve pre-existing git token acquisition: omission selects the stored arm and default secret,
+   a scalar remains accepted shorthand, and the canonical current spelling is the tagged stored arm;
+   inner `token.secret` omission or null selects the default, while retired outer `token: null` is
+   deleted or rewritten exactly as `token: {mode: stored}`; the current contract has no minted arm;
+8. inspect every pre-existing and TOML-derived site without changing it; classify Proxmox
    `token_secret`, Azure service-principal `auth.secret`, and AWS access-key
    `auth.access_key_secret` as the well-known default or a custom secret name; treat omitted `auth`
    as ambient, omitted `placement` as local, and preserve Proxmox's required secret-backed mode; if
    a retired shape remains, record its exact required rewrite and route it back through the earlier
    edit and validation loop, keeping outer null mode mappings distinct from inner secret nulls;
-8. remove every retired TOML resource section in one pass, compare the normal
+9. remove every retired TOML resource section in one pass, compare the normal
    `agw resource list --origin operator` inventory with the pre-migration identities, including
    origin variant and manifest file while ignoring source line, and finish only when `agw doctor`
    reports zero failures.
@@ -207,6 +220,15 @@ and does not copy the generated live field set.
 PR #446 changed where owner-templated defaults are filled, not what the declarative field reference
 reports. Revalidation therefore covers guide rendering and migration wording while leaving filling
 at the manifest and capability decode boundaries.
+
+PR #455 changed git token acquisition from a nullable scalar field to an untagged scalar-or-table
+union without changing the default stored-secret behavior. Omitted `provider.token`, a tagged stored
+arm with omitted or null inner `secret`, and an explicitly tagged stored arm all use the
+owner-derived default; a scalar remains stored-arm shorthand. Explicit outer `token: null` is the
+one retired spelling and its exact equivalent is deletion or `token: {mode: stored}`. The migration
+topic authors that release-history rewrite inside `edit-one-manifest`, while all current paths,
+defaults, and the single `stored` arm continue to come from `reference_for`. It does not invent a
+future minted arm or broaden the site-only read review.
 
 ## Verification
 
@@ -236,6 +258,10 @@ The adapter is complete when tests prove:
 - Azure, AWS, and Lima field references render every anonymous union arm's fields under the arm,
   preserve block defaults, mark recurring arms, and point unexpanded addressable arms to their full
   guide or describe reference;
+- the declarable git-credential reference and the GitHub and AzDO provider references render the PR
+  #455 scalar-or-table token union, its stored arm, mode and secret rows, owner default, and no
+  minted arm; live validation and reference extraction pin omission, scalar shorthand, tagged
+  stored, inner null, and retired outer-null behavior;
 - final inventory comparison accepts a preserved operator resource whose manifest source line moved
   while requiring its identity, operator-declared variant, and manifest file to match;
 - schema scalar rendering uses `render_value` for booleans, enums, collections, empty and whitespace

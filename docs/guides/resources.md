@@ -591,5 +591,23 @@ agw resource describe secret/npm-token  # where it's referenced, what uses it
 agw doctor                              # offline secret attempt/readiness preview
 ```
 
+### JSON for automation
+
+The read-only resource, secret, and health commands also support `--output json`: `resource list`,
+`resource kinds`, `resource describe`, `secret list`, `secret describe`, and `doctor`. Each
+successful response is one JSON document with `schema_version`, `command`, and `data` fields. The
+backend lists and reference arrays retain their operational precedence and graph order, and the
+secret views report only lookup prediction and metadata, never a secret value.
+
+`--output human` is the default and keeps the terminal-oriented rendering. `--names-only` remains
+reserved for shell completion, so it cannot be combined with JSON output. `agw doctor --output json`
+still exits 1 when its complete report contains failed checks, after writing that report.
+
+The [CLI JSON v1 reference](../../cli/command-reference.md#machine-readable-output) documents the
+exact envelopes, fields, null rules, ordering, error behavior, and compatibility policy. Doctor's
+JSON diagnostic message and hint fields are the same structured facts shown by the human renderer.
+They can therefore contain configuration paths, backend responses, exception text, or other
+troubleshooting detail that the human report exposes.
+
 ADRs 0016 and 0022 record the design of the config/resource split, capability kinds, and YAML as the
 resource-declaration frontend.

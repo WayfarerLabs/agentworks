@@ -16,6 +16,13 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.errors import StateError
+from agentworks.machine_output import (
+    JsonObject,
+    JsonValue,
+    project_instance_references,
+    project_origin,
+    project_references,
+)
 from agentworks.resources.inspect import used_by_for
 from agentworks.resources.render import format_origin_line, format_reference_entry
 from agentworks.secrets.kinds import SECRET_KIND_NAME
@@ -81,6 +88,33 @@ class SecretTable:
     rows: tuple[SecretRow, ...]
     operator_count: int
     auto_count: int
+
+
+def secret_table_data(table: SecretTable) -> JsonObject:
+    """Project list facts into the closed ``secret.list`` JSON data shape."""
+    return {
+        "sources": list(table.sources),
+        "secrets": [
+            {
+                "name": row.name,
+                "description": row.description,
+                "sources": [
+                    {
+                        "source": cell.source,
+                        "would_attempt": cell.would_attempt,
+                        "identifier": cell.identifier,
+                        "not_ready_reason": cell.not_ready_reason,
+                    }
+                    for cell in row.cells
+                ],
+            }
+            for row in table.rows
+        ],
+        "counts": {
+            "operator_declared": table.operator_count,
+            "auto_declared": table.auto_count,
+        },
+    }
 
 
 def build_secret_table(config: Config, registry: Registry) -> SecretTable:
@@ -250,7 +284,7 @@ class SourceMapping:
     - ``backend``: the backend name (``"env-var"``, ``"prompt"``, ...).
     - ``would_attempt``: True if the backend would try this secret at
       resolution time. False = explicit opt-out via
-      ``backend_mappings.<backend> = false``, or the backend has no
+      ``backend_mappings.<source> = false``, or the selected backend has no
       default convention for this secret and no operator override.
     - ``identifier``: the backend's lookup identifier (env-var name,
       ``op://`` URI, vault path, etc.) when meaningful. ``None`` for
@@ -298,6 +332,47 @@ class SecretDescription:
     used_by: tuple[InstanceRef, ...] | None
     source_mappings: tuple[SourceMapping, ...]
     resolution: ResolutionPreview
+
+
+def secret_description_data(description: SecretDescription) -> JsonObject:
+    """Project describe facts into the closed ``secret.describe`` JSON data shape."""
+    references: list[JsonValue] = [reference for reference in project_references(description.references)]
+    used_by: list[JsonValue] | None = (
+        None
+        if description.used_by is None
+        else [reference for reference in project_instance_references(description.used_by)]
+    )
+    return {
+        "secret": {
+            "name": description.name,
+            "kind": description.kind,
+            "origin": project_origin(description.origin),
+            "description": description.description,
+            "hint": description.hint,
+            "references": references,
+            "used_by": used_by,
+            "source_mappings": [
+                {
+                    "source": mapping.source,
+                    "backend": mapping.backend,
+                    "provenance": mapping.provenance.value,
+                    "would_attempt": mapping.would_attempt,
+                    "identifier": mapping.identifier,
+                    "not_ready_reason": mapping.not_ready_reason,
+                }
+                for mapping in description.source_mappings
+            ],
+            "resolution": {
+                "category": description.resolution.category.value,
+                "source": description.resolution.source,
+                "identifier": description.resolution.identifier,
+                "skipped_not_ready": [
+                    {"source": skipped.source, "reason": skipped.reason}
+                    for skipped in description.resolution.skipped_not_ready
+                ],
+            },
+        },
+    }
 
 
 def describe_secret(

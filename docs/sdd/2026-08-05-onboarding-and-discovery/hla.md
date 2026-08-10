@@ -327,7 +327,9 @@ inspection separation and keeps tests independent of terminal presentation.
 One canonical bootstrap body is the source for both harness packages. It contains only:
 
 1. supported Python and `agentworks-cli` installation guidance;
-2. the complete R12 access disclosure and concrete strict-security posture links;
+2. the complete R12 access disclosure, including the intended workstation, full account-scoped file
+   inspection and command execution, separate explicit privilege elevation, Agentworks-reachable
+   resources, and concrete strict-security posture links;
 3. the instruction to run `agw guide concept-onboarding --agent` and follow it.
 
 A small generator wraps that body in the Claude Code and Codex package layouts. Generated files are
@@ -337,7 +339,8 @@ minimum CLI version that first supplies the referenced guide contract and no max
 itself owns all evolving teaching.
 
 The repository README leads with the same canonical agent-addressed bootstrap text in a fenced
-copyable block. The plugins remain an additional discovery channel, not a prerequisite.
+copyable block. It derives from or is checked against the canonical source rather than maintaining a
+second security paraphrase. The plugins remain an additional discovery channel, not a prerequisite.
 
 The bootstrap's instruction to follow `concept-onboarding` also exercises the machine-readable
 contract. The guide tells the agent which list, describe, and doctor JSON documents to request and
