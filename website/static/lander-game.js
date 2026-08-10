@@ -98,7 +98,7 @@ function positionSite(group, site) {
     const deck = platform.querySelector("rect");
     deck.setAttribute("x", left); deck.setAttribute("y", top); deck.setAttribute("width", right - left); deck.setAttribute("height", bottom - top);
     platform.querySelector(".helipad-mark").setAttribute("d", `M${center - 9} ${top + 1.7}v-20m18 20v-20m-18 10h18`);
-    group.querySelector(".platform-supports").setAttribute("d", `M${left + 14} ${bottom}v8m${right - left - 28} -8v13`);
+    group.querySelector(".platform-supports").setAttribute("d", `M${left + 14} ${bottom}v4.5m${right - left - 28} -4.5v4.5`);
     group.querySelector(".gas-can").setAttribute("transform", `translate(${center + 30} ${top - 15})`);
     const buildingLeft = right + 20;
     const roof = top - 72;
@@ -117,9 +117,10 @@ function positionSite(group, site) {
 }
 
 export class LanderGameController {
-    constructor(root, cleanups = []) {
+    constructor(root, cleanups = [], snapshot = root?.cloneNode(true)) {
         if (!root) throw new Error("Lunar deployment game root is missing");
         this.root = root;
+        this.pristine = snapshot;
         for (const id of ["lander-scene-shell", "lander-scene", "lander-start", "lander-fuel", "lander-fuel-value",
             "lander-target-direction", "lander-controls", "lander-actions", "lander-exit", "lander-restart", "lander-status",
             "terrain-layer", "site-layer", "debris-layer", "mission-agent"]) {
@@ -135,6 +136,7 @@ export class LanderGameController {
         this.pulseTimer = null;
         this.frameId = null;
         this.previousFrame = null;
+        this.worldWindowKey = null;
         this.paused = document.hidden;
         this.destroyed = false;
         this.cleanups = cleanups;
@@ -174,7 +176,11 @@ export class LanderGameController {
     queueInput(timestamp, token = null) {
         const held = Object.fromEntries([...this.heldKeys].map((key) => [key, true]));
         const request = mixEngineRequests(mixDigitalInput(held), this.pointerInput);
-        this.clock = enqueueInputEdge(this.clock, { timestamp, ...request, token });
+        const physical = Object.freeze({ heldCodes: Object.freeze([...this.heldKeys].sort()),
+            pointer: this.pointer ? Object.freeze({ active: true, id: this.pointer.id,
+                anchorX: this.pointer.x, currentX: this.pointer.currentX,
+                pulseDeadline: this.pointer.pulseDeadline }) : Object.freeze({ active: false }) });
+        this.clock = enqueueInputEdge(this.clock, { timestamp, ...request, token, physical });
     }
 
     start(holdSpace, timestamp) {
@@ -210,6 +216,14 @@ export class LanderGameController {
         this.lander_restart.hidden = true; this.lander_restart.disabled = true;
         this.lander_start.hidden = false; this.lander_start.disabled = false;
         this.lander_status.textContent = "";
+        const staticTerrain = this.pristine.querySelector("#terrain-layer");
+        const staticSites = this.pristine.querySelector("#site-layer");
+        this.terrain_layer.replaceChildren(...[...staticTerrain.children].map((node) => node.cloneNode(true)));
+        this.site_layer.replaceChildren(...[...staticSites.children].map((node) => node.cloneNode(true)));
+        this.debris_layer.replaceChildren(); this.worldWindowKey = null;
+        for (const property of ["--agent-x", "--agent-y", "--crash-x", "--crash-y", "--crash-progress"]) {
+            this.root.style.removeProperty(property);
+        }
         this.render(); this.lander_start.focus({ preventScroll: true }); this.requestFrame();
     }
 
@@ -252,13 +266,15 @@ export class LanderGameController {
         if (event.type === "pointerdown") {
             if (this.model.state !== "flying" || !event.isPrimary || event.button !== 0 || this.pointer) return;
             event.preventDefault();
-            this.pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, started: eventTime(event), token: event.pointerId };
+            this.pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, currentX: event.clientX,
+                started: eventTime(event), token: event.pointerId, pulseDeadline: null };
             this.lander_scene_shell.setPointerCapture(event.pointerId);
             this.pointerInput = { left: 0.72, right: 0.72 }; this.queueInput(eventTime(event), event.pointerId); return;
         }
         if (!this.pointer || event.pointerId !== this.pointer.id) return;
         event.preventDefault();
         if (event.type === "pointermove") {
+            this.pointer.currentX = event.clientX;
             this.pointerInput = pointerEngineRequests(event.clientX - this.pointer.x, this.lander_scene.getBoundingClientRect().width);
             this.queueInput(eventTime(event), this.pointer.token); return;
         }
@@ -268,6 +284,7 @@ export class LanderGameController {
             const distance = Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y);
             if (this.lander_scene_shell.hasPointerCapture(pointer.id)) this.lander_scene_shell.releasePointerCapture(pointer.id);
             if (elapsed <= 180 && distance <= 10 && elapsed < 140) {
+                this.pointer.currentX = event.clientX; this.pointer.pulseDeadline = eventTime(event) + 140 - elapsed;
                 this.pulseTimer = setTimeout(() => this.finishPointer(pointer.token, performance.now()), 140 - elapsed); return;
             }
         }
@@ -328,6 +345,17 @@ export class LanderGameController {
 
     reconcileWorld() {
         if (!this.model.terrainVertices) return;
+        if (this.worldWindowKey === this.model.retentionKey) {
+            for (const site of this.model.retainedSites) {
+                const group = this.site_layer.querySelector(`[data-site-id="${site.id}"]`);
+                if (group) {
+                    group.dataset.can = site.canCollected ? "collected" : "present";
+                    group.dataset.power = site.powered ? "on" : "off";
+                    group.dataset.nocStage = String(site.nocStage ?? (site.powered ? 5 : 0));
+                }
+            }
+            return;
+        }
         const indexes = this.model.retainedChunks;
         const existingChunks = new Map([...this.terrain_layer.children].map((node) => [Number(node.dataset.chunkIndex), node]));
         for (const index of indexes) {
@@ -345,18 +373,29 @@ export class LanderGameController {
             positionSite(group, site); existingSites.delete(site.id);
         }
         for (const node of existingSites.values()) node.remove();
+        this.worldWindowKey = this.model.retentionKey;
     }
 
     renderCrash(cameraLeft) {
-        this.debris_layer.replaceChildren();
-        if (this.model.state !== "crashing" || !this.model.crash) return;
+        if (this.model.state !== "crashing" || !this.model.crash) {
+            if (this.debris_layer.children.length) this.debris_layer.replaceChildren();
+            return;
+        }
         const time = this.model.sequenceSeconds;
+        const existing = new Map([...this.debris_layer.children].map((node) => [Number(node.dataset.fragmentId), node]));
         for (const fragment of this.model.crash.fragments) {
             const x = fragment.x + fragment.vx * time;
             const y = fragment.y + fragment.vy * time - 0.5 * GRAVITY * time * time;
-            this.debris_layer.append(svg("rect", { x: x * 10 - 4, y: 548 - y * 10 - 4, width: 8, height: 8,
-                fill: fragment.color, transform: `rotate(${fragment.angularVelocity * time} ${x * 10} ${548 - y * 10})` }));
+            let node = existing.get(fragment.id);
+            if (!node) {
+                node = svg("rect", { width: 8, height: 8, fill: fragment.color, "data-fragment-id": fragment.id });
+                this.debris_layer.append(node);
+            }
+            node.setAttribute("x", x * 10 - 4); node.setAttribute("y", 548 - y * 10 - 4);
+            node.setAttribute("transform", `rotate(${fragment.angularVelocity * time} ${x * 10} ${548 - y * 10})`);
+            existing.delete(fragment.id);
         }
+        for (const node of existing.values()) node.remove();
         this.root.style.setProperty("--crash-x", `${(this.model.crash.pose.x - cameraLeft) * 10}px`);
         this.root.style.setProperty("--crash-y", `${548 - this.model.crash.pose.y * 10}px`);
         this.root.style.setProperty("--crash-progress", String(Math.min(1, time / 0.14)));
@@ -387,7 +426,7 @@ export class LanderGameController {
         this.lander_target_direction.hidden = !offscreen;
         const fuel = this.model.state === "preflight" ? "0.0" : this.model.fuel.toFixed(1);
         if (this.lander_fuel_value.value !== fuel) this.lander_fuel_value.value = fuel;
-        if (this.model.status && this.lander_status.textContent !== this.model.status) this.lander_status.textContent = this.model.status;
+        if (this.lander_status.textContent !== this.model.status) this.lander_status.textContent = this.model.status;
         const failed = this.model.state === "failed";
         this.lander_restart.hidden = !failed; this.lander_restart.disabled = !failed;
     }
@@ -395,9 +434,14 @@ export class LanderGameController {
     destroy() {
         if (this.destroyed) return;
         this.destroyed = true;
-        if (this.frameId !== null) cancelAnimationFrame(this.frameId);
+        if (this.frameId !== null) { cancelAnimationFrame(this.frameId); this.frameId = null; }
         this.clearAllInput(performance.now());
         while (this.cleanups.length) { try { this.cleanups.pop()(); } catch (error) { console.error(error); } }
+        this.model = createPreflightModel(); this.clock = createSimulationClock(); this.cue = settleCue();
+        this.previousFrame = null; this.paused = false;
+        const restored = this.pristine.cloneNode(true);
+        this.root.replaceWith(restored);
+        this.root = restored;
     }
 }
 
@@ -405,7 +449,7 @@ export function initializeLanderGame(root = document.querySelector("#lander-game
     if (!root) return null;
     const snapshot = root.cloneNode(true);
     const cleanups = [];
-    try { return new LanderGameController(root, cleanups); }
+    try { return new LanderGameController(root, cleanups, snapshot); }
     catch (error) {
         console.error(error);
         while (cleanups.length) {

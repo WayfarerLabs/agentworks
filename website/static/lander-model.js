@@ -8,6 +8,7 @@ import {
     retainedSiteDescriptors,
     sampleUnit,
     selectTemplate,
+    STATIC_WORLD_SEED,
     terrainHeightAt,
     terrainVerticesForWindow,
 } from "./lander-world.js";
@@ -43,20 +44,31 @@ export const REFERENCE_COMMANDS = Object.freeze([
 ]);
 
 const ROUTES = [
-    ["route-78-flat",78,0,[[4.8,-0.65],[39,-0.65],[73.2,-0.65]],8.25,2144885575,[[1,90],[3,200],[2,200],[1,20],[2,274],[3,274],[1,44],[3,189],[2,189],[0,362],[1,118]],1960,8.236500000000081,77.81635462654064,0,-0.16132550005166613,-2.0400613638522276,1.4109374999979991,9.658940314238862e-15,1957,77.81915738522775,0.035815642788041835,-0.16656397706546264,-2.201021022692424],
-    ["route-81-rise",81,1.6,[[4.8,-0.65],[40.5,-0.65],[76.2,-0.65]],8.8,2142277263,[[1,90],[3,202],[2,202],[1,20],[2,262],[3,262],[1,79],[3,165],[2,165],[0,597],[1,151]],2195,8.797500000000085,81.22313214146925,1.6,-0.3571484940191654,-1.4011609662143851,-1.3453125000005457,9.658940314238862e-15,2192,81.22946350909285,1.6247718554458646,-0.3498431538373557,-1.6590187792730884],
-    ["route-84-fall",84,-0.8,[[4.8,-0.65],[42,-0.65],[79.2,-0.65]],8.55,2534735720,[[1,90],[3,189],[2,189],[1,35],[2,272],[3,272],[1,20],[3,195],[2,195],[0,471],[1,157],[0,8]],2093,8.544000000000096,83.70286133633655,-0.8,0.3456508750859214,-1.3498503744245758,-0.5206250000021555,9.658940314238862e-15,2082,83.673778669356,-0.6940811274803341,0.34900924377718046,-1.4671731413865226],
-    ["route-87-rise",87,0.8,[[4.8,-0.65],[43.5,-0.65],[82.2,-0.65]],8.05,2668170190,[[1,90],[3,205],[2,205],[1,20],[2,290],[3,290],[1,20],[3,204],[2,204],[1,100],[0,86]],1714,8.002500000000094,87.33008153729982,0.8,-0.2466460903023193,-1.2970841910551256,-1.0040625000021919,9.658940314238862e-15,1628,87.50644892711453,0.9693146125224776,-0.24627810101080405,0.8270694757215198],
-    ["route-90-fall",90,-1.6,[[4.8,-0.65],[45,-0.65],[85.2,-0.65]],8.9,2650405298,[[1,90],[3,211],[2,211],[1,23],[2,271],[3,271],[1,92],[3,171],[2,171],[0,362],[1,127],[0,67]],2067,8.881500000000102,90.18155353749594,-1.6,-0.120953984240069,-1.5272002017182151,0.7021874999984448,9.658940314238862e-15,1998,90.25084606793465,-1.209883781054864,-0.12419670408867468,-0.07322586179573665],
-    ["route-93-flat",93,0,[[4.8,-0.65],[46.5,-0.65],[88.2,-0.65]],7.95,4118756405,[[1,90],[3,209],[2,209],[1,20],[2,284],[3,284],[1,34],[3,190],[2,190],[0,64],[1,91],[0,76]],1741,7.942500000000086,93.11203111281411,0,0.437731695217983,-1.658749652139103,-1.914062500001819,9.658940314238862e-15,1662,92.82611074235642,0.45379218514534153,0.449655666355321,-0.05646409890942916],
-    ["route-96-fall",96,-0.8,[[4.8,-0.65],[48,-0.65],[91.2,-0.65]],8.25,2222144006,[[1,90],[3,219],[2,219],[1,20],[2,276],[3,276],[1,102],[3,168],[2,168],[0,138],[1,58],[0,10]],1744,8.21250000000008,95.98350674461238,-0.8,-0.24997483169118467,-1.0936723576008238,0.019687499998553903,9.658940314238862e-15,1733,96.00562967512104,-0.7138620102438289,-0.2500109109186034,-0.9331703120334541],
-    ["route-99-rise",99,0.8,[[4.8,-0.65],[49.5,-0.65],[94.2,-0.65]],8.75,4183148461,[[1,90],[3,207],[2,207],[1,42],[2,273],[3,273],[1,93],[3,180],[2,180],[0,264],[1,91]],1900,8.74200000000011,98.95316347247866,0.8,-0.1810513427453735,-1.568342902278645,1.5749999999979991,9.658940314238862e-15,1897,98.95658064988923,0.8298488921582128,-0.18867696830427538,-1.7893700851808665],
-    ["route-102-flat",102,0,[[4.8,-0.65],[51,-0.65],[97.2,-0.65]],8.3,3649007746,[[1,90],[3,209],[2,209],[1,38],[2,279],[3,279],[1,70],[3,183],[2,183],[0,91],[1,71],[0,18]],1720,8.260500000000095,102.0788892026972,0,0.038326945004470384,-1.438879686216837,-1.4678125000020827,9.658940314238862e-15,1702,102.07325610778827,0.18069713376632007,0.040586219656034796,-1.0846526729402146],
+    ["route-78-flat",78,0,[[4.8,-0.65],[39,-0.65],[73.2,-0.65]],8.25,179067976,[[1,90],[3,200],[2,200],[1,20],[2,274],[3,274],[1,44],[3,189],[2,190],[0,362],[1,118]],1961,8.240250000000083,77.7263339065049,0.010064611143606045,-0.35013822715732584,-2.021594243536191,0.36053161621327945,-0.26249999999999035,1958,77.73271551523135,0.04735678880958487,-0.35176655442395444,-2.2229535179362707],
+    ["route-81-rise",81,1.6,[[4.8,-0.65],[40.5,-0.65],[76.2,-0.65]],8.75,1875239339,[[1,90],[3,202],[2,202],[1,20],[2,262],[3,262],[1,79],[3,165],[2,164],[0,597],[1,146]],2189,8.733750000000082,81.46176696617067,1.607768874554987,0.0291235543158249,-1.7755267163904782,0.27829582213621507,0.26250000000000967,2187,81.46146758849471,1.6251824224337825,0.028139806261924763,-1.9499721583302025],
+    ["route-84-fall",84,-0.8,[[4.8,-0.65],[42,-0.65],[79.2,-0.65]],8.450000000000001,2185442569,[[1,90],[3,189],[2,189],[1,35],[2,272],[3,272],[1,20],[3,195],[2,194],[0,472],[1,148]],2076,8.432250000000092,83.84184336983078,-0.776669796259028,0.6648482426313611,-1.8880694420343425,0.8355849456709166,0.26250000000000967,2074,83.83086743256571,-0.7454588478196159,0.6609437944802974,-2.107553170786723],
+    ["route-87-rise",87,0.8,[[4.8,-0.65],[43.5,-0.65],[82.2,-0.65]],8,2725764839,[[1,90],[3,205],[2,205],[1,20],[2,290],[3,290],[1,20],[3,204],[2,203],[1,98],[0,78]],1703,7.9747500000000935,87.37147575289124,0.8173063604438984,-0.22427215355164115,-1.2510453351082702,-0.6198197937048917,0.26250000000000967,1623,87.52033263327817,0.9959263874973471,-0.2213945662053693,0.5324197953791863],
+    ["route-90-fall",90,-1.6,[[4.8,-0.65],[45,-0.65],[85.2,-0.65]],8.950000000000001,1915623439,[[1,90],[3,211],[2,211],[1,23],[2,271],[3,271],[1,92],[3,171],[2,170],[0,364],[1,131],[0,51]],2056,8.925750000000104,90.39617230208658,-1.5470614107578358,0.09983235175511208,-0.8863612416793984,1.8961208343440603,0.26250000000000967,2003,90.3522699830073,-1.441221843984177,0.09310802670949096,0.21739569898607944],
+    ["route-93-flat",93,0,[[4.8,-0.65],[46.5,-0.65],[88.2,-0.65]],7.65,250511621,[[1,90],[3,208],[2,209],[1,20],[2,284],[3,284],[1,34],[3,190],[2,189],[0,65],[1,66]],1639,7.635000000000097,89.8577042899191,0.13994947378347053,-0.4903117355121642,-2.1656702951540683,-5.018125000001646,9.658940314238862e-15,1637,89.86358003699574,0.1650096439683111,-0.46966683213351734,-2.36516584285813],
+    ["route-96-fall",96,-0.8,[[4.8,-0.65],[48,-0.65],[91.2,-0.65]],8.200000000000001,1877669739,[[1,90],[3,219],[2,219],[1,20],[2,276],[3,276],[1,102],[3,168],[2,168],[0,140],[1,55]],1733,8.176500000000079,96.00765307776732,-0.7994520937865548,-0.2501129108406806,-1.205352472242873,0.019687499998553903,9.658940314238862e-15,1731,96.0097652790254,-0.789447499675277,-0.2501552278282772,-1.3031702872389384],
+    ["route-99-rise",99,0.8,[[4.8,-0.65],[49.5,-0.65],[94.2,-0.65]],8.700000000000001,874838527,[[1,90],[3,207],[2,207],[1,42],[2,273],[3,273],[1,93],[3,180],[2,179],[0,264],[1,86]],1894,8.678250000000107,98.99636535293325,0.865303954524589,-0.09502947367377342,-1.9503707769743535,2.339180908197932,0.26250000000000967,1892,98.99741823413149,0.8868561749182591,-0.10199011896417977,-2.0874890035909046],
+    ["route-102-flat",102,0,[[4.8,-0.65],[51,-0.65],[97.2,-0.65]],8.25,2841405082,[[1,90],[3,209],[2,209],[1,38],[2,279],[3,279],[1,70],[3,183],[2,184],[0,93],[1,68]],1702,8.228250000000095,102.06788448406428,0.05085559595482135,0.012973123945688402,-1.293307622839421,-1.8214633178716895,-0.26249999999999035,1700,102.06770154310719,0.06882788295895807,0.019443288475113202,-1.4554110107722478],
+];
+const FAILURE_LITERALS = [
+    [8.2,8.19999999999996,0.3653125000023465,-0.26249999999999035],
+    [8.7,8.699999999999912,0.27562499999271495,0.26250000000000967],
+    [8.4,8.399999999999944,0.8312499999922238,0.26250000000000967],
+    [7.95,7.949999999999993,-0.794062500003065,0.26250000000000967],
+    [8.9,8.899999999999926,1.780624999993961,0.26250000000000967],
+    [7.6000000000000005,7.600000000000018,-5.018125000001646,9.658940314238862e-15],
+    [8.15,8.149999999999988,0.019687499998553903,9.658940314238862e-15],
+    [8.65,8.649999999999984,2.336249999994834,0.26250000000000967],
+    [8.2,8.200000000000008,-1.8178125000006276,-0.26249999999999035],
 ];
 
 export const ROUTE_DIGESTS = Object.freeze({
     geometryDigest: "a45465787699a9b737b22bb32e0f40ae50913ce14cc3c6c2aeb9300f287ed8d8",
-    outputDigest: "724957dc0a3d0ba0845eb600db2a6794eb3f1d1ab218d8ea0a4cd73c4e7ae26f",
+    outputDigest: "a424370d4d928b814c8aeb17237b98cbefdc6d2732277697283864c938989c1e",
     physicsDigest: "390d39bcacade9ebf38e6c8715a9f09bd6aeae4dea9a9e426c6d2f5707499ec1",
 });
 
@@ -69,23 +81,25 @@ function freeze(value) {
     return Object.freeze(value);
 }
 
-function routeRecord(row) {
+function routeRecord(row, failureLiteral) {
     const [templateId, centerDelta, deckDelta, clearanceKnots, demonstratedMinimum, scheduleDigest, runs,
         contactStep, burn, x, y, vx, vy, angle, angularVelocity, exhaustionStep, failureX, failureY,
         failureVx, failureVy] = row;
+    const [failureAllowance, failureBurn, failureAngle, failureAngularVelocity] = failureLiteral;
     return freeze({
         templateId, centerDelta, deckDelta, clearanceKnots, demonstratedMinimum, scheduleDigest, runs,
         success: { contactStep, burn, classification: "safe", pose: { x, y, vx, vy, angle, angularVelocity } },
         smallerFailure: {
-            allowance: demonstratedMinimum - FUEL_QUANTUM,
-            burn: demonstratedMinimum - FUEL_QUANTUM,
+            allowance: failureAllowance,
+            burn: failureBurn,
             exhaustionStep,
-            pose: { x: failureX, y: failureY, vx: failureVx, vy: failureVy, angle, angularVelocity },
+            pose: { x: failureX, y: failureY, vx: failureVx, vy: failureVy,
+                angle: failureAngle, angularVelocity: failureAngularVelocity },
         },
     });
 }
 
-export const REFERENCE_TEMPLATES = freeze(ROUTES.map(routeRecord));
+export const REFERENCE_TEMPLATES = freeze(ROUTES.map((row, index) => routeRecord(row, FAILURE_LITERALS[index])));
 
 const STEP_MILLISECONDS = STEP_SECONDS * 1000;
 const HULL = Object.freeze([[-1.6, 0], [1.6, 0], [1.6, 6.5], [-1.6, 6.5]]);
@@ -226,11 +240,170 @@ function hullBounds(pose) {
     };
 }
 
+function segmentDistanceSquared(a, b, c, d) {
+    function orientation(p, q, r) {
+        return (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+    }
+    function onSegment(p, q, r) {
+        return q.x >= Math.min(p.x, r.x) && q.x <= Math.max(p.x, r.x) &&
+            q.y >= Math.min(p.y, r.y) && q.y <= Math.max(p.y, r.y);
+    }
+    const o1 = orientation(a, b, c);
+    const o2 = orientation(a, b, d);
+    const o3 = orientation(c, d, a);
+    const o4 = orientation(c, d, b);
+    if (((o1 === 0 && onSegment(a, c, b)) || (o2 === 0 && onSegment(a, d, b)) ||
+        (o3 === 0 && onSegment(c, a, d)) || (o4 === 0 && onSegment(c, b, d))) ||
+        ((o1 > 0) !== (o2 > 0) && (o3 > 0) !== (o4 > 0))) return 0;
+    function pointDistanceSquared(point, start, end) {
+        const dx = end.x - start.x;
+        const dy = end.y - start.y;
+        const lengthSquared = dx * dx + dy * dy;
+        const projection = lengthSquared === 0 ? 0 : clamp(((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared, 0, 1);
+        const x = start.x + projection * dx;
+        const y = start.y + projection * dy;
+        return (point.x - x) ** 2 + (point.y - y) ** 2;
+    }
+    return Math.min(pointDistanceSquared(a, c, d), pointDistanceSquared(b, c, d),
+        pointDistanceSquared(c, a, b), pointDistanceSquared(d, a, b));
+}
+
+function polygonSegmentDistanceSquared(polygon, start, end) {
+    let minimum = Infinity;
+    for (let index = 0; index < polygon.length; index += 1) {
+        minimum = Math.min(minimum, segmentDistanceSquared(polygon[index], polygon[(index + 1) % polygon.length], start, end));
+    }
+    return minimum;
+}
+
+function rectangle(left, right, bottom, top) {
+    return [{ x: left, y: bottom }, { x: right, y: bottom }, { x: right, y: top }, { x: left, y: top }];
+}
+
+function pointInPolygon(point, polygon) {
+    let inside = false;
+    for (let index = 0, previous = polygon.length - 1; index < polygon.length; previous = index, index += 1) {
+        const a = polygon[index];
+        const b = polygon[previous];
+        if ((a.y > point.y) !== (b.y > point.y) && point.x <= ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+    }
+    return inside;
+}
+
+function polygonDistanceSquared(left, right) {
+    if (left.some((point) => pointInPolygon(point, right)) || right.some((point) => pointInPolygon(point, left))) return 0;
+    let minimum = Infinity;
+    for (let index = 0; index < right.length; index += 1) {
+        minimum = Math.min(minimum, polygonSegmentDistanceSquared(left, right[index], right[(index + 1) % right.length]));
+    }
+    return minimum;
+}
+
+function terrainSegments(model, bounds) {
+    let vertices = model.terrainVertices;
+    if (!vertices) {
+        const first = Math.floor((((bounds.left + bounds.right) / 2) - 10) / 4);
+        vertices = Array.from({ length: 7 }, (_, index) => {
+            const x = (first + index) * 4;
+            return [x, terrainHeightAt(model.seed, x)];
+        });
+    }
+    const segments = [];
+    for (let index = 1; index < vertices.length; index += 1) {
+        const left = { x: vertices[index - 1][0], y: vertices[index - 1][1] };
+        const right = { x: vertices[index][0], y: vertices[index][1] };
+        if (right.x >= bounds.left - COLLISION_MARGIN && left.x <= bounds.right + COLLISION_MARGIN) segments.push([left, right]);
+    }
+    return segments;
+}
+
+function belowTerrain(hull, segment) {
+    const [left, right] = segment;
+    return hull.some((point) => {
+        if (point.x < left.x || point.x > right.x) return false;
+        const y = left.y + (right.y - left.y) * ((point.x - left.x) / (right.x - left.x));
+        return point.y <= y;
+    });
+}
+
+function unsafeFeatures(model, pose, target, ignoredTopSiteId = null) {
+    const features = [];
+    for (const site of model.retainedSites) {
+        const topLeft = { x: site.platformLeft, y: site.platformTop };
+        const topRight = { x: site.platformRight, y: site.platformTop };
+        const bottomLeft = { x: site.platformLeft, y: site.platformBottom };
+        const bottomRight = { x: site.platformRight, y: site.platformBottom };
+        if (site.id === target?.id || site.id === ignoredTopSiteId) {
+            features.push({ cause: "platform", priority: 2, segment: [topLeft, bottomLeft] });
+            features.push({ cause: "platform", priority: 2, segment: [bottomLeft, bottomRight] });
+            features.push({ cause: "platform", priority: 2, segment: [bottomRight, topRight] });
+        } else {
+            features.push({ cause: "platform", priority: 2,
+                polygon: rectangle(site.platformLeft, site.platformRight, site.platformBottom, site.platformTop) });
+        }
+        for (const center of [site.platformLeft + 1.4, site.platformRight - 1.4]) {
+            const bottom = site.platformTop - 0.8;
+            features.push({ cause: "pylon", priority: 2,
+                polygon: rectangle(center - 0.3, center + 0.3, bottom, site.platformBottom) });
+        }
+        const buildingLeft = site.platformRight + 2;
+        const buildingRight = buildingLeft + 7;
+        const foundationBottom = Math.min(terrainHeightAt(model.seed, buildingLeft), terrainHeightAt(model.seed, buildingRight));
+        const roof = site.platformTop + 7.2;
+        features.push({ cause: "noc", priority: 1,
+            polygon: rectangle(buildingLeft, buildingRight, foundationBottom, roof) });
+        features.push({ cause: "mast", priority: 1,
+            polygon: rectangle(buildingLeft + 3.25, buildingLeft + 3.75, roof, roof + 3.2) });
+    }
+    return features.map((feature) => {
+        const points = feature.polygon ?? feature.segment;
+        return { ...feature, bounds: { left: Math.min(...points.map((point) => point.x)),
+            right: Math.max(...points.map((point) => point.x)), bottom: Math.min(...points.map((point) => point.y)),
+            top: Math.max(...points.map((point) => point.y)) } };
+    });
+}
+
+function unsafeCauseAtPose(model, pose, target, ignoredTopSiteId = null, suppliedFeatures = null) {
+    const hull = hullForPose(pose);
+    const bounds = { left: Math.min(...hull.map((point) => point.x)), right: Math.max(...hull.map((point) => point.x)),
+        bottom: Math.min(...hull.map((point) => point.y)), top: Math.max(...hull.map((point) => point.y)) };
+    const marginSquared = COLLISION_MARGIN ** 2;
+    const hits = [];
+    for (const feature of suppliedFeatures ?? unsafeFeatures(model, pose, target, ignoredTopSiteId)) {
+        const featureBounds = feature.bounds;
+        if (featureBounds.right < bounds.left - COLLISION_MARGIN || featureBounds.left > bounds.right + COLLISION_MARGIN ||
+            featureBounds.top < bounds.bottom - COLLISION_MARGIN || featureBounds.bottom > bounds.top + COLLISION_MARGIN) continue;
+        const distance = feature.polygon ? polygonDistanceSquared(hull, feature.polygon) :
+            polygonSegmentDistanceSquared(hull, feature.segment[0], feature.segment[1]);
+        if (distance <= marginSquared) hits.push(feature);
+    }
+    for (const segment of terrainSegments(model, bounds)) {
+        if (belowTerrain(hull, segment) || polygonSegmentDistanceSquared(hull, segment[0], segment[1]) <= marginSquared) {
+            hits.push({ cause: "terrain", priority: 3 });
+        }
+    }
+    hits.sort((left, right) => left.priority - right.priority);
+    return hits[0]?.cause ?? null;
+}
+
 function targetTopSweptContact(previous, next, target) {
     const radius = Math.hypot(1.6, 6.5);
+    const topLeft = { x: target.platformLeft, y: target.platformTop };
+    const topRight = { x: target.platformRight, y: target.platformTop };
     function search(leftPose, rightPose, leftTime, rightTime, depth) {
         const leftBounds = hullBounds(leftPose);
         const rightBounds = hullBounds(rightPose);
+        const translation = Math.hypot(rightPose.x - leftPose.x, rightPose.y - leftPose.y);
+        const rotation = radius * Math.abs(normalizeDegrees(rightPose.angle - leftPose.angle) * Math.PI / 180);
+        const bound = translation + rotation;
+        const enclosure = {
+            left: Math.min(leftBounds.left, rightBounds.left) - bound,
+            right: Math.max(leftBounds.right, rightBounds.right) + bound,
+            bottom: Math.min(leftBounds.bottom, rightBounds.bottom) - bound,
+            top: Math.max(leftBounds.top, rightBounds.top) + bound,
+        };
+        if (enclosure.right < target.platformLeft || enclosure.left > target.platformRight ||
+            enclosure.bottom > target.platformTop || enclosure.top < target.platformTop) return null;
         if (leftBounds.bottom > target.platformTop && rightBounds.bottom <= target.platformTop) {
             let clear = leftPose;
             let hit = rightPose;
@@ -248,19 +421,10 @@ function targetTopSweptContact(previous, next, target) {
                 }
             }
             void clear;
-            return { pose: hit, time: hitTime, grazing: false };
+            if (polygonSegmentDistanceSquared(hullForPose(hit), topLeft, topRight) <= Number.EPSILON) {
+                return { pose: hit, time: hitTime, grazing: false };
+            }
         }
-        const translation = Math.hypot(rightPose.x - leftPose.x, rightPose.y - leftPose.y);
-        const rotation = radius * Math.abs(normalizeDegrees(rightPose.angle - leftPose.angle) * Math.PI / 180);
-        const bound = translation + rotation;
-        const enclosure = {
-            left: Math.min(leftBounds.left, rightBounds.left) - bound,
-            right: Math.max(leftBounds.right, rightBounds.right) + bound,
-            bottom: Math.min(leftBounds.bottom, rightBounds.bottom) - bound,
-            top: Math.max(leftBounds.top, rightBounds.top) + bound,
-        };
-        if (enclosure.right < target.platformLeft || enclosure.left > target.platformRight ||
-            enclosure.bottom > target.platformTop || enclosure.top < target.platformTop) return null;
         if (depth >= 20 || (rightTime - leftTime) * STEP_SECONDS <= 1e-7) {
             return { pose: interpolatePose(previous, next, (leftTime + rightTime) / 2),
                 time: (leftTime + rightTime) / 2, grazing: true };
@@ -273,41 +437,55 @@ function targetTopSweptContact(previous, next, target) {
     return search(previous, next, 0, 1, 0);
 }
 
-function unsafeAtPose(model, pose, target) {
-    const hull = hullForPose(pose);
-    const minimumY = Math.min(...hull.map((point) => point.y));
-    let terrain = terrainHeightAt(model.seed, pose.x);
-    const vertices = model.terrainVertices;
-    if (vertices) {
-        for (let index = 1; index < vertices.length; index += 1) {
-            const left = vertices[index - 1];
-            const right = vertices[index];
-            if (pose.x >= left[0] && pose.x <= right[0]) {
-                terrain = left[1] + (right[1] - left[1]) * ((pose.x - left[0]) / (right[0] - left[0]));
-                break;
-            }
-        }
-    }
-    if (minimumY <= terrain + COLLISION_MARGIN && !(target && pose.x >= target.platformLeft && pose.x <= target.platformRight)) {
-        return "terrain";
-    }
-    for (const site of model.retainedSites) {
-        const inPlatformX = hull.some((point) => point.x >= site.platformLeft - COLLISION_MARGIN && point.x <= site.platformRight + COLLISION_MARGIN);
-        const platformSide = inPlatformX && minimumY <= site.platformBottom + COLLISION_MARGIN;
-        if (platformSide) return "platform";
-        const buildingLeft = site.platformRight + 2;
-        const buildingRight = buildingLeft + 7;
-        const buildingTop = site.platformTop + 7.2;
-        if (hull.some((point) => point.x >= buildingLeft - COLLISION_MARGIN && point.x <= buildingRight + COLLISION_MARGIN && point.y <= buildingTop + COLLISION_MARGIN)) {
-            return "noc";
-        }
-    }
-    return null;
-}
-
-export function classifySweptContact(model, previous, next) {
+export function classifySweptContact(model, previous, next, options = {}) {
     const target = siteById(model, model.targetSiteId);
-    const topContact = target ? targetTopSweptContact(previous, next, target) : null;
+    const radius = Math.hypot(1.6, 6.5);
+    const travel = Math.hypot(next.x - previous.x, next.y - previous.y) + radius * Math.abs(normalizeDegrees(next.angle - previous.angle) * Math.PI / 180);
+    const intervals = Math.max(1, Math.ceil(travel / COLLISION_MARGIN));
+    if (intervals > 64) return { kind: "unsafe", cause: "overspeed", pose: next };
+    const previousBounds = hullBounds(previous); const nextBounds = hullBounds(next);
+    const swept = { left: Math.min(previousBounds.left, nextBounds.left) - travel,
+        right: Math.max(previousBounds.right, nextBounds.right) + travel,
+        bottom: Math.min(previousBounds.bottom, nextBounds.bottom) - travel,
+        top: Math.max(previousBounds.top, nextBounds.top) + travel };
+    const overlaps = (bounds) => bounds.right >= swept.left - COLLISION_MARGIN &&
+        bounds.left <= swept.right + COLLISION_MARGIN && bounds.top >= swept.bottom - COLLISION_MARGIN &&
+        bounds.bottom <= swept.top + COLLISION_MARGIN;
+    const features = options.features ?? unsafeFeatures(model, previous, target, options.ignoreTopSiteId);
+    const topPossible = target && target.platformRight >= swept.left && target.platformLeft <= swept.right &&
+        target.platformTop >= swept.bottom && target.platformTop <= swept.top;
+    const featurePossible = features.some((feature) => overlaps(feature.bounds));
+    const terrainPossible = terrainSegments(model, swept).some(([left, right]) => overlaps({
+        left: left.x, right: right.x, bottom: Math.min(left.y, right.y), top: Math.max(left.y, right.y),
+    }));
+    if (!topPossible && !featurePossible && !terrainPossible) return null;
+    const topContact = topPossible ? targetTopSweptContact(previous, next, target) : null;
+    let unsafeContact = null;
+    let clearPose = previous;
+    let clearTime = 0;
+    for (let index = 0; index <= intervals; index += 1) {
+        const time = index / intervals;
+        const pose = interpolatePose(previous, next, time);
+        const cause = unsafeCauseAtPose(model, pose, target, options.ignoreTopSiteId, features);
+        if (cause) {
+            let hitPose = pose;
+            let hitTime = time;
+            let hitCause = cause;
+            for (let iteration = 0; index > 0 && iteration < 12; iteration += 1) {
+                const middleTime = (clearTime + hitTime) / 2;
+                const middle = interpolatePose(previous, next, middleTime);
+                const middleCause = unsafeCauseAtPose(model, middle, target, options.ignoreTopSiteId, features);
+                if (middleCause) { hitPose = middle; hitTime = middleTime; hitCause = middleCause; }
+                else { clearPose = middle; clearTime = middleTime; }
+            }
+            void clearPose;
+            unsafeContact = { kind: "unsafe", cause: hitCause, pose: hitPose, time: hitTime };
+            break;
+        }
+        clearPose = pose;
+        clearTime = time;
+    }
+    if (unsafeContact && (!topContact || unsafeContact.time <= topContact.time + 1e-12)) return unsafeContact;
     if (topContact) {
         const pose = topContact.pose;
         const feet = [transformLocalPoint(pose, -1.6, 0), transformLocalPoint(pose, 1.6, 0)];
@@ -316,24 +494,35 @@ export function classifySweptContact(model, previous, next) {
             Math.abs(pose.vx) <= MAX_LANDING_HORIZONTAL_SPEED && Math.abs(pose.vy) <= MAX_LANDING_DESCENT_SPEED &&
             Math.abs(normalizeDegrees(pose.angle)) <= MAX_LANDING_ANGLE &&
             Math.abs(pose.angularVelocity) <= MAX_LANDING_ANGULAR_SPEED;
-        return { kind: safe ? "safe" : "unsafe", cause: safe ? "target" : topContact.grazing ? "grazing" : "target-envelope", pose };
-    }
-    const radius = Math.hypot(1.6, 6.5);
-    const travel = Math.hypot(next.x - previous.x, next.y - previous.y) + radius * Math.abs(normalizeDegrees(next.angle - previous.angle) * Math.PI / 180);
-    const intervals = Math.max(1, Math.ceil(travel / COLLISION_MARGIN));
-    if (intervals > 64) return { kind: "unsafe", cause: "overspeed", pose: next };
-    for (let index = 0; index <= intervals; index += 1) {
-        const pose = interpolatePose(previous, next, index / intervals);
-        const cause = unsafeAtPose(model, pose, target);
-        if (cause) return { kind: "unsafe", cause, pose };
+        return { kind: safe ? "safe" : "unsafe", cause: safe ? "target" : topContact.grazing ? "grazing" : "target-envelope", pose, time: topContact.time };
     }
     return null;
 }
 
-function replayTemplate(template, fuel) {
-    let pose = { x: 0, y: 0, vx: 0, vy: 0, angle: 0, angularVelocity: 0 };
+function routeContext(template, supplied = null) {
+    if (supplied) return supplied;
+    const originSite = freeze({ id: 0, center: 0, platformLeft: -4.8, platformRight: 4.8,
+        platformTop: 0, platformBottom: -0.35, canCollected: true, powered: true, nocStage: 4 });
+    return { seed: STATIC_WORLD_SEED, originSite,
+        targetSite: instantiateTemplateSite(STATIC_WORLD_SEED, 1, originSite, template) };
+}
+
+function replayTemplate(template, fuel, suppliedContext = null) {
+    const context = routeContext(template, suppliedContext);
+    const { originSite, targetSite } = context;
+    let pose = uprightPose(originSite);
     let reserve = fuel;
     let step = 0;
+    let launchCleared = false;
+    const retainedSites = [originSite, targetSite];
+    const collisionModel = {
+        seed: context.seed, retainedSites, targetSiteId: targetSite.id,
+        terrainVertices: context.terrainVertices ?? terrainVerticesForWindow(context.seed, retainedSites,
+            originSite.center - 12, targetSite.center + 12),
+    };
+    const target = targetSite;
+    const ordinaryFeatures = unsafeFeatures(collisionModel, pose, target);
+    const launchFeatures = unsafeFeatures(collisionModel, pose, target, originSite.id);
     for (const [commandIndex, count] of template.runs) {
         for (let index = 0; index < count; index += 1) {
             const previous = pose;
@@ -341,21 +530,38 @@ function replayTemplate(template, fuel) {
             pose = result.pose;
             reserve = result.thrust.fuel;
             step += 1;
-            if (previous.y > template.deckDelta && pose.y <= template.deckDelta && pose.x >= template.centerDelta - 4.8 && pose.x <= template.centerDelta + 4.8) {
-                return { kind: "contact", step, pose: interpolatePose(previous, pose, (previous.y - template.deckDelta) / (previous.y - pose.y)) };
+            const ignoreTopSiteId = !launchCleared && pose.vy > 0 ? originSite.id : null;
+            const contact = classifySweptContact(collisionModel, previous, pose, { ignoreTopSiteId,
+                features: ignoreTopSiteId === null ? ordinaryFeatures : launchFeatures });
+            if (contact) {
+                const relative = { ...contact.pose, x: contact.pose.x - originSite.center,
+                    y: contact.pose.y - originSite.platformTop };
+                return { kind: contact.kind === "safe" ? "contact" : "collision", cause: contact.cause,
+                    step, pose: relative, burn: fuel - reserve };
             }
-            if (reserve === 0) return { kind: "exhausted", step, pose };
+            const feet = [transformLocalPoint(pose, -1.6, 0), transformLocalPoint(pose, 1.6, 0)];
+            launchCleared ||= feet.every((foot) => foot.y > originSite.platformTop + 0.05);
+            if (reserve === 0) return { kind: "exhausted", step,
+                pose: { ...pose, x: pose.x - originSite.center, y: pose.y - originSite.platformTop }, burn: fuel };
         }
     }
     return { kind: "incomplete", step, pose };
 }
 
-export function proveTemplate(template) {
-    const successful = replayTemplate(template, template.demonstratedMinimum);
-    const smaller = replayTemplate(template, template.demonstratedMinimum - FUEL_QUANTUM);
+function samePose(actual, expected) {
+    return ["x", "y", "vx", "vy", "angle", "angularVelocity"].every(
+        (key) => Math.abs(actual[key] - expected[key]) <= 1e-9,
+    );
+}
+
+export function proveTemplate(template, suppliedContext = null) {
+    const successful = replayTemplate(template, template.demonstratedMinimum, suppliedContext);
+    const smaller = replayTemplate(template, template.demonstratedMinimum - FUEL_QUANTUM, suppliedContext);
     if (successful.kind !== "contact" || successful.step !== template.success.contactStep ||
-        smaller.kind !== "exhausted" || smaller.step !== template.smallerFailure.exhaustionStep) {
-        throw new Error(`Route proof mismatch for ${template.templateId}`);
+        Math.abs(successful.burn - template.success.burn) > 1e-9 || !samePose(successful.pose, template.success.pose) ||
+        smaller.kind !== "exhausted" || smaller.step !== template.smallerFailure.exhaustionStep ||
+        Math.abs(smaller.burn - template.smallerFailure.burn) > 1e-9 || !samePose(smaller.pose, template.smallerFailure.pose)) {
+        throw new Error(`Route proof mismatch for ${template.templateId}: ${JSON.stringify({ successful, smaller })}`);
     }
     return freeze({ templateId: template.templateId, demonstratedMinimum: template.demonstratedMinimum,
         quantum: FUEL_QUANTUM, scheduleDigest: template.scheduleDigest, burn: template.success.burn,
@@ -366,14 +572,24 @@ function generationError(model) {
     return { ...model, state: "generation-error", commanded: { ...ZERO }, status: GENERATION_ERROR_STATUS };
 }
 
+function provisionalProofContext(model, originSite, targetSite, contactPose) {
+    const poweredOrigin = { ...originSite, canCollected: true, powered: true, nocStage: 5 };
+    const retainedSites = model.retainedSites.filter((site) => site.id !== originSite.id)
+        .concat(poweredOrigin, targetSite).sort((left, right) => left.id - right.id);
+    return freeze({ seed: model.seed, completedSites: model.completedSites + 1,
+        awardRatio: nextAwardRatio(model.awardRatio), generatorCursor: model.generatorCursor + 1,
+        pose: uprightPose(originSite, contactPose.x), fuel: null, activeSiteId: originSite.id,
+        targetSiteId: targetSite.id, retainedSites, originSite: poweredOrigin, targetSite });
+}
+
 function prepareService(model, contactPose) {
     const contacted = siteById(model, model.targetSiteId);
     try {
         const template = selectTemplate(model.seed, model.generatorCursor, contacted, REFERENCE_TEMPLATES);
         const nextSite = instantiateTemplateSite(model.seed, model.generatorCursor, contacted, template);
-        const proof = proveTemplate(template);
-        const award = proof.demonstratedMinimum * model.awardRatio;
         const serviced = { ...contacted, canCollected: true };
+        const proof = proveTemplate(template, provisionalProofContext(model, serviced, nextSite, contactPose));
+        const award = proof.demonstratedMinimum * model.awardRatio;
         const sites = model.retainedSites.filter((site) => site.id !== contacted.id).concat(serviced, nextSite).sort((a, b) => a.id - b.id);
         return {
             ...model, state: "landed", pose: uprightPose(contacted, contactPose.x), commanded: { ...ZERO },
@@ -420,7 +636,11 @@ export function stepFlight(model, requested, options = {}) {
         commanded: { left: result.thrust.left, right: result.thrust.right }, missionSeconds: model.missionSeconds + (options.seconds ?? STEP_SECONDS) };
     if (model.state === "launching") {
         const active = siteById(model, model.activeSiteId);
-        const cleared = model.launchCleared || (active && result.pose.y > active.platformTop + 0.05);
+        const ignoreTopSiteId = !model.launchCleared && result.pose.vy > 0 ? active?.id ?? null : null;
+        const contact = classifySweptContact(model, previous, result.pose, { ignoreTopSiteId });
+        if (contact) return beginCrash(stepped, contact.cause, contact.pose);
+        const feet = [transformLocalPoint(result.pose, -1.6, 0), transformLocalPoint(result.pose, 1.6, 0)];
+        const cleared = model.launchCleared || (active && feet.every((foot) => foot.y > active.platformTop + 0.05));
         stepped = { ...stepped, launchCleared: cleared };
         if (stepped.sequenceSeconds + STEP_SECONDS + 1e-12 >= 0.75) {
             return { ...stepped, state: "flying", sequenceSeconds: 0, launchCleared: false, status: SUCCESS_STATUS };
@@ -501,8 +721,10 @@ export function updateRetention(model) {
     const cameraLeft = cameraLeftForPose(model.pose);
     const chunks = retainedChunkIndexes(cameraLeft);
     const sites = retainedSiteDescriptors(model.retainedSites, model.activeSiteId, model.targetSiteId);
-    return { ...model, retainedChunks: chunks, retainedSites: sites,
-        terrainVertices: terrainVerticesForWindow(model.seed, sites, cameraLeft - 40, cameraLeft + 140) };
+    const retentionKey = `${chunks[0]}:${chunks.at(-1)}|${sites.map((site) => site.id).join(",")}`;
+    const terrainVertices = retentionKey === model.retentionKey && model.terrainVertices ? model.terrainVertices :
+        terrainVerticesForWindow(model.seed, sites, chunks[0] * 20, (chunks.at(-1) + 1) * 20);
+    return { ...model, retainedChunks: chunks, retainedSites: sites, retentionKey, terrainVertices };
 }
 
 export function createCueState(reducedMotion = false) {
@@ -523,8 +745,8 @@ export function createSimulationClock(timestamp = null) {
 
 export function enqueueInputEdge(clock, edge) {
     const queued = { ...edge, left: clamp(edge.left, 0, 1), right: clamp(edge.right, 0, 1), sequence: clock.sequence };
-    const queue = clock.queue.length >= 64 ? [{ timestamp: edge.timestamp, left: queued.left, right: queued.right,
-        sequence: clock.sequence, snapshot: true }] : [...clock.queue, queued].sort((a, b) => a.timestamp - b.timestamp || a.sequence - b.sequence);
+    const queue = clock.queue.length >= 64 ? [{ ...queued, snapshot: true }] :
+        [...clock.queue, queued].sort((a, b) => a.timestamp - b.timestamp || a.sequence - b.sequence);
     return { ...clock, sequence: clock.sequence + 1, queue };
 }
 

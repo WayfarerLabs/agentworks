@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -26,6 +26,7 @@ import {
     nextAwardRatio,
     plumeForThrust,
     proveTemplate,
+    removeQueuedInputEdges,
     stepFlight,
     transitionMission,
     updateRetention,
@@ -46,6 +47,89 @@ function stepMany(pose, request, fuel, count) {
         reserve = result.thrust.fuel;
     }
     return { pose: current, fuel: reserve };
+}
+
+class FakeElement {
+    constructor(parentElement = null) {
+        this.parentElement = parentElement; this.hidden = false; this.disabled = false; this.tabIndex = -1;
+        this.textContent = ""; this.value = "0.0"; this.dataset = {}; this.attributes = new Map(); this.children = [];
+        this.setCount = 0;
+        const properties = new Map();
+        this.style = { setProperty: (name, value) => properties.set(name, value),
+            removeProperty: (name) => properties.delete(name), properties };
+    }
+    addEventListener() {} removeEventListener() {}
+    setAttribute(name, value) {
+        this.setCount += 1;
+        this.attributes.set(name, String(value));
+        if (name === "class") this.className = String(value);
+        if (name.startsWith("data-")) this.dataset[name.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = String(value);
+    }
+    removeAttribute(name) { this.attributes.delete(name); }
+    append(...nodes) { for (const node of nodes) { node.parentElement = this; this.children.push(node); } }
+    replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
+    replaceWith(node) { this.replacement = node; }
+    remove() { if (this.parentElement) this.parentElement.children = this.parentElement.children.filter((node) => node !== this); }
+    focus() { globalThis.document.activeElement = this; }
+    hasPointerCapture() { return false; }
+    get firstElementChild() { return this.children[0] ?? null; }
+    get lastElementChild() { return this.children.at(-1) ?? null; }
+    querySelector(selector) {
+        const matches = (node) => selector.startsWith(".") ? node.className?.split(" ").includes(selector.slice(1)) :
+            selector.startsWith("[data-site-id=") ? node.dataset.siteId === selector.match(/"(.*)"/)[1] :
+                node.tagName === selector;
+        for (const child of this.children) {
+            if (matches(child)) return child;
+            const nested = child.querySelector(selector); if (nested) return nested;
+        }
+        return null;
+    }
+    cloneNode(deep = false) {
+        const clone = new FakeElement(); clone.hidden = this.hidden; clone.disabled = this.disabled;
+        clone.tabIndex = this.tabIndex; clone.textContent = this.textContent; clone.value = this.value;
+        clone.dataset = { ...this.dataset }; clone.attributes = new Map(this.attributes); clone.className = this.className;
+        if (deep) clone.append(...this.children.map((child) => child.cloneNode(true)));
+        return clone;
+    }
+}
+
+function controllerFixture() {
+    const root = new FakeElement(); const actions = new FakeElement(root);
+    const ids = ["lander-scene-shell", "lander-scene", "lander-start", "lander-fuel", "lander-fuel-value",
+        "lander-target-direction", "lander-controls", "lander-actions", "lander-exit", "lander-restart", "lander-status",
+        "terrain-layer", "site-layer", "debris-layer", "mission-agent"];
+    const elements = Object.fromEntries(ids.map((id) => [id, new FakeElement(root)]));
+    elements["lander-actions"] = actions; elements["lander-exit"].parentElement = actions;
+    elements["lander-restart"].parentElement = actions;
+    elements["lander-start"].hidden = true; elements["lander-start"].disabled = true;
+    actions.hidden = true; elements["lander-exit"].disabled = true;
+    elements["lander-restart"].hidden = true; elements["lander-restart"].disabled = true;
+    root.querySelector = (selector) => elements[selector.slice(1)] ?? FakeElement.prototype.querySelector.call(root, selector);
+    root.cloneNode = () => controllerFixture().root;
+    root.elements = elements;
+    return { root, elements };
+}
+
+let controllerModule;
+async function controllerClasses() {
+    if (!controllerModule) {
+        globalThis.Element = FakeElement;
+        globalThis.document = { activeElement: null, body: new FakeElement(), hidden: true,
+            addEventListener() {}, removeEventListener() {}, createElementNS: (_, name) => {
+                const element = new FakeElement(); element.tagName = name; return element;
+            }, querySelector: (selector) =>
+                selector === "#lander-scene" ? { namespaceURI: "http://www.w3.org/2000/svg" } : null };
+        globalThis.window = { addEventListener() {}, removeEventListener() {} };
+        globalThis.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+        globalThis.requestAnimationFrame = () => 1; globalThis.cancelAnimationFrame = () => {};
+        controllerModule = await import("../static/lander-game.js");
+    }
+    return controllerModule;
+}
+
+function focusable(element) {
+    for (let current = element; current; current = current.parentElement) if (current.hidden) return false;
+    return !element.disabled;
 }
 
 test("8.4 engine physics, fuel exhaustion, input, and plumes match fixed vectors", () => {
@@ -93,7 +177,41 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
     const fixture = join(ROOT, "tests/fixtures/lander-route-derived-v1.json");
     execFileSync(process.execPath, [tool, "--geometry", geometry, "--output", output, "--verify", fixture]);
     assert.equal(await readFile(output, "utf8"), await readFile(fixture, "utf8"));
+    const derived = JSON.parse(await readFile(fixture, "utf8"));
+    assert.deepEqual(REFERENCE_TEMPLATES, derived.routes);
+    assert.equal(ROUTE_DIGESTS.outputDigest, derived.outputDigest);
+    assert.equal(ROUTE_DIGESTS.physicsDigest, derived.physicsDigest);
+    assert.equal(ROUTE_DIGESTS.geometryDigest, derived.geometryDigest);
+    assert.equal(derived.routes[0].runs[1][1], 200, "the selected route is not the first ranged candidate");
     assert.equal(spawnSync(process.execPath, [tool, "--bogus"]).status, 2);
+
+    const blockedGeometry = join(directory, "blocked-geometry.json");
+    const blocked = JSON.parse(await readFile(geometry, "utf8"));
+    blocked.templates[0].clearanceKnots[2][1] = 50;
+    await writeFile(blockedGeometry, `${JSON.stringify(blocked)}\n`, "utf8");
+    assert.equal(spawnSync(process.execPath, [tool, "--geometry", blockedGeometry, "--output", output]).status, 1);
+
+    const changedTool = join(directory, "changed-recipes.mjs");
+    const changedSource = (await readFile(tool, "utf8")).replace("[3,199,201]", "[3,1,1]");
+    assert.notEqual(changedSource, await readFile(tool, "utf8"));
+    await writeFile(changedTool, changedSource, "utf8");
+    assert.equal(spawnSync(process.execPath, [changedTool, "--geometry", geometry, "--output", output]).status, 1);
+});
+
+test("the old route-78 target crossing is rejected by the exact landing envelope", () => {
+    const current = REFERENCE_TEMPLATES[0];
+    const unsafe = { ...current, runs: [[1,90],[3,200],[2,200],[1,20],[2,274],[3,274],[1,44],
+        [3,189],[2,189],[0,362],[1,118]], success: { ...current.success, contactStep: 1960,
+        burn: 8.236500000000081, classification: "safe", pose: { x: 77.81635462654064, y: 0,
+            vx: -0.16132550005166613, vy: -2.0400613638522276, angle: 1.4109374999979991,
+            angularVelocity: 9.658940314238862e-15 } } };
+    assert.throws(() => proveTemplate(unsafe), /Route proof mismatch/);
+    const originSite = { id: 0, center: 0, platformLeft: -4.8, platformRight: 4.8,
+        platformTop: 0, platformBottom: -0.35, canCollected: true, powered: true, nocStage: 5 };
+    const targetSite = { id: 1, center: 78, platformLeft: 73.2, platformRight: 82.8,
+        platformTop: 0, platformBottom: -0.35, clearanceKnots: current.clearanceKnots };
+    assert.throws(() => proveTemplate(current, { seed: 1, originSite, targetSite,
+        terrainVertices: [[4.8,-0.8],[72,50],[73.2,-0.8],[82.8,-0.8]] }), /Route proof mismatch/);
 });
 
 test("safe target top is inclusive and epsilon excess is unsafe", () => {
@@ -106,6 +224,35 @@ test("safe target top is inclusive and epsilon excess is unsafe", () => {
     assert.equal(classifySweptContact(model, { ...previous, vx: 1.400000001 }, { ...next, vx: 1.400000001 }).kind, "unsafe");
     const tangent = { x: target.center, y: target.platformTop, vx: 0, vy: 0, angle: 0, angularVelocity: 0 };
     assert.equal(classifySweptContact(model, tangent, { ...tangent, x: tangent.x + 0.01 }).cause, "grazing");
+
+    const isolated = { ...model, terrainVertices: [[-100, -20], [200, -20]] };
+    for (const x of [target.platformLeft - 20, target.platformRight + 20]) {
+        const clear = { x, y: target.platformTop + 0.1, vx: 0, vy: -1, angle: 0, angularVelocity: 0 };
+        assert.equal(classifySweptContact(isolated, clear, { ...clear, y: target.platformTop - 0.1 }), null);
+    }
+});
+
+test("closed unsafe geometry catches slopes, platform equality, pylons, mast, and precedence", () => {
+    const base = createRun({ seed: 1 });
+    const site = base.retainedSites[0];
+    const slopeModel = { ...base, retainedSites: [], targetSiteId: null, terrainVertices: [[0, 0], [10, 10]] };
+    const slopePose = { x: 5, y: 6.62, vx: 0, vy: 0, angle: 0, angularVelocity: 0 };
+    assert.equal(classifySweptContact(slopeModel, slopePose, slopePose).cause, "terrain");
+    const sidePose = { x: site.platformLeft - 1.6 - 0.02, y: site.platformTop - 0.1,
+        vx: 0, vy: 0, angle: 0, angularVelocity: 0 };
+    assert.equal(classifySweptContact(base, sidePose, sidePose).cause, "platform");
+    const pylonPose = { x: site.platformLeft + 1.4, y: site.platformTop - 0.6,
+        vx: 0, vy: 0, angle: 180, angularVelocity: 0 };
+    assert.equal(classifySweptContact(base, pylonPose, pylonPose).cause, "pylon");
+    const buildingLeft = site.platformRight + 2;
+    const roof = site.platformTop + 7.2;
+    const mastPose = { x: buildingLeft + 3.5, y: roof + 0.1,
+        vx: 0, vy: 0, angle: 0, angularVelocity: 0 };
+    assert.equal(classifySweptContact(base, mastPose, mastPose).cause, "mast");
+    const earlierUnsafe = { x: site.platformRight - 0.8, y: site.platformTop + 0.7,
+        vx: 0, vy: -1, angle: 20, angularVelocity: 0 };
+    const laterTop = { ...earlierUnsafe, y: site.platformTop + 0.1 };
+    assert.equal(classifySweptContact(base, earlierUnsafe, laterTop).cause, "noc");
 });
 
 test("safe landing creates next target, adds uncapped award, and begins service", () => {
@@ -137,6 +284,64 @@ test("service powers the NOC, freezes a checkpoint, and launches with actual fue
     for (let index = 0; index < 90; index += 1) model = stepFlight(model, { left: 0, right: 0 });
     assert.equal(model.state, "flying");
     assert.ok(model.fuel < fuel);
+});
+
+test("automatic launch ignores only its rising start top and keeps other collisions", () => {
+    let model = createRun({ seed: 1, reducedMotion: true });
+    const target = model.retainedSites[0];
+    model = { ...model, pose: { x: target.center, y: target.platformTop + 0.001, vx: 0, vy: -1,
+        angle: 0, angularVelocity: 0 } };
+    const launching = stepFlight(model, { left: 0, right: 0 });
+    assert.equal(launching.state, "launching");
+    assert.equal(stepFlight({ ...launching, fuel: 0 }, { left: 0, right: 0 }).state, "failed");
+    const active = launching.retainedSites.find((site) => site.id === launching.activeSiteId);
+    const side = { ...launching, pose: { ...launching.pose, x: active.platformLeft + 1.6, vy: 1 } };
+    assert.equal(stepFlight(side, { left: 0, right: 0 }).failureCause, "platform");
+    const pylon = { ...launching, pose: { ...launching.pose, x: active.platformLeft + 1.4,
+        y: active.platformTop - 0.6, vy: 1, angle: 180 } };
+    assert.equal(stepFlight(pylon, { left: 0, right: 0 }).failureCause, "pylon");
+    const buildingLeft = active.platformRight + 2;
+    const noc = { ...launching, pose: { ...launching.pose, x: buildingLeft + 3.5,
+        y: active.platformTop + 1, vy: 1 } };
+    assert.equal(stepFlight(noc, { left: 0, right: 0 }).failureCause, "noc");
+});
+
+test("destroy restores the pristine static DOM from active and failed controllers", async () => {
+    const { LanderGameController } = await controllerClasses();
+    for (const terminal of [false, true]) {
+        const fixture = controllerFixture();
+        const controller = new LanderGameController(fixture.root);
+        const elements = fixture.elements;
+        elements["lander-scene-shell"].setAttribute("role", "application");
+        elements["lander-actions"].hidden = false; elements["lander-exit"].disabled = false;
+        elements["lander-status"].textContent = terminal ? FAILURE_STATUS : "Mission underway.";
+        if (terminal) { elements["lander-restart"].hidden = false; elements["lander-restart"].disabled = false; }
+        fixture.root.style.setProperty("--lander-x", "999px");
+        assert.equal(focusable(elements["lander-exit"]), true);
+        controller.destroy();
+        const restored = fixture.root.replacement;
+        assert.equal(controller.model.state, "preflight");
+        assert.ok(restored); assert.equal(restored.style.properties.size, 0);
+        assert.equal(restored.elements["lander-start"].hidden, true);
+        assert.equal(restored.elements["lander-start"].disabled, true);
+        assert.equal(restored.elements["lander-actions"].hidden, true);
+        assert.equal(restored.elements["lander-exit"].disabled, true);
+        assert.equal(restored.elements["lander-restart"].hidden, true);
+        assert.equal(restored.elements["lander-restart"].disabled, true);
+        assert.equal(focusable(restored.elements["lander-exit"]), false);
+        assert.equal(restored.elements["lander-status"].textContent, "");
+    }
+});
+
+test("render clears stale live status on crash entry", async () => {
+    const { LanderGameController } = await controllerClasses();
+    const fixture = controllerFixture();
+    const controller = new LanderGameController(fixture.root);
+    fixture.elements["lander-status"].textContent = "Mission underway.";
+    controller.model = { ...createPreflightModel(), state: "crashing", status: "", crash: null };
+    controller.render();
+    assert.equal(fixture.elements["lander-status"].textContent, "");
+    controller.destroy();
 });
 
 test("vacuum crash has exactly eight deterministic fragments and finite duration", () => {
@@ -186,9 +391,18 @@ test("fixed scheduler is frame-rate equivalent and bounds its input queue", () =
         close(model.pose.x, 30.8); close(model.pose.y, 30.0875); close(model.pose.vy, -3.4);
     }
     let clock = createSimulationClock(0);
-    for (let index = 0; index < 65; index += 1) clock = enqueueInputEdge(clock, { timestamp: 1, left: index % 2, right: 0 });
+    for (let index = 0; index < 64; index += 1) clock = enqueueInputEdge(clock, { timestamp: 1, left: index % 2, right: 0 });
+    const physical = Object.freeze({ heldCodes: Object.freeze(["Space"]),
+        pointer: Object.freeze({ active: true, id: 7, anchorX: 10, currentX: 90, pulseDeadline: null }) });
+    clock = enqueueInputEdge(clock, { timestamp: 1, left: 1, right: 0.72, token: 7, physical });
     assert.equal(clock.queue.length, 1);
     assert.equal(clock.queue[0].snapshot, true);
+    assert.equal(clock.queue[0].token, 7); assert.equal(clock.queue[0].physical, physical);
+    clock = removeQueuedInputEdges(clock, 7);
+    clock = enqueueInputEdge(clock, { timestamp: 2, left: 0.72, right: 0.72,
+        physical: { heldCodes: ["Space"], pointer: { active: false } } });
+    const continued = advanceSimulation(clock, createRun({ seed: 1 }), 1000 / 120);
+    assert.deepEqual(continued.clock.input, { left: 0.72, right: 0.72 });
 });
 
 test("cue, preflight transition, and retention remain bounded", () => {
@@ -199,6 +413,34 @@ test("cue, preflight transition, and retention remain bounded", () => {
     assert.ok(run.retainedSites.length <= 3);
     assert.ok(run.terrainVertices.length > 0);
     close(STEP_SECONDS, 1 / 120);
+});
+
+test("retention and DOM reconciliation change only at bounded window keys", async () => {
+    let model = updateRetention(createRun({ seed: 1 }));
+    const vertices = model.terrainVertices; const key = model.retentionKey;
+    model = updateRetention({ ...model, pose: { ...model.pose, x: model.pose.x + 1 } });
+    assert.equal(model.retentionKey, key); assert.equal(model.terrainVertices, vertices);
+    const changed = updateRetention({ ...model, pose: { ...model.pose, x: model.pose.x + 25 } });
+    assert.notEqual(changed.retentionKey, key); assert.notEqual(changed.terrainVertices, vertices);
+
+    const { LanderGameController } = await controllerClasses();
+    const fixture = controllerFixture(); const controller = new LanderGameController(fixture.root);
+    controller.model = model; controller.render();
+    const terrainPath = fixture.elements["terrain-layer"].children[0];
+    const writes = terrainPath.setCount;
+    controller.model = updateRetention({ ...model, pose: { ...model.pose, x: model.pose.x + 1 } });
+    controller.render();
+    assert.equal(terrainPath.setCount, writes);
+    controller.model = changed; controller.render();
+    assert.notEqual(controller.worldWindowKey, key);
+    controller.root.style.setProperty("--crash-x", "900px");
+    controller.exit();
+    assert.equal(controller.model.state, "preflight"); assert.equal(controller.worldWindowKey, null);
+    assert.equal(fixture.elements["terrain-layer"].children.length, 0);
+    assert.equal(fixture.elements["site-layer"].children.length, 0);
+    assert.equal(controller.root.style.properties.has("--crash-x"), false);
+    assert.equal(fixture.elements["lander-start"].hidden, false);
+    controller.destroy();
 });
 
 test("100-site deterministic mission keeps generation and retention bounded", () => {
