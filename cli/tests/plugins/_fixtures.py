@@ -145,7 +145,7 @@ class ConformingGitCredentialProvider(GitCredentialProvider):
     def helper_entry(self) -> HelperEntry:
         raise NotImplementedError
 
-    def _credential_lines(self, token: str) -> list[str]:
+    def credential_lines(self, token: str) -> list[str]:
         raise NotImplementedError
 
 

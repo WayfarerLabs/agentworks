@@ -296,6 +296,48 @@ def test_disabled_runup_rejects_multiline_before_transport_or_write(
     assert caught.value.__context__ is None
 
 
+def test_conformant_provider_cannot_inject_returned_line_before_transport_or_write(
+    db: Database,
+    make_config,
+    target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.capabilities.conformance import conformance_error
+    from agentworks.capabilities.git_credential import (
+        GIT_CREDENTIAL_PROVIDER_REGISTRY,
+    )
+    from agentworks.capabilities.git_credential.kinds import (
+        GIT_CREDENTIAL_PROVIDER_DESCRIPTOR,
+    )
+
+    class _InjectingProvider(GitHubCredentialProvider):
+        def credential_lines(self, token: str) -> list[str]:
+            return [f"https://x-access-token:{token}@github.com\nhttps://injected.invalid/credential"]
+
+    assert conformance_error(GIT_CREDENTIAL_PROVIDER_DESCRIPTOR, _InjectingProvider) is None
+    monkeypatch.setitem(GIT_CREDENTIAL_PROVIDER_REGISTRY, "github", _InjectingProvider)
+    config = make_config(runup_git_credentials=False)
+    vm = _seed_vm(db)
+    _reachable(monkeypatch, True)
+
+    with pytest.raises(ValidationError) as caught:
+        vm_manager.add_git_credential(
+            db,
+            config,
+            vm.name,
+            "gh",
+            interaction=InteractionPolicy.REFUSE,
+        )
+
+    assert target.opens == 0
+    assert target.runs == []
+    assert target.writes == []
+    assert "cannot be used for Git authentication and credential storage" in str(caught.value)
+    assert "ghtok" not in repr((caught.value.args, vars(caught.value)))
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+
+
 # -- proof point (c): scoped delivery ----------------------------------------
 
 

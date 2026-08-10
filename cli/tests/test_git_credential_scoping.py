@@ -22,7 +22,11 @@ from agentworks.capabilities.descriptor import descriptor_for
 from agentworks.capabilities.git_credential.github import GitHubCredentialProvider
 from agentworks.config import load_config
 from agentworks.errors import ConfigError, ValidationError
-from agentworks.git_credentials import CredentialMaterials, build_credential_materials
+from agentworks.git_credentials import (
+    CredentialMaterials,
+    build_credential_materials,
+    materialize_credential_lines,
+)
 from agentworks.plugins.azure.azdo import AzDOCredentialProvider
 from agentworks.schema import RefOwner, iter_field_docs
 from agentworks.vms.initializer import resolve_git_credential_providers
@@ -217,17 +221,41 @@ def test_unscoped_store_line_unchanged() -> None:
     "separator",
     [pytest.param("\n", id="lf"), pytest.param("\r", id="cr"), pytest.param("\0", id="nul")],
 )
-def test_public_credential_materialization_rejects_line_unsafe_token(
+def test_core_credential_materialization_rejects_line_unsafe_token_for_shipped_provider(
     provider: GitHubCredentialProvider | AzDOCredentialProvider,
     separator: str,
 ) -> None:
     token = f"git-sink-sentinel{separator}injected"
 
     with pytest.raises(ValidationError) as caught:
-        provider.credential_lines(token)
+        materialize_credential_lines(provider, token)
 
     assert "cannot be used for Git authentication and credential storage" in str(caught.value)
     assert "git-sink-sentinel" not in repr((caught.value.args, vars(caught.value)))
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+
+
+def test_direct_builder_rejects_line_injected_by_conformant_provider() -> None:
+    class _InjectingProvider(GitHubCredentialProvider):
+        def credential_lines(self, token: str) -> list[str]:
+            return [f"https://x-access-token:{token}@github.com\nhttps://injected.invalid"]
+
+    from agentworks.capabilities.conformance import conformance_error
+    from agentworks.capabilities.git_credential.kinds import (
+        GIT_CREDENTIAL_PROVIDER_DESCRIPTOR,
+    )
+
+    assert conformance_error(GIT_CREDENTIAL_PROVIDER_DESCRIPTOR, _InjectingProvider) is None
+
+    with pytest.raises(ValidationError) as caught:
+        build_credential_materials(
+            {"gh": _InjectingProvider("gh", {})},
+            {"gh": "git-provider-output-sentinel"},
+        )
+
+    assert "cannot be used for Git authentication and credential storage" in str(caught.value)
+    assert "git-provider-output-sentinel" not in repr((caught.value.args, vars(caught.value)))
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
 

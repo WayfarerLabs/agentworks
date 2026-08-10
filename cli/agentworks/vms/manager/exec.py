@@ -372,7 +372,9 @@ def add_git_credential(
         # The materials-write op reads its token through the node's
         # SCOPED delivery: only the credential's declared secret names.
         token = scoped_ctx(cred_node.secret_refs()).secret(provider.secret_name)
-        new_lines = provider.credential_lines(token)
+        from agentworks.git_credentials import materialize_credential_lines
+
+        new_lines = materialize_credential_lines(provider, token)
 
         target = transport(vm, config)
 

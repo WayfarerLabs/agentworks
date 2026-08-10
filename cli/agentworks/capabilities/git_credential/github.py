@@ -174,7 +174,7 @@ class GitHubCredentialProvider(GitCredentialProvider):
             ]
         return []
 
-    def _credential_lines(self, token: str) -> list[str]:
+    def credential_lines(self, token: str) -> list[str]:
         return [f"https://{self.store_username}:{token}@github.com"]
 
     def helper_entry(self) -> HelperEntry:

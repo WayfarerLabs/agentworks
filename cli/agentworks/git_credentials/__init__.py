@@ -66,6 +66,36 @@ def validate_git_tokens(
     }
 
 
+def materialize_credential_lines(
+    provider: GitCredentialProvider,
+    token: str,
+) -> list[str]:
+    """Safely materialize one provider's Git credential lines.
+
+    Provider ``credential_lines`` remains the contract-version-2 extension
+    point. Every core sink calls this module-owned wrapper so a provider cannot
+    bypass token validation or inject an additional durable line in its output.
+    """
+    from agentworks.secrets.line_safety import (
+        LineOrientedSecretUse,
+        require_line_safe_secret,
+    )
+
+    safe_token = require_line_safe_secret(
+        token,
+        use=LineOrientedSecretUse.GIT_CREDENTIAL,
+        secret_name=provider.secret_name,
+    )
+    lines = provider.credential_lines(safe_token)
+    for line in lines:
+        require_line_safe_secret(
+            line,
+            use=LineOrientedSecretUse.GIT_CREDENTIAL,
+            secret_name=provider.secret_name,
+        )
+    return lines
+
+
 def remote_advisories(registry: Registry, url: str) -> list[str]:
     """Ask every declared git credential to review a repo remote URL and
     return the deduped advisories.
@@ -247,7 +277,7 @@ def build_credential_materials(
                 )
             claimed[key] = name
         records.append(_CredRecord(name, provider.secret_name, entry))
-        lines = provider.credential_lines(tokens[name])
+        lines = materialize_credential_lines(provider, tokens[name])
         if entry.repos or entry.owner:
             store_scoped.extend(lines)
             scoped_users.add(entry.username)
