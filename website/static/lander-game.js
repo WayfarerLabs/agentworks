@@ -66,6 +66,9 @@ export class LanderGameController {
         this.scene = root.querySelector("#lander-scene");
         this.startButton = root.querySelector("#lander-start");
         this.controls = root.querySelector("#lander-controls");
+        this.actions = root.querySelector("#lander-actions");
+        this.exitButton = root.querySelector("#lander-exit");
+        this.restartButton = root.querySelector("#lander-restart");
         this.status = root.querySelector("#lander-status");
         this.model = createPreflightModel();
         this.clock = createSimulationClock();
@@ -84,6 +87,10 @@ export class LanderGameController {
         this.cue = createCueState(this.motion.matches);
         this.installListeners();
         this.startButton.hidden = false;
+        this.actions.hidden = true;
+        this.exitButton.disabled = true;
+        this.restartButton.hidden = true;
+        this.restartButton.disabled = true;
         this.render();
         if (!this.paused) {
             this.requestFrame();
@@ -93,6 +100,8 @@ export class LanderGameController {
     installListeners() {
         const options = { signal: this.abortController.signal };
         this.startButton.addEventListener("click", () => this.start(false, performance.now()), options);
+        this.exitButton.addEventListener("click", () => this.exit(), options);
+        this.restartButton.addEventListener("click", () => this.restart(), options);
         document.addEventListener("keydown", (event) => this.onKeyDown(event), options);
         document.addEventListener("keyup", (event) => this.onKeyUp(event), options);
         window.addEventListener("blur", () => this.clearAllInput(performance.now()), options);
@@ -133,6 +142,10 @@ export class LanderGameController {
         this.startButton.hidden = true;
         this.startButton.disabled = true;
         this.controls.hidden = false;
+        this.actions.hidden = false;
+        this.exitButton.disabled = false;
+        this.restartButton.hidden = true;
+        this.restartButton.disabled = true;
         this.shell.tabIndex = 0;
         this.shell.setAttribute("role", "application");
         this.shell.setAttribute("aria-label", "Lunar deployment game");
@@ -159,6 +172,10 @@ export class LanderGameController {
         this.shell.removeAttribute("aria-describedby");
         this.scene.removeAttribute("aria-hidden");
         this.controls.hidden = true;
+        this.actions.hidden = true;
+        this.exitButton.disabled = true;
+        this.restartButton.hidden = true;
+        this.restartButton.disabled = true;
         this.startButton.disabled = false;
         this.startButton.hidden = false;
         this.status.textContent = "";
@@ -176,6 +193,8 @@ export class LanderGameController {
         this.clock = createSimulationClock();
         this.previousFrame = null;
         this.status.textContent = "Mission underway.";
+        this.restartButton.hidden = true;
+        this.restartButton.disabled = true;
         this.render();
         this.shell.focus({ preventScroll: true });
         this.requestFrame();
@@ -431,6 +450,9 @@ export class LanderGameController {
         if (this.status.textContent !== this.model.status && this.model.status) {
             this.status.textContent = this.model.status;
         }
+        const terminal = ["failed", "succeeded"].includes(this.model.state);
+        this.restartButton.hidden = !terminal;
+        this.restartButton.disabled = !terminal;
     }
 
     destroy() {
@@ -455,6 +477,10 @@ export class LanderGameController {
         this.startButton.disabled = true;
         this.startButton.hidden = true;
         this.controls.hidden = true;
+        this.actions.hidden = true;
+        this.exitButton.disabled = true;
+        this.restartButton.hidden = true;
+        this.restartButton.disabled = true;
         this.status.textContent = "";
         this.render();
     }

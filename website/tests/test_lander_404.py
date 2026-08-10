@@ -18,6 +18,21 @@ if SPEC is None or SPEC.loader is None:
 website_build = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(website_build)
 
+EXPECTED_FILES = frozenset(
+    {
+        Path("404.html"),
+        Path("index.html"),
+        Path("lander/index.html"),
+        Path("manifesto/index.html"),
+        Path("security/index.html"),
+        Path("assets/agw-rocket.svg"),
+        Path("static/lander-game.js"),
+        Path("static/lander-model.js"),
+        Path("static/lander.css"),
+        Path("static/site.css"),
+    }
+)
+
 
 class DocumentParser(HTMLParser):
     def __init__(self) -> None:
@@ -89,20 +104,17 @@ FORBIDDEN_RUNTIME_PATTERNS = {
     "sendBeacon": member_access(NAVIGATOR_OBJECT, "sendBeacon"),
     "cookie": member_access(DOCUMENT_OBJECT, "cookie"),
     "cache": r"\b(?:Cache|CacheStorage|caches)\b",
-    "service worker": (
-        rf"\bServiceWorker\b|{member_access(NAVIGATOR_OBJECT, 'serviceWorker')}"
-    ),
-    "location navigation": (
-        rf"{member_access(LOCATION_OBJECT, '(?:href|assign|replace)')}"
-    ),
-    "history mutation": (
-        rf"{member_access(HISTORY_OBJECT, '(?:pushState|replaceState)')}"
-    ),
+    "service worker": (rf"\bServiceWorker\b|{member_access(NAVIGATOR_OBJECT, 'serviceWorker')}"),
+    "location navigation": (rf"{member_access(LOCATION_OBJECT, '(?:href|assign|replace)')}"),
+    "history mutation": (rf"{member_access(HISTORY_OBJECT, '(?:pushState|replaceState)')}"),
     "storage": r"\b(?:localStorage|sessionStorage|indexedDB)\b",
 }
 
 FORBIDDEN_RUNTIME_CANARIES = {
-    "fetch": ('window["fetch"]("/collect")', "const request = window.fetch; request('/collect')"),
+    "fetch": (
+        'window["fetch"]("/collect")',
+        "const request = window.fetch; request('/collect')",
+    ),
     "XMLHttpRequest": ('window["XMLHttpRequest"]',),
     "WebSocket": ('window["WebSocket"]',),
     "EventSource": ('window["EventSource"]',),
@@ -136,9 +148,7 @@ class SiteBaseTests(unittest.TestCase):
     def test_root_and_project_bases_pass(self) -> None:
         self.assertEqual(website_build.validate_site_base("/"), "/")
         self.assertEqual(website_build.validate_site_base("/agentworks/"), "/agentworks/")
-        self.assertEqual(
-            website_build.validate_site_base("/agent-works_1.0~/"), "/agent-works_1.0~/"
-        )
+        self.assertEqual(website_build.validate_site_base("/agent-works_1.0~/"), "/agent-works_1.0~/")
 
     def test_invalid_bases_are_rejected(self) -> None:
         invalid = (
@@ -178,7 +188,7 @@ class SiteBaseTests(unittest.TestCase):
 
 
 class BuildTests(unittest.TestCase):
-    expected = website_build.FULL_MANIFEST
+    expected = EXPECTED_FILES
 
     def build(self, site_base: str) -> tuple[Path, tempfile.TemporaryDirectory[str]]:
         temporary = tempfile.TemporaryDirectory()
@@ -193,14 +203,16 @@ class BuildTests(unittest.TestCase):
                 self.addCleanup(temporary.cleanup)
                 files = {path.relative_to(output) for path in output.rglob("*") if path.is_file()}
                 self.assertEqual(files, self.expected)
-                html = (output / "404.html").read_text(encoding="utf-8")
-                self.assertNotIn("{{", html)
-                self.assertIn(f'href="{site_base}"', html)
-                self.assertIn(f'href="{site_base}static/lander.css"', html)
-                self.assertIn(f'href="{site_base}static/site.css"', html)
-                self.assertIn(f'src="{site_base}static/lander-game.js"', html)
-                for fragment in ("agw-mark", "agw-engine-left", "agw-engine-right"):
-                    self.assertIn(f'href="{site_base}assets/agw-rocket.svg#{fragment}"', html)
+                self.assertEqual(website_build.FULL_MANIFEST, self.expected)
+                for route in (Path("404.html"), Path("lander/index.html")):
+                    html = (output / route).read_text(encoding="utf-8")
+                    self.assertNotIn("{{", html)
+                    self.assertIn(f'href="{site_base}"', html)
+                    self.assertIn(f'href="{site_base}static/lander.css"', html)
+                    self.assertIn(f'href="{site_base}static/site.css"', html)
+                    self.assertIn(f'src="{site_base}static/lander-game.js"', html)
+                    for fragment in ("agw-mark", "agw-engine-left", "agw-engine-right"):
+                        self.assertIn(f'href="{site_base}assets/agw-rocket.svg#{fragment}"', html)
 
     def test_builder_replaces_only_an_owned_output_set(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -239,9 +251,14 @@ class BuildTests(unittest.TestCase):
         self.assertFalse((WEBSITE / "templates" / "nested-output").exists())
         self.assertFalse((WEBSITE / "static" / "nested-output").exists())
 
-    def test_closed_template_vocabulary_and_required_references_fail_closed(self) -> None:
+    def test_closed_template_vocabulary_and_required_references_fail_closed(
+        self,
+    ) -> None:
         template = (WEBSITE / "templates" / "404.html").read_text(encoding="utf-8")
-        self.assertEqual(set(re.findall(r"{{[^{}]+}}", template)), {"{{SITE_BASE}}"})
+        self.assertEqual(
+            set(re.findall(r"{{[^{}]+}}", template)),
+            {"{{SITE_BASE}}", "{{LANDER_GAME}}"},
+        )
         with self.assertRaises(ValueError):
             website_build._validate_template("404.html", template + "{{OTHER}}")
         for required in website_build.REQUIRED_404_REFERENCES:
@@ -252,7 +269,9 @@ class BuildTests(unittest.TestCase):
 class StaticDocumentTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.template = (WEBSITE / "templates" / "404.html").read_text(encoding="utf-8")
+        shell = (WEBSITE / "templates" / "404.html").read_text(encoding="utf-8")
+        cls.fragment = (WEBSITE / "templates" / "lander-game.html").read_text(encoding="utf-8")
+        cls.template = shell.replace("{{LANDER_GAME}}", cls.fragment)
         cls.document = parse_document(cls.template)
         cls.css = (WEBSITE / "static" / "lander.css").read_text(encoding="utf-8")
         cls.model = (WEBSITE / "static" / "lander-model.js").read_text(encoding="utf-8")
@@ -275,9 +294,13 @@ class StaticDocumentTests(unittest.TestCase):
         self.assertIn("Product of Wayfarer Labs, LLC", self.template)
         self.assertNotIn("Build systems that let agents do the work.", self.template)
 
-    def test_preflight_controls_are_hidden_but_scene_and_breadcrumb_are_not(self) -> None:
+    def test_preflight_controls_are_hidden_but_scene_and_breadcrumb_are_not(
+        self,
+    ) -> None:
         self.assertIn("hidden", self.element("lander-start")[1])
         self.assertIn("hidden", self.element("lander-controls")[1])
+        self.assertIn("hidden", self.element("lander-actions")[1])
+        self.assertIn("hidden", self.element("lander-restart")[1])
         self.assertNotIn("hidden", self.element("lander-scene")[1])
         home = next(attributes for tag, attributes in self.document.tags if attributes.get("href") == "{{SITE_BASE}}")
         self.assertNotIn("hidden", home)
@@ -287,17 +310,22 @@ class StaticDocumentTests(unittest.TestCase):
             "Thrust: Space or Up. Turn: Left/H or Right/L. Escape exits. R restarts after success or failure.",
         )
 
-    def test_accessible_names_live_region_and_initial_focus_surface_are_pinned(self) -> None:
+    def test_accessible_names_live_region_and_initial_focus_surface_are_pinned(
+        self,
+    ) -> None:
         self.assertEqual(len(self.document.ids), len(set(self.document.ids)))
         self.assertEqual(self.element("lander-game")[1]["aria-label"], "Lunar deployment scene")
         self.assertEqual(
-            self.element("lander-start")[1]["aria-label"], "Start lunar deployment mission"
+            self.element("lander-start")[1]["aria-label"],
+            "Start lunar deployment mission",
         )
         self.assertEqual(self.element("lander-scene-shell")[1]["tabindex"], "-1")
         status = self.element("lander-status")[1]
         self.assertEqual(status["role"], "status")
         self.assertEqual(status["aria-live"], "polite")
         self.assertEqual(status["aria-atomic"], "true")
+        self.assertEqual(self.element("lander-exit")[0], "button")
+        self.assertEqual(self.element("lander-restart")[0], "button")
         description = " ".join(self.document.text_by_id["lander-scene-description"].split()).lower()
         for word in ("lander", "surface", "zone", "dark", "network operations center"):
             self.assertIn(word, description)
@@ -321,7 +349,9 @@ class StaticDocumentTests(unittest.TestCase):
         self.assertIn("transform-origin: 158px 401px", self.css)
         self.assertEqual(self.element("scene-terrain")[1]["d"], "M0 548H1000V640H0Z")
 
-    def test_css_has_only_bounded_keyframes_and_reduced_motion_preserves_live_plumes(self) -> None:
+    def test_css_has_only_bounded_keyframes_and_reduced_motion_preserves_live_plumes(
+        self,
+    ) -> None:
         self.assertEqual(
             set(re.findall(r"@keyframes\s+([\w-]+)", self.css)),
             {"agw-preflight-cue", "agw-agent-route"},
@@ -333,9 +363,7 @@ class StaticDocumentTests(unittest.TestCase):
         self.assertNotIn("#mission-right-engine", reduced)
         self.assertNotIn("scale(1, 0.08)", reduced)
         self.assertIn('[data-paused="true"]', self.css)
-        powered_rule = self.css.split(
-            '#lander-game[data-noc-stage="4"] #noc-signals {', 1
-        )[1].split("}", 1)[0]
+        powered_rule = self.css.split('#lander-game[data-noc-stage="4"] #noc-signals {', 1)[1].split("}", 1)[0]
         self.assertIn("opacity: 1", powered_rule)
         self.assertNotIn("animation", powered_rule)
 
@@ -349,8 +377,40 @@ class StaticDocumentTests(unittest.TestCase):
         self.assertIn("this.cue = settleCue()", destroy)
         self.assertIn("this.startButton.disabled = true", destroy)
         self.assertIn("this.startButton.hidden = true", destroy)
+        self.assertIn("this.actions.hidden = true", destroy)
+        self.assertIn("this.exitButton.disabled = true", destroy)
+        self.assertIn("this.restartButton.disabled = true", destroy)
         self.assertIn('this.status.textContent = ""', destroy)
-        self.assertLess(destroy.index("this.abortController.abort()"), destroy.index("this.render()"))
+        self.assertLess(
+            destroy.index("this.abortController.abort()"),
+            destroy.index("this.render()"),
+        )
+
+    def test_native_actions_share_keyboard_controller_operations_and_focus_lifecycle(
+        self,
+    ) -> None:
+        listeners = self.game.split("installListeners() {", 1)[1].split("\n    }", 1)[0]
+        self.assertIn('this.exitButton.addEventListener("click", () => this.exit()', listeners)
+        self.assertIn(
+            'this.restartButton.addEventListener("click", () => this.restart()',
+            listeners,
+        )
+        keyboard = self.game.split("onKeyDown(event) {", 1)[1].split("onKeyUp(event) {", 1)[0]
+        self.assertIn("this.exit()", keyboard)
+        self.assertIn("this.restart()", keyboard)
+        start = self.game.split("start(holdSpace, timestamp) {", 1)[1].split("exit() {", 1)[0]
+        self.assertIn("this.actions.hidden = false", start)
+        self.assertIn("this.exitButton.disabled = false", start)
+        self.assertIn("this.restartButton.hidden = true", start)
+        exit_method = self.game.split("exit() {", 1)[1].split("restart() {", 1)[0]
+        self.assertIn("this.actions.hidden = true", exit_method)
+        self.assertIn("this.startButton.focus({ preventScroll: true })", exit_method)
+        restart = self.game.split("restart() {", 1)[1].split("onKeyDown(event) {", 1)[0]
+        self.assertIn("this.restartButton.hidden = true", restart)
+        self.assertIn("this.shell.focus({ preventScroll: true })", restart)
+        render = self.game.split("render() {", 1)[1].split("destroy() {", 1)[0]
+        self.assertIn('["failed", "succeeded"].includes(this.model.state)', render)
+        self.assertIn("this.restartButton.disabled = !terminal", render)
 
     def test_fixed_color_contrast_meets_text_and_graphic_thresholds(self) -> None:
         self.assertGreaterEqual(contrast("#292b30", "#f5f2e8"), 4.5)
@@ -385,7 +445,8 @@ class RocketAssetTests(unittest.TestCase):
         self.assertNotIn("height", self.root.attrib)
         self.assertEqual(self.root.attrib["role"], "img")
         self.assertEqual(
-            self.root.attrib["aria-labelledby"], "agw-rocket-title agw-rocket-description"
+            self.root.attrib["aria-labelledby"],
+            "agw-rocket-title agw-rocket-description",
         )
         without_namespace = self.source.replace('xmlns="http://www.w3.org/2000/svg"', "")
         self.assertNotRegex(without_namespace, r"<(?:script|image|animate)\b|https?://")
@@ -421,8 +482,7 @@ class RocketAssetTests(unittest.TestCase):
             "agw-right-hot-core": "M151 412c2 4 5 6 7 6s5-2 7-6c-1 18-3 35-7 49-4-14-6-31-7-49Z",
             "agw-letter-w": "M32 274h40l21 68 15-68h24l15 68 21-68h40l-32 112h-35l-21-53-21 53H64L32 274Z",
             "agw-letter-g": (
-                "M191 184a34 34 0 0 0-34-34H83a34 34 0 0 0-34 34v78a34 34 0 0 0 34 34h74"
-                "a34 34 0 0 0 34-34v-22h-73"
+                "M191 184a34 34 0 0 0-34-34H83a34 34 0 0 0-34 34v78a34 34 0 0 0 34 34h74a34 34 0 0 0 34-34v-22h-73"
             ),
             "agw-letter-a": "M120 10 204 143h-40l-15-27H91l-15 27H36L120 10Zm0 55-18 32h36l-18-32Z",
         }

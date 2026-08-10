@@ -1,0 +1,509 @@
+# ruff: noqa: F405
+
+from site_test_support import *  # noqa: F403
+
+
+class TemplateContractTests(RepositoryFixture):
+    def test_each_template_has_only_its_closed_vocabulary(self) -> None:
+        for name, expected in site_builder.TEMPLATE_TOKENS.items():
+            template = (self.root / "website/templates" / name).read_text(encoding="utf-8")
+            self.assertEqual(set(site_builder.TOKEN_PATTERN.findall(template)), expected)
+            site_builder._validate_template(name, template)
+
+    def test_unknown_missing_duplicate_wrong_template_and_brace_tokens_fail(
+        self,
+    ) -> None:
+        path = self.root / "website/templates/index.html"
+        template = path.read_text(encoding="utf-8")
+        variants = (
+            template + "{{UNKNOWN}}",
+            template.replace("{{HOME_IDENTITY}}", ""),
+            template.replace("{{HOME_IDENTITY}}", "{{HOME_IDENTITY}}{{HOME_IDENTITY}}"),
+            template.replace("{{HOME_IDENTITY}}", "{{SECURITY_THREATS}}"),
+            template + "{{not-a-token}}",
+            template.replace('href="{{SITE_BASE}}security/"', 'data-base="{{SITE_BASE}}security/"', 1),
+        )
+        for changed in variants:
+            with self.subTest(changed=changed[-40:]), self.assertRaises(ValueError):
+                site_builder._validate_template("index.html", changed)
+
+    def test_extracted_content_cannot_expand_a_template_token(self) -> None:
+        template = (self.root / "website/templates/index.html").read_text(encoding="utf-8")
+        substitutions = site_builder.extract_content(self.root)
+        for injection in (
+            "&lt;script&gt;{{ATTACK}}&lt;/script&gt;",
+            "{{HOME_IDENTITY}}",
+        ):
+            with self.subTest(injection=injection):
+                substitutions["HOME_IDENTITY"] = injection
+                with self.assertRaisesRegex(ValueError, "brace-like token syntax"):
+                    site_builder.render_named_template("index.html", template, "/", substitutions)
+
+    def test_content_tokens_cannot_move_to_hostile_or_unreviewed_contexts(self) -> None:
+        path = self.root / "website/templates/index.html"
+        template = path.read_text(encoding="utf-8")
+        identity = '<div class="sourced-content">{{HOME_IDENTITY}}</div>'
+        metadata = 'content="{{HOME_META_DESCRIPTION}}"'
+        variants = (
+            template.replace(metadata, 'content="safe" data-copy="{{HOME_META_DESCRIPTION}}"'),
+            template.replace(identity, "<script>{{HOME_IDENTITY}}</script>"),
+            template.replace(identity, "<style>{{HOME_IDENTITY}}</style>"),
+            template.replace(identity, '<div class="unreviewed">{{HOME_IDENTITY}}</div>'),
+            template.replace(identity, '<div class="sourced-content">prefix {{HOME_IDENTITY}}</div>'),
+            template.replace(
+                identity,
+                '</section><section id="unreviewed"><div class="sourced-content">{{HOME_IDENTITY}}</div>',
+            ),
+        )
+        for changed in variants:
+            with (
+                self.subTest(changed=changed[changed.find("{{HOME_") - 30 : changed.find("{{HOME_") + 50]),
+                self.assertRaisesRegex(
+                    ValueError,
+                    "content token|metadata token|sourced-content|reviewed section",
+                ),
+            ):
+                site_builder._validate_template("index.html", changed)
+
+    def test_interim_notice_section_heading_and_shared_destinations_are_guarded(
+        self,
+    ) -> None:
+        template = (self.root / "website/templates/index.html").read_text(encoding="utf-8")
+        variants = (
+            template.replace("</body>", f"<p>{NOTICE}</p></body>"),
+            template.replace('id="onboarding"', 'id="onboarding-moved"'),
+            template.replace('aria-labelledby="onboarding-heading"', 'aria-labelledby="other"', 1),
+            template.replace('<h2 id="onboarding-heading">', '<h2 id="other">'),
+            template.replace(
+                "</footer>",
+                '<a href="https://github.com/WayfarerLabs/agentworks">Repeated repository</a></footer>',
+            ),
+            template.replace("</footer>", '<a href="#main-content">Repeated skip link</a></footer>'),
+        )
+        for changed in variants:
+            with (
+                self.subTest(change=changed[-100:]),
+                self.assertRaisesRegex(ValueError, "onboarding|notice|destination|skip link|footer"),
+            ):
+                site_builder._validate_template("index.html", changed)
+
+    def test_shell_destination_labels_are_bound_to_their_reviewed_hrefs(self) -> None:
+        template = (self.root / "website/templates/index.html").read_text(encoding="utf-8")
+        swapped = template.replace("<span>GitHub</span>", "<span>SWAPPED</span>", 1)
+        swapped = swapped.replace("<span>PyPI</span>", "<span>GitHub</span>", 1)
+        swapped = swapped.replace("<span>SWAPPED</span>", "<span>PyPI</span>", 1)
+        with self.assertRaisesRegex(ValueError, "destination"):
+            site_builder._validate_template("index.html", swapped)
+
+    def test_shell_css_classes_landmark_order_and_breadcrumb_order_fail_closed(
+        self,
+    ) -> None:
+        for name in SHELL_TEMPLATES:
+            template = (self.root / "website/templates" / name).read_text(encoding="utf-8")
+            footer = re.search(
+                r"\n        <footer class=\"site-footer\">.*?</footer>",
+                template,
+                re.DOTALL,
+            )
+            self.assertIsNotNone(footer)
+            assert footer is not None
+            reordered = template.replace(footer.group(0), "", 1).replace(
+                "        <main ", f"{footer.group(0)}\n        <main ", 1
+            )
+            reversed_breadcrumb = re.sub(
+                r'(<a href="\{\{SITE_BASE\}\}">Agentworks</a>)(\s*)'
+                r'(<span class="breadcrumb-separator" aria-hidden="true">/</span>)',
+                r"\3\2\1",
+                template,
+                count=1,
+            )
+            variants = (
+                template.replace('class="site-header"', 'class="site-top"', 1),
+                template.replace('class="site-footer"', 'class="site-bottom"', 1),
+                template.replace('class="breadcrumbs"', 'class="crumbs"', 1),
+                template.replace('class="service-links"', 'class="services"', 1),
+                template.replace(
+                    site_builder.MAIN_ATTRIBUTES[name].get("class", 'id="main-content"'),
+                    "drifted",
+                    1,
+                ),
+                template.replace('aria-label="External"', 'aria-label="Primary"', 1),
+                template.replace('aria-label="Footer"', 'aria-label="Elsewhere"', 1),
+                template.replace('aria-current="page"', 'aria-current="step"', 1),
+                reversed_breadcrumb,
+                reordered,
+            )
+            if name != "index.html":
+                variants += (template.replace('class="header-identity"', 'class="identity"', 1),)
+            for changed in variants:
+                with (
+                    self.subTest(name=name, change=changed[:80]),
+                    self.assertRaises(ValueError),
+                ):
+                    site_builder._validate_template(name, changed)
+
+    def test_detail_page_headings_reject_provenance_eyebrows(self) -> None:
+        headings = {
+            "manifesto.html": "Agentworks Manifesto",
+            "security.html": "Security at Agentworks",
+            "lander.html": "Lunar deployment",
+            "404.html": "Page not found",
+        }
+        for name, heading in headings.items():
+            template = (self.root / "website/templates" / name).read_text(encoding="utf-8")
+            changed = template.replace(
+                f"<h1>{heading}</h1>",
+                f'<p class="eyebrow">Generated from the repository</p><h1>{heading}</h1>',
+                1,
+            )
+            with (
+                self.subTest(name=name),
+                self.assertRaisesRegex(ValueError, "detail page heading"),
+            ):
+                site_builder._validate_template(name, changed)
+
+    def test_service_ctas_reject_hidden_ancestors_and_icon_bypasses(self) -> None:
+        extra_icon = '<svg aria-hidden="true" focusable="false" viewBox="0 0 16 16"><path d="M0 0" /></svg>'
+        for name in SHELL_TEMPLATES:
+            template = (self.root / "website/templates" / name).read_text(encoding="utf-8")
+            variants = (
+                template.replace(
+                    f'<a href="{site_builder.REPOSITORY_URL}"',
+                    f'<a hidden href="{site_builder.REPOSITORY_URL}"',
+                    1,
+                ),
+                template.replace(
+                    f'<a href="{site_builder.REPOSITORY_URL}"',
+                    f'<a style="display: none" href="{site_builder.REPOSITORY_URL}"',
+                    1,
+                ),
+                template.replace(
+                    '<header class="site-header">',
+                    '<header class="site-header" hidden>',
+                    1,
+                ),
+                template.replace("<body>", "<body hidden>", 1),
+                template.replace(
+                    '<nav class="service-links" aria-label="External">',
+                    '<nav class="service-links" aria-label="External" aria-hidden="true">',
+                    1,
+                ),
+                template.replace("<span>GitHub</span>", "<span hidden>GitHub</span>", 1),
+                template.replace(
+                    "</head>",
+                    "<style>.service-links { display: none }</style></head>",
+                    1,
+                ),
+                template.replace("<span>GitHub</span>", f"{extra_icon}<span>GitHub</span>", 1),
+                template.replace(
+                    "</nav>\n        </header>",
+                    f"{extra_icon}</nav>\n        </header>",
+                    1,
+                ),
+                template.replace("</main>", f"{extra_icon}</main>", 1),
+                template.replace('class="service-icon"', 'class="icon"', 1),
+                template.replace(
+                    'aria-hidden="true" focusable="false" viewBox="0 0 16 16"',
+                    'focusable="false" viewBox="0 0 16 16"',
+                    1,
+                ),
+            )
+            for changed in variants:
+                with (
+                    self.subTest(name=name, change=changed[:100]),
+                    self.assertRaises(ValueError),
+                ):
+                    site_builder._validate_template(name, changed)
+
+    def test_reviewed_shell_text_cannot_come_from_hidden_or_structural_descendants(
+        self,
+    ) -> None:
+        template = (self.root / "website/templates/index.html").read_text(encoding="utf-8")
+        variants = (
+            template.replace(
+                "Skip to main content",
+                "<span hidden>Skip to main content</span>",
+                1,
+            ),
+            template.replace(
+                "<span>GitHub</span>",
+                '<span><span aria-hidden="true">GitHub</span></span>',
+                1,
+            ),
+            template.replace(
+                '<a href="{{SITE_BASE}}">Agentworks</a>',
+                '<a href="{{SITE_BASE}}"><span hidden>Agentworks</span></a>',
+                1,
+            ),
+            template.replace(
+                '<span aria-current="page">Home</span>',
+                '<span aria-current="page"><template>Home</template></span>',
+                1,
+            ),
+            template.replace(
+                "Product of Wayfarer Labs, LLC",
+                '<span aria-hidden="true">Product of Wayfarer Labs, LLC</span>',
+                1,
+            ),
+            template.replace(
+                ">Agentworks Manifesto</a>",
+                '><span style="visibility: hidden">Agentworks Manifesto</span></a>',
+                1,
+            ),
+        )
+        for changed in variants:
+            with self.subTest(change=changed[:120]), self.assertRaises(ValueError):
+                site_builder._validate_template("index.html", changed)
+
+    def test_service_icon_paths_are_exact_single_direct_children(self) -> None:
+        for name in SHELL_TEMPLATES:
+            template = (self.root / "website/templates" / name).read_text(encoding="utf-8")
+            for destination, path_data in site_builder.SERVICE_ICON_PATHS.items():
+                path = f'<path d="{path_data}" />'
+                self.assertIn(path, template)
+                variants = (
+                    template.replace(path, "", 1),
+                    template.replace(path, '<path d="M0 0" />', 1),
+                    template.replace(path, "<path />", 1),
+                    template.replace(path, f"{path}{path}", 1),
+                    template.replace(path, f"<g>{path}</g>", 1),
+                    template.replace(path, f'<path d="{path_data}">unexpected</path>', 1),
+                )
+                for changed in variants:
+                    with (
+                        self.subTest(name=name, destination=destination),
+                        self.assertRaisesRegex(ValueError, "exact reviewed icon path"),
+                    ):
+                        site_builder._validate_template(name, changed)
+
+    def test_rocket_inventory_rejects_unclassified_extra_and_misplaced_images(
+        self,
+    ) -> None:
+        extra = '<img src="{{SITE_BASE}}assets/agw-rocket.svg" alt="" />'
+        for name in SHELL_TEMPLATES:
+            template = (self.root / "website/templates" / name).read_text(encoding="utf-8")
+            variants = (
+                template.replace(
+                    '<header class="site-header">',
+                    f'<header class="site-header">{extra}',
+                    1,
+                ),
+                template.replace("</main>", f"{extra}</main>", 1),
+            )
+            if name != "index.html":
+                variants += (
+                    template.replace('class="header-mark"', 'class="unclassified"', 1),
+                    template.replace(
+                        '<img class="header-mark" src="{{SITE_BASE}}assets/agw-rocket.svg" alt="" />\n                '
+                        '<nav class="breadcrumbs"',
+                        '<nav class="breadcrumbs"',
+                        1,
+                    ).replace(
+                        "</nav>\n            </div>",
+                        '</nav>\n                <img class="header-mark" '
+                        'src="{{SITE_BASE}}assets/agw-rocket.svg" alt="" />\n            </div>',
+                        1,
+                    ),
+                )
+            else:
+                variants += (
+                    template.replace(
+                        '<img class="hero-mark" src="{{SITE_BASE}}assets/agw-rocket.svg" alt="AGW rocket mark" />',
+                        "",
+                        1,
+                    ).replace(
+                        "</main>",
+                        '<img class="hero-mark" src="{{SITE_BASE}}assets/agw-rocket.svg" '
+                        'alt="AGW rocket mark" /></main>',
+                        1,
+                    ),
+                )
+            for changed in variants:
+                with (
+                    self.subTest(name=name, change=changed[:100]),
+                    self.assertRaises(ValueError),
+                ):
+                    site_builder._validate_template(name, changed)
+
+    def test_fragment_scene_svg_cannot_move_outside_its_reviewed_section(self) -> None:
+        template = (self.root / "website/templates/lander-game.html").read_text(encoding="utf-8")
+        scene = re.search(r"\n        <svg\n.*?\n        </svg>", template, re.DOTALL)
+        self.assertIsNotNone(scene)
+        assert scene is not None
+        changed = template.replace(scene.group(0), "", 1) + scene.group(0)
+        with self.assertRaisesRegex(ValueError, "root section|scene"):
+            site_builder._validate_template("lander-game.html", changed)
+
+    def test_fragment_variants_cannot_duplicate_local_route_destinations(self) -> None:
+        for name in SHELL_TEMPLATES:
+            template = (self.root / "website/templates" / name).read_text(encoding="utf-8")
+            variants = (
+                (
+                    template.replace(
+                        "</main>",
+                        '<a href="{{SITE_BASE}}manifesto/#the-problem-space">Duplicate Manifesto route</a></main>',
+                        1,
+                    ),
+                    "duplicate normalized local route",
+                ),
+                (
+                    template.replace(
+                        "</main>",
+                        '<a href="{{SITE_BASE}}manifesto/index.html#the-problem-space">'
+                        "Aliased Manifesto route</a></main>",
+                        1,
+                    ),
+                    "duplicate normalized local route",
+                ),
+                (
+                    template.replace(
+                        "</main>",
+                        '<a href="{{SITE_BASE}}index.html">Aliased root route</a></main>',
+                        1,
+                    ),
+                    "duplicate normalized local route",
+                ),
+                (
+                    template.replace(
+                        "</main>",
+                        '<a href="/manifesto/#the-problem-space">Unbased route</a></main>',
+                        1,
+                    ),
+                    "must use SITE_BASE",
+                ),
+            )
+            for changed, reason in variants:
+                with (
+                    self.subTest(name=name, reason=reason),
+                    self.assertRaises(ValueError),
+                ):
+                    site_builder._validate_template(name, changed)
+
+    def test_shared_game_fragment_has_one_exact_shell_placement(self) -> None:
+        for name in ("lander.html", "404.html"):
+            template = (self.root / "website/templates" / name).read_text(encoding="utf-8")
+            variants = (
+                template.replace("{{LANDER_GAME}}", "", 1),
+                template.replace("{{LANDER_GAME}}", "{{LANDER_GAME}}{{LANDER_GAME}}", 1),
+                template.replace("{{LANDER_GAME}}", "<div>{{LANDER_GAME}}</div>", 1),
+                template.replace("{{LANDER_GAME}}", "", 1).replace("</footer>", "{{LANDER_GAME}}</footer>", 1),
+            )
+            for changed in variants:
+                with self.subTest(name=name), self.assertRaises(ValueError):
+                    site_builder._validate_template(name, changed)
+
+    def test_footer_game_link_is_final_icon_only_and_accessibly_named(self) -> None:
+        for name in SHELL_TEMPLATES:
+            template = (self.root / "website/templates" / name).read_text(encoding="utf-8")
+            variants = (
+                template.replace('aria-label="Play Lunar Lander"', 'aria-label="Game"', 1),
+                template.replace(
+                    'alt=""\n                /></a>',
+                    'alt="Rocket"\n                /></a>',
+                    1,
+                ),
+                template.replace('class="footer-game-link"', 'class="footer-rocket"', 1),
+                template.replace("lander/#lander-game", "lander/", 1),
+                template.replace("/></a>", "/>Lander</a>", 1),
+            )
+            for changed in variants:
+                with (
+                    self.subTest(name=name),
+                    self.assertRaisesRegex(ValueError, "footer Lander"),
+                ):
+                    site_builder._validate_template(name, changed)
+
+    def test_shell_title_and_canonical_metadata_fail_closed(self) -> None:
+        for name, (title, canonical) in site_builder.TEMPLATE_METADATA.items():
+            template = (self.root / "website/templates" / name).read_text(encoding="utf-8")
+            drifted_canonical = (
+                "https://agentworks.build/security/"
+                if canonical != "https://agentworks.build/security/"
+                else "https://agentworks.build/"
+            )
+            for changed in (
+                template.replace(f"<title>{title}</title>", "<title>Drifted</title>", 1),
+                template.replace(f'href="{canonical}"', f'href="{drifted_canonical}"', 1),
+            ):
+                with (
+                    self.subTest(name=name),
+                    self.assertRaisesRegex(ValueError, "title|canonical URL"),
+                ):
+                    site_builder._validate_template(name, changed)
+
+    def test_game_shell_description_and_csp_are_exact_and_shared(self) -> None:
+        policies = []
+        for name in ("lander.html", "404.html"):
+            template = (self.root / "website/templates" / name).read_text(encoding="utf-8")
+            document = parse(template)
+            csp = next(meta["content"] for meta in document.tags("meta") if meta.get("http-equiv"))
+            policies.append(csp)
+            for changed in (
+                template.replace(csp, "default-src 'self'", 1),
+                template.replace(site_builder.GAME_DESCRIPTIONS[name], "Drifted", 1),
+            ):
+                with (
+                    self.subTest(name=name),
+                    self.assertRaisesRegex(ValueError, "description|Content Security"),
+                ):
+                    site_builder._validate_template(name, changed)
+        self.assertEqual(policies, [CSP, CSP])
+
+    def test_duplicate_attributes_cannot_bypass_template_contracts(self) -> None:
+        template = (self.root / "website/templates/index.html").read_text(encoding="utf-8")
+        variants = (
+            template.replace(
+                'name="description" content="{{HOME_META_DESCRIPTION}}"',
+                'name="description" content="safe" content="{{HOME_META_DESCRIPTION}}"',
+            ),
+            template.replace(
+                '<section class="identity-panel" aria-labelledby="home-heading">',
+                '<section class="unreviewed" class="identity-panel" aria-labelledby="home-heading">',
+            ),
+            template.replace(
+                'aria-labelledby="onboarding-heading">',
+                'aria-labelledby="other" aria-labelledby="onboarding-heading">',
+                1,
+            ),
+        )
+        for changed in variants:
+            with (
+                self.subTest(change=changed[:200]),
+                self.assertRaisesRegex(ValueError, "duplicate HTML attribute"),
+            ):
+                site_builder._validate_template("index.html", changed)
+
+    def test_reviewed_destination_and_reporting_literals_cannot_drift(self) -> None:
+        for name, old, new in (
+            ("security.html", site_builder.REPORTING_URL, "https://example.com/report"),
+            (
+                "security.html",
+                "https://github.com/WayfarerLabs/agentworks/security/policy",
+                "https://example.com/policy",
+            ),
+        ):
+            template = (self.root / "website/templates" / name).read_text(encoding="utf-8")
+            with (
+                self.subTest(name=name, old=old),
+                self.assertRaisesRegex(ValueError, "required reviewed literals"),
+            ):
+                site_builder._validate_template(name, template.replace(old, new))
+
+    def test_manifesto_tokens_cannot_move_out_of_reviewed_article_or_metadata(
+        self,
+    ) -> None:
+        template = (self.root / "website/templates/manifesto.html").read_text(encoding="utf-8")
+        variants = (
+            template.replace(
+                'content="{{MANIFESTO_META_DESCRIPTION}}"',
+                'data-copy="{{MANIFESTO_META_DESCRIPTION}}"',
+            ),
+            template.replace(
+                '<article class="manifesto-content sourced-content">{{MANIFESTO_CONTENT}}</article>',
+                "<div>{{MANIFESTO_CONTENT}}</div>",
+            ),
+            template.replace("{{MANIFESTO_CONTENT}}", "prefix {{MANIFESTO_CONTENT}}", 1),
+        )
+        for changed in variants:
+            with self.assertRaisesRegex(ValueError, "content token|metadata token|manifesto article|block token"):
+                site_builder._validate_template("manifesto.html", changed)

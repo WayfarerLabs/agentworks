@@ -7,13 +7,14 @@ python3 website/build.py --repo-root . --output /tmp/agentworks-site-demo --site
 python3 -m http.server --directory /tmp/agentworks-site-demo 8000
 ```
 
-Use this package-free checklist against `/404.html` in the complete built site. Record each
-execution so a future reader can distinguish verified behavior from an expectation that has not been
-run.
+Use this package-free checklist against `/lander/` for ordinary game work and `/404.html` for the
+fallback in the complete built site. Record each execution so a future reader can distinguish
+verified behavior from an expectation that has not been run.
 
-Phase 4B changed the shared header and footer and added `/manifesto/`. Automated source, generated
-document, and model checks pass, but no browser execution has been recorded for that source. All
-shared-shell rows and any 404 row that names the new breadcrumb route-home action are pending.
+Phase 4C adds `/lander/`, the final footer icon link, shared native Exit and Restart controls, and a
+compact 404 heading. Automated source, generated-document, and model checks pass, but no browser
+execution has been recorded for that source. All five-page shared-shell rows and every row that
+names the new route, footer link, or native controls are pending.
 
 ## Local demo
 
@@ -24,8 +25,10 @@ python3 website/build.py --repo-root . --output /tmp/agentworks-site-demo --site
 python3 -m http.server --directory /tmp/agentworks-site-demo 8000
 ```
 
-Open `http://localhost:8000/404.html` from the complete linked site. Keep the browser network panel
-open with request preservation enabled. Disable the browser cache for request-log checks.
+Open `http://localhost:8000/lander/` for the normal game, then repeat fallback-specific rows at
+`http://localhost:8000/404.html`. Also inspect Home, Manifesto, and Security so the run covers all
+five pages. Keep the browser network panel open with request preservation enabled. Disable the
+browser cache for request-log checks.
 
 ## Execution record
 
@@ -71,6 +74,35 @@ open with request preservation enabled. Disable the browser cache for request-lo
 Repeat the full checklist in current Chromium and Firefox. Repeat the responsive rows on a touch
 browser. Safari or another WebKit browser is required before public launch.
 
+## Phase 4C permanent acceptance
+
+Record a new dated run against the exact implementation SHA. Current Chromium owns the ordinary
+functional baseline; Firefox and WebKit remain independent engine gates. Spoken screen-reader
+quality and physical touch/motion feel require humans on those actual surfaces. Emulation and an
+accessibility-tree dump are useful evidence, but do not close those rows.
+
+- [ ] In current Chromium, exercise `/lander/` and `/404.html` with JavaScript enabled and disabled,
+      at normal and reduced motion, and at every responsive viewport below. Record the exact browser
+      version and source SHA.
+- [ ] In Firefox, repeat the complete keyboard, pointer, lifecycle, reflow, computed-style, and
+      reduced-motion pass. Record the exact browser version and source SHA.
+- [ ] In Safari or another WebKit browser, repeat the same engine pass before public release.
+- [ ] With a spoken screen reader, verify initial scene naming, hidden preflight controls, the
+      application transition, concise control description, polite status changes, native Exit and
+      Restart names/states, and focus destinations. Record screen reader, browser, and versions.
+- [ ] On physical touch hardware, verify start, tap impulse, hold, drag, Exit, Restart, scroll
+      outside the active scene, and human motion quality. Record device, operating system, browser,
+      and input observations.
+- [ ] On all five pages, inspect every reviewed shell link with computed styles. Each link is
+      visible, intersects the viewport, has nonzero bounds, receives keyboard focus with the full
+      outline, and is reachable by pointer without overlap. Temporarily apply an offscreen
+      `position: absolute; left: -10000px` canary to a copied link and prove this browser check
+      fails even though the static declaration checks do not claim to detect it.
+- [ ] Measure the Home hero's actual computed bounds and the compact header mark's computed bounds.
+      Record both, while evaluating the accepted `3.2rem` to `4.8rem` hero width against the
+      historical pre-refinement `1.6rem` header baseline. Do not reinterpret the requirement as two
+      to three times the current `1.2rem` compact mark.
+
 ## Interim shell execution record
 
 - Date: 2026-08-09
@@ -107,9 +139,10 @@ new run records the refined source.
 
 ## Static recovery and initial presentation
 
-- [ ] With JavaScript disabled, the page shows one 404 heading, explanatory text, a working linked
-      `Agentworks` breadcrumb home crumb, the lander, lunar surface, landing zone, and dark
-      operations center. There is no body-level home link.
+- [ ] With JavaScript disabled, `/lander/` shows one `Lunar deployment` heading and the complete
+      static scene. `/404.html` shows one `Page not found` heading, explanatory text, a working
+      linked `Agentworks` breadcrumb home crumb, and the same scene. There is no error-code eyebrow
+      or body-level home link.
 - [x] With JavaScript disabled, no start target or control instructions are exposed visually or to
       the accessibility tree. The document has header, main, and footer landmarks in that order.
 - [x] With JavaScript enabled and normal motion, each reload gives one subtle three-pulse plume cue
@@ -125,9 +158,9 @@ new run records the refined source.
 
 - [ ] Tab reaches the breadcrumb home crumb, GitHub, PyPI, footer links, and named start button in
       logical document order. No Tab key is intercepted and focus is never trapped.
-- [x] Activating the start button by keyboard or ordinary click starts without thrust, reveals the
-      single control paragraph, hides the start button, and moves focus to the game without
-      scrolling.
+- [ ] Activating the start button by keyboard or ordinary click starts without thrust, reveals the
+      single control paragraph and native `Exit mission` button, keeps `Restart mission` hidden,
+      hides the start button, and moves focus to the game without scrolling.
 - [x] Pressing unmodified Space on the document body or scene starts, immediately commands thrust,
       and does not scroll. Holding that same physical Space key continues thrust after focus moves;
       releasing it ends thrust.
@@ -138,11 +171,12 @@ new run records the refined source.
       only one leaves the other active.
 - [x] Active control keys suppress browser scrolling only while the game shell is active. Shift does
       not change flight mappings. Control, Alt, and Meta combinations retain browser behavior.
-- [ ] Escape on the active shell exits, cuts thrust, hides controls, restores settled preflight, and
-      focuses the start button without scrolling. Escape on a shell link or outside the shell keeps
-      browser behavior.
-- [x] After success or failure, R restarts with fresh fuel, a dark operations center, a closed bay,
-      no agent, and shell focus. R has no mission effect in other states.
+- [ ] Escape and native `Exit mission` on the active shell call the same exit operation: cut thrust,
+      hide controls and actions, restore settled preflight, and focus the start button without
+      scrolling. Escape on a shell link or outside the shell keeps browser behavior.
+- [ ] After success or failure, both R and native `Restart mission` start the same fresh run with
+      full fuel, a dark operations center, a closed bay, no agent, and shell focus. Restart is
+      hidden and disabled in every non-terminal state.
 - [ ] During play the scene SVG and all decorative descendants are silent to a screen reader. The
       shell is announced as `Lunar deployment game`, controls are described once, and status changes
       are polite and restrained.
@@ -160,6 +194,8 @@ new run records the refined source.
 - [x] Pointer up, cancellation, lost capture, window blur, shell focus loss, tab hiding, contact,
       failure, Escape, restart, and a simulated frame stall all release capture and leave no stuck
       thrust. Repeat each teardown once to confirm it is harmless when already clear.
+- [ ] Touch activation of native Exit and terminal-state Restart follows the same controller,
+      teardown, model-event, and focus lifecycle as Escape and R. Neither action needs a keyboard.
 
 ## Flight, collision, and sequence
 
@@ -201,8 +237,8 @@ new run records the refined source.
 
 - [ ] At 320 CSS pixels wide, the page has no horizontal overflow, clipped controls, obscured
       breadcrumb, or start target smaller than the pinned full-silhouette bounds.
-- [ ] At 400 percent zoom, all error content, home navigation, controls, focus outlines, scene, and
-      status remain reachable without two-dimensional page scrolling.
+- [ ] At 400 percent zoom, all detail headings, 404 content, home navigation, native actions, focus
+      outlines, scene, and status remain reachable without two-dimensional page scrolling.
 - [x] In touch landscape, the scene fits its container, the active shell alone suppresses touch
       actions, and browser navigation and zoom remain available outside it.
 - [x] On a wide viewport, the scene remains capped at 60 rem with a 25:16 ratio; terrain never
@@ -210,19 +246,21 @@ new run records the refined source.
 
 ## Shared shell acceptance
 
-- [ ] Home shows the AGW rocket at two to three times the small-header scale, repository-sourced
+- [ ] Home shows the AGW rocket at the accepted historical-baseline size, repository-sourced
       identity, and onboarding availability. It has no small header mark. Home, Manifesto, Security,
-      and 404 each show one GitHub and one PyPI icon-and-text link in the header and one Manifesto
-      and one Security link in the footer, with no body duplicate.
+      Lander, and 404 each show one GitHub and one PyPI icon-and-text link in the header and exactly
+      three footer destinations: Manifesto, Security, then the icon-only Lander link. No destination
+      is duplicated in the body.
 - [ ] In current Chromium, Firefox, and WebKit at 320 CSS pixels, 400 percent zoom, touch landscape,
-      and wide desktop, Home, Manifesto, Security, and 404 have no page overflow, clipped text or
-      navigation, overlap, or fixed-height content loss. Record browser versions, viewport, date,
-      and result before public release.
-- [ ] With JavaScript disabled, Home, Manifesto, and Security retain all content and links, while
-      404 retains its message, named scene, and breadcrumb route-home action. No surface depends on
-      terminal familiarity.
+      and wide desktop, Home, Manifesto, Security, Lander, and 404 have no page overflow, clipped
+      text or navigation, overlap, or fixed-height content loss. Record browser versions, viewport,
+      date, and result before public release.
+- [ ] With JavaScript disabled, Home, Manifesto, and Security retain all content and links, Lander
+      retains its heading and named scene, and 404 retains its message, named scene, and breadcrumb
+      route-home action. No surface depends on terminal familiarity.
 - [ ] Keyboard-only traversal reaches each visible skip link, breadcrumb home crumb, GitHub, PyPI,
-      footer links, and the 404 lander start control in source order with a visible focus outline.
+      all three footer links, and both Lander/404 start controls in source order with a visible
+      focus outline. The footer rocket target is at least 24 by 24 CSS pixels and is not clipped.
 - [ ] A screen reader reports each page title, header, main, footer, one `h1`, nested section
       headings, breadcrumb current state, named navigation, visible CTA labels without decorative
       icon noise, sourced links, and 404 status/focus behavior. Initial game controls remain hidden.

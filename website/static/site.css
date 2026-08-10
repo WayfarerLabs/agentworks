@@ -301,7 +301,23 @@ code {
 }
 
 .site-footer nav {
+    align-items: center;
     gap: 0.5rem 1.25rem;
+}
+
+.footer-game-link {
+    display: inline-flex;
+    width: 24px;
+    height: 24px;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 24px;
+}
+
+.footer-game-mark {
+    width: 0.8rem;
+    height: 1.2rem;
+    object-fit: contain;
 }
 
 .manifesto-main {

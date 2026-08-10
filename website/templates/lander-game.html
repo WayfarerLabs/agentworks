@@ -1,0 +1,75 @@
+<section id="lander-game" aria-label="Lunar deployment scene">
+    <div id="lander-scene-shell" tabindex="-1">
+        <svg
+            id="lander-scene"
+            viewBox="0 0 1000 640"
+            preserveAspectRatio="xMidYMid meet"
+            role="img"
+            aria-labelledby="lander-scene-title lander-scene-description"
+        >
+            <title id="lander-scene-title">Lunar deployment scene</title>
+            <desc id="lander-scene-description">
+                An AGW lander hovers above a lunar surface, a marked landing zone, and a dark network operations
+                center.
+            </desc>
+
+            <rect id="scene-sky" width="1000" height="640" />
+            <path id="scene-stars" d="M90 98h2m122-31h2m235 63h2m198-48h2m173 91h2" />
+            <path id="scene-terrain" d="M0 548H1000V640H0Z" />
+            <line id="landing-zone" x1="180" y1="548" x2="420" y2="548" />
+            <g id="landing-zone-markers" aria-hidden="true">
+                <path d="M180 548v16m240-16v16" />
+            </g>
+
+            <g id="noc" aria-hidden="true">
+                <rect id="noc-west" x="540" y="506" width="50" height="42" />
+                <rect id="noc-server" x="600" y="480" width="60" height="68" />
+                <rect id="noc-east" x="670" y="500" width="50" height="48" />
+                <g id="noc-west-window">
+                    <rect x="550" y="517" width="22" height="12" />
+                    <path d="M557 517v12m8-12v12" />
+                </g>
+                <g id="noc-server-bars">
+                    <path d="M613 495h34m-34 12h34m-34 12h34" />
+                    <circle cx="617" cy="495" r="3" />
+                    <circle cx="617" cy="507" r="3" />
+                    <circle cx="617" cy="519" r="3" />
+                </g>
+                <g id="noc-east-window">
+                    <rect x="682" y="511" width="25" height="14" />
+                    <path d="M690 511v14m9-14v14" />
+                </g>
+                <g id="noc-antenna">
+                    <path d="M695 500v-32" />
+                    <circle cx="695" cy="468" r="4" />
+                </g>
+                <g id="noc-signals">
+                    <path d="M704 464a15 15 0 0 1 0 16" />
+                    <path d="M712 456a26 26 0 0 1 0 32" />
+                </g>
+                <path id="noc-entry" d="M540 537h9v11h-9Z" />
+            </g>
+
+            <g id="mission-lander" aria-hidden="true">
+                <use id="mission-left-engine" href="{{SITE_BASE}}assets/agw-rocket.svg#agw-engine-left" />
+                <use id="mission-right-engine" href="{{SITE_BASE}}assets/agw-rocket.svg#agw-engine-right" />
+                <use id="mission-mark" href="{{SITE_BASE}}assets/agw-rocket.svg#agw-mark" />
+                <path id="mission-bay-lip" d="M126 248h52v12h-52" />
+            </g>
+
+            <g id="mission-agent" aria-hidden="true">
+                <rect x="-5" y="-9" width="10" height="11" rx="1" />
+                <path d="M-3 2v7m6-7v7M-2-5l2 2-2 2m3 0h2" />
+            </g>
+        </svg>
+        <button id="lander-start" type="button" hidden aria-label="Start lunar deployment mission"></button>
+    </div>
+    <p id="lander-controls" hidden>
+        Thrust: Space or Up. Turn: Left/H or Right/L. Escape exits. R restarts after success or failure.
+    </p>
+    <div id="lander-actions" hidden>
+        <button id="lander-exit" type="button">Exit mission</button>
+        <button id="lander-restart" type="button" hidden>Restart mission</button>
+    </div>
+    <p id="lander-status" role="status" aria-live="polite" aria-atomic="true"></p>
+</section>

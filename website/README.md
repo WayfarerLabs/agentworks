@@ -11,9 +11,11 @@ The current release is intentionally useful without guided onboarding. The compa
 the repository-sourced identity and states that guided onboarding is not yet published. A generated
 Manifesto presents the complete long-form argument from `docs/why-agentworks.md`, while a separate
 Security page provides practical depth and reporting routes. The shared header places the GitHub and
-PyPI destinations once per page; the shared footer places the Manifesto and Security destinations
-once per page. Home contains no substitute command or copy control. A later change will replace the
-notice with the canonical onboarding source after that source is available on `main`.
+PyPI destinations once per page. A dedicated Lander page presents the same bounded lunar-deployment
+game used as progressive enhancement on the useful 404 fallback. The shared footer places the
+Manifesto, Security, and icon-only Lander destinations once per page. Home contains no substitute
+command or copy control. A later change will replace the notice with the canonical onboarding source
+after that source is available on `main`.
 
 ## Local build and test
 
@@ -31,11 +33,14 @@ python3 -m http.server --directory /tmp/agentworks-site 8000
 ```
 
 Then open `http://localhost:8000/`, `http://localhost:8000/manifesto/`,
-`http://localhost:8000/security/`, and `http://localhost:8000/404.html`. A project-Pages build uses
-the same source and command with `--site-base /agentworks/`.
+`http://localhost:8000/security/`, `http://localhost:8000/lander/`, and
+`http://localhost:8000/404.html`. A project-Pages build uses the same source and command with
+`--site-base /agentworks/`.
 
-Game work uses `/404.html` from this complete build. The builder has no partial-output mode because
-the 404 breadcrumb and footer link to the other generated pages.
+Game work normally uses `/lander/` from this complete build; fallback acceptance also exercises the
+actual `/404.html`. Both shells receive one already-rendered `lander-game.html` fragment and load
+the same CSS, controller, and model. The builder has no partial-output mode because every breadcrumb
+and footer links to the other generated pages.
 
 Run the automated suites and repository checks:
 
@@ -70,6 +75,7 @@ Generated output is not maintained or edited. The complete output contains exact
 index.html
 assets/agw-rocket.svg
 manifesto/index.html
+lander/index.html
 security/index.html
 static/lander-game.js
 static/lander-model.js
@@ -90,7 +96,8 @@ Local directory URLs and trailing `index.html` aliases resolve to one manifest d
 every local fragment must exist in its actual HTML or SVG target. Shared shell labels must remain
 visible direct text. `static/site.css` contains no backslash escapes; `display` accepts only `grid`,
 `flex`, or `inline-flex`; and `opacity`, `visibility`, and `content-visibility` declarations are
-forbidden. The manual checklist still verifies browser-computed visibility.
+forbidden. These are exact static checks, not a general CSS concealment parser. The manual checklist
+still verifies browser-computed visibility, bounds, focus, and pointer reachability.
 
 Replacement uses a sibling backup. A failed installation or installed-manifest check restores the
 previous output. Once the installed manifest is verified, the new artifact is committed. A failure
@@ -135,14 +142,15 @@ and the bounded interim availability notice. `website/` does not own product beh
 claims, vulnerability contact details, or installation instructions. The selected SVG and lander
 implementation are permanent assets and must not be regenerated from design-history files.
 
-Home, Manifesto, Security, and 404 use the same breadcrumb-led header and traditional footer. The
-header has exactly one linked `Agentworks` home crumb, a hidden visual separator, a non-linked
-current-page item, and one icon-and-text link each for GitHub and PyPI. Home omits the small header
-mark because its large hero follows; every other page has exactly one decorative small mark
-immediately before the breadcrumb. The footer has exact ownership text plus one Manifesto and one
-Security link. Each service icon has one pinned direct path; its adjacent visible text supplies the
-accessible name. Those local and external destinations are not repeated in the body. On 404, the
-linked home crumb is the sole visible route-home action.
+Home, Manifesto, Security, Lander, and 404 use the same breadcrumb-led header and traditional
+footer. The header has exactly one linked `Agentworks` home crumb, a hidden visual separator, a
+non-linked current-page item, and one icon-and-text link each for GitHub and PyPI. Home omits the
+small header mark because its large hero follows; every other page has exactly one decorative small
+mark immediately before the breadcrumb. The footer has exact ownership text plus one Manifesto and
+one Security text link, followed by a selected-rocket icon link named `Play Lunar Lander`. Each
+service icon has one pinned direct path; its adjacent visible text supplies the accessible name.
+Those local and external destinations are not repeated in the body. On 404, the linked home crumb is
+the sole visible route-home action.
 
 Build artifacts are disposable projections of the templates and permanent sources; maintain the
 sources, not generated HTML.
@@ -154,9 +162,9 @@ builder, and publishing path. There is no runtime release mode.
 
 The interim artifact must contain the ordinary-text availability notice exactly once and must not
 contain a bootstrap region, installation command, copy control, copy script, dormant onboarding
-token, disabled control, or empty placeholder. Home, Manifesto, and Security have no JavaScript. The
-custom 404 alone loads its same-origin game module; its error content and breadcrumb home route work
-without scripts.
+token, disabled control, or empty placeholder. Home, Manifesto, and Security have no JavaScript.
+Lander and the custom 404 alone load the same-origin game module; their headings, static scene, and
+404 breadcrumb home route work without scripts.
 
 Once the canonical onboarding contract lands on `main`, a separately reviewed integration will
 delete the notice, add the canonical content as a required input, and prove byte identity with the
@@ -179,10 +187,13 @@ the publishing workflow first runs from a merged `main` commit.
    before attaching the custom domain.
 4. Verify `agentworks.build` for the WayfarerLabs organization and retain the generated GitHub TXT
    record.
-5. Set `agentworks.build` as this repository's custom domain.
-6. Re-inventory DNS, obtain explicit operator approval for the exact cutover, and then change only
-   the identified parking records.
-7. Verify apex content, the `www` redirect, certificate hostname, and HTTPS enforcement.
+5. Set `agentworks.build` as this repository's custom domain. Do not mutate DNS yet.
+6. On the same already verified implementation merge-push workflow, use GitHub's **Re-run all
+   jobs**. Prove the rerun checked out the same source SHA, normalized `site_base=/`, built and
+   uploaded the exact root-base ten-file artifact, and deployed that artifact successfully.
+7. Re-inventory DNS. Only after the same-SHA root deployment is proven, obtain explicit operator
+   approval for the exact cutover and then change only the identified parking records.
+8. Verify apex content, the `www` redirect, certificate hostname, and HTTPS enforcement.
 
 The publishing workflow must build and test from a clean checkout on every push to `main`, without
 path filters. Authoritative inputs live outside `website/`, so a website-only trigger could publish
@@ -191,7 +202,8 @@ stale content. The build job uploads exactly the generated directory. The deploy
 test but do not deploy or receive those permissions.
 
 Attaching the custom domain changes only the builder's site-base input from `/agentworks/` to `/`.
-It does not select different content or require a second artifact path. The artifact contains no
+The required same-workflow rerun makes that root-base transition observable before DNS approval. It
+does not select different content or require a second artifact path. The artifact contains no
 `CNAME`; the repository setting is the custom-domain authority.
 
 ## DNS cutover and verification
