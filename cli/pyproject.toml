@@ -94,8 +94,12 @@ runtime-evaluated-base-classes = [
 "agentworks/cli/commands/__init__.py" = ["I001"]
 
 [tool.pytest.ini_options]
+# The suite is isolation-first and runs in parallel locally and in CI. Use
+# ``-n 0`` only while debugging a test that genuinely needs one process.
+addopts = ["-n", "auto", "--dist", "loadgroup"]
 markers = [
     "integration: tests that probe the real environment (filesystem, subprocesses, database)",
+    "xdist_group(name): tests that share unavoidable external state run on one worker",
 ]
 
 [tool.mypy]
@@ -153,6 +157,7 @@ dev = [
     "ruff>=0.15.5",
     "mypy>=1.19.1",
     "pytest>=9.0.0",
+    "pytest-xdist>=3.8.0",
     "types-pyyaml>=6.0.12.20260518",
     # The reference JSON Schema implementation, for the emission tests only:
     # agentworks/manifests/emit.py has no runtime dependency on it, and

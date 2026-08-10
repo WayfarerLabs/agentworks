@@ -74,6 +74,18 @@ specification.
 - **Spelling across markdown, Python, YAML, and TOML**: cspell (custom dictionary in
   `.cspell.json`). JSON/JSONC are intentionally excluded; they're identifiers and config, not prose.
 
+### Running the Python tests
+
+From `cli/`, the default pytest configuration uses all available workers:
+
+```bash
+uv run pytest tests/ -m 'not integration'
+```
+
+Pass `-n 0` for a deliberately single-process debugging run. Tests that genuinely share an external
+resource must use a named `xdist_group` with a one-line comment explaining the constraint; do not
+serialize tests preemptively.
+
 ### Running the file-quality linters
 
 The npm-based linters (cspell, markdownlint-cli2, prettier) are pinned via per-tool

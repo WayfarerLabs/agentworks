@@ -86,6 +86,13 @@ the checked box has merged to `main`, in step with the lock-at-merge paragraph u
 [Lockfile](#lockfile). Key that to the box, not to the plan file: plans routinely merge mid-effort,
 so the plan being on `main` says nothing about whether any particular box has landed there yet.
 
+Supersession is not error (operator ruling, 2026-08-10). When a scope correction expunges work
+before it ever merges, the truthful checked boxes recording that work remain in the plan: the work
+happened, and "it never shipped" does not make a done-work record false. The clean-slate standard
+applies to everything around those boxes instead (narration, correction framing, definitions of
+done, and unchecked boxes of the abandoned direction all strip), with exactly one short note
+recording the supersession, which is what the reviewer's exception keys on.
+
 Mutability also follows ownership. An agent working an effort edits that effort's SDD artifacts and
 no other's: do not update another SDD's content (a saga SDD's ledger, a sibling effort's plan)
 unless specifically instructed to, and treat such an instruction as the exception, not standard
@@ -413,9 +420,11 @@ a fresh one) and opens its own PR; the branching flow above is otherwise unchang
 Two things never merge ahead of their work. Checkbox flips are completion claims, not design: a
 checked box merges with or after the work that makes it true (an early-merged box would be an
 immutable record of work that never shipped if the branch dies, and the reviewer rightly flags a box
-checked in a PR that does not contain the work). And `locked.md` rides the effort's final PR, never
-an early artifact PR: once it lands on `main` the CI guard freezes the directory against the
-still-open implementation and cuts off message delivery to a live effort. Merged-early artifacts
-describe intent rather than shipped behavior, which is exactly what SDD artifacts are for; permanent
-docs stay bound to behavior at HEAD per SDDs Are Not Permanent. This is a sanctioned exception to
-the one-PR-per-feature default in the `agentic-dev-process` skill, which cross-references it.
+checked in a PR that does not contain the work, unless the box is a truthful supersession survivor
+per the artifact-mutability section, which the retained supersession note identifies). And
+`locked.md` rides the effort's final PR, never an early artifact PR: once it lands on `main` the CI
+guard freezes the directory against the still-open implementation and cuts off message delivery to a
+live effort. Merged-early artifacts describe intent rather than shipped behavior, which is exactly
+what SDD artifacts are for; permanent docs stay bound to behavior at HEAD per SDDs Are Not
+Permanent. This is a sanctioned exception to the one-PR-per-feature default in the
+`agentic-dev-process` skill, which cross-references it.

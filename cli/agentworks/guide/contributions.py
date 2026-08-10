@@ -326,7 +326,9 @@ def _migration_actions() -> tuple[GuideAction, ...]:
 
 def guide_contributions() -> tuple[TopicContribution, ...]:
     """Load core prose only when a guide request builds its catalog."""
-    from agentworks.secrets import guide_contributions as secret_guide_contributions
+    # The same-named secrets submodule may replace its package attribute;
+    # the loader is the stable, inert hook across either import order.
+    from agentworks.secrets import _load_guide_contributions as secret_guide_contributions
 
     return (
         _concept(

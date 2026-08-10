@@ -182,6 +182,8 @@ class TestCompletionChecks:
         assert doctor._shell_available("powershell") is True
 
 
+# These probes share the operator config and database, so one worker owns them.
+@pytest.mark.xdist_group(name="doctor-environment")
 @pytest.mark.integration
 def test_run_checks_returns_report() -> None:
     """Smoke test: run_checks returns a valid HealthReport with expected groups.
@@ -203,6 +205,7 @@ def test_run_checks_returns_report() -> None:
     assert "Database" in group_names
 
 
+@pytest.mark.xdist_group(name="doctor-environment")
 @pytest.mark.integration
 def test_run_checks_group_order_and_config_failure_placeholder(
     monkeypatch: pytest.MonkeyPatch,
@@ -266,6 +269,7 @@ def test_run_checks_group_order_and_config_failure_placeholder(
     ]
 
 
+@pytest.mark.xdist_group(name="doctor-environment")
 @pytest.mark.integration
 def test_run_checks_secrets_group_skips_not_vanishes_when_config_broken(
     monkeypatch: pytest.MonkeyPatch,

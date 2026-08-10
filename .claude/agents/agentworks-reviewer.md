@@ -513,9 +513,12 @@ Look for:
   docs, which must match behavior at HEAD; SDD artifacts are forward-looking by design.)
 - Dishonest checkboxes: a box checked for work this change does not actually contain, a box whose
   stated definition of done is not met, or completed work landing with no box moved at all. A
-  previously completed box that has been unchecked, reworded, moved, or deleted is a violation in
-  its own right (the `sdd` skill permits correcting a wrongly-checked box only while that box has
-  not yet merged to `main`, so say which case you believe you are looking at).
+  checked box recording truthfully completed work that a later scope correction expunged is NOT
+  dishonest (the `sdd` skill's supersession paragraph); expect its one-line supersession note, and
+  flag only a survivor box with no such context. A previously completed box that has been unchecked,
+  reworded, moved, or deleted is a violation in its own right (the `sdd` skill permits correcting a
+  wrongly-checked box only while that box has not yet merged to `main`, so say which case you
+  believe you are looking at).
 - Ownership breaches: edits to another effort's SDD artifacts, or a child effort updating its saga
   SDD's ledger instead of flagging the inconsistency. Cross-effort messages are new files only, and
   never into a locked feature directory.
