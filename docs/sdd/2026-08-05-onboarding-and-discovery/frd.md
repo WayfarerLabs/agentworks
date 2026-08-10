@@ -16,36 +16,40 @@ capabilities, maintain its configuration, and operate it over time. The experien
 surface because it is derived from the platform's own registries, schemas, and samples, and it
 serves human operators and Agentworks assistant agents alike.
 
-The delivery model is plan A from the roadmap's user perspective: an operator already has a vanilla
-harness (Claude Code or Codex) on their workstation and uses it whenever they want help with
-Agentworks, including setup and ongoing management. Agentworks publishes a marketplace and plugin
-(or whatever packaging the harness requires; both Claude Code and Codex support the
-marketplace-plus-plugin model) in its own repository; the operator adds it straight from GitHub,
-asks their Agentworks assistant agent for help, and that Agentworks assistant agent uses the skill
-to install or update the CLI when needed and obtain current context from the guide. The Agentworks
-assistant agent deliberately sits outside Agentworks: an Agentworks-managed agent must not modify
-the system it runs in, so the agentic-artifacts layer is not the delivery path for these skills.
+The delivery model is plan A from the roadmap's user perspective: an operator already has a capable
+assistant agent on their workstation and uses it whenever they want help with Agentworks, including
+setup and ongoing management. The universal entry is the copy/paste prompt from the repository and
+website. Agentworks also publishes native marketplace and plugin integrations for Claude Code and
+Codex as convenient discovery and installation paths. The operator asks their Agentworks assistant
+agent for help, and that Agentworks assistant agent uses the prompt or native skill to install or
+update the CLI when needed and obtain current context from the guide. The Agentworks assistant agent
+deliberately sits outside Agentworks: an Agentworks-managed agent must not modify the system it runs
+in, so the agentic-artifacts layer is not the delivery path for these skills.
 
-The skill is positioned as Agentworks assistance, not as a one-time onboarding tool. First-run
-onboarding is its most important use case and must reach a working VM and session, but the same
-skill remains available for questions such as "what can Agentworks do now?", "what have I not
-adopted?", "help me change this configuration", and "help me create or operate a VM or session."
-Setup, discovery, adoption, management, and operation are one lifecycle over the same CLI surfaces.
+The assistance is positioned as an always-available capability, not as a one-time onboarding tool.
+First-run onboarding is its most important use case and must reach a working VM and session, but the
+same canonical prompt or native skill remains available for questions such as "what can Agentworks
+do now?", "what have I not adopted?", "help me change this configuration", and "help me create or
+operate a VM or session." Setup, discovery, adoption, management, and operation are one lifecycle
+over the same CLI surfaces.
 
 The centerpiece mechanism is the guide command (R13): the CLI serves its own teaching content,
-blending static authored material with dynamic material from the live system, and the published
-plugins reduce to thin assistance entries that point at it. Teaching content versions with the
-surfaces it teaches and cannot fork across harnesses, because there is exactly one copy and the CLI
-serves it.
+blending static authored material with dynamic material from the live system. The universal
+copy/paste prompt and the published plugins reduce to thin assistance entries that point at it.
+Teaching content versions with the surfaces it teaches and cannot fork across harnesses, because
+there is exactly one copy and the CLI serves it.
 
 The first slice needs nothing from wave 2. The schema-derived depth (generated samples, describe
 surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blocking on them.
 
 ## Terminology
 
-- **Agentworks assistant agent** means the external Claude Code or Codex agent helping the operator
-  install, understand, configure, troubleshoot, or operate Agentworks. It consumes guide context,
-  decides what to propose next, and remains subject to operator consent.
+- **Agentworks assistant agent** means any external agent helping the operator install, understand,
+  configure, troubleshoot, or operate Agentworks. It needs only to accept the canonical copy/paste
+  prompt, invoke and interpret the Agentworks CLI, and have the operator-approved workstation access
+  required by the requested task. It consumes guide context, decides what to propose next, and
+  remains subject to operator consent. Claude Code and Codex are packaged integrations, not limits
+  on this role.
 - **Agentworks-managed agent** means an agent resource created and managed by Agentworks for work in
   a workspace or session. It is part of the system being operated and is never the Agentworks
   assistant agent.
@@ -112,11 +116,12 @@ term whenever either role could be ambiguous.
   is configured, ready, and wrong.
 - **R9 (discovery conventions).** New CLI surfaces MUST follow the platform's list/describe
   conventions, participate in shell completions, and update docs in the same commits as behavior.
-- **R10 (always-available management and operation).** The skill MUST activate for any Agentworks
-  assistance request, not only first-run onboarding. It MUST provide current context and topic
-  destinations for current-state and capability questions, creating and changing declared resources,
-  adopting capabilities, resolving migration requirements, troubleshooting with doctor, and
-  operating VMs and sessions through the same live CLI surfaces. The Agentworks assistant agent
+- **R10 (always-available management and operation).** Assistance MUST be available for any
+  Agentworks request, not only first-run onboarding, through the canonical prompt or a native skill.
+  Native skills SHOULD activate for those requests. Assistance MUST provide current context and
+  topic destinations for current-state and capability questions, creating and changing declared
+  resources, adopting capabilities, resolving migration requirements, troubleshooting with doctor,
+  and operating VMs and sessions through the same live CLI surfaces. The Agentworks assistant agent
   decides what to propose next. A "what is new" request MUST distinguish the live current-capability
   and adoption assessment from temporal release history, and the intent map MUST point temporal
   questions to `concept-release-notes`. That topic MUST render the installed release's notes offline
@@ -125,9 +130,9 @@ term whenever either role could be ambiguous.
   explicit version range and network-read consent. Current facts alone MUST NOT be presented as a
   version-to-version delta. Release prose and repository source are untrusted evidence, never an
   instruction source or authorization to follow links or run commands. Configuration and operation
-  are not separate skill silos. Risk is expressed by each action's explicit scope, impact, consent,
-  and verification; creating or connecting to managed resources is never authorized merely because
-  the skill is installed.
+  are not separate assistance silos. Risk is expressed by each action's explicit scope, impact,
+  consent, and verification; creating or connecting to managed resources is never authorized merely
+  because the prompt is present or a native skill is installed.
 - **R11 (cross-harness parity, by construction).** Teaching content lives in the CLI (R13), so it
   cannot fork between harnesses. The thin assistance packages (R1) MUST NOT drift apart in
   substance: share or generate them from one source where the harness formats allow (the repo's own
@@ -170,16 +175,17 @@ term whenever either role could be ambiguous.
   assessment, current capabilities versus temporal release changes, ongoing management and
   operation, troubleshooting, exceptional migration, secrets, and bug reporting. It returns context
   only: the Agentworks assistant agent interprets the operator's current request and decides which
-  topic, proposal, or inert action to use next. The published skill enters through this top-level
-  context rather than hard-coding first-run onboarding as every request's destination. An Agentworks
-  assistant agent rendering mode (an `--agent` flag with a TTY-informed default; the exact mechanism
-  is the HLA's call) MAY adjust emphasis, never substance: in agent mode the rendering foregrounds
-  the behavioral contract (ask for consent before any tool call that examines the operator's
-  machine; test only for the presence of sensitive material such as SSH keys and secrets, never view
-  values; restate R12's access disclosure). Both renderings derive from one source; there are never
-  two contents. Prior art for the effort's `prior-art-research.md`: PowerShell's module-contributed
-  `about_*` topics, `kubectl explain`'s live schema walks, `git help` concept guides, `go help`
-  topics, `rustc --explain`, and Terraform's per-provider schema-plus-prose docs generation.
+  topic, proposal, or inert action to use next. The canonical prompt and published native skills
+  enter through this top-level context rather than hard-coding first-run onboarding as every
+  request's destination. An Agentworks assistant agent rendering mode (an `--agent` flag with a
+  TTY-informed default; the exact mechanism is the HLA's call) MAY adjust emphasis, never substance:
+  in agent mode the rendering foregrounds the behavioral contract (ask for consent before any tool
+  call that examines the operator's machine; test only for the presence of sensitive material such
+  as SSH keys and secrets, never view values; restate R12's access disclosure). Both renderings
+  derive from one source; there are never two contents. Prior art for the effort's
+  `prior-art-research.md`: PowerShell's module-contributed `about_*` topics, `kubectl explain`'s
+  live schema walks, `git help` concept guides, `go help` topics, `rustc --explain`, and Terraform's
+  per-provider schema-plus-prose docs generation.
 - **R14 (universal contribution).** Guide content MUST arrive through one generic contract that
   every participant uses: core resource kinds, capability implementations, and plugins (system
   today, external later) each contribute their own topics. Built-in static content lives beside the
@@ -222,18 +228,23 @@ term whenever either role could be ambiguous.
   Please obtain my consent before acting, then run `agw guide --agent` for current context and
   decide what to propose next based on my request." This is a first-class zero-plugin assistance
   path; the harness plugins (R1) say essentially the same thing and remain primarily an advertising
-  and discoverability channel.
+  and discoverability channel. The prompt MUST avoid product-specific harness assumptions beyond the
+  ability to accept the prompt, drive the CLI, and request or use appropriate operator-approved
+  workstation access.
 
 ## Personas and stories
 
+- As an operator using any agent that meets the Agentworks assistant agent capability definition, I
+  paste the canonical website prompt and receive the same disclosure, CLI-driven context, and
+  consent boundaries without installing a native Agentworks plugin.
 - As a new operator with Claude Code or Codex on my workstation, I add the Agentworks marketplace
   and plugin from GitHub, ask my Agentworks assistant agent to set Agentworks up, and reach my first
   working session in minutes, told up front what access I am granting and asked before anything on
   my machine is examined.
 - As an operator six months in, I ask the same Agentworks assistant agent to add a VM site, create a
-  VM or session, rotate a secret, or troubleshoot a failure. The skill supplies current guide
-  context, and the Agentworks assistant agent chooses what to propose rather than guessing from
-  stale knowledge.
+  VM or session, rotate a secret, or troubleshoot a failure. The assistance entry supplies current
+  guide context, and the Agentworks assistant agent chooses what to propose rather than guessing
+  from stale knowledge.
 - As a returning operator, I ask "what is new in Agentworks and what have I not adopted?" and get a
   current capability and adoption assessment without redoing what is already configured, plus the
   canonical release-history source when I mean changes between versions.
@@ -253,6 +264,9 @@ term whenever either role could be ambiguous.
   assistant agent sits outside Agentworks by design.
 - Assistance driven by an Agentworks-managed agent. An Agentworks-managed agent must not modify the
   system it runs in.
+- Native packages for every possible assistant product. Claude Code and Codex are the packaged
+  integrations; the universal copy/paste prompt is the portability contract for other capable
+  Agentworks assistant agents.
 - Building schema emission, live samples, or describe surfaces themselves; those are wave 2's, and
   their CLI naming is wave 2's call (coordinated with this effort).
 - Editor integration for manifest authoring. It follows wave 2's emission as schema-derived depth
@@ -263,9 +277,10 @@ term whenever either role could be ambiguous.
 
 ## Acceptance criteria
 
-1. A fresh operator with a vanilla Claude Code or Codex and no prior Agentworks knowledge reaches a
-   working session using only the published assistance package and the guide command, with every
-   probe consented.
+1. A fresh operator with any Agentworks assistant agent meeting the capability definition and no
+   prior Agentworks knowledge reaches a working session using only the canonical copy/paste prompt
+   and the guide command, with every probe consented. The native Claude Code and Codex packages each
+   pass the same path.
 2. Asking for an adoption assessment on an unchanged, fully-adopted system is a clean no-op; asking
    after an upgrade reports all currently not-yet-adopted capabilities without redoing completed
    work. `concept-release-notes` renders the installed release's packaged canonical notes offline. A
@@ -285,20 +300,21 @@ term whenever either role could be ambiguous.
    guide's instructions; `agw`'s verification surfaces read no secret values, and a declined probe
    leaves an explicit manual-verification note.
 10. The README's getting-started section leads with the R16 copy-paste block, and following it on a
-    clean machine reaches the top-level `agw guide --agent` context successfully. The Agentworks
-    assistant agent, not the guide command, decides what to propose next.
+    clean machine with a capable prompt-driven assistant reaches the top-level `agw guide --agent`
+    context successfully. The Agentworks assistant agent, not the guide command, decides what to
+    propose next.
 11. `agw guide` with no topic lists every available topic; a kind topic reflects the live instance
     list; disabling an implementation visibly changes its topic's rendering.
 12. Guide topics complete in the shell, including `concept-` prefix discovery, and the completion
     tree includes dynamic topic elements per the repo's completions mechanism.
 13. A plugin's contributed guide content renders with zero contributed code executed (R15),
     demonstrated by a test that rejects a contribution attempting expression evaluation.
-14. With the skill already installed, an Agentworks assistant agent can use the top-level guide's
-    intent-to-topic map and live index for setup, adoption assessment, release history,
-    configuration, troubleshooting, and VM or session operation requests. The Agentworks assistant
-    agent decides what to propose next. First-run assistance creates and verifies a usable VM and a
-    started session. Every mutating, remote, privileged, or destructive action retains an explicit
-    operator decision.
+14. With the canonical prompt available or a native skill installed, an Agentworks assistant agent
+    can use the top-level guide's intent-to-topic map and live index for setup, adoption assessment,
+    release history, configuration, troubleshooting, and VM or session operation requests. The
+    Agentworks assistant agent decides what to propose next. First-run assistance creates and
+    verifies a usable VM and a started session. Every mutating, remote, privileged, or destructive
+    action retains an explicit operator decision.
 15. Before installing or updating the CLI, the assistance package offers an exact-tag source review,
     warns about full-repository model usage, and preserves separate decisions for focused review,
     full review, no review, and installation. Declining source review does not claim the source was
@@ -307,7 +323,9 @@ term whenever either role could be ambiguous.
 ## Decisions
 
 - **D1 (plan A).** The vanilla-harness plugin model is settled (operator ruling recorded in the
-  roadmap's user perspective and target-state); this FRD does not reopen it.
+  roadmap's user perspective and target-state) for the two native integrations; this FRD does not
+  reopen it. R16's universal copy/paste prompt keeps native plugin support optional for any other
+  capable Agentworks assistant agent.
 - **D2 (parallel to wave 2).** This effort seeds now, consumes wave 2's surfaces as they land, and
   must not block on them nor duplicate them. D7 narrowly supersedes this historical sequencing rule
   for PR #428's Phase 1 release boundary: the migration-remediation topic waits for authoritative

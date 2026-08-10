@@ -17,9 +17,11 @@
   PR because it is independently usable and keeps main green. Later phases build only on merged
   predecessors.
 - Completed checkboxes are immutable.
-- Terminology follows the FRD: **Agentworks assistant agent** is the external Claude Code or Codex
-  agent helping the operator use Agentworks; **Agentworks-managed agent** is a resource in the
-  system being operated. Historical completed checklist wording remains unchanged.
+- Terminology follows the FRD: **Agentworks assistant agent** is any external agent that can accept
+  the canonical prompt, invoke and interpret the CLI, and use appropriate operator-approved
+  workstation access. Claude Code and Codex are native integrations, not limits on the role.
+  **Agentworks-managed agent** is a resource in the system being operated. Historical completed
+  checklist wording remains unchanged.
 
 ## Phase 0: pre-implementation artifacts and coordination
 
@@ -288,10 +290,12 @@ completed design work; the corrective LLD and implementation boxes below carry t
       Configuration and operation remain one assistance surface; each read, mutation, connection,
       privilege, or destructive boundary retains its own explicit scope and operator decision.
 - [ ] Canonical thin assistance content contains installation or update guidance, the complete R12
-      disclosure, strict harness posture, and `agw guide --agent`, with no duplicated teaching. The
-      disclosure names the intended workstation, full file inspection and command execution under
-      the harness account, separate explicit privilege elevation, and the strictest practical
-      approval and visibility posture that preserves the required workstation access.
+      disclosure, conditional strict harness posture, and `agw guide --agent`, with no duplicated
+      teaching or Claude Code/Codex prerequisite. Any capable Agentworks assistant agent can consume
+      the same body as a copy/paste prompt. The disclosure names the intended workstation, full file
+      inspection and command execution under the harness account, separate explicit privilege
+      elevation, and the strictest practical approval and visibility posture that preserves the
+      required workstation access.
 - [ ] Before CLI installation or update, canonical assistance resolves one exact stable version,
       offers to inspect its canonical `vVERSION` source tag, warns that a full-repository review may
       consume significant model usage, and keeps focused review, full review, decline-review, and
@@ -336,7 +340,7 @@ completed design work; the corrective LLD and implementation boxes below carry t
 - [ ] Always-green ready-to-merge PR opened and saga-lead review requested.
 
 Definition of done: R1, R2, R3, R10, R11, R12, R13, R16, AC1, AC2, AC3, AC7, AC8, AC10, AC14, and
-AC15 hold for both harnesses and the zero-plugin README path.
+AC15 hold for both native packages and the universal zero-plugin copy/paste path.
 
 ## Phase 4: registry inventory and specific-resource projection
 

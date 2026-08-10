@@ -27,26 +27,28 @@ or general packaging framework. Packages contain no hooks, commands, scripts, MC
 pre-approved tools. Installing a package makes inert instructions discoverable but does not inspect
 or change the workstation.
 
-Terminology follows the FRD. **Agentworks assistant agent** means the external Claude Code or Codex
-agent helping the operator use Agentworks. **Agentworks-managed agent** means an agent resource in
-the system being operated. Literal `--agent`, `AgentContract`, and CLI `agent` names retain their
-established spellings; prose uses the full role name whenever ambiguity is possible.
+Terminology follows the FRD. **Agentworks assistant agent** means any external agent that can accept
+the canonical copy/paste prompt, invoke and interpret the Agentworks CLI, and use the
+operator-approved workstation access appropriate to the requested task. Claude Code and Codex are
+the two native package targets, not limits on the role. **Agentworks-managed agent** means an agent
+resource in the system being operated. Literal `--agent`, `AgentContract`, and CLI `agent` names
+retain their established spellings; prose uses the full role name whenever ambiguity is possible.
 
 ## Decisions
 
-| Concern                 | Decision                                                                                                                                                                                                                                              |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Canonical body          | `packaging/agentworks/assistance.md` is the only authored package body and owns its prose, security posture, and links.                                                                                                                               |
-| Canonical metadata      | `packaging/agentworks/metadata.json` owns machine metadata only: identity, package version, minimum CLI version, and publisher fields.                                                                                                                |
-| Identity                | Both marketplaces, both plugins, and both skills use the neutral name `agentworks`. The native install identity is `agentworks@agentworks`.                                                                                                           |
-| Minimum CLI             | `agentworks-cli >=0.14.0`, with no maximum. Version 0.14.0 first contains the guide companion this package invokes.                                                                                                                                   |
-| Projection              | `scripts/generate-agentworks-package.py` emits two native wrappers from one body and metadata record. Generated skill bodies are byte-identical after frontmatter.                                                                                    |
-| README parity           | One marked region under README `## Getting Started` contains the canonical body exactly. The generator owns only that region.                                                                                                                         |
-| Runtime behavior        | The inert skill tells the Agentworks assistant agent to disclose, obtain consent, offer bounded review of the exact intended release source, check or install the CLI, and request guide context. It performs no action itself.                       |
-| Teaching ownership      | The top-level guide owns the intent-to-topic map and the installed guide topics own teaching. Packages contain no intent map, recipes, or release prose.                                                                                              |
-| Current versus temporal | Live guide facts answer current capability and adoption questions. The packaged release-please changelog section answers what changed in the installed version; canonical GitHub releases are the consented fallback for older or unavailable ranges. |
-| Security posture        | Claude uses default/manual approvals without bypass. Codex starts with `workspace-write` and `on-request`, using scoped escalation for account files, network, or SSH.                                                                                |
-| Release ownership       | The Agentworks repository owns package source, projections, catalogs, guide companion, tests, and versions. Saga and release leads own integration into the release PR.                                                                               |
+| Concern                 | Decision                                                                                                                                                                                                                                                         |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Canonical body          | `packaging/agentworks/assistance.md` is the universal copy/paste prompt and only authored package body. It owns its prose, security posture, and links.                                                                                                          |
+| Canonical metadata      | `packaging/agentworks/metadata.json` owns machine metadata only: identity, package version, minimum CLI version, and publisher fields.                                                                                                                           |
+| Identity                | Both marketplaces, both plugins, and both skills use the neutral name `agentworks`. The native install identity is `agentworks@agentworks`.                                                                                                                      |
+| Minimum CLI             | `agentworks-cli >=0.14.0`, with no maximum. Version 0.14.0 first contains the guide companion this package invokes.                                                                                                                                              |
+| Projection              | `scripts/generate-agentworks-package.py` emits two native wrappers from one body and metadata record. Generated skill bodies are byte-identical after frontmatter.                                                                                               |
+| README parity           | One marked region under README `## Getting Started` contains the canonical body exactly. The generator owns only that region.                                                                                                                                    |
+| Runtime behavior        | The inert canonical body, whether pasted directly or loaded as a native skill, tells the Agentworks assistant agent to disclose, obtain consent, offer bounded source review, check or install the CLI, and request guide context. It performs no action itself. |
+| Teaching ownership      | The top-level guide owns the intent-to-topic map and the installed guide topics own teaching. Packages contain no intent map, recipes, or release prose.                                                                                                         |
+| Current versus temporal | Live guide facts answer current capability and adoption questions. The packaged release-please changelog section answers what changed in the installed version; canonical GitHub releases are the consented fallback for older or unavailable ranges.            |
+| Security posture        | Every Agentworks assistant agent uses the strictest practical documented approval, visibility, and sandbox posture that permits the task. Claude and Codex receive the pinned conditional native profiles below.                                                 |
+| Release ownership       | The Agentworks repository owns package source, projections, catalogs, guide companion, tests, and versions. Saga and release leads own integration into the release PR.                                                                                          |
 
 The package version starts at `1.0.0` and changes whenever an installed generated artifact changes.
 It remains independent of the CLI version. A focused CI comparison against the merge base rejects a
@@ -133,7 +135,10 @@ consent:
 
 Refusal stops automation without penalty. Manual instructions are not treated as verification.
 
-The matching strict harness posture is advice, not a settings mutation:
+The matching strict harness posture is advice, not a settings mutation. For any harness, the body
+requires the strictest practical approval, visibility, and sandbox posture that still permits the
+operator-approved workstation task. It gives these conditional profiles for the two native package
+targets:
 
 - Claude Code uses `default` permission mode and normal manual approvals. It never uses
   `bypassPermissions` for workstation management. The canonical body links
@@ -148,7 +153,9 @@ The matching strict harness posture is advice, not a settings mutation:
   <https://developers.openai.com/codex/security> and
   <https://developers.openai.com/codex/config-basic>.
 
-The package never writes `.claude/settings*.json`, `.codex/config.toml`, or managed policy.
+The package never writes `.claude/settings*.json`, `.codex/config.toml`, or managed policy. Another
+Agentworks assistant agent applies the same general posture using its own documented controls; the
+body does not invent product-specific setting names.
 
 ### Source review offer
 
@@ -448,14 +455,15 @@ mutation.
 - Generator tests cover deterministic ordering, write and `--check`, README marker failures,
   generated inventory, stale bytes, and canonical-body equality across both skills.
 - Contract tests cover neutral identities, minimum/version metadata, inertness, security links, the
-  distinction between `Agentworks assistant agent` and `Agentworks-managed agent`,
-  disclosure-before-action ordering, exact-version source-review offers, dedicated review consent,
-  focused/full/no-review choices, decline-review followed by approved install, completed review
-  followed by declined install, and absence of executables, extra plugin files, package intent maps,
-  recipes, and release prose. Adversarial candidate `AGENTS.md`, `CLAUDE.md`, skills, hooks,
-  plugins, configuration, links, and embedded commands remain data: fixtures prove they cannot
-  change the protected policy or working root, launch or reconfigure a harness, execute, authorize
-  install, or expand the selected review scope.
+  distinction between `Agentworks assistant agent` and `Agentworks-managed agent`, product-neutral
+  prompt requirements, conditional native-harness guidance, disclosure-before-action ordering,
+  exact-version source-review offers, dedicated review consent, focused/full/no-review choices,
+  decline-review followed by approved install, completed review followed by declined install, and
+  absence of executables, extra plugin files, package intent maps, recipes, and release prose.
+  Adversarial candidate `AGENTS.md`, `CLAUDE.md`, skills, hooks, plugins, configuration, links, and
+  embedded commands remain data: fixtures prove they cannot change the protected policy or working
+  root, launch or reconfigure a harness, execute, authorize install, or expand the selected review
+  scope.
 - A merge-base CI test rejects package-content changes without a package-version bump.
 - `claude plugin validate --strict` validates the Claude package and marketplace.
 - The current Codex plugin validator validates the Codex package and marketplace, including the
@@ -489,6 +497,7 @@ consent boundaries, and cleanup.
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Claude fresh first run          | With default/manual approval mode and no bypass, install `agentworks@agentworks`; disclose, name the exact candidate commit substitution, perform the focused review before a separate installation consent, install the candidate wheel, render the shared guide fixture, offer first VM then first session only after explicit inputs and consent, and verify both describes. |
 | Codex fresh first run           | With `workspace-write` plus `on-request` and scoped escalation for account files/network/SSH, produce the same result without electing `danger-full-access`. Declining source review must not suppress the separate install choice.                                                                                                                                             |
+| Generic prompt-only first run   | Give the marked canonical body to an agent meeting the Agentworks assistant agent capability definition, with no Agentworks plugin. It identifies that role, discloses its actual workstation access, installs the candidate wheel only after consent, obtains guide context, and completes the same first-VM/session path without assuming Claude Code or Codex controls.      |
 | Source-review independence      | Offer both scopes and the substantial-usage warning. Decline review then approve install in one path; complete the focused review then decline install in another. A full-review selection requires its own consent and exact-ref scope, and candidate policy files remain data.                                                                                                |
 | Returning current adoption      | The Agentworks assistant agent selects `concept-onboarding` from the map and uses current live facts, not release history.                                                                                                                                                                                                                                                      |
 | Rerun and post-upgrade adoption | An unchanged adopted system is a no-op; after an upgrade, report current not-yet-adopted capabilities without replaying completed work or inventing a historical delta.                                                                                                                                                                                                         |
@@ -496,7 +505,7 @@ consent boundaries, and cleanup.
 | Older temporal history          | Request an older range and network consent, then use the canonical release URL; refusal performs no network request and invents no delta.                                                                                                                                                                                                                                       |
 | Ordinary management             | The Agentworks assistant agent selects `concept-management`, uses a live JSON kind/instance fact and built-in group/command help, and runs at most one disposable consented action with JSON verification.                                                                                                                                                                      |
 | Higher-risk refusal             | Refuse an attach, delete, elevation, or unselected mutation request; execute no command and provide the applicable live topic/help route.                                                                                                                                                                                                                                       |
-| README equivalence              | Starting from only the marked README body produces the same disclosure, package install, and shared guide handoff as either package.                                                                                                                                                                                                                                            |
+| README equivalence              | Starting from only the marked README body in an agent meeting the capability definition produces the same disclosure, package install, and shared guide handoff as either native package.                                                                                                                                                                                       |
 | Old CLI or failure              | Select an exact compatible version, offer exact-tag review, and upgrade a pre-0.14 CLI only after separate install consent; a declined or failed install stops before the guide and reports the exact pinned repair command.                                                                                                                                                    |
 | Post-publish production         | Resolve the published stable version, review its real canonical `vVERSION` tag, then run the exact pinned PyPI install and verify the installed version and local release section.                                                                                                                                                                                              |
 

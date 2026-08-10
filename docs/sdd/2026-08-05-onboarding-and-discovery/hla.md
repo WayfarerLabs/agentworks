@@ -15,16 +15,19 @@ The implementation has four cooperating surfaces:
    plugins contribute through the same path.
 3. Selected operational commands expose versioned JSON from the same service-layer fact records
    their human renderers use.
-4. Claude Code and Codex publish thin, equivalent Agentworks skills that remain available for the
-   Agentworks lifecycle. They disclose access, install or update the CLI when needed, and ask
-   `agw guide --agent` for top-level context. The command returns an intent-to-topic map, behavioral
-   guidance, and the live topic index. The Agentworks assistant agent interprets the operator's
-   request and decides what to propose or inspect next; the command does not make that decision.
+4. One universal assistance prompt is directly consumable by any capable Agentworks assistant agent
+   and is also projected into thin, equivalent Claude Code and Codex skills. It discloses access,
+   installs or updates the CLI when needed, and asks `agw guide --agent` for top-level context. The
+   command returns an intent-to-topic map, behavioral guidance, and the live topic index. The
+   Agentworks assistant agent interprets the operator's request and decides what to propose or
+   inspect next; the command does not make that decision.
 
-Terminology follows the FRD: the **Agentworks assistant agent** is the external Claude Code or Codex
-agent helping the operator use Agentworks, while an **Agentworks-managed agent** is a resource
-inside the system being operated. Literal `--agent`, `AgentContract`, and CLI `agent` resource names
-retain their established spellings; prose uses the full role name whenever ambiguity is possible.
+Terminology follows the FRD: the **Agentworks assistant agent** is any external agent that can
+accept the canonical prompt, invoke and interpret the CLI, and operate with the appropriate
+operator-approved workstation access. Claude Code and Codex are the two native packages, not the
+boundary of the role. An **Agentworks-managed agent** is a resource inside the system being
+operated. Literal `--agent`, `AgentContract`, and CLI `agent` resource names retain their
+established spellings; prose uses the full role name whenever ambiguity is possible.
 
 The first implementation slice uses only contracts on `main`: current registries, finalized graph
 facts, resource inspection records, and the completion mechanism. Wave 2 adoption is a later adapter
@@ -279,16 +282,16 @@ default filling remains at the manifest decode boundary; the guide does not recr
 Pydantic validation context, or construct capability implementations.
 
 `concept-onboarding` remains the specialized first-run and adoption-assessment topic; it is not the
-identity of the installed skill. It does not persist a second onboarding ledger. Done and
-not-yet-done status is a pure assessment over sanitized facts already available through `GuideView`:
-resource identity and description from registry rows, finalized enablement and readiness verdicts
-from graph nodes, declared graph relationships, and existing instance rows from kind-owned read-only
-inventory hooks. The guide never loads raw config to infer additional state and never runs doctor
-while rendering. A fact outside that set is `unverifiable`, not permission to reach around the view.
-Its golden path continues through a usable VM and a started first session. Those operations are
-inert action records with explicit names and selected templates or sites, declared impact,
-`mutate-agentworks` consent, ordinary JSON verification, and a refusal alternative. The action plan
-does not attach, delete, elevate privileges, or infer operator choices.
+identity of the universal assistance entry or either native skill. It does not persist a second
+onboarding ledger. Done and not-yet-done status is a pure assessment over sanitized facts already
+available through `GuideView`: resource identity and description from registry rows, finalized
+enablement and readiness verdicts from graph nodes, declared graph relationships, and existing
+instance rows from kind-owned read-only inventory hooks. The guide never loads raw config to infer
+additional state and never runs doctor while rendering. A fact outside that set is `unverifiable`,
+not permission to reach around the view. Its golden path continues through a usable VM and a started
+first session. Those operations are inert action records with explicit names and selected templates
+or sites, declared impact, `mutate-agentworks` consent, ordinary JSON verification, and a refusal
+alternative. The action plan does not attach, delete, elevate privileges, or infer operator choices.
 
 `concept-management` is the ongoing configuration and operation entry. It presents live kind and
 instance facts, then points to the applicable built-in CLI help entry point for exact current
@@ -394,7 +397,9 @@ inspection separation and keeps tests independent of terminal presentation.
 
 ## Assistance packaging
 
-One canonical assistance body is the source for both harness packages. It contains only:
+One canonical assistance body is the universal prompt contract and the source for both native
+harness packages. A capable Agentworks assistant agent can consume it directly from the README or
+website without plugin support. It contains only:
 
 1. supported Python and `agentworks-cli` installation guidance;
 2. the complete R12 access disclosure, including the intended workstation, full account-scoped file
@@ -443,18 +448,20 @@ exact install path.
 The repository README leads with the same canonical assistance text, explicitly addressed to the
 Agentworks assistant agent, in a fenced copyable block. It derives from or is checked against the
 canonical source rather than maintaining a second security paraphrase. The plugins remain an
-additional discovery channel, not a prerequisite.
+additional discovery channel, not a prerequisite. The body does not assume Claude Code, Codex, or a
+plugin API; harness-specific security posture applies as conditional guidance only when that harness
+is actually in use.
 
 The package is named for Agentworks rather than onboarding, and its description activates for setup,
 discovery, adoption, configuration, troubleshooting, and operation. It contains no intent-to-topic
 switchboard of its own. The top-level guide supplies the intent map, and selected topics tell the
 Agentworks assistant agent which list, describe, doctor, and operation records are relevant at each
 applicable action. The Agentworks assistant agent still chooses what to propose next. End-to-end
-assistance tests cover focused and full source-review choices, decline-review followed by separately
-approved installation, completed review followed by declined installation, an initial VM and
-session, a returning current-capability and adoption assessment, offline installed release notes
-plus the consented range fallback, an ongoing management operation, and a refusal at a higher-risk
-action boundary.
+assistance tests cover a generic prompt-only Agentworks assistant agent with no native plugin,
+focused and full source-review choices, decline-review followed by separately approved installation,
+completed review followed by declined installation, an initial VM and session, a returning
+current-capability and adoption assessment, offline installed release notes plus the consented range
+fallback, an ongoing management operation, and a refusal at a higher-risk action boundary.
 
 ## Feedback decision
 
