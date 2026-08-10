@@ -9,7 +9,7 @@ match the code; all required reviews and gates are green.
 
 ## Prerequisite
 
-- [ ] Wait for PR #469 to merge, update this branch from `main`, and run its parallel default once
+- [x] Wait for PR #469 to merge, update this branch from `main`, and run its parallel default once
       before implementation so enforcement edits and gate evidence use the shipped test structure.
 
 ## Phase 1: behavior-preserving preparation on contract v1
