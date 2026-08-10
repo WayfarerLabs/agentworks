@@ -249,8 +249,71 @@ the new command.
 - [x] Exercise the real CLI in an isolated configuration: implied env-var resolution, prompt
       refusal, `secret verify`, unknown direct `onepassword` remediation, and a declared OnePassword
       source without printing any secret value.
-- [x] Integrate current `main`, consume the saga rename message, and resolve every merge conflict
-      while preserving both contracts.
+- [x] Run Green on every supported Python version through CI. Complete `agentworks-reviewer`,
+      roadmap-lead, and fresh-eyes review (the fallback if Copilot is unavailable) with every valid
+      finding resolved.
+- [x] Create `locked.md` only in the final feature commit, summarizing shipped behavior, the 0.14
+      break, guide-topic status, PRs, gates, and any honest residual work.
+- [x] Mark PR #453 ready, request Copilot review, and resolve every valid finding before merge;
+      notify the operator of any roadmap ledger inconsistency without editing the roadmap SDD.
+
+**Definition of done:** every FRD acceptance criterion is demonstrated, permanent documentation is
+truthful without this SDD, the feature directory locks with the final code, and no migration bridge
+remains.
+
+### Phase 10: post-ready integration and security review fixes
+
+- [x] Integrate current `main`, consume the saga rename message, resolve every merge conflict while
+      preserving both contracts, and update current artifact status and terminology.
+- [x] Replace persisted Lima Tailscale-key delivery with an ephemeral boundary, pin prompt-broker
+      scoping, reject retired module identities, and preserve disabled-plugin remediation through
+      source outcomes.
+- [x] Publish the interaction broker deliberately, complete source vocabulary/readiness teaching,
+      split the oversized Phase 7 enforcement suite, and mark literal caller pins for the planned
+      post-0.14 consolidation pass.
+- [ ] Run focused mutations, Green, provider-faithful persistence checks, live remote-Lima
+      validation with independent cleanup, all supported-version CI, and full re-review. The local
+      portions are complete at independently reviewed `0dad790f`, and supported-version CI passed at
+      `94a26dc7`. Only the live run remains; it is operator-gated on concrete inventory and a fresh
+      authorized Tailscale key. The previously exposed key must not be reused.
+- [ ] Re-truth `locked.md` for the final implementation and residuals, then leave PR #453 ready and
+      mergeable with no valid finding unresolved.
+
+**Definition of done:** no resolved credential is persisted by Lima, every reviewed security
+boundary is non-vacuously enforced, current `main` is integrated, and the final lock describes the
+tested merge candidate.
+
+### Phase 11: operator contract correction and unwind
+
+The operator narrowed the secret-handling contract on 2026-08-09. The completed Phase 10 boxes
+remain the immutable record of work performed, but frame-level memory erasure is superseded: the
+workstation process is trusted, and verification must not expand the contract beyond persisted or
+externally observable disclosure boundaries.
+
+- [x] Restore the pre-ratchet lifecycle, SSH, initializer, and unwind semantics using `f9381b46` as
+      the reference; remove every sensitive-state owner, operation fence, traceback rewrite,
+      scrub-on-every-`BaseException` path, and frame-walking test introduced for memory erasure.
+- [x] Preserve the actual Secret Sources fixes: key-free Lima/provider-retained configuration,
+      centralized stdin delivery, safe logs/diagnostics/exception objects, broker scoping,
+      retired-module enforcement, plugin remediation, and the valid `str`-subclass attribution fix.
+- [x] Remove plaintext Tailscale bootstrap files after every Proxmox and WSL2 delivery path. Use
+      private staging and verify success, ordinary failure, timeout, and interrupt cleanup without
+      reintroducing process-memory ownership or traceback machinery.
+- [x] Align remote Lima provision-log identity with VM deletion so a successful delete removes the
+      log created for that VM.
+- [x] Prove the mistaken path is gone with structural deny-list scans and diff review against the
+      reference, then run focused behavior tests, the full non-integration suite, static/repository
+      gates, independent review, and supported-version CI.
+- [ ] Re-truth the prospective lock and acceptance counts. The pre-unwind live remote-Lima run
+      passed with a rotated key; repeat it at the final post-unwind head and record the final
+      evidence.
+
+**Definition of done:** the branch behaves as though the frame-erasure detour never happened. It
+protects durable and externally observable boundaries without dedicated in-memory cleanup machinery,
+semantic changes, complexity, friction, or performance cost.
+
+### Phase 12: provider-boundary completion and final lock
+
 - [x] Enforce the final boundary at all five provider-shaped inspection surfaces. Lima instance
       YAML, Azure `OSProfile.custom_data`, and AWS `RunInstances.UserData` retain credential-free
       bootstrap payloads and deliver the key after boot through provisioning-transport stdin. WSL2
@@ -267,6 +330,5 @@ the new command.
       provider-retention boundary, final gates, reviews, and honest residual work. Rewrite PR #453's
       body around that same final design and leave the PR ready and mergeable.
 
-**Definition of done:** every FRD acceptance criterion is demonstrated, permanent documentation is
-truthful without this SDD, the feature directory locks with the final code, and no migration bridge
-remains.
+**Definition of done:** every provider-shaped final inspection surface is covered, the immutable
+execution record is intact, and the feature is locked against the final reviewed implementation.
