@@ -1,6 +1,6 @@
 # Plan: Onboarding, Discovery, and Management
 
-- Status: Active, Phase 2
+- Status: Active, Phase 3
 - FRD: `docs/sdd/2026-08-05-onboarding-and-discovery/frd.md`
 - HLA: `docs/sdd/2026-08-05-onboarding-and-discovery/hla.md`
 
@@ -255,7 +255,7 @@ one fact source.
 
 ## Phase 3: README and cross-harness bootstraps
 
-- [ ] `bootstrap-packaging-lld.md` pins the canonical source, generated Claude Code and Codex
+- [x] `bootstrap-packaging-lld.md` pins the canonical source, generated Claude Code and Codex
       layouts, marketplace metadata, install commands, security-setting links, minimum CLI version,
       regeneration guard, README derivation or equivalence check, and clean-environment probe
       matrix.
@@ -270,12 +270,14 @@ one fact source.
       from the canonical source and retains a clear human installation path below it.
 - [ ] Both packages install directly from GitHub in clean harness environments and reach the guide;
       minimum-version failure produces an actionable upgrade instruction.
-- [ ] Both bootstrap packages drive the same guide action inventory through guided and
-      non-interactive fixture runs, exercising consent boundaries, refusal handling, rerun no-op
-      behavior, post-upgrade newly available capability reporting, and JSON v1 consumption.
-- [ ] Every bootstrap fixture asserts the R12 disclosure is emitted before its first setup command,
-      probe, verification command, or other action, and pins every workstation-access and privilege
-      boundary from the canonical source.
+- [ ] Both generated package projections contain the exact same guide handoff and bind by
+      construction to one shared guided and non-interactive guide fixture covering refusal, rerun
+      no-op behavior, post-upgrade newly available capability reporting, and JSON v1 consumption;
+      per-harness live probes validate model interpretation without a bootstrap orchestration
+      driver.
+- [ ] Canonical projection checks and every live bootstrap probe assert the R12 disclosure is
+      emitted before the first setup command, probe, verification command, or other action, and pin
+      every workstation-access and privilege boundary from the canonical source.
 - [ ] Permanent installation and security documentation ships with the packages.
 - [ ] Packaging, generation, lint, and end-to-end gates pass; step reviewed by `agentworks-reviewer`
       and a fresh-eyes reviewer; valid findings resolved.
