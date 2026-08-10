@@ -538,40 +538,45 @@ Definition of done: R3-R11 and R13-R18 plus AC1, AC2, AC5-AC11, and AC13-AC19's 
 hold at `https://agentworks.build`; the public site is useful and honest while onboarding remains
 pending.
 
-## Phase 7: merged onboarding pickup and integration LLD
+## Phase 7: canonical assistance pickup and contract reconciliation
 
-- [ ] Check the website feature directory on `origin/main` for late messages before starting.
-- [ ] Confirm onboarding Phase 3 is merged to `main`; inspect its canonical bootstrap source,
-      generator, README block markers, tests, and permanent docs at HEAD. If it has no clean
-      consumer seam, raise the incompatibility rather than parsing a generated harness wrapper.
-- [ ] Confirm the merged canonical disclosure explicitly states intended-workstation placement, full
-      file inspection and command execution access as the workstation account without implicit root,
-      separately explicit elevation, and a concrete strict-posture recommendation. If not, stop and
-      coordinate with the onboarding owner rather than adding website-owned wording.
-- [ ] Delegate `onboarding-integration-lld.md` to an `agentworks-dev` subagent. It pins exact source
-      paths, README fence semantics, byte/newline rules, builder inputs and errors, notice removal,
-      access-disclosure semantics, bootstrap DOM, copy states, and the complete-release test matrix.
-- [ ] Lead reviews the LLD against R1/R2, C1/C3/C5, D3/D6/D10, and the merged onboarding contract.
-- [ ] `agentworks-reviewer` reviews the LLD; all valid findings are resolved and re-reviewed.
+The operator's 2026-08-10 thin-bootstrap correction superseded the unexecuted plan to publish the
+startup disclosure in the website prompt. PR #480 intentionally carries the canonical source and its
+website consumer together. The website projects only the thin install, verification, and guide
+handoff; the installed guide owns disclosure and source review.
 
-Definition of done: the final content seam is pinned at file and symbol level against merged code,
-with no branch-only dependency or duplicated bootstrap.
+- [x] Check the website feature directory and latest `main` before starting, preserving the merged
+      Manifesto source-path change.
+- [x] Inspect the canonical assistance source, generator, README block markers, tests, and permanent
+      docs at the integrated feature head; consume the authored source rather than a harness
+      wrapper.
+- [x] Reconcile the FRD, HLA, and shell LLD to the thin-bootstrap placement, exact
+      `docs/manifesto.md` source, and four permanent website content inputs.
+- [x] Pin exact source paths, README fence semantics, byte/newline rules, builder inputs and errors,
+      notice removal, semantic bootstrap DOM, copy states, and the complete-release test matrix in
+      the existing shell and bootstrap-packaging LLDs without adding a second integration design.
+- [x] Lead reviews the contract against R1/R2, C1/C3/C5, D3/D6/D10, and the current onboarding
+      contract.
+- [x] `agentworks-reviewer` reviews the implementation contract; valid findings are resolved and
+      re-reviewed.
 
-## Phase 8: canonical onboarding integration
+Definition of done: the final content seam is pinned at file and symbol level against current code,
+with no branch-only dependency, duplicated bootstrap, or website-owned continuing-assistance prose.
 
-- [ ] Delegate implementation to an `agentworks-dev` subagent with ownership of the main-page
-      onboarding integration, copy enhancement, focused tests, and permanent documentation. The
-      subagent is not alone in the codebase and must preserve concurrent changes.
-- [ ] Delete the interim notice and make the canonical bootstrap a required builder input; enforce
+## Phase 8: canonical assistance integration
+
+- [x] Implement the main-page assistance projection, copy enhancement, focused tests, and permanent
+      documentation in an isolated lane based on current `main`.
+- [x] Delete the interim notice and make the canonical bootstrap a required builder input; enforce
       byte identity across source, README, and decoded built HTML, including newline and fence-edge
       cases.
-- [ ] Add the real semantic `pre`/`code` region and progressive copy behavior with accessible
+- [x] Add the real semantic `pre`/`code` region and progressive copy behavior with accessible
       success/failure feedback and a fully usable no-JavaScript path. Do not change the established
       URLs, information architecture, visual system, 404, hosting, or DNS.
-- [ ] Invert interim guards: forbid the availability notice and require canonical bootstrap markup,
-      identity, access-disclosure semantics, copy behavior, and absence of unsupported installation
-      or security prose.
-- [ ] Run focused tests, full CI-equivalent gates, locked-SDD checks, and file-quality lint.
+- [x] Invert interim guards: forbid the availability notice and require canonical bootstrap markup,
+      identity, thin-scope semantics, copy behavior, and absence of website-owned source-review,
+      startup-disclosure, or security-posture prose.
+- [x] Run focused tests, full CI-equivalent gates, locked-SDD checks, and file-quality lint.
 - [ ] `agentworks-reviewer` and a fresh-eyes reviewer inspect content identity, accessibility,
       migration cleanliness, and scope; resolve valid findings and re-review.
 - [ ] Open the integration PR ready for review, triage Copilot comments, request the saga lead's
@@ -612,11 +617,10 @@ locked.
 
 ## Escalation triggers
 
-- The onboarding canonical bootstrap lands without a source or consumer interface the website can
-  use without parsing generated wrappers.
-- The onboarding canonical disclosure omits intended-workstation placement, full workstation-account
-  file/command access without implicit root, separately explicit elevation, or strict-posture
-  requirements, or exposes no stable way to verify them.
+- The canonical assistance source or README parity seam changes so the website would need to parse a
+  generated harness wrapper or maintain a second prompt.
+- The canonical website prompt grows source-review, startup-disclosure, security-posture, or
+  operating guidance instead of handing those concerns to `agw guide --agent`.
 - GitHub Pages policy no longer permits the intended project site, or the site gains a commercial
   transaction/SaaS purpose.
 - The repository or organization plan cannot enable Pages or a custom domain.

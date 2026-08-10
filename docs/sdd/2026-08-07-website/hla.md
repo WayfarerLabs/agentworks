@@ -1,6 +1,6 @@
 # HLA: The agentworks.build Website
 
-- Status: Interim implementation complete; release acceptance in progress
+- Status: Canonical assistance integration complete; production acceptance in progress
 - Date: 2026-08-07
 - Last revised: 2026-08-10
 - FRD: `frd.md`
@@ -15,20 +15,16 @@ standard-library Python builder performs explicit substitutions, escapes shared 
 the finished artifact, and fails when a content contract required by the current release is
 unavailable or ambiguous.
 
-Delivery has two honest stages over the same URLs and architecture. The interim release publishes
-the complete Home, Manifesto, Security, Lander, and 404 shells, repository-derived product/security
-passages, stable links, selected brand, one shared Lander/404 game, pipeline, and domain while
-canonical onboarding is unavailable. It contains a small semantic availability notice and no
-bootstrap-shaped substitute. After onboarding Phase 3 lands on `main`, a second release replaces
-that notice with the canonical bootstrap and its copy enhancement. This is a delivery sequence, not
-a runtime mode or parallel site.
+The completed architecture publishes the Home, Manifesto, Security, Lander, and 404 shells,
+repository-derived product/security passages, stable links, selected brand, one shared Lander/404
+game, pipeline, domain, and canonical assistance prompt. The former interim notice was a staged
+delivery step and has been deleted rather than retained as a runtime mode or parallel site.
 
-The content pages use HTML and CSS for their full experience. A small local script progressively
-enhances the shared static scene on Lander and 404 into the same nonessential game. The later
-onboarding release adds focused copy-button behavior, while its bootstrap, the static Lander scene,
-and all error content remain useful when scripts are absent. The visual system includes local SVG
-logo assets. There are no remote fonts, scripts, images, runtime APIs, analytics, cookies, accounts,
-forms, or backend.
+The content pages use HTML and CSS for their full experience. Small local scripts progressively
+enhance the canonical prompt with copy-button behavior and the shared static scene on Lander and 404
+with the same nonessential game. The prompt, static Lander scene, and all error content remain
+useful when scripts are absent. The visual system includes local SVG logo assets. There are no
+remote fonts, scripts, images, runtime APIs, analytics, cookies, accounts, forms, or backend.
 
 GitHub Actions builds and checks the same artifact in pull requests and on `main`. A dedicated Pages
 workflow uploads that artifact and deploys it through the protected `github-pages` environment.
@@ -44,10 +40,9 @@ The completed home page has this information order:
 2. the agent-addressed bootstrap as the dominant action;
 3. one direct link each to GitHub, PyPI, deeper rationale, and security.
 
-The interim release preserves that structure but replaces item 2 with a concise, ordinary-text
-notice that guided onboarding is not yet published. It does not render an empty bootstrap region,
-disabled copy button, speculative command, wait-list form, countdown, or generic "coming soon"
-marketing panel. The notice is removed when the real bootstrap replaces it.
+The retired interim notice is absent. Home renders the real canonical bootstrap, not an empty
+region, disabled control, speculative command, wait-list form, countdown, or parallel marketing
+panel.
 
 The landing page does not render the longer problem statement or principles. Those passages render
 on the generated Manifesto page from their permanent repository source. GitHub and PyPI appear once
@@ -87,16 +82,14 @@ navigation system.
 
 ### D1A. Long-form pages are complete generated documents
 
-`/manifesto/` renders the complete `docs/why-agentworks.md` document, and `/security/` renders the
+`/manifesto/` renders the complete `docs/manifesto.md` document, and `/security/` renders the
 complete root `SECURITY.md`. The same closed Markdown transform emits every supported source block,
 including the one required source `h1`; the templates do not add, replace, select, reorder, or
 duplicate body headings or prose. Source-relative links are mapped by an explicit allowlist to
 permanent repository URLs. The site owns only metadata, breadcrumb labels, and the connective shell.
 
-The Manifesto source path is exactly `docs/why-agentworks.md` today. When the repository document is
-renamed, that change updates the one configured path to `docs/manifesto.md`. The builder does not
-probe for alternatives or accept both names. This makes the future rename an ordinary reviewed
-source-path change rather than permanent compatibility machinery.
+The Manifesto source path is exactly `docs/manifesto.md`. The builder does not probe for or accept
+the retired path.
 
 ### D2. Plain web technologies with a narrow build step
 
@@ -135,39 +128,28 @@ builder API.
 
 The site has three content classes:
 
-- **Canonical shared content.** After onboarding Phase 3 lands on `main`, the build reads its
-  canonical bootstrap body directly. The built code element's decoded text, the canonical source,
-  and the README's generated fenced block must be byte-identical. The build fails closed on missing,
-  duplicate, malformed, or drifted sources. The website does not own or rewrite this text.
+- **Canonical shared content.** The build reads `packaging/agentworks/assistance.md` directly. The
+  built code element's decoded text, the canonical source, and the README's generated fenced block
+  must be byte-identical. The build fails closed on missing, duplicate, malformed, or drifted
+  sources. The website does not own or rewrite this text.
 - **Repository-derived product and security content.** The Manifesto and Security pages each render
-  one complete permanent Markdown document through a closed, escaping transform:
-  `docs/why-agentworks.md` and root `SECURITY.md`, respectively. Each source has exactly one `h1`
-  and owns all of its page's body headings, order, and prose; templates cannot supply alternate
-  claims. Supported content edits flow directly to the generated page without synchronized hashes,
-  heading inventories, expected passages, or heading-path selections in website code. Missing or
-  unreadable inputs, invalid UTF-8, an absent or duplicate `h1`, unsupported Markdown, unsafe links
-  or links outside the reviewed set, and reporting-channel violations fail the build. Links point to
-  permanent repository docs, never to this SDD.
+  one complete permanent Markdown document through a closed, escaping transform: `docs/manifesto.md`
+  and root `SECURITY.md`, respectively. Each source has exactly one `h1` and owns all of its page's
+  body headings, order, and prose; templates cannot supply alternate claims. Supported content edits
+  flow directly to the generated page without synchronized hashes, heading inventories, expected
+  passages, or heading-path selections in website code. Missing or unreadable inputs, invalid UTF-8,
+  an absent or duplicate `h1`, unsupported Markdown, unsafe links or links outside the reviewed set,
+  and reporting-channel violations fail the build. Links point to permanent repository docs, never
+  to this SDD.
 - **Site-owned connective content.** The website owns only presentation-neutral labels and
   instructions such as navigation, link introductions, the operator-approved security-link label,
-  the interim onboarding-availability notice and, after integration, "Copy" and copy-status
-  feedback. It does not make claims about Agentworks behavior, guarantees, principles, installation,
-  security properties, or requirements.
+  "Copy", and copy-status feedback. It does not make claims about Agentworks behavior, guarantees,
+  principles, installation, security properties, or requirements.
 
-The shell LLD pins the whole-document source and rendering contract against current `main`. The
-later onboarding-integration LLD pins the exact upstream bootstrap path, extraction contract, and
-README fence semantics after onboarding Phase 3 is merged. README fence-body byte equality is an
-assumption until that pickup proves the merged onboarding contract. A branch-only path is not an
-architecture input. Shell implementation and publication do not wait for onboarding; bootstrap
-integration does.
-
-That pickup also verifies the canonical disclosure's meaning before the website publishes it: the
-agent must run on the intended workstation and needs full file inspection and command execution
-access with the permissions of the workstation account running the harness. Root is not implicit;
-privilege elevation remains separate and explicit. The recommended strict posture governs approval
-and visibility without preventing the access onboarding needs. These are upstream onboarding
-requirements, not prose for the website to reconstruct. If the merged canonical source does not
-establish them cleanly, integration stops and coordinates the gap with the onboarding owner.
+The shell LLD pins the whole-document source, canonical assistance path, extraction contract, README
+fence semantics, and rendering contract. Website validation proves byte equality and rejects broad
+startup-disclosure, source-review, and security-posture prose in the thin prompt. The installed
+guide owns those continuing-assistance concerns.
 
 ### D4. HTML is the agent surface too
 
@@ -177,10 +159,8 @@ The built pages provide:
 - one descriptive `title`, meta description, canonical URL, and ordinary indexable markup;
 - semantic landmarks and one correctly nested heading outline;
 - real anchor and button elements with accessible names;
-- in the interim release, an ordinary-text onboarding-availability notice and no bootstrap or copy
-  control;
-- after onboarding integration, the complete bootstrap in a `pre`/`code` region, without image-baked
-  or CSS-generated text;
+- the complete bootstrap in a `pre`/`code` region, without image-baked or CSS-generated text, plus a
+  progressively enhanced copy control;
 - useful link text that identifies GitHub, PyPI, rationale, and security destinations;
 - on complete long-form pages, one source-derived `h2`/`h3` contents navigation using ordinary
   fragment links, inline after the source `h1` by default and presented as a left rail only when the
@@ -212,9 +192,9 @@ simple but powerful, with strong typography, restrained color, visible structure
 density. Terminal and TUI paradigms appear through monospaced accents, crisp panel boundaries,
 compact status-like labels, and deliberate alignment. They do not appear as a fake window frame,
 wall of command prompts, green-on-black theme, CRT effect, decorative ASCII text, or keyboard-only
-interaction. The interim notice occupies the future bootstrap region without mimicking a code block;
-after integration, the bootstrap becomes the visual center without requiring a layout redesign. No
-remote font, icon library, or existing architecture diagram is introduced.
+interaction. The canonical bootstrap is the visual center; the deleted interim notice required no
+parallel layout or retained compatibility branch. The site introduces no remote font, icon library,
+or existing architecture diagram.
 
 The shell LLD pins final tokens and layouts across the home, Manifesto, security, Lander, and 404
 surfaces with these invariants:
@@ -228,8 +208,7 @@ surfaces with these invariants:
 
 ### D6. Copy is progressive enhancement
 
-The interim release ships no copy script or dormant copy control. After onboarding integration, the
-bootstrap text is selectable and readable before JavaScript runs. The copy button reads the code
+The bootstrap text is selectable and readable before JavaScript runs. The copy button reads the code
 element's `textContent`, invokes the Clipboard API only from the user's activation, and reports
 success or failure in an `aria-live` status region without moving focus. If the API is unavailable,
 the button is absent or explains that manual selection remains available. No clipboard content is
@@ -389,10 +368,10 @@ turning a two-step delivery need into permanent configuration machinery.
 ## Component topology
 
 ```text
-README.md identity selectors --+--> home page
-interim availability notice ---+
+README.md identity selectors ------------------+--> home page
+packaging/agentworks/assistance.md canonical ---+
 
-docs/why-agentworks.md complete document --> Manifesto page
+docs/manifesto.md complete document --> Manifesto page
 SECURITY.md complete document ------------> security page
 
 shared game fragment + logo/game assets --+-----> Lander page
@@ -402,11 +381,9 @@ home + Manifesto + security + Lander + 404 --> deterministic builder --> PR/CI
                                                                        |
                                                                        +--> GitHub Pages --> agentworks.build
 
-After onboarding Phase 3 merges:
-
 canonical bootstrap + README fenced block
-                  --> identity and disclosure checks
-                  --> generated bootstrap region (replaces interim notice)
+                  --> byte-identity and thin-scope checks
+                  --> generated bootstrap region
 ```
 
 ## Source layout
@@ -418,10 +395,9 @@ fixed here:
   CSS/JavaScript; builder; tests; and permanent operator/developer runbook.
 - `.github/workflows/`: Pages build/deploy workflow and the existing CI integration.
 - `.gitignore`: generated site artifact exclusion.
-- repository README and onboarding canonical source: inputs only after onboarding integration, not
-  website-owned copies.
-- `docs/why-agentworks.md`: current complete Manifesto source; a later rename updates this one path
-  to `docs/manifesto.md` without fallback.
+- repository README and `packaging/agentworks/assistance.md`: required inputs, not website-owned
+  copies.
+- `docs/manifesto.md`: complete Manifesto source, with no fallback to the retired path.
 - `SECURITY.md`: complete Security page and private vulnerability-reporting authority.
 - this feature directory: temporary design, plan, research, and acceptance evidence only.
 
@@ -437,12 +413,9 @@ fixed here:
 - valid internal paths, canonical URL, metadata, and no external runtime assets;
 - generated output absent from Git status.
 
-Interim tests additionally reject bootstrap markup, copy controls/scripts, installation text, and
-missing availability notice. After onboarding integration, tests reject the interim notice and
-require exact bootstrap equality across canonical source, README fenced block, and decoded built
-HTML, and prove that the canonical disclosure covers intended-workstation placement, full
-workstation-account file/command access without implicit root, and the strict-posture
-recommendation.
+Tests reject the retired interim notice, require exact bootstrap equality across canonical source,
+README fenced block, and decoded built HTML, and prove the thin website prompt contains no
+source-review, startup-disclosure, or security-posture substitute.
 
 ### Document behavior
 
@@ -450,8 +423,8 @@ recommendation.
   onboarding region asserted;
 - the home security link remains visually secondary but programmatically clear, and the security
   page remains useful without script or terminal familiarity;
-- after onboarding integration, copy behavior exercised for success, unavailable API, and rejected
-  write without changing the source text;
+- copy behavior exercised for success, unavailable API, and rejected write without changing the
+  source text;
 - custom 404 fallback, initial hidden controls, bounded idle cue, keyboard/vi/pointer mappings,
   deterministic physics vectors, plume-to-thrust mapping, success/failure/restart/exit states,
   background pause, and agent-deployment completion asserted;
@@ -470,9 +443,8 @@ recommendation.
 - `www` redirects to the apex without a certificate warning;
 - DNS A, AAAA, CNAME, MX, TXT, and CAA answers match the recorded before-state plus approved cutover
   delta;
-- GitHub and PyPI links resolve. Interim production contains the availability notice and no
-  bootstrap affordance; complete production contains the byte-identical bootstrap and no interim
-  notice.
+- GitHub and PyPI links resolve. Production contains the byte-identical bootstrap and no retired
+  interim notice.
 
 ## Security and privacy
 

@@ -361,10 +361,10 @@ installed no-topic agent guide owns source-review and continuing assistance.
       review offer. It presents focused, full, and decline choices; warns concisely that the
       repository is substantial and full review may consume significant model usage; keeps source
       evidence inert and untrusted; and never treats review choice as install or update authority.
-- [ ] Hand the canonical assistance block to the standalone website effort as its prompt source and
+- [x] Hand the canonical assistance block to the standalone website effort as its prompt source and
       record verified byte parity there; after integration, that effort deletes its temporary
       security-disclosure message input rather than retaining a second authored copy.
-- [ ] Both packages install directly from GitHub in clean harness environments and reach the guide;
+- [x] Both packages install directly from GitHub in clean harness environments and reach the guide;
       Claude uses the explicit HTTPS repository URL and install probes expose no SSH key or Git
       credential. Codex catalogs include the required top-level interface plus per-plugin
       installation policy, authentication policy, and category. Minimum-version failure produces an

@@ -1,6 +1,6 @@
 # FRD: The agentworks.build Website
 
-- Status: Interim implementation complete; release acceptance in progress
+- Status: Canonical assistance integration complete; production acceptance in progress
 - Date: 2026-08-07
 - Last revised: 2026-08-10
 - Seeded by: the saga lead, at operator request. This is a standalone effort, deliberately NOT a
@@ -11,10 +11,9 @@
 ## Purpose
 
 Agentworks gets a public front door at `agentworks.build` (domain purchased 2026-08-07): the place a
-curious human or their agent lands first and learns what Agentworks is. In the completed site, they
-leave with the one copy-paste block that starts onboarding. Until that contract is ready, the public
-site gives them useful product/security depth, permanent project links, and an honest availability
-notice.
+curious human or their agent lands first and learns what Agentworks is. They leave with the one
+copy-paste block that installs or updates the CLI, verifies it, and hands continuing assistance to
+`agw guide --agent`, alongside useful product/security depth and permanent project links.
 
 The operator's sizing mandate is the controlling constraint: **super simple at first**. The first
 slice is a small static site, its publishing pipeline, and one bounded interactive surprise shared
@@ -64,13 +63,9 @@ growth path so nothing forecloses it, and none of it is in scope now.
   only for the current run. After activation, native visible `Exit mission` and terminal-state
   `Restart mission` buttons provide touch and assistive-technology equivalents to Escape and `r`;
   they remain hidden during hint-free preflight.
-- R10. Before the onboarding effort's canonical bootstrap source lands, an **interim public
-  release** may serve the complete site shell, repository-sourced problem and principle content,
-  selected brand, permanent links, custom 404, deployment pipeline, and custom domain. It states
-  plainly that guided onboarding is not yet published and provides no substitute installation
-  command, bootstrap text, disabled copy affordance, or implication that onboarding is available.
-  The later bootstrap integration replaces this bounded notice; it does not require a redesign or a
-  second site.
+- R10. The completed site replaces the former bounded onboarding-availability notice with the one
+  canonical bootstrap source. It retains the established shell, brand, permanent links, custom 404,
+  deployment pipeline, and domain; no runtime mode, second site, or dormant interim notice remains.
 - R11. The main page includes the restrained link text `We take security seriously.` as optional
   depth, not a warning gate or dominant call to action. It leads to a dedicated static security page
   that renders the complete root `SECURITY.md` as HTML. That document is the single authority for
@@ -78,14 +73,10 @@ growth path so nothing forecloses it, and none of it is in scope now.
   posture, and GitHub-only vulnerability-reporting path. The website adds no selected passages or
   separately maintained security prose. The page is candid and specific without assuming every
   visitor wants a security lecture.
-- R12. The completed onboarding surface makes the access tradeoff plain before setup: the onboarding
-  agent runs on the machine the operator intends to use as their workstation and needs full file
-  inspection and command execution access with the permissions of the workstation account running
-  the harness. This does not grant root implicitly; privilege elevation remains a separate, explicit
-  action. It recommends a strict harness security posture for approval and visibility, not a sandbox
-  that prevents the access onboarding needs. This language remains owned by onboarding's canonical
-  bootstrap/disclosure contract; the website must consume or link that source, never paraphrase it
-  into a drifting second copy.
+- R12. The website consumes the canonical thin bootstrap source byte-for-byte and does not append a
+  security recital, source-review offer, or operating guidance. That prompt only installs or updates
+  an exact compatible CLI, verifies it, and invokes `agw guide --agent`; the installed guide owns
+  the startup disclosure, authorization posture, optional source review, and continuing assistance.
 - R13. The visual language hints at terminal and TUI paradigms while remaining a modern website:
   monospaced accents, crisp bounded regions, compact status-like details, strong hierarchy, and
   efficient use of space should communicate `simple but powerful`. It must not become a fake
@@ -116,14 +107,13 @@ growth path so nothing forecloses it, and none of it is in scope now.
   on each page. These placements supersede the Phase 4A combined exploration panel while preserving
   one link per external, manifesto, security, and Lander destination.
 - R16. The footer's `Agentworks Manifesto` link opens a semantic static page at `/manifesto/`, not
-  the repository document. The page renders the complete `docs/why-agentworks.md` document at build
-  time, including its source `h1`, introduction, problem space, and key principles, without a
-  separately maintained site copy or selected-passage contract. Relative source links are
-  deliberately mapped to their permanent repository destinations. Missing or unreadable input,
-  invalid UTF-8, unsupported Markdown, invalid links, or an invalid whole-document structure fails
-  the build before output replacement. A later repository rename changes the single configured
-  source path to `docs/manifesto.md` in that rename's reviewed change; the website has no fallback,
-  autodetection, or simultaneous support for both paths.
+  the repository document. The page renders the complete `docs/manifesto.md` document at build time,
+  including its source `h1`, introduction, problem space, and key principles, without a separately
+  maintained site copy or selected-passage contract. Relative source links are deliberately mapped
+  to their permanent repository destinations. Missing or unreadable input, invalid UTF-8,
+  unsupported Markdown, invalid links, or an invalid whole-document structure fails the build before
+  output replacement. The website has no fallback, autodetection, or simultaneous support for the
+  retired source path.
 - R17. The builder emits only the complete linked site artifact. The earlier `--only 404` partial
   demo mode is retired because the accepted 404 now shares navigation with Home, Manifesto, and
   Security; emitting only `404.html` would make its sole recovery action and footer links dead. Game
@@ -199,36 +189,29 @@ merged and settled on `main`. The first slice must not build toward them specula
 - AC8. Automated and browser acceptance cover state transitions, input mapping, consistent
   fixed-step physics across representative frame schedules, route-home fallback, hidden-until-start
   instructions, reduced motion, keyboard focus, narrow screens, and paused background behavior.
-- AC9. Before onboarding is available, `https://agentworks.build` serves the useful interim release
-  described by R10 over TLS. The page contains no bootstrap code region, copy control, installation
-  instruction, empty onboarding container, or unexpanded template token, and its availability notice
-  is exposed in ordinary semantic markup.
-- AC10. The interim release satisfies AC1, AC2, and AC5-AC8 independently. AC3 and AC4 remain
-  explicitly unaccepted until the canonical bootstrap is integrated; replacing the interim notice
-  with that bootstrap leaves the established information architecture, visual system, URLs, 404, and
-  deployment path intact.
+- AC9. `https://agentworks.build` contains exactly one semantic canonical bootstrap region and no
+  retired availability notice, empty onboarding container, or unexpanded template token.
+- AC10. Canonical bootstrap integration leaves the established information architecture, visual
+  system, URLs, 404, and deployment path intact.
 - AC11. The home-page security link is visible but visually secondary, works without JavaScript, and
   resolves to a semantic security page at a stable URL. That page distinguishes claims, boundaries,
   current limitations, operator practices, and private vulnerability reporting; every
   product/security claim is sourced from or verified against permanent repository documentation.
-- AC12. Before the onboarding integration is accepted, tooling or a pinned contract test proves the
-  canonical disclosure explicitly covers the intended-workstation requirement, full
-  workstation-account file/command access, separately explicit elevation, and strict-posture
-  recommendation. The interim release does not invent or imply that disclosure while the upstream
-  contract is absent.
+- AC12. Tooling proves the website and README decode to the canonical thin bootstrap bytes and that
+  this surface contains no source-review, security-posture, or startup-disclosure substitute. A
+  clean guide invocation proves the installed guide, rather than the website, owns that context.
 - AC13. The landing, Manifesto, security, Lander, and 404 surfaces share a restrained
   terminal/TUI-derived visual system at desktop and narrow widths. Text remains real semantic
   content, ordinary links and controls remain recognizable, and the design meets the existing
   contrast, focus, zoom, reflow, reduced-motion, keyboard, and touch requirements without depending
   on terminal familiarity.
-- AC14. In a clean-context interim-release check, a visitor with no prior Agentworks knowledge can
-  understand what the project is, recognize that guided onboarding is not yet published, and choose
-  the repository, package, rationale, or security path without explanation. This is the interim
-  usefulness bar; it does not claim AC4's completed onboarding handoff.
+- AC14. In a clean-context check, a visitor with no prior Agentworks knowledge can understand what
+  the project is, copy the bootstrap, and choose the repository, package, rationale, or security
+  path without explanation.
 - AC15. The landing page contains exactly one navigable anchor for each of the GitHub repository,
   PyPI package, deeper rationale, and security destinations; it contains no rendered problem-space
   or principles section. The selected rocket is a prominent hero element without displacing the page
-  identity, availability notice, or four destinations at 320 CSS pixels or 400 percent zoom.
+  identity, canonical bootstrap, or four destinations at 320 CSS pixels or 400 percent zoom.
 - AC16. Generated Home, Manifesto, Security, Lander, and 404 documents expose the shared responsive
   header and footer landmarks with the exact per-page breadcrumb current item. Home has no small
   header mark; every other page has exactly one small header mark, and 404 has no separate body home
@@ -237,11 +220,11 @@ merged and settled on `main`. The first slice must not build toward them specula
   footer, beside the exact Wayfarer Labs ownership text. The footer rocket remains operable and
   named when its image is unavailable. Link purposes, keyboard focus, accessible names, source
   order, narrow-screen wrapping, and 400-percent zoom stay useful with images or CSS unavailable.
-- AC17. `/manifesto/` renders every supported block in `docs/why-agentworks.md`, and `/security/`
-  renders every supported block in root `SECURITY.md`, including each document's sole source `h1`,
-  as semantic headings, paragraphs, and lists. Generated content and mapped links are verified
-  against the complete permanent source, contain no unexpanded source-relative URL, and remain
-  useful without CSS or JavaScript. Ordinary supported prose or heading edits flow through without a
+- AC17. `/manifesto/` renders every supported block in `docs/manifesto.md`, and `/security/` renders
+  every supported block in root `SECURITY.md`, including each document's sole source `h1`, as
+  semantic headings, paragraphs, and lists. Generated content and mapped links are verified against
+  the complete permanent source, contain no unexpanded source-relative URL, and remain useful
+  without CSS or JavaScript. Ordinary supported prose or heading edits flow through without a
   website-code update; malformed document structure, unsupported Markdown, unsafe or unexpected
   links, invalid encoding, and missing input fail closed.
 - AC18. The builder CLI has no focused or partial-output option, its complete artifact contains

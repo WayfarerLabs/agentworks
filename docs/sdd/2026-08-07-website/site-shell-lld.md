@@ -2,7 +2,7 @@
 
 <!-- cspell:ignore canonicalization keypath keypaths nonblank sdds TUI -->
 
-- Status: Phase 4F implemented; release acceptance remains pending
+- Status: Canonical assistance integration implemented; production acceptance remains pending
 - Date: 2026-08-10
 - FRD: `frd.md`, specifically R7-R11 and R13-R20
 - HLA: `hla.md`, specifically D1-D5, D7, D8, and D10
@@ -11,20 +11,16 @@
 ## 1. Scope and release invariant
 
 The checked-in `website/` tree produces the complete static shell for Home, Manifesto, Security,
-Lander, and 404. Phase 4C adds a deliberate game route and a footer easter-egg link without changing
-deployment, DNS, onboarding, or game mechanics. Home, Manifesto, and Security remain script-free.
-Lander and 404 remain useful without JavaScript and progressively enhance only their one shared game
-subtree.
-
-The release still has no guided onboarding implementation. Home contains the one reviewed ordinary
-text availability notice, with no command, copy control, empty placeholder, or runtime release mode.
-A later onboarding phase replaces that notice through its own canonical contract.
+Lander, and 404. Home projects the canonical thin assistance prompt and progressively enhances it
+with a local copy control. Manifesto and Security remain script-free. Lander and 404 remain useful
+without JavaScript and progressively enhance only their one shared game subtree. The retired
+availability notice and its temporary message input are absent.
 
 ## 2. Permanent files, routes, and output
 
 | Source                               | Responsibility                                                              |
 | ------------------------------------ | --------------------------------------------------------------------------- |
-| `website/templates/index.html`       | Compact repository-sourced identity and interim onboarding notice           |
+| `website/templates/index.html`       | Compact identity and semantic canonical assistance container                |
 | `website/templates/manifesto.html`   | Presentation shell for the generated long-form argument                     |
 | `website/templates/security.html`    | Repository-sourced security depth and GitHub reporting route                |
 | `website/templates/lander.html`      | Dedicated semantic shell for the shared lunar deployment game               |
@@ -36,6 +32,7 @@ A later onboarding phase replaces that notice through its own canonical contract
 | `website/static/lander.css`          | Shared Lander/404 scene and mission presentation                            |
 | `website/static/lander-model.js`     | Pure deterministic lander model                                             |
 | `website/static/lander-game.js`      | Page-agnostic game controller                                               |
+| `website/static/onboarding-copy.js`  | Accessible progressive copy enhancement for the canonical prompt            |
 | `website/build.py`                   | Closed inputs, rendering, validation, manifest, and atomic installation     |
 | `website/site_content.py`            | Complete Markdown projection and safe HTML rendering                        |
 | `website/site_validation.py`         | Template, shell, CSS, and local-reference validation                        |
@@ -55,6 +52,7 @@ lander/index.html
 security/index.html
 static/lander-game.js
 static/lander-model.js
+static/onboarding-copy.js
 static/lander.css
 static/site.css
 ```
@@ -132,10 +130,10 @@ zoom, pointer, and keyboard acceptance verifies computed size, focus visibility,
 
 The builder renders two complete normalized UTF-8 Markdown documents:
 
-| Route         | Current source           |
-| ------------- | ------------------------ |
-| `/manifesto/` | `docs/why-agentworks.md` |
-| `/security/`  | `SECURITY.md`            |
+| Route         | Current source      |
+| ------------- | ------------------- |
+| `/manifesto/` | `docs/manifesto.md` |
+| `/security/`  | `SECURITY.md`       |
 
 Each source owns every body heading and paragraph on its page, including exactly one source `h1`.
 Each template contains one sourced-content token in `main` and supplies no additional body title,
@@ -160,9 +158,8 @@ layout wrapper becomes a two-column grid. The source `h1` and one grouped post-t
 right column while the navigation spans both rows in the left column, so body copy begins beside the
 rail instead of waiting for its height. DOM and keyboard order do not change.
 
-The Manifesto source path is exactly `docs/why-agentworks.md` in this release. A later document
-rename changes that one configuration value to `docs/manifesto.md` in the same reviewed rename.
-There is no dual-path fallback, probing, or autodetection.
+The Manifesto source path is exactly `docs/manifesto.md`. There is no dual-path fallback, probing,
+or autodetection for the retired path.
 
 Source-relative links use this exact allowlist:
 
@@ -177,10 +174,12 @@ absolute URL fails. Tests prove all three mappings and prove no source-relative 
 
 ## 6. Other repository content contracts
 
-The builder reads exactly three permanent content inputs: `README.md`, `docs/why-agentworks.md`, and
-`SECURITY.md`. README continues to own the concise selected Home identity. The other two inputs each
-own one complete long-form page. Only Home retains a heading-keypath plus exact-block selection;
-long-form content has no duplicated prose contract in Python or templates.
+The builder reads exactly four permanent content inputs: `README.md`,
+`packaging/agentworks/assistance.md`, `docs/manifesto.md`, and `SECURITY.md`. README owns the
+concise Home identity and an exact generated projection of the assistance source. The assistance
+source owns the prompt, and the other two inputs each own one complete long-form page. Only Home
+retains a heading-keypath plus exact-block selection for identity; long-form content has no
+duplicated prose contract in Python or templates.
 
 Templates may not move content tokens outside their reviewed metadata or sourced containers. All
 templates use a closed token vocabulary and reject unknown, missing, duplicated, or brace-like
