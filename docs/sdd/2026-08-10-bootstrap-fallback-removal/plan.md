@@ -30,6 +30,8 @@ through Phase A with the same redacted log and database result; focused tests an
 - [x] Make Azure and AWS readiness exhaustion and cloud-init-wait failure raise inside create and
       trigger their existing rollback paths.
 - [x] Make Proxmox bootstrap timeout, parsed failure, or missing Tailscale IP raise and roll back.
+      Completion note: this deliberately removes the prior incomplete-success tolerance for missing
+      cloud-init and guest-agent readiness; a Proxmox template must provide both prerequisites.
 - [x] Add provider-shaped Azure and AWS regressions that inspect retained payloads, fixed stdin
       calls, staging calls, diagnostics, exception chains, and cleanup.
 - [x] Add interrupt and second-interrupt/manual-removal coverage for Azure/AWS readiness waits and
@@ -80,12 +82,12 @@ focused platform, manager, registration, and guide-projection suites pass; the t
 
 ## Phase 4: full verification and closeout
 
-- [ ] Run focused tests for manager Phase A, WSL2, Lima, Proxmox, Azure, AWS, and provider-retention
+- [x] Run focused tests for manager Phase A, WSL2, Lima, Proxmox, Azure, AWS, and provider-retention
       boundaries.
-- [ ] Run Ruff check and format, strict mypy, the full non-integration test suite, file lint,
+- [x] Run Ruff check and format, strict mypy, the full non-integration test suite, file lint,
       Rulesync drift, locked-SDD, and diff checks.
-- [ ] Run the required project review and fresh-eyes review; resolve every valid finding.
-- [ ] Record exact gate and review evidence, close issue #471 through the PR, and add `locked.md`
+- [x] Run the required project review and fresh-eyes review; resolve every valid finding.
+- [x] Record exact gate and review evidence, close issue #471 through the PR, and add `locked.md`
       only when the implementation and evidence are complete.
 
 **DoD:** permanent docs and implementation agree; all gates and reviews are green; the SDD is locked
