@@ -32,11 +32,17 @@ app = typer.Typer(
 # --debug stays here because only the CLI error wrapper consults it.
 
 _debug = False
+_completion_mode = False
 
 
 def debug_enabled() -> bool:
     """Whether --debug (or AGW_DEBUG=1) is in effect for this invocation."""
     return _debug
+
+
+def completion_mode_enabled() -> bool:
+    """Whether this invocation is a generated or recognized legacy completion probe."""
+    return _completion_mode
 
 
 def _set_debug(enabled: bool) -> None:
@@ -117,10 +123,20 @@ def _global_options(
             help="Silence the ambient per-command deprecation banner (agw doctor always reports deprecation health)",
         ),
     ] = False,
+    completion_probe: Annotated[
+        bool,
+        typer.Option("--completion-probe", hidden=True),
+    ] = False,
 ) -> None:
     """Global options for all commands."""
     from agentworks import output
     from agentworks.bootstrap import begin_request_warning_scope
+    from agentworks.completions.spec import is_legacy_database_completion
+
+    global _completion_mode  # noqa: PLW0603
+
+    legacy_completion = sys.stdin.isatty() and not sys.stderr.isatty() and is_legacy_database_completion(sys.argv[1:])
+    _completion_mode = completion_probe or legacy_completion
 
     output.set_non_interactive(non_interactive)
     output.set_suppress_deprecations(no_deprecations)

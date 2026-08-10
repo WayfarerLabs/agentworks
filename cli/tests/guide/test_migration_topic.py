@@ -45,6 +45,8 @@ def test_migration_actions_pin_order_consent_operations_and_no_execution_authori
         ("remove-retired-sections", ConsentBoundary.MUTATE_AGENTWORKS),
         ("compare-operator-inventory", ConsentBoundary.EXAMINE_WORKSTATION),
         ("finish-doctor", ConsentBoundary.EXAMINE_WORKSTATION),
+        ("restore-database-backup", ConsentBoundary.MUTATE_AGENTWORKS),
+        ("refresh-completions", ConsentBoundary.MUTATE_AGENTWORKS),
     ]
     assert action_block.actions[0].command is None
     assert action_block.actions[0].manual_steps is not None
@@ -60,6 +62,8 @@ def test_migration_actions_pin_order_consent_operations_and_no_execution_authori
         "json",
     )
     assert action_block.actions[9].command == ("agw", "doctor", "--output", "json")
+    assert action_block.actions[10].command == ("agw", "database", "restore", "$BACKUP_PATH")
+    assert action_block.actions[11].command == ("agw", "completion", "install")
 
 
 def test_migration_actions_make_inventory_backups_and_verification_distinct() -> None:
@@ -197,12 +201,45 @@ def test_migration_mutations_name_exact_scope_and_never_claim_implicit_authority
         "backup-resources",
         "edit-one-manifest",
         "remove-retired-sections",
+        "restore-database-backup",
+        "refresh-completions",
     ]
-    assert all(action.command is None and action.manual_steps for action in mutate)
+    assert all((action.command is None) is (action.manual_steps is not None) for action in mutate)
     assert "CONFIG_PATH" in (mutate[0].manual_steps or "")
     assert "RESOURCES_PATH" in (mutate[1].manual_steps or "")
     assert "MANIFEST_PATH" in (mutate[2].manual_steps or "")
     assert "CONFIG_PATH" in (mutate[3].manual_steps or "")
+    assert mutate[4].command == ("agw", "database", "restore", "$BACKUP_PATH")
+    assert mutate[5].command == ("agw", "completion", "install")
+
+
+def test_migration_database_restore_and_completion_refresh_actions_are_bounded_and_inert() -> None:
+    actions = next(block for block in _topic("concept-migration").blocks if isinstance(block, ActionList)).actions
+    by_id = {str(action.id): action for action in actions}
+
+    restore = by_id["restore-database-backup"]
+    assert [(item.name, item.required, item.sensitive) for item in restore.required_inputs] == [
+        ("BACKUP_PATH", True, False)
+    ]
+    assert restore.command == ("agw", "database", "restore", "$BACKUP_PATH")
+    assert "separate confirmation" in restore.expected_state
+    assert "no implicit pre-restore backup" in restore.expected_state
+    assert "Leave the live state database unchanged" in restore.refusal_alternative
+    assert "instead of downgrading" in restore.refusal_alternative
+
+    refresh = by_id["refresh-completions"]
+    assert refresh.required_inputs == ()
+    assert refresh.command == ("agw", "completion", "install")
+    assert "when that shell is PowerShell" in refresh.precondition
+    assert "completion dot-source line in $PROFILE" in refresh.precondition
+    assert "autodetected current shell" in refresh.expected_state
+    assert "exact installed path" in refresh.expected_state
+    assert "preserves every existing $PROFILE line" in refresh.expected_state
+    assert "only when Agentworks completions are not already sourced" in refresh.expected_state
+    assert "'. \"<profile-adjacent Completions/agentworks.ps1>\"'" in refresh.expected_state
+    assert "reports the $PROFILE path" in refresh.expected_state
+    assert "installed completion files and, for PowerShell, $PROFILE unchanged" in refresh.refusal_alternative
+    assert "avoid database-backed completion candidates" in refresh.refusal_alternative
 
 
 def test_manifest_origin_identity_ignores_only_a_shifted_source_line() -> None:

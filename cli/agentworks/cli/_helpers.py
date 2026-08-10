@@ -10,11 +10,17 @@ being module-private.
 
 from __future__ import annotations
 
+import sys
+from typing import TYPE_CHECKING
+
 import typer
 
-from agentworks.cli._app import require_interactive
-from agentworks.db import Database, VMRow, WorkspaceRow
+from agentworks.cli._app import completion_mode_enabled, require_interactive
+from agentworks.errors import BackupError, StateError
 from agentworks.secrets.policy import InteractionPolicy
+
+if TYPE_CHECKING:
+    from agentworks.db import Database, VMRow, WorkspaceRow
 
 
 def ordinary_interaction_policy() -> InteractionPolicy:
@@ -25,7 +31,72 @@ def ordinary_interaction_policy() -> InteractionPolicy:
 
 
 def get_db() -> Database:
-    return Database()
+    """Open writable state through the migration-safety interaction boundary."""
+    from agentworks import db as db_module
+    from agentworks import output
+    from agentworks.config import load_database_config
+    from agentworks.db import (
+        SchemaState,
+        open_completion_database,
+        open_database_safely,
+        prepare_database_open,
+    )
+
+    database_path = db_module.DB_PATH
+    if completion_mode_enabled():
+        completion_database = open_completion_database(database_path)
+        if completion_database is None:
+            raise StateError("database-backed completion is unavailable")
+        return completion_database
+
+    plan = prepare_database_open(database_path)
+    if plan.inspection.state is not SchemaState.STALE:
+        return open_database_safely(database_path, plan, create_backup=False).database
+
+    # Version zero has no completed Agentworks schema to preserve. Keep the
+    # same locked safe-open sequencing, but initialize without interaction or
+    # a non-restorable automatic backup.
+    if plan.inspection.current_version == 0:
+        return open_database_safely(database_path, plan, create_backup=False).database
+
+    output.notice(
+        "State database schema migration "
+        f"from version {plan.inspection.current_version} to {plan.inspection.latest_version} is about to begin."
+    )
+    interactive = output.is_interactive() and sys.stderr.isatty()
+    if interactive:
+        with output.suppress_presentation():
+            create_backup = output.confirm("Back up the state database before migrating?", default=True)
+    else:
+        create_backup = load_database_config().auto_backup_before_migration
+
+    try:
+        result = open_database_safely(database_path, plan, create_backup=create_backup)
+    except BackupError as error:
+        if interactive:
+            hint = "Migration did not start. Retry and answer no to explicitly decline the pre-migration backup."
+        else:
+            hint = (
+                "Migration did not start. To retry without a backup, set "
+                "`[database] auto_backup_before_migration = false` in config.toml."
+            )
+        raise BackupError(str(error), hint=hint) from error
+    except BaseException as error:
+        # The safety service preserves interrupt/exit semantics with standard
+        # exception notes. Surface its recovery association before Typer turns
+        # KeyboardInterrupt into an exit and suppresses the traceback.
+        for note in getattr(error, "__notes__", ()):
+            if note.startswith("Agentworks migration recovery:"):
+                output.notice(note)
+        raise
+
+    if result.backup is not None:
+        from agentworks.path_rendering import format_host_path
+
+        output.notice(f"Pre-migration database backup completed: {format_host_path(result.backup.path)}")
+        for failure in result.backup.cleanup_failures:
+            output.warn(f"Could not remove old automatic database backup {failure.path}: {failure.message}")
+    return result.database
 
 
 def prompt_workspace(db: Database, workspace: str | None) -> WorkspaceRow:

@@ -2,7 +2,7 @@
 
 <!-- cspell:ignore sdds -->
 
-- Status: Active
+- Status: Complete
 - Builds on: [frd.md](./frd.md), [hla.md](./hla.md),
   [migration-strategy.md](./migration-strategy.md)
 - Saga: `docs/sdd/2026-08-04-next-steps/`
@@ -54,18 +54,18 @@ behavior. Live validation uses a temporary isolated home and no operator state.
 
 ## Phase 1: Direct backup and restore
 
-- [ ] Add the focused `agentworks.db` online-copy service with adjacent backup directory creation,
+- [x] Add the focused `agentworks.db` online-copy service with adjacent backup directory creation,
       separate manual and automatic names, collision safety, source validation, restore direction,
       incomplete-destination cleanup, restrictive file creation, a fixed busy deadline, and
       automatic-only retention of five. Put the exact non-SQLite table-and-column version-shape map
       beside the migration ladder with its future-maintenance comment.
-- [ ] Add the singular `agw database` group with `backup` and `restore BACKUP_PATH [--yes/-y]`.
+- [x] Add the singular `agw database` group with `backup` and `restore BACKUP_PATH [--yes/-y]`.
       Neither command may call `get_db()` or construct the migrating `Database` facade.
-- [ ] Keep backup status and restore confirmation on stderr, keep the successful backup path as the
+- [x] Keep backup status and restore confirmation on stderr, keep the successful backup path as the
       only stdout value, and refuse non-interactive restore without `--yes`.
-- [ ] Add native restore-file completion in bash, zsh, PowerShell, and completion specs; update the
+- [x] Add native restore-file completion in bash, zsh, PowerShell, and completion specs; update the
       CLI README and command reference with the now-shipped command behavior.
-- [ ] Test WAL-visible copy, validation-before-destination-open, source/destination direction,
+- [x] Test WAL-visible copy, validation-before-destination-open, source/destination direction,
       generic SQLite rejection, the exact version-appropriate map across every historical schema
       version, current-version common-sentinel lookalike and partial-next-version rejection,
       future-version restore refusal before destination open, identical-path refusal, held-lock
@@ -78,70 +78,74 @@ behavior. Live validation uses a temporary isolated home and no operator state.
 
 ## Phase 2: Safe automatic migration flow
 
-- [ ] Add WAL-aware non-migrating schema inspection and safe writable-open sequencing to the same
+- [x] Add WAL-aware non-migrating schema inspection and safe writable-open sequencing to the same
       database safety service. Serialize stale opens with one persistent dedicated SQLite lock,
       treat the preliminary stale observation only as a lock-acquisition trigger, require canonical
       version-shape conformance under that first lock, compare the locked version and schema cookie
-      with the preliminary tokens, recheck after interaction, refuse a shape-mismatched or
-      changed-but-stale observation, refuse malformed and future schema, complete any selected
-      backup before `Database` construction, close construction failures, and raise a kind-based
-      `StateError` with the exact platform-aware recovery command or the explicit no-backup fact.
-- [ ] Add the strict default-true `DatabaseConfig` and focused `[database]` loader. Full config
+      with the preliminary tokens, recheck after interaction, refuse an overlapped,
+      shape-mismatched, or changed-but-stale observation, refuse malformed and future schema,
+      complete any selected backup before `Database` construction, close construction failures, and
+      raise a kind-based `StateError` with the exact platform-aware recovery command or the explicit
+      no-backup fact.
+- [x] Add the strict default-true `DatabaseConfig` and focused `[database]` loader. Full config
       includes the section; only stale non-interactive opens use the focused projection.
-- [ ] Update `get_db()` to own notice, interactive default-yes prompt, and non-interactive setting
+- [x] Update `get_db()` to own notice, interactive default-yes prompt, and non-interactive setting
       selection while delegating safety ordering to the service. Catch a selected backup's existing
       `BackupError` here and add the mode-specific explicit-decline or config-opt-out retry hint.
       Add suppression-surviving `output.notice()` for the mandatory versioned notice and automatic
       backup status. Prompt only when stdin and the stderr prompt stream are terminals.
-- [ ] Add the hidden completion-probe marker. When sidecars exist, return no candidates; otherwise
+- [x] Add the hidden completion-probe marker. When sidecars exist, return no candidates; otherwise
       use an immutable read-only connection. Unavailable probe state raises a clean error before a
       database caller runs; generated shell code discards its stderr and consumes empty stdout,
       including when config warned or failed earlier. Recognize the pre-0.14 marker-free completion
       argv/TTY shape in the root callback from the shared database-backed command-path set and
       refuse it before prompt or migration. Completion must never prompt, migrate, create a
       database, or create or change SQLite sidecars.
-- [ ] Make `Database` refuse future schema and close on migration failure. Keep the existing
+- [x] Make `Database` refuse future schema and close on migration failure. Keep the existing
       migration ladder and per-version commit behavior unchanged. Make doctor use the shared
       non-migrating, WAL-aware inspection path and align its wording.
-- [ ] Update `sample-config.toml`, config reference material, the 0.14 upgrade guide, and
+- [x] Update `sample-config.toml`, config reference material, the 0.14 upgrade guide, and
       `concept-migration` with backup location, fixed retention, opt-out behavior, failure recovery,
       restore-before-downgrade order, and the required `agw completion install` refresh.
-- [ ] Test fresh/current/stale/future/malformed matrices; interactive accept and decline;
+- [x] Test fresh/current/stale/future/malformed matrices; interactive accept and decline;
       non-interactive default, opt-out, and invalid focused config; backup-before-first-statement;
       backup failure prevention and retry guidance; partial failure recovery; POSIX and PowerShell
       command rendering; two-process serialized recheck with one backup; staggered late-inspector
-      partial-migration refusal after an actor releases the lock between a tainted preliminary read
-      and the first acquisition; interactive JSON and names-only stdout purity with the required
-      stderr notice; doctor; the single writable-construction-site inventory; and byte-identical
-      zero-output completion probes, including shell-wrapped warning, invalid-config, and pre-0.14
-      marker-free cases.
+      partial-migration refusal while the lock is held and after an actor releases it between a
+      tainted preliminary read and the first acquisition; interactive JSON and names-only stdout
+      purity with the required stderr notice; doctor; the single writable-construction-site
+      inventory; and byte-identical zero-output completion probes, including shell-wrapped warning,
+      invalid-config, and pre-0.14 marker-free cases.
+- [x] Supersede the initial-contention provenance refusal and its held-lock rejection witness with
+      one bounded acquisition plus a deterministic benign-contention test: unchanged canonical stale
+      state becomes the baseline after waiting; changed tokens or a shape mismatch still refuse.
 - DoD: every writable production open follows the reviewed safety flow, every completion probe is
   non-mutating, all permanent teaching matches behavior, and the complete gate and project-specific
   review have no unresolved valid finding.
 
 ## Phase 3: Integrated validation and closeout
 
-- [ ] As the invoking session, fetch the PR's real head and base; prove the checkout matches the
+- [x] As the invoking session, fetch the PR's real head and base; prove the checkout matches the
       remote head; and check freshness and merge conflicts with current `main`. Save and preserve an
       `agw-state` snapshot first only if the planned run can touch operator state.
-- [ ] Run six mutation checks: force migration before backup, bypass initial stale qualification,
+- [x] Run six mutation checks: force migration before backup, bypass initial stale qualification,
       remove canonical version-shape conformance under the first lock, remove only the
       preliminary-to-qualified version/cookie comparison, remove the post-interaction schema
       recheck, and force completion through a writable open. Each must fail a focused test; restore
       production behavior afterward.
-- [ ] Run the full gate from a clean tree and record the exact commands and results in the PR.
-- [ ] Have an independent fresh-eyes reviewer inspect the complete implementation, tests, docs, and
+- [x] Run the full gate from a clean tree and record the exact commands and results in the PR.
+- [x] Have an independent fresh-eyes reviewer inspect the complete implementation, tests, docs, and
       SDD traceability; return every valid finding to the implementing agent and re-review fixes.
-- [ ] As the invoking session, load `integration-testing` and `agw-test-env`, select the local-only
+- [x] As the invoking session, load `integration-testing` and `agw-test-env`, select the local-only
       inventory and a bounded resource budget, and inject the relevant environment, safety,
       freshness, cleanup, and disposition charter into an `agentworks-tester`. Have it exercise the
       installed real CLI with an isolated temporary home: manual backup/restore, automatic
       stale-schema backup, opt-out, migration failure remediation, JSON/names-only purity, and
       non-mutating completion. The tester returns evidence only; the invoking session independently
       verifies cleanup, decides the operator-gated disposition, and posts the signed PR comment.
-- [ ] Obtain the saga lead's final implementation ruling after code, review, gate, and live-test
+- [x] Obtain the saga lead's final implementation ruling after code, review, gate, and live-test
       findings converge.
-- [ ] Classify residual migration claims and completion call sites, confirm the brief remains
+- [x] Classify residual migration claims and completion call sites, confirm the brief remains
       absent, update all plan checkboxes truthfully, and create `locked.md` containing final state
       and evidence.
 - DoD: full gates, mutation checks, fresh-eyes review, and isolated CLI validation are clear; the PR

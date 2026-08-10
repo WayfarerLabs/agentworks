@@ -2,6 +2,11 @@ Agentworks 0.14 moved resource declarations out of `config.toml` and into YAML m
 covers that exceptional resource-model migration. It is not a general upgrade checklist, and it does
 not provide a migrator or a frozen copy of an older schema.
 
+This resource rewrite is distinct from the automatic SQLite state-schema migration. A normal command
+announces stale state and offers or automatically creates a pre-migration database snapshot before
+changing it; `agw doctor` only inspects. Restore a schema-compatible snapshot before a downgrade,
+and refresh generated shell code with `agw completion install` after upgrading.
+
 Work from the installed model. A bare kind topic, such as `agw guide vm-template`, includes its live
 sample and field reference. A capability implementation topic, such as `agw guide vm-platform/lima`,
 describes that implementation's tagged configuration. Keep an untouched backup and the expected

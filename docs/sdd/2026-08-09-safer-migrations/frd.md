@@ -1,6 +1,6 @@
 # FRD: Safer Database Migrations
 
-- Status: Approved for implementation
+- Status: Implemented
 - Date: 2026-08-09
 - Saga: `docs/sdd/2026-08-04-next-steps/`
 - Delivery: operator-dispatched SDD effort tracked by the saga's pre-0.14 release gate; the effort
