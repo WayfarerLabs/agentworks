@@ -201,8 +201,8 @@ blocks and the migration workflow only; the broader registry-inventory scope rem
       fixtures.
 - [x] Shared `--output human|json` option and v1 envelope serializer implemented without replacing
       the global output handler, adding a process-global output mode or renderer, or implying
-      support on mutation commands; narrow request-scoped state suppresses presentation only while a
-      successful JSON document is collected.
+      support on mutation commands; narrow request-scoped state controls presentation suppression
+      and error styling only for covered JSON commands.
 - [x] Resource list, kinds, and instance describe serialize their existing service fact records;
       human output remains byte-compatible.
 - [x] VM, workspace, agent, session, console, and secret list/describe paths return fact records and
@@ -215,14 +215,39 @@ blocks and the migration workflow only; the broader registry-inventory scope rem
       routing, and schema-version compatibility covered by CLI tests.
 - [x] JSON v1 documented as a permanent contract with examples and compatibility rules; command docs
       and completions updated in the same commits.
-- [x] Focused and full implementation gates pass.
+- [x] All focused and full gates pass; step reviewed by `agentworks-reviewer` and a fresh-eyes
+      reviewer; valid findings resolved.
 - [x] Always-green ready-to-merge PR opened and roadmap-lead review requested.
+- [x] Resolve the saga and installed-CLI review round: propagate failing JSON entrypoint status,
+      reject invalid and special database paths without blocking, share one verified database
+      snapshot across doctor groups, restore focused module sizes, reconcile final artifacts, and
+      rerun project, fresh-eyes, full, and PR gates before requesting re-review.
+- [x] Resolve the native-Windows and malformed-schema re-review round: represent unavailable secure
+      database inspection as a first-class non-failing doctor outcome, reject non-integer schema
+      versions through a complete path-free report, clean the accepted inspection seams, and rerun
+      project, fresh-eyes, full, and PR gates before requesting re-review.
+- [x] Resolve the pinned-parent, complete schema-history, and persisted-enum re-review round: carry
+      the resolved database directory identity through snapshot acquisition, distinguish an absent
+      schema history from malformed shape or rows, close corrupted persisted JSON enum values with
+      documented sentinels, and rerun project, fresh-eyes, full, and PR gates before requesting
+      re-review.
+
+The checked review rounds above record work later superseded by the operator scope correction below.
+
 - [x] Close corrupted persisted operational JSON enum values with documented sentinels and preserve
       human-output compatibility.
+- [x] Apply the operator scope correction: remove the database-copying and hostile-filesystem
+      inspection subsystem, its unavailable-result protocol, tests, and documentation; retain only
+      straightforward non-migrating doctor reads and the independently required JSON projections;
+      then rerun project, fresh-eyes, full, and PR gates before requesting re-review.
+- [x] Resolve the simplified-doctor review round: share one ordinary read-only schema gate, fail
+      closed on malformed scalar schema versions, retain a closed warning for unexpected VM
+      initialization states, require a current schema before migration completion, and rerun focused
+      and full project gates.
 - [x] Doctor serializes the same `HealthReport` facts for human and JSON output, reports a stale
       scalar schema version without migrating, fails closed on malformed or newer versions, and
       requires a current Schema check before migration completion.
-- [ ] Resolve final review findings, rerun focused and full gates, and obtain clean project,
+- [x] Resolve final review findings, rerun focused and full gates, and obtain clean project,
       fresh-eyes, integration, and PR re-review.
 
 Definition of done: R7 and AC4 hold across the named commands, with human and JSON renderers sharing
