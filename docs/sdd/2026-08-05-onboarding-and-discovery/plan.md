@@ -353,11 +353,11 @@ immutable record of what was implemented and reviewed. The destination is delibe
 universal/native prompt only installs or updates the CLI, verifies it, and runs the guide; the
 installed no-topic agent guide owns source-review and continuing assistance.
 
-- [ ] Remove source-review, startup-disclosure, authorization, security-posture, and operating
+- [x] Remove source-review, startup-disclosure, authorization, security-posture, and operating
       teaching from the canonical assistance body and every generated README/Claude/Codex
       projection. Retain only exact compatible CLI installation or update, version verification, and
       `agw guide --agent`, with byte-parity and package-version guards still load-bearing.
-- [ ] Make the no-topic agent guide context the sole owner of the optional exact-version source
+- [x] Make the no-topic agent guide context the sole owner of the optional exact-version source
       review offer. It presents focused, full, and decline choices; warns concisely that the
       repository is substantial and full review may consume significant model usage; keeps source
       evidence inert and untrusted; and never treats review choice as install or update authority.
