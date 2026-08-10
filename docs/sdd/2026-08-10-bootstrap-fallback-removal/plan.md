@@ -14,12 +14,12 @@ match the code; all required reviews and gates are green.
 
 ## Phase 1: behavior-preserving preparation on contract v1
 
-- [ ] Extract the generated-script executor into a WSL2-owned helper while the v1 Phase A caller
+- [x] Extract the generated-script executor into a WSL2-owned helper while the v1 Phase A caller
       remains in place; preserve private staging, cleanup, parsing, redaction, progress, database
       updates at the manager boundary, and observable logging.
-- [ ] Introduce the value-free bootstrap-progress protocol and have the existing concrete logger
+- [x] Introduce the value-free bootstrap-progress protocol and have the existing concrete logger
       satisfy it without changing the v1 request/result contract.
-- [ ] Add focused tests for the extracted helper and logger lifecycle before changing platform
+- [x] Add focused tests for the extracted helper and logger lifecycle before changing platform
       ownership.
 
 **DoD:** behavior and vm-platform contract version 1 are unchanged; WSL2 still bootstraps once
