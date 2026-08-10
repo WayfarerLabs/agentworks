@@ -33,6 +33,7 @@ already-released 0.13 binary, so downgrade remains restore-first.
 | Automation             | No migration choice       | Automatic pre-migration backup unless config strictly disables it |
 | Completion             | Ordinary database path    | Hidden, non-prompting, side-effect-free probe                     |
 | Doctor                 | Reports without migration | Same posture, with wording aligned to the new flow                |
+| Concurrent stale opens | Can race within a version | Serialized recheck; one backup and migration                      |
 
 The only new configuration is:
 
@@ -75,10 +76,14 @@ On the first ordinary 0.14 command that needs writable state:
 2. It announces the pending transition on stderr.
 3. An interactive operator accepts or declines a default-yes backup prompt. A non-interactive caller
    uses the default-true focused setting.
-4. When selected, Agentworks completes a timestamped SQLite online backup before the first migration
-   statement and retains only the five newest automatic backups.
-5. Agentworks runs the existing migration ladder. The original command continues after success.
-6. On migration failure, the error preserves the completed backup and prints an exact executable
+4. Agentworks acquires the dedicated migration lock and rechecks schema. A waiter that now sees
+   current state skips backup and migration. A waiter that sees a changed but still-stale schema
+   refuses without adding another backup or migration attempt.
+5. When selected for still-stale state, Agentworks completes a timestamped SQLite online backup
+   before the first migration statement and retains only the five newest automatic backups.
+6. Agentworks runs the existing migration ladder while holding the separate migration lock. The
+   original command continues after success.
+7. On migration failure, the error preserves the completed backup and prints an exact executable
    restore command. If backup was declined or disabled, the error says no pre-migration backup was
    created.
 
@@ -114,7 +119,9 @@ Restore validates the source before opening the live destination, copies through
 backup API, and exits without running migrations. The selected backup remains available for retry.
 Agentworks does not coordinate other processes during restore; exclusive operator use is a stated
 precondition. Restore does not automatically back up the database it replaces; an operator who wants
-that additional artifact runs `agw database backup` first.
+that additional artifact runs `agw database backup` first. Validation requires the stable Agentworks
+schema sentinels across historical versions, and a fixed busy deadline returns a clean retry error
+instead of waiting indefinitely.
 
 An on-demand manual backup can be restored through the same command. Manual backups are never
 removed by automatic retention.

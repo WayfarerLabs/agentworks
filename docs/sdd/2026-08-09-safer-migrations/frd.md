@@ -43,15 +43,20 @@ transaction, so the product must not promise that every failure rolls itself bac
 - R5. `agw database restore BACKUP_PATH` restores the selected backup into the state database. It
   shows both paths and asks for confirmation by default; `--yes` accepts the replacement for
   automation. A non-interactive invocation without `--yes` refuses cleanly. Refusal or an invalid
-  backup leaves both paths untouched. Restore does not open the restored database through the
-  automatic migration path during the same command.
+  backup leaves both paths untouched. Validation requires a structurally sound SQLite database with
+  the stable Agentworks schema sentinels, not merely a caller-supplied `schema_version` table.
+  Restore does not open the restored database through the automatic migration path during the same
+  command.
 - R6. Backups use SQLite's online backup API rather than filesystem copying. A completed backup is a
-  consistent SQLite snapshot even when the source uses WAL or another process has it open.
+  consistent SQLite snapshot even when the source uses WAL or another process has it open. Backup
+  and restore use one fixed bounded busy deadline; exhausting it returns a clean retryable error
+  rather than waiting indefinitely.
 - R7. Database backups live in a dedicated directory beside the state database and use timestamped,
   collision-resistant names that distinguish automatic pre-migration backups from on-demand backups.
   After a successful automatic backup, Agentworks retains the five newest automatic backups and
   removes older automatic backups. It does not prune on-demand backups or files it does not
-  recognize as its own automatic backups.
+  recognize as its own automatic backups. Newly created backup files and an absent live destination
+  restored on POSIX are user-only; native Windows relies on the existing user-profile directory ACL.
 - R8. When migration fails after a backup was created, the clean CLI error includes the exact
   `agw database restore <path>` invocation for that backup. If the operator declined or disabled
   backup, the error says no pre-migration backup was created and does not invent a restore path.
@@ -64,7 +69,11 @@ transaction, so the product must not promise that every failure rolls itself bac
   downgrade use. The generated completion tree includes the new command group and arguments.
 - R11. Shell-completion probes are non-prompting and non-mutating. If dynamic completion encounters
   a stale database, it returns no database-derived candidates and leaves migration to an
-  operator-invoked command. Generating or installing completion scripts does not open state.
+  operator-invoked command. The hidden child invocation may fail cleanly with empty stdout;
+  generated shell code discards its diagnostic stderr and treats that as no candidates, without
+  spreading an optional database through ordinary callers. Configuration warnings or errors before
+  the database gate are equally hidden from the interactive shell. Generating or installing
+  completion scripts does not open state.
 - R12. Migration notices, backup status, prompts, and failure remediation use the presentation and
   error channels without writing to command stdout. JSON commands still emit exactly one JSON
   document, and names-only commands still emit only candidate names, after migration completes.
@@ -73,6 +82,12 @@ transaction, so the product must not promise that every failure rolls itself bac
   back to migrating without the selected safety artifact. The clean error tells an interactive
   operator that a retry may explicitly decline the offer and tells automation that the documented
   config opt-out is the deliberate escape hatch.
+- R14. Concurrent commands that observe the same stale database serialize at one narrow migration
+  boundary and recheck schema after acquiring it. Exactly one command backs up and migrates that
+  version transition; a waiter that finds current state continues without a second backup or stale
+  failure remediation. If state changed but remains non-current, the waiter refuses without another
+  backup or migration so it cannot attach misleading recovery guidance to another process's partial
+  result.
 
 ## Acceptance
 
@@ -87,10 +102,12 @@ transaction, so the product must not promise that every failure rolls itself bac
 - AC4. An on-demand backup taken from a WAL-mode database remains readable and contains committed
   rows, including rows not yet written into the main database file.
 - AC5. Six automatic backups cause the oldest automatic backup to be removed and the newest five to
-  remain. On-demand backups and unrelated files in the same directory remain untouched.
+  remain. On-demand backups and unrelated files in the same directory remain untouched. New backup
+  files and a newly restored live database have restrictive POSIX modes.
 - AC6. Restore refusal changes neither source nor destination. Confirmed restore replaces the state
   database with the selected snapshot; the next ordinary command applies any required forward
-  migrations through the normal notice and backup flow.
+  migrations through the normal notice and backup flow. A structurally valid non-Agentworks SQLite
+  file is rejected before the destination opens.
 - AC7. Doctor does not create, migrate, back up, or restore state, and its human and JSON schema
   facts remain accurate for absent, current, stale, malformed, and newer databases.
 - AC8. Focused tests, the complete repository gates, and an isolated-home drive of the shipped CLI
@@ -106,14 +123,20 @@ transaction, so the product must not promise that every failure rolls itself bac
 - AC11. A forced online-backup or destination failure after the operator or config selected backup
   leaves the schema and representative data unchanged, creates no completed backup, and explains how
   to retry with an explicit decline or opt-out rather than continuing automatically.
+- AC12. Two processes opening the same stale database converge on one successful backup and
+  migration; the waiter rechecks under serialization, exits successfully, and does not create a
+  second automatic backup. A companion partial-change case makes the waiter refuse without a backup.
+  Removing the locked recheck makes these tests fail.
+- AC13. A held SQLite lock makes backup or restore return the documented retryable error within the
+  fixed deadline and leaves no completed partial backup or newly created live destination.
 
 ## Constraints and non-goals
 
 - The feature covers only the Agentworks SQLite state database. VM backups, config and resource
   manifests, workspace files, secrets, and remote state are separate concerns.
 - Do not add hostile-filesystem defenses, ownership or provenance machinery, backup encryption,
-  remote targets, atomicity proofs, a general snapshot framework, or a migration orchestration
-  subsystem.
+  remote targets, atomicity proofs, a general snapshot framework, or a general migration
+  orchestration subsystem. One dedicated SQLite lock file is the complete concurrency mechanism.
 - Do not change the migration ladder or make all historical migrations transactional as part of this
   effort. The backup is a safety net around the migration behavior that exists.
 - Do not reuse the configurable VM-backup path for database backups. Database backups follow the

@@ -25,8 +25,8 @@ The SQLite backup API can copy in incremental page batches with short source rea
 the destination write transaction for the copy. If another connection changes the source during an
 incremental copy, SQLite restarts as needed; a completed backup represents one consistent source
 snapshot. Python's `Connection.backup` works while other clients, or the same source connection,
-access the database. This bounded design accepts its default one-step copy, and therefore a
-whole-copy source read transaction, for today's small state databases.
+access the database. This design uses small finite page batches so the callback can enforce a fixed
+deadline and the source read locks stay bounded.
 
 Design consequences:
 
@@ -39,6 +39,24 @@ Design consequences:
 Sources: [SQLite backup overview](https://sqlite.org/backup.html),
 [SQLite backup API](https://sqlite.org/c3ref/backup_finish.html),
 [Python `sqlite3.Connection.backup`](https://docs.python.org/3.14/library/sqlite3.html#sqlite3.Connection.backup)
+
+### The Python backup retry loop needs an outer deadline
+
+CPython calls the progress callback after each backup step, including `SQLITE_BUSY` and
+`SQLITE_LOCKED`, and otherwise sleeps and retries those statuses without a total deadline. A
+callback exception exits the loop and SQLite finishes the backup handle, rolling back an unfinished
+destination transaction.
+
+Design consequences:
+
+- Use finite page batches, short connection busy timeouts, and a short sleep interval.
+- Check a fixed monotonic deadline in the progress callback and translate expiry to `BackupError`.
+- Close both connections and remove a newly created incomplete destination after timeout.
+- Test the bound with another connection holding a destination write lock.
+
+Sources:
+[CPython `_sqlite` backup implementation](https://github.com/python/cpython/blob/3.14/Modules/_sqlite/connection.c#L2011-L2090),
+[SQLite backup finish contract](https://sqlite.org/c3ref/backup_finish.html)
 
 ### WAL requires no special copy path
 
@@ -95,6 +113,24 @@ Design consequences:
 Sources: [SQLite backup API](https://sqlite.org/c3ref/backup_finish.html),
 [Python `sqlite3.Connection.backup`](https://docs.python.org/3.14/library/sqlite3.html#sqlite3.Connection.backup)
 
+### Two schema sentinels survive the complete Agentworks history
+
+Migration 1 creates `vms(name)` and `workspaces(name)`. Later rebuilds in migrations 26, 27, and 28
+preserve those identifiers, so both columns remain queryable at every completed historical schema
+version. Combined with SQLite integrity checking and a valid `schema_version`, they distinguish an
+Agentworks-shaped backup from an arbitrary SQLite file without adding a manifest or provenance
+format.
+
+Design consequences:
+
+- Restore validation queries `vms(name)` and `workspaces(name)` before opening the live destination.
+- A test builds every real migration version and proves the invariant instead of maintaining a
+  parallel hand-written schema matrix.
+- This is not hostile-input authentication; a deliberately forged lookalike remains outside scope.
+
+Source: current `agentworks.db.migrations` history and
+[SQLite integrity check](https://sqlite.org/pragma.html#pragma_integrity_check)
+
 ### Transactional DDL requires a transaction the runner does not start
 
 With Python's legacy transaction control, implicit transactions open for DML statements such as
@@ -114,6 +150,24 @@ Design consequences:
 Sources:
 [Python transaction control](https://docs.python.org/3.14/library/sqlite3.html#transaction-control-via-the-isolation-level-attribute),
 [SQLite transactions](https://sqlite.org/lang_transaction.html)
+
+### A separate SQLite write transaction can serialize the existing runner
+
+Locking the state database cannot protect the whole current migration ladder because the runner
+commits before the run and after every completed version. SQLite permits only one simultaneous write
+transaction per database, so a transaction on a separate dedicated SQLite file can act as a narrow,
+portable mutex without changing those migration transactions.
+
+Design consequences:
+
+- Acquire bounded `BEGIN IMMEDIATE` on one persistent adjacent lock database only for stale opens.
+- Recheck state schema after acquiring the lock, then hold it across backup and the full existing
+  migration ladder.
+- Never unlink the lock file; unlinking can let a waiter and a new caller lock different files.
+- Do not add owner records, leases, stale-lock recovery, or platform-specific file-lock branches.
+
+Source:
+[SQLite immediate transactions](https://sqlite.org/lang_transaction.html#deferred_immediate_and_exclusive_transactions)
 
 ## Refuted or not adopted
 
@@ -143,3 +197,4 @@ justify that machinery.
 | SQLite URI documentation         | Primary project docs  | Immutable read-only inspection                |
 | SQLite transaction documentation | Primary project docs  | Implicit and explicit transaction boundaries  |
 | Python `sqlite3` documentation   | Primary language docs | Backup wrapper and legacy transaction control |
+| CPython `_sqlite` implementation | Primary language code | Busy retry and progress callback behavior     |
