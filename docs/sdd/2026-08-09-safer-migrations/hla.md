@@ -85,16 +85,16 @@ recovery artifact or allowing cleanup complexity to mask backup success.
 
 Before restore opens the live destination, it rejects an identical source path and validates the
 selected source read-only: `PRAGMA quick_check` reports `ok`; `schema_version` is a table whose
-maximum is an integer from 1 through `LATEST_VERSION`; and a declarative schema-sentinel map
-requires the tables and critical columns introduced by that completed version. The map lives beside
-the migration ladder and is cumulative by introduction/removal milestone; at the current version it
-includes every durable state table plus current critical columns, including `settings` and
-`sessions`, so a lookalike containing only `schema_version`, `vms(name)`, and `workspaces(name)` is
-rejected. A history test builds every real completed version and proves its corresponding sentinel
-set. A comment on the migration ladder requires future table additions, rebuilds, and removals to
-update the map. This is a narrow semantic format check, not provenance or hostile-filesystem
-verification. A future-schema backup remains preservable by `database backup` but must be restored
-with a release that understands that version.
+maximum is an integer from 1 through `LATEST_VERSION`; and a declarative version-shape map exactly
+matches every non-`sqlite_%` table and every column in those tables to the claimed completed
+version. The map lives beside the migration ladder and is cumulative by introduction/removal
+milestone. A history test builds every real completed version and proves its corresponding exact
+shape. Focused tests reject both a common-sentinel lookalike and a version-1 database with a
+committed version-2 column, because the latter is a partial migration that would fail on the next
+ordinary open. A comment on the migration ladder requires future table additions, rebuilds, and
+removals to update the map. This is a narrow semantic format check, not provenance, foreign-key
+validation, or hostile-filesystem verification. A future-schema backup remains preservable by
+`database backup` but must be restored with a release that understands that version.
 
 After validation, restore copies the selected source into a fresh raw connection to the live path
 and closes without constructing `Database` or creating a pre-restore backup. Operators who want a
@@ -151,10 +151,12 @@ lock. When it identifies stale state, the service qualifies that first observati
 before the CLI announces or prompts. It first tries non-blocking acquisition. If the lock was
 already held, it waits for the bounded acquisition and rechecks: current state returns as current,
 while still-stale state is refused because the observation overlapped another migration attempt. If
-the lock was free, it rechecks under lock and returns the version plus schema cookie as the
-interaction baseline, then releases while the operator answers. This closes the late-inspector
-window where a caller could otherwise record another process's partial DDL as a legitimate stale
-baseline.
+the lock was free, it rechecks under lock and compares the version plus schema cookie with the
+preliminary observation. Current state converges normally; changed-but-still-stale state refuses;
+only unchanged stale state becomes the interaction baseline. The service then releases the lock
+while the operator answers. This closes the late-inspector window where a caller could otherwise
+record another process's partial DDL as a legitimate stale baseline, including when that process
+releases the lock before the first caller acquires it.
 
 After interaction, safe writable open reacquires the lock and rechecks the state database against
 that qualified Agentworks version and schema cookie. If another process completed migration, the
@@ -319,10 +321,12 @@ Focused tests establish the contracts at three layers:
 
 1. **Service:** immutable inspection without sidecar changes; WAL-visible backup; bounded busy
    timeout; restrictive creation; manual and automatic naming; collision handling; mixed-version
-   automatic-only retention; version-appropriate historical-schema validation; current-version
-   common-sentinel lookalike rejection; future-version refusal before destination open; restore
-   direction; identical-path refusal; first-observation lock qualification; serialized safe-open
-   recheck; staggered partial-migration refusal; migration-failure association; and failure cleanup.
+   automatic-only retention; exact version-appropriate historical-schema validation; current-version
+   common-sentinel lookalike and partial-next-version rejection; future-version refusal before
+   destination open; restore direction; identical-path refusal; first-observation lock
+   qualification; serialized safe-open recheck; staggered partial-migration refusal while the lock
+   is held and after a changed-stale actor releases it before first acquisition; migration-failure
+   association; and failure cleanup.
 2. **Policy and CLI:** fresh/current/stale/future/malformed matrices; interactive accept and
    decline; non-interactive default and opt-out; backup-before-first-migration ordering; backup
    failure prevention; partial-migration failure and exact remediation; confirmation and `--yes`;
@@ -334,12 +338,13 @@ Focused tests establish the contracts at three layers:
    upgrade guide, guide topic, operator path rendering, and a construction-site inventory that
    permits production writable `Database` construction only inside the database safety service.
 
-Mutation checks neuter four safety pivots: make migration run before backup, bypass initial stale
-qualification, remove the post-interaction schema recheck, and make completion use a writable open.
-Each mutation must fail a focused test. An isolated-home real-CLI drive creates an old-schema
-fixture, exercises non-interactive automatic backup, restores it, exercises opt-out, and verifies
-JSON/names-only stdout without touching operator state. No live VM is needed because the entire
-feature boundary is local SQLite and CLI behavior.
+Mutation checks neuter five safety pivots: make migration run before backup, bypass initial stale
+qualification, remove only the preliminary-to-qualified version/cookie comparison, remove the
+post-interaction schema recheck, and make completion use a writable open. Each mutation must fail a
+focused test. An isolated-home real-CLI drive creates an old-schema fixture, exercises
+non-interactive automatic backup, restores it, exercises opt-out, and verifies JSON/names-only
+stdout without touching operator state. No live VM is needed because the entire feature boundary is
+local SQLite and CLI behavior.
 
 ## Complexity guard
 

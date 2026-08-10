@@ -74,8 +74,9 @@ On the first ordinary 0.14 command that needs writable state:
 
 1. Agentworks reads the current and target schema versions without migration.
 2. For stale state, it qualifies that first observation under the dedicated migration lock. A caller
-   that had to wait and still sees stale state refuses because it may have observed another
-   process's partial migration.
+   that observed the lock as busy and still sees stale state refuses. If the first acquisition finds
+   the lock free, a caller whose version or schema cookie changed but remains stale also refuses.
+   Either case may have observed another process's partial migration.
 3. It announces the pending transition on stderr, including for JSON and names-only output.
 4. An interactive operator accepts or declines a default-yes backup prompt. A non-interactive caller
    uses the default-true focused setting.
@@ -135,9 +136,10 @@ Restore validates the source before opening the live destination, copies through
 backup API, and exits without running migrations. The selected backup remains available for retry.
 Agentworks does not coordinate other processes during restore; exclusive operator use is a stated
 precondition. Restore does not automatically back up the database it replaces; an operator who wants
-that additional artifact runs `agw database backup` first. Validation requires the stable Agentworks
-schema sentinels across historical versions, and a fixed busy deadline returns a clean retry error
-instead of waiting indefinitely.
+that additional artifact runs `agw database backup` first. Validation requires the exact non-SQLite
+table and column shape for the claimed historical version, so a partial migration cannot masquerade
+as its last recorded version. A fixed busy deadline returns a clean retry error instead of waiting
+indefinitely.
 
 An on-demand manual backup can be restored through the same command. Manual backups are never
 removed by automatic retention.
