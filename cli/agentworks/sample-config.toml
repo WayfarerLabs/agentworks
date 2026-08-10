@@ -128,8 +128,10 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #                 overrides it (`backend_mappings.env-var`). A set value is
 #                 read exactly, including terminal CR/LF.
 #   prompt      : interactive prompt. Always applies; you are never asked for
-#                 the same secret twice in one command, and all prompting
-#                 happens before the command starts changing anything.
+#                 the same secret twice in one command. Plan-wide prompting
+#                 happens before mutation. Conditional Tailscale repair stays
+#                 lazy: a stopped VM may start before late key delivery, then
+#                 validation precedes every rejoin-specific action.
 # Additional sources are YAML resources. For 1Password, enable its plugin and
 # declare a source such as `work-op` with `spec.backend.name: onepassword`.
 # Put `account` and the positive `timeout` (default 30 seconds) in that backend

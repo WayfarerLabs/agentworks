@@ -143,9 +143,9 @@ capability, never the reverse.
 
 #### How a Credential Reaches a Git Operation
 
-A provider's output is inert on its own. Three domain pieces turn it into working auth on a VM, and
-they are where the `helper_entry` / `credential_lines` / `store_username` / `secret_name` surface is
-actually consumed:
+A provider's output is inert on its own. Three domain pieces turn it into working auth on a VM. Host
+implementations provide `helper_entry` / `_credential_lines` / `store_username`; the base owns the
+public `credential_lines` guard, and the domain consumes that safe surface with `secret_name`:
 
 1. **Construction** happens in `resolve_git_credential_providers`
    (`vms/initializer/credentials.py`): given the credential names from the admin row or an agent
@@ -332,8 +332,10 @@ files wholesale):
   its `host`, its `username` (the store-line key the helper selects by), and its scopes (`repos`
   match the remote path exactly, `owner` matches the first path segment; no scopes means the host's
   default candidate). `HelperEntry` is a frozen dataclass in `base.py`.
-- `credential_lines(token) -> list[str]` returns the `~/.git-credentials` lines, each a
-  `https://user:token@host` URL. `github` emits `https://<store_username>:<token>@github.com`;
+- `credential_lines(token) -> list[str]` is the concrete, base-owned public materialization
+  boundary. The base rejects CR, LF, and NUL, then delegates the safe token to the provider's
+  protected `_credential_lines(token)`. Each result is a `~/.git-credentials` line in
+  `https://user:token@host` form. `github` emits `https://<store_username>:<token>@github.com`;
   `azdo` emits `https://<org>:<token>@dev.azure.com/<org>`.
 - `store_username` (property) is the username on the store line and the join key the helper selects
   by. Default is the credential's own resource name; a provider overrides where the host dictates.
@@ -375,8 +377,9 @@ are the contract:
 
 The shared shape underneath: one base config model carrying a `token` acquisition union whose stored
 arm carries the marked `secret` field, both driving `_verify_token` through `_probe_pat`, both
-returning `credential_lines` and a `HelperEntry`. A third provider should look the same from the
-outside and differ only in these host-policy rows.
+implementing protected `_credential_lines`, and both returning a `HelperEntry`. The inherited public
+`credential_lines` validates before dispatching to either implementation. A third provider should
+look the same from the outside and differ only in these host-policy rows.
 
 ### Best Practices
 

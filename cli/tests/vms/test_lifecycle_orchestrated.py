@@ -196,6 +196,9 @@ def _patch_actual_ensure_sequence(
         calls["rejoin"] += 1
         events.append("rejoin")
         _raise_at("rejoin")
+        database = cast("Database", args[0])
+        name = cast("str", args[1])
+        database.update_vm_tailscale(name, "100.64.0.10")
 
     def _final_wait(*args: object, **kwargs: object) -> bool:
         calls["final-wait"] += 1
@@ -322,12 +325,15 @@ def test_start_lazy_repair_validates_after_start_and_delivery_before_rejoin_work
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import agentworks.secrets as secret_package
+    import agentworks.transports as transports
     from agentworks.errors import ValidationError
+    from agentworks.secrets.orchestration import resolve_for_command as actual_resolve
     from agentworks.vms.manager.tailscale import _ensure_tailscale as actual_ensure
 
     auth_key = "tskey-prefix\r\ntskey-suffix\r\n"
     config = make_config()
     _seed_vm(db)
+    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", auth_key)
     events: list[str] = []
     monkeypatch.setattr(
         ProxmoxPlatform,
@@ -345,15 +351,21 @@ def test_start_lazy_repair_validates_after_start_and_delivery_before_rejoin_work
         lambda self, row, *, config: contextlib.nullcontext(),
     )
     monkeypatch.setattr(
-        vm_manager,
-        "_tailscale_rejoin_required",
-        lambda *args, **kwargs: events.append("repair-required") or True,
+        transports,
+        "transport",
+        lambda *args, **kwargs: events.append("probe-transport") or object(),
     )
     monkeypatch.setattr(
-        secret_package,
-        "resolve_for_command",
-        lambda *args, **kwargs: events.append("late-resolve") or {"tailscale-auth-key": auth_key},
+        transports,
+        "wait_for_reconnect",
+        lambda *args, **kwargs: events.append("repair-required") or False,
     )
+
+    def _resolve(*args: object, **kwargs: object) -> dict[str, str]:
+        events.append("late-resolve")
+        return actual_resolve(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(secret_package, "resolve_for_command", _resolve)
 
     def _ensure(*args: object, **kwargs: object) -> None:
         events.append("ensure")
@@ -369,8 +381,20 @@ def test_start_lazy_repair_validates_after_start_and_delivery_before_rejoin_work
     with pytest.raises(ValidationError) as caught:
         vm_manager.start_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
 
-    assert events == ["status", "start", "repair-required", "late-resolve", "ensure"]
-    assert auth_key not in repr((caught.value.args, vars(caught.value)))
+    assert events == [
+        "status",
+        "start",
+        "probe-transport",
+        "repair-required",
+        "late-resolve",
+        "ensure",
+    ]
+    refreshed = db.get_vm("box")
+    assert refreshed is not None
+    assert refreshed.tailscale_host == "100.64.0.9"
+    assert "tskey-prefix" not in repr((caught.value.args, vars(caught.value)))
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
 @pytest.mark.parametrize("failure_type", [RuntimeError, KeyboardInterrupt])

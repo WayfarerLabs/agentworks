@@ -572,9 +572,12 @@ should you when reading them:
   is a `false` opt-out, or a mapping-required backend (like `onepassword`) with no mapping.
 
 Resolution is a pass over the chain in precedence order: the first source that produces a value
-wins. You are never prompted for the same secret twice in one command, and all prompting happens up
-front, before the command starts changing anything. The walk considers a candidate only when it is
-**present, enabled, ready, active, and would-attempt** the secret.
+wins. You are never prompted for the same secret twice in one command, and plan-wide prompting
+happens up front, before the command starts changing anything. Conditional Tailscale repair remains
+lazy so healthy and already-connected paths never ask for a repair key: a stopped VM may start
+before late key delivery, then Agentworks validates the key before any rejoin-specific mutation,
+transport, installation, or daemon action. The walk considers a candidate only when it is **present,
+enabled, ready, active, and would-attempt** the secret.
 
 A **not-ready** active source is **skipped with a warning**, and resolution continues with the next
 candidate. A _ready_ store's hard miss stops the chain so a bad mapping cannot fall through to a

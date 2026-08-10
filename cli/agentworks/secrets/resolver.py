@@ -64,6 +64,7 @@ class Resolver:
         self._registry = registry
         self._interaction = interaction
         self._decls: dict[str, SecretDecl] = {}
+        self._targets: list[SecretTarget] = []
         self._seeded: dict[str, str] = {}
         self._values: dict[str, str] | None = None
 
@@ -87,7 +88,9 @@ class Resolver:
         """
         from agentworks.secrets.orchestration import compute_needed_secrets
 
-        self.register(compute_needed_secrets(targets, self._registry))
+        retained = list(targets)
+        self._targets.extend(retained)
+        self.register(compute_needed_secrets(retained, self._registry))
 
     def register_name(self, name: str) -> SecretDecl:
         """Register a secret by name and return its declaration.
@@ -168,6 +171,9 @@ class Resolver:
                     "Register every participating resource's secrets before "
                     "the preflight-boundary resolve."
                 )
+            from agentworks.secrets.orchestration import validate_target_values
+
+            validate_target_values(self._targets, self._values)
             return
         from agentworks.secrets.policy import InteractionPolicy
         from agentworks.secrets.resolve import (
@@ -182,16 +188,20 @@ class Resolver:
         # source-chain pass); the boundary loop covers only the rest.
         missing = [decl for name, decl in self._decls.items() if name not in self._seeded]
         if not missing:
-            self._values = dict(self._seeded)
-            return
-        broker = OutputInteractionBroker(missing) if interaction is InteractionPolicy.ALLOW else None
-        batch = resolve_batch(
-            missing,
-            active_sources(self._config, self._registry),
-            policy=ResolutionPolicy(interaction=interaction, completion=CompletionPolicy.COMPLETE),
-            interaction_broker=broker,
-        )
-        self._values = {**self._seeded, **batch.complete_or_raise()}
+            resolved = dict(self._seeded)
+        else:
+            broker = OutputInteractionBroker(missing) if interaction is InteractionPolicy.ALLOW else None
+            batch = resolve_batch(
+                missing,
+                active_sources(self._config, self._registry),
+                policy=ResolutionPolicy(interaction=interaction, completion=CompletionPolicy.COMPLETE),
+                interaction_broker=broker,
+            )
+            resolved = {**self._seeded, **batch.complete_or_raise()}
+        from agentworks.secrets.orchestration import validate_target_values
+
+        validate_target_values(self._targets, resolved)
+        self._values = resolved
 
     def resolve_gate(self, name: str) -> str:
         """Resolve and seed one declaration before the operation boundary."""

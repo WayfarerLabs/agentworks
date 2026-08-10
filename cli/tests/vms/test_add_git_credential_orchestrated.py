@@ -51,17 +51,25 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token")
     monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GH", "ghtok")
 
-    def _make(*, git_cred: bool = True):
+    def _make(*, git_cred: bool = True, runup_git_credentials: bool = True):
         manifests: list[ManifestDoc | str] = [proxmox_site()]
         if git_cred:
             manifests.append(GIT_CRED_GH)
-        return write_operator_config(tmp_path, PLUGINS_ENABLED, manifests=manifests)
+        defaults = ""
+        if not runup_git_credentials:
+            defaults = "\n[defaults]\nrunup_git_credentials = false\n"
+        return write_operator_config(
+            tmp_path,
+            PLUGINS_ENABLED + defaults,
+            manifests=manifests,
+        )
 
     return _make
 
 
 class _FakeTarget:
     def __init__(self, existing: str = "") -> None:
+        self.opens = 0
         self.runs: list[str] = []
         self.writes: list[tuple[str, str, str | None]] = []
         self._existing = existing
@@ -81,7 +89,12 @@ def target(monkeypatch: pytest.MonkeyPatch) -> _FakeTarget:
     import agentworks.transports as transports
 
     fake = _FakeTarget()
-    monkeypatch.setattr(transports, "transport", lambda vm, config: fake)
+
+    def _open(vm: object, config: object) -> _FakeTarget:
+        fake.opens += 1
+        return fake
+
+    monkeypatch.setattr(transports, "transport", _open)
     return fake
 
 
@@ -244,7 +257,43 @@ def test_runup_rejection_is_fatal_and_writes_nothing(
     with pytest.raises(TokenRejectedError, match="rejected the token"):
         vm_manager.add_git_credential(db, config, vm.name, "gh", interaction=InteractionPolicy.REFUSE)
     assert target.writes == []
+    assert target.opens == 0
     assert target.runs == []
+
+
+def test_disabled_runup_rejects_multiline_before_transport_or_write(
+    db: Database,
+    make_config,
+    target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = "git-command-sentinel\nhttps://injected.example.invalid/token"
+    monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GH", token)
+    config = make_config(runup_git_credentials=False)
+    vm = _seed_vm(db)
+    _reachable(monkeypatch, True)
+
+    monkeypatch.setattr(
+        "agentworks.capabilities.git_credential.base._http_probe",
+        lambda *args, **kwargs: pytest.fail("disabled runup performed an authenticated probe"),
+    )
+
+    with pytest.raises(ValidationError) as caught:
+        vm_manager.add_git_credential(
+            db,
+            config,
+            vm.name,
+            "gh",
+            interaction=InteractionPolicy.REFUSE,
+        )
+
+    assert target.opens == 0
+    assert target.runs == []
+    assert target.writes == []
+    assert "cannot be used for Git authentication and credential storage" in str(caught.value)
+    assert "git-command-sentinel" not in repr((caught.value.args, vars(caught.value)))
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
 # -- proof point (c): scoped delivery ----------------------------------------

@@ -129,7 +129,7 @@ def test_a_capability_with_no_config_rejects_every_key() -> None:
         def helper_entry(self) -> HelperEntry:
             return HelperEntry(host="example.test", username="bare")
 
-        def credential_lines(self, token: str) -> list[str]:
+        def _credential_lines(self, token: str) -> list[str]:
             return []
 
     _Bare("bare", {})
@@ -293,7 +293,7 @@ class _SigningCredentialProvider(GitCredentialProvider):
 
     def _verify_token(self, token: str) -> None: ...
 
-    def credential_lines(self, token: str) -> list[str]:
+    def _credential_lines(self, token: str) -> list[str]:
         return [f"https://signer:{token}@example.test"]
 
     def helper_entry(self) -> HelperEntry:

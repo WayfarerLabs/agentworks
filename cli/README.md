@@ -232,16 +232,21 @@ simple default stays behavior-identical without a manifest:
 - `env-var` -- reads from the operator's process env. Default convention is
   `AW_SECRET_<UPPER_SNAKE_CASE>`, overridable per secret via the secret's `backend_mappings`
   (`env-var: CUSTOM_NAME`).
-- `prompt` -- interactive prompt; you are never asked for the same secret twice in one command, and
-  all prompting happens before the command starts changing anything.
+- `prompt` -- interactive prompt; you are never asked for the same secret twice in one command.
+  Plan-wide prompting happens before the command starts changing anything. Conditional Tailscale
+  repair is deliberately lazy: healthy and already-connected paths never ask for a repair key, and a
+  stopped VM may start before late key delivery. The delivered key is validated before any
+  rejoin-specific mutation, transport, installation, or daemon action.
 
-**Resolve before any mutation:** a command resolves all the secrets its plan needs up front, before
-it starts changing anything. Preflight first performs a pure applicability screen: a declaration
-with no ready, permitted source that would even attempt it fails with a hint
-(`agw secret describe <name>` shows how each source maps it), before any prompt and before any VM is
-started. Actual presence, authentication, transport, and provider failures remain the typed
-resolution boundary's job. The set of secrets is computed from the command's static filters
-(positional targets, `--vm`, `--workspace`, `--agent`, etc.) -- dynamic predicates like
+**Resolve before plan mutation:** a command resolves all the secrets its static plan needs up front,
+before it starts changing anything. The conditional Tailscale repair exception stays lazy so healthy
+paths do not prompt: a stopped VM may start before Agentworks discovers that repair is required,
+then the late key is validated before all rejoin-specific work. Preflight first performs a pure
+applicability screen: a declaration with no ready, permitted source that would even attempt it fails
+with a hint (`agw secret describe <name>` shows how each source maps it), before any prompt and
+before any VM is started. Actual presence, authentication, transport, and provider failures remain
+the typed resolution boundary's job. The set of secrets is computed from the command's static
+filters (positional targets, `--vm`, `--workspace`, `--agent`, etc.) -- dynamic predicates like
 `--all-stopped` apply later, so the prompted set may over-approximate. Non-interactive mode (no TTY
 or `--non-interactive`) surfaces missing secrets as `SecretUnavailableError` with a per-secret hint
 naming which sources were tried. Commands that join existing shells (`session attach`,
@@ -421,9 +426,9 @@ group listing every installed plugin, its description, and whether it is enabled
 See [docs/guides/resources.md](../docs/guides/resources.md#system-plugins) for the full model
 (origins, the disabled-resource semantics, config-error deferral) and the upgrade note for configs
 that relied on Azure, Proxmox, 1Password, or Claude Code before they became opt-in. Google Compute
-Engine setup, firewall prerequisites, JSON-secret compaction, and provider-ID-safe recovery are
-covered in [Using Google Compute Engine](../docs/guides/gcp.md); AWS guest CLI boundaries are in
-[Using AWS with Agentworks](../docs/guides/aws.md).
+Engine setup, firewall prerequisites, whole-document JSON-secret setup, and provider-ID-safe
+recovery are covered in [Using Google Compute Engine](../docs/guides/gcp.md); AWS guest CLI
+boundaries are in [Using AWS with Agentworks](../docs/guides/aws.md).
 
 ### Mise (Polyglot Tool Manager)
 

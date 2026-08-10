@@ -114,5 +114,5 @@ class AzDOCredentialProvider(GitCredentialProvider):
             ]
         return []
 
-    def credential_lines(self, token: str) -> list[str]:
+    def _credential_lines(self, token: str) -> list[str]:
         return [f"https://{self.config.org}:{token}@dev.azure.com/{self.config.org}"]

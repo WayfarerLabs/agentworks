@@ -212,6 +212,7 @@ def _ensure_tailscale(
         use=LineOrientedSecretUse.TAILSCALE,
         secret_name=auth_key_name,
     )
+    db.clear_vm_tailscale(vm.name)
 
     # native_transport() composes Azure's route open/close (heal the
     # public IP, poke and remove the scoped ephemeral SSH allow) via
@@ -261,7 +262,7 @@ def _tailscale_rejoin_required(
     *,
     already_running: bool,
 ) -> bool:
-    """Probe a known Tailscale host and clear it when rejoin is required."""
+    """Return whether a known Tailscale host requires a rejoin."""
     from agentworks.transports import TailscaleWait, transport, wait_for_reconnect
 
     refreshed = _require_vm(db, vm.name)
@@ -271,7 +272,6 @@ def _tailscale_rejoin_required(
     if wait_for_reconnect(transport(refreshed, config), context=context):
         return False
     output.info(f"Tailscale node {refreshed.tailscale_host} did not reconnect, rejoining...")
-    db.clear_vm_tailscale(refreshed.name)
     return True
 
 

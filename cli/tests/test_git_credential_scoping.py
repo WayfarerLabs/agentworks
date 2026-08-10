@@ -21,7 +21,7 @@ from agentworks.capabilities.config import capability_config_references, validat
 from agentworks.capabilities.descriptor import descriptor_for
 from agentworks.capabilities.git_credential.github import GitHubCredentialProvider
 from agentworks.config import load_config
-from agentworks.errors import ConfigError
+from agentworks.errors import ConfigError, ValidationError
 from agentworks.git_credentials import CredentialMaterials, build_credential_materials
 from agentworks.plugins.azure.azdo import AzDOCredentialProvider
 from agentworks.schema import RefOwner, iter_field_docs
@@ -206,6 +206,30 @@ def test_unscoped_store_line_unchanged() -> None:
     assert p.credential_lines("tok") == ["https://x-access-token:tok@github.com"]
     entry = p.helper_entry()
     assert entry.repos == () and entry.owner is None
+
+
+@pytest.mark.parametrize(
+    "provider",
+    [_gh("gh"), _azdo("azdo", "acme")],
+    ids=["github", "azdo"],
+)
+@pytest.mark.parametrize(
+    "separator",
+    [pytest.param("\n", id="lf"), pytest.param("\r", id="cr"), pytest.param("\0", id="nul")],
+)
+def test_public_credential_materialization_rejects_line_unsafe_token(
+    provider: GitHubCredentialProvider | AzDOCredentialProvider,
+    separator: str,
+) -> None:
+    token = f"git-sink-sentinel{separator}injected"
+
+    with pytest.raises(ValidationError) as caught:
+        provider.credential_lines(token)
+
+    assert "cannot be used for Git authentication and credential storage" in str(caught.value)
+    assert "git-sink-sentinel" not in repr((caught.value.args, vars(caught.value)))
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
 def test_repo_scope_selected_by_path(tmp_path: Path) -> None:

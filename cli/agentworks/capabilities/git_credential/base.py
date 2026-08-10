@@ -136,7 +136,9 @@ class GitCredentialProvider(Capability):
     Subclasses (``GitHubCredentialProvider``, ``AzDOCredentialProvider``)
     declare their ``config_model`` (the token secret and any scope
     fields), implement ``_verify_token`` (the authenticated probe), and
-    implement the ops ``helper_entry`` / ``credential_lines``.
+    implement the ops ``helper_entry`` / ``_credential_lines``. The
+    public ``credential_lines`` materialization boundary is concrete so
+    providers cannot bypass the shared token syntax guard.
     """
 
     owner_kind: ClassVar[str] = "git-credential"
@@ -191,17 +193,21 @@ class GitCredentialProvider(Capability):
         resolved secrets at all (inspection only?) is the accessor's
         typed ``ConfigError``.
         """
+        token = self._line_safe_token(ctx.secret(self.secret_name))
+        self._verify_token(token)
+
+    def _line_safe_token(self, token: str) -> str:
+        """Return one safe token for Git's header and line syntax."""
         from agentworks.secrets.line_safety import (
             LineOrientedSecretUse,
             require_line_safe_secret,
         )
 
-        token = require_line_safe_secret(
-            ctx.secret(self.secret_name),
+        return require_line_safe_secret(
+            token,
             use=LineOrientedSecretUse.GIT_CREDENTIAL,
             secret_name=self.secret_name,
         )
-        self._verify_token(token)
 
     def review_remote(self, url: str) -> list[str]:
         """Advisory review of a declared repo remote URL against THIS
@@ -282,9 +288,14 @@ class GitCredentialProvider(Capability):
         through ``vm add-git-credential`` usable.
         """
 
-    @abstractmethod
     def credential_lines(self, token: str) -> list[str]:
-        """Return lines for ~/.git-credentials.
+        """Validate ``token`` and return lines for ~/.git-credentials.
 
-        Each line is a URL in the format: https://user:token@host
+        This is the non-bypassable public materialization boundary. Each
+        line is a URL in the format: https://user:token@host.
         """
+        return self._credential_lines(self._line_safe_token(token))
+
+    @abstractmethod
+    def _credential_lines(self, token: str) -> list[str]:
+        """Format lines from a token already validated by the base."""
