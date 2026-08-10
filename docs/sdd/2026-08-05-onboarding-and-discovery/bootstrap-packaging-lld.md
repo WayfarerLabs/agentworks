@@ -11,19 +11,26 @@
 Phase 3 makes Agentworks assistance available before and after installation through native Claude
 Code and Codex packages and the repository README. One inert body discloses the workstation access
 Agentworks work can require, obtains consent, offers review of the exact intended release source,
-installs or updates a compatible CLI when needed, and hands all teaching to `agw guide --agent`.
+installs or updates a compatible CLI when needed, and asks `agw guide --agent` for current context.
+The Agentworks assistant agent reads that context and decides what to propose next.
 
-The same phase completes the guide companion needed by that handoff. The no-topic guide routes agent
-requests, `concept-release-notes` renders the installed release's packaged changelog section offline
-and connects older ranges to canonical release notes, `concept-management` connects ordinary
-operations to live facts and built-in CLI help, and `concept-onboarding` can offer bounded first-VM
-and first-session actions.
+The same phase completes the guide companion needed by that handoff. The no-topic guide presents an
+intent-to-topic map and live index; it does not classify or route the current request.
+`concept-release-notes` renders the installed release's packaged changelog section offline and
+connects older ranges to canonical release notes, `concept-management` connects ordinary operations
+to live facts and built-in CLI help, and `concept-onboarding` can offer bounded first-VM and
+first-session actions. The Agentworks assistant agent chooses among those contexts and actions.
 
 This design does not add a package intent switchboard, copied recipes, custom installer, Markdown
 parser, bootstrap orchestration driver, command registry, runtime package loader, network renderer,
 or general packaging framework. Packages contain no hooks, commands, scripts, MCP servers, apps, or
 pre-approved tools. Installing a package makes inert instructions discoverable but does not inspect
 or change the workstation.
+
+Terminology follows the FRD. **Agentworks assistant agent** means the external Claude Code or Codex
+agent helping the operator use Agentworks. **Agentworks-managed agent** means an agent resource in
+the system being operated. Literal `--agent`, `AgentContract`, and CLI `agent` names retain their
+established spellings; prose uses the full role name whenever ambiguity is possible.
 
 ## Decisions
 
@@ -35,8 +42,8 @@ or change the workstation.
 | Minimum CLI             | `agentworks-cli >=0.14.0`, with no maximum. Version 0.14.0 first contains the guide companion this package invokes.                                                                                                                                   |
 | Projection              | `scripts/generate-agentworks-package.py` emits two native wrappers from one body and metadata record. Generated skill bodies are byte-identical after frontmatter.                                                                                    |
 | README parity           | One marked region under README `## Getting Started` contains the canonical body exactly. The generator owns only that region.                                                                                                                         |
-| Runtime behavior        | The inert skill tells the agent to disclose, obtain consent, offer bounded review of the exact intended release source, check or install the CLI, and run the guide. It performs no action itself.                                                    |
-| Teaching ownership      | The top-level guide owns routing and the installed guide topics own teaching. Packages contain no intent routes, recipes, or release prose.                                                                                                           |
+| Runtime behavior        | The inert skill tells the Agentworks assistant agent to disclose, obtain consent, offer bounded review of the exact intended release source, check or install the CLI, and request guide context. It performs no action itself.                       |
+| Teaching ownership      | The top-level guide owns the intent-to-topic map and the installed guide topics own teaching. Packages contain no intent map, recipes, or release prose.                                                                                              |
 | Current versus temporal | Live guide facts answer current capability and adoption questions. The packaged release-please changelog section answers what changed in the installed version; canonical GitHub releases are the consented fallback for older or unavailable ranges. |
 | Security posture        | Claude uses default/manual approvals without bypass. Codex starts with `workspace-write` and `on-request`, using scoped escalation for account files, network, or SSH.                                                                                |
 | Release ownership       | The Agentworks repository owns package source, projections, catalogs, guide companion, tests, and versions. Saga and release leads own integration into the release PR.                                                                               |
@@ -89,7 +96,8 @@ establish ownership. No other README content is rewritten.
 
 ## Canonical assistance contract
 
-`assistance.md` is agent-addressed Markdown without frontmatter. Its headings and order are stable:
+`assistance.md` is Markdown addressed to the Agentworks assistant agent, without frontmatter. Its
+headings and order are stable:
 
 1. `Agentworks assistance request`
 2. `Access disclosure and consent`
@@ -100,14 +108,21 @@ establish ownership. No other README content is rewritten.
 The body is deliberately thin. It contains no topic choice, operation recipe, generated inventory,
 or historical release text.
 
+The opening calls its addressee the **Agentworks assistant agent** and states that this is the
+external helper using Agentworks with the operator, not an Agentworks-managed agent resource. That
+distinction appears before any use of the literal `agw agent` resource group or `--agent` guide
+flag.
+
 ### Disclosure before action
 
 Before a command, probe, file read, verification, installation, or configuration action, the body
-instructs the agent to restate these facts and wait for affirmative operator consent:
+instructs the Agentworks assistant agent to restate these facts and wait for affirmative operator
+consent:
 
 - Work runs from the workstation from which the operator intends to manage Agentworks.
-- The agent needs the ability to inspect every file available to that workstation account and
-  execute commands as that account, even though each actual probe remains separately scoped.
+- The Agentworks assistant agent needs the ability to inspect every file available to that
+  workstation account and execute commands as that account, even though each actual probe remains
+  separately scoped.
 - Account access is not root access. Privilege elevation is a separate action that requires its own
   disclosure and approval.
 - Agentworks work can reach managed resources, secret references, and destinations reachable over
@@ -125,11 +140,12 @@ The matching strict harness posture is advice, not a settings mutation:
   <https://code.claude.com/docs/en/permissions> and <https://code.claude.com/docs/en/sandboxing>.
 - Codex starts with `sandbox_mode = "workspace-write"` and `approval_policy = "on-request"`. It
   requests scoped escalation only when an exact operation needs account-wide files, network, or SSH.
-  If the bounded sandbox and escalation flow cannot support the requested task, the agent discloses
-  that limitation and may ask whether the operator elects `danger-full-access` as a fallback. Full
-  access removes the sandbox boundary and must never be described as retaining on-request prompts
-  for already allowed work. The agent never selects it or `approval_policy = "never"` for the
-  operator. The body links <https://developers.openai.com/codex/security> and
+  If the bounded sandbox and escalation flow cannot support the requested task, the Agentworks
+  assistant agent discloses that limitation and may ask whether the operator elects
+  `danger-full-access` as a fallback. Full access removes the sandbox boundary and must never be
+  described as retaining on-request prompts for already allowed work. The Agentworks assistant agent
+  never selects it or `approval_policy = "never"` for the operator. The body links
+  <https://developers.openai.com/codex/security> and
   <https://developers.openai.com/codex/config-basic>.
 
 The package never writes `.claude/settings*.json`, `.codex/config.toml`, or managed policy.
@@ -138,11 +154,11 @@ The package never writes `.claude/settings*.json`, `.codex/config.toml`, or mana
 
 Before any CLI installation or update, assistance identifies one exact intended stable version and
 its canonical `vVERSION` release tag. If no compatible installed version exists and the operator has
-not selected an exact version, the agent separately discloses and obtains consent to consult PyPI's
-release metadata at <https://pypi.org/pypi/agentworks-cli/json>, treats that metadata as untrusted
-evidence, and selects the latest non-prerelease version satisfying the minimum. The resulting
-installation is pinned to `agentworks-cli==VERSION`; a range is never treated as an exact review
-target.
+not selected an exact version, the Agentworks assistant agent separately discloses and obtains
+consent to consult PyPI's release metadata at <https://pypi.org/pypi/agentworks-cli/json>, treats
+that metadata as untrusted evidence, and selects the latest non-prerelease version satisfying the
+minimum. The resulting installation is pinned to `agentworks-cli==VERSION`; a range is never treated
+as an exact review target.
 
 Assistance then offers these two inert choices before asking to install:
 
@@ -176,7 +192,7 @@ outside source review and requires its own disclosure and consent.
 
 ### After approval
 
-Only after global consent, the body instructs the agent to:
+Only after global consent, the body instructs the Agentworks assistant agent to:
 
 1. Run `agw version`.
 2. If `agw` is absent, malformed, older than 0.14.0, or the operator requests an update, select an
@@ -184,11 +200,12 @@ Only after global consent, the body instructs the agent to:
 3. Independently disclose the network and account-wide tool installation, obtain installation
    consent, and run `uv tool install --upgrade 'agentworks-cli==VERSION'`.
 4. Re-run `agw version` and require the exact selected version.
-5. Run `agw guide --agent` and follow the installed guide's routes and action boundaries.
+5. Run `agw guide --agent`, interpret its intent-to-topic map and live index against the operator's
+   current request, and decide what topic or action to propose next.
 
-The source body merely instructs the agent to perform these steps. It does not execute them. An
-installation failure, declined installation consent, or unsatisfied version stops before guide
-execution and leaves the exact manual command available.
+The source body merely instructs the Agentworks assistant agent to perform these steps. It does not
+execute them. An installation failure, declined installation consent, or unsatisfied version stops
+before guide execution and leaves the exact manual command available.
 
 ## Native package projections
 
@@ -275,8 +292,10 @@ version to the merge base and requires a version bump when the fingerprint chang
 
 ## Guide companion contract
 
-The package's only guide handoff is `agw guide --agent`. The top-level guide therefore owns the
-following routes and continues to render the complete live topic index after its short router.
+The package's only guide handoff is `agw guide --agent`. The top-level guide therefore supplies the
+following intent-to-topic map and continues to render the complete live topic index after that short
+map. It does not inspect or classify the operator's current request. The Agentworks assistant agent
+uses this context to decide what topic, proposal, or inert action to present next.
 
 | Operator intent                                                                      | Guide destination                                                        |
 | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------ |
@@ -288,11 +307,12 @@ following routes and continues to render the complete live topic index after its
 | Secret handling                                                                      | `concept-secrets`                                                        |
 | Product bug                                                                          | `concept-reporting-bugs`                                                 |
 
-The router contains destinations, not recipes or commands. It performs no network request.
+The map contains destinations, not recipes or commands. It performs no network request and grants no
+authority.
 
 ### Temporal release notes
 
-`concept-release-notes` is a first-class core topic with an authored overview and agent contract, a
+`concept-release-notes` is a first-class core topic with an authored overview and `AgentContract`, a
 dynamic `ReleaseNotes` block, and related links. It contains no hand-maintained release prose. The
 block reads only the changelog packaged in the installed wheel and performs no network access. Its
 contribution shape contains only `type` and `id`; no contributor can supply a path, version, or
@@ -319,7 +339,7 @@ under a renderer-owned heading as untrusted plain-text release evidence with all
 It never interprets a changelog line as an instruction or authority. Invalid, ambiguous, or
 oversized content yields one bounded issue and the fallback route, not partial notes.
 
-The topic's agent contract instructs the agent to:
+The topic's `AgentContract` instructs the Agentworks assistant agent to:
 
 1. Use `agw version` to establish the installed version and render its matching local section
    offline.
@@ -327,7 +347,7 @@ The topic's agent contract instructs the agent to:
    historical claims.
 3. Ask which older or missing version range the operator wants when the local section is
    insufficient, then use the topic's inert `read-release-notes` action.
-4. Route separately to `concept-onboarding` when the operator wants a current capability or adoption
+4. Use `concept-onboarding` instead when the operator wants a current capability or adoption
    assessment.
 
 `read-release-notes` requires operator-supplied `FROM_VERSION` and `TO_VERSION`, with no inferred
@@ -355,8 +375,8 @@ contain no release prose, and the top-level guide never initiates a network requ
 | Exact operation syntax | `agw GROUP COMMAND --help`, or `agw doctor --help` for the top-level command                 |
 
 The authored topic may name the stable built-in groups `config`, `resource`, `vm`, `workspace`,
-`agent`, `session`, `console`, and `secret` for routing. A CLI group rename updates that small route
-list in the same change. It does not introduce a command registry, copied mutation catalog,
+`agent`, `session`, `console`, and `secret` in the intent map. A CLI group rename updates that small
+group list in the same change. It does not introduce a command registry, copied mutation catalog,
 introspection model, or recipe list. Before any mutation, teaching requires exact scope, selected
 inputs, impact, consent boundary, expected state, verification, and a useful refusal alternative.
 
@@ -407,18 +427,19 @@ impact field is introduced. JSON retains the same record shape.
 - `precondition`: the snapshot has no session, a selected VM is usable, every input is selected, and
   built-in `agw session create --help` confirms this syntax.
 - `expected_state`: Agentworks persists and starts a session, creates the selected workspace and
-  agent, and changes local and remote state. The running session can consume provider resources and
-  cost, and needs provider network and SSH connectivity under normal secret-reference boundaries. No
-  attach, delete, or privilege elevation is implied.
+  Agentworks-managed agent, and changes local and remote state. The running session can consume
+  provider resources and cost, and needs provider network and SSH connectivity under normal
+  secret-reference boundaries. No attach, delete, or privilege elevation is implied.
 - `verification`: run `agw session describe SESSION_NAME --output json`; require JSON contract v1,
-  `command == "session.describe"`, matching session, template, VM, workspace, and agent identities,
-  and `data.session.status == "running"`.
+  `command == "session.describe"`, matching session, template, VM, workspace, and Agentworks-managed
+  agent identity, and `data.session.status == "running"`.
 - `refusal_alternative`: keep the exact inert command and input checklist, create or start nothing,
-  and route to live VM/session topics for manual preparation.
+  and point to live VM/session topics for manual preparation.
 
 These are the only new mutations. There is no attach, delete, elevation, inferred choice, automatic
 execution, or action when the corresponding instance already exists. A failed verification reports
-observed state and routes to troubleshooting without retrying the mutation.
+observed state and points the Agentworks assistant agent to troubleshooting without retrying the
+mutation.
 
 ## Tests and acceptance probes
 
@@ -426,10 +447,11 @@ observed state and routes to troubleshooting without retrying the mutation.
 
 - Generator tests cover deterministic ordering, write and `--check`, README marker failures,
   generated inventory, stale bytes, and canonical-body equality across both skills.
-- Contract tests cover neutral identities, minimum/version metadata, inertness, security links,
+- Contract tests cover neutral identities, minimum/version metadata, inertness, security links, the
+  distinction between `Agentworks assistant agent` and `Agentworks-managed agent`,
   disclosure-before-action ordering, exact-version source-review offers, dedicated review consent,
   focused/full/no-review choices, decline-review followed by approved install, completed review
-  followed by declined install, and absence of executables, extra plugin files, package routes,
+  followed by declined install, and absence of executables, extra plugin files, package intent maps,
   recipes, and release prose. Adversarial candidate `AGENTS.md`, `CLAUDE.md`, skills, hooks,
   plugins, configuration, links, and embedded commands remain data: fixtures prove they cannot
   change the protected policy or working root, launch or reconfigure a harness, execute, authorize
@@ -468,11 +490,11 @@ consent boundaries, and cleanup.
 | Claude fresh first run          | With default/manual approval mode and no bypass, install `agentworks@agentworks`; disclose, name the exact candidate commit substitution, perform the focused review before a separate installation consent, install the candidate wheel, render the shared guide fixture, offer first VM then first session only after explicit inputs and consent, and verify both describes. |
 | Codex fresh first run           | With `workspace-write` plus `on-request` and scoped escalation for account files/network/SSH, produce the same result without electing `danger-full-access`. Declining source review must not suppress the separate install choice.                                                                                                                                             |
 | Source-review independence      | Offer both scopes and the substantial-usage warning. Decline review then approve install in one path; complete the focused review then decline install in another. A full-review selection requires its own consent and exact-ref scope, and candidate policy files remain data.                                                                                                |
-| Returning current adoption      | Route to `concept-onboarding` and use current live facts, not release history.                                                                                                                                                                                                                                                                                                  |
+| Returning current adoption      | The Agentworks assistant agent selects `concept-onboarding` from the map and uses current live facts, not release history.                                                                                                                                                                                                                                                      |
 | Rerun and post-upgrade adoption | An unchanged adopted system is a no-op; after an upgrade, report current not-yet-adopted capabilities without replaying completed work or inventing a historical delta.                                                                                                                                                                                                         |
-| Installed temporal history      | Route to `concept-release-notes` and render only the candidate wheel's matching 0.14 changelog section offline as bounded untrusted evidence.                                                                                                                                                                                                                                   |
+| Installed temporal history      | The Agentworks assistant agent selects `concept-release-notes` from the map and renders only the candidate wheel's matching 0.14 changelog section offline as bounded untrusted evidence.                                                                                                                                                                                       |
 | Older temporal history          | Request an older range and network consent, then use the canonical release URL; refusal performs no network request and invents no delta.                                                                                                                                                                                                                                       |
-| Ordinary management             | Route through `concept-management`, use a live JSON kind/instance fact and built-in group/command help, and run at most one disposable consented action with JSON verification.                                                                                                                                                                                                 |
+| Ordinary management             | The Agentworks assistant agent selects `concept-management`, uses a live JSON kind/instance fact and built-in group/command help, and runs at most one disposable consented action with JSON verification.                                                                                                                                                                      |
 | Higher-risk refusal             | Refuse an attach, delete, elevation, or unselected mutation request; execute no command and provide the applicable live topic/help route.                                                                                                                                                                                                                                       |
 | README equivalence              | Starting from only the marked README body produces the same disclosure, package install, and shared guide handoff as either package.                                                                                                                                                                                                                                            |
 | Old CLI or failure              | Select an exact compatible version, offer exact-tag review, and upgrade a pre-0.14 CLI only after separate install consent; a declined or failed install stops before the guide and reports the exact pinned repair command.                                                                                                                                                    |
@@ -493,8 +515,8 @@ No test adds a Markdown parser or test-only bootstrap workflow.
   and preserves the consented canonical fallback. Network refusal or failure does not synthesize
   historical claims.
 - Package validation or generated-byte drift fails CI with the exact path.
-- Guide fact or verification failure reports observed facts and routes to troubleshooting without
-  replaying a mutation.
+- Guide fact or verification failure reports observed facts and points the Agentworks assistant
+  agent to troubleshooting without replaying a mutation.
 
 ## Documentation, completion, and configuration impact
 
@@ -503,7 +525,7 @@ No test adds a Markdown parser or test-only bootstrap workflow.
 - Permanent assistance installation docs name both production package commands, exact-version CLI
   installation behavior, source-review choices, consent boundaries, and strict harness posture
   without copying the body.
-- Permanent guide docs describe the no-topic routes, current-versus-temporal split,
+- Permanent guide docs describe the no-topic intent map, current-versus-temporal split,
   `concept-release-notes`, management help authority, and bounded first-run actions.
 - `concept-release-notes` joins the existing dynamic guide topic source, so guide topic completion
   fixtures, snapshots, and generated completion documentation update in the same implementation

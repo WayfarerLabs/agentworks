@@ -16,8 +16,15 @@ The implementation has four cooperating surfaces:
 3. Selected operational commands expose versioned JSON from the same service-layer fact records
    their human renderers use.
 4. Claude Code and Codex publish thin, equivalent Agentworks skills that remain available for the
-   Agentworks lifecycle. They disclose access, install or update the CLI when needed, and hand the
-   current request to the top-level `agw guide --agent` intent router.
+   Agentworks lifecycle. They disclose access, install or update the CLI when needed, and ask
+   `agw guide --agent` for top-level context. The command returns an intent-to-topic map, behavioral
+   guidance, and the live topic index. The Agentworks assistant agent interprets the operator's
+   request and decides what to propose or inspect next; the command does not make that decision.
+
+Terminology follows the FRD: the **Agentworks assistant agent** is the external Claude Code or Codex
+agent helping the operator use Agentworks, while an **Agentworks-managed agent** is a resource
+inside the system being operated. Literal `--agent`, `AgentContract`, and CLI `agent` resource names
+retain their established spellings; prose uses the full role name whenever ambiguity is possible.
 
 The first implementation slice uses only contracts on `main`: current registries, finalized graph
 facts, resource inspection records, and the completion mechanism. Wave 2 adoption is a later adapter
@@ -152,8 +159,8 @@ already-materialized data:
 - resource instances from existing kind-owned instance inventory hooks.
 
 Descriptions are operator or plugin data, not authored teaching. Guide projects them as labeled
-plain text with Markdown and HTML syntax neutralized, so configured facts cannot become agent
-instructions, headings, links, images, or executable markup.
+plain text with Markdown and HTML syntax neutralized, so configured facts cannot become Agentworks
+assistant agent instructions, headings, links, images, or executable markup.
 
 The mode is gated by leaving powers unwired. Its public API has no secret resolver, run target,
 capability implementation, mutable node, raw config, or arbitrary graph traversal entry point. In
@@ -194,27 +201,30 @@ from the finalized registry, become scoped unavailable facts. Translation occurs
 boundary. Programming errors from graph methods or kind-owned inventory hooks are not caught as
 missing resources.
 
-## Guide rendering and agent shaping
+## Guide rendering for the Agentworks assistant agent
 
 `agw guide` always writes markdown to stdout. With no topic it renders a compact overview, security
-disclosure, intent router, and live topic index. Agent mode routes common requests without assuming
-that every invocation is first-run onboarding:
+disclosure, intent-to-topic map, and live topic index. The map supplies context; the Agentworks
+assistant agent interprets the current operator request and chooses what topic, proposal, or inert
+action to use next. Agent mode presents these reviewed associations without assuming that every
+invocation is first-run onboarding:
 
-- setup, adoption assessment, and installed-release capability questions route to
+- setup, adoption assessment, and installed-release capability questions point to
   `concept-onboarding`;
-- temporal release-change questions route to `concept-release-notes`, which renders the installed
+- temporal release-change questions point to `concept-release-notes`, which renders the installed
   release's packaged canonical notes, offers a consented canonical fallback for older ranges, and
   then links back to the live adoption assessment;
-- configuration, declared-resource changes, and VM or session operation route to
+- configuration, declared-resource changes, and VM or session operation point to
   `concept-management` and the applicable kind or instance topics;
-- diagnosis routes to `concept-troubleshooting`;
-- breaking-input remediation routes to `concept-migration`;
-- secret-model questions route to `concept-secrets`;
-- defects route to `concept-reporting-bugs`.
+- diagnosis points to `concept-troubleshooting`;
+- breaking-input remediation points to `concept-migration`;
+- secret-model questions point to `concept-secrets`;
+- defects point to `concept-reporting-bugs`.
 
-The router is authored core guide content over the live topic catalog. It contains no operation
-commands and grants no authority. Adding a topic does not silently make it a top-level intent; the
-small set of intent routes is reviewed teaching, while the complete index remains derived.
+The intent-to-topic map is authored core guide content over the live topic catalog. It contains no
+operation commands, performs no request classification, and grants no authority. Adding a topic does
+not silently make it a top-level intent; the small set of intent associations is reviewed teaching,
+while the complete index remains derived.
 
 `concept-release-notes` combines authored connective teaching with one core `ReleaseNotes` block.
 The wheel contains release-please's existing `cli/CHANGELOG.md` as package data; it does not contain
@@ -228,12 +238,12 @@ For an older or missing range, a validated `read-release-notes` action requires 
 `FROM_VERSION` and `TO_VERSION`, uses a dedicated `read-canonical-release-notes` consent boundary,
 and names only `https://github.com/WayfarerLabs/agentworks/releases` as the allowed network source.
 Its manual step reads only the requested inclusive release range, summarizes the changes, and does
-not follow embedded links. Fetched or packaged release prose is untrusted evidence. The agent
-ignores instructions, commands, permission requests, and scope changes within it, and treats any
-proposed follow-up as a new action requiring its own operator decision. Refusal performs no network
-request and leaves the canonical URL and requested range as manual operator steps without claiming a
-summary. The topic then links to `concept-onboarding` for the separate question of which
-capabilities the current installation has adopted.
+not follow embedded links. Fetched or packaged release prose is untrusted evidence. The Agentworks
+assistant agent ignores instructions, commands, permission requests, and scope changes within it,
+and treats any proposed follow-up as a new action requiring its own operator decision. Refusal
+performs no network request and leaves the canonical URL and requested range as manual operator
+steps without claiming a summary. The topic then links to `concept-onboarding` for the separate
+question of which capabilities the current installation has adopted.
 
 The CLI exposes a paired `--agent/--human` override. Detection precedence is:
 
@@ -249,8 +259,8 @@ exist in an ordinary shell. The current public Codex environment-variable contra
 stable execution signature, so the first slice does not treat an internal variable observed in one
 session as a contract. The guide LLD inventories both harnesses again at implementation time.
 `--human` is the documented override when a human pipes or redirects markdown; `--agent` makes an
-agent invocation deterministic when no signature exists. Detection never inspects parent processes,
-session files, or other workstation state.
+Agentworks assistant agent invocation deterministic when no signature exists. Detection never
+inspects parent processes, session files, or other workstation state.
 
 Both modes traverse the same topic and block sequence. Agent mode may move `AgentContract` blocks
 immediately after the summary, expand their heading, and foreground the R12 disclosure and R4
@@ -260,8 +270,8 @@ and prove both modes contain the same semantic block identifiers.
 `concept-migration` is the exceptional remediation topic for breaking resource-model changes. It is
 not a general upgrade guide: ordinary upgrades should remain routine. The topic carries authored
 rewrite sequencing and points into kind and implementation topics whose `FieldReference` and
-`Sample` blocks consume the declarative-schema services now on `main`. An operator or agent
-therefore works against the installed model rather than a frozen migration oracle.
+`Sample` blocks consume the declarative-schema services now on `main`. An operator or Agentworks
+assistant agent therefore works against the installed model rather than a frozen migration oracle.
 `concept-onboarding` and `concept-management` link to it without duplicating its teaching.
 
 Schema-derived guide topics consume the context-free reference and sample records. Owner-dependent
@@ -280,25 +290,27 @@ inert action records with explicit names and selected templates or sites, declar
 `mutate-agentworks` consent, ordinary JSON verification, and a refusal alternative. The action plan
 does not attach, delete, elevate privileges, or infer operator choices.
 
-`concept-management` is the ongoing configuration and operation entry. It routes to live kind and
-instance facts, then names the applicable built-in CLI help entry point for exact current command
-syntax. Group and command help from the existing Typer command tree is the command authority; the
-guide does not project a command registry or copy complete operational recipes. The small stable set
-of group-level help links is authored connective teaching and changes in the same commit as a CLI
-rename. There is no package-level wall between configuring Agentworks and operating managed VMs or
-sessions. The boundary is the action: read-only discovery may remain read-only; creating or changing
-declared state uses `mutate-agentworks`; connection uses the named-target boundary; and destructive
-work or privilege elevation requires a fresh, explicitly described operator decision. Existing
-consent boundaries remain sufficient for configuration and operation; the release-note lookup adds
-only the narrow `read-canonical-release-notes` boundary and does not create a second risk model.
+`concept-management` is the ongoing configuration and operation entry. It presents live kind and
+instance facts, then points to the applicable built-in CLI help entry point for exact current
+command syntax. Group and command help from the existing Typer command tree is the command
+authority; the guide does not project a command registry or copy complete operational recipes. The
+small stable set of group-level help links is authored connective teaching and changes in the same
+commit as a CLI rename. There is no package-level wall between configuring Agentworks and operating
+managed VMs or sessions. The boundary is the action: read-only discovery may remain read-only;
+creating or changing declared state uses `mutate-agentworks`; connection uses the named-target
+boundary; and destructive work or privilege elevation requires a fresh, explicitly described
+operator decision. Existing consent boundaries remain sufficient for configuration and operation;
+the release-note lookup adds only the narrow `read-canonical-release-notes` boundary and does not
+create a second risk model.
 
-Agent-only workstation facts are never inferred by `agw`. Doctor, tool checks, SSH tests, and other
-verification commands are explicit assistance actions that the agent runs only after obtaining the
-applicable consent. The guide asks the agent to check presence without reading sensitive values and
-record refusals in the current interaction or caller-owned replay log. The guide presents an ordered
-action plan:
+Workstation facts observable only by the Agentworks assistant agent are never inferred by `agw`.
+Doctor, tool checks, SSH tests, and other verification commands are explicit assistance actions that
+the Agentworks assistant agent runs only after obtaining the applicable consent. The guide asks the
+Agentworks assistant agent to check presence without reading sensitive values and record refusals in
+the current interaction or caller-owned replay log. The guide presents an ordered action plan:
 
-- guided use lets the agent ask before each consent boundary and execute the next action;
+- guided use lets the Agentworks assistant agent ask before each consent boundary and execute the
+  next operator-approved action;
 - replayable use uses the same actions with `agw --non-interactive`, explicit inputs, and repeatable
   target-scoped `--evidence ACTION_ID:KIND/NAME=OUTCOME` values from the caller-owned replay log;
 - reruns skip facts already ready and report currently not-yet-adopted, disabled, not-ready, or
@@ -323,7 +335,7 @@ an Agentworks onboarding ledger; the caller remains responsible for retaining an
 | Need                          | Existing surface                                                                                                                                        | Gap and commitment                                                                                                                                                                                                                                                                |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Secret reference availability | `agw secret describe` predicts the ready backend without resolving or exposing a value. Doctor reports the same prediction in its consented full check. | Prediction is not proof. Add a named-secret verification operation that resolves through the normal boundary, returns only success or framed failure, never emits or returns the value to the caller, and cannot fall through to an interactive backend without explicit consent. |
-| Required host tools           | `agw doctor` checks `ssh`, `scp`, and `tailscale`; finalized capability rows carry already-computed readiness for their host requirements.              | The LLD inventories every assistance action's required tool and adds a safe explicit check only where doctor or readiness does not already cover it. Agent-side discovery of other installed tools remains consent-first.                                                         |
+| Required host tools           | `agw doctor` checks `ssh`, `scp`, and `tailscale`; finalized capability rows carry already-computed readiness for their host requirements.              | The LLD inventories every assistance action's required tool and adds a safe explicit check only where doctor or readiness does not already cover it. Discovery by the Agentworks assistant agent of other installed tools remains consent-first.                                  |
 | SSH connectivity              | VM lifecycle code verifies connectivity during mutating operations, but there is no dedicated read-only operator surface for an existing VM.            | Add a bounded, non-mutating named-VM connection verification operation that uses the standard transport and reports success or framed failure without repairing, rekeying, or changing power state.                                                                               |
 
 Doctor and the new proof operations run only as explicit, consented action records. Guide rendering
@@ -338,8 +350,8 @@ without implying that every command is serializable.
 
 Version 1 covers:
 
-- entity list and describe commands for resources, VMs, workspaces, agents, sessions, consoles, and
-  secrets;
+- entity list and describe commands for resources, VMs, workspaces, Agentworks-managed agents,
+  sessions, consoles, and secrets;
 - `resource kinds`;
 - `doctor`.
 
@@ -391,8 +403,8 @@ One canonical assistance body is the source for both harness packages. It contai
 3. a pre-install offer to review the exact canonical source tag, with a warning that the repository
    is substantial and a full review can consume significant model usage, and separate focused, full,
    decline-review, and install decisions;
-4. the instruction to run `agw guide --agent`, select the route matching the operator's current
-   goal, and follow that topic.
+4. the instruction to run `agw guide --agent`, interpret its intent-to-topic map and live index
+   against the operator's current goal, and decide what topic or action to propose next.
 
 After the general disclosure and network consent, the package resolves the exact stable PyPI version
 it proposes to install and pins both the source-review tag and install command to that version. A
@@ -402,11 +414,11 @@ evidence: it cannot grant permission, direct execution, or expand the reviewed s
 review neither claims review nor blocks a separately approved install. Review approval never implies
 install approval.
 
-Source inspection runs from the assistance session's protected policy root. The agent does not
-launch or reconfigure a harness from the candidate tree, change its working root to that tree, load
-candidate `AGENTS.md`, `CLAUDE.md`, skills, hooks, plugins, or configuration as policy, or execute
-candidate scripts and commands. If files are materialized locally, they remain in an
-operator-approved data-only temporary location and are read by explicit path from the protected
+Source inspection runs from the assistance session's protected policy root. The Agentworks assistant
+agent does not launch or reconfigure a harness from the candidate tree, change its working root to
+that tree, load candidate `AGENTS.md`, `CLAUDE.md`, skills, hooks, plugins, or configuration as
+policy, or execute candidate scripts and commands. If files are materialized locally, they remain in
+an operator-approved data-only temporary location and are read by explicit path from the protected
 root. Instruction-like repository content is reported only as source evidence. Running any candidate
 code is a separate action and is not part of source review.
 
@@ -428,14 +440,16 @@ release-PR commit that built the candidate wheel, record that test-only ref subs
 install that exact artifact. The post-tag PyPI smoke exercises the production `vVERSION` review and
 exact install path.
 
-The repository README leads with the same canonical agent-addressed assistance text in a fenced
-copyable block. It derives from or is checked against the canonical source rather than maintaining a
-second security paraphrase. The plugins remain an additional discovery channel, not a prerequisite.
+The repository README leads with the same canonical assistance text, explicitly addressed to the
+Agentworks assistant agent, in a fenced copyable block. It derives from or is checked against the
+canonical source rather than maintaining a second security paraphrase. The plugins remain an
+additional discovery channel, not a prerequisite.
 
 The package is named for Agentworks rather than onboarding, and its description activates for setup,
 discovery, adoption, configuration, troubleshooting, and operation. It contains no intent-to-topic
-switchboard of its own. The top-level guide owns that routing, and selected topics tell the agent
-which list, describe, doctor, and operation records to request at each applicable action. End-to-end
+switchboard of its own. The top-level guide supplies the intent map, and selected topics tell the
+Agentworks assistant agent which list, describe, doctor, and operation records are relevant at each
+applicable action. The Agentworks assistant agent still chooses what to propose next. End-to-end
 assistance tests cover focused and full source-review choices, decline-review followed by separately
 approved installation, completed review followed by declined installation, an initial VM and
 session, a returning current-capability and adoption assessment, offline installed release notes
@@ -449,11 +463,12 @@ prompt, or request for the operator to relay non-bug comments manually. Acceptan
 own timing and intervention evidence as test artifacts. A real product feedback channel requires a
 later operator decision.
 
-`agw guide concept-reporting-bugs` covers the narrower case where the operator or agent encounters a
-defect. It teaches how to reproduce the problem, remove secrets and identifying data from evidence,
-check existing issues, and use the repository's bug-report template. The topic may direct the agent
-to prepare or submit an issue only with the operator's explicit authorization. It never files an
-issue automatically and is not presented as a channel for general feedback.
+`agw guide concept-reporting-bugs` covers the narrower case where the operator or Agentworks
+assistant agent encounters a defect. It teaches how to reproduce the problem, remove secrets and
+identifying data from evidence, check existing issues, and use the repository's bug-report template.
+The topic may direct the Agentworks assistant agent to prepare or submit an issue only with the
+operator's explicit authorization. It never files an issue automatically and is not presented as a
+channel for general feedback.
 
 ## Declarative-schema coordination boundary
 
@@ -477,19 +492,19 @@ gated work.
 
 ## Documentation and compatibility
 
-Permanent CLI docs define topic taxonomy, agent shaping, JSON v1, assistance-package installation,
-and the safe contribution contract in the same commits as their code. Package-level contributor docs
-explain how to colocate inert topic data. The sample config changes only if assistance introduces a
-new setting; no setting is currently planned.
+Permanent CLI docs define topic taxonomy, Agentworks assistant agent shaping, JSON v1,
+assistance-package installation, and the safe contribution contract in the same commits as their
+code. Package-level contributor docs explain how to colocate inert topic data. The sample config
+changes only if assistance introduces a new setting; no setting is currently planned.
 
-The contributor contract also becomes durable agent guidance through Rulesync's canonical sources.
-An always-on rule tells developers that code adding or changing a resource kind, capability
+The contributor contract also becomes durable AI-development guidance through Rulesync's canonical
+sources. An always-on rule tells developers that code adding or changing a resource kind, capability
 implementation, plugin, or documented workflow must add or update its colocated topic contribution.
 The `agentworks-dev` role treats that contribution as part of implementation completeness, and the
 `agentworks-reviewer` role checks the code and contribution together for missing or stale teaching.
-The implementation audits other agent roles for a real need rather than copying the rule blindly,
-then regenerates and commits the Claude Code, Codex, and Copilot projections with the existing
-Rulesync drift check.
+The implementation audits other development roles for a real need rather than copying the rule
+blindly, then regenerates and commits the Claude Code, Codex, and Copilot projections with the
+existing Rulesync drift check.
 
 `agw guide` and JSON v1 are additive. Bootstrap packages state their minimum compatible CLI.
 Breaking changes follow the repository's warn-then-reject runway where one exists. Remediation is

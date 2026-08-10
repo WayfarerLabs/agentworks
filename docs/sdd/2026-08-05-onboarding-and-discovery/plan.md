@@ -17,6 +17,9 @@
   PR because it is independently usable and keeps main green. Later phases build only on merged
   predecessors.
 - Completed checkboxes are immutable.
+- Terminology follows the FRD: **Agentworks assistant agent** is the external Claude Code or Codex
+  agent helping the operator use Agentworks; **Agentworks-managed agent** is a resource in the
+  system being operated. Historical completed checklist wording remains unchanged.
 
 ## Phase 0: pre-implementation artifacts and coordination
 
@@ -267,9 +270,10 @@ completed design work; the corrective LLD and implementation boxes below carry t
 - [x] Revise `bootstrap-packaging-lld.md` around an always-available Agentworks package: neutral
       package and skill identity, top-level `agw guide --agent` handoff, setup and
       returning-operator probes, and no package-owned intent switchboard or duplicated teaching.
-- [ ] Top-level agent guide rendering routes setup and adoption, management and operation, temporal
-      release history, troubleshooting, exceptional migration, secrets, and bug-reporting intents
-      without granting action authority or hiding the complete live topic index.
+- [ ] Top-level guide rendering for the Agentworks assistant agent presents an intent-to-topic map
+      for setup and adoption, management and operation, temporal release history, troubleshooting,
+      exceptional migration, secrets, and bug reporting without granting action authority or hiding
+      the complete live topic index. The Agentworks assistant agent decides what to propose next.
 - [ ] `concept-release-notes` renders only the unique exact installed-release section from
       release-please's canonical changelog packaged in the wheel, as bounded, visibly labeled,
       escaped plain-text evidence. It links to the separate live adoption assessment and offers an
@@ -278,11 +282,11 @@ completed design work; the corrective LLD and implementation boxes below carry t
 - [ ] `concept-onboarding` remains the specialized first-run and adoption-assessment path and gains
       a bounded, consented golden path that creates and verifies a usable VM and started first
       session from explicit operator-selected inputs.
-- [ ] `concept-management` routes ongoing configuration and VM or session operation through live
-      kind and instance facts, existing JSON facts, and the applicable built-in CLI group or command
-      help for exact syntax. It adds no command registry or copied recipe catalog. Configuration and
-      operation remain one assistance surface; each read, mutation, connection, privilege, or
-      destructive boundary retains its own explicit scope and operator decision.
+- [ ] `concept-management` presents live kind and instance facts for ongoing configuration and VM or
+      session operation, then points to existing JSON facts and the applicable built-in CLI group or
+      command help for exact syntax. It adds no command registry or copied recipe catalog.
+      Configuration and operation remain one assistance surface; each read, mutation, connection,
+      privilege, or destructive boundary retains its own explicit scope and operator decision.
 - [ ] Canonical thin assistance content contains installation or update guidance, the complete R12
       disclosure, strict harness posture, and `agw guide --agent`, with no duplicated teaching. The
       disclosure names the intended workstation, full file inspection and command execution under
@@ -303,8 +307,9 @@ completed design work; the corrective LLD and implementation boxes below carry t
       scope.
 - [ ] Generator emits committed Claude Code and Codex Agentworks plugin and marketplace wrappers
       from that source; CI requires regeneration to produce no diff.
-- [ ] Repository README Getting Started leads with the R16 agent-addressed assistance block
-      generated from the canonical source and retains a clear human installation path below it.
+- [ ] Repository README Getting Started leads with the R16 assistance block addressed explicitly to
+      the Agentworks assistant agent, generated from the canonical source, and retains a clear human
+      installation path below it.
 - [ ] Both packages install directly from GitHub in clean harness environments and reach the guide;
       minimum-version failure produces an actionable upgrade instruction.
 - [ ] The 0.14 release PR contains Phase 3, its release-please version and changelog, and the
