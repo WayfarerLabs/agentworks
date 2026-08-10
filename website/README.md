@@ -52,6 +52,11 @@ node --test website/tests/lander-model.test.mjs
 ./scripts/rulesync-upgen.sh --check
 ```
 
+The Python website suite requires `chromium`, `chromium-browser`, or `google-chrome` on `PATH`. Its
+responsive geometry test launches that browser in headless mode and fails, rather than skips, when
+none is available. PR CI and the Pages build therefore prove the wide left-rail and narrow inline
+layouts.
+
 Pull requests and pushes to `main` run these website contracts in the `Website` job of
 `.github/workflows/ci.yml`; `ci-success` requires that job. The `Deploy website to Pages` workflow
 in `.github/workflows/pages.yml` runs only for pushes to `main`. Its read-only build job repeats the

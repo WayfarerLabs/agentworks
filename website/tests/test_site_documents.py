@@ -187,7 +187,7 @@ def browser_geometry(output: Path, width: int) -> dict[str, object]:
         None,
     )
     if chromium is None:
-        raise unittest.SkipTest("Chromium is not installed")
+        raise AssertionError("Chromium or Google Chrome is required for responsive website geometry tests")
     harness = output / "geometry.html"
     harness.write_text(
         """<!doctype html>
