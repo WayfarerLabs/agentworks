@@ -447,10 +447,16 @@ class TemplateContractTests(RepositoryFixture):
             for changed in (
                 template.replace(f"<title>{title}</title>", "<title>Drifted</title>", 1),
                 template.replace(f'href="{canonical}"', f'href="{drifted_canonical}"', 1),
+                template.replace(
+                    f'<link rel="canonical" href="{canonical}" />',
+                    f'<link rel="canonical" href="{canonical}" />\n'
+                    f'        <link rel="alternate canonical" href="{canonical}" />',
+                    1,
+                ),
             ):
                 with (
                     self.subTest(name=name),
-                    self.assertRaisesRegex(ValueError, "title|canonical URL"),
+                    self.assertRaisesRegex(ValueError, "title|canonical URL|canonical link"),
                 ):
                     site_builder._validate_template(name, changed)
 

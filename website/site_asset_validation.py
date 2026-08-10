@@ -20,6 +20,8 @@ def _rel_tokens(attributes: dict[str, str | None]) -> set[str]:
 
 
 def _parse_svg(label: str, source: str) -> ElementTree.Element:
+    if "<!" in source or "<?" in source:
+        raise ValueError(f"{label}: comments, declarations, and processing instructions are forbidden")
     parser = ElementTree.XMLParser(target=ElementTree.TreeBuilder(insert_comments=True, insert_pis=True))
     try:
         return ElementTree.fromstring(source, parser=parser)
@@ -46,6 +48,7 @@ def validate_favicon_asset(favicon_source: str, rocket_source: str) -> None:
     paths = tuple(mark)
     canonical_paths = tuple(canonical_mark)
     all_elements = (favicon, mark, *paths)
+    canonical_elements = (rocket, canonical_mark, *canonical_paths)
     if (
         mark.tag != GROUP_TAG
         or mark.attrib != canonical_mark.attrib
@@ -53,7 +56,11 @@ def validate_favicon_asset(favicon_source: str, rocket_source: str) -> None:
         or _has_non_whitespace_text(all_elements)
     ):
         raise ValueError("assets/agw-favicon.svg: mark structure is invalid")
+    if canonical_mark.tag != GROUP_TAG or len(canonical_paths) != 3 or _has_non_whitespace_text(canonical_elements):
+        raise ValueError("assets/agw-rocket.svg: canonical mark structure is invalid")
     for path, canonical_path in zip(paths, canonical_paths, strict=True):
+        if canonical_path.tag != PATH_TAG or tuple(canonical_path):
+            raise ValueError("assets/agw-rocket.svg: canonical mark structure is invalid")
         if path.tag != PATH_TAG or path.attrib != canonical_path.attrib or tuple(path):
             raise ValueError("assets/agw-favicon.svg: mark geometry differs from the canonical rocket")
 
@@ -65,11 +72,11 @@ def validate_head_links(
 ) -> None:
     """Validate canonical and favicon links among a template's head children."""
     canonicals = [
-        attributes for tag, attributes in head_elements if tag == "link" and attributes.get("rel") == "canonical"
+        attributes for tag, attributes in head_elements if tag == "link" and "canonical" in _rel_tokens(attributes)
     ]
     if len(canonicals) != 1:
         raise ValueError(f"{template_name}: one canonical link is required")
-    if canonicals[0].get("href") != expected_canonical:
+    if canonicals[0] != {"rel": "canonical", "href": expected_canonical}:
         raise ValueError(f"{template_name}: canonical URL must be {expected_canonical}")
     favicons = [attributes for tag, attributes in head_elements if tag == "link" and "icon" in _rel_tokens(attributes)]
     if favicons != [FAVICON_ATTRIBUTES]:

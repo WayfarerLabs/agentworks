@@ -60,12 +60,24 @@ class BuildAndInstallTests(RepositoryFixture):
             source.replace("</g>", '<animateTransform attributeName="transform" />\n    </g>', 1),
             source.replace("</g>", '<set attributeName="fill" to="red" />\n    </g>', 1),
             source.replace("</g>", "<!-- anonymous extra node -->\n    </g>", 1),
+            f"<!-- document comment -->\n{source}",
+            f"<?favicon test?>\n{source}",
         )
         for mutation in mutations:
             with self.subTest(mutation=mutation[-80:]):
                 favicon.write_text(mutation, encoding="utf-8")
                 with self.assertRaisesRegex(ValueError, "agw-favicon.svg"):
                     site_builder._render_artifact(self.root, "/")
+
+    def test_favicon_rejects_non_path_canonical_mark_geometry(self) -> None:
+        rocket = self.root / "website/assets/agw-rocket.svg"
+        source = rocket.read_text(encoding="utf-8")
+        rocket.write_text(
+            source.replace('<path\n            id="agw-letter-w"', '<rect\n            id="agw-letter-w"', 1),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ValueError, "canonical mark structure"):
+            site_builder._render_artifact(self.root, "/")
 
     def test_unapproved_external_url_fails_before_output_changes(self) -> None:
         output = self.build()
