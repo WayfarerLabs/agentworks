@@ -206,14 +206,18 @@ ones.
   transition itself, or poll ready PRs and remember the last-reviewed head per PR; a new head on a
   ready PR always means there is something to review, so a consumer that missed the edge loses
   nothing.
-- **Checkpoint reviews use the `review-requested` label** (operator convention, 2026-08-10). Ready
-  keeps its full meaning: round complete, handoff comment posted, believed mergeable. When work that
-  is NOT at merge intent needs eyes now (the `sdd` skill's phased artifact reviews on a draft PR, a
-  pre-implementation schema gate, a mid-effort design consult), apply the `review-requested` label
-  to the draft PR together with a comment scoping what to review. The reviewer removes the label
-  when the review is delivered, so the label is simultaneously the request and the pending state:
-  self-clearing, never stale. Consumers watch label events or poll
-  `gh pr list --label review-requested`.
+- **Checkpoint reviews use the author-owned `review-requested` label** (operator convention,
+  2026-08-10). Ready keeps its full meaning: round complete, handoff comment posted, believed
+  mergeable. When work that is NOT at merge intent needs eyes now (the `sdd` skill's phased artifact
+  reviews on a draft PR, a pre-implementation schema gate, a mid-effort design consult), the author
+  applies the `review-requested` label with a comment scoping what to review. The label mirrors
+  ready in every respect: anyone interested reviews (no audience dimension, no reviewer
+  bookkeeping); consumers edge-trigger on the label or track the last head they reviewed, so label
+  present plus an unreviewed head means there is something to review; and the author drops the label
+  BEFORE pushing new changes, re-applying it when the next checkpoint is coherent, so a labeled head
+  is always a complete handoff state. Remove it for good when checkpoint reviews are no longer
+  wanted (the request is absorbed, or the PR flips ready). Consumers watch label and push events or
+  poll `gh pr list --label review-requested`.
 
 ## 7. Get a fresh-eyes pass: Copilot if available, else a generic review here
 
