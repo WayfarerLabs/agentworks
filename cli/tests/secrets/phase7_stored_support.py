@@ -6,6 +6,7 @@ import ast
 
 from tests.secrets.phase7_lexical_support import (
     _enclosing_function,
+    _object,
     _production_modules,
     _qualified_function_name,
     _semantic_object,
@@ -18,7 +19,6 @@ from tests.secrets.phase7_resolver_support import (
     _resolver_bindings,
     _resolver_usage_violations_from_tree,
 )
-from tests.secrets.test_phase7_enforcement import _object
 
 
 def _stored_call_edges_from_tree(

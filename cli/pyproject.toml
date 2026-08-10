@@ -169,5 +169,4 @@ dev = [
     # 2020-12 metaschema, and validates real sample documents against it.
     "jsonschema>=4.26.0",
     "types-jsonschema>=4.26.0.20260518",
-    "pytest-xdist>=3.8.0",
 ]

@@ -12,13 +12,12 @@ from tests.secrets.phase7_call_graph_support import (
     _protected_callable_alias_violations_from_tree,
     _semantic_target_calls_from_tree,
 )
+from tests.secrets.phase7_lexical_support import _object, _object_name
 from tests.secrets.test_phase7_enforcement import (
     _TAILSCALE_ENSURE_FORBIDDEN_TARGETS,
     _TAILSCALE_SOURCE_EDGE_MANIFEST,
     _TAILSCALE_STANDALONE_EDGE_MANIFEST,
     _function_node,
-    _object,
-    _object_name,
 )
 
 

@@ -1,5 +1,7 @@
 """Semantic contracts for required onboarding and day-two guide content."""
 
+import importlib
+
 from agentworks.guide import (
     AgentContract,
     ConsentBoundary,
@@ -16,6 +18,11 @@ from agentworks.guide.render import render_topic
 
 def _topic(slug: str):
     return next(item for item in guide_contributions() if item.topic == slug)
+
+
+def test_core_guide_contributions_survive_secret_submodule_import() -> None:
+    importlib.import_module("agentworks.secrets.guide_contributions")
+    assert guide_contributions()
 
 
 def test_onboarding_authored_blocks_snapshot_security_consent_and_reruns() -> None:

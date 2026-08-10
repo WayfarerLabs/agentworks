@@ -11,20 +11,14 @@ from contextlib import AbstractContextManager
 from enum import Enum, StrEnum
 from functools import cache
 from pathlib import Path
-from typing import Protocol, cast
+from typing import cast
 
 import pytest
 
-
-class _NamedObject(Protocol):
-    __name__: str
-
-
-def _object_name(value: object) -> str:
-    return cast(_NamedObject, value).__name__
-
-
-_DIRECTED_CALLEE_ALIASES = {"_session_logs": "session_logs"}
+from tests.secrets.phase7_lexical_support import (
+    _interaction_calls,
+    _object,
+)
 
 # The immediate follow-up retains this narrow exact-owner pin for the credential boundary.
 _TAILSCALE_SOURCE_EDGE_MANIFEST = (
@@ -46,10 +40,6 @@ _TAILSCALE_ENSURE_FORBIDDEN_TARGETS = (
     "resolve_for_command",
     "resolve_template",
 )
-
-_RESOLVER_TYPE = "agentworks.secrets.resolver.Resolver"
-_RESOLVER_CONTAINER_TYPE = f"{_RESOLVER_TYPE}[]"
-
 
 _RETIRED_SYMBOLS = {
     "ActiveBackend",
@@ -99,13 +89,6 @@ _PACKAGE_EXPORT_MANIFEST = (
 )
 
 
-def _object(module_name: str, dotted_name: str) -> object:
-    value: object = importlib.import_module(module_name)
-    for part in dotted_name.split("."):
-        value = getattr(value, part)
-    return value
-
-
 def _first_statement(value: object) -> ast.stmt:
     tree = ast.parse(textwrap.dedent(inspect.getsource(value)))
     function = next(node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)))
@@ -151,31 +134,13 @@ _VERIFY_CLI_BOUNDARY = ("agentworks.cli.commands.secret", "secret_verify")
 
 @cache
 def _cli_boundary_entries() -> tuple[tuple[str, str], ...]:
-    """Discover CLI roots that forward the operation interaction policy."""
-    root = Path(__file__).parents[2] / "agentworks" / "cli" / "commands"
-    discovered: list[tuple[str, str]] = []
-    for path in sorted(root.glob("*.py")):
-        tree = ast.parse(path.read_text())
-        parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
-        module = ".".join(("agentworks.cli.commands", path.stem))
-        for function in (node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))):
-            parameters = (*function.args.args, *function.args.kwonlyargs)
-            if any(parameter.arg == "interaction" for parameter in parameters):
-                continue
-            forwards_interaction = any(
-                keyword.arg == "interaction"
-                for call in ast.walk(function)
-                if isinstance(call, ast.Call)
-                for keyword in call.keywords
-            )
-            if not forwards_interaction:
-                continue
-            names = [function.name]
-            current = parents.get(function)
-            while isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                names.append(current.name)
-                current = parents.get(current)
-            discovered.append((module, ".".join(reversed(names))))
+    """Discover CLI roots from the signatures of their production callees."""
+    discovered = {
+        site.owner
+        for site in _interaction_calls()
+        if site.owner[0].startswith("agentworks.cli.commands.")
+        and "interaction" not in inspect.signature(_object(*site.owner)).parameters
+    }
     return tuple(sorted(discovered))
 
 
@@ -449,6 +414,7 @@ def test_every_preflight_caller_forwards_the_validated_local() -> None:
             discovered.add((module, function.name))
             interaction = next((keyword.value for keyword in call.keywords if keyword.arg == "interaction"), None)
             assert isinstance(interaction, ast.Name) and interaction.id == "interaction"
+    # Per-call forwarding is asserted above; this only prevents a vacuous scan.
     assert discovered
     assert discovered <= set(_parameter_boundary_entries())
 
@@ -457,4 +423,6 @@ def test_discovered_forwarding_edges_use_only_the_validated_local() -> None:
     """Every discovered policy-bearing edge forwards the validated local."""
     from tests.secrets.phase7_lexical_support import _interaction_call_edges
 
+    # The helper validates every semantically discovered edge; this only pins
+    # that production still contains at least one policy-bearing edge.
     assert _interaction_call_edges()

@@ -8,15 +8,18 @@ from typing import cast
 
 import pytest
 
-from tests.secrets.phase7_lexical_support import _interaction_call_edges
+from tests.secrets.phase7_lexical_support import (
+    _interaction_call_edges,
+    _interaction_calls_from_tree,
+    _object,
+    _validated_interaction_edges,
+)
 from tests.secrets.phase7_stored_support import _stored_call_edges
 from tests.secrets.test_phase7_enforcement import (
-    _DIRECTED_CALLEE_ALIASES,
     _STORED_INVOCATION_MANIFEST,
     _cli_boundary_entries,
     _function_node,
     _invoke_with_opaque_arguments,
-    _object,
     _parameter_boundary_entries,
     _stored_policy_entries,
 )
@@ -85,12 +88,20 @@ def test_every_discovered_owner_reaches_a_policy_or_storage_seam() -> None:
         ("agentworks.workspaces.nodes", "PendingWorkspaceNode.__init__"),
         ("agentworks.agents.nodes", "PendingAgentNode.__init__"),
     }
-    terminal_index: dict[str, set[tuple[str, str]]] = {}
-    for owner in owners | final_owners:
-        name = owner[1].rsplit(".", 1)[-1]
-        terminal_index.setdefault(name, set()).add(owner)
-        if name == "__init__":
-            terminal_index.setdefault(owner[1].split(".", 1)[0], set()).add(owner)
+    boundary_index = {
+        _object(module_name, function_name): (module_name, function_name)
+        for module_name, function_name in _parameter_boundary_entries()
+    }
+    boundary_index.update(
+        {
+            _object(module_name, function_name.removesuffix(".__init__")): (module_name, function_name)
+            for module_name, function_name in final_owners
+        }
+    )
+    seams = {
+        _object("agentworks.secrets.resolve", "ResolutionPolicy"),
+        _object("agentworks.secrets.preview", "_preview"),
+    }
 
     def _reaches_seam(owner: tuple[str, str], seen: set[tuple[str, str]]) -> bool:
         if owner in final_owners:
@@ -98,13 +109,12 @@ def test_every_discovered_owner_reaches_a_policy_or_storage_seam() -> None:
         if owner in seen:
             return False
         seen.add(owner)
-        for callee, keyword in interaction_edges.get(owner, ()):
-            assert keyword == "interaction"
-            terminal = callee.rsplit(".", 1)[-1]
-            terminal = _DIRECTED_CALLEE_ALIASES.get(terminal, terminal)
-            if terminal in {"ResolutionPolicy", "_preview"}:
+        for target in interaction_edges.get(owner, ()):
+            if target in seams:
                 return True
-            if any(_reaches_seam(target, seen.copy()) for target in terminal_index.get(terminal, ())):
+            target_owner = boundary_index.get(target)
+            assert target_owner is not None, (owner, target)
+            if _reaches_seam(target_owner, seen.copy()):
                 return True
         for callee in stored_edges.get(owner, ()):
             if _reaches_seam(("agentworks.secrets.resolver", callee), seen.copy()):
@@ -114,23 +124,24 @@ def test_every_discovered_owner_reaches_a_policy_or_storage_seam() -> None:
     roots = set(_parameter_boundary_entries()) | set(_cli_boundary_entries()) | set(_stored_policy_entries())
     assert {root for root in roots if not _reaches_seam(root, set())} == set()
 
-    actual_graph: dict[tuple[str, str], set[tuple[str, str] | str]] = {}
+    actual_graph: dict[tuple[str, str], set[tuple[str, str] | object]] = {}
     for owner in owners:
         targets = actual_graph.setdefault(owner, set())
-        for callee, _keyword in interaction_edges.get(owner, ()):
-            terminal = _DIRECTED_CALLEE_ALIASES.get(callee.rsplit(".", 1)[-1], callee.rsplit(".", 1)[-1])
-            if terminal in {"ResolutionPolicy", "_preview"}:
-                targets.add(terminal)
+        for target in interaction_edges.get(owner, ()):
+            if target in seams:
+                targets.add(target)
             else:
-                targets.update(terminal_index.get(terminal, ()))
+                target_owner = boundary_index.get(target)
+                assert target_owner is not None, (owner, target)
+                targets.add(target_owner)
         for callee in stored_edges.get(owner, ()):
             targets.add(("agentworks.secrets.resolver", callee))
 
-    reverse: dict[tuple[str, str] | str, set[tuple[str, str]]] = {}
+    reverse: dict[tuple[str, str] | object, set[tuple[str, str]]] = {}
     for caller, targets in actual_graph.items():
         for target in targets:
             reverse.setdefault(target, set()).add(caller)
-    frontier: list[tuple[str, str] | str] = ["ResolutionPolicy", "_preview", *final_owners]
+    frontier: list[tuple[str, str] | object] = [*seams, *final_owners]
     reverse_callers: set[tuple[str, str]] = set()
     while frontier:
         target = frontier.pop()
@@ -139,6 +150,50 @@ def test_every_discovered_owner_reaches_a_policy_or_storage_seam() -> None:
                 reverse_callers.add(caller)
                 frontier.append(caller)
     assert reverse_callers == owners - final_owners
+
+
+def test_policy_call_domain_does_not_depend_on_the_forwarding_keyword() -> None:
+    tree = ast.parse(
+        """
+from agentworks.vms.manager.power import delete_vm
+
+def cli_root(policy_kwargs):
+    delete_vm(None, None, "vm", **policy_kwargs)
+"""
+    )
+    sites = _interaction_calls_from_tree(
+        tree,
+        module="fixture.cli",
+        current_package="fixture",
+    )
+    assert tuple(site.owner for site in sites) == (("fixture.cli", "cli_root"),)
+    with pytest.raises(AssertionError, match="one explicit keyword"):
+        _validated_interaction_edges(sites)
+
+
+def test_policy_call_domain_rejects_a_same_named_local_seam() -> None:
+    tree = ast.parse(
+        """
+from agentworks.secrets.resolve import CompletionPolicy, ResolutionPolicy
+
+def owner(interaction):
+    class ResolutionPolicy:
+        def __init__(self, *, interaction, completion):
+            self.interaction = interaction
+            self.completion = completion
+
+    ResolutionPolicy(
+        interaction=interaction,
+        completion=CompletionPolicy.COMPLETE,
+    )
+"""
+    )
+    with pytest.raises(AssertionError, match="unresolved policy call"):
+        _interaction_calls_from_tree(
+            tree,
+            module="fixture.policy",
+            current_package="fixture",
+        )
 
 
 def test_policy_storage_and_teardown_edges_preserve_identity_shape() -> None:

@@ -10,11 +10,12 @@ from tests.secrets.phase7_lexical_support import (
     _lexically_shadowed_names,
     _production_modules,
     _qualified_function_name,
+    _semantic_call_name,
     _semantic_object,
     _semantic_reference,
     _visible_semantic_aliases,
 )
-from tests.secrets.phase7_resolver_support import _reflected_owner_and_member, _semantic_call_name
+from tests.secrets.phase7_resolver_support import _reflected_owner_and_member
 
 
 def _semantic_target_calls_from_tree(
