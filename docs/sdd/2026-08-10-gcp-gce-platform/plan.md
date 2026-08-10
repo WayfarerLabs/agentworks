@@ -85,25 +85,25 @@ suites and strict typing pass.
 
 ## Phase 2a: provider-bundle growth correction
 
-- [ ] Reframe `gcp` as an extensible vendor bundle whose service-specific capability names and
+- [x] Reframe `gcp` as an extensible vendor bundle whose service-specific capability names and
       models remain independent; document that future implementations, including secret backends,
       use existing capability contracts rather than a speculative provider abstraction.
-- [ ] Bundle one `gcloud-cli` `system-install-command` using Google's signed Debian/Ubuntu apt
+- [x] Bundle one `gcloud-cli` `system-install-command` using Google's signed Debian/Ubuntu apt
       repository, current `google-cloud-cli` package, completed-install `gcloud` probe, retry-safe
       key/source reconciliation, and no host or guest authentication side effect.
-- [ ] Bundle one `aws-cli` `system-install-command` using AWS's current official CLI v2 archive,
+- [x] Bundle one `aws-cli` `system-install-command` using AWS's current official CLI v2 archive,
       architecture selection, pinned signing-key fingerprint, mandatory detached-signature
       verification, command-owned v2-aware completed-install probe, private temporary extraction,
       retry-safe explicit update/install directories, and no host or guest authentication side
       effect; omit generic `test_exec` because it cannot distinguish CLI v1 from v2.
-- [ ] Add disabled/enabled provenance, recipe-gate, operator-override, manifest-payload, discovery,
+- [x] Add disabled/enabled provenance, recipe-gate, operator-override, manifest-payload, discovery,
       multi-contribution plugin, architecture, v1-present/v2-present, signing-key/signature
       rejection, and partial-install retry tests; confirm provider lifecycle remains independent of
       both CLIs.
-- [ ] Update permanent plugin-author, resource, sample, GCP, and AWS operator teaching to
+- [x] Update permanent plugin-author, resource, sample, GCP, and AWS operator teaching to
       distinguish optional guest tooling from ambient host ADC/AWS credential sources and optional
       host recovery tooling, and leave completion code registry-driven.
-- [ ] Run focused/full offline gates and both required reviews for the amended publication before
+- [x] Run focused/full offline gates and both required reviews for the amended publication before
       recording this corrective phase complete.
 
 **DoD:** vendor plugins can grow through the existing capability/manifest composition boundary;
