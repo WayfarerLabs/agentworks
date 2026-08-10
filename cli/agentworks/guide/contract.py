@@ -232,6 +232,7 @@ class ConsentBoundary(Enum):
     RESOLVE_NAMED_SECRET = "resolve-named-secret"
     CONNECT_NAMED_VM = "connect-named-vm"
     MUTATE_AGENTWORKS = "mutate-agentworks"
+    READ_CANONICAL_SOURCE = "read-canonical-source"
     READ_CANONICAL_RELEASE_NOTES = "read-canonical-release-notes"
 
 
