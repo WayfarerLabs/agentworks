@@ -331,9 +331,10 @@ cannot exhaust its template choices or enter an unbounded retry loop.
 
 Each platform is exactly `3 * 3.2 = 9.6 m` long, centered at the site coordinate, `0.35 m` thick,
 and `0.8 m` above its highest underlying collision-terrain point. Two `0.6 m`-wide pylons connect
-its underside to native terrain. A centered `H` marking and outline make it read as a small elevated
-helicopter pad. The platform replaces the terrain collision surface on its open horizontal span; its
-top, ends, underside, and pylons are explicit solid geometry.
+its underside to the flat replacement collision terrain at `platformTop-0.8 m`. A centered `H`
+marking and outline make it read as a small elevated helicopter pad. The platform replaces the
+terrain collision surface on its open horizontal span; its top, ends, underside, and pylons are
+explicit solid geometry.
 
 One gas can sits `3.0 m` right of platform center and does not collide. One NOC begins `2.0 m` right
 of the platform edge. It is a single solid `7.0 m` by `7.2 m` building on a filled foundation up to
