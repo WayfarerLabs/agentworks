@@ -7,11 +7,14 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentworks.capabilities.vm_platform.tailscale_join import (
+    DEFAULT_READINESS_COMMAND,
+    DEFAULT_READINESS_LABEL,
     TAILSCALE_JOIN_STDIN_COMMAND,
     EphemeralTailscaleBootstrap,
     join_tailscale_ephemerally,
 )
 from agentworks.errors import ProvisioningError
+from agentworks.plugins.gcp.bootstrap import GCE_READINESS_COMMAND, GCE_READINESS_LABEL
 from agentworks.ssh import SSHError, SSHResult
 from agentworks.vms.initializer.credentials import _join_tailscale
 
@@ -116,6 +119,61 @@ def test_cloud_init_wait_failure_raises_typed_without_delivering_key() -> None:
     assert target.calls == [
         ("echo ok", {"check": True, "timeout": 10}),
         ("cloud-init status --wait", {"check": True, "timeout": 600}),
+    ]
+    assert all("input_text" not in kwargs for _command, kwargs in target.calls)
+    assert _SENTINEL not in repr(caught.value)
+    assert _SENTINEL not in repr(target.calls)
+
+
+def test_default_readiness_contract_preserves_azure_and_aws_behavior() -> None:
+    target = _RecordingTransport()
+
+    result = EphemeralTailscaleBootstrap(target).complete(_SENTINEL)  # type: ignore[arg-type]
+
+    assert DEFAULT_READINESS_COMMAND == "cloud-init status --wait"
+    assert DEFAULT_READINESS_LABEL == "cloud-init"
+    assert result == "100.64.0.77"
+    assert target.calls[:2] == [
+        ("echo ok", {"check": True, "timeout": 10}),
+        ("cloud-init status --wait", {"check": True, "timeout": 600}),
+    ]
+    _assert_fixed_stdin_call(target.calls[2], timeout=30)
+    assert target.calls[3] == ("tailscale ip -4", {"sudo": True, "check": True, "timeout": 15})
+
+
+def test_gce_readiness_runs_after_ssh_and_before_fixed_stdin_join() -> None:
+    target = _RecordingTransport()
+
+    result = EphemeralTailscaleBootstrap(
+        target,
+        readiness_command=GCE_READINESS_COMMAND,
+        readiness_label=GCE_READINESS_LABEL,
+    ).complete(_SENTINEL)  # type: ignore[arg-type]
+
+    assert result == "100.64.0.77"
+    assert target.calls[:2] == [
+        ("echo ok", {"check": True, "timeout": 10}),
+        (GCE_READINESS_COMMAND, {"check": True, "timeout": 600}),
+    ]
+    assert "input_text" not in target.calls[1][1]
+    assert _SENTINEL not in GCE_READINESS_COMMAND
+    _assert_fixed_stdin_call(target.calls[2], timeout=30)
+    assert target.calls[3] == ("tailscale ip -4", {"sudo": True, "check": True, "timeout": 15})
+
+
+def test_gce_readiness_timeout_is_typed_labeled_and_stops_before_stdin() -> None:
+    target = _ReadinessTransport(fail_command=GCE_READINESS_COMMAND)
+
+    with pytest.raises(ProvisioningError, match="GCE startup script did not complete") as caught:
+        EphemeralTailscaleBootstrap(
+            target,
+            readiness_command=GCE_READINESS_COMMAND,
+            readiness_label=GCE_READINESS_LABEL,
+        ).complete(_SENTINEL)  # type: ignore[arg-type]
+
+    assert target.calls == [
+        ("echo ok", {"check": True, "timeout": 10}),
+        (GCE_READINESS_COMMAND, {"check": True, "timeout": 600}),
     ]
     assert all("input_text" not in kwargs for _command, kwargs in target.calls)
     assert _SENTINEL not in repr(caught.value)
