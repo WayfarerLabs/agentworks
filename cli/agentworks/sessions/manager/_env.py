@@ -45,7 +45,7 @@ def _display_registry(config: Config) -> Registry | None:
     ``load_request_registry`` builds and validates the registry and renders
     manifest/deprecation warnings at most once in the current request. It can
     raise ``AgentworksError`` for reasons
-    unrelated to session templates (a misconfigured secret backend
+    unrelated to session templates (a misconfigured secret source
     chain, a bad ``defaults.site``, an unrelated resource collision).
     ``session list`` / ``session describe`` are read-only and never
     built the registry before the HARNESS INTEGRATION column existed, so a bad
@@ -104,7 +104,7 @@ def _substitute_template_vars_in_env(
     carried before the EnvEntry migration (the pane command itself now
     substitutes at the harness integration op call site). Secret-ref entries pass
     through unchanged (variable substitution applies to the resolved
-    string at backend time, not the secret name).
+    string at resolution time, not the secret name).
     """
     from agentworks.env import EnvEntry as _EnvEntry
     from agentworks.env import PlaintextEnvEntry as _PlaintextEnvEntry

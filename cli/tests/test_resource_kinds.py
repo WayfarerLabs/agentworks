@@ -12,8 +12,8 @@ from __future__ import annotations
 from pathlib import Path
 from textwrap import dedent
 
+from agentworks.capabilities.secret_backend import SECRET_BACKEND_REGISTRY
 from agentworks.resources import KIND_REGISTRY
-from agentworks.secrets import SECRET_BACKEND_REGISTRY
 
 
 def _write_base(cfg_path: Path) -> None:
@@ -61,6 +61,7 @@ def test_names_only_needs_no_config(tmp_path: Path, monkeypatch) -> None:
     lines = [line for line in result.output.splitlines() if line]
     assert lines == sorted(KIND_REGISTRY)
     assert "harness-integration" in lines
+    assert "secret-source" in lines
     assert "harness" not in lines
 
 
@@ -85,3 +86,5 @@ def test_table_shows_categories_and_counts(tmp_path: Path, monkeypatch) -> None:
     assert backend_line.split()[2] == str(len(SECRET_BACKEND_REGISTRY))
     (secret_line,) = [line for line in out.splitlines() if line.startswith("secret ") or line.startswith("secret  ")]
     assert "declarable" in secret_line
+    (source_line,) = [line for line in out.splitlines() if line.startswith("secret-source ")]
+    assert source_line.split()[:3] == ["secret-source", "declarable", "2"]

@@ -230,7 +230,7 @@ class LiveVMNode:
 
     def auto_start(self, gate_secrets: SecretReader) -> None:
         from agentworks import output
-        from agentworks.vms.manager import _ensure_tailscale
+        from agentworks.vms.manager import _ensure_tailscale, _tailscale_rejoin_required
 
         # Re-read the intent flag: the row this node was built from may
         # predate a concurrent `vm stop` / `vm start` in another
@@ -250,33 +250,24 @@ class LiveVMNode:
         platform = self._site.platform
         platform.start(self._row, self._gate_ops_ctx(gate_secrets))
 
-        # Hold while tailscaled reattaches: a freshly booted WSL2
-        # distro must not idle out during the handshake wait. The
-        # rejoin auth key, needed only when the node fails to
-        # reconnect, reads LAZILY through the gate's reader; even its
-        # NAME (a template lookup) is deferred to that first need.
-        def rejoin_auth_key() -> str:
-            refs = self.repair_secret_refs()
-            if not refs:
-                raise StateError(
-                    f"VM '{self._row.name}' must rejoin tailscale but its template declares no auth key secret",
-                    entity_kind="vm",
-                    entity_name=self._row.name,
-                )
-            return gate_secrets.get(refs[0])
-
         with platform.vm_active(self._row, config=self._config):
-            _ensure_tailscale(
+            if _tailscale_rejoin_required(
                 self._db,
                 self._config,
                 self._row,
-                platform,
-                # The same gate-scoped ops context the start above ran
-                # under: the rejoin's platform-native transport is a
-                # backend call too (Azure attaches a public IP for it).
-                self._gate_ops_ctx(gate_secrets),
-                auth_key_source=rejoin_auth_key,
-            )
+                already_running=False,
+            ):
+                auth_key_name = self.repair_secret_refs()[0]
+                _ensure_tailscale(
+                    self._db,
+                    self._config,
+                    self._row,
+                    platform,
+                    # The unchanged gate reader remains the only auth source.
+                    self._gate_ops_ctx(gate_secrets),
+                    auth_keys=gate_secrets,
+                    auth_key_name=auth_key_name,
+                )
 
     def hold_active(self) -> AbstractContextManager[None]:
         return self._site.platform.vm_active(self._row, config=self._config)
@@ -327,7 +318,7 @@ class VMTemplateNode:
         follow. The key is still the TEMPLATE's responsibility rather
         than the site's, and it still stays out of a reinit's boundary
         (that command's graph deliberately excludes this node); what
-        moved is only who asks whether a declared name would resolve.
+        moved is only who reports whether a declared name has an attemptable source.
         Conditionality is unchanged either way, because it was never
         expressed in the check: the node either participates in the
         command's graph or it does not.
@@ -345,9 +336,9 @@ class VMTemplateNode:
         git-credential nodes: those verify their declared names reach
         real registry rows, but the auth key rides
         ``secret_declarations``'s lookup-or-synthesize fallback on
-        purpose, so an operator with no ``[secrets.*]`` sections at all
-        still gets a callable backend chain. Requiring a row here would
-        retire that fallback as a side effect.
+        purpose, so a well-known name with no manifest reference still
+        gets a synthesized declaration and a callable source chain.
+        Requiring a row here would retire that fallback as a side effect.
         """
 
     def runup(self, ctx: RunContext) -> None: ...

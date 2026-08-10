@@ -150,7 +150,7 @@ surfaces, valid values retain their existing human bytes and corrupt values rend
 Configuration splits into two surfaces:
 
 - **Settings** live in `~/.config/agentworks/config.toml`: your identity, paths, defaults, and the
-  secret backend chain. Run `agw config init` to generate a sample; see
+  secret source chain. Run `agw config init` to generate a sample; see
   [sample-config.toml](agentworks/sample-config.toml) for the full reference.
 - **Resources** (secrets, templates, git credentials, vm-sites, apt / install-command entries) are
   declared as YAML manifests under `~/.config/agentworks/resources/`, auto-loaded whenever a command
@@ -166,8 +166,8 @@ Settings sections (`config.toml`, permanent):
 - `[paths]` -- VM workspace, VS Code workspace file, and backup directories
 - `[defaults]`: `site`, the default vm-site for `vm create`
 - `[session.config]` -- session defaults (history limit)
-- `[secret_config]` -- active secret backend chain (`[secret_backends.*]` sections are deprecated
-  no-ops; see Secret Backends below)
+- `[secret_config]` -- active secret source chain; its `backends` key keeps the established spelling
+  but contains `secret-source` names
 - `[plugins]`: the plugin-subsystem namespace; its `system` key is the opt-in list of enabled system
   plugins (see [System Plugins](#system-plugins) below)
 
@@ -189,6 +189,7 @@ reference for reading an old `config.toml` and for rewriting it as manifests.
 | `named-console-template`                                                      | `[named_console]`                           |
 | `git-credential`                                                              | `[git_credentials.*]`                       |
 | `secret`                                                                      | `[secrets.*]`                               |
+| `secret-source`                                                               | none; introduced as YAML                    |
 | `apt-source`, `apt-package`, `system-install-command`, `user-install-command` | `[apt_sources.*]` and siblings              |
 
 The four capability kinds (`vm-platform`, `harness-integration`, `git-credential-provider`,
@@ -223,9 +224,9 @@ spec:
 ```
 
 Every secret reference points to a `secret` resource declaration (auto-declared with a
-framework-synthesized description if you skip it). Active backends (and their precedence order) are
-listed in `[secret_config].backends`. `agw resource describe-kind secret-backend` lists the backends
-this build has, and naming one documents the address it expects. The two that are always available:
+framework-synthesized description if you skip it). `[secret_config].backends` lists configured
+`secret-source` resource names in precedence order. Agentworks synthesizes two sources, so the
+simple default stays behavior-identical without a manifest:
 
 - `env-var` -- reads from the operator's process env. Default convention is
   `AW_SECRET_<UPPER_SNAKE_CASE>`, overridable per secret via the secret's `backend_mappings`
@@ -234,34 +235,35 @@ this build has, and naming one documents the address it expects. The two that ar
   all prompting happens before the command starts changing anything.
 
 **Resolve before any mutation:** a command resolves all the secrets its plan needs up front, before
-it starts changing anything. A secret that cannot be resolved by any active backend fails at
-preflight with a hint (`agw secret describe <name>` shows how each backend looks it up), before any
-prompt and before any VM is started. The set of secrets is computed from the command's static
-filters (positional targets, `--vm`, `--workspace`, `--agent`, etc.) -- dynamic predicates like
+it starts changing anything. Preflight first performs a pure applicability screen: a declaration
+with no ready, permitted source that would even attempt it fails with a hint
+(`agw secret describe <name>` shows how each source maps it), before any prompt and before any VM is
+started. Actual presence, authentication, transport, and provider failures remain the typed
+resolution boundary's job. The set of secrets is computed from the command's static filters
+(positional targets, `--vm`, `--workspace`, `--agent`, etc.) -- dynamic predicates like
 `--all-stopped` apply later, so the prompted set may over-approximate. Non-interactive mode (no TTY
 or `--non-interactive`) surfaces missing secrets as `SecretUnavailableError` with a per-secret hint
-naming which backends were tried. Commands that join existing shells (`session attach`,
+naming which sources were tried. Commands that join existing shells (`session attach`,
 `session list`, `console attach` against a live tmux session, `console add-sessions`) consume no
 secrets.
 
-**Miss semantics:** what "not found" means depends on the backend. Conventional sources (`env-var`,
-`prompt`) treat a missing value as a soft miss and fall through to the next backend in the chain --
-a `GITHUB_TOKEN` env var that isn't set is just-not-set, not a config error. Persistent-store
-backends (1Password, Vault when implemented) will treat an explicit mapping that doesn't resolve as
-a hard miss: they raise `SecretMappingError` and the chain halts so a wrong `op://` URI doesn't
-quietly fall through to a prompt that masks the real problem.
+**Miss semantics:** what "not found" means depends on the selected backend. Conventional sources
+(`env-var`, `prompt`) treat a missing value as a soft miss and fall through to the next source -- a
+`GITHUB_TOKEN` env var that isn't set is just-not-set, not a config error. Persistent-store clients
+treat an explicit mapping that does not resolve as a typed hard mapping failure, and the chain halts
+for that secret so a wrong `op://` URI cannot be masked by a prompt.
 
 Inspect the merged result for any context with `agw env show`:
 
 ```bash
 agw env show --session my-session              # secrets redacted as <from secret: name>
-agw env show --vm my-vm --resolve              # resolves through the active backend chain
+agw env show --vm my-vm --resolve              # resolves through the active source chain
 ```
 
 (The flag was formerly spelled `--reveal-secrets`; it was renamed to `--resolve` as a breaking
 change, the old spelling no longer works.)
 
-Inspect how each active backend would resolve each declared or auto-declared secret (e.g. "which env
+Inspect how each active source would attempt each declared or auto-declared secret (e.g. "which env
 var name does this secret read from?") with `agw secret list`:
 
 ```bash
@@ -270,22 +272,23 @@ agw secret list
 #
 # NAME                 DESCRIPTION                                                                env-var                       prompt
 # ----                 -----------                                                                -------                       ------
-# api-key              OpenAI key for the operator's service                                      OPENAI_API_KEY                enabled
-# force-prompt         Always prompted at command time                                            disabled                      enabled
-# git-token-github     (auto) the auth token for git_credentials:github                           AW_SECRET_GIT_TOKEN_GITHUB    enabled
-# tailscale-auth-key   (auto) the Tailscale auth key for vm-template:default (and 1 more)   AW_SECRET_TAILSCALE_AUTH_KEY  enabled
+# api-key              OpenAI key for the operator's service                                      OPENAI_API_KEY                would attempt
+# force-prompt         Always prompted at command time                                            won't attempt                 would attempt
+# git-token-github     (auto) the auth token for git_credentials:github                           AW_SECRET_GIT_TOKEN_GITHUB    would attempt
+# tailscale-auth-key   (auto) the Tailscale auth key for vm-template:default (and 1 more)          AW_SECRET_TAILSCALE_AUTH_KEY  would attempt
 ```
 
-Columns are the active backends in `[secret_config].backends` precedence order. Cells show each
-backend's static lookup identifier (env var name, vault path, `op://` URI) or `disabled` / `enabled`
-for backends with an explicit opt-out or no static identifier (prompt). The Description column shows
-the operator-supplied text for operator-declared secrets, or a framework-synthesized
-`(auto) <usage> for <kind>:<name>` (plus `(and N more)` when more than one source requires the
-secret) for auto-declared ones. The synthesized text reads as "what this secret is for, and who's
-asking." The summary line breaks the rows down by origin. Values are never resolved.
+Columns are the active sources in `[secret_config].backends` precedence order. Cells show each
+source's static lookup identifier (env var name, vault path, `op://` URI), `won't attempt`,
+`would attempt`, or `not ready: <reason>`. The Description column shows the operator-supplied text
+for operator-declared secrets, or a framework-synthesized `(auto) <usage> for <kind>:<name>` (plus
+`(and N more)` when more than one source requires the secret) for auto-declared ones. The
+synthesized text reads as "what this secret is for, and who's asking." The summary line breaks the
+rows down by origin. Values are never resolved.
 
 For the full per-secret detail view, including the structured origin block, usage list (who requires
-this secret), per-backend mapping table, and a resolution preview, use `agw secret describe`:
+this secret), source-keyed `backend_mappings` table, and a resolution preview, use
+`agw secret describe`:
 
 ```bash
 agw secret describe tailscale-auth-key
@@ -299,58 +302,71 @@ agw secret describe tailscale-auth-key
 #   - vm-template:heavy -- the Tailscale auth key
 #
 # Backend mappings:
-#   - env-var: AW_SECRET_TAILSCALE_AUTH_KEY
-#   - prompt: (prompt at resolution time)
+#   - env-var (env-var, synthesized default): AW_SECRET_TAILSCALE_AUTH_KEY
+#   - prompt (prompt, synthesized default): (prompt at resolution time)
 #
 # Resolution preview:
-#   would resolve via env-var
+#   would attempt via env-var
 ```
 
-`describe` reports state -- it does not prompt and does not resolve the secret's value.
+`describe` never prompts, opens a source client, reads the environment, or displays a secret value.
+Its preview is mapping applicability, not proof: it reports `would attempt via`, and verification or
+the command's resolution boundary determines whether a value is actually present.
 
-To prove that a declared secret resolves through the configured backend chain, use `verify`:
+To prove that a declared secret resolves through the configured source chain, use `verify`:
 
 ```bash
-agw secret verify tailscale-auth-key
-# Secret 'tailscale-auth-key' verified.
+agw secret verify tailscale-auth-key deploy-token
+# NAME                 CATEGORY  SOURCE   IDENTIFIER                    DETAIL    REMEDIATION
+# -------------------------------------------------------------------------------------------
+# tailscale-auth-key   resolved  env-var  AW_SECRET_TAILSCALE_AUTH_KEY  resolved  none
+# deploy-token         resolved  work-op  op://Engineering/deploy/token resolved  none
 ```
 
-Verification performs one real ordered resolution pass, but prints only the one-line success result
-and never returns or displays the secret value. By default it skips interactive backends, so the
-command cannot unexpectedly prompt or initiate provider authentication. Opt in explicitly when an
-interactive backend is required:
+Verification deduplicates names in first-written order, performs one real ordered resolution pass,
+and prints one value-free row per unique name. The columns report category, source, safe lookup
+identifier, typed detail, and remediation. If any row is not `resolved`, every row is still shown
+and the command exits 1; an all-resolved batch exits 0. Registry, configuration, and usage failures
+occur before the table and use normal CLI error framing.
+
+By default verification refuses interactive sources, so it cannot unexpectedly prompt or initiate
+provider authentication. Opt in explicitly when an interactive source is required:
 
 ```bash
-agw secret verify tailscale-auth-key --allow-interactive
+agw secret verify tailscale-auth-key --allow-interaction
 ```
 
-`--allow-interactive` is rejected when the global `--non-interactive` flag is set. Missing secrets,
-unavailable mappings, backend connectivity failures, and configuration failures use the normal
-framed CLI error categories with backend-authored details sanitized at this verification boundary.
+`--allow-interaction` permits prompts, biometric checks, and renewed authentication. It is rejected
+when the global `--non-interactive` flag is set. Outcome rows use only framework-owned categories
+and remediation; resolved values and provider-authored payloads are never rendered.
 
-`agw doctor`'s Secrets group emits exactly one row per registry secret -- operator-declared and
-auto-declared alike (auto-declared rows, e.g. `tailscale-auth-key` and the `git-token-*` family,
-carry an `(auto)` marker; they are exactly the secrets most likely to prompt at command time):
+`agw doctor` keeps three adjacent secret groups. `Secret backends` reports implementation readiness;
+`Secret sources` shows every declared source with its selected backend, active/inactive,
+enabled/disabled, provenance, and folded readiness; `Secrets` emits exactly one row per registry
+secret -- operator-declared and auto-declared alike (auto-declared rows, e.g. `tailscale-auth-key`
+and the `git-token-*` family, carry an `(auto)` marker; they are exactly the secrets most likely to
+prompt at command time):
 
-- **OK** when at least one active backend would resolve the secret at runtime
-  (`would resolve via env-var`, `would resolve via prompt`, ...). `would resolve via prompt` is the
-  heads-up that the next command needing this secret will ask for it interactively.
-- **WARN** when nothing in the chain would resolve it (config-valid but no path to a value, e.g.
-  env-var has no matching env var set and `prompt` is opted out via
-  `backend_mappings.prompt = false`).
-- **FAIL** when `backend_mappings` references an unknown backend name (not a registered backend like
-  `env-var` / `prompt`).
+- **OK** when at least one active source would attempt the secret (`would attempt via env-var`,
+  `would attempt via prompt`, ...). `would attempt via prompt` is the heads-up that the next command
+  needing this secret will ask for it interactively.
+- **WARN** when nothing in the chain is attemptable (config-valid but no mapping path, e.g. a
+  mapping-required source has no mapping and `prompt` is opted out via
+  `backend_mappings.prompt = false`). An unknown `backend_mappings` source name fails Registry
+  construction first, so doctor reports it under Configuration and does not construct the Secrets
+  group.
 
-Backend-applicability detail (per-backend soft-skip reasons, inactive mappings, per-secret
-references) lives in `agw secret list` and `agw secret describe`. `AGENTWORKS_*` identity overrides
-surface in the Configuration group (they're a config-load warning). Broken `{ secret: ... }`
-references are caught earlier as a hard config-load error before doctor runs. Git-credential tokens
-are just secrets: their _resolvability_ reports as ordinary `git-token-<name>` rows in the Secrets
-group, like any other secret. Doctor is preflight-only and never prompts, so it does not
-authenticate tokens against their provider; live verification (a token expired, revoked, or
-wrong-scope) happens at the capability `runup()` stage inside provisioning ops, and on-demand via
-the planned `agw doctor --runup` (which may prompt). The Tailscale group checks only workstation
-connectivity; the auth key is the `tailscale-auth-key` secret row.
+Source-applicability detail (per-source soft-skip reasons, inactive mappings, per-secret references)
+lives in `agw secret list` and `agw secret describe`. `AGENTWORKS_*` identity overrides surface in
+the Configuration group (they're a config-load warning). Broken `{ secret: ... }` references are
+caught earlier as a hard config-load error before doctor runs. Git-credential tokens are just
+secrets: their _resolvability_ reports as ordinary `git-token-<name>` rows in the Secrets group,
+like any other secret. Doctor never opens a source, reads an environment variable, invokes a client,
+or prompts. Its preview is a value-free applicability prediction, not proof that a value exists. Use
+`agw secret verify NAME...` for an explicit value-free proof; interactive sources require
+`--allow-interaction`. Capability token authentication still occurs at the capability `runup()`
+stage inside provisioning operations. The Tailscale group checks only workstation connectivity; the
+auth key is the `tailscale-auth-key` secret row.
 
 When the config or a resource manifest fails to load, the groups that depend on them (VM sites,
 Secrets) do not vanish: each renders a single
@@ -358,14 +374,16 @@ Secrets) do not vanish: each renders a single
 degraded run keeps the same section skeleton as a healthy one and the Configuration group carries
 the actual failure.
 
-### Secret Backends
+### Secret Sources and Backends
 
-A **backend** is a capability resource that produces secret values (`env-var`, `prompt` built in;
-`onepassword` ships as the opt-in `onepassword` system plugin, disabled by default, see
-[System Plugins](#system-plugins) below): a read-only row backed by registered code, listed by
-`agw resource list --kind secret-backend` and activated in precedence order by the chain
-(`[secret_config].backends`). Per-secret behavior -- identifier overrides, structured store
-addressing, opt-outs -- lives in each secret's `backend_mappings.<backend>`.
+A **source** is a declarable `secret-source` resource that selects one read-only `secret-backend`
+implementation in `spec.backend`. The chain and every `backend_mappings` key name sources, not
+implementations. The synthesized `env-var` and `prompt` source names remain valid unchanged. For
+1Password, enable the plugin, declare a source with `backend.name: onepassword`, move the old
+mapping account to that source, optionally set the new source timeout, and map each secret's source
+key to one scalar `op://` reference. A direct configured-backend reference such as `onepassword`
+breaks in 0.14 with an exact source declaration and mapping rewrite; no compatibility row is
+created.
 
 ### System Plugins
 
@@ -387,11 +405,11 @@ system = ["azure", "aws", "proxmox", "onepassword", "claude", "codex"]   # only 
 ```
 
 A resource that references a not-enabled plugin's contribution (an `azure-vm` vm-site, a
-`claude-code` session-template, a secret mapped to `onepassword`, ...) is not-ready, or refused at
-use, with an "enable plugin `<name>`" hint, never an unknown-name error. The default local path (the
-`lima` / `wsl2` platforms, the `shell` harness integration, the `env-var` / `prompt` secret
-backends, and the `github` git-credential provider) is built in, always on, and needs no `[plugins]`
-entry.
+`claude-code` session-template, a secret mapped to a source selecting `onepassword`, ...) is
+not-ready, or refused at use, with an "enable plugin `<name>`" hint, never an unknown-name error.
+The default local path (the `lima` / `wsl2` platforms, the `shell` harness integration, the
+`env-var` / `prompt` secret backends, and the `github` git-credential provider) is built in, always
+on, and needs no `[plugins]` entry.
 
 A not-enabled plugin's rows are hidden from `agw resource list` by default; pass
 `--include-disabled` to reveal them (see the
@@ -476,7 +494,8 @@ config-management flow). To remove completions installed here, use
 dot-source line the installer appended to `$PROFILE`; user-authored lines around it are left
 untouched.
 
-Completions include dynamic VM, vm-site, workspace, session, and template name lookups.
+Completions include dynamic VM, vm-site, workspace, session, secret, and template name lookups.
+`agw secret verify` completes registered secret names at every positional argument.
 
 ## State
 

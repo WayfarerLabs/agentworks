@@ -14,6 +14,14 @@ import typer
 
 from agentworks.cli._app import require_interactive
 from agentworks.db import Database, VMRow, WorkspaceRow
+from agentworks.secrets.policy import InteractionPolicy
+
+
+def ordinary_interaction_policy() -> InteractionPolicy:
+    """Derive ordinary-operation interaction authority at a CLI root."""
+    from agentworks import output
+
+    return InteractionPolicy.ALLOW if output.is_interactive() else InteractionPolicy.REFUSE
 
 
 def get_db() -> Database:

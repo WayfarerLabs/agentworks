@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.plugins.azure.platform import _AZURE_IDENTITY_LOGGER, _quiet_azure_identity_logging
+from agentworks.plugins.azure.auth import _AZURE_IDENTITY_LOGGER, _quiet_azure_identity_logging
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

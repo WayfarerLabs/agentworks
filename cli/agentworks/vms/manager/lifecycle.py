@@ -33,6 +33,7 @@ from agentworks.errors import (
     unknown_template_error,
 )
 from agentworks.naming import MAX_VM_NAME_LENGTH, validate_name
+from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 
 from ._helpers import _require_vm
 
@@ -116,6 +117,7 @@ def create_vm(
     template: str | None = None,
     admin_template: str | None = None,
     site: str | None = None,
+    interaction: InteractionPolicy,
 ) -> None:
     """Create a new VM: provision + initialize.
 
@@ -128,6 +130,7 @@ def create_vm(
     declared admin-template resource; an unknown name fails here, before
     any DB or backend work.
     """
+    interaction = validate_interaction_policy(interaction)
     import agentworks.vms.manager as _mgr
     from agentworks.bootstrap import load_request_registry
     from agentworks.vms.templates import resolve_template
@@ -212,7 +215,7 @@ def create_vm(
         vm_template_node,
     )
 
-    resolver = Resolver(config, registry)
+    resolver = Resolver(config, registry, interaction=interaction)
 
     # BUILD: the command names its direct resources (the resolved
     # template, the chosen site, the admin template's declared
@@ -257,7 +260,12 @@ def create_vm(
         output.info(f"Checking vm-site/{site}...")
         output.info(f"Checking vm-template/{vm_tmpl.name}...")
         _mgr.announce_git_credentials(providers)
-        preflight_all(nodes, RunContext(config=config, operation_scope=scope), registry=registry)
+        preflight_all(
+            nodes,
+            RunContext(config=config, operation_scope=scope),
+            registry=registry,
+            interaction=interaction,
+        )
 
     with output.section("Resolving Secrets"):
         resolver.resolve()
@@ -493,6 +501,8 @@ def reinit_vm(
     db: Database,
     config: Config,
     name: str,
+    *,
+    interaction: InteractionPolicy,
 ) -> None:
     """Re-run initialization on a VM that has already been provisioned.
 
@@ -506,6 +516,7 @@ def reinit_vm(
     nothing to unwind; a failed init leaves the VM re-runnable, as
     before.
     """
+    interaction = validate_interaction_policy(interaction)
     import agentworks.vms.manager as _mgr
     from agentworks.bootstrap import load_request_registry
     from agentworks.transports import transport
@@ -528,7 +539,7 @@ def reinit_vm(
     from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import live_vm_node
 
-    resolver = Resolver(config, registry)
+    resolver = Resolver(config, registry, interaction=interaction)
 
     # BUILD before any secret collection: a stranded site fails here
     # (inside the live node's site edge) with the manifest hint instead
@@ -623,7 +634,12 @@ def reinit_vm(
         with output.section("Preflight"):
             output.info(f"Checking vm-site/{vm.site}...")
             _mgr.announce_git_credentials(providers)
-            preflight_all(nodes, RunContext(config=config, operation_scope=scope), registry=registry)
+            preflight_all(
+                nodes,
+                RunContext(config=config, operation_scope=scope),
+                registry=registry,
+                interaction=interaction,
+            )
 
         with output.section("Resolving Secrets"):
             resolver.resolve()

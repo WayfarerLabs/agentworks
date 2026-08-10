@@ -28,6 +28,7 @@ from types import SimpleNamespace
 import pytest
 
 from agentworks.errors import SecretUnavailableError
+from agentworks.secrets.policy import InteractionPolicy
 
 from ._secrets_eager_support import _seed_basic_db, _stub_build_registry
 from .conftest import stub_vm_gates
@@ -165,7 +166,7 @@ def test_vm_shell_env_target_joins_the_bind_boundary(
         admin=SimpleNamespace(env={}),
     )
     with pytest.raises(_Stop):
-        vm_manager.shell_vm(db, config, "vm1")  # type: ignore[arg-type]
+        vm_manager.shell_vm(db, config, "vm1", interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
     assert bound_targets == [[sentinel_target]]
     db.close()
@@ -222,7 +223,7 @@ def test_vm_shell_eager_resolve_fires_before_ssh(
     )
 
     with pytest.raises(SecretUnavailableError, match="api-key"):
-        vm_manager.shell_vm(db, config, "vm1")  # type: ignore[arg-type]
+        vm_manager.shell_vm(db, config, "vm1", interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
     assert ssh_called == [], "eager-resolve must precede the SSH session"
     db.close()
@@ -276,7 +277,7 @@ def test_vm_exec_eager_resolve_fires_before_ssh(
     )
 
     with pytest.raises(SecretUnavailableError, match="api-key"):
-        vm_manager.exec_vm(db, config, "vm1", ["echo", "hi"])  # type: ignore[arg-type]
+        vm_manager.exec_vm(db, config, "vm1", ["echo", "hi"], interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
     assert streaming_calls == [], "eager-resolve must precede call_streaming"
     db.close()
@@ -333,6 +334,7 @@ def test_agent_exec_eager_resolve_fires_before_ssh(
             config,
             name="a1",
             command=["echo", "hi"],  # type: ignore[arg-type]
+            interaction=InteractionPolicy.REFUSE,
         )
 
     assert streaming_calls == [], "eager-resolve must precede call_streaming"
@@ -387,6 +389,7 @@ def test_agent_exec_env_target_joins_the_bind_boundary(
             SimpleNamespace(),
             name="a1",
             command=["echo", "hi"],  # type: ignore[arg-type]
+            interaction=InteractionPolicy.REFUSE,
         )
 
     assert bound_targets == [[sentinel_target]]
@@ -446,6 +449,7 @@ def test_shell_agent_passes_workspace_scope_to_secret_target(
             config,
             name="a1",
             workspace_name="ws1",  # type: ignore[arg-type]
+            interaction=InteractionPolicy.REFUSE,
         )
 
     # The scope resolver received the workspace row, not None. The

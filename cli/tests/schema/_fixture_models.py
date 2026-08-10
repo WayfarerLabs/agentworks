@@ -510,9 +510,8 @@ class AccountRefLike(AgwModel):
 
 
 class StringOrTableRoot(AgwRootModel[NonEmptyStr | AccountRefLike]):
-    """A backend mapping that is a bare string OR a table: the shipped
-    onepassword shape, and the framework's one UNdiscriminated union
-    (nothing tags a bare string)."""
+    """A root value that is a bare string OR a table: an UNdiscriminated
+    union because nothing tags a bare string."""
 
 
 class ScalarOrBlockLike(AgwModel):

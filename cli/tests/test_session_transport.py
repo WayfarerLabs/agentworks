@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.db import Database
+from agentworks.secrets.policy import InteractionPolicy
 
 from .conftest import (
     empty_secret_target,
@@ -142,6 +143,7 @@ def test_create_session_probes_before_state_mutation(tmp_path: Path, monkeypatch
             workspace="ws1",
             template_name=None,
             agent="a1",
+            interaction=InteractionPolicy.REFUSE,
         )
 
     # No state mutated: no session row, no implicit grant, no group add.
@@ -193,6 +195,7 @@ def test_create_session_uses_agent_target_for_tmux(tmp_path: Path, monkeypatch: 
         workspace="ws1",
         template_name=None,
         agent="a1",
+        interaction=InteractionPolicy.REFUSE,
     )
 
     # run_command must be agent_target.run, not admin_target.run.
@@ -268,6 +271,7 @@ def test_create_session_aborts_on_missing_required_command(tmp_path: Path, monke
             workspace="ws1",
             template_name="claude",
             agent="a1",
+            interaction=InteractionPolicy.REFUSE,
         )
 
     # Fail-fast: no session row, no implicit grant, no group add.
@@ -336,7 +340,7 @@ def test_delete_session_probes_before_confirm_prompt(tmp_path: Path, monkeypatch
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
     with pytest.raises(StateError):
-        session_manager.delete_session(db, config, name="s1", yes=False)  # type: ignore[arg-type]
+        session_manager.delete_session(db, config, name="s1", yes=False, interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
     assert not confirm_called[0], "confirm prompt fired before probe rejected; probe must run first"
     db.close()
@@ -395,7 +399,7 @@ def test_exec_agent_uses_direct_agent_ssh(tmp_path: Path, monkeypatch: pytest.Mo
         operator=SimpleNamespace(ssh_private_key=None),
     )
 
-    rc = agent_mgr.exec_agent(db, config, name="a1", command=["echo", "hi"])  # type: ignore[arg-type]
+    rc = agent_mgr.exec_agent(db, config, name="a1", command=["echo", "hi"], interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
     assert rc == 0
 
     assert called_args, "subprocess.call was not invoked"
@@ -502,7 +506,7 @@ def test_resume_migrates_legacy_session_to_per_session_socket(tmp_path: Path, mo
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
     # Should not raise: legacy migration flows around check_session_status.
-    session_manager.resume_session(db, config, name="legacy", yes=True)  # type: ignore[arg-type]
+    session_manager.resume_session(db, config, name="legacy", yes=True, interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
     assert kill_calls == [("legacy", None)], (
         "kill_session must be invoked with the legacy session name and "
@@ -582,7 +586,7 @@ def test_resume_dead_workload_error_propagates(tmp_path: Path, monkeypatch: pyte
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
     with pytest.raises(StateError) as excinfo:
-        session_manager.resume_session(db, config, name="s1", yes=True)  # type: ignore[arg-type]
+        session_manager.resume_session(db, config, name="s1", yes=True, interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
     msg = str(excinfo.value)
     assert "exited immediately after launch (status 2)" in msg

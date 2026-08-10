@@ -12,6 +12,7 @@ from typer.testing import CliRunner
 
 from agentworks.cli import app
 from agentworks.db import PID_STOPPED, SessionMode, SessionStatus, VMStatus
+from agentworks.secrets.policy import InteractionPolicy
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -74,7 +75,12 @@ def test_invalid_database_enums_are_closed_in_shared_facts(
     vm_fact = vm_listing(db).vms[0]
     assert (vm_fact.provisioning_status, vm_fact.initialization_status) == ("unknown", "unknown")
     assert workspace_description(db, "ws").sessions[0].mode == "unknown"
-    session_fact = session_listing(db, config, no_status=True).sessions[0]
+    session_fact = session_listing(
+        db,
+        config,
+        no_status=True,
+        interaction=InteractionPolicy.REFUSE,
+    ).sessions[0]
     assert session_fact.mode == "unknown"
     assert session_fact.status == "unavailable"
 

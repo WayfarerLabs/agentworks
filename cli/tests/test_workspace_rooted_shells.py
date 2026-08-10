@@ -23,6 +23,7 @@ import pytest
 
 from agentworks.db import Database
 from agentworks.errors import AuthorizationError, NotFoundError, ValidationError
+from agentworks.secrets.policy import InteractionPolicy
 from tests.conftest import empty_secret_target, stub_build_registry, stub_vm_gates
 
 # ---------------------------------------------------------------------------
@@ -136,10 +137,7 @@ def test_shell_vm_workspace_unknown_raises_not_found(
 
     with pytest.raises(NotFoundError, match="nope"):
         vm_manager.shell_vm(  # type: ignore[arg-type]
-            db,
-            config,
-            "vm1",
-            workspace_name="nope",
+            db, config, "vm1", workspace_name="nope", interaction=InteractionPolicy.REFUSE
         )
 
 
@@ -167,10 +165,7 @@ def test_shell_vm_workspace_cross_vm_raises_validation(
 
     with pytest.raises(ValidationError, match="belongs to VM 'vm2', not 'vm1'"):
         vm_manager.shell_vm(  # type: ignore[arg-type]
-            db,
-            config,
-            "vm1",
-            workspace_name="ws2",
+            db, config, "vm1", workspace_name="ws2", interaction=InteractionPolicy.REFUSE
         )
 
     assert interactive_calls == [], (
@@ -201,10 +196,7 @@ def test_shell_vm_workspace_cds_into_workspace_path(
 
     assert (
         vm_manager.shell_vm(  # type: ignore[arg-type]
-            db,
-            config,
-            "vm1",
-            workspace_name="ws1",
+            db, config, "vm1", workspace_name="ws1", interaction=InteractionPolicy.REFUSE
         )
         == 0
     )
@@ -235,7 +227,7 @@ def test_shell_vm_no_workspace_keeps_empty_command(
 
     monkeypatch.setattr("agentworks.transports.transport", _factory)
 
-    assert vm_manager.shell_vm(db, config, "vm1") == 0  # type: ignore[arg-type]
+    assert vm_manager.shell_vm(db, config, "vm1", interaction=InteractionPolicy.REFUSE) == 0  # type: ignore[arg-type]
 
     assert captured_cmd == [""]
 
@@ -267,11 +259,7 @@ def test_exec_vm_workspace_cross_vm_raises_validation(
 
     with pytest.raises(ValidationError, match="belongs to VM 'vm2', not 'vm1'"):
         vm_manager.exec_vm(  # type: ignore[arg-type]
-            db,
-            config,
-            "vm1",
-            ["echo", "hi"],
-            workspace_name="ws2",
+            db, config, "vm1", ["echo", "hi"], workspace_name="ws2", interaction=InteractionPolicy.REFUSE
         )
 
     assert streaming_calls == []
@@ -298,11 +286,7 @@ def test_exec_vm_workspace_prefixes_cd(
     monkeypatch.setattr("agentworks.transports.transport", _factory)
 
     rc = vm_manager.exec_vm(  # type: ignore[arg-type]
-        db,
-        config,
-        "vm1",
-        ["echo", "hi"],
-        workspace_name="ws1",
+        db, config, "vm1", ["echo", "hi"], workspace_name="ws1", interaction=InteractionPolicy.REFUSE
     )
 
     assert rc == 0
@@ -330,7 +314,7 @@ def test_exec_vm_no_workspace_unchanged(
 
     monkeypatch.setattr("agentworks.transports.transport", _factory)
 
-    vm_manager.exec_vm(db, config, "vm1", ["echo", "hi"])  # type: ignore[arg-type]
+    vm_manager.exec_vm(db, config, "vm1", ["echo", "hi"], interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
     assert captured == ["echo hi"]
 
@@ -367,11 +351,7 @@ def test_exec_agent_workspace_cross_vm_raises_validation(
 
     with pytest.raises(ValidationError, match="belongs to VM 'vm2', not 'vm1'"):
         agent_manager.exec_agent(  # type: ignore[arg-type]
-            db,
-            config,
-            name="a1",
-            command=["echo", "hi"],
-            workspace_name="ws2",
+            db, config, name="a1", command=["echo", "hi"], workspace_name="ws2", interaction=InteractionPolicy.REFUSE
         )
 
     assert streaming_calls == []
@@ -403,11 +383,7 @@ def test_exec_agent_workspace_missing_grant_raises_authz(
 
     with pytest.raises(AuthorizationError, match="does not have access"):
         agent_manager.exec_agent(  # type: ignore[arg-type]
-            db,
-            config,
-            name="a1",
-            command=["echo", "hi"],
-            workspace_name="ws1",
+            db, config, name="a1", command=["echo", "hi"], workspace_name="ws1", interaction=InteractionPolicy.REFUSE
         )
 
     assert streaming_calls == []
@@ -438,11 +414,7 @@ def test_exec_agent_workspace_prefixes_cd(
     monkeypatch.setattr("agentworks.transports.agent_transport", _factory)
 
     rc = agent_manager.exec_agent(  # type: ignore[arg-type]
-        db,
-        config,
-        name="a1",
-        command=["echo", "hi"],
-        workspace_name="ws1",
+        db, config, name="a1", command=["echo", "hi"], workspace_name="ws1", interaction=InteractionPolicy.REFUSE
     )
 
     assert rc == 0
@@ -499,7 +471,7 @@ def test_exec_vm_rejects_dash_prefixed_command(
     config = SimpleNamespace()
 
     with pytest.raises(ValidationError, match="cannot start with '-'") as exc_info:
-        vm_manager.exec_vm(db, config, "vm1", command)  # type: ignore[arg-type]
+        vm_manager.exec_vm(db, config, "vm1", command, interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
     hint = exc_info.value.hint or ""
     assert "put it before the name" in hint
     assert "put '--' before" in hint
@@ -520,10 +492,7 @@ def test_exec_agent_rejects_dash_prefixed_command(
 
     with pytest.raises(ValidationError, match="cannot start with '-'") as exc_info:
         agent_manager.exec_agent(  # type: ignore[arg-type]
-            db,
-            config,
-            name="a1",
-            command=["--workspace", "ws1", "pwd"],
+            db, config, name="a1", command=["--workspace", "ws1", "pwd"], interaction=InteractionPolicy.REFUSE
         )
     hint = exc_info.value.hint or ""
     assert "put '--' before" in hint
@@ -640,10 +609,7 @@ def test_shell_vm_passes_workspace_scope_to_secret_target(
 
     assert (
         vm_manager.shell_vm(  # type: ignore[arg-type]
-            db,
-            config,
-            "vm1",
-            workspace_name="ws1",
+            db, config, "vm1", workspace_name="ws1", interaction=InteractionPolicy.REFUSE
         )
         == 0
     )

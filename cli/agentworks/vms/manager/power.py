@@ -9,9 +9,11 @@ from agentworks import output
 from agentworks.capabilities.base import RunContext
 from agentworks.db import VMStatus
 from agentworks.errors import StateError, UserAbort
+from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 
 from ._helpers import (
     _guard_failed_vm,
+    _lookup_or_synthesize_secret,
     _mask_env_var_backend_for,
     _require_vm,
     _vm_scope,
@@ -24,7 +26,13 @@ if TYPE_CHECKING:
     from agentworks.vms.nodes import LiveVMNode
 
 
-def start_vm(db: Database, config: Config, name: str) -> None:
+def start_vm(
+    db: Database,
+    config: Config,
+    name: str,
+    *,
+    interaction: InteractionPolicy,
+) -> None:
     """Start a stopped VM. Clears the operator-stopped flag so the
     activation gate resumes auto-starting on demand.
 
@@ -34,11 +42,20 @@ def start_vm(db: Database, config: Config, name: str) -> None:
     start IS this command's operation, and the operator-stopped flag
     is CLEARED by it, never consulted.
     """
+    interaction = validate_interaction_policy(interaction)
     import agentworks.vms.manager as _mgr
+    from agentworks.bootstrap import load_request_registry
 
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
-    vm_node, ops_ctx = _live_vm_boundary(db, config, vm)
+    registry = load_request_registry(config)
+    vm_node, ops_ctx = _live_vm_boundary(
+        db,
+        config,
+        vm,
+        registry=registry,
+        interaction=interaction,
+    )
     platform = vm_node.site.platform
     # An explicit start is operator intent, whatever the observed state:
     # clear the flag first so a crashed start doesn't leave the gate
@@ -55,13 +72,42 @@ def start_vm(db: Database, config: Config, name: str) -> None:
     else:
         platform.start(vm, ops_ctx)
 
-    # Tailscale verification runs inside the keepalive so a freshly booted
-    # WSL2 distro doesn't idle-shut while we wait for tailscaled to come up.
-    # The rejoin auth key, needed only on a failed reconnect, keeps its
-    # internal late resolve (the documented conditional-need exception):
-    # there is no gate here to hand a lazy reader through.
+    # Probe and conditionally acquire the standalone repair credential inside
+    # the same hold that protects the reconnect/rejoin lifecycle.
     with vm_node.hold_active():
-        _mgr._ensure_tailscale(db, config, vm, platform, ops_ctx, already_running=status == VMStatus.RUNNING)
+        if _mgr._tailscale_rejoin_required(
+            db,
+            config,
+            vm,
+            already_running=status == VMStatus.RUNNING,
+        ):
+            from agentworks.orchestration.secrets import ScopedSecrets
+            from agentworks.secrets import resolve_for_command
+            from agentworks.vms.templates import resolve_template
+
+            template = resolve_template(registry, vm.template)
+            auth_key_name = template.tailscale_auth_key
+            declaration = _lookup_or_synthesize_secret(registry, auth_key_name)
+            values = resolve_for_command(
+                [],
+                config,
+                registry,
+                extra_decls=[declaration],
+                interaction=interaction,
+            )
+            try:
+                auth_keys = ScopedSecrets(values, (auth_key_name,))
+                _mgr._ensure_tailscale(
+                    db,
+                    config,
+                    vm,
+                    platform,
+                    ops_ctx,
+                    auth_keys=auth_keys,
+                    auth_key_name=auth_key_name,
+                )
+            finally:
+                values.clear()
     # Only emit "is ready" on the path that actually started the VM. When
     # status was already RUNNING we already said so above, and Tailscale
     # verification is usually a no-op (handshake already valid), so an
@@ -71,16 +117,23 @@ def start_vm(db: Database, config: Config, name: str) -> None:
         output.info(f"VM '{name}' is ready")
 
 
-def stop_vm(db: Database, config: Config, name: str) -> None:
+def stop_vm(
+    db: Database,
+    config: Config,
+    name: str,
+    *,
+    interaction: InteractionPolicy,
+) -> None:
     """Stop a running VM and record the operator's intent.
 
     Orchestrated, composition only, mirroring :func:`start_vm`: no
     activation gate (the stop IS the operation), power ops through the
     node's held platform.
     """
+    interaction = validate_interaction_policy(interaction)
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
-    vm_node, ops_ctx = _live_vm_boundary(db, config, vm)
+    vm_node, ops_ctx = _live_vm_boundary(db, config, vm, interaction=interaction)
     platform = vm_node.site.platform
     # Record intent BEFORE the already-stopped short-circuit: an
     # operator stopping an already-stopped VM still means "keep it
@@ -114,6 +167,7 @@ def delete_vm(
     *,
     force: bool = False,
     yes: bool = False,
+    interaction: InteractionPolicy,
 ) -> None:
     """Delete a VM, cleaning up all associated resources.
 
@@ -134,6 +188,7 @@ def delete_vm(
     the best-effort spans may not downgrade: an abort at the
     boundary's secret prompt or inside an op span must keep the row.
     """
+    interaction = validate_interaction_policy(interaction)
     import agentworks.vms.manager as _mgr
 
     vm = _require_vm(db, name)
@@ -173,7 +228,7 @@ def delete_vm(
     vm_node: LiveVMNode | None
     ops_ctx: RunContext | None = None
     try:
-        vm_node, ops_ctx = _live_vm_boundary(db, config, vm)
+        vm_node, ops_ctx = _live_vm_boundary(db, config, vm, interaction=interaction)
     except UserAbort:
         # Ctrl-C at the boundary's secret prompt must keep the SIGINT
         # contract: abort the whole delete rather than orphaning the
@@ -246,6 +301,7 @@ def rekey_vm(
     *,
     wait_for_share: bool = False,
     ignore_env: bool = False,
+    interaction: InteractionPolicy,
 ) -> None:
     """Assign a new Tailscale auth key to a VM (logout + rejoin).
 
@@ -268,8 +324,8 @@ def rekey_vm(
     any gate, so rekey never auto-starts one outside the same race
     HEAD had.
     """
+    interaction = validate_interaction_policy(interaction)
     import ipaddress
-    import shlex
     import time
 
     from agentworks.bootstrap import load_request_registry
@@ -301,7 +357,7 @@ def rekey_vm(
     # skips it cleanly across BOTH the preflight prediction and the
     # resolve, and the prompt backend takes over).
     registry = load_request_registry(config)
-    resolver = Resolver(config, registry)
+    resolver = Resolver(config, registry, interaction=interaction)
     vm_node = live_vm_node(db, config, registry, vm)
     rekey_vm_tmpl = resolve_template(registry, vm.template)
     tmpl_node = vm_template_node(rekey_vm_tmpl)
@@ -314,7 +370,12 @@ def rekey_vm(
     ts_decl = resolver.register_name(rekey_vm_tmpl.tailscale_auth_key)
     scope = _vm_scope(db, name)
     with _mask_env_var_backend_for(ts_decl, masked=ignore_env):
-        preflight_all(nodes, RunContext(config=config, operation_scope=scope), registry=registry)
+        preflight_all(
+            nodes,
+            RunContext(config=config, operation_scope=scope),
+            registry=registry,
+            interaction=interaction,
+        )
         resolver.resolve()
     ts_auth_key = resolver.get(rekey_vm_tmpl.tailscale_auth_key)
 
@@ -376,8 +437,9 @@ def rekey_vm(
         time.sleep(stabilize_secs)
 
         output.info("Joining new tailnet...")
-        quoted_key = shlex.quote(ts_auth_key)
-        exec_target.run(f"tailscale up --auth-key {quoted_key}", sudo=True, timeout=30)
+        from agentworks.capabilities.vm_platform.tailscale_join import join_tailscale_ephemerally
+
+        join_tailscale_ephemerally(exec_target, ts_auth_key, timeout=30)
         time.sleep(stabilize_secs)
 
         output.info("Restarting Tailscale daemon...")

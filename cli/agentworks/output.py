@@ -356,7 +356,8 @@ class _DefaultHandler:
                     return value
                 print("(empty, try again)", file=sys.stderr)
         except (EOFError, KeyboardInterrupt):
-            raise UserAbort("interrupted") from None
+            pass
+        raise UserAbort("interrupted") from None
 
     def progress(self, label: str, level: int, total: int | None = None) -> Progress:
         print(f"{_pad(level + 1)}{label}...")

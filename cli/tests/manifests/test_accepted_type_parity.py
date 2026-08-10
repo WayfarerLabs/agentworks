@@ -52,7 +52,7 @@ from collections.abc import Mapping, Sequence
 from collections.abc import Set as AbstractSet
 from datetime import date, datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Final, Literal, Union, get_args, get_origin
+from typing import TYPE_CHECKING, Any, Final, Literal, NoReturn, Union, get_args, get_origin
 
 from pydantic import BaseModel
 
@@ -114,6 +114,8 @@ def _annotation_types(annotation: object) -> frozenset[str]:
         return frozenset({"object"})
     if annotation is object:
         return _ANY
+    if annotation is NoReturn:
+        return frozenset()
     return frozenset({_SCALAR_TYPES[annotation]})
 
 
@@ -128,6 +130,8 @@ def _value_type(value: object) -> str:
 def _schema_types(node: dict[str, Any], defs: dict[str, Any]) -> frozenset[str]:
     """The JSON types an emitted subschema accepts."""
     node = _dereferenced(node, defs)
+    if node.get("not") == {}:
+        return frozenset()
     branches = node.get("anyOf") or node.get("oneOf")
     if branches:
         return frozenset[str]().union(*(_schema_types(branch, defs) for branch in branches))
@@ -335,9 +339,9 @@ def test_the_shipped_surface_is_actually_being_walked() -> None:
     the ones the defect and its siblings live in."""
     subjects = _subjects()
     from agentworks.env.entry import EnvEntry
-    from agentworks.plugins.onepassword.backend import OnePasswordAccountRef
+    from agentworks.plugins.onepassword.backend import OnePasswordSourceConfig
 
     assert EnvEntry in subjects
-    assert OnePasswordAccountRef in subjects
+    assert OnePasswordSourceConfig in subjects
     assert _fixture_models.StringOrTableRoot in subjects
     assert len(subjects) > 50, f"only {len(subjects)} models walked, which is fewer than this app ships"

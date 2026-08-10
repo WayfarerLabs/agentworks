@@ -3,7 +3,7 @@
 Resolves a context from the operator's flags, computes the effective env
 with per-key provenance (which scope won, what value), and renders the
 result. Secret-backed entries are redacted by default; ``reveal_secrets``
-runs them through the configured backend chain.
+runs them through the configured source chain.
 
 Lives next to the env model so the inspection logic stays close to the
 producers (``effective_env``, ``per_context_identity_env``,
@@ -19,6 +19,8 @@ from agentworks import output
 from agentworks.env.identity import ResourceContext, per_context_identity_env
 from agentworks.env.merge import effective_env
 from agentworks.errors import ValidationError
+from agentworks.secrets.outcomes import ResolutionOutcome, format_outcome
+from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 
 if TYPE_CHECKING:
     from agentworks.agents.templates import ResolvedAgentTemplate
@@ -76,6 +78,7 @@ def show_env(
     agent_name: str | None = None,
     session_name: str | None = None,
     reveal_secrets: bool = False,
+    interaction: InteractionPolicy,
 ) -> list[ResolvedEnvRow]:
     """Resolve the context, compute provenance-aware env, render rows.
 
@@ -85,6 +88,7 @@ def show_env(
 
     Raises ``ValidationError`` when no context flag is provided.
     """
+    interaction = validate_interaction_policy(interaction)
     ctx = _resolve_context(
         db,
         vm_name=vm_name,
@@ -125,7 +129,13 @@ def show_env(
     # Reveal mode resolves each referenced secret exactly once (deduped
     # by name; several keys may reference one secret), per-secret so one
     # failure renders inline as <error: ...> without aborting the table.
-    values, errors = _reveal_values(config, registry, user_env_merged, reveal=reveal_secrets)
+    values, errors = _reveal_values(
+        config,
+        registry,
+        user_env_merged,
+        reveal=reveal_secrets,
+        interaction=interaction,
+    )
 
     rows: list[ResolvedEnvRow] = []
     for key in sorted(user_env_merged.keys() | identity_env.keys()):
@@ -375,7 +385,8 @@ def _reveal_values(
     merged: dict[str, EnvEntry],
     *,
     reveal: bool,
-) -> tuple[dict[str, str], dict[str, str]]:
+    interaction: InteractionPolicy,
+) -> tuple[dict[str, str], dict[str, ResolutionOutcome]]:
     """Resolve every secret referenced by ``merged`` when revealing.
 
     Returns ``(values, errors)`` keyed by secret name: ONE batched
@@ -389,13 +400,16 @@ def _reveal_values(
     / NUL bytes renders as ``<error: secret 'X': resolved value
     contains a control character...>``.
     """
+    interaction = validate_interaction_policy(interaction)
     if not reveal:
         return {}, {}
     from agentworks.resources.access import secret_decls
-    from agentworks.secrets import SecretDecl, active_backends, resolve_secrets
+    from agentworks.secrets import SecretDecl
+    from agentworks.secrets.outcomes import ResolutionCategory
+    from agentworks.secrets.resolve import active_sources, resolve_partial_for_reveal
 
     decls = secret_decls(registry)
-    backends = active_backends(config, registry)
+    sources = active_sources(config, registry)
     needed: list[SecretDecl] = []
     seen: set[str] = set()
     for entry in merged.values():
@@ -407,17 +421,17 @@ def _reveal_values(
     if not needed:
         return {}, {}
 
-    errors: dict[str, str] = {}
-    # ``registry`` powers the disabled-plugin failure hint (LLD b) on the
-    # per-secret error line for the inspection path too.
-    values = resolve_secrets(needed, backends, errors=errors, registry=registry)
-    return values, errors
+    result = resolve_partial_for_reveal(needed, sources, interaction=interaction)
+    errors = {
+        outcome.name: outcome for outcome in result.outcomes if outcome.category is not ResolutionCategory.RESOLVED
+    }
+    return result.values, errors
 
 
 def _render_value(
     entry: EnvEntry,
     values: dict[str, str],
-    errors: dict[str, str],
+    errors: dict[str, ResolutionOutcome],
     reveal_secrets: bool,
 ) -> tuple[str, bool]:
     """Return ``(rendered_value, is_secret)`` for one EnvEntry.
@@ -431,7 +445,7 @@ def _render_value(
         if not reveal_secrets:
             return f"<from secret: {entry.secret}>", True
         if entry.secret in errors:
-            return f"<error: {errors[entry.secret]}>", True
+            return f"<error: {format_outcome(errors[entry.secret])}>", True
         return values[entry.secret], True
     assert entry.value is not None  # EnvEntry invariant
     return entry.value, False

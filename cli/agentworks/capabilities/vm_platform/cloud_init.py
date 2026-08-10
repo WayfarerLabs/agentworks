@@ -2,7 +2,9 @@
 
 Wraps a bootstrap script in a #cloud-config YAML that delivers and executes
 it via write_files + runcmd. This lets Azure VMs run the same bootstrap script
-that Lima uses via its provision block.
+that Lima uses via its provision block. Provider-retained cloud-init always
+renders the script with its Tailscale join deferred; the resolved key crosses
+a separate post-boot stdin boundary.
 """
 
 from __future__ import annotations
@@ -38,7 +40,7 @@ def generate_cloud_init(bootstrap_script: str) -> str:
 
     Uses write_files to place the script on disk and runcmd to execute it.
     This is the delivery mechanism for Azure; the script itself is the same
-    one Lima embeds in its provision block.
+    key-free one Lima embeds in its provision block.
     """
     # Indent the script content for YAML embedding (8 spaces for write_files content block)
     indented = textwrap.indent(bootstrap_script, "        ")

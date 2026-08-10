@@ -1,15 +1,16 @@
 """The orchestrator's secret helpers: union, central prediction, and
 scoped delivery.
 
-Prediction fakes are backend-shaped duck types, same as
+Prediction fakes are source-shaped duck types, same as
 ``tests/test_secrets_resolve.py``: the helpers only speak the
-``ActiveBackend`` surface.
+``ActiveSource`` surface.
 """
 
 from __future__ import annotations
 
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 import pytest
 
@@ -21,8 +22,13 @@ from agentworks.orchestration.secrets import (
     secret_declarations,
     secret_union,
 )
+from agentworks.resources.graph import Readiness
 from agentworks.resources.reference import ResourceReference, SecretReference
+from agentworks.schema import AgwModel, AgwRootModel, CapabilityBlock
 from agentworks.secrets.base import SecretDecl
+from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.preview import PreviewCategory, SkippedSource
+from agentworks.secrets.sources import SecretSourceDecl
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -30,7 +36,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.resources.registry import Registry
-    from agentworks.secrets.resolve import ActiveBackend
+    from agentworks.secrets.resolve import ActiveSource
 
 
 @dataclass
@@ -111,7 +117,7 @@ def test_unknown_name_falls_back_to_a_bare_declaration() -> None:
 
 
 class _FakeBackend:
-    """An ActiveBackend-shaped stub controllable per-test."""
+    """State captured by a final ActiveSource-shaped prediction fixture."""
 
     def __init__(
         self,
@@ -120,41 +126,112 @@ class _FakeBackend:
         interactive: bool = False,
         not_ready_reason: str | None = None,
     ) -> None:
-        from agentworks.resources.graph import Readiness
-
         self.name = name
         self.interactive = interactive
         self._values = values or {}
         self.resolve_calls: list[list[str]] = []
-        # ActiveBackend carries its stored readiness verdict; preview_resolution
-        # skips a not-ready backend (R9.6). Ready by default.
+        # ActiveSource carries its stored readiness verdict; preview_resolution
+        # skips a not-ready source (R9.6). Ready by default.
         self.readiness = Readiness.ready() if not_ready_reason is None else Readiness.blocked(not_ready_reason)
 
-    def would_attempt(self, secret: SecretDecl) -> bool:
-        return secret.backend_mappings.get(self.name) is not False
 
-    def describe_lookup(self, secret: SecretDecl) -> str | None:
-        return f"<{self.name}>"
+class _PredictionConfig(AgwModel):
+    name: Literal["prediction"]
 
-    def resolve(self, secrets: list[SecretDecl]) -> dict[str, str]:
-        self.resolve_calls.append([s.name for s in secrets])
-        return {s.name: self._values[s.name] for s in secrets if s.name in self._values}
+
+class _PredictionMapping(AgwRootModel[str]):
+    pass
+
+
+class _PredictionClient:
+    def __init__(self, state: _FakeBackend) -> None:
+        self._state = state
+
+    def prepare(self, requests: tuple[object, ...], *, remaining_time: object) -> None:
+        return None
+
+    def resolve(self, requests: tuple[object, ...], *, remaining_time: object) -> dict[str, str]:
+        names = [cast("Any", request).name for request in requests]
+        self._state.resolve_calls.append(names)
+        return {name: self._state._values[name] for name in names if name in self._state._values}
+
+
+class _PredictionContext(AbstractContextManager[Any]):
+    def __init__(self, state: _FakeBackend) -> None:
+        self._state = state
+
+    def __enter__(self) -> _PredictionClient:
+        return _PredictionClient(self._state)
+
+    def __exit__(self, *args: object) -> None:
+        return None
 
 
 def _decl(name: str, **kw: object) -> SecretDecl:
     return SecretDecl(name=name, description="", **kw)  # type: ignore[arg-type]
 
 
-def _chain(*backends: _FakeBackend) -> list[ActiveBackend]:
-    return cast("list[ActiveBackend]", list(backends))
+def _chain(*backends: _FakeBackend) -> list[ActiveSource]:
+    from agentworks.capabilities.secret_backend import SecretBackend
+    from agentworks.capabilities.secret_backend.client import InteractionBroker, RemainingTime, SecretSourceClient
+    from agentworks.secrets.resolve import ActiveSource
+
+    out: list[ActiveSource] = []
+    for state in backends:
+
+        class _PredictionBackend(SecretBackend):
+            _state: ClassVar[_FakeBackend] = state
+            contract_version: ClassVar[int] = 2
+            config_model: ClassVar[type[AgwModel]] = _PredictionConfig
+            mapping_model: ClassVar[type[AgwRootModel[Any]]] = _PredictionMapping
+            name: ClassVar[str] = "prediction"
+            description: ClassVar[str] = "prediction fixture"
+            prose = None
+            interactive: ClassVar[bool] = state.interactive
+
+            @classmethod
+            def backend_readiness(cls) -> Readiness:
+                return Readiness.ready()
+
+            @classmethod
+            def would_attempt(cls, secret_name: str, *, mapping_present: bool) -> bool:
+                return True
+
+            @classmethod
+            def describe_lookup(cls, secret_name: str, mapping: object) -> str:
+                return f"<{cls._state.name}>"
+
+            @classmethod
+            def create_client(
+                cls,
+                *,
+                source_name: str,
+                config: AgwModel,
+                interaction_broker: InteractionBroker | None,
+                remaining_time: RemainingTime,
+            ) -> AbstractContextManager[SecretSourceClient]:
+                return cast("AbstractContextManager[SecretSourceClient]", _PredictionContext(cls._state))
+
+        out.append(
+            ActiveSource(
+                source=SecretSourceDecl(name=state.name, backend=CapabilityBlock.of("prediction")),
+                backend_class=_PredictionBackend,
+                config=_PredictionConfig(name="prediction"),
+                readiness=state.readiness,
+            )
+        )
+    return out
 
 
-def test_prediction_reports_the_first_producing_backend() -> None:
+def test_prediction_reports_the_first_attemptable_source() -> None:
     chain = _chain(
         _FakeBackend("env-var"),  # attempts but produces nothing
         _FakeBackend("op", values={"a": "1"}),
     )
-    assert predict_resolution([_decl("a")], chain) == {"a": "op"}
+    preview = predict_resolution([_decl("a")], chain, interaction=InteractionPolicy.REFUSE)["a"]
+    assert preview.category is PreviewCategory.ATTEMPTABLE
+    assert preview.source == "env-var"
+    assert chain[0].source.name == "env-var"
 
 
 def test_prediction_skips_a_not_ready_backend() -> None:
@@ -165,11 +242,15 @@ def test_prediction_skips_a_not_ready_backend() -> None:
         _FakeBackend("op", values={"a": "1"}, not_ready_reason="op CLI not installed"),
         _FakeBackend("env-var", values={"a": "2"}),
     )
-    assert predict_resolution([_decl("a")], chain) == {"a": "env-var"}
+    preview = predict_resolution([_decl("a")], chain, interaction=InteractionPolicy.REFUSE)["a"]
+    assert preview.category is PreviewCategory.ATTEMPTABLE
+    assert preview.source == "env-var"
+    assert preview.skipped_not_ready == (SkippedSource(source="op", reason="op CLI not installed"),)
 
 
 def test_prediction_none_when_nothing_would_resolve() -> None:
-    assert predict_resolution([_decl("a")], _chain(_FakeBackend("env-var"))) == {"a": None}
+    preview = predict_resolution([], _chain(_FakeBackend("env-var")), interaction=InteractionPolicy.REFUSE)
+    assert preview == {}
 
 
 def test_interactive_backend_predicted_resolvable_when_interactive(
@@ -181,7 +262,9 @@ def test_interactive_backend_predicted_resolvable_when_interactive(
 
     monkeypatch.setattr(output, "is_interactive", lambda: True)
     prompt = _FakeBackend("prompt", interactive=True)
-    assert predict_resolution([_decl("a")], _chain(prompt)) == {"a": "prompt"}
+    preview = predict_resolution([_decl("a")], _chain(prompt), interaction=InteractionPolicy.ALLOW)["a"]
+    assert preview.category is PreviewCategory.ATTEMPTABLE
+    assert preview.source == "prompt"
     assert prompt.resolve_calls == []
 
 
@@ -195,22 +278,24 @@ def test_interactive_backend_predicted_unresolvable_when_non_interactive(
 
     monkeypatch.setattr(output, "is_interactive", lambda: False)
     prompt = _FakeBackend("prompt", interactive=True)
-    assert predict_resolution([_decl("a")], _chain(prompt)) == {"a": None}
+    preview = predict_resolution([_decl("a")], _chain(prompt), interaction=InteractionPolicy.REFUSE)["a"]
+    assert preview.category is PreviewCategory.REFUSED_INTERACTION
+    assert preview.source == "prompt"
     assert prompt.resolve_calls == []
 
 
 def test_prediction_respects_backend_opt_out() -> None:
     prompt = _FakeBackend("prompt", interactive=True)
     decl = _decl("a", backend_mappings={"prompt": False})
-    assert predict_resolution([decl], _chain(prompt)) == {"a": None}
+    preview = predict_resolution([decl], _chain(prompt), interaction=InteractionPolicy.REFUSE)["a"]
+    assert preview.category is PreviewCategory.UNAVAILABLE
 
 
 def test_prediction_covers_every_declaration() -> None:
     chain = _chain(_FakeBackend("env-var", values={"a": "1"}))
-    assert predict_resolution([_decl("a"), _decl("b")], chain) == {
-        "a": "env-var",
-        "b": None,
-    }
+    predictions = predict_resolution([_decl("a"), _decl("b")], chain, interaction=InteractionPolicy.REFUSE)
+    assert tuple(predictions) == ("a", "b")
+    assert all(preview.category is PreviewCategory.ATTEMPTABLE for preview in predictions.values())
 
 
 # -- require_predicted_refs --------------------------------------------------
@@ -257,7 +342,7 @@ def test_require_predicted_refs_prompt_only_passes_when_interactive(
     config, registry = _env_and_prompt_setup(tmp_path)
     monkeypatch.delenv("AW_SECRET_PROXMOX_TOKEN", raising=False)
     monkeypatch.setattr(output, "is_interactive", lambda: True)
-    require_predicted_refs("vm-site/px", (_px_ref(),), config, registry)
+    require_predicted_refs("vm-site/px", (_px_ref(),), config, registry, interaction=InteractionPolicy.ALLOW)
 
 
 def test_require_predicted_refs_prompt_only_fails_fast_when_non_interactive(
@@ -268,17 +353,17 @@ def test_require_predicted_refs_prompt_only_fails_fast_when_non_interactive(
     harmless resolve-end failure."""
     from agentworks import output
 
-    config, registry = _env_and_prompt_setup(tmp_path)
+    config, registry = _px_site_setup(tmp_path, '"prompt"')
     monkeypatch.delenv("AW_SECRET_PROXMOX_TOKEN", raising=False)
     monkeypatch.setattr(output, "is_interactive", lambda: False)
-    with pytest.raises(ConfigError, match="not resolvable by any active backend"):
-        require_predicted_refs("vm-site/px", (_px_ref(),), config, registry)
+    with pytest.raises(ConfigError, match="not attemptable by any active source"):
+        require_predicted_refs("vm-site/px", (_px_ref(),), config, registry, interaction=InteractionPolicy.REFUSE)
 
 
 def test_require_predicted_refs_passes_when_resolvable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config, registry = _env_only_setup(tmp_path)
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "tok")
-    require_predicted_refs("vm-site/px", (_px_ref(),), config, registry)
+    require_predicted_refs("vm-site/px", (_px_ref(),), config, registry, interaction=InteractionPolicy.REFUSE)
 
 
 def test_require_predicted_refs_refuses_with_owner_usage_framing(
@@ -288,15 +373,15 @@ def test_require_predicted_refs_refuses_with_owner_usage_framing(
     centralization (the retired base-preflight prediction's framing):
     owner display, secret name, declared usage, and the describe
     hint."""
-    config, registry = _env_only_setup(tmp_path)
+    config, registry = _px_site_setup(tmp_path, '"prompt"')
     monkeypatch.delenv("AW_SECRET_PROXMOX_TOKEN", raising=False)
     with pytest.raises(ConfigError) as exc:
-        require_predicted_refs("vm-site/px", (_px_ref(),), config, registry)
+        require_predicted_refs("vm-site/px", (_px_ref(),), config, registry, interaction=InteractionPolicy.REFUSE)
     assert str(exc.value) == (
-        "vm-site/px: secret 'proxmox-token' (the Proxmox API token) is not resolvable by any active backend"
+        "vm-site/px: secret 'proxmox-token' (the Proxmox API token) is not attemptable by any active source"
     )
     assert exc.value.hint == (
-        "ensure secret 'proxmox-token' is mapped to a backend. Run `agw secret describe proxmox-token` for details."
+        "preview category: refused-interaction. Run `agw secret describe proxmox-token` for details."
     )
 
 
@@ -304,7 +389,7 @@ def test_require_predicted_refs_empty_refs_is_a_no_op() -> None:
     """The early return: with nothing declared, neither the config nor
     the registry is touched (the cast object would explode on any
     lookup), so a secret-free node's preflight costs nothing here."""
-    require_predicted_refs("vm/box", (), None, cast("Registry", object()))
+    require_predicted_refs("vm/box", (), None, cast("Registry", object()), interaction=InteractionPolicy.REFUSE)
 
 
 def test_require_predicted_refs_without_config_is_loud(
@@ -316,7 +401,7 @@ def test_require_predicted_refs_without_config_is_loud(
     resolver guard's successor)."""
     _config, registry = _env_only_setup(tmp_path)
     with pytest.raises(ConfigError, match="without config on the context") as exc:
-        require_predicted_refs("vm-site/px", (_px_ref(),), None, registry)
+        require_predicted_refs("vm-site/px", (_px_ref(),), None, registry, interaction=InteractionPolicy.REFUSE)
     assert str(exc.value).startswith("vm-site/px: ")
 
 
@@ -416,11 +501,11 @@ def test_require_declared_refs_says_nothing_about_resolvability(
     from agentworks import output
     from agentworks.orchestration.secrets import require_declared_refs
 
-    config, registry = _px_site_setup(tmp_path, '"env-var", "prompt"')
+    config, registry = _px_site_setup(tmp_path, '"prompt"')
     monkeypatch.delenv("AW_SECRET_PROXMOX_TOKEN", raising=False)
     monkeypatch.setattr(output, "is_interactive", lambda: False)
 
     require_declared_refs("vm-site/px", (_px_ref(),), registry)  # no raise
     # ... while the prediction the SWEEP runs over the same reference does refuse.
-    with pytest.raises(ConfigError, match="not resolvable"):
-        require_predicted_refs("vm-site/px", (_px_ref(),), config, registry)
+    with pytest.raises(ConfigError, match="not attemptable"):
+        require_predicted_refs("vm-site/px", (_px_ref(),), config, registry, interaction=InteractionPolicy.REFUSE)

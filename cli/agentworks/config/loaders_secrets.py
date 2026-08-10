@@ -1,20 +1,20 @@
 """Secrets-related settings loaders: ``[secret_config]`` and ``[plugins]``.
 
-Both are genuine settings. ``[secret_config]`` decides WHICH backends are
-active and in what order; ``[plugins]`` is the system-plugin opt-in.
+Both are genuine settings. ``[secret_config]`` decides WHICH declared sources
+are active and in what order; ``[plugins]`` is the system-plugin opt-in.
 
 Two neighbours are deliberately absent. The ``[secrets.*]`` resource loader
 (``_load_secrets``) is gone: config.toml stopped declaring resources
 (ADR 0022), and secrets are decoded from YAML manifests by
 ``agentworks.manifests.decode``. ``[secret_backends.*]`` is gone the same
-way and for the same reason: it names a resource (a ``secret-backend`` row)
-rather than configuring anything, so it is swept by
+way: it was a retired backend-selection row that carried no configuration, so
+it is swept by
 ``_raise_for_resource_sections`` in ``agentworks.config.load`` alongside
 every other retired resource section, instead of being half-warned and
 half-refused here against the built-in backend registry.
 
-``[secret_config].backends`` NAMES those same backends and stays, because
-choosing and ordering them is configuration. Only its SHAPE is checked here:
+``[secret_config].backends`` now NAMES declared ``secret-source`` resources and
+stays, because choosing and ordering them is configuration. Only its SHAPE is checked here:
 the registry does not exist at settings-load time, so whether the names
 resolve is settled after finalize, by
 ``agentworks.config.references.validate_setting_references``.
@@ -40,12 +40,12 @@ def _load_secret_config(
     issues: list[str],
     decls: _SectionLineMap,
 ) -> SecretConfig:
-    """Load [secret_config] with the enabled-backends precedence list.
+    """Load [secret_config] with the active-source precedence list.
 
     Absence of the [secret_config] table OR absence of the ``backends`` key
     within it falls back to ``SecretConfig()``'s default chain
-    (``DEFAULT_BACKEND_CHAIN``). An explicit ``backends = []`` is respected
-    as "no backends" (operator opts out of resolution entirely).
+    (``DEFAULT_SOURCE_CHAIN``). An explicit ``backends = []`` is respected
+    as "no sources" (operator opts out of resolution entirely).
     """
     declared_at = decls.lookup("secret_config")
     if "secret_config" not in data:
@@ -108,8 +108,8 @@ def _load_plugins(
 
 
 # Neither of the two post-load secret checks lives here, because neither can:
-# the chain names backends that plugins supply, which are unknowable at
-# config-load time. The chain-NAME check is the generic settings-reference
+# the chain names sources that manifests and built-ins supply, which are
+# unavailable at config-load time. The chain-NAME check is the generic settings-reference
 # pass (``agentworks.config.references``); the unreachable-secret check is
 # ``agentworks.secrets.resolve.validate_chain`` (ADR 0016). Both run at the
 # composition boundary, in that order.

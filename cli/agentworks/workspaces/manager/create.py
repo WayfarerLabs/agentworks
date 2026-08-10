@@ -12,6 +12,7 @@ from agentworks.db.projections import project_session_mode
 from agentworks.errors import AlreadyExistsError, NotFoundError
 from agentworks.name_filters import validate_name_filters
 from agentworks.naming import validate_name
+from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 from agentworks.workspaces.manager._common import _guard_vm_status, _resolve_vm, _workspace_scope
 
 if TYPE_CHECKING:
@@ -131,6 +132,7 @@ def create_workspace(
     vm_name: str | None = None,
     template_name: str | None = None,
     open_vscode: bool = False,
+    interaction: InteractionPolicy,
 ) -> None:
     """Create a workspace on a VM.
 
@@ -147,6 +149,7 @@ def create_workspace(
     workspace, exactly the imperative shape), so no realization log
     exists here.
     """
+    interaction = validate_interaction_policy(interaction)
     from agentworks.bootstrap import load_request_registry
 
     # build_registry runs first so framework miss-policies fire before
@@ -203,11 +206,18 @@ def create_workspace(
     from agentworks.vms.nodes import live_vm_node
     from agentworks.workspaces.nodes import pending_workspace_node
 
-    resolver = Resolver(config, registry)
+    resolver = Resolver(config, registry, interaction=interaction)
 
     vm_node = live_vm_node(db, config, registry, vm)
 
-    pending_workspace = pending_workspace_node(db, config, ws_name, vm_node, template_name)
+    pending_workspace = pending_workspace_node(
+        db,
+        config,
+        ws_name,
+        vm_node,
+        template_name,
+        interaction=interaction,
+    )
     nodes = walk(pending_workspace)
     # The walk supplies the boundary union (the site's config secrets;
     # a workspace template's env secrets are runtime inputs, delivered
@@ -224,7 +234,12 @@ def create_workspace(
         # arrive pre-seeded from the gate). This command has never
         # framed phases, so no banners here; the realize body never
         # frames either.
-        preflight_all(nodes, RunContext(config=config, operation_scope=scope), registry=registry)
+        preflight_all(
+            nodes,
+            RunContext(config=config, operation_scope=scope),
+            registry=registry,
+            interaction=interaction,
+        )
         resolver.resolve()
 
         from agentworks.workspaces.realize import realize_workspace

@@ -19,6 +19,7 @@ from agentworks.config import load_config
 from agentworks.db import Database
 from agentworks.env.show import ResolvedEnvRow, show_env
 from agentworks.errors import ValidationError
+from agentworks.secrets.policy import InteractionPolicy
 from tests.conftest import ManifestDoc, write_manifests
 
 if TYPE_CHECKING:
@@ -113,7 +114,7 @@ def test_no_flags_raises_validation_error(db: Database, tmp_path: Path) -> None:
     config = load_config(cfg, warn_issues=False)
     _seed_db(db)
     with pytest.raises(ValidationError, match="requires a context"):
-        show_env(db, config)
+        show_env(db, config, interaction=InteractionPolicy.REFUSE)
 
 
 def test_unknown_vm_raises_validation_error(db: Database, tmp_path: Path) -> None:
@@ -121,7 +122,7 @@ def test_unknown_vm_raises_validation_error(db: Database, tmp_path: Path) -> Non
     config = load_config(cfg, warn_issues=False)
     _seed_db(db)
     with pytest.raises(ValidationError, match="VM 'nope' not found"):
-        show_env(db, config, vm_name="nope")
+        show_env(db, config, vm_name="nope", interaction=InteractionPolicy.REFUSE)
 
 
 def test_session_flag_auto_resolves_workspace_agent_vm(
@@ -137,7 +138,7 @@ def test_session_flag_auto_resolves_workspace_agent_vm(
     config = load_config(cfg, warn_issues=False)
     _seed_db(db, with_workspace=True, with_agent=True, with_session=True)
 
-    rows = show_env(db, config, session_name="s1")
+    rows = show_env(db, config, session_name="s1", interaction=InteractionPolicy.REFUSE)
     # Per-context dynamic identity vars are surfaced.
     keys = {r.key: r for r in rows}
     assert keys["AGENTWORKS_SESSION"].rendered_value == "s1"
@@ -153,7 +154,7 @@ def test_workspace_flag_auto_resolves_vm(db: Database, tmp_path: Path) -> None:
     config = load_config(cfg, warn_issues=False)
     _seed_db(db)
 
-    rows = show_env(db, config, workspace_name="ws-a")
+    rows = show_env(db, config, workspace_name="ws-a", interaction=InteractionPolicy.REFUSE)
     keys = {r.key: r for r in rows}
     assert "AGENTWORKS_WORKSPACE" in keys
     assert keys["AGENTWORKS_WORKSPACE"].rendered_value == "ws-a"
@@ -197,18 +198,18 @@ def test_copied_workspace_template_shows_no_workspace_env_and_does_not_crash(
     db._conn.commit()
 
     # --workspace on the copied marker: renders, with no workspace-scope env.
-    copied_rows = show_env(db, config, workspace_name="ws-copied")
+    copied_rows = show_env(db, config, workspace_name="ws-copied", interaction=InteractionPolicy.REFUSE)
     assert {r.key for r in copied_rows}  # rendered something (identity vars)
     assert not any(r.scope == "workspace" for r in copied_rows)
 
     # --session whose workspace is the copied marker: same tolerance via the
     # session-inferred workspace.
-    session_rows = show_env(db, config, session_name="s-copied")
+    session_rows = show_env(db, config, session_name="s-copied", interaction=InteractionPolicy.REFUSE)
     assert not any(r.scope == "workspace" for r in session_rows)
 
     # Positive control: a real workspace template still shows its env, at
     # the workspace scope.
-    proj_rows = show_env(db, config, workspace_name="ws-proj")
+    proj_rows = show_env(db, config, workspace_name="ws-proj", interaction=InteractionPolicy.REFUSE)
     ws_var = next(r for r in proj_rows if r.key == "WS_VAR")
     assert ws_var.scope == "workspace"
     assert ws_var.rendered_value == "ws-val"
@@ -236,7 +237,7 @@ def test_session_scope_wins_over_vm_for_same_key(
     db._conn.execute("UPDATE sessions SET template = 'shell' WHERE name = 's1'")
     db._conn.commit()
 
-    rows = show_env(db, config, session_name="s1")
+    rows = show_env(db, config, session_name="s1", interaction=InteractionPolicy.REFUSE)
     editor = next(r for r in rows if r.key == "EDITOR")
     assert editor.rendered_value == "nvim"
     assert editor.scope == "session"
@@ -254,11 +255,11 @@ def test_admin_env_appears_only_when_no_agent_context(
     _seed_db(db, with_agent=True)
 
     # --vm only: admin scope applies (no agent context).
-    rows_admin = show_env(db, config, vm_name="vm-1")
+    rows_admin = show_env(db, config, vm_name="vm-1", interaction=InteractionPolicy.REFUSE)
     assert any(r.key == "HTTP_PROXY" and r.scope == "admin" for r in rows_admin)
 
     # --agent: admin scope does NOT apply (agent context excludes it).
-    rows_agent = show_env(db, config, agent_name="claude")
+    rows_agent = show_env(db, config, agent_name="claude", interaction=InteractionPolicy.REFUSE)
     assert not any(r.key == "HTTP_PROXY" for r in rows_agent)
 
 
@@ -282,7 +283,7 @@ def test_secret_redacted_by_default(db: Database, tmp_path: Path) -> None:
     config = load_config(cfg, warn_issues=False)
     _seed_db(db)
 
-    rows = show_env(db, config, vm_name="vm-1")
+    rows = show_env(db, config, vm_name="vm-1", interaction=InteractionPolicy.REFUSE)
     api = next(r for r in rows if r.key == "API_KEY")
     assert api.is_secret
     assert api.rendered_value == "<from secret: shared-token>"
@@ -309,7 +310,7 @@ def test_secret_revealed_with_flag(
     config = load_config(cfg, warn_issues=False)
     _seed_db(db)
 
-    rows = show_env(db, config, vm_name="vm-1", reveal_secrets=True)
+    rows = show_env(db, config, vm_name="vm-1", reveal_secrets=True, interaction=InteractionPolicy.REFUSE)
     api = next(r for r in rows if r.key == "API_KEY")
     assert api.is_secret
     assert api.rendered_value == "from-operator-env"
@@ -335,7 +336,7 @@ def test_identity_var_overlays_user_env(
     db._conn.execute("UPDATE sessions SET template = 'shell' WHERE name = 's1'")
     db._conn.commit()
 
-    rows = show_env(db, config, session_name="s1")
+    rows = show_env(db, config, session_name="s1", interaction=InteractionPolicy.REFUSE)
     session_row = next(r for r in rows if r.key == "AGENTWORKS_SESSION")
     assert session_row.rendered_value == "s1"  # identity wins
     assert session_row.scope == "identity"
@@ -353,7 +354,7 @@ def test_identity_subset_skips_vm_stable_vars(
     config = load_config(cfg, warn_issues=False)
     _seed_db(db, with_workspace=True, with_agent=True, with_session=True)
 
-    rows = show_env(db, config, session_name="s1")
+    rows = show_env(db, config, session_name="s1", interaction=InteractionPolicy.REFUSE)
     keys = {r.key for r in rows}
     for excluded in ("AGENTWORKS_VM", "AGENTWORKS_VM_HOST", "AGENTWORKS_PLATFORM"):
         assert excluded not in keys, f"{excluded} should not appear in env show output"
@@ -374,6 +375,6 @@ def test_return_type_is_list_of_resolved_env_rows(
     config = load_config(cfg, warn_issues=False)
     _seed_db(db)
 
-    rows = show_env(db, config, vm_name="vm-1")
+    rows = show_env(db, config, vm_name="vm-1", interaction=InteractionPolicy.REFUSE)
     assert isinstance(rows, list)
     assert all(isinstance(r, ResolvedEnvRow) for r in rows)

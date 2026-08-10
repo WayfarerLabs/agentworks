@@ -215,11 +215,11 @@ class TyperHandler:
             while True:
                 value = str(click.prompt(f"{_pad(level)}{label}", err=True, default="", hide_input=True))
                 if value.strip():
-                    break
+                    return value
                 typer.echo("(empty, try again)", err=True)
-            return value
         except (click.exceptions.Abort, typer.Abort):
-            raise UserAbort("interrupted") from None
+            pass
+        raise UserAbort("interrupted") from None
 
     def progress(self, label: str, level: int, total: int | None = None) -> Progress:
         typer.echo(f"{_pad(level + 1)}{label}...")

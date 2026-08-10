@@ -1,10 +1,8 @@
 """Secret declarations, backends, and the resolve loop.
 
-See ADR 0016 for the model: the ``[secret_config].backends`` chain
-(config) names registered backend capabilities
-(``SECRET_BACKEND_REGISTRY``), mirrored into the resource Registry as
-read-only ``secret-backend`` capability resources; the resolution loop
-consumes the ``SecretBackend`` API directly.
+The capability contract and registry live in
+``agentworks.capabilities.secret_backend``. This package owns declarations,
+resolution, inspection, and orchestration.
 """
 
 from __future__ import annotations
@@ -14,23 +12,24 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from agentworks.guide.contract import TopicContribution
 
-from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
 from agentworks.secrets.base import (
     SecretConfig,
     SecretDecl,
 )
-from agentworks.secrets.env_var import env_var_name_for
 from agentworks.secrets.orchestration import (
     SecretTarget,
     compute_needed_secrets,
     resolve_for_command,
 )
-from agentworks.secrets.resolve import (
-    ActiveBackend,
-    active_backends,
-    resolve_secrets,
-    validate_chain,
+from agentworks.secrets.outcomes import (
+    ResolutionCategory,
+    ResolutionDetail,
+    ResolutionOutcome,
+    ResolutionRemediation,
 )
+from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.resolve import validate_chain
+from agentworks.secrets.sources import SecretSourceDecl, publish_builtin_secret_sources
 
 
 def _load_guide_contributions() -> tuple[TopicContribution, ...]:
@@ -47,16 +46,18 @@ guide_contributions = _load_guide_contributions
 
 
 __all__ = [
-    "SECRET_BACKEND_REGISTRY",
-    "ActiveBackend",
+    "InteractionPolicy",
+    "ResolutionCategory",
+    "ResolutionDetail",
+    "ResolutionOutcome",
+    "ResolutionRemediation",
     "SecretConfig",
     "SecretDecl",
+    "SecretSourceDecl",
     "SecretTarget",
-    "active_backends",
     "compute_needed_secrets",
-    "env_var_name_for",
     "guide_contributions",
+    "publish_builtin_secret_sources",
     "resolve_for_command",
-    "resolve_secrets",
     "validate_chain",
 ]

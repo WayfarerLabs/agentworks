@@ -5,9 +5,8 @@
 ``agw secret describe <name>``. Both follow the same "build structured
 view, render via ``agentworks.output``" pattern.
 
-Neither command prompts the operator nor resolves a secret
-value for display; they report state by asking the active backends
-(``would_attempt`` / ``describe_lookup``) directly.
+Neither command prompts the operator nor resolves a secret value for
+display; both consume the pure active-source projection.
 """
 
 from __future__ import annotations
@@ -16,6 +15,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.errors import StateError
 from agentworks.machine_output import (
     JsonObject,
     JsonValue,
@@ -26,6 +26,8 @@ from agentworks.machine_output import (
 from agentworks.resources.inspect import used_by_for
 from agentworks.resources.render import format_origin_line, format_reference_entry
 from agentworks.secrets.kinds import SECRET_KIND_NAME
+from agentworks.secrets.preview import PreviewCategory, ResolutionPreview, preview_resolution
+from agentworks.secrets.sources import SourceProvenance, source_provenance
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -36,11 +38,11 @@ if TYPE_CHECKING:
     from agentworks.resources.reference import ReferenceEntry
 
 
-@dataclass(frozen=True)
-class SecretCell:
-    """One (secret, backend) cell in the table."""
+@dataclass(frozen=True, slots=True)
+class SecretSourceCell:
+    """One (secret, source) cell in the list table."""
 
-    backend: str
+    source: str
     would_attempt: bool
     """False = this backend won't attempt this secret (mapping=false or no
     default convention and no explicit mapping). True = backend will try."""
@@ -58,7 +60,7 @@ class SecretCell:
 
 @dataclass(frozen=True)
 class SecretRow:
-    """One declared secret, with a cell per active backend.
+    """One declared secret, with a cell per active source.
 
     ``description`` is the operator-supplied text for operator-declared
     secrets, or the framework-synthesized ``"auto-declared by k:n[ (and
@@ -68,21 +70,21 @@ class SecretRow:
 
     name: str
     description: str
-    cells: tuple[SecretCell, ...]
+    cells: tuple[SecretSourceCell, ...]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SecretTable:
     """Full table for ``agw secret list``.
 
-    ``backends`` lists the columns (backend names) in the configured
+    ``sources`` lists the columns (source names) in the configured
     chain order (precedence order). ``rows`` is one per
     Registry-published secret (operator-declared and auto-declared
     alike). ``operator_count`` / ``auto_count`` drive the header
     summary.
     """
 
-    backends: tuple[str, ...]
+    sources: tuple[str, ...]
     rows: tuple[SecretRow, ...]
     operator_count: int
     auto_count: int
@@ -91,14 +93,14 @@ class SecretTable:
 def secret_table_data(table: SecretTable) -> JsonObject:
     """Project list facts into the closed ``secret.list`` JSON data shape."""
     return {
-        "backends": list(table.backends),
+        "sources": list(table.sources),
         "secrets": [
             {
                 "name": row.name,
                 "description": row.description,
-                "backends": [
+                "sources": [
                     {
-                        "backend": cell.backend,
+                        "source": cell.source,
                         "would_attempt": cell.would_attempt,
                         "identifier": cell.identifier,
                         "not_ready_reason": cell.not_ready_reason,
@@ -116,7 +118,7 @@ def secret_table_data(table: SecretTable) -> JsonObject:
 
 
 def build_secret_table(config: Config, registry: Registry) -> SecretTable:
-    """Build a (secrets x backends) table.
+    """Build a (secrets x sources) table.
 
     The table iterates the Registry's ``"secret"`` kind so auto-declared
     secrets surface in ``agw secret list`` alongside operator-declared
@@ -124,15 +126,13 @@ def build_secret_table(config: Config, registry: Registry) -> SecretTable:
     tell which secret came from where; the header summary reports the
     counts.
 
-    Walks the active backends in precedence order; for each
-    Registry-published secret asks each backend whether it would attempt
-    and what identifier it would use. Pure config + registry derived;
-    never probes a backend or resolves a value.
+    Walks active sources in precedence order and consumes only their pure
+    lookup projections. No client is constructed and no value is read.
     """
-    from agentworks.secrets.resolve import active_backends
+    from agentworks.secrets.resolve import _BackendProtocolError, _lookup_projection, active_sources
 
-    backends = active_backends(config, registry)
-    backend_names = tuple(b.name for b in backends)
+    sources = active_sources(config, registry)
+    source_names = tuple(source.name for source in sources)
 
     operator_count = 0
     auto_count = 0
@@ -148,25 +148,31 @@ def build_secret_table(config: Config, registry: Registry) -> SecretTable:
         # built-in origins (bundled manifests, capability rows) but only
         # for non-secret kinds.
 
-        cells = tuple(
-            SecretCell(
-                backend=b.name,
-                would_attempt=b.would_attempt(decl),
-                identifier=b.describe_lookup(decl),
-                not_ready_reason=b.readiness.reason,
+        cells: list[SecretSourceCell] = []
+        for source in sources:
+            try:
+                request, identifier = _lookup_projection(decl, source)
+            except _BackendProtocolError:
+                raise StateError(f"secret source {source.name!r} violated the preview contract") from None
+            would_attempt = request is not None
+            cells.append(
+                SecretSourceCell(
+                    source=source.name,
+                    would_attempt=would_attempt,
+                    identifier=identifier,
+                    not_ready_reason=source.readiness.reason,
+                )
             )
-            for b in backends
-        )
         rows.append(
             SecretRow(
                 name=decl.name,
                 description=decl.description,
-                cells=cells,
+                cells=tuple(cells),
             )
         )
 
     return SecretTable(
-        backends=backend_names,
+        sources=source_names,
         rows=tuple(rows),
         operator_count=operator_count,
         auto_count=auto_count,
@@ -191,7 +197,7 @@ def render_secret_table(table: SecretTable) -> None:
 
     - ``No secrets in the resource registry.`` -- nothing declared or
       auto-declared.
-    - ``No active secret backends.`` -- ``[secret_config].backends = []``.
+    - ``No active secret sources.`` -- ``[secret_config].backends = []``.
 
     Otherwise a header + table with one column per active (opted-in) backend
     in chain order. Cell semantics, per R9.7 (never the overloaded
@@ -209,10 +215,10 @@ def render_secret_table(table: SecretTable) -> None:
     if not table.rows:
         output.info("No secrets in the resource registry.")
         return
-    if not table.backends:
+    if not table.sources:
         output.info(
-            "No active secret backends. Set [secret_config].backends in your "
-            "config (or leave it unset to use the default chain).",
+            "No active secret sources. Set [secret_config].backends to source "
+            "names (or leave it unset to use env-var then prompt).",
         )
         return
 
@@ -253,7 +259,7 @@ def render_secret_table(table: SecretTable) -> None:
                 cells.append("would attempt")
         rendered.append(tuple(cells))
 
-    headers = ("NAME", "DESCRIPTION", *table.backends)
+    headers = ("NAME", "DESCRIPTION", *table.sources)
     widths = [max(len(headers[i]), *(len(r[i]) for r in rendered)) for i in range(len(headers))]
 
     def _fmt(cols: tuple[str, ...]) -> str:
@@ -268,9 +274,9 @@ def render_secret_table(table: SecretTable) -> None:
 # -- agw secret describe ---------------------------------------------------
 
 
-@dataclass(frozen=True)
-class BackendMapping:
-    """One backend's view of a secret for the describe view's mapping table.
+@dataclass(frozen=True, slots=True)
+class SourceMapping:
+    """One source's view of a secret for the describe mapping table.
 
     Fields express what the backend would do at resolution time without
     actually resolving (no I/O):
@@ -278,7 +284,7 @@ class BackendMapping:
     - ``backend``: the backend name (``"env-var"``, ``"prompt"``, ...).
     - ``would_attempt``: True if the backend would try this secret at
       resolution time. False = explicit opt-out via
-      ``backend_mappings.<backend> = false``, or the backend has no
+      ``backend_mappings.<source> = false``, or the selected backend has no
       default convention for this secret and no operator override.
     - ``identifier``: the backend's lookup identifier (env-var name,
       ``op://`` URI, vault path, etc.) when meaningful. ``None`` for
@@ -286,37 +292,15 @@ class BackendMapping:
       won't attempt.
     """
 
+    source: str
     backend: str
+    provenance: SourceProvenance
     would_attempt: bool
     identifier: str | None
     not_ready_reason: str | None
     """The backend node's stored readiness reason, or None when ready. The
     mapping is still shown when not-ready (the config is real; it just cannot
     run here now), annotated ``(not ready: <reason>)`` (R9.1)."""
-
-
-@dataclass(frozen=True)
-class ResolutionPreview:
-    """What the active backend chain would do at resolution time.
-
-    - ``resolved_by``: the NAME of the first backend in the chain that
-      would yield a value for this secret right now (e.g. ``"env-var"``
-      when ``AW_SECRET_<NAME>`` is set, ``"prompt"`` when the chain
-      falls through to an interactive prompt). ``None`` = no active
-      backend would resolve the secret. Readiness-aware: a not-ready
-      backend is skipped and never named here (R9.6), while a ready
-      ``prompt`` still previews optimistically on would-attempt alone.
-    - ``available``: True iff ``resolved_by`` is not None. Convenience
-      flag for the renderer (mirrors ``resolved_by is not None``).
-    - ``skipped_not_ready``: the (backend, reason) pairs the walk skipped
-      because their node is not-ready on this host, in chain order. Shown
-      as ``skipped: not ready: <reason>`` so the preview is honest about the
-      offline layer under the optimistic interactivity preview (R9.6).
-    """
-
-    resolved_by: str | None
-    available: bool
-    skipped_not_ready: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -327,7 +311,7 @@ class SecretDescription:
     as a multi-line block (variant + sub-fields). ``description`` is the
     operator-supplied text or the framework-synthesized text for
     auto-declared secrets (set during ``Registry.finalize``). ``hint``
-    is the operator-set prompt hint (``[secrets.<name>].hint``),
+    is the operator-set prompt hint from the ``secret`` manifest,
     surfaced for debugging "why isn't my prompt showing the helpful
     hint" without triggering a prompt.
 
@@ -346,7 +330,7 @@ class SecretDescription:
     hint: str | None
     references: tuple[ReferenceEntry, ...]
     used_by: tuple[InstanceRef, ...] | None
-    backend_mappings: tuple[BackendMapping, ...]
+    source_mappings: tuple[SourceMapping, ...]
     resolution: ResolutionPreview
 
 
@@ -367,21 +351,24 @@ def secret_description_data(description: SecretDescription) -> JsonObject:
             "hint": description.hint,
             "references": references,
             "used_by": used_by,
-            "backend_mappings": [
+            "source_mappings": [
                 {
+                    "source": mapping.source,
                     "backend": mapping.backend,
+                    "provenance": mapping.provenance.value,
                     "would_attempt": mapping.would_attempt,
                     "identifier": mapping.identifier,
                     "not_ready_reason": mapping.not_ready_reason,
                 }
-                for mapping in description.backend_mappings
+                for mapping in description.source_mappings
             ],
             "resolution": {
-                "resolved_by": description.resolution.resolved_by,
-                "available": description.resolution.available,
+                "category": description.resolution.category.value,
+                "source": description.resolution.source,
+                "identifier": description.resolution.identifier,
                 "skipped_not_ready": [
-                    {"backend": backend, "reason": reason}
-                    for backend, reason in description.resolution.skipped_not_ready
+                    {"source": skipped.source, "reason": skipped.reason}
+                    for skipped in description.resolution.skipped_not_ready
                 ],
             },
         },
@@ -396,8 +383,7 @@ def describe_secret(
 ) -> SecretDescription:
     """Build a ``SecretDescription`` for one secret in the registry.
 
-    No prompting, no resolution for display (the
-    resolution PREVIEW probes non-interactive backends only). Raises
+    No prompting and no resolution for display. Raises
     ``NotFoundError`` if ``name`` isn't a
     published secret -- typed at the service layer so CLI / future
     web/API clients all see the same error shape (per the project's
@@ -432,41 +418,26 @@ def describe_secret(
     # reference that resolved here), populated by the finalize pass.
     references: tuple[ReferenceEntry, ...] = registry.graph.dependents_of(SECRET_KIND_NAME, name)
 
-    # Backend mappings: ask each active backend how it would
-    # handle this secret.
-    from agentworks.secrets.resolve import active_backends, preview_resolution
+    from agentworks.secrets.resolve import _BackendProtocolError, _lookup_projection, active_sources
 
-    backends = active_backends(config, registry)
-    mappings = [
-        BackendMapping(
-            backend=b.name,
-            would_attempt=b.would_attempt(decl),
-            identifier=b.describe_lookup(decl),
-            not_ready_reason=b.readiness.reason,
+    sources = active_sources(config, registry)
+    mappings: list[SourceMapping] = []
+    for source in sources:
+        try:
+            request, identifier = _lookup_projection(decl, source)
+        except _BackendProtocolError:
+            raise StateError(f"secret source {source.name!r} violated the preview contract") from None
+        mappings.append(
+            SourceMapping(
+                source=source.name,
+                backend=source.backend_class.name,
+                provenance=source_provenance(source.source),
+                would_attempt=request is not None,
+                identifier=identifier,
+                not_ready_reason=source.readiness.reason,
+            )
         )
-        for b in backends
-    ]
-    # The offline readiness layer under the preview: backends that would
-    # attempt this secret but are not-ready on this host, in chain order.
-    # Resolution skips them (R9.6); the preview shows them as skipped.
-    skipped_not_ready = tuple(
-        (b.name, b.readiness.reason)
-        for b in backends
-        if b.would_attempt(decl) and not b.readiness.is_ready and b.readiness.reason is not None
-    )
-
-    # Resolution preview: which active backend would actually yield a
-    # value right now. ``preview_resolution`` reflects runtime presence
-    # (e.g. is the env var set?), not just configuration shape;
-    # interactive backends are reported without probing. Describe is a
-    # pure inspection surface (FRD R10) that never prompts, so its
-    # preview stays optimistic about interactive availability
-    # (``interactive_available=True``): it describes the secret's
-    # configured capability, not whether THIS invocation happens to have
-    # a TTY. The preflight prediction, which must match a specific run's
-    # mode, is the caller that gates on ``output.is_interactive()``.
-    resolved_by = preview_resolution(decl, backends, interactive_available=True)
-    available = resolved_by is not None
+    resolution = preview_resolution(decl, sources)
 
     return SecretDescription(
         name=name,
@@ -476,12 +447,8 @@ def describe_secret(
         hint=decl.hint,
         references=references,
         used_by=used_by_for(db, registry, SECRET_KIND_NAME, decl),
-        backend_mappings=tuple(mappings),
-        resolution=ResolutionPreview(
-            resolved_by=resolved_by,
-            available=available,
-            skipped_not_ready=skipped_not_ready,
-        ),
+        source_mappings=tuple(mappings),
+        resolution=resolution,
     )
 
 
@@ -543,10 +510,15 @@ def render_secret_description(desc: SecretDescription) -> None:
     # --- Backend mappings ---
     output.info("")
     output.info("Backend mappings:")
-    if not desc.backend_mappings:
-        output.detail("(no active backends in [secret_config].backends)")
+    if not desc.source_mappings:
+        output.detail("(no active sources in [secret_config].backends)")
     else:
-        for mapping in desc.backend_mappings:
+        provenance_labels = {
+            SourceProvenance.OPERATOR_OVERRIDE: "operator override of synthesized default",
+            SourceProvenance.SYNTHESIZED_DEFAULT: "synthesized default",
+            SourceProvenance.DECLARED: "declared",
+        }
+        for mapping in desc.source_mappings:
             if not mapping.would_attempt:
                 status = "won't attempt"
             elif mapping.identifier is not None:
@@ -557,16 +529,16 @@ def render_secret_description(desc: SecretDescription) -> None:
             # shown (the config is real) but is flagged not-ready (R9.1).
             if mapping.would_attempt and mapping.not_ready_reason is not None:
                 status += f" (not ready: {mapping.not_ready_reason})"
-            output.detail(f"- {mapping.backend}: {status}")
+            output.detail(f"- {mapping.source} ({mapping.backend}, {provenance_labels[mapping.provenance]}): {status}")
 
     # --- Resolution preview ---
     output.info("")
     output.info("Resolution preview:")
     # The honest offline layer first: backends the walk skips because they are
     # not-ready here (R9.6), then the optimistic would-resolve verdict under it.
-    for backend_name, reason in desc.resolution.skipped_not_ready:
-        output.detail(f"- skipped {backend_name}: not ready: {reason}")
-    if not desc.resolution.available:
-        output.detail("not available in any active backend")
+    for skipped in desc.resolution.skipped_not_ready:
+        output.detail(f"- skipped {skipped.source}: not ready: {skipped.reason}")
+    if desc.resolution.category is not PreviewCategory.ATTEMPTABLE:
+        output.detail("not attemptable through any active source")
     else:
-        output.detail(f"would resolve via {desc.resolution.resolved_by}")
+        output.detail(f"would attempt via {desc.resolution.source}")

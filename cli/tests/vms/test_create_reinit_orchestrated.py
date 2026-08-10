@@ -20,6 +20,7 @@ from agentworks.config import load_config
 from agentworks.db import VMStatus
 from agentworks.errors import StateError
 from agentworks.output import Role
+from agentworks.secrets.policy import InteractionPolicy
 from agentworks.vms import manager as vm_manager
 from tests.conftest import ManifestDoc, write_manifests
 from tests.orchestrated_fixtures import proxmox_site
@@ -149,7 +150,7 @@ def test_create_rollback_on_keyboard_interrupt_unwinds_the_row(
 
     monkeypatch.setattr(LimaPlatform, "create", _interrupt)
     with pytest.raises(KeyboardInterrupt):
-        vm_manager.create_vm(db, make_config(), name="ivm")
+        vm_manager.create_vm(db, make_config(), name="ivm", interaction=InteractionPolicy.REFUSE)
     assert db.get_vm("ivm") is None
     assert any("rolling back" in w for w in captured_output.warnings)
 
@@ -171,7 +172,7 @@ def test_create_rollback_on_user_abort_unwinds_the_row(
 
     monkeypatch.setattr(LimaPlatform, "create", _abort)
     with pytest.raises(UserAbort):
-        vm_manager.create_vm(db, make_config(), name="avm")
+        vm_manager.create_vm(db, make_config(), name="avm", interaction=InteractionPolicy.REFUSE)
     assert db.get_vm("avm") is None
 
 
@@ -194,7 +195,7 @@ def test_create_rollback_failure_warns_and_never_masks(
     monkeypatch.setattr(LimaPlatform, "create", _boom)
     monkeypatch.setattr(_Db, "delete_vm", lambda self, name: (_ for _ in ()).throw(RuntimeError("db locked")))
     with pytest.raises(ProvisioningError, match="backend exploded"):
-        vm_manager.create_vm(db, make_config(), name="wvm")
+        vm_manager.create_vm(db, make_config(), name="wvm", interaction=InteractionPolicy.REFUSE)
     (warning,) = [w for w in captured_output.warnings if "rollback" in w]
     assert warning.startswith("rollback: teardown of vm/wvm failed:")
     assert "the DB record for VM 'wvm'" in warning  # names what survived
@@ -244,7 +245,7 @@ def test_create_init_failure_keeps_the_row(
 
     monkeypatch.setattr(vm_manager, "run_initialization", _init_boom)
     with pytest.raises(ExternalError, match="init exploded"):
-        vm_manager.create_vm(db, make_config(), name="kvm")
+        vm_manager.create_vm(db, make_config(), name="kvm", interaction=InteractionPolicy.REFUSE)
     assert db.get_vm("kvm") is not None
 
 
@@ -287,7 +288,7 @@ def test_create_phase_a_failure_maps_to_provisioning_error(
     monkeypatch.setattr(vm_manager, "run_initialization", _no_phase_b)
 
     with pytest.raises(ProvisioningError, match="bootstrap exploded") as exc:
-        vm_manager.create_vm(db, make_config(), name="fvm")
+        vm_manager.create_vm(db, make_config(), name="fvm", interaction=InteractionPolicy.REFUSE)
     assert "vm delete fvm" in (exc.value.hint or "")
     row = db.get_vm("fvm")
     assert row is not None  # kept: past the unwind window
@@ -344,7 +345,7 @@ def test_create_phase_a_sync_failure_is_non_fatal(
     monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: phase_b_ran.append(True))
 
     # Does not raise: the sync failure is non-fatal.
-    vm_manager.create_vm(db, config, name="svm")
+    vm_manager.create_vm(db, config, name="svm", interaction=InteractionPolicy.REFUSE)
 
     row = db.get_vm("svm")
     assert row is not None
@@ -397,7 +398,7 @@ def test_create_provisioning_section_ends_with_ssh_config_synced(
     monkeypatch.setattr(driver, "SSHTransport", _FakeTS)
     monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: None)
 
-    vm_manager.create_vm(db, config, name="pvm")
+    vm_manager.create_vm(db, config, name="pvm", interaction=InteractionPolicy.REFUSE)
 
     # Provisioning is a real level-0 section.
     assert (Role.HEADER, 0, "Provisioning") in captured_output.lines
@@ -479,7 +480,7 @@ def test_reinit_runs_initialization_through_the_gate(
 
     monkeypatch.setattr(transports, "transport", lambda vm, config, **kw: SimpleNamespace())
 
-    vm_manager.reinit_vm(db, config, "rvm")
+    vm_manager.reinit_vm(db, config, "rvm", interaction=InteractionPolicy.REFUSE)
 
     assert captured["git_tokens"] == {"gh": "ghtok"}
     assert logger_redactions == [("ghtok",)]
@@ -549,7 +550,7 @@ def test_reinit_resolves_the_stored_admin_template(
 
     monkeypatch.setattr(transports, "transport", lambda vm, config, **kw: SimpleNamespace())
 
-    vm_manager.reinit_vm(db, config, "rvm")
+    vm_manager.reinit_vm(db, config, "rvm", interaction=InteractionPolicy.REFUSE)
 
     # The work admin-template's git credential flowed through: reinit
     # resolved ``work``, not the credential-less ``default``.
@@ -587,7 +588,7 @@ def test_reinit_errors_cleanly_when_the_stored_admin_template_is_gone(
     monkeypatch.setattr(vm_manager, "run_initialization", _fake_init)
 
     with pytest.raises(NotFoundError, match="work"):
-        vm_manager.reinit_vm(db, config, "rvm")
+        vm_manager.reinit_vm(db, config, "rvm", interaction=InteractionPolicy.REFUSE)
     assert not called  # errored before initialization
 
 
@@ -611,5 +612,5 @@ def test_reinit_refuses_an_operator_stopped_vm_at_the_gate(
 
     monkeypatch.setattr(vm_manager, "run_initialization", _no_init)
     with pytest.raises(StateError, match="manually stopped") as exc:
-        vm_manager.reinit_vm(db, config, "rvm")
+        vm_manager.reinit_vm(db, config, "rvm", interaction=InteractionPolicy.REFUSE)
     assert "agw vm start rvm" in (exc.value.hint or "")

@@ -93,13 +93,13 @@ agw resource describe secret/npm-token --output json
 
 ```text
 {
-  backends,
-  secrets: [{name, description, backends: [{backend, would_attempt, identifier, not_ready_reason}]}],
+  sources,
+  secrets: [{name, description, sources: [{source, would_attempt, identifier, not_ready_reason}]}],
   counts: {operator_declared, auto_declared}
 }
 ```
 
-The top-level and per-secret backend arrays preserve active backend precedence. Secrets sort by
+The top-level and per-secret source arrays preserve configured source precedence. Secrets sort by
 name. `identifier` and `not_ready_reason` are nullable. This is lookup prediction only, and never
 resolves or serializes a secret value.
 
@@ -107,18 +107,20 @@ resolves or serializes a secret value.
 
 ```text
 {secret: {
-  name, kind, origin, description, hint, references, used_by, backend_mappings,
-  resolution: {resolved_by, available, skipped_not_ready: [{backend, reason}]}
+  name, kind, origin, description, hint, references, used_by, source_mappings,
+  resolution: {category, source, identifier, skipped_not_ready: [{source, reason}]}
 }}
 ```
 
-`backend_mappings` is an array of exactly `{backend, would_attempt, identifier, not_ready_reason}`.
-`backend` is a string and `would_attempt` is boolean. `identifier` is null when a backend has no
-static lookup identifier or will not attempt the secret. `not_ready_reason` is null when that
-backend is ready. `hint`, `used_by`, `identifier`, `not_ready_reason`, and `resolved_by` may be
-null. `available` is boolean and equals whether `resolved_by` is non-null. `backend_mappings`
-retains active backend chain ordering. References and `used_by` have the same shapes and ordering
-rules as resource describe.
+`source_mappings` is an array of exactly
+`{source, backend, provenance, would_attempt, identifier, not_ready_reason}`. `source` names the
+configured source instance and `backend` names its implementation. `provenance` is
+`synthesized-default`, `operator-override-of-synthesized-default`, or `declared`. `would_attempt` is
+boolean. `identifier` is null when a source has no static lookup identifier or will not attempt the
+secret. `not_ready_reason` is null when that source is ready. Resolution `category` is
+`attemptable`, `refused-interaction`, or `unavailable`; `source` and `identifier` are nullable.
+`source_mappings` retains configured source-chain ordering. References and `used_by` have the same
+shapes and ordering rules as resource describe.
 
 #### VM JSON schemas
 
@@ -267,6 +269,20 @@ changing an enum spelling requires a new schema version and an explicit compatib
 | `agw completion show`      | Print the completion script to stdout    |
 | `agw completion install`   | Install the completion script in-place   |
 | `agw completion uninstall` | Remove installed completions for a shell |
+
+### Secrets
+
+| Command                                           | Description                                       |
+| ------------------------------------------------- | ------------------------------------------------- |
+| `agw secret list`                                 | Preview source applicability without reading      |
+| `agw secret describe NAME`                        | Describe one secret without reading               |
+| `agw secret verify NAME... [--allow-interaction]` | Verify one or more secrets without showing values |
+
+The synthesized `env-var` and `prompt` sources work without declarations. Add a `secret-source`
+resource when a backend needs shared configuration or when you want another named source instance.
+`secret verify` resolves every unique requested name in one batch, prints one value-free outcome row
+per name, and exits nonzero when any name does not resolve. It refuses interactive sources by
+default; `--allow-interaction` opts into prompting or provider authentication for that invocation.
 
 ### VMs
 

@@ -348,9 +348,9 @@ class Registry:
            references it (R12); then walk / resolve / fold the new node,
            looping to a fixpoint (a materialized node's out-edges point
            only back into the settled set; LLD b subtlety 3). Dormant for
-           secrets this effort (they emit no ``secret -> secret-backend``
-           edges until phase 4), so a materialized secret has no out-edges
-           to walk yet.
+           Auto-declared secrets may now emit ``secret -> secret-source``
+           candidate edges, so each materialized row is walked before the
+           fixpoint continues.
         6. **attach**: build the retained frozen ``DependencyGraph``
            (inbound references + fold verdicts on the node), then synthesize
            descriptions for auto-declared rows from the graph's inbound refs.
@@ -393,11 +393,9 @@ class Registry:
         # walk sees them alongside operator-published ones.
         self._materialize_reserved_defaults()
 
-        # The build context the walk threads to every resource's
-        # ``dependencies``: today the available-backend list a ``secret`` reads
-        # to emit its ``secret -> secret-backend`` edges. Assembled once (the
-        # ``secret-backend`` rows are published before finalize and never
-        # materialize later).
+        # The build context threaded to every dependency projection includes
+        # the generic read-only capability-class map used when a secret
+        # selects each present configured source's backend.
         context = build_context(self._resources)
 
         # ``all_refs`` accumulates edges keyed by target (for inbound and
@@ -406,16 +404,25 @@ class Registry:
         # first-encountered order (LLD a). Both are filled in one walk.
         all_refs: dict[tuple[str, str], list[ResourceReference]] = {}
         all_outbound: dict[tuple[str, str], list[ResourceReference]] = {}
+        mapping_key_refs: dict[tuple[str, str], list[ResourceReference]] = {}
+        miss_schedule: dict[tuple[str, str], None] = {}
 
         # 1: build. Walk every currently-present Resource once (secrets are
         # not present yet, so this is operator + reserved-default rows).
         for kind in list(self._resources.keys()):
             for name in list(self._resources[kind].keys()):
-                self._walk_into((kind, name), all_refs, all_outbound, context)
+                self._walk_into(
+                    (kind, name),
+                    all_refs,
+                    all_outbound,
+                    mapping_key_refs,
+                    miss_schedule,
+                    context,
+                )
 
         # 2: resolve. Classify misses; allowed auto-declares defer to pass 5.
         deferred: set[tuple[str, str]] = set()
-        self._resolve_misses(all_refs, deferred)
+        self._resolve_misses(all_refs, mapping_key_refs, miss_schedule, deferred)
 
         # 3: cycle-detect over the built edge map (no re-walk).
         _detect_cycles(all_outbound, self._present_keys())
@@ -455,6 +462,8 @@ class Registry:
             deferred,
             all_refs,
             all_outbound,
+            mapping_key_refs,
+            miss_schedule,
             readiness,
             enablement,
             marks,
@@ -543,10 +552,10 @@ class Registry:
 
         NO enablement-keyed suppression survives here, and the pass takes
         no enablement input at all. It briefly kept one, recorded here as an
-        exception: a ``secret``'s mapping addressed to a present-but-DISABLED
-        ``secret-backend`` was left unvalidated until the backend was
-        enabled (R9.9's disabled sub-clause), for which this pass threaded
-        the enabled backend-name set down to every ``validate_config``. It
+        exception: a ``secret``'s mapping addressed to a source selecting a
+        present-but-DISABLED ``secret-backend`` was left unvalidated until the
+        backend was enabled (R9.9's disabled sub-clause), for which this pass
+        threaded the enabled backend-name set down to every ``validate_config``. It
         was the same shape as the pass-level gate removed above, only
         narrower, and it failed the same way: an operator could accumulate
         mappings no model would ever accept and learn about all of them at
@@ -554,12 +563,10 @@ class Registry:
         find out. So the skip is retired and the parameter with it; a
         mapping is validated whether or not its backend is enabled.
 
-        What that skip was conflated with survives untouched. A mapping to a
-        disabled backend is still INERT for resolution
-        (:func:`~agentworks.secrets.resolve.active_backends` drops a disabled
-        backend from the chain, so it is never selected or resolved
-        through). Being validated and being live were always two properties;
-        only the second one tracks enablement.
+        What that skip was conflated with survives untouched. A configured
+        source selecting a disabled backend is retained with not-ready
+        evidence and its client is never constructed. Being validated and
+        being live remain separate properties.
 
         Each ``validate_config`` is handed the build walk's own ``context``,
         so an INHERITING resource validates the same merged declaration its
@@ -616,6 +623,8 @@ class Registry:
         key: tuple[str, str],
         all_refs: dict[tuple[str, str], list[ResourceReference]],
         all_outbound: dict[tuple[str, str], list[ResourceReference]],
+        mapping_key_refs: dict[tuple[str, str], list[ResourceReference]],
+        miss_schedule: dict[tuple[str, str], None],
         context: FinalizeContext,
     ) -> None:
         """Walk one Resource's ``dependencies(context)``, appending its
@@ -624,17 +633,29 @@ class Registry:
         ``all_outbound[key]`` holds this Resource's edges contiguously in
         emission order (LLD a's first-encountered guarantee). ``context`` is
         the builder's threaded :class:`FinalizeContext` (the secret's
-        backend-list read; every other resource ignores it).
+        source/backend selection read; every other resource ignores it).
         """
         kind, name = key
         resource = self._resources[kind][name]
+        from agentworks.capabilities.config import capability_mapping_key_references
+        from agentworks.capabilities.descriptor import mapping_descriptors_for_host
+
+        for descriptor in mapping_descriptors_for_host(kind):
+            for req in capability_mapping_key_references(descriptor=descriptor, row=resource):
+                target = (req.kind, req.name)
+                mapping_key_refs.setdefault(target, []).append(req)
+                miss_schedule.setdefault(target, None)
         for req in _dependencies(resource, context):
-            all_refs.setdefault((req.kind, req.name), []).append(req)
+            target = (req.kind, req.name)
+            all_refs.setdefault(target, []).append(req)
             all_outbound.setdefault(req.source, []).append(req)
+            miss_schedule.setdefault(target, None)
 
     def _resolve_misses(
         self,
         all_refs: dict[tuple[str, str], list[ResourceReference]],
+        mapping_key_refs: dict[tuple[str, str], list[ResourceReference]],
+        miss_schedule: dict[tuple[str, str], None],
         deferred: set[tuple[str, str]],
     ) -> None:
         """Classify every edge whose target is not (yet) a Resource: an
@@ -644,12 +665,17 @@ class Registry:
         readiness-gated materialize pass (R12). A target already deferred or
         already present is skipped.
         """
-        for target, refs in list(all_refs.items()):
+        for target in list(miss_schedule):
             kind, name = target
             if name in self._resources.get(kind, {}) or target in deferred:
                 continue
-            kind_handler = _lookup_kind(kind, refs[0])
-            first = refs[0]
+            validation_refs = mapping_key_refs.get(target, [])
+            refs = all_refs.get(target, [])
+            selected_refs = validation_refs or refs
+            if not selected_refs:
+                raise StateError(f"miss schedule target {target!r} has no references")
+            kind_handler = _lookup_kind(kind, selected_refs[0])
+            first = selected_refs[0]
             # The DECLARER, not the publisher: an inheriting row publishes
             # the runtime needs of its merged declaration, so blaming its
             # ``source`` would send an operator to a file that does not
@@ -666,6 +692,15 @@ class Registry:
                     )
                 deferred.add(target)
             elif kind_handler.miss_policy == "error":
+                missing_reference_error = getattr(kind_handler, "missing_reference_error", None)
+                if validation_refs and missing_reference_error is not None:
+                    error = missing_reference_error(
+                        name=name,
+                        registry=self,
+                        referrer=first,
+                    )
+                    if error is not None:
+                        raise error
                 raise ConfigError(f"{blamed[0]} {blamed[1]!r} references unknown {kind} {name!r} ({first.usage})")
             else:
                 raise StateError(f"unexpected miss_policy {kind_handler.miss_policy!r} on KIND_REGISTRY[{kind!r}]")
@@ -675,6 +710,8 @@ class Registry:
         deferred: set[tuple[str, str]],
         all_refs: dict[tuple[str, str], list[ResourceReference]],
         all_outbound: dict[tuple[str, str], list[ResourceReference]],
+        mapping_key_refs: dict[tuple[str, str], list[ResourceReference]],
+        miss_schedule: dict[tuple[str, str], None],
         readiness: dict[tuple[str, str], Readiness],
         enablement: Mapping[tuple[str, str], Enablement],
         disabled_marks: Mapping[tuple[str, str], DisabledMark],
@@ -740,8 +777,15 @@ class Registry:
                 # deps are already folded, so the reverse-topo invariant holds).
                 # The newly-materialized secret's ``dependencies(context)`` now
                 # emits its backend edges (the loop is load-bearing, LLD b).
-                self._walk_into(target, all_refs, all_outbound, context)
-                self._resolve_misses(all_refs, deferred)
+                self._walk_into(
+                    target,
+                    all_refs,
+                    all_outbound,
+                    mapping_key_refs,
+                    miss_schedule,
+                    context,
+                )
+                self._resolve_misses(all_refs, mapping_key_refs, miss_schedule, deferred)
                 readiness[target] = node_readiness(
                     target,
                     self._resources,

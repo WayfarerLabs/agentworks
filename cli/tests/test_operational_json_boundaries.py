@@ -6,16 +6,18 @@ import contextlib
 import json
 import threading
 from contextvars import copy_context
-from dataclasses import dataclass
+from dataclasses import replace
 from typing import TYPE_CHECKING, cast
 
 import pytest
 from typer.testing import CliRunner
 
+from agentworks.capabilities.secret_backend import InteractionBroker
 from agentworks.cli import app
 from agentworks.db import PID_STOPPED, SessionMode, SessionStatus, VMStatus
 from agentworks.resources.graph import Readiness
-from agentworks.secrets.resolve import ActiveBackend
+from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.resolve import ActiveSource, ResolutionBatch, ResolutionPolicy
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -23,44 +25,19 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow
     from agentworks.resources.registry import Registry
-    from agentworks.secrets.base import MappingValue, SecretDecl
-
-
-@dataclass
-class _SkippedBackend:
-    """A backend that would attempt every secret but is deliberately offline."""
-
-    interactive: bool = False
-
-    def would_attempt(self, secret: SecretDecl, mapping: MappingValue | None) -> bool:
-        del secret, mapping
-        return True
-
-    def describe_lookup(self, secret: SecretDecl, mapping: MappingValue | None) -> str:
-        del secret, mapping
-        return "SKIPPED_IDENTIFIER"
-
-    def batch_get(self, wants: list[tuple[SecretDecl, MappingValue | None]]) -> dict[str, str]:
-        del wants
-        raise AssertionError("a not-ready backend must never execute")
+    from agentworks.secrets.base import SecretDecl
 
 
 def _install_skipped_backend(monkeypatch: pytest.MonkeyPatch) -> None:
     from agentworks.secrets import resolve
 
-    real_active_backends = resolve.active_backends
+    real_active_sources = resolve.active_sources
 
-    def active_backends(config: Config, registry: Registry) -> list[ActiveBackend]:
-        return [
-            ActiveBackend(
-                capability=_SkippedBackend(),  # type: ignore[arg-type]
-                readiness=Readiness.blocked("backend offline"),
-                registered_name="skipped-store",
-            ),
-            *real_active_backends(config, registry),
-        ]
+    def active_sources(config: Config, registry: Registry) -> tuple[ActiveSource, ...]:
+        sources = real_active_sources(config, registry)
+        return (replace(sources[0], readiness=Readiness.blocked("source offline")), *sources)
 
-    monkeypatch.setattr(resolve, "active_backends", active_backends)
+    monkeypatch.setattr(resolve, "active_sources", active_sources)
 
 
 def _seed_vm(db: Database) -> None:
@@ -104,38 +81,32 @@ def _platform_fast_path(monkeypatch: pytest.MonkeyPatch) -> None:
 def _resolution_spy(monkeypatch: pytest.MonkeyPatch) -> list[tuple[tuple[str, ...], tuple[str, ...], str, bool]]:
     from agentworks.secrets import resolve
 
-    real_ordered = resolve._resolve_secrets_ordered
+    real_resolve_batch = resolve.resolve_batch
     calls: list[tuple[tuple[str, ...], tuple[str, ...], str, bool]] = []
 
-    def ordered(
-        secrets: list[SecretDecl],
-        backends: Sequence[ActiveBackend],
+    def resolve_batch(
+        secrets: Sequence[SecretDecl],
+        sources: Sequence[ActiveSource],
         *,
-        errors: dict[str, str] | None,
-        registry: Registry | None,
-        reporter: object,
-        interactive_available: bool,
-        exclude_interactive: bool = False,
-    ) -> dict[str, str]:
+        policy: ResolutionPolicy,
+        interaction_broker: InteractionBroker | None,
+    ) -> ResolutionBatch:
         calls.append(
             (
                 tuple(secret.name for secret in secrets),
-                tuple(backend.name for backend in backends),
-                reporter.__class__.__name__,
-                interactive_available,
+                tuple(source.name for source in sources),
+                policy.interaction.value,
+                interaction_broker is not None,
             )
         )
-        return real_ordered(
+        return real_resolve_batch(
             secrets,
-            backends,
-            errors=errors,
-            registry=registry,
-            reporter=reporter,  # type: ignore[arg-type]
-            interactive_available=interactive_available,
-            exclude_interactive=exclude_interactive,
+            sources,
+            policy=policy,
+            interaction_broker=interaction_broker,
         )
 
-    monkeypatch.setattr(resolve, "_resolve_secrets_ordered", ordered)
+    monkeypatch.setattr(resolve, "resolve_batch", resolve_batch)
     return calls
 
 
@@ -170,10 +141,8 @@ def test_vm_describe_json_suppresses_the_ordinary_resolver_presentation(
     machine = CliRunner().invoke(app, ["vm", "describe", "box", "--output", "json"])
 
     assert human.exit_code == machine.exit_code == 0, machine.output
-    assert human.stdout_bytes.startswith(b"Resolved proxmox-token via env-var (AW_SECRET_PROXMOX_TOKEN)\nName:")
-    assert human.stderr_bytes == (
-        b"Warning: secret proxmox-token: skipping skipped-store, not ready: backend offline\n"
-    )
+    assert human.stdout_bytes.startswith(b"Name:")
+    assert human.stderr_bytes == b""
     document = _assert_json_envelope_only(machine, "vm.describe")
     assert machine.stderr_bytes == b""
     assert b"PLATFORM_SECRET" not in machine.stdout_bytes
@@ -181,14 +150,14 @@ def test_vm_describe_json_suppresses_the_ordinary_resolver_presentation(
     assert calls == [
         (
             ("proxmox-token",),
-            ("skipped-store", "env-var", "prompt"),
-            "_OutputResolutionReporter",
+            ("env-var", "env-var", "prompt"),
+            "allow",
             True,
         ),
         (
             ("proxmox-token",),
-            ("skipped-store", "env-var", "prompt"),
-            "_OutputResolutionReporter",
+            ("env-var", "env-var", "prompt"),
+            "allow",
             True,
         ),
     ]
@@ -245,10 +214,8 @@ def test_session_describe_uses_the_same_real_gate_chain_for_both_formats(
     machine = CliRunner().invoke(app, ["session", "describe", "session-a", "--output", "json"])
 
     assert human.exit_code == machine.exit_code == 0, machine.output
-    assert human.stdout_bytes.startswith(b"Resolved proxmox-token via env-var (AW_SECRET_PROXMOX_TOKEN)\nName:")
-    assert human.stderr_bytes == (
-        b"Warning: secret proxmox-token: skipping skipped-store, not ready: backend offline\n"
-    )
+    assert human.stdout_bytes.startswith(b"Name:")
+    assert human.stderr_bytes == b""
     _assert_json_envelope_only(machine, "session.describe")
     assert machine.stderr_bytes == b""
     assert chain == [
@@ -281,14 +248,15 @@ def test_session_list_status_and_late_repair_use_the_same_resolution_path(
     _install_skipped_backend(monkeypatch)
     calls = _resolution_spy(monkeypatch)
     monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
-    monkeypatch.setattr(vms, "_is_tailscale_reachable", lambda _host: False)
+    monkeypatch.setattr(vms, "_tailscale_rejoin_required", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, row, ctx: VMStatus.STOPPED)
     monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: None)
     keys: list[str] = []
 
-    def reconnect(*_args: object, auth_key_source=None, **_kwargs: object) -> None:  # noqa: ANN001
-        assert auth_key_source is not None
-        keys.append(auth_key_source())
+    def reconnect(*_args: object, auth_keys=None, auth_key_name=None, **_kwargs: object) -> None:  # noqa: ANN001
+        assert auth_keys is not None
+        assert auth_key_name is not None
+        keys.append(auth_keys.get(auth_key_name))
 
     def repair(rows: list[SessionRow], *, db: Database, config: Config) -> list[SessionRow]:
         del rows, config
@@ -315,14 +283,14 @@ def test_session_list_status_and_late_repair_use_the_same_resolution_path(
     assert calls == [
         (
             ("proxmox-token",),
-            ("skipped-store", "env-var", "prompt"),
-            "_OutputResolutionReporter",
+            ("env-var", "env-var", "prompt"),
+            "allow",
             True,
         ),
         (
             ("tailscale-auth-key",),
-            ("skipped-store", "env-var", "prompt"),
-            "_OutputResolutionReporter",
+            ("env-var", "env-var", "prompt"),
+            "allow",
             True,
         ),
     ]
@@ -332,26 +300,19 @@ def test_session_list_status_and_late_repair_use_the_same_resolution_path(
     db.update_session_pid("session-a", None)
     human = CliRunner().invoke(app, ["session", "list", "--output", "human"])
     assert human.exit_code == 0, human.output
-    assert human.stdout_bytes.splitlines()[:3] == [
-        b"Resolved proxmox-token via env-var (AW_SECRET_PROXMOX_TOKEN)",
-        b"VM 'box' is stopped. Starting...",
-        b"Resolved tailscale-auth-key via env-var (AW_SECRET_TAILSCALE_AUTH_KEY)",
-    ]
-    assert human.stderr_bytes == (
-        b"Warning: secret proxmox-token: skipping skipped-store, not ready: backend offline\n"
-        b"Warning: secret tailscale-auth-key: skipping skipped-store, not ready: backend offline\n"
-    )
+    assert human.stdout_bytes.splitlines()[0] == b"VM 'box' is stopped. Starting..."
+    assert human.stderr_bytes == b""
     assert calls == [
         (
             ("proxmox-token",),
-            ("skipped-store", "env-var", "prompt"),
-            "_OutputResolutionReporter",
+            ("env-var", "env-var", "prompt"),
+            "allow",
             True,
         ),
         (
             ("tailscale-auth-key",),
-            ("skipped-store", "env-var", "prompt"),
-            "_OutputResolutionReporter",
+            ("env-var", "env-var", "prompt"),
+            "allow",
             True,
         ),
     ]
@@ -371,7 +332,7 @@ def test_session_json_suppresses_activation_output_around_the_envelope(
     config = make_config()
     _seed_session(db)
     _wire_cli(monkeypatch, db, config)
-    monkeypatch.setattr(vms, "_is_tailscale_reachable", lambda _host: False)
+    monkeypatch.setattr(vms, "_tailscale_rejoin_required", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, row, ctx: VMStatus.STOPPED)
     monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: output.info("ACTIVATION_OUTPUT_SENTINEL"))
     monkeypatch.setattr(vms, "_ensure_tailscale", lambda *_args, **_kwargs: None)
@@ -641,7 +602,7 @@ def test_vm_describe_propagates_operator_abort_in_service_and_both_cli_formats(
         monkeypatch.setattr("agentworks.secrets.resolver.Resolver.resolve", abort)
 
     with pytest.raises(UserAbort, match="operator declined"):
-        manager.vm_description(db, config, "box")
+        manager.vm_description(db, config, "box", interaction=InteractionPolicy.ALLOW)
 
     for output_format in ("human", "json"):
         result = CliRunner().invoke(app, ["vm", "describe", "box", "--output", output_format])

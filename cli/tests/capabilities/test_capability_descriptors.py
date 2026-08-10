@@ -18,6 +18,7 @@ behavior rather than holding a mirror up to the table.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -25,7 +26,9 @@ import pytest
 from agentworks.capabilities.conformance import conformance_error
 from agentworks.capabilities.descriptor import (
     CapabilityKindDescriptor,
+    ModelInputDomain,
     RegistryPolicy,
+    _validate_mapping_descriptors,
     capability_descriptors,
     descriptor_for,
 )
@@ -33,14 +36,15 @@ from agentworks.capabilities.git_credential.base import TokenAcquiringConfig
 from agentworks.capabilities.git_credential.kinds import GitCredentialProviderEntry
 from agentworks.capabilities.harness_integration.kinds import HarnessIntegrationEntry
 from agentworks.capabilities.publish import publish_capability_rows
+from agentworks.capabilities.secret_backend.kinds import SecretBackendEntry
 from agentworks.capabilities.vm_platform import VMPlatformEntry
 from agentworks.errors import StateError
 from agentworks.manifests.decode import _hosting_descriptors
 from agentworks.resources.graph import Readiness, _capability_node_readiness
 from agentworks.resources.kind import KIND_REGISTRY
 from agentworks.resources.registry import Registry
-from agentworks.schema import AgwModel, AgwRootModel
-from agentworks.secrets.kinds import SecretBackendEntry
+from agentworks.schema import AgwModel, AgwRootModel, ResourceRef
+from agentworks.schema.reference import RefRelationship
 from tests.plugins._fixtures import ConformingVMPlatform
 
 _KNOWN_KINDS = ("vm-platform", "harness-integration", "git-credential-provider", "secret-backend")
@@ -49,7 +53,7 @@ _BUILTIN_PUBLISHER_SOURCES = {
     "vm-platform": "agentworks.capabilities.vm_platform",
     "harness-integration": "agentworks.capabilities.harness_integration",
     "git-credential-provider": "agentworks.capabilities.git_credential",
-    "secret-backend": "agentworks.secrets",
+    "secret-backend": "agentworks.capabilities.secret_backend",
 }
 """The ``Origin.built_in`` source label each kind's built-in rows carry, as
 operators see it in ``agw resource describe``. Held here as the expectation,
@@ -88,8 +92,8 @@ def _live_registry(kind: str) -> dict[str, Any]:
     against the real object rather than against itself."""
     from agentworks.capabilities.git_credential import GIT_CREDENTIAL_PROVIDER_REGISTRY
     from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
+    from agentworks.capabilities.secret_backend import SECRET_BACKEND_REGISTRY
     from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
-    from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
 
     registries: dict[str, dict[str, Any]] = {
         "vm-platform": VM_PLATFORM_REGISTRY,
@@ -106,11 +110,6 @@ def _published_rows(descriptor: CapabilityKindDescriptor) -> list[tuple[str, Any
     registry = Registry.empty()
     publish_capability_rows(registry, descriptor)
     return list(registry.iter_kind_items(descriptor.kind))
-
-
-def _impl_class(impl: Any) -> type:
-    """The impl CLASS, whichever policy its registry stores it under."""
-    return impl if isinstance(impl, type) else type(impl)
 
 
 # -- The table itself -------------------------------------------------------
@@ -164,14 +163,12 @@ def test_registry_accessor_returns_the_live_registry_object(descriptor: Capabili
 def test_registry_policy_matches_what_the_registry_actually_holds(
     descriptor: CapabilityKindDescriptor,
 ) -> None:
-    """``CONSTRUCTED_SINGLETON`` is a claim about the live registry's
-    contents (secret-backend holds instances, the other three hold
-    classes), so check it against the contents."""
-    holds_classes = descriptor.registry_policy is RegistryPolicy.CLASS_BY_NAME
+    """Every live registry stores implementation classes by name."""
+    assert descriptor.registry_policy is RegistryPolicy.CLASS_BY_NAME
     seated_impls = list(descriptor.registry().items())
     assert seated_impls, f"{descriptor.kind} has an empty registry; this test would prove nothing"
     for name, seated in seated_impls:
-        assert isinstance(seated, type) is holds_classes, f"{descriptor.kind} {name!r}"
+        assert isinstance(seated, type), f"{descriptor.kind} {name!r}"
 
 
 @pytest.mark.parametrize("descriptor", _descriptors(), ids=lambda d: d.kind)
@@ -181,10 +178,8 @@ def test_publisher_source_is_the_label_the_builtin_rows_carry(
     """Publish the kind's built-in rows and read the label back off them.
 
     The expected labels are spelled out here rather than read from the
-    descriptor: they are operator-visible provenance that the switchboard
-    collapse had to preserve byte-for-byte (secret-backend in particular
-    publishes as ``agentworks.secrets``, the package, not the ``backends``
-    module that used to hold its publisher). Comparing the rows against the
+    descriptor: they are operator-visible provenance published from each
+    capability package. Comparing the rows against the
     field that produced them would only prove the publisher can copy a
     string."""
     published = _published_rows(descriptor)
@@ -312,7 +307,7 @@ def test_the_graph_routes_a_capability_node_to_its_own_kinds_verdict() -> None:
 
 
 def test_manifest_sections_match_the_decoders_host_surfaces() -> None:
-    """Decode's host dispatch is exactly the three host surfaces, with the
+    """Decode's host dispatch is exactly the four host surfaces, with the
     capability kind and the field pair each one names.
 
     Spelled out rather than recomputed from the descriptors, because decode
@@ -330,6 +325,7 @@ def test_manifest_sections_match_the_decoders_host_surfaces() -> None:
         "vm-site": ("vm-platform", "platform", "platform_config"),
         "git-credential": ("git-credential-provider", "provider", "provider_config"),
         "session-template": ("harness-integration", "harness_integration", "harness_integration_config"),
+        "secret-source": ("secret-backend", "backend", None),
     }
 
     hosted = [d.manifest_section for d in _descriptors() if d.manifest_section is not None]
@@ -339,7 +335,13 @@ def test_manifest_sections_match_the_decoders_host_surfaces() -> None:
         f"fold dispatch by host_kind, so the second record would silently "
         f"overwrite the first and one host's fold would vanish."
     )
-    assert descriptor_for("secret-backend").manifest_section is None
+    source_host = descriptor_for("secret-backend").manifest_section
+    assert source_host is not None
+    assert (source_host.host_kind, source_host.naming_field, source_host.config_field) == (
+        "secret-source",
+        "backend",
+        None,
+    )
 
 
 # -- The kind's config contract ---------------------------------------------
@@ -362,10 +364,72 @@ def test_each_kinds_config_contract_matches_how_its_config_is_dispatched() -> No
     assert contracts["git-credential-provider"].base is TokenAcquiringConfig
     assert contracts["git-credential-provider"].discriminator == "name"
 
-    # The one kind whose config need not be a mapping at all (env-var's is a
-    # bare env var name) and whose dispatch is the ``backend_mappings`` key.
-    assert contracts["secret-backend"].base is AgwRootModel
-    assert contracts["secret-backend"].discriminator is None
+    backend = descriptor_for("secret-backend")
+    assert backend.config_schema.base is AgwModel
+    assert backend.config_schema.discriminator == "name"
+    assert backend.config_schema.forbidden_reference_kinds == frozenset({"secret"})
+    assert backend.mapping_schema is not None
+    assert backend.mapping_schema.base is AgwRootModel
+    assert backend.mapping_schema.discriminator is None
+    assert backend.mapping_schema.input_domain is ModelInputDomain.JSON_NATIVE
+    assert backend.mapping_host is not None
+    assert backend.mapping_host.host_kind == "secret"
+    assert backend.mapping_host.field_name == "backend_mappings"
+    assert backend.mapping_host.key_reference.kind == "secret-source"
+    assert backend.mapping_host.key_reference.relationship is RefRelationship.USES
+    assert backend.mapping_host.false_opt_out is True
+
+
+def test_mapping_contract_and_host_are_declared_together() -> None:
+    for descriptor in _descriptors():
+        assert (descriptor.mapping_schema is None) == (descriptor.mapping_host is None), descriptor.kind
+
+
+def test_mapping_descriptor_requires_contract_and_host_together() -> None:
+    backend = descriptor_for("secret-backend")
+    with pytest.raises(StateError, match="mapping_schema and mapping_host together"):
+        _validate_mapping_descriptors((replace(backend, mapping_host=None),))
+
+
+def test_mapping_descriptor_requires_a_declarable_mapping_shaped_host() -> None:
+    backend = descriptor_for("secret-backend")
+    assert backend.mapping_host is not None
+
+    capability_host = replace(backend.mapping_host, host_kind="secret-backend")
+    with pytest.raises(StateError, match="not a declarable resource kind"):
+        _validate_mapping_descriptors((replace(backend, mapping_host=capability_host),))
+
+    scalar_field = replace(backend.mapping_host, field_name="hint")
+    with pytest.raises(StateError, match="not mapping-shaped"):
+        _validate_mapping_descriptors((replace(backend, mapping_host=scalar_field),))
+
+
+def test_mapping_descriptor_requires_unique_host_field_ownership() -> None:
+    backend = descriptor_for("secret-backend")
+    with pytest.raises(StateError, match="both claim mapping host secret.backend_mappings"):
+        _validate_mapping_descriptors((backend, replace(backend, kind="other-mapping-kind")))
+
+
+def test_mapping_descriptor_key_is_a_hard_uses_reference() -> None:
+    backend = descriptor_for("secret-backend")
+    assert backend.mapping_host is not None
+
+    inherits = replace(
+        backend.mapping_host,
+        key_reference=replace(
+            backend.mapping_host.key_reference,
+            relationship=RefRelationship.INHERITS,
+        ),
+    )
+    with pytest.raises(StateError, match="must use the USES relationship"):
+        _validate_mapping_descriptors((replace(backend, mapping_host=inherits),))
+
+    auto_declared_target = replace(
+        backend.mapping_host,
+        key_reference=ResourceRef(kind="vm-template", usage="a fixture target"),
+    )
+    with pytest.raises(StateError, match="must use miss_policy='error'"):
+        _validate_mapping_descriptors((replace(backend, mapping_host=auto_declared_target),))
 
 
 # -- Conformance of everything this build ships -----------------------------
@@ -386,4 +450,4 @@ def test_every_registered_builtin_impl_conforms(descriptor: CapabilityKindDescri
     no model at all.
     """
     for name, seated in descriptor.registry().items():
-        assert conformance_error(descriptor, _impl_class(seated)) is None, f"{descriptor.kind} {name!r}"
+        assert conformance_error(descriptor, seated) is None, f"{descriptor.kind} {name!r}"

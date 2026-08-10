@@ -85,7 +85,7 @@ class _GitCredentialKind:
 
         The provider's `token` field says how the token is obtained. Its `stored` arm
         names a SECRET and defaults to `git-token-<this credential's name>`; a bare
-        secret name is shorthand for that arm. The secret resolves through the backend
+        secret name is shorthand for that arm. The secret resolves through the source
         chain at VM-init time. Because the default name derives from this resource's
         name, a name that breaks the standard naming rules still loads but warns.
 

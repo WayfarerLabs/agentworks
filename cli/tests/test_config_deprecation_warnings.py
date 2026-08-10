@@ -181,22 +181,23 @@ def test_secret_backends_is_a_resource_section_whatever_it_names(backend: str, t
     assert "unknown secret backend" not in message
 
 
-def test_secret_backends_is_told_to_delete_not_to_write_a_manifest(tmp_path: Path) -> None:
-    """The one section whose remediation is not "rewrite it as a manifest".
+def test_secret_backends_is_told_to_delete_and_declare_a_source(tmp_path: Path) -> None:
+    """The retired backend row is deleted and replaced by a source declaration.
 
-    It carried no configuration, so there is nothing to move, and
-    ``secret-backend`` is a capability kind with no declarable form: the
-    generic advice would send the operator to write a manifest that cannot
-    exist. The remedy is a deletion, plus the one place activation actually
-    happens.
+    ``secret-backend`` remains a capability kind with no declarable form, so
+    the replacement manifest is a ``secret-source`` that selects it. The
+    chain then names that declared source.
     """
     cfg = _config(tmp_path, "[secret_backends.env-var]\n")
     with pytest.raises(ConfigError) as excinfo:
         load_config(cfg, warn_issues=False)
     message = str(excinfo.value)
-    assert "nothing to rewrite: delete it" in message
+    assert "carries no configuration, so delete it" in message
     assert "Rewrite" not in message
-    assert "[secret_config].backends" in (excinfo.value.hint or "")
+    hint = excinfo.value.hint or ""
+    assert "Use the implied env-var and prompt source names as-is" in hint
+    assert "declare a secret-source manifest" in hint
+    assert "list the source name in [secret_config].backends" in hint
 
 
 def test_mixed_sections_get_both_remediations_in_one_read(tmp_path: Path) -> None:
@@ -220,7 +221,7 @@ def test_mixed_sections_get_both_remediations_in_one_read(tmp_path: Path) -> Non
     assert "[secret_backends.*]" in message
     # The rewrite clause names the rewritable section and only that one.
     assert "Rewrite [secrets.*] as YAML manifests" in message
-    assert "nothing to rewrite: delete it" in message
+    assert "carries no configuration, so delete it" in message
 
 
 def test_secret_backends_is_behind_the_resources_false_escape_hatch(tmp_path: Path) -> None:

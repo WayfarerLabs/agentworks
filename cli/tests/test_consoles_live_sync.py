@@ -18,6 +18,7 @@ import pytest
 
 from agentworks.db import Database
 from agentworks.errors import ConnectivityError
+from agentworks.secrets.policy import InteractionPolicy
 from agentworks.sessions.multi_console import (
     add_sessions,
     create_console,
@@ -45,7 +46,7 @@ def test_add_session_live_sync_skipped_when_console_absent(db: Database, fake_ta
 
     fake_target.commands.clear()
     fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=1)
-    add_sessions(db, _StubConfig(), console_name="con", session_specs=["b"])
+    add_sessions(db, _StubConfig(), console_name="con", session_specs=["b"], interaction=InteractionPolicy.REFUSE)
 
     assert not any("new-window" in c for c in fake_target.commands)
 
@@ -57,7 +58,7 @@ def test_add_session_live_sync_adds_window_when_alive(db: Database, fake_target:
 
     fake_target.commands.clear()
     fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
-    add_sessions(db, _StubConfig(), console_name="con", session_specs=["b+1"])
+    add_sessions(db, _StubConfig(), console_name="con", session_specs=["b+1"], interaction=InteractionPolicy.REFUSE)
 
     new_window = [c for c in fake_target.commands if "new-window -t aw-console-con" in c]
     assert len(new_window) == 1
@@ -81,7 +82,7 @@ def test_add_session_live_sync_adds_window_for_bare_spec(
 
     fake_target.commands.clear()
     fake_target.responses["has-session -t aw-console-con"] = _FakeResult(returncode=0)
-    add_sessions(db, _StubConfig(), console_name="con", session_specs=["b"])
+    add_sessions(db, _StubConfig(), console_name="con", session_specs=["b"], interaction=InteractionPolicy.REFUSE)
 
     assert not any("live console sync failed" in w for w in captured_output.warnings)
     new_window = [c for c in fake_target.commands if "new-window -t aw-console-con" in c]
@@ -119,7 +120,7 @@ def test_add_sessions_appends_new_window_last_under_renumber_off(
     assert model.windows_with_index(CON) == [(1, "a"), (2, "b")]
     target = console_target_factory(model)
 
-    add_sessions(db, _StubConfig(), console_name="con", session_specs=["c"])
+    add_sessions(db, _StubConfig(), console_name="con", session_specs=["c"], interaction=InteractionPolicy.REFUSE)
 
     # The new window landed at the tail (index 3), not the reclaimed slot 0.
     assert model.windows_with_index(CON) == [(1, "a"), (2, "b"), (3, "c")]
@@ -154,7 +155,7 @@ def test_add_sessions_appends_multiple_new_windows_in_order_at_the_tail(
     # Installs the model-backed transport seam (side effect); no handle needed.
     console_target_factory(model)
 
-    add_sessions(db, _StubConfig(), console_name="con", session_specs=["c", "d"])
+    add_sessions(db, _StubConfig(), console_name="con", session_specs=["c", "d"], interaction=InteractionPolicy.REFUSE)
 
     # Both new windows landed at the tail in argument order (3, 4), not in the
     # reclaimed slot 0, and live order matches DB order.
@@ -185,7 +186,7 @@ def test_add_sessions_reorders_to_config_order_when_new_window_lands_low(
     # Installs the model-backed transport seam (side effect); no handle needed.
     console_target_factory(model)
 
-    add_sessions(db, _StubConfig(), console_name="con", session_specs=["c"])
+    add_sessions(db, _StubConfig(), console_name="con", session_specs=["c"], interaction=InteractionPolicy.REFUSE)
 
     # The reorder pass settles everything to DB order regardless of where the
     # append or the pre-existing windows sat.
@@ -513,7 +514,7 @@ def test_delete_session_kills_console_windows(
 
     monkeypatch.setattr("agentworks.sessions.multi_console.kill_session_windows", spy)
 
-    manager_mod.delete_session(db, _StubConfig(), name="s", yes=True)
+    manager_mod.delete_session(db, _StubConfig(), name="s", yes=True, interaction=InteractionPolicy.REFUSE)
 
     # The DB row is gone, and only the consoles that listed 's' get kills.
     assert db.get_session("s") is None
@@ -546,7 +547,7 @@ def test_delete_session_skips_kill_when_no_member_consoles(
 
     monkeypatch.setattr("agentworks.sessions.multi_console.kill_session_windows", spy)
 
-    manager_mod.delete_session(db, _StubConfig(), name="lonely", yes=True)
+    manager_mod.delete_session(db, _StubConfig(), name="lonely", yes=True, interaction=InteractionPolicy.REFUSE)
 
     assert called is False
 
@@ -576,7 +577,7 @@ def test_delete_session_reports_affected_consoles(
     monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.sessions.multi_console.kill_session_windows", lambda *a, **k: None)
 
-    manager_mod.delete_session(db, _StubConfig(), name="s", yes=True)
+    manager_mod.delete_session(db, _StubConfig(), name="s", yes=True, interaction=InteractionPolicy.REFUSE)
 
     # The affected consoles (alpha, beta) are named in c.name order; the
     # unrelated console (gamma) is not. Two consoles -> plural noun.
@@ -618,7 +619,7 @@ def test_delete_session_offers_and_deletes_now_empty_console(
     monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
     monkeypatch.setattr("agentworks.output.confirm", _confirm)
 
-    manager_mod.delete_session(db, _StubConfig(), name="s", yes=False)
+    manager_mod.delete_session(db, _StubConfig(), name="s", yes=False, interaction=InteractionPolicy.REFUSE)
 
     assert any("beta" in p and "no configured sessions left" in p for p in prompts)
     # Accepted offer: the emptied console is gone; the still-populated one stays.
@@ -654,7 +655,7 @@ def test_delete_session_declined_offer_keeps_empty_console(
     monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
     monkeypatch.setattr("agentworks.output.confirm", _confirm)
 
-    manager_mod.delete_session(db, _StubConfig(), name="s", yes=False)
+    manager_mod.delete_session(db, _StubConfig(), name="s", yes=False, interaction=InteractionPolicy.REFUSE)
 
     assert db.get_session("s") is None
     assert db.get_console("beta") is not None
@@ -692,7 +693,7 @@ def test_delete_session_does_not_offer_console_with_remaining_sessions(
     monkeypatch.setattr("agentworks.output.is_interactive", lambda: True)
     monkeypatch.setattr("agentworks.output.confirm", _confirm)
 
-    manager_mod.delete_session(db, _StubConfig(), name="s", yes=False)
+    manager_mod.delete_session(db, _StubConfig(), name="s", yes=False, interaction=InteractionPolicy.REFUSE)
 
     # No empty-console offer was presented, and alpha still holds 'other'.
     assert not any("no configured sessions left" in p for p in prompts)
@@ -719,7 +720,7 @@ def test_delete_session_leaves_no_dangling_console_reference(
     monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.sessions.multi_console.kill_session_windows", lambda *a, **k: None)
 
-    manager_mod.delete_session(db, _StubConfig(), name="s", yes=True)
+    manager_mod.delete_session(db, _StubConfig(), name="s", yes=True, interaction=InteractionPolicy.REFUSE)
 
     assert db.list_consoles_for_session("s") == []
     dangling = db._conn.execute("SELECT COUNT(*) FROM console_sessions WHERE session_name = 's'").fetchone()[0]
@@ -747,7 +748,7 @@ def test_delete_session_yes_reports_but_keeps_empty_console(
     monkeypatch.setattr(manager_mod, "_regenerate_tmuxinator", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.sessions.multi_console.kill_session_windows", lambda *a, **k: None)
 
-    manager_mod.delete_session(db, _StubConfig(), name="s", yes=True)
+    manager_mod.delete_session(db, _StubConfig(), name="s", yes=True, interaction=InteractionPolicy.REFUSE)
 
     # A single affected console uses the singular noun.
     assert "Removed 's' from console: beta" in captured_output.info
@@ -796,7 +797,7 @@ def test_delete_session_warns_when_offered_console_delete_raises(
 
     # The AgentworksError from the console teardown is swallowed with a warning;
     # it must not propagate out of delete_session.
-    manager_mod.delete_session(db, _StubConfig(), name="s", yes=False)
+    manager_mod.delete_session(db, _StubConfig(), name="s", yes=False, interaction=InteractionPolicy.REFUSE)
 
     assert db.get_session("s") is None
     assert "Session 's' deleted" in captured_output.info
@@ -1019,7 +1020,7 @@ def test_delete_workspace_kills_console_windows(
     # .code-workspace file; point it at a tmp dir so the unlink is a no-op.
     cfg = _StubConfig()
     cfg.paths = type("P", (), {"vscode_workspaces": tmp_path})()  # type: ignore[attr-defined]
-    ws_manager.delete_workspace(db, cfg, "ws-vm1", force=True, yes=True)
+    ws_manager.delete_workspace(db, cfg, "ws-vm1", force=True, yes=True, interaction=InteractionPolicy.REFUSE)
 
     assert db.get_workspace("ws-vm1") is None
     assert db.get_session("s1") is None
@@ -1076,7 +1077,9 @@ def test_delete_agent_kills_console_windows(
 
     monkeypatch.setattr("agentworks.sessions.multi_console.kill_session_windows", spy)
 
-    agent_manager.delete_agent(db, _StubConfig(), name="bot", force=True, yes=True)
+    agent_manager.delete_agent(
+        db, _StubConfig(), name="bot", force=True, yes=True, interaction=InteractionPolicy.REFUSE
+    )
 
     assert db.get_agent("bot") is None
     assert len(captured) == 1

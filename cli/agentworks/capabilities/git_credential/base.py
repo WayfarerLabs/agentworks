@@ -6,7 +6,7 @@ including the secret its token comes from, checks that token against the
 host at the post-resolve ``runup`` stage, and produces the credential
 materials (``credential_lines`` / ``helper_entry``) as its op. Token
 resolution itself lives in the framework: each provider declares a
-``SecretReference`` for its token, the active backend chain (env-var /
+``SecretReference`` for its token, the active source chain (env-var /
 1Password / prompt / ...) resolves it, and the token secret's health
 reports through the doctor Secrets group and ``agw secret describe
 git-token-<name>`` like any other secret.

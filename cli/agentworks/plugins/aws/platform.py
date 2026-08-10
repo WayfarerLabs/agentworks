@@ -20,10 +20,7 @@ from __future__ import annotations
 
 import contextlib
 import gzip
-from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, NamedTuple
-
-import yaml
-from pydantic import Field
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from agentworks import output
 from agentworks.capabilities.retired_shapes import RetiredPresenceShape
@@ -31,8 +28,18 @@ from agentworks.capabilities.vm_platform.base import ProvisionRequest, Provision
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs, operator_ssh_prefixes
+from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
 from agentworks.errors import ConfigError, NotFoundError, StateError, TokenRejectedError
+from agentworks.plugins.aws.auth import _build_access_key_session, _build_ambient_session
+from agentworks.plugins.aws.config import (
+    AwsAmbientAuth,
+    AwsEC2Config,
+    _generate_ec2_user_data,
+    _instance_catalog,
+    _InstanceType,
+    _select_instance_type,
+)
 
 # The network-resource plumbing (the security-group exposure mechanics, the
 # cleanup / rollback sweeps) and the shared SDK-error wrapper live in the
@@ -53,8 +60,6 @@ from agentworks.plugins.aws.network import (
     vm_tag,
     wrap_ec2_error,
 )
-from agentworks.schema import AgwModel, NonEmptyStr, PositiveInt, SecretRef
-from agentworks.ssh import SSHError
 from agentworks.topics import TopicProse
 from agentworks.transports import SSHTransport
 
@@ -76,186 +81,6 @@ _DEBIAN_ARCH_SEGMENT = {"x86_64": "amd64", "arm64": "arm64"}
 # The payload is gzipped (cloud-init decompresses natively), so this bounds the
 # COMPRESSED bytes; a pre-launch guard raises typed if even that is over.
 _MAX_USER_DATA_BYTES = 16384
-
-
-# Ambient authentication is an explicit arm so every identity mechanism
-# has a declared shape.
-class AwsAmbientAuth(AgwModel):
-    """Authenticate with boto3's ambient default credential chain.
-
-    That is environment variables, the shared config and credentials
-    files, an instance profile, and SSO.
-    """
-
-    mode: Literal["ambient"]
-
-
-class AwsAccessKeyAuth(AgwModel):
-    """Authenticate with an explicit IAM access key.
-
-    It replaces the ambient chain entirely for this site: a rejected key
-    fails the command rather than falling back to some other identity.
-    """
-
-    mode: Literal["access-key"]
-
-    access_key_id: NonEmptyStr
-    """The access key id, plain config."""
-
-    access_key_secret: Annotated[
-        NonEmptyStr,
-        SecretRef(usage="the AWS secret access key", default_template="aws-secret-access-key"),
-    ]
-    """The secret containing the secret access key. The default maps to
-    ``AW_SECRET_AWS_SECRET_ACCESS_KEY`` in the env-var backend."""
-
-    assume_role_arn: NonEmptyStr | None = None
-    """An optional role to assume with the key through STS."""
-
-
-#: Authentication mechanisms have distinct tagged shapes. Ambient is the
-#: default because it is boto3's standard credential behavior.
-AwsAuth = Annotated[AwsAmbientAuth | AwsAccessKeyAuth, Field(discriminator="mode")]
-
-
-class AwsInstanceType(AgwModel):
-    """One entry in an EC2 instance-type selection catalog."""
-
-    cpus: PositiveInt
-    """The vCPUs the type provides."""
-
-    memory: PositiveInt
-    """The memory (GiB) the type provides."""
-
-    type: NonEmptyStr
-    """The literal EC2 instance type (e.g. ``t4g.large``)."""
-
-    arch: Literal["x86_64", "arm64"]
-    """The CPU architecture, in EC2's vocabulary. The Debian image naming
-    for the same thing stays internal."""
-
-
-class AwsEC2Config(AgwModel):
-    """Where an aws-ec2 site creates instances, and as whom."""
-
-    name: Literal["aws-ec2"]
-    """The platform this config is for."""
-
-    region: NonEmptyStr = Field(examples=["us-east-1"])
-    """The region new instances are created in."""
-
-    subnet_id: NonEmptyStr | None = Field(default=None, examples=["subnet-00000000000000000"])
-    """The subnet new instances attach to. Omit for the region's default
-    VPC."""
-
-    instance_types: Annotated[list[AwsInstanceType], Field(min_length=1)] | None = None
-    """An override of the built-in Graviton catalog ``vm create`` picks
-    from. Order does not matter; selection uses the smallest matching
-    entry. Must contain at least one entry."""
-
-    auth: AwsAuth = AwsAmbientAuth(mode="ambient")
-    """How this site authenticates to AWS: ``{mode: ambient}`` for boto3's
-    default chain, or ``{mode: access-key, ...}`` for an explicit key.
-    Defaults to ambient."""
-
-
-class _InstanceType(NamedTuple):
-    """One entry in the EC2 instance-type selection catalog: the cpus and
-    memory (GiB) it provides, the literal EC2 instance type, and its CPU
-    architecture (EC2 vocabulary: ``x86_64`` or ``arm64``)."""
-
-    cpus: int
-    memory_gib: int
-    type: str
-    arch: str
-
-
-# Built-in EC2 instance-type catalog: current-generation Graviton (arm64)
-# burstable (t4g) and general-purpose (m7g) types, spanning roughly the same
-# cpu/memory rungs as azure's B-series ladder. `vm create` picks the smallest
-# entry whose cpus AND memory both satisfy the vm-template's request, so the
-# operator specifies compute and memory like every other platform instead of
-# an EC2-specific instance type. A template asking for an off-ratio shape (e.g.
-# 4 vCPU / 8 GiB) rounds UP to the nearest fitting type and warns. Ordered
-# small to large for readability; selection takes the minimum by
-# (cpus, memory), so an operator override in the site's instance_types
-# need not be pre-sorted. arm64 by default: Graviton is the cheaper, current
-# general-purpose silicon, and the fleet OS (Debian bookworm) ships arm64.
-_DEFAULT_INSTANCE_TYPES: tuple[_InstanceType, ...] = (
-    _InstanceType(2, 2, "t4g.small", "arm64"),
-    _InstanceType(2, 4, "t4g.medium", "arm64"),
-    _InstanceType(2, 8, "t4g.large", "arm64"),
-    _InstanceType(4, 16, "t4g.xlarge", "arm64"),
-    _InstanceType(8, 32, "t4g.2xlarge", "arm64"),
-    _InstanceType(12, 48, "m7g.3xlarge", "arm64"),
-    _InstanceType(16, 64, "m7g.4xlarge", "arm64"),
-)
-
-
-def _instance_catalog(config: AwsEC2Config) -> tuple[_InstanceType, ...]:
-    """The site's instance-type catalog: its declared override, else the
-    built-in Graviton ladder. What is left here is the DEFAULT, which is
-    domain knowledge rather than schema."""
-    if config.instance_types is None:
-        return _DEFAULT_INSTANCE_TYPES
-    return tuple(_InstanceType(e.cpus, e.memory, e.type, e.arch) for e in config.instance_types)
-
-
-def _select_instance_type(catalog: tuple[_InstanceType, ...], *, cpus: int, memory_gib: int) -> _InstanceType:
-    """The catalog entry that both satisfies the request and is smallest by
-    (cpus, memory), chosen with ``min`` so the result is independent of catalog
-    order. Raises ``ConfigError`` when the request exceeds every entry (the
-    template is bigger than anything on offer)."""
-    fits = [t for t in catalog if t.cpus >= cpus and t.memory_gib >= memory_gib]
-    if not fits:
-        largest = max(catalog, key=lambda t: (t.cpus, t.memory_gib))
-        raise ConfigError(
-            f"no EC2 instance type satisfies the requested {cpus} vCPU / "
-            f"{memory_gib} GiB (largest available is {largest.type}: "
-            f"{largest.cpus} vCPU / {largest.memory_gib} GiB)",
-            hint="shrink the vm-template's cpus/memory, or add a larger entry to the site's instance_types catalog",
-        )
-    return min(fits, key=lambda t: (t.cpus, t.memory_gib))
-
-
-def _generate_ec2_user_data(
-    *,
-    admin_username: str,
-    ssh_public_key: str,
-    hostname: str,
-    bootstrap_script: str | None,
-) -> str:
-    """The cloud-init ``#cloud-config`` user-data for a created instance.
-
-    Always declares the admin user with its SSH key, so SSH works the moment
-    cloud-init's config stage lands, independent of the (later) bootstrap
-    runcmd. This is the one place EC2 diverges from azure's create-time
-    delivery: azure injects the admin user and key through the VM's
-    ``os_profile`` out of band, but EC2 has no such channel (we deliberately
-    use no key pair), so the identity has to ride in user-data. When a Tailscale
-    key is present the same shared bootstrap script azure runs is written and
-    executed via runcmd; the script's own user/key steps are idempotent against
-    the user cloud-init already made.
-    """
-    config: dict[str, object] = {
-        "hostname": hostname,
-        "preserve_hostname": False,
-        "users": [
-            {
-                "name": admin_username,
-                "shell": "/bin/bash",
-                "sudo": "ALL=(ALL) NOPASSWD:ALL",
-                "groups": ["sudo"],
-                "ssh_authorized_keys": [ssh_public_key],
-            }
-        ],
-    }
-    if bootstrap_script is not None:
-        config["write_files"] = [
-            {"path": "/tmp/agentworks-bootstrap.sh", "permissions": "0755", "content": bootstrap_script}
-        ]
-        config["runcmd"] = [["/bin/bash", "/tmp/agentworks-bootstrap.sh"]]
-    return "#cloud-config\n" + yaml.safe_dump(config, default_flow_style=False, sort_keys=False)
 
 
 class EC2Platform(VMPlatform):
@@ -544,19 +369,17 @@ class EC2Platform(VMPlatform):
         if swap > 0:
             output.detail(f"Swap: {swap} GiB")
 
-        # Generate the same bootstrap script the other platforms use, wrapped in
-        # cloud-init user-data. The SSH key is installed ONCE, by the cloud-init
-        # users block (_generate_ec2_user_data); the bootstrap script is asked
-        # NOT to embed it a second time (an empty key makes its install step a
-        # no-op), so the size-capped user-data carries the key literal only once.
-        # No Tailscale key: minimal cloud-init, bootstrap deferred to Phase A.
+        # EC2 retains UserData. The SSH key is installed once by the cloud-init
+        # users block. When create-time bootstrap is requested, embed the full
+        # script with no Tailscale key and deliver the resolved key once over
+        # the post-boot provisioning transport below.
         bootstrap = None
         if request.tailscale_auth_key:
             bootstrap = generate_bootstrap_script(
                 admin_username=request.admin_username,
                 ssh_public_key="",
                 provisioning_packages=PROVISIONING_PACKAGES,
-                tailscale_auth_key=request.tailscale_auth_key,
+                tailscale_auth_key=None,
                 hostname=request.hostname,
                 swap=swap,
             )
@@ -657,11 +480,12 @@ class EC2Platform(VMPlatform):
                 force_tty=sys.platform == "win32",
             )
 
-            # If bootstrap was embedded in cloud-init, wait for it to finish and
-            # extract the Tailscale IP.
+            # The provider-retained bootstrap installed Tailscale without a
+            # credential. Wait for it, then join once over stdin.
             if request.tailscale_auth_key:
-                tailscale_ip = self._wait_for_bootstrap(prov_transport)
-                bootstrap_complete = tailscale_ip is not None
+                completion = EphemeralTailscaleBootstrap(prov_transport).complete(request.tailscale_auth_key)
+                bootstrap_complete = completion.complete
+                tailscale_ip = completion.tailscale_ip
         except KeyboardInterrupt:
             rollback_create_on_interrupt(ec2, region, backend_name, instance_id, security_group_id)
             raise
@@ -1074,130 +898,3 @@ class EC2Platform(VMPlatform):
                 hint="verify the AMI id, or drop the vm-template's disk request to keep the image's own root size",
             )
         return str(root_device)
-
-    def _wait_for_bootstrap(self, target: Transport) -> str | None:
-        """Wait for cloud-init to finish and return the Tailscale IP.
-
-        SSH may not be immediately available after instance creation, so we
-        retry. Returns None if we cannot get the IP (Phase A will handle it).
-        """
-        import time
-
-        output.detail("Waiting for cloud-init bootstrap to complete (this may take several minutes)...")
-
-        for attempt in range(30):
-            try:
-                target.run("echo ok", check=True, timeout=10)
-                break
-            except SSHError:
-                if attempt == 29:
-                    output.warn("SSH not available, deferring bootstrap to Phase A")
-                    return None
-                time.sleep(10)
-
-        try:
-            target.run("cloud-init status --wait", check=True, timeout=600)
-        except SSHError as e:
-            output.warn(f"cloud-init wait failed: {e}")
-            output.warn("Deferring bootstrap to Phase A")
-            return None
-
-        try:
-            result = target.run("sudo tailscale ip -4", check=True, timeout=15)
-            tailscale_ip = result.stdout.strip()
-            output.detail(f"Tailscale IP: {tailscale_ip}")
-            return tailscale_ip
-        except SSHError as e:
-            output.warn(f"could not retrieve Tailscale IP: {e}")
-            return None
-
-
-def _build_ambient_session(region: str) -> Any:
-    """The AMBIENT boto3 session (the path a site selects by declaring
-    ``auth: {mode: ambient}``): boto3's default credential chain (env vars,
-    shared config, instance profile, SSO). No probe and no fallback
-    decision, unlike azure's ambient path: AWS has no interactive-browser
-    equivalent, so the chain is used as-is and any failure surfaces at runup or
-    at the op."""
-    import boto3
-
-    return boto3.session.Session(region_name=region)
-
-
-def _build_access_key_session(auth: AwsAccessKeyAuth, secret_value: str, site_name: str, region: str) -> Any:
-    """The ACCESS-KEY boto3 session, built from the site's configured access
-    key id and the resolved secret access key, with STS AssumeRole layered on
-    when ``assume_role_arn`` is set.
-
-    Raises :class:`EC2Error` (site- and secret-named) on the one credential
-    failure reachable at BUILD time, an empty resolved secret, for the same
-    reason azure's service-principal path raises a typed error: an operator who
-    selected ``mode: access-key`` means that credential and no other, so a
-    failure here is fatal and must not fall through to the ambient chain (which
-    the site did not select). The empty resolved secret is
-    reachable in a way ``validate`` cannot catch (the config names a secret; a
-    backend hands back the value), so it is checked explicitly here. The secret
-    VALUE is never interpolated into any message.
-
-    The AssumeRole path uses AUTO-REFRESHING credentials rather than a one-shot
-    assume: a single ``assume_role`` returns temporary credentials that expire
-    (as low as 15 minutes under a restrictive role ``MaxSessionDuration``, which
-    a slow bootstrap wait can outlast), and a session frozen on them would then
-    fail every later call with ``ExpiredToken``, a misleading "rejection" for
-    what is really a stale cache. botocore's ``AssumeRoleCredentialFetcher`` +
-    ``DeferredRefreshableCredentials`` is the standard mechanism: the assume is
-    deferred to first use and transparently re-run as credentials near expiry.
-    Because the assume is deferred, a bad role no longer fails at build; it
-    surfaces at the first real call (runup's ``GetCallerIdentity``), where
-    runup's own classifier reports it. ``ExpiredToken`` deliberately stays in
-    the rejection code set: once refresh exists, a surviving ``ExpiredToken``
-    means a genuinely expired BASE credential (e.g. an ambient SSO session),
-    where fatal-with-hint is the honest verdict.
-    """
-    import boto3
-
-    if not secret_value:
-        raise EC2Error(
-            f"could not authenticate the AWS credentials for vm-site '{site_name}' "
-            f"(access key {auth.access_key_id}, secret '{auth.access_key_secret}'): the resolved secret is empty",
-            detail="the framework resolved the configured secret to an empty string",
-            entity_kind="vm-site",
-            entity_name=site_name,
-            hint=(
-                f"check the value of the '{auth.access_key_secret}' secret (its default env-var backend key is "
-                f"AW_SECRET_AWS_SECRET_ACCESS_KEY)"
-            ),
-        )
-    base = boto3.session.Session(
-        aws_access_key_id=auth.access_key_id,
-        aws_secret_access_key=secret_value,
-        region_name=region,
-    )
-    if auth.assume_role_arn is None:
-        return base
-    return _assume_role_session(base, auth.assume_role_arn, region)
-
-
-def _assume_role_session(base: Any, role_arn: str, region: str) -> Any:
-    """A boto3 session whose credentials auto-refresh by re-assuming ``role_arn``
-    from ``base``'s credentials as they near expiry (botocore's standard
-    deferred-refresh mechanism). The assume is lazy, so no network happens here.
-    """
-    import boto3
-    import botocore.session
-    from botocore.credentials import AssumeRoleCredentialFetcher, DeferredRefreshableCredentials
-
-    base_botocore = base._session
-    fetcher = AssumeRoleCredentialFetcher(
-        client_creator=base_botocore.create_client,
-        source_credentials=base_botocore.get_credentials(),
-        role_arn=role_arn,
-        extra_args={"RoleSessionName": "agentworks"},
-    )
-    assumed = botocore.session.Session()
-    assumed._credentials = DeferredRefreshableCredentials(
-        method="assume-role",
-        refresh_using=fetcher.fetch_credentials,
-    )
-    assumed.set_config_variable("region", region)
-    return boto3.session.Session(botocore_session=assumed)

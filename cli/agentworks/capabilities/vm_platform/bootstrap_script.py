@@ -13,6 +13,7 @@ Markers:
 
 from __future__ import annotations
 
+import ipaddress
 import shlex
 from dataclasses import dataclass, field
 
@@ -234,9 +235,16 @@ fi
 
 # -- Step 7: Join Tailscale --
 echo "##STEP## Tailscale join"
-tailscale up --auth-key "$TAILSCALE_AUTH_KEY"
-TS_IP=$(tailscale ip -4)
-echo "##SUCCESS## tailscale-ip=$TS_IP"
+if [ -n "$TAILSCALE_AUTH_KEY" ]; then
+    tailscale up --auth-key "$TAILSCALE_AUTH_KEY"
+    TS_IP=$(tailscale ip -4)
+    echo "##SUCCESS## tailscale-ip=$TS_IP"
+else
+    # Provider-retained bootstrap payloads embed this script without the
+    # resolved key. Their platform adapters deliver the key over a separate
+    # post-start stdin boundary.
+    echo "##SUCCESS## Tailscale join deferred to platform"
+fi
 """
 
 
@@ -245,11 +253,16 @@ def generate_bootstrap_script(
     admin_username: str,
     ssh_public_key: str,
     provisioning_packages: list[str],
-    tailscale_auth_key: str,
+    tailscale_auth_key: str | None,
     hostname: str,
     swap: int,
 ) -> str:
     """Generate the Phase A bootstrap script with parameters baked in.
+
+    ``tailscale_auth_key=None`` leaves the join step deferred. Provider
+    adapters use this persistence-safe shape whenever their platform retains
+    the script, then deliver the resolved key through a separate ephemeral
+    boundary after the retained script has run.
 
     ``swap`` (GiB, 0 to disable) is required rather than defaulted: the
     vm-template layer resolves it and every caller has the resolved value
@@ -261,7 +274,7 @@ def generate_bootstrap_script(
         admin_username=shlex.quote(admin_username),
         ssh_public_key=shlex.quote(ssh_public_key),
         provisioning_packages=shlex.quote(" ".join(provisioning_packages)),
-        tailscale_auth_key=shlex.quote(tailscale_auth_key),
+        tailscale_auth_key=shlex.quote(tailscale_auth_key or ""),
         vm_hostname=shlex.quote(hostname),
         swap=swap,
         ssh_preserve_path=SSH_PRESERVE_KEYS_PATH,
@@ -310,7 +323,12 @@ def parse_bootstrap_output(stdout: str, exit_code: int) -> BootstrapResult:
             if current_step is not None:
                 current_step.success_msg = msg
             if msg.startswith("tailscale-ip="):
-                result.tailscale_ip = msg.split("=", 1)[1].strip()
+                candidate = msg.split("=", 1)[1].strip()
+                try:
+                    ipaddress.ip_address(candidate)
+                except ValueError:
+                    continue
+                result.tailscale_ip = candidate
         elif line.startswith("##WARN## "):
             if current_step is not None:
                 current_step.warnings.append(line[9:])

@@ -1,6 +1,6 @@
 # 16. YAML Resource Manifests and the Config/Resource Split
 
-Date: 2026-07-05 (amended 2026-07-07)
+Date: 2026-07-05 (amended 2026-08-08)
 
 ## Status
 
@@ -33,10 +33,10 @@ Three pressures converged:
 
 Everything the CLI works with belongs to exactly one of two layers:
 
-| Layer     | What it is                                                                      | Where it lives                            | Identity vocabulary |
-| --------- | ------------------------------------------------------------------------------- | ----------------------------------------- | ------------------- |
-| Config    | Settings: SSH keys, paths, defaults, the active backend chain, (future) plugins | TOML (`config.toml`), the `Config` object | section/field names |
-| Resources | Named, referenceable things: secrets, templates, credentials, capabilities      | the resource Registry, fed by publishers  | `kind` + `name`     |
+| Layer     | What it is                                                                 | Where it lives                            | Identity vocabulary |
+| --------- | -------------------------------------------------------------------------- | ----------------------------------------- | ------------------- |
+| Config    | Settings: SSH keys, paths, defaults, the active source chain, plugins      | TOML (`config.toml`), the `Config` object | section/field names |
+| Resources | Named, referenceable things: secrets, templates, credentials, capabilities | the resource Registry, fed by publishers  | `kind` + `name`     |
 
 **A resource is a named, referenceable registry entry (`kind` + `name`) regardless of where it comes
 from.** Kinds split by whether operators can declare them:
@@ -71,16 +71,16 @@ the composition boundary (`build_registry`).
 
 A capability is a resource whose implementation is registered code: it enters the registry as a
 read-only capability-kind row, so references to it validate through the ordinary framework machinery
-and it lists and describes like everything else. Other resources reference capabilities **directly,
-many-to-one**: a `git-credential` names its provider, a secret's mappings name backends, and a
-session-template names its harness integration. There is no dedicated "exposure" layer between a
-resource and a capability: whether a kind exists is ordinary domain modeling (is there a real noun
-operators reason about, referenced from more than one place?), not a pattern requirement. A
-credential is such a noun; "a configured place to create VMs" (the plugin SDD's vm-site) is such a
-noun. (A declarable "backend instance" kind was considered and rejected because its identity carried
-no content.) If a capability someday genuinely needs multiple configured instances (two 1Password
-accounts with different credentials), a declarable instance kind for THAT capability is an additive
-graduation, not a redesign.
+and it lists and describes like everything else. Other resources usually reference capabilities
+**directly, many-to-one**: a `git-credential` names its provider and a session-template names its
+harness integration. Secrets instead name declarable `secret-source` instances, each of which
+selects a backend capability. There is no generic dedicated "exposure" layer between a resource and
+a capability: whether a kind exists is ordinary domain modeling (is there a real noun operators
+reason about, referenced from more than one place?), not a pattern requirement. A credential is such
+a noun; "a configured place to create VMs" (the plugin SDD's vm-site) is such a noun. The original
+decision rejected a content-free backend instance. The 2026-08-08 amendment records that secret
+sources now carry real per-instance config, including a 1Password account and timeout, so that
+additive graduation has occurred.
 
 **Naming**: each domain calls its capability by its natural noun (`secret-backend`,
 `git-credential-provider`, `vm-platform`, or `harness-integration`), adding a disambiguating suffix
@@ -142,12 +142,12 @@ the YAML surface and the internal model stay uniform.
 > ([ADR 0023](0023-declared-schemas-and-the-kind-descriptor.md)). The uniformity the paragraph was
 > arguing for is now structural: there is one shape, on the surface and inside.
 
-For secrets concretely: `SecretBackend` is an ordinary well-defined API (`would_attempt` /
-`describe_lookup` / `batch_get`) abstracting where secrets actually come from, and resolution is a
-plain loop over the active chain (`[secret_config].backends`, capability names in precedence order)
--- no resolver object, no cache, no memos. Prompt-once is structural (one resolve per command,
-values threaded to env composition), not cached. Per-secret behavior (identifier overrides,
-opt-outs, store addressing) lives in `backend_mappings`, keyed by backend name.
+For secrets concretely, the current model is a bounded `SecretBackend` client selected by a
+declarable `secret-source`. `[secret_config].backends` keeps its spelling but lists source names in
+precedence order, and `backend_mappings` is keyed by source name. `env-var` and `prompt` are
+synthesized sources, preserving the simple default. OnePassword account and timeout live on its
+source; the per-secret mapping is one scalar `op://` reference. Resolution opens one lazy client per
+attempted source and produces value-free typed outcomes.
 
 ### YAML manifests, auto-loaded, Kubernetes envelope
 
@@ -217,10 +217,10 @@ teaching surface, while `agw config init/edit/sample` continue to own the perman
 ADR 0013's decision (CLI-side secret injection at command time, with no VM-side secret storage) and
 ADR 0014's decision (`AcceptEnv AW_*` wildcard transport via SSH `SetEnv`) both stand unchanged.
 What this ADR supersedes is the resolution _mechanism_ those documents describe in passing: the "env
-var, then prompt" sourcing is no longer a hardcoded resolver but the default backend chain
-(`[secret_config].backends = ["env-var", "prompt"]`) over registered backend capabilities, resolved
-by the loop described above. Where 0013/0014 say "the CLI resolves secret values", read "the active
-backend chain resolves them through the `SecretBackend` API".
+var, then prompt" sourcing is the default configured-source chain
+(`[secret_config].backends = ["env-var", "prompt"]`) over synthesized sources. Where 0013/0014 say
+"the CLI resolves secret values", read "the active source chain resolves them through bounded
+`SecretBackend` clients".
 
 ## Implementation note: vm-site / vm-platform
 

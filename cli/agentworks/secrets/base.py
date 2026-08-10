@@ -1,7 +1,7 @@
 """Core types for the agentworks secret system.
 
 Secrets are declarations (``SecretDecl``); values come from the
-registered backend capabilities (``agentworks.secrets.backends``)
+registered backend capabilities (``agentworks.capabilities.secret_backend``)
 through the resolution loop (ADR 0016, YAML resource manifests and the
 config/resource/capability split). See
 ``docs/adrs/0013-cli-side-secret-injection.md`` for why values never
@@ -11,7 +11,8 @@ persist on the VM.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
+from math import isfinite
+from typing import TYPE_CHECKING, Annotated, ClassVar, cast
 
 from pydantic import BeforeValidator, Field
 from pydantic.json_schema import SkipJsonSchema
@@ -26,35 +27,51 @@ if TYPE_CHECKING:
     from agentworks.resources.reference import ResourceReference
 
 
-def _refuse_true(value: Any) -> Any:
-    """``true`` keeps its own message: the alternatives list the union
-    would otherwise render says what IS accepted without teaching that
-    ``false`` is the opt-out an operator was reaching for."""
-    if value is True:
-        raise ValueError("boolean must be `false` (opt-out); `true` is not a valid value")
+def require_exact_json_value(value: object) -> object:
+    """Reject Python lookalikes before pydantic can normalize them.
+
+    The validator is attached recursively, so a failure keeps the list index
+    or mapping key that led to it. Checking ``type`` rather than
+    ``isinstance`` is intentional: enum members and custom primitive
+    subclasses are not JSON-native runtime values even when Python makes
+    them behave like one.
+    """
+    value_type = type(value)
+    if value_type not in (type(None), bool, int, float, str, list, dict):
+        raise ValueError(f"must use exact JSON-native runtime types (got {value_type.__name__})")
+    if value_type is float and not isfinite(cast("float", value)):
+        raise ValueError("JSON numbers must be finite")
     return value
 
 
-MappingValue = Annotated[str | dict[str, object] | Literal[False], BeforeValidator(_refuse_true)]
-"""One entry in ``SecretDecl.backend_mappings``: an identifier override
-(string or structured), or ``False`` for an explicit opt-out."""
+def require_exact_json_string(value: object) -> object:
+    """Reject mapping-key lookalikes before pydantic string normalization."""
+    if type(value) is not str:
+        raise ValueError(f"must use exact JSON string keys (got {type(value).__name__})")
+    return value
+
+
+type _JsonString = Annotated[str, BeforeValidator(require_exact_json_string)]
+type MappingValue = Annotated[
+    None | bool | int | float | str | list[MappingValue] | dict[_JsonString, MappingValue],
+    BeforeValidator(require_exact_json_value),
+]
+"""One lossless JSON-native mapping value. Exact ``False`` remains the
+framework opt-out; every other value belongs to the selected model."""
 
 
 class SecretDecl(DeclaredResource):
     """A declared secret. Values are never stored here; only the existence,
-    description, and per-backend identifier overrides.
+    description, and per-source identifier overrides.
 
-    ``backend_mappings`` is keyed by backend (capability) name
-    (``"env-var"``, ``"prompt"``; later ``"onepassword"``, ...). Value
-    forms per the env-and-secrets SDD:
+    ``backend_mappings`` is a source-name-to-lookup-address map. Its raw carrier
+    preserves every JSON-native value for the selected backend's validation:
 
-    - ``str``: backend's identifier for this secret (env var name, op:// URI, etc.).
-    - ``dict[str, object]``: structured identifier (for backends whose ID
-      carries more than the bare reference, e.g. 1Password's
-      ``{account, reference}`` for pinning a specific account).
-    - ``False``: opt out; skip this backend for this secret regardless of any
-      default convention the backend would otherwise apply.
-    - key absent: use the backend's default convention if it has one, else
+    - strings, numbers, ``True``, null, arrays, and string-keyed objects are
+      delivered to the selected model without framework coercion;
+    - ``False``: opt out; skip this source for this secret regardless of any
+      default convention the selected backend would otherwise apply.
+    - key absent: use the selected backend's default convention if it has one, else
       soft-skip (backend reports as "no mapping" via ``would_attempt``).
     """
 
@@ -82,115 +99,111 @@ class SecretDecl(DeclaredResource):
     """Operator-facing text shown when the secret has to be entered by
     hand: where to generate it, which account it belongs to."""
 
-    backend_mappings: dict[str, MappingValue] = Field(
+    backend_mappings: dict[_JsonString, MappingValue] = Field(
         default_factory=dict,
         examples=[{"env-var": "NPM_TOKEN"}],
     )
-    """Per-backend identifier overrides, keyed by backend name."""
+    """Lookup-address overrides. The editor schema offers every registered
+    backend mapping shape, marks each key as a secret-source reference, and
+    includes exact ``false`` as the framework opt-out."""
 
     def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
-        """The secret's ``secret -> secret-backend`` edges: the candidate
-        backends that could resolve it, frozen into the graph at finalize.
+        """Emit candidate ``secret -> secret-source`` edges source-first.
 
         The edge set is the union of:
 
-        - (a) every PRESENT backend that would attempt this secret
+        - (a) every PRESENT source whose selected backend would attempt this secret
           (``would_attempt(secret, mapping)`` true: it has a mapping or is
-          mapping-optional), read off the build ``context``'s available-backend
-          list, MINUS an explicit ``False`` opt-out; and
+          mapping-optional), read from the build context's source rows, MINUS
+          an explicit ``False`` opt-out; and
         - (b) every explicit non-``False`` ``backend_mappings`` key, even one
-          naming no present backend (the DANGLING edge that turns a typo'd key
-          into a hard finalize miss under the ``secret-backend`` kind's
-          ``"error"`` policy, R9.11).
+          naming no present source (the DANGLING validation edge that turns a
+          typo'd key into a hard finalize miss under `secret-source`).
 
         ``would_attempt`` is a pure function of ``(secret, mapping)`` (the
         ``SecretBackend`` contract), so freezing candidates into edges at
         finalize is safe: ``edges_of(secret)`` is the full candidate set that
         resolution (LLD d) walks. Total and non-throwing. Deduped by target
-        backend name in first-encountered order (present backends in registry
+        source name in first-encountered order (present sources in registry
         order, then any extra explicit keys).
         """
         from agentworks.resources.reference import ResourceReference, sourced_references
+        from agentworks.secrets.sources import (
+            finalize_source_backend_lookup,
+            source_backend_class,
+            source_mapping_references,
+        )
 
         source = ("secret", self.name)
         seen: set[str] = set()
         refs: list[ResourceReference] = []
 
-        def emit(backend_name: str) -> None:
-            if backend_name in seen:
+        def emit(source_name: str) -> None:
+            if source_name in seen:
                 return
-            seen.add(backend_name)
+            seen.add(source_name)
             refs.append(
                 ResourceReference(
-                    name=backend_name,
-                    kind="secret-backend",
-                    usage=f"a resolution backend for secret {self.name!r}",
+                    name=source_name,
+                    kind="secret-source",
+                    usage=f"a resolution source for secret {self.name!r}",
                     source=source,
                 )
             )
 
-        # (a) present backends that would attempt this secret (minus a false
-        # opt-out). ``would_attempt`` is pure over (secret, mapping).
-        for backend_name, backend in context.available_backends:
-            mapping = self.backend_mappings.get(backend_name)
-            if mapping is False:
+        lookup = finalize_source_backend_lookup(context)
+        for source_name in context.rows_of("secret-source"):
+            selected = source_backend_class(lookup, source_name)
+            if selected is None:
                 continue
-            if backend.would_attempt(self, mapping):
-                emit(backend_name)
-        # (a2) whatever each declared mapping itself NAMES. Every shipped
-        # backend's mapping is an external identifier (an env var name, an
-        # ``op://`` reference) that implies no agentworks resource, so this
-        # contributes nothing today. It is wired anyway so secret-backend is
-        # not the one kind whose config references are structurally
-        # underivable: the core reads them off the backend's declared model,
-        # exactly as it does for the other three kinds.
-        from agentworks.capabilities.config import capability_config_references
+            _source_decl, backend = selected
+            mapping_present = source_name in self.backend_mappings
+            mapping = self.backend_mappings.get(source_name)
+            if mapping_present and mapping is False:
+                continue
+            if backend.would_attempt(self.name, mapping_present=mapping_present):
+                emit(source_name)
 
-        for backend_name, mapping in self.backend_mappings.items():
+        for source_name, mapping in self.backend_mappings.items():
             if mapping is False:
                 continue
             refs.extend(
                 sourced_references(
-                    capability_config_references(
-                        kind="secret-backend",
-                        name=backend_name,
-                        config=mapping,
-                        owner=self.mapping_owner(backend_name),
+                    source_mapping_references(
+                        lookup=lookup,
+                        source_name=source_name,
+                        mapping=mapping,
+                        owner=self.mapping_owner(source_name),
                     ),
                     source,
                 )
             )
-        # (b) explicit non-false mapping keys, including any naming no present
-        # backend (a dangling edge that the "error" miss policy hard-errors).
-        for backend_name, mapping in self.backend_mappings.items():
+        for source_name, mapping in self.backend_mappings.items():
             if mapping is False:
                 continue
-            emit(backend_name)
+            emit(source_name)
         return refs
 
     def validate_config(self, context: FinalizeContext) -> None:
         """Throwing per-mapping spec check, run by the finalize ``validate``
         pass: EVERY declared ``backend_mappings`` entry is validated by the
-        CORE against its backend's declared model (R9.9: every declared
+        CORE against its selected backend's declared model (R9.9: every declared
         mapping, not just the opted-in ones, so a stale mapping for a
         configured-but-not-opted-in backend fails at build). No backend code
         runs.
 
         UNCONDITIONAL over enablement, like the pass that calls it
         (:meth:`~agentworks.resources.registry.Registry._validate_resources`).
-        A mapping addressed to a present-but-DISABLED backend is validated
-        exactly like one addressed to an enabled backend: whether a key is
-        accepted is the backend model's answer, and an operator must not be
+        A mapping addressed to a source selecting a DISABLED backend is
+        validated exactly like one selecting an enabled backend: whether a
+        key is accepted is the backend model's answer, and an operator must not be
         able to bank invalid config that detonates at the moment they enable
         the backend. That is the worst possible moment to learn the mapping
         was never well-formed.
 
-        Being validated is a SEPARATE property from being live, and only the
-        latter tracks enablement. A mapping to a disabled backend is still
-        INERT for resolution: :func:`~agentworks.secrets.resolve.active_backends`
-        drops a disabled backend from the chain, so it is never selected and
-        never resolved through. Nothing about that changes here; this method
-        decides only when the shape is checked.
+        Being validated is separate from being live. A source selecting a
+        disabled backend folds not-ready and is skipped without constructing a
+        client; this method decides only when the shape is checked.
 
         Two entries are still not validated against a backend model, neither
         of them for an environmental reason:
@@ -199,50 +212,46 @@ class SecretDecl(DeclaredResource):
           backend config. It names no model to check it against, and it says
           the same thing on every host, so skipping it is a fact about the
           document, not about the environment.
-        - a mapping naming an ABSENT backend, which selects no model and so
-          validates vacuously (``validate_capability_config`` no-ops when no
-          implementation is seated). Checking it is not possible: the model
-          that would judge it does not exist on this host. It is not silently
-          accepted either, because the secret's dangling ``secret-backend``
-          edge reports it once as a hard finalize miss (R9.11), which is the
-          right vocabulary for "no such backend". Naming it a second time as
-          a config error would be one problem told twice.
+        - a mapping naming an absent source, which selects no model and
+          validates vacuously here. Its separately collected source-key
+          reference reports the dangling source exactly once.
         """
-        from agentworks.capabilities.config import validate_capability_config
+        from agentworks.secrets.sources import finalize_source_backend_lookup, validate_source_mapping
 
-        for backend_name, mapping in self.backend_mappings.items():
+        lookup = finalize_source_backend_lookup(context)
+        for source_name, mapping in self.backend_mappings.items():
             if mapping is False:
                 continue
-            validate_capability_config(
-                kind="secret-backend",
-                name=backend_name,
-                config=mapping,
-                owner=self.mapping_owner(backend_name),
+            validate_source_mapping(
+                lookup=lookup,
+                source_name=source_name,
+                mapping=mapping,
+                owner=self.mapping_owner(source_name),
                 location=self.error_location,
             )
 
-    def mapping_owner(self, backend_name: str) -> RefOwner:
+    def mapping_owner(self, source_name: str) -> RefOwner:
         """Who owns one ``backend_mappings`` value, for error framing.
 
         The secret alone would be ambiguous: a secret may map several
-        backends, and a root model's errors carry no field path of their
+        sources, and a root model's errors carry no field path of their
         own, so without the key an operator reading "must not be empty"
         would not know WHICH mapping to fix.
 
         Public, because the finalize pass above is not the only validator
-        of a mapping: a backend that re-validates its own entry defensively
+        of a mapping: the runtime projection that re-validates a source entry defensively
         (``onepassword``) has to frame the result identically, and a second
         spelling of this label would be a second thing to keep in sync.
         """
         return RefOwner(
             kind="secret",
             name=self.name,
-            label=f"secret/{self.name}.backend_mappings.{backend_name}",
+            label=f"secret/{self.name}.backend_mappings.{source_name}",
         )
 
 
-DEFAULT_BACKEND_CHAIN: tuple[str, ...] = ("env-var", "prompt")
-"""Default backend chain when ``[secret_config].backends`` is absent.
+DEFAULT_SOURCE_CHAIN: tuple[str, ...] = ("env-var", "prompt")
+"""Default source chain when ``[secret_config].backends`` is absent.
 
 Resolves declared secrets from operator-side env (``AW_SECRET_<NAME>``) first,
 then prompts interactively. The chain is operator-overridable via an explicit
@@ -257,17 +266,17 @@ class SecretConfig:
     the resource Registry: the chain is a SETTING that names resources
     (like a future active-plugins list would), consumed by the secrets
     subsystem when it validates (``validate_chain``, at
-    ``build_registry``) and when it resolves (``resolve_secrets``).
+    ``build_registry``) and when it resolves (the operation's typed resolution batch).
 
-    ``backends`` is dual-role: presence activates the backend, list
-    order is the resolution precedence. A declared backend absent from
+    ``backends`` retains its settings spelling but contains source names:
+    presence activates the source and list order is the resolution precedence. A declared source absent from
     this list is dormant (never consulted).
 
-    Default value is ``DEFAULT_BACKEND_CHAIN`` (``env-var``, then ``prompt``).
+    Default value is ``DEFAULT_SOURCE_CHAIN`` (``env-var``, then ``prompt``).
     The default applies when the operator's TOML has no ``[secret_config]``
     table OR has the table without a ``backends`` key. An explicit
     ``backends = []`` disables resolution entirely.
     """
 
-    backends: tuple[str, ...] = DEFAULT_BACKEND_CHAIN
+    backends: tuple[str, ...] = DEFAULT_SOURCE_CHAIN
     declared_at: SourceLocation = field(default_factory=synthesized)

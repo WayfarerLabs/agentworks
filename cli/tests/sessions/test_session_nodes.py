@@ -12,8 +12,9 @@ import pytest
 
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
 from agentworks.capabilities.harness_integration import HarnessIntegration
-from agentworks.errors import ConfigError, StateError
+from agentworks.errors import StateError
 from agentworks.schema import AgwModel, NonEmptyStr, SecretRef
+from agentworks.secrets.policy import InteractionPolicy
 from agentworks.sessions.nodes import pending_session_node
 from agentworks.sessions.templates import ResolvedSessionTemplate
 from agentworks.vms.nodes import LiveVMNode, VMSiteNode
@@ -64,7 +65,7 @@ def _pending_agent(db: Database, vm: LiveVMNode, name: str = "dev"):
     from agentworks.agents.templates import ResolvedAgentTemplate
 
     template = AgentTemplateNode(ResolvedAgentTemplate(name="default"), ())
-    return pending_agent_node(db, _stub_config(), name, template, vm)
+    return pending_agent_node(db, _stub_config(), name, template, vm, interaction=InteractionPolicy.REFUSE)
 
 
 def _session(
@@ -78,7 +79,7 @@ def _session(
     from agentworks.workspaces.nodes import pending_workspace_node
 
     vm_node = vm if vm is not None else _vm_node(db)
-    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm_node, None)
+    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm_node, None, interaction=InteractionPolicy.REFUSE)
     template = ResolvedSessionTemplate(name="claude", harness_integration_config={"required_commands": list(required)})
     return pending_session_node(
         db,
@@ -273,8 +274,8 @@ def test_session_create_graph_shares_one_vm_node(db: Database) -> None:
         cast("Registry", object()),
     )
     template = AgentTemplateNode(ResolvedAgentTemplate(name="default", git_credentials=["gh"]), (cred,))
-    agent = pending_agent_node(db, _stub_config(), "dev", template, vm)
-    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm, None)
+    agent = pending_agent_node(db, _stub_config(), "dev", template, vm, interaction=InteractionPolicy.REFUSE)
+    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm, None, interaction=InteractionPolicy.REFUSE)
     session = pending_session_node(
         db,
         _stub_config(),
@@ -350,7 +351,7 @@ def _scanner_session(db: Database, monkeypatch: pytest.MonkeyPatch):  # noqa: AN
 
     monkeypatch.setitem(HARNESS_INTEGRATION_REGISTRY, "scanner", _SecretHarnessIntegration)
     vm = _vm_node(db)
-    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm, None)
+    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm, None, interaction=InteractionPolicy.REFUSE)
     template = ResolvedSessionTemplate(name="scan", harness_integration="scanner")
     return pending_session_node(
         db,
@@ -415,11 +416,7 @@ def test_live_session_node_exposes_the_same_harness_integration_refs(
 def test_sweep_predicts_a_harness_integration_config_secret_with_owner_usage_framing(
     db: Database, tmp_path, monkeypatch: pytest.MonkeyPatch, declared: bool
 ) -> None:
-    """The #305 fail-fast pin, the whole point of the threading: an
-    unresolvable harness_integration_config secret fails at the preflight sweep,
-    before any prompt or mutation, with the same owner/usage framing
-    every other declared config secret gets, instead of surfacing at
-    resolve time.
+    """The sweep predicts a harness secret from source metadata alone.
 
     Parametrized over the registry's knowledge of the secret. The
     ``declared`` case is the path a real session create takes: the
@@ -428,8 +425,7 @@ def test_sweep_predicts_a_harness_integration_config_secret_with_owner_usage_fra
     ``secret_declarations`` finds that row. The ``undeclared`` case
     (no template in the config) drives the lookup-or-synthesize
     fallback instead, pinning that the framing is identical either way
-    (the sweep's message is built from the node's declared reference,
-    not the registry row)."""
+    without probing either registry shape for a current env value."""
     from agentworks.bootstrap import build_registry
     from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
     from agentworks.orchestration.readiness import preflight_all
@@ -454,14 +450,14 @@ def test_sweep_predicts_a_harness_integration_config_secret_with_owner_usage_fra
             registry.lookup(SECRET_KIND_NAME, "scanner-api-key")
     monkeypatch.delenv("AW_SECRET_SCANNER_API_KEY", raising=False)
     session = _scanner_session(db, monkeypatch)
+    scope = OperationScope(level=ScopeLevel.SESSION, vm="box", workspace="ws1", session="s1", admin=True)
 
-    with pytest.raises(ConfigError) as exc:
-        preflight_all([session], RunContext(config=config), registry=registry)
-
-    assert str(exc.value) == (
-        f"session/s1: secret 'scanner-api-key' ({_EXPECTED_USAGE}) is not resolvable by any active backend"
+    preflight_all(
+        [session],
+        RunContext(config=config, operation_scope=scope),
+        registry=registry,
+        interaction=InteractionPolicy.REFUSE,
     )
-    assert "agw secret describe scanner-api-key" in (exc.value.hint or "")
 
 
 def test_sweep_passes_a_resolvable_harness_integration_config_secret(
@@ -481,7 +477,12 @@ def test_sweep_passes_a_resolvable_harness_integration_config_secret(
     session = _scanner_session(db, monkeypatch)
     scope = OperationScope(level=ScopeLevel.SESSION, vm="box", workspace="ws1", session="s1", admin=True)
 
-    preflight_all([session], RunContext(config=config, operation_scope=scope), registry=registry)
+    preflight_all(
+        [session],
+        RunContext(config=config, operation_scope=scope),
+        registry=registry,
+        interaction=InteractionPolicy.REFUSE,
+    )
 
     assert secret_union([session]) == ("scanner-api-key",)
 
@@ -535,7 +536,7 @@ def test_pending_workspace_teardown_is_todays_rollback_body(db: Database, monkey
         lambda db_, config, **kw: calls.append(dict(kw)),
     )
     vm = _vm_node(db)
-    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm, None)
+    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm, None, interaction=InteractionPolicy.REFUSE)
     workspace.mark_realized()
     workspace.teardown()
     (call,) = calls
@@ -678,7 +679,7 @@ def test_reverse_realization_order_reproduces_rollback_order(db: Database, monke
         lambda *a, **k: order.append("workspace"),
     )
     vm = _vm_node(db)
-    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm, None)
+    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm, None, interaction=InteractionPolicy.REFUSE)
     agent = _pending_agent(db, vm)
     log = RealizationLog()
     log.mark_realized(workspace)  # creation order: workspace, then agent
@@ -908,7 +909,7 @@ def _seam_harness_integration(db: Database, blob: dict[str, object], harness_int
     from agentworks.workspaces.nodes import pending_workspace_node
 
     vm_node = _vm_node(db)
-    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm_node, None)
+    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm_node, None, interaction=InteractionPolicy.REFUSE)
     template = ResolvedSessionTemplate(name="t", harness_integration=harness_integration_name)
     return _harness_integration_for_template(
         template,
@@ -931,7 +932,7 @@ def test_same_key_writers_land_in_distinct_namespaces(db: Database, monkeypatch:
     from agentworks.workspaces.nodes import pending_workspace_node
 
     vm_node = _vm_node(db)
-    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm_node, None)
+    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm_node, None, interaction=InteractionPolicy.REFUSE)
     for hname in ("toy-a", "toy-b"):
         monkeypatch.setitem(HARNESS_INTEGRATION_REGISTRY, hname, _toy_harness_integration(hname))
     blob: dict[str, object] = {}

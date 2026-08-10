@@ -20,6 +20,7 @@ from agentworks.agents.manager import list_agents
 from agentworks.db import SessionMode
 from agentworks.errors import NotFoundError
 from agentworks.name_filters import validate_name_filters
+from agentworks.secrets.policy import InteractionPolicy
 from agentworks.sessions import manager as session_manager
 from agentworks.sessions.multi_console import list_consoles
 from agentworks.workspaces.manager import list_workspaces
@@ -98,19 +99,19 @@ def test_no_filters_is_a_noop(db: Database) -> None:
 def test_session_list_rejects_unknown_vm(db: Database) -> None:
     _seed(db)
     with pytest.raises(NotFoundError, match="unknown VM 'wf-test'"):
-        session_manager.list_sessions(db, None, vm_name="wf-test")  # type: ignore[arg-type]
+        session_manager.list_sessions(db, None, vm_name="wf-test", interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
 
 def test_session_list_rejects_unknown_workspace(db: Database) -> None:
     _seed(db)
     with pytest.raises(NotFoundError, match="unknown workspace 'nope'"):
-        session_manager.list_sessions(db, None, workspace_name="nope")  # type: ignore[arg-type]
+        session_manager.list_sessions(db, None, workspace_name="nope", interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
 
 def test_session_list_rejects_unknown_agent(db: Database) -> None:
     _seed(db)
     with pytest.raises(NotFoundError, match="unknown agent 'nope'"):
-        session_manager.list_sessions(db, None, agent_name="nope")  # type: ignore[arg-type]
+        session_manager.list_sessions(db, None, agent_name="nope", interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
 
 def test_session_list_csv_with_one_bad_element_rejects(db: Database) -> None:
@@ -118,7 +119,7 @@ def test_session_list_csv_with_one_bad_element_rejects(db: Database) -> None:
     excuse an unknown sibling."""
     _seed(db)
     with pytest.raises(NotFoundError, match="unknown VM 'wf-test'") as excinfo:
-        session_manager.list_sessions(db, None, vm_name=["dev-vm", "wf-test"])  # type: ignore[arg-type]
+        session_manager.list_sessions(db, None, vm_name=["dev-vm", "wf-test"], interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
     assert "'dev-vm'" not in str(excinfo.value)
 
 
@@ -129,7 +130,7 @@ def test_session_list_valid_filter_empty_result_succeeds(
     """A defined VM with no sessions is a valid filter: empty result,
     no error. This is the half of the contract that must NOT change."""
     _seed(db)
-    session_manager.list_sessions(db, None, vm_name="dev-vm")  # type: ignore[arg-type]
+    session_manager.list_sessions(db, None, vm_name="dev-vm", interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
     assert any("No sessions found" in m for m in captured_output.info)
 
 
@@ -141,7 +142,7 @@ def test_session_list_valid_filter_empty_result_succeeds(
 def test_stop_all_sessions_rejects_unknown_vm(db: Database) -> None:
     _seed(db)
     with pytest.raises(NotFoundError, match="unknown VM 'wf-test'"):
-        session_manager.stop_all_sessions(db, None, vm_name="wf-test")  # type: ignore[arg-type]
+        session_manager.stop_all_sessions(db, None, vm_name="wf-test", interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
 
 def test_stop_all_sessions_valid_filter_empty_result_succeeds(
@@ -149,7 +150,7 @@ def test_stop_all_sessions_valid_filter_empty_result_succeeds(
     captured_output: CapturedOutput,
 ) -> None:
     _seed(db)
-    session_manager.stop_all_sessions(db, None, vm_name="dev-vm")  # type: ignore[arg-type]
+    session_manager.stop_all_sessions(db, None, vm_name="dev-vm", interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
     assert any("No running sessions to stop" in m for m in captured_output.info)
 
 
@@ -158,7 +159,7 @@ def test_resume_all_sessions_rejects_unknown_vm(db: Database) -> None:
     ``--vm`` must be a hard error, not "no sessions to restart"."""
     _seed(db)
     with pytest.raises(NotFoundError, match="unknown VM 'wf-test'"):
-        session_manager.resume_all_sessions(db, None, vm_name="wf-test")  # type: ignore[arg-type]
+        session_manager.resume_all_sessions(db, None, vm_name="wf-test", interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
 
 def test_resume_all_sessions_valid_filter_empty_result_succeeds(
@@ -166,7 +167,7 @@ def test_resume_all_sessions_valid_filter_empty_result_succeeds(
     captured_output: CapturedOutput,
 ) -> None:
     _seed(db)
-    session_manager.resume_all_sessions(db, None, vm_name="dev-vm")  # type: ignore[arg-type]
+    session_manager.resume_all_sessions(db, None, vm_name="dev-vm", interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
     assert any("No matching sessions to resume" in m for m in captured_output.info)
 
 
@@ -239,5 +240,5 @@ def test_agent_filter_valid_for_agent_with_no_sessions(
         agent_name="a2",
         socket_path="/tmp/agw-a2/tmux.sock",
     )
-    session_manager.list_sessions(db, None, agent_name="a1")  # type: ignore[arg-type]
+    session_manager.list_sessions(db, None, agent_name="a1", interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
     assert any("No sessions found" in m for m in captured_output.info)

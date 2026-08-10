@@ -100,38 +100,23 @@ class ConnectivityError(AgentworksError):
 
 
 class SecretUnavailableError(AgentworksError):
-    """No active secret backend could resolve the requested secret.
+    """A secret outcome was unavailable or interaction was refused.
 
-    Raised by the resolve loop when every backend in the active chain
-    came up empty for at least one needed secret. The ``hint`` field
-    carries the list of backends that were tried so the operator can act
-    (e.g. set ``AW_SECRET_<NAME>``, configure 1Password, or run
-    interactively).
+    Complete resolution selects this type when its first failed outcome is
+    unavailable for any value-free reason, or when the only eligible source
+    required interaction that the operation's exact policy refused. The hint
+    retains every failed outcome in request order without values.
     """
 
 
 class SecretMappingError(SecretUnavailableError):
-    """A backend with a configured mapping reports the mapping doesn't resolve.
+    """A source with a configured mapping reports a definitive hard miss.
 
-    Distinct from a soft miss (where a provider omits the secret from its
-    ``batch_get`` result to fall through to the next backend in the
-    chain). A provider raises this when the operator has explicitly told
-    it where to look and the lookup definitively returns "not present" --
-    a 1Password URI pointing at a deleted item, a Vault path with no
-    value, etc. The resolve loop halts the chain on this exception so a
-    misconfigured persistent store doesn't quietly fall through to a
-    prompt.
-
-    Conventional providers (env-var, prompt) keep soft-missing; only
-    persistent-store providers raise this. Future per-backend config
-    (e.g. a ``strict_on_miss`` field on a ``secret-backend`` manifest)
-    could let operators opt persistent stores back into fall-through; not
-    wired today since no provider that would honor it ships in this
-    surface.
-
-    Transport / authentication failures (vault locked, network down) are
-    distinct from a mapping miss and surface as ``ConnectivityError`` or
-    ``ExternalError`` per the broader error taxonomy.
+    This differs from a soft unavailable outcome, which permits the next
+    configured source to try. Connectivity alone maps to
+    ``ConnectivityError``. Authentication, deadlines, provider failures,
+    malformed values, protocol violations, and unexpected failures map to
+    ``ExternalError``.
     """
 
 
@@ -147,14 +132,6 @@ class ProvisioningError(ExternalError):
     """VM provisioning against a platform backend (Azure, Proxmox, Lima)
     failed. Named for the activity: "provisioner" as a noun is retired
     (the class concept is the VM platform).
-    """
-
-
-class SensitiveDataCleanupError(ProvisioningError):
-    """Cleanup could not confirm removal of sensitive provisioning data.
-
-    This failure takes precedence over an earlier operation failure when
-    residue may remain and requires explicit operator remediation.
     """
 
 

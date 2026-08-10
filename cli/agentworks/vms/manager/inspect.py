@@ -18,6 +18,7 @@ from agentworks.errors import (
     UserAbort,
 )
 from agentworks.naming import MAX_VM_NAME_LENGTH
+from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 
 from ._helpers import _require_vm, _vm_scope
 from .boundary import _platform_ops_ctx
@@ -431,8 +432,11 @@ def vm_description(
     db: Database,
     config: Config,
     name: str,
+    *,
+    interaction: InteractionPolicy,
 ) -> VMDescription:
     """Collect safe VM detail facts, degrading bounded live reads to issues."""
+    interaction = validate_interaction_policy(interaction)
     import agentworks.vms.manager as _mgr
     from agentworks.bootstrap import load_request_registry
     from agentworks.capabilities.base import RunContext
@@ -463,7 +467,7 @@ def vm_description(
         issues.append(issue)
         diagnostics.append(VMDiagnostic(issue=issue, error=exc))
     else:
-        resolver = Resolver(config, registry)
+        resolver = Resolver(config, registry, interaction=interaction)
         try:
             vm_node = live_vm_node(db, config, registry, vm)
         except UserAbort:
@@ -482,6 +486,7 @@ def vm_description(
                     nodes,
                     RunContext(config=config, operation_scope=scope),
                     registry=registry,
+                    interaction=interaction,
                 )
             except UserAbort:
                 raise
@@ -694,6 +699,13 @@ def render_vm_description(description: VMDescription) -> None:
         output.detail("(none)")
 
 
-def describe_vm(db: Database, config: Config, name: str) -> None:
+def describe_vm(
+    db: Database,
+    config: Config,
+    name: str,
+    *,
+    interaction: InteractionPolicy,
+) -> None:
     """Show VM details through the shared inspection fact record."""
-    render_vm_description(vm_description(db, config, name))
+    interaction = validate_interaction_policy(interaction)
+    render_vm_description(vm_description(db, config, name, interaction=interaction))

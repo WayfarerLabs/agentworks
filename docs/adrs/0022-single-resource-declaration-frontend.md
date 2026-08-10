@@ -56,10 +56,10 @@ pointing at `agw resource migrate` (and, for the legacy flat sites, noting that 
 `[proxmox]` migrate as `vm-site`). The warning became an error; the section no longer loads.
 
 This is the change from ADR 0016's dual-path section and nothing more. `config.toml` remains the
-home for settings (operator identity, paths, defaults, the secret backend chain,
-`[plugins].system`), and those sections load exactly as before. The `[secret_backends.*]` no-op
-sections keep their existing deprecation warning: they were never resource declarations, so FR1 does
-not sweep them into the hard error.
+home for settings (operator identity, paths, defaults, the secret source chain, `[plugins].system`),
+and those sections load exactly as before. The `[secret_backends.*]` no-op sections keep their
+existing deprecation warning: they were never resource declarations, so FR1 does not sweep them into
+the hard error.
 
 `agw resource migrate` remains the escape hatch and the recommended path. It still reads the legacy
 TOML directly and writes YAML manifests, backup-first, with rollback on a verification mismatch; the

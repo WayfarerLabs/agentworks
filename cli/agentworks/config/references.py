@@ -2,7 +2,7 @@
 resolve.
 
 A handful of settings are references: ``defaults.site`` names a ``vm-site``,
-``[secret_config].backends`` names ``secret-backend`` rows in precedence
+``[secret_config].backends`` names ``secret-source`` rows in precedence
 order. They are settings, not resources, and are never published as
 pseudo-resources (ADR 0016), so the framework's own reference machinery does
 not see them: a ``ResourceReference`` is sourced from a declaring ROW, and
@@ -18,7 +18,7 @@ is the whole list of settings that name rows; adding a setting that names one
 means adding a row there, and :func:`validate_setting_references` then covers
 it with no new per-field check. That is deliberately the opposite of what it
 replaced: one bespoke validator per subsystem
-(``vms.validate_sites``, plus an ``active_backends`` call made purely for its
+(``vms.validate_sites``, plus an ``active_sources`` call made purely for its
 side effect inside ``secrets.validate_chain``), each with its own error
 wording for the same operator mistake.
 
@@ -76,7 +76,7 @@ def _default_site(config: Config) -> tuple[str, ...]:
 
 
 def _secret_chain(config: Config) -> tuple[str, ...]:
-    """``[secret_config].backends``, the enabled-backend precedence list."""
+    """``[secret_config].backends``, the active-source precedence list."""
     return config.secret_config_data.backends
 
 
@@ -88,7 +88,7 @@ def _secret_chain(config: Config) -> tuple[str, ...]:
 #: not a name of anything.
 _SETTING_REF_SOURCES: tuple[_SettingRefSource, ...] = (
     _SettingRefSource(setting="defaults.site", kind="vm-site", read=_default_site),
-    _SettingRefSource(setting="[secret_config].backends", kind="secret-backend", read=_secret_chain),
+    _SettingRefSource(setting="[secret_config].backends", kind="secret-source", read=_secret_chain),
 )
 
 
@@ -162,6 +162,12 @@ def validate_setting_references(config: Config, registry: Registry) -> None:
         try:
             registry.lookup(ref.kind, ref.name)
         except KeyError:
+            if ref.kind == "secret-source":
+                from agentworks.secrets.sources import direct_backend_source_error
+
+                error = direct_backend_source_error(name=ref.name, registry=registry, referrer=ref)
+                if error is not None:
+                    raise error from None
             raise ConfigError(
                 f"{ref.setting} references unknown {ref.kind} {ref.name!r}",
                 hint=_dangling_hint(registry, ref),

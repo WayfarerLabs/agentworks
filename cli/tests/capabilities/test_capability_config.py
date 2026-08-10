@@ -10,7 +10,7 @@ behavior all four share.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, get_args
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, cast, get_args
 
 import pytest
 from pydantic import BaseModel
@@ -26,7 +26,7 @@ from agentworks.capabilities.config import (
     validate_own_config,
 )
 from agentworks.capabilities.descriptor import descriptor_for
-from agentworks.errors import ConfigError, StateError
+from agentworks.errors import ConfigError
 from agentworks.plugins import Plugin, seated_plugin
 from agentworks.resources.reference import ConfigReference
 from agentworks.schema import (
@@ -342,16 +342,12 @@ def test_a_missing_or_non_string_tag_names_no_implementation(config: object) -> 
     assert selected_name("vm-platform", config, None) is None
 
 
-def test_a_map_keyed_kind_takes_its_selector_from_the_caller() -> None:
-    """A secret backend's config is the mapping VALUE, which carries no
-    tag and need not be a mapping at all; the outer map key is the only
-    source there is."""
-    assert selected_name("secret-backend", "NPM_TOKEN", "env-var") == "env-var"
+def test_a_secret_backend_source_config_takes_its_selector_from_the_tag() -> None:
+    assert selected_name("secret-backend", {"name": "env-var"}, None) == "env-var"
 
 
-def test_a_map_keyed_kind_with_no_name_is_a_framework_bug() -> None:
-    with pytest.raises(StateError, match="dispatches its config by map key"):
-        selected_name("secret-backend", "NPM_TOKEN", None)
+def test_a_secret_backend_source_config_does_not_use_a_caller_selector() -> None:
+    assert selected_name("secret-backend", {"name": "prompt"}, "env-var") == "prompt"
 
 
 # -- Extraction ---------------------------------------------------------------
@@ -459,11 +455,10 @@ def test_a_collapsed_union_still_dispatches_on_the_tag(sole_seated: None) -> Non
     )
 
 
-def test_a_map_keyed_kind_has_no_union_to_assemble() -> None:
-    """secret-backend dispatches on the ``backend_mappings`` key, so a tag
-    inside the value would say the same thing twice and could disagree."""
-    with pytest.raises(StateError, match="map key"):
-        capability_config_union("secret-backend")
+def test_secret_backend_source_config_has_a_tagged_union() -> None:
+    union = capability_config_union("secret-backend")
+    validated = cast("Any", union.model_validate({"name": "env-var"}))
+    assert validated.root.name == "env-var"
 
 
 def test_an_unregistered_name_is_rejected_by_the_union_naming_what_is_registered(seated: None) -> None:

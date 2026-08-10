@@ -24,11 +24,14 @@ import pytest
 import yaml
 from jsonschema import Draft202012Validator
 
+from agentworks.capabilities.conformance import conformance_error
+from agentworks.capabilities.descriptor import descriptor_for
 from agentworks.declared_resource import METADATA_FIELDS
 from agentworks.manifests.emit import (
     ENVELOPE_SCHEMA_FILENAME,
     SCHEMA_DIRNAME,
     YAML_11_ONLY_BOOLEANS,
+    YAML_11_ONLY_FLOATS,
     YAML_11_ONLY_INTEGERS,
     document_schema,
     envelope_schema,
@@ -40,12 +43,12 @@ from agentworks.manifests.emit import (
 from agentworks.manifests.envelope import _ENVELOPE_KEYS, API_VERSION
 from agentworks.manifests.loader import load_manifests
 from agentworks.manifests.samples import sample_text
-from agentworks.manifests.spec_model import declarable_kinds
+from agentworks.manifests.spec_model import declarable_kinds, spec_model
 from agentworks.plugins import Plugin, seated_plugin
-from agentworks.schema import REF_SCHEMA_KEY, AgwModel
+from agentworks.schema import REF_SCHEMA_KEY, AgwModel, AgwRootModel, iter_field_docs
 from tests._emitted_schema import ref_extension
 from tests.manifests.conftest import uncomment
-from tests.plugins._fixtures import ConformingVMPlatform
+from tests.plugins._fixtures import ConformingSecretBackend, ConformingVMPlatform
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -78,12 +81,9 @@ class _EditorLoader(yaml.SafeLoader):
       the same way and one round later: modelling two of the three left
       ``"type": "integer"`` over-reporting on ``memory: 8_192``.
 
-    Floats are NOT modelled, and the one visible consequence is that
-    ``1e3`` is a string here where a real editor makes it the number
-    1000. It is inert because the emitted surface holds no float field,
-    and ``test_the_float_gap_is_still_unreachable`` is what keeps that
-    true; adding one means finishing this harness as well as
-    ``emit._ManifestJsonSchema``.
+    - **floats.** 1.1 accepts underscore and sexagesimal spellings that 1.2
+      leaves as strings. Source timeout config makes this live, so the
+      harness models the 1.2 number vocabulary too.
     """
 
 
@@ -97,11 +97,20 @@ Note what is missing against 1.1 and what is added: no underscores and no
 sexagesimal, hex takes no sign, and ``0o17`` is an integer to 1.2 alone.
 """
 
+_YAML_12_FLOAT = re.compile(r"^(?:[-+]?(?:[0-9]+\.[0-9]*|\.[0-9]+)(?:[eE][-+]?[0-9]+)?|[-+]?[0-9]+[eE][-+]?[0-9]+)$")
+"""The plain scalars YAML 1.2 core resolves to a float."""
+
 _EditorLoader.yaml_implicit_resolvers = {
     first: [
         (tag, regexp)
         for tag, regexp in resolvers
-        if tag not in {"tag:yaml.org,2002:timestamp", "tag:yaml.org,2002:bool", "tag:yaml.org,2002:int"}
+        if tag
+        not in {
+            "tag:yaml.org,2002:timestamp",
+            "tag:yaml.org,2002:bool",
+            "tag:yaml.org,2002:int",
+            "tag:yaml.org,2002:float",
+        }
     ]
     for first, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
 }
@@ -112,6 +121,8 @@ for _first in "tTfF":
     )
 for _first in "-+0123456789":
     _EditorLoader.yaml_implicit_resolvers[_first].insert(0, ("tag:yaml.org,2002:int", _YAML_12_INTEGER))
+for _first in "-+.0123456789":
+    _EditorLoader.yaml_implicit_resolvers.setdefault(_first, []).append(("tag:yaml.org,2002:float", _YAML_12_FLOAT))
 
 
 def _construct_yaml_12_integer(_loader: yaml.SafeLoader, node: yaml.Node) -> int:
@@ -373,6 +384,154 @@ def _platform_names() -> set[str]:
     from agentworks.capabilities.descriptor import descriptor_for
 
     return set(descriptor_for("vm-platform").registry())
+
+
+class _SchemaListMapping(AgwRootModel[list[str]]):
+    """A plugin-contributed list mapping."""
+
+
+class _SchemaListBackend(ConformingSecretBackend):
+    name = "schema-list"
+    description = "fixture list mapping"
+    mapping_model = _SchemaListMapping
+
+
+class _SchemaAddress(AgwModel):
+    """The closed object nested inside a mapping root."""
+
+    item: int
+
+
+class _SchemaObjectMapping(AgwRootModel[_SchemaAddress]):
+    """A plugin-contributed object mapping."""
+
+
+class _SchemaObjectBackend(ConformingSecretBackend):
+    name = "schema-object"
+    description = "fixture object mapping"
+    mapping_model = _SchemaObjectMapping
+
+
+class _SchemaTrueMapping(AgwRootModel[Literal[True]]):
+    """A plugin-contributed true-literal mapping."""
+
+
+class _SchemaTrueBackend(ConformingSecretBackend):
+    name = "schema-true"
+    description = "fixture true mapping"
+    mapping_model = _SchemaTrueMapping
+
+
+class _SchemaNullMapping(AgwRootModel[None]):
+    """A plugin-contributed null mapping."""
+
+
+class _SchemaNullBackend(ConformingSecretBackend):
+    name = "schema-null"
+    description = "fixture null mapping"
+    mapping_model = _SchemaNullMapping
+
+
+class _SchemaNumberMapping(AgwRootModel[int]):
+    """A plugin-contributed number mapping."""
+
+
+class _SchemaNumberBackend(ConformingSecretBackend):
+    name = "schema-number"
+    description = "fixture number mapping"
+    mapping_model = _SchemaNumberMapping
+
+
+_RecursiveSchemaMapping = type(
+    "_RecursiveSchemaMapping",
+    (AgwRootModel[list["_RecursiveSchemaMapping"] | str],),  # type: ignore[misc]
+    {
+        "__module__": __name__,
+        "__doc__": "A mapping that recursively nests lists around a string leaf.",
+    },
+)
+
+
+class _RecursiveSchemaBackend(ConformingSecretBackend):
+    name = "schema-recursive"
+    description = "fixture recursive mapping"
+    mapping_model = _RecursiveSchemaMapping
+
+
+def test_recursive_root_mapping_conforms_and_projects_to_emitted_schema() -> None:
+    with seated_plugin(
+        Plugin(
+            name="recursive-schema-mapping",
+            capabilities={"secret-backend": (_RecursiveSchemaBackend,)},
+        )
+    ):
+        assert conformance_error(descriptor_for("secret-backend"), _RecursiveSchemaBackend) is None
+        docs = {doc.path: doc for doc in iter_field_docs(spec_model("secret"))}
+        schema = document_schema("secret")
+
+    assert ("backend_mappings",) in docs
+    recursive = schema["$defs"]["_RecursiveSchemaMapping"]
+    assert recursive["anyOf"] == [
+        {
+            "items": {"$ref": "#/$defs/_RecursiveSchemaMapping"},
+            "type": "array",
+        },
+        {"type": "string"},
+    ]
+    document = _a_document(
+        "secret",
+        {"backend_mappings": {"recursive": ["leaf", [["nested"]]]}},
+        description="fixture",
+    )
+    assert _errors(schema, document) == []
+
+
+def test_mapping_schema_is_derived_from_descriptor_and_registered_models() -> None:
+    fixtures = (
+        _SchemaListBackend,
+        _SchemaObjectBackend,
+        _SchemaTrueBackend,
+        _SchemaNullBackend,
+        _SchemaNumberBackend,
+    )
+    with seated_plugin(Plugin(name="schema-mappings", capabilities={"secret-backend": fixtures})):
+        schema = document_schema("secret")
+
+    mappings = schema["$defs"]["SecretSpec"]["properties"]["backend_mappings"]
+    assert ref_extension(mappings["propertyNames"]) == {
+        "kind": "secret-source",
+        "usage": "a source for resolving this secret",
+        "default_template": None,
+        "relationship": "uses",
+    }
+    assert mappings["propertyNames"]["minLength"] == 1
+    mapping_union = schema["$defs"][mappings["additionalProperties"]["$ref"].rsplit("/", 1)[-1]]
+    assert sum(arm.get("const") is False for arm in mapping_union["anyOf"]) == 1
+    for definition in (
+        "_SchemaListMapping",
+        "_SchemaObjectMapping",
+        "_SchemaTrueMapping",
+        "_SchemaNullMapping",
+        "_SchemaNumberMapping",
+    ):
+        assert definition in schema["$defs"]
+        assert list(_every_ref(schema)).count(f"#/$defs/{definition}") == 1
+    assert schema["$defs"]["PromptMapping"] == {"not": {}}
+    assert schema["$defs"]["_SchemaAddress"]["additionalProperties"] is False
+
+    for value in (["vault", "item"], {"item": 7}, True, None, False, 17):
+        document = _a_document(
+            "secret",
+            {"backend_mappings": {"any-source-name": value}},
+            description="fixture",
+        )
+        assert _errors(schema, document) == [], value
+    closed = _a_document(
+        "secret",
+        {"backend_mappings": {"any-source-name": {"item": 7, "unknown": 1}}},
+        description="fixture",
+    )
+    assert _errors(schema, closed)
 
 
 # What the splice buys (without it the block is ``extra="allow"`` and an
@@ -887,22 +1046,37 @@ def test_no_emitted_integer_type_is_narrower_than_the_loader() -> None:
             assert node.get("type") != "integer", (filename, node)
 
 
-def test_the_float_gap_is_still_unreachable() -> None:
-    """No emitted field is a float, which is what lets there be no
-    ``float_schema`` override.
-
-    pyyaml reads ``1_000.5`` as a float where 1.2 core reads a string, so
-    a float field would arrive over-reporting exactly as integers did.
-    Rather than write a widening for a field that does not exist and
-    guess at its constraints, this fails the day one appears. Whoever
-    that is owes ``_ManifestJsonSchema`` a ``float_schema``, this file's
-    ``_EditorLoader`` the matching resolver, and the emission LLD a row.
-    """
+def test_no_emitted_number_type_is_narrower_than_the_loader() -> None:
     for filename, schema in schema_set().items():
         for node in _every_subschema(schema):
-            declared = node.get("type")
-            declared = declared if isinstance(declared, list) else [declared]
-            assert "number" not in declared, (filename, node)
+            assert node.get("type") != "number", (filename, node)
+
+
+def test_a_yaml_11_float_spelling_is_not_a_source_schema_error(tmp_path: Path) -> None:
+    from agentworks.bootstrap import build_registry
+    from agentworks.config import load_config
+
+    text = (
+        f"apiVersion: {API_VERSION}\n"
+        "kind: secret-source\n"
+        "metadata:\n"
+        "  name: team-op\n"
+        "spec:\n"
+        "  backend:\n"
+        "    name: onepassword\n"
+        "    timeout: 1_000.5\n"
+    )
+    (document,) = _documents(text)
+    assert document["spec"]["backend"]["timeout"] == "1_000.5"
+    assert _errors(document_schema("secret-source"), document) == []
+    assert re.fullmatch(YAML_11_ONLY_FLOATS, "1_000.5")
+
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    (resources / "sources.yaml").write_text(text)
+    registry = build_registry(load_config(_a_config(tmp_path), warn_issues=False))
+    source = registry.lookup("secret-source", "team-op")
+    assert source.backend.config["timeout"] == 1000.5
 
 
 def _a_vm_template(memory: str) -> str:

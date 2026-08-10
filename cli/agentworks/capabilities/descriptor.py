@@ -32,17 +32,24 @@ if TYPE_CHECKING:
     from agentworks.origin import Origin
     from agentworks.resources.graph import Readiness
     from agentworks.resources.kind import ResourceKind
+    from agentworks.schema import ResourceRef
 
 
 class RegistryPolicy(Enum):
     """What a capability kind's code registry stores under each name."""
 
     CLASS_BY_NAME = "class-by-name"
-    """The impl CLASS itself (vm-platform, harness-integration,
-    git-credential-provider)."""
+    """The implementation class itself."""
 
-    CONSTRUCTED_SINGLETON = "constructed-singleton"
-    """One instance built at seating time. Used by ``secret-backend``."""
+
+class ModelInputDomain(Enum):
+    """The values a declared model may accept at its raw input boundary."""
+
+    PYTHON = "python"
+    """The ordinary Pydantic input vocabulary, constrained by the model."""
+
+    JSON_NATIVE = "json-native"
+    """Only values representable by Agentworks' JSON-native manifest carrier."""
 
 
 @dataclass(frozen=True)
@@ -66,7 +73,13 @@ class ConfigContract:
     config is dispatched by a DISCRIMINATED UNION (``"name"``: a vm-site
     writes ``platform: {name: lima, ...}``). ``None`` for a kind dispatched
     by a MAP KEY, whose models carry no tag because the key already is one
-    (``secret-backend``, keyed by ``backend_mappings``)."""
+    map key rather than a tag inside the value."""
+
+    input_domain: ModelInputDomain = ModelInputDomain.PYTHON
+    """The annotation vocabulary the model may expose at its input boundary."""
+
+    forbidden_reference_kinds: frozenset[str] = frozenset()
+    """Reference-marker kinds this config layer is not allowed to contain."""
 
 
 @dataclass(frozen=True)
@@ -85,15 +98,32 @@ class HostSurface:
     naming_field: str
     """The spec field naming the capability (``"platform"``)."""
 
-    config_field: str
+    config_field: str | None
     """The RETIRED sibling field that used to hold the capability's config
     blob (``"platform_config"``).
 
     There is no such field any more: the row carries one tagged block, so
     this exists for exactly one reader, ``decode._reject_legacy_shape``,
     which names the retired field in the error that tells an operator how
-    to rewrite the 0.14 shape. It goes when that guard does, and the
-    guard's own docstring says when."""
+    to rewrite the 0.14 shape. ``None`` means the host never had a retired
+    sibling field."""
+
+
+@dataclass(frozen=True)
+class MappingHost:
+    """Where a capability's map-key-selected model is hosted."""
+
+    host_kind: str
+    """The declarable resource kind carrying the mapping field."""
+
+    field_name: str
+    """The host row field whose keys select configured implementations."""
+
+    key_reference: ResourceRef
+    """What each authored mapping key references."""
+
+    false_opt_out: bool
+    """Whether singleton ``False`` is framework-owned opt-out vocabulary."""
 
 
 @dataclass(frozen=True)
@@ -102,7 +132,7 @@ class CapabilityKindDescriptor:
 
     Core-owned and frozen: plugins contribute IMPLEMENTATIONS of existing
     kinds, never new kinds. Domain operations stay domain-owned: nothing
-    here touches ``VMPlatform.create``, ``SecretBackend.batch_get``, or
+    here touches ``VMPlatform.create``, ``SecretBackend.create_client``, or
     credential fill. The descriptor wires a kind into the framework; it does
     not absorb what makes the kind itself.
     """
@@ -115,16 +145,11 @@ class CapabilityKindDescriptor:
     requires an exact match."""
 
     implementation_contract: type
-    """The base class or protocol an impl must satisfy. NOT uniform in
-    shape: three kinds declare an ABC and are checked nominally, while
-    ``SecretBackend`` is a ``Protocol`` whose members include properties, so
-    it is checked structurally (``required_attributes`` plus
-    ``required_operations``) and this field is documentary for that kind. See
-    :func:`agentworks.capabilities.conformance.conformance_error`."""
+    """The nominal base class an implementation must derive from."""
 
     registry_policy: RegistryPolicy
-    """Whether the kind's registry stores classes or constructed
-    instances."""
+    """Whether the kind's registry stores classes. Every current kind is
+    class-by-name."""
 
     registry: Callable[[], dict[str, Any]]
     """Lazy accessor for the kind's live code registry. A callable, not the
@@ -133,19 +158,10 @@ class CapabilityKindDescriptor:
     snapshot restore) are mutating the real thing, by design."""
 
     required_operations: frozenset[str]
-    """The domain operations the framework depends on being present and
-    callable on an impl. For the ABC kinds this restates what
-    ``inspect.isabstract`` already enforces; for ``secret-backend`` (a
-    Protocol, with nothing to leave abstract) it IS the enforcement."""
+    """The domain operations the framework depends on being callable."""
 
     required_attributes: frozenset[str]
-    """The non-operation members the framework reads off an impl, beyond the
-    universal ``name`` / ``description``. EMPTY for the ABC kinds, whose base
-    class supplies every such member to any subclass. For ``secret-backend``
-    it carries ``interactive``, which the resolve loop reads on every chain
-    pass: a Protocol declares it but cannot supply it, so without this field
-    a backend omitting it seats cleanly and raises ``AttributeError`` deep in
-    resolution, which is the exact failure this module exists to end."""
+    """The kind-specific non-operation members consumers read off an impl."""
 
     entry_factory: Callable[[str, Any, Origin | None], Any]
     """Builds the kind's read-only resource row from ``(name, seated impl,
@@ -166,14 +182,11 @@ class CapabilityKindDescriptor:
     (vm-site) uses."""
 
     publisher_source: str
-    """The ``Origin.built_in`` source label the kind's built-in rows carry
-    (``"agentworks.secrets"`` for secret-backend, whose publisher fronts
-    ``secrets/backends.py``)."""
+    """The ``Origin.built_in`` source label the kind's built-in rows carry."""
 
     manifest_section: HostSurface | None
     """How the kind is selected in its host's manifest spec, or ``None``
-    when no declarable kind hosts it (``secret-backend``, whose
-    ``backend_mappings`` map key already names the capability)."""
+    when the kind has no declarable host."""
 
     config_schema: ConfigContract
     """What a config model offered for this kind must be.
@@ -183,6 +196,12 @@ class CapabilityKindDescriptor:
     every model that comes back has to satisfy this contract. A capability
     whose methods run at several levels with different config is then a
     per-capability declaration rather than a framework change."""
+
+    mapping_schema: ConfigContract | None = None
+    """The model contract for a map-key-selected consuming surface."""
+
+    mapping_host: MappingHost | None = None
+    """The declarable map field hosting :attr:`mapping_schema`."""
 
     # One field is deliberately NOT added yet, recorded with the trigger
     # that would create it so it is neither built early nor reinvented:
@@ -212,8 +231,8 @@ def capability_descriptors() -> tuple[CapabilityKindDescriptor, ...]:
     """
     from agentworks.capabilities.git_credential.kinds import GIT_CREDENTIAL_PROVIDER_DESCRIPTOR
     from agentworks.capabilities.harness_integration.kinds import HARNESS_INTEGRATION_DESCRIPTOR
+    from agentworks.capabilities.secret_backend.kinds import SECRET_BACKEND_DESCRIPTOR
     from agentworks.capabilities.vm_platform.kinds import VM_PLATFORM_DESCRIPTOR
-    from agentworks.secrets.kinds import SECRET_BACKEND_DESCRIPTOR
 
     return (
         VM_PLATFORM_DESCRIPTOR,
@@ -234,11 +253,6 @@ def descriptor_for_impl(impl: type) -> CapabilityKindDescriptor | None:
     this class satisfies is reading one fact rather than declaring a second
     one that could disagree.
 
-    Nominal, so it answers for the three ABC kinds and not for the Protocol
-    kind, whose implementations derive from nothing. That is the boundary
-    of what needs it: secret backends never construct through the shared
-    capability lifecycle, and every caller reaches them by kind and name.
-
     ``None`` rather than an error for a class of no kind, and that is not
     a tolerance: registration refuses any implementation that does not
     derive from its kind's contract, so the only classes reaching here
@@ -249,7 +263,7 @@ def descriptor_for_impl(impl: type) -> CapabilityKindDescriptor | None:
     """
     for descriptor in capability_descriptors():
         contract = descriptor.implementation_contract
-        if not getattr(contract, "_is_protocol", False) and issubclass(impl, contract):
+        if issubclass(impl, contract):
             return descriptor
     return None
 
@@ -267,3 +281,65 @@ def descriptor_for(kind: str) -> CapabilityKindDescriptor:
             return descriptor
     known = ", ".join(d.kind for d in capability_descriptors())
     raise StateError(f"no capability-kind descriptor for {kind!r} (known capability kinds: {known})")
+
+
+def mapping_descriptors_for_host(host_kind: str) -> tuple[CapabilityKindDescriptor, ...]:
+    """Descriptors whose map-key-selected config is hosted by ``host_kind``.
+
+    Descriptor registration order is preserved. The table is checked as a
+    whole before any record is returned, because duplicate host fields and a
+    target kind with the wrong miss policy are framework declaration errors,
+    not malformed operator data.
+    """
+    descriptors = capability_descriptors()
+    _validate_mapping_descriptors(descriptors)
+    return tuple(
+        descriptor
+        for descriptor in descriptors
+        if descriptor.mapping_host is not None and descriptor.mapping_host.host_kind == host_kind
+    )
+
+
+def _validate_mapping_descriptors(descriptors: tuple[CapabilityKindDescriptor, ...]) -> None:
+    """Enforce the invariants every map-host consumer relies on."""
+    from agentworks.resources.kind import KIND_REGISTRY
+    from agentworks.schema._shape import Collection, shape_of
+    from agentworks.schema.reference import RefRelationship
+
+    claimed: dict[tuple[str, str], str] = {}
+    for descriptor in descriptors:
+        schema = descriptor.mapping_schema
+        host = descriptor.mapping_host
+        if (schema is None) != (host is None):
+            raise StateError(f"{descriptor.kind} must declare mapping_schema and mapping_host together")
+        if host is None:
+            continue
+        strategy = KIND_REGISTRY.get(host.host_kind)
+        if strategy is None or strategy.category != "declarable":
+            raise StateError(
+                f"{descriptor.kind} mapping host kind {host.host_kind!r} is not a declarable resource kind"
+            )
+        model = getattr(strategy, "model", None)
+        field = getattr(model, "model_fields", {}).get(host.field_name)
+        if field is None or shape_of(field).collection is not Collection.MAPPING:
+            raise StateError(
+                f"{descriptor.kind} mapping host field {host.host_kind}.{host.field_name} is not mapping-shaped"
+            )
+        key = (host.host_kind, host.field_name)
+        previous = claimed.get(key)
+        if previous is not None:
+            raise StateError(
+                f"{descriptor.kind} and {previous} both claim mapping host {host.host_kind}.{host.field_name}"
+            )
+        claimed[key] = descriptor.kind
+        if host.key_reference.relationship is not RefRelationship.USES:
+            raise StateError(f"{descriptor.kind} mapping host keys must use the USES relationship")
+        target = KIND_REGISTRY.get(host.key_reference.kind)
+        if target is None:
+            raise StateError(
+                f"{descriptor.kind} mapping host key target {host.key_reference.kind!r} is not a resource kind"
+            )
+        if target.miss_policy != "error":
+            raise StateError(
+                f"{descriptor.kind} mapping host key target {host.key_reference.kind!r} must use miss_policy='error'"
+            )

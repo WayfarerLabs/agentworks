@@ -184,6 +184,9 @@ class FieldDoc:
     """The field's reference semantics, verbatim. For a marked list this
     is the ELEMENT's marker: it is what each element names."""
 
+    key_ref: RefMarker | None
+    """A mapping key's reference semantics, carried to its ``<key>`` node."""
+
     nested_model: type[BaseModel] | None
     """Set when this field opens a nested block, whose fields follow this
     one in the stream at a longer path.
@@ -382,6 +385,7 @@ def _field_doc(path: tuple[str, ...], field: FieldInfo, shape: FieldShape) -> Fi
         constraints=_constraints_of(field),
         examples=tuple(field.examples or ()),
         ref=marker,
+        key_ref=shape.mapping_key_marker,
         # The block a field OPENS, whether it always is one or only may
         # be, from the same pairing ``_expandable`` walks.
         nested_model=shape.block,

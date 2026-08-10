@@ -1,99 +1,139 @@
-"""Tests for the prompt backend, exercised through the runtime
-``ActiveBackend`` wrapper -- how the resolution loop reaches a
-capability.
-"""
+"""Prompt source behavior through an explicit caller-owned broker."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import pytest
 
+from agentworks import output
+from agentworks.capabilities.secret_backend.client import InteractionBroker
+from agentworks.capabilities.secret_backend.prompt import PromptBackend, PromptSourceConfig
+from agentworks.errors import StateError, UserAbort
 from agentworks.resources.graph import Readiness
-from agentworks.secrets import ActiveBackend, SecretDecl
-from agentworks.secrets.prompt import PromptBackend
-
-if TYPE_CHECKING:
-    import pytest
-
-
-def _backend() -> ActiveBackend:
-    return ActiveBackend(capability=PromptBackend(), readiness=Readiness.ready(), registered_name="prompt")
-
-
-def _set_interactive(monkeypatch: pytest.MonkeyPatch, value: bool) -> None:
-    """Set output.is_interactive() to a fixed value for the test."""
-    from agentworks import output
-
-    monkeypatch.setattr(output, "is_interactive", lambda: value)
+from agentworks.schema import CapabilityBlock
+from agentworks.secrets import SecretDecl, SecretSourceDecl
+from agentworks.secrets.outcomes import ResolutionCategory, ResolutionDetail
+from agentworks.secrets.policy import InteractionPolicy
+from agentworks.secrets.resolve import (
+    ActiveSource,
+    CompletionPolicy,
+    ResolutionPolicy,
+    resolve_batch,
+)
 
 
-def test_would_attempt_true_by_default() -> None:
-    """Prompt applies to any secret unless opted out; the runtime TTY check
-    is in resolve()."""
-    assert _backend().would_attempt(SecretDecl(name="x", description="X")) is True
+class _Broker(InteractionBroker):
+    def __init__(self) -> None:
+        self.names: list[str] = []
+
+    def request_secret(self, name: str, /) -> str:
+        self.names.append(name)
+        return f"value:{name}"
 
 
-def test_would_attempt_false_when_opted_out() -> None:
-    """``backend_mappings.prompt = false`` disables the prompt backend for
-    this secret -- the way operators force a secret to error rather than
-    silently fall through to interactive input when testing the env-var
-    path in an interactive shell. The opt-out is generic loop-side
-    behavior; the provider never sees it."""
-    decl = SecretDecl(
-        name="x",
-        description="X",
-        backend_mappings={"prompt": False},
-    )
-    assert _backend().would_attempt(decl) is False
-
-
-def test_backend_is_interactive() -> None:
-    """The interactive flag is what keeps inspection previews from
-    probing prompt (probing would BE the operator interaction)."""
-    assert _backend().interactive is True
-
-
-def test_describe_lookup_is_none() -> None:
-    """No static identifier: the "lookup" is the operator typing."""
-    assert _backend().describe_lookup(SecretDecl(name="x", description="X")) is None
-
-
-def test_resolve_returns_empty_when_not_interactive(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _set_interactive(monkeypatch, False)
-    assert _backend().resolve([SecretDecl(name="x", description="X")]) == {}
-
-
-def test_resolve_prompts_when_interactive(monkeypatch: pytest.MonkeyPatch) -> None:
-    _set_interactive(monkeypatch, True)
-    from agentworks import output
-
-    captured: list[tuple[str, str | None]] = []
-    monkeypatch.setattr(
-        output,
-        "prompt_secret",
-        lambda label, hint=None: captured.append((label, hint)) or "operator-entered",
+def _source() -> ActiveSource:
+    return ActiveSource(
+        source=SecretSourceDecl(name="prompt", backend=CapabilityBlock.of("prompt")),
+        backend_class=PromptBackend,
+        config=PromptSourceConfig(name="prompt"),
+        readiness=Readiness.ready(),
     )
 
-    decl = SecretDecl(name="github-token", description="GitHub PAT", hint="https://...")
-    assert _backend().resolve([decl]) == {"github-token": "operator-entered"}
-    assert captured == [("Secret 'github-token': GitHub PAT", "https://...")]
+
+def test_prompt_requires_explicit_allow_and_uses_name_only_broker() -> None:
+    broker = _Broker()
+    batch = resolve_batch(
+        [SecretDecl(name="a", description="A"), SecretDecl(name="b", description="B")],
+        [_source()],
+        policy=ResolutionPolicy(InteractionPolicy.ALLOW, CompletionPolicy.COMPLETE),
+        interaction_broker=broker,
+    )
+    assert batch.complete_or_raise() == {"a": "value:a", "b": "value:b"}
+    assert broker.names == ["a", "b"]
 
 
-def test_resolve_prompts_each_secret_when_interactive(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """All prompts in one operator interaction: the "prompt once at the
-    start" UX, preserved even though prompt is just another backend."""
-    _set_interactive(monkeypatch, True)
-    from agentworks import output
+def test_refusal_constructs_nothing_and_records_typed_outcome() -> None:
+    broker = _Broker()
+    batch = resolve_batch(
+        [SecretDecl(name="x", description="X")],
+        [_source()],
+        policy=ResolutionPolicy(InteractionPolicy.REFUSE, CompletionPolicy.COMPLETE),
+        interaction_broker=broker,
+    )
+    assert broker.names == []
+    assert batch.outcomes[0].category is ResolutionCategory.REFUSED_INTERACTION
+    assert batch.outcomes[0].detail is ResolutionDetail.INTERACTION_REFUSED
 
-    values = iter(["v1", "v2", "v3"])
-    monkeypatch.setattr(output, "prompt_secret", lambda label, hint=None: next(values))
 
-    secrets = [
-        SecretDecl(name="a", description="A"),
-        SecretDecl(name="b", description="B"),
-        SecretDecl(name="c", description="C"),
-    ]
-    assert _backend().resolve(secrets) == {"a": "v1", "b": "v2", "c": "v3"}
+def test_false_mapping_opts_out_before_broker() -> None:
+    broker = _Broker()
+    batch = resolve_batch(
+        [SecretDecl(name="x", description="X", backend_mappings={"prompt": False})],
+        [_source()],
+        policy=ResolutionPolicy(InteractionPolicy.ALLOW, CompletionPolicy.COMPLETE),
+        interaction_broker=broker,
+    )
+    assert broker.names == []
+    assert batch.outcomes[0].detail is ResolutionDetail.NO_ATTEMPTABLE_SOURCE
+
+
+def test_prompt_has_no_static_identifier() -> None:
+    assert _source().describe_lookup(SecretDecl(name="x", description="X")) is None
+
+
+def test_allowed_prompt_without_broker_is_state_error() -> None:
+    with pytest.raises(StateError, match="interaction broker"):
+        resolve_batch(
+            [SecretDecl(name="x", description="X")],
+            [_source()],
+            policy=ResolutionPolicy(InteractionPolicy.ALLOW, CompletionPolicy.COMPLETE),
+            interaction_broker=None,
+        )
+
+
+def test_prompt_uses_no_tty_or_global_interactivity_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(output, "is_interactive", lambda: pytest.fail("typed core read global TTY state"))
+    monkeypatch.setattr(output, "non_interactive", lambda: pytest.fail("typed core read global policy"))
+    broker = _Broker()
+    batch = resolve_batch(
+        [SecretDecl(name="x", description="X")],
+        [_source()],
+        policy=ResolutionPolicy(InteractionPolicy.ALLOW, CompletionPolicy.COMPLETE),
+        interaction_broker=broker,
+    )
+    assert batch.complete_or_raise() == {"x": "value:x"}
+
+
+def test_prompt_abort_does_not_expose_earlier_answers_in_exception() -> None:
+    class _AbortBroker(_Broker):
+        def request_secret(self, name: str, /) -> str:
+            if name == "b":
+                raise KeyboardInterrupt
+            return "sentinel-first-value"
+
+    with pytest.raises(KeyboardInterrupt) as caught:
+        resolve_batch(
+            [SecretDecl(name="a", description="A"), SecretDecl(name="b", description="B")],
+            [_source()],
+            policy=ResolutionPolicy(InteractionPolicy.ALLOW, CompletionPolicy.COMPLETE),
+            interaction_broker=_AbortBroker(),
+        )
+    assert "sentinel-first-value" not in repr(caught.value)
+
+
+def test_prompt_broker_user_abort_propagates_by_identity() -> None:
+    abort = UserAbort("sentinel-user-abort")
+
+    class _AbortBroker(_Broker):
+        def request_secret(self, name: str, /) -> str:
+            del name
+            raise abort
+
+    with pytest.raises(UserAbort) as caught:
+        resolve_batch(
+            [SecretDecl(name="token", description="Token")],
+            [_source()],
+            policy=ResolutionPolicy(InteractionPolicy.ALLOW, CompletionPolicy.COMPLETE),
+            interaction_broker=_AbortBroker(),
+        )
+
+    assert caught.value is abort

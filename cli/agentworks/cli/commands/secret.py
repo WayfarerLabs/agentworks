@@ -1,4 +1,4 @@
-"""`agentworks secret` -- inspect declared secrets and their backend mappings."""
+"""`agentworks secret` commands for value-free source inspection and proof."""
 
 from __future__ import annotations
 
@@ -6,13 +6,15 @@ from typing import Annotated
 
 import typer
 
+from agentworks import output
 from agentworks.cli._app import app
 from agentworks.cli._helpers import get_db
 from agentworks.machine_output import OutputFormat
+from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 
 secret_app = typer.Typer(
     name="secret",
-    help="Inspect declared secrets and their backend mappings.",
+    help="Inspect declared secrets and their source mappings.",
     no_args_is_help=True,
 )
 app.add_typer(secret_app)
@@ -34,11 +36,11 @@ def secret_list(
         ),
     ] = OutputFormat.HUMAN,
 ) -> None:
-    """Show declared secrets and how each active backend would look them up.
+    """Show declared secrets and how each active source would look them up.
 
-    Rows are declared secrets; columns are the opted-in backends in
+    Rows are declared secrets; columns are the active sources in
     ``[secret_config].backends`` precedence order. Each cell says what that
-    backend would do for the secret: its lookup identifier (env var name,
+    source would do for the secret: its lookup identifier (env var name,
     op:// URI, etc.), ``would attempt`` (no static key, e.g. prompt),
     ``not ready: <reason>`` (its host tool is missing), or ``won't attempt``
     (a ``false`` opt-out, or a mapping-required backend with no mapping).
@@ -87,16 +89,15 @@ def secret_describe(
     matching config reference); ``Used by (per current config):`` (one
     row per live session whose subgraph reaches this secret, projected
     via the secret kind's ``instances`` hook -- same shape as
-    ``agw resource describe``); ``Backend mappings:`` (per-active-backend
-    disposition without merging); ``Resolution preview:`` (which active
-    backend would resolve, or "not available"). Does not prompt, does
+    ``agw resource describe``); ``Backend mappings:`` (per-active-source
+    disposition with selected backend and provenance); ``Resolution preview:``
+    (which active source would attempt, or "not attemptable"). Does not prompt, does
     not resolve values.
 
-    The secret must be in the Resource Registry -- either
-    operator-declared via ``[secrets.<name>]`` or auto-declared via a
-    reference's miss policy (the framework auto-declares missing
-    names that something references; ``agw secret list`` shows every
-    such name).
+    The secret must be in the Resource Registry: either operator-declared
+    as a ``secret`` manifest or auto-declared via a reference's miss policy.
+    The framework auto-declares missing names that something references;
+    ``agw secret list`` shows every such name.
     """
     from agentworks.bootstrap import load_request_registry
     from agentworks.config import load_config
@@ -122,24 +123,28 @@ def secret_describe(
 
 @secret_app.command("verify")
 def secret_verify(
-    name: str = typer.Argument(..., help="Secret name to verify."),
-    allow_interactive: bool = typer.Option(
+    names: Annotated[list[str], typer.Argument(help="Secret names to verify.")],
+    allow_interaction: bool = typer.Option(
         False,
-        "--allow-interactive",
-        help="Allow backends that may prompt, authenticate, or require operator presence.",
+        "--allow-interaction",
+        help="Allow sources that may prompt, authenticate, or require operator presence.",
     ),
 ) -> None:
-    """Prove that one declared secret resolves without displaying its value."""
-    from agentworks import output
+    """Prove that declared secrets resolve without displaying their values."""
+    interaction = validate_interaction_policy(
+        InteractionPolicy.ALLOW if allow_interaction else InteractionPolicy.REFUSE
+    )
     from agentworks.bootstrap import load_request_registry
     from agentworks.config import load_config
     from agentworks.errors import ValidationError
-    from agentworks.secrets.verification import SecretInteractionPolicy, verify_named_secret
+    from agentworks.secrets.outcomes import ResolutionCategory
+    from agentworks.secrets.verification import render_verification, verify_secrets
 
-    if allow_interactive and output.non_interactive():
-        raise ValidationError("--allow-interactive cannot be used with --non-interactive")
+    if allow_interaction and output.non_interactive():
+        raise ValidationError("--allow-interaction cannot be used with --non-interactive")
     config = load_config()
     registry = load_request_registry(config)
-    policy = SecretInteractionPolicy.ALLOW_INTERACTIVE if allow_interactive else SecretInteractionPolicy.NON_INTERACTIVE
-    result = verify_named_secret(config, registry, name, interaction_policy=policy)
-    output.result(f"Secret '{result.name}' verified.")
+    outcomes = verify_secrets(config, registry, names, interaction=interaction)
+    render_verification(outcomes)
+    if any(outcome.category is not ResolutionCategory.RESOLVED for outcome in outcomes):
+        raise typer.Exit(1)

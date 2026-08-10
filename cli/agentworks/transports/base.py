@@ -67,6 +67,7 @@ class Transport(abc.ABC):
         check: bool = True,
         timeout: int | None = None,
         env: dict[str, str] | None = None,
+        input_text: str | None = None,
         retries: int | None = None,
         on_retry: Callable[[int, int], None] | None = None,
     ) -> SSHResult:
@@ -77,7 +78,9 @@ class Transport(abc.ABC):
         default; ``tty=True``/``False`` overrides. ``check=True`` raises
         on non-zero exit. ``env`` is the per-call env dict; SSH carries
         it via ``-o SetEnv``, non-SSH transports prepend it as scoped
-        assignments to the bash payload.
+        assignments to the bash payload. ``input_text`` streams sensitive
+        text to the command on stdin; transports omit it from argv, logs,
+        returned output, and failure diagnostics.
 
         ``retries`` and ``on_retry`` are best-effort across transports:
         SSH retries on connection-level timeouts (default 1 attempt);

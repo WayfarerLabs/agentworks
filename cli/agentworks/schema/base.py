@@ -236,6 +236,11 @@ class AgwRootModel[T](RootModel[T]):
 
     model_config = _AGW_ROOT_MODEL_CONFIG
 
+    operator_input_annotation: ClassVar[object | None] = None
+    """Optional field-reference annotation for a root model whose custom
+    validator/schema accepts a shape its declared root annotation cannot
+    express. Ordinary root models leave this unset."""
+
 
 NonEmptyStr = Annotated[str, Field(min_length=1)]
 """A string an operator must actually fill in.
@@ -492,6 +497,11 @@ def _marker_error(model_cls: type[BaseModel], visiting: tuple[type[BaseModel], .
                 f"default and a present element is named by the operator, so drop the template or "
                 f"move the marker onto a scalar field that holds one name"
             )
+        if shape.mapping_key_marker is not None and shape.mapping_key_marker.default_template is not None:
+            return (
+                f"{model_cls.__name__}.{name} declares a default template on a mapping key marker, "
+                "which nothing renders: every mapping key is authored by the operator, so drop the template"
+            )
         reachable = _reachable_models(shape)
         for stranded in models_in(field.annotation):
             if stranded not in reachable and _hides_marker(stranded, ()):
@@ -524,7 +534,7 @@ def _has_unplaceable_marker(field: FieldInfo, shape: FieldShape) -> bool:
     ``shape.marker`` while appearing nowhere in the annotation tree, and
     that is the ordinary case rather than a fault.
     """
-    placed = (shape.marker, shape.item_marker)
+    placed = (shape.marker, shape.item_marker, shape.mapping_key_marker)
     return any(all(marker is not found for found in placed) for marker in markers_in(field.annotation))
 
 

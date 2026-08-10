@@ -31,6 +31,7 @@ from agentworks.errors import (
 )
 from agentworks.name_filters import validate_name_filters
 from agentworks.resources.access import named_console_template
+from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 from agentworks.sessions.tmux import tmux_cmd
 from agentworks.vms.manager import gated_vm_boundary
 
@@ -235,7 +236,12 @@ def kill_session_windows(
 
 @contextlib.contextmanager
 def _prepare_vm_target_for_attach(
-    db: Database, config: Config, vm_name: str, *, registry: Registry
+    db: Database,
+    config: Config,
+    vm_name: str,
+    *,
+    registry: Registry,
+    interaction: InteractionPolicy,
 ) -> Iterator[tuple[VMRow, Transport]]:
     """Ensure the VM is running (starting it if needed) and yield
     ``(vm, target)`` inside the activation gate's held-active span.
@@ -252,6 +258,7 @@ def _prepare_vm_target_for_attach(
     resolve their own targets on the documented conditional-need
     path).
     """
+    interaction = validate_interaction_policy(interaction)
     from agentworks.transports import transport
 
     vm = db.get_vm(vm_name)
@@ -276,7 +283,7 @@ def _prepare_vm_target_for_attach(
             entity_kind="vm",
             entity_name=vm.name,
         )
-    with gated_vm_boundary(db, config, registry, vm):
+    with gated_vm_boundary(db, config, registry, vm, interaction=interaction):
         yield vm, transport(vm, config)
 
 
@@ -468,12 +475,14 @@ def attach_console(
     name: str,
     recreate: bool = False,
     allow_nesting: bool = False,
+    interaction: InteractionPolicy,
 ) -> int:
     """Attach to a named console, building or rebuilding tmux state as needed.
 
     Returns the interactive attach's exit code; the CLI layer owns the
     translation to process exit (check 9: no sys.exit in the service).
     """
+    interaction = validate_interaction_policy(interaction)
     if os.environ.get("TMUX") and not allow_nesting:
         raise StateError(
             "already inside a tmux session. Nesting is not recommended "
@@ -487,7 +496,13 @@ def attach_console(
     registry = load_request_registry(config)
     # The gate's held-active span covers the build and the interactive
     # attach (the hold this caller used to open itself).
-    with _mc._prepare_vm_target_for_attach(db, config, console.vm_name, registry=registry) as (vm, target):
+    with _mc._prepare_vm_target_for_attach(
+        db,
+        config,
+        console.vm_name,
+        registry=registry,
+        interaction=interaction,
+    ) as (vm, target):
         exists = _mc._console_tmux_exists(target, name)
         layout = named_console_template(registry).tmux_layout
 
@@ -513,6 +528,7 @@ def attach_console(
                 _mc._console_build_secret_targets(db, registry, console=console, vm=vm),
                 config,
                 registry,
+                interaction=interaction,
             )
 
         if recreate and exists:

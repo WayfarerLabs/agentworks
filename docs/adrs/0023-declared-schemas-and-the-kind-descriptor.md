@@ -155,7 +155,7 @@ stays all-or-nothing.
   nothing of ours but `errors` and `source_location`, so a capability module can declare its model
   at import time without dragging in the kind registry. That constraint is real and load-bearing;
   see `cli/agentworks/schema/__init__.py`.
-- **One interim asymmetry is recorded rather than hidden.** `secret-backend`'s registry holds a
-  constructed instance rather than the class, so its descriptor carries a `registry_policy` field
-  saying so. That is the one place the exception lives, which is why nothing else has to
-  special-case the kind.
+- **The former secret-backend asymmetry is resolved.** Its registry and graph now retain the exact
+  implementation class, like the other capability kinds. Configured `secret-source` resources own
+  per-instance config and bounded client construction, so the descriptor needs no constructed
+  singleton policy or consuming-code special case.

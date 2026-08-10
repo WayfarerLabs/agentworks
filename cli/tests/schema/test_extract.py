@@ -18,7 +18,15 @@ from typing import Annotated, Literal
 import pytest
 from pydantic import BaseModel, Discriminator, Field
 
-from agentworks.schema import AgwModel, AgwRootModel, RefOwner, SecretRef, extract_references, filled_defaults
+from agentworks.schema import (
+    AgwModel,
+    AgwRootModel,
+    RefOwner,
+    ResourceRef,
+    SecretRef,
+    extract_references,
+    filled_defaults,
+)
 from agentworks.schema.reference import ConfigReference, RefRelationship
 
 from ._fixture_models import (
@@ -288,6 +296,20 @@ def test_every_value_of_a_table_of_models_is_walked() -> None:
 def test_every_value_of_a_table_of_names_becomes_an_edge() -> None:
     blob = {"extra_secrets": {"one": "first", "two": "second", "bad": 8}}
     assert names(_extracted(CatalogLike, blob)) == ["first", "second"]
+
+
+def test_every_marked_mapping_key_becomes_an_edge_in_authored_order() -> None:
+    class MappingKeys(AgwModel):
+        lookups: dict[
+            Annotated[str, ResourceRef(kind="secret-source", usage="a lookup source")],
+            object,
+        ]
+
+    references = _extracted(MappingKeys, {"lookups": {"first": False, "second": ["ignored"]}})
+    assert [(ref.kind, ref.name, ref.usage) for ref in references] == [
+        ("secret-source", "first", "a lookup source"),
+        ("secret-source", "second", "a lookup source"),
+    ]
 
 
 def test_a_tuple_of_names_is_a_sequence_like_a_list() -> None:

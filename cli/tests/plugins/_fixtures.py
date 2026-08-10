@@ -2,8 +2,7 @@
 
 ``register_plugin`` checks contract conformance before it seats anything, so
 a fixture impl has to be a REAL implementation of its kind's contract:
-derived from the kind's base (or, for ``secret-backend``, structurally
-satisfying the ``SecretBackend`` Protocol), concrete, and declaring a
+derived from the kind's nominal base, concrete, and declaring a
 supported ``contract_version``. That is the point of the check, and a
 fixture that dodged it would be proving the framework against something the
 framework would never accept.
@@ -19,22 +18,30 @@ one-of-each set ``fixture_plugin`` seats.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal
+from collections.abc import Mapping
+from contextlib import AbstractContextManager, nullcontext
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from pydantic import BaseModel, create_model
 
 from agentworks.capabilities.descriptor import descriptor_for
 from agentworks.capabilities.git_credential.base import GitCredentialProvider, HelperEntry
 from agentworks.capabilities.harness_integration.base import HarnessIntegration
+from agentworks.capabilities.secret_backend import (
+    InteractionBroker,
+    RemainingTime,
+    SecretBackend,
+    SecretLookupRequest,
+    SecretSourceClient,
+)
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
 from agentworks.plugins import Plugin
 from agentworks.resources.graph import Readiness
-from agentworks.schema import AgwRootModel
+from agentworks.schema import AgwModel, AgwRootModel
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.db import VMRow, VMStatus
-    from agentworks.secrets.base import MappingValue, SecretDecl
     from agentworks.transports import Transport
 
 
@@ -142,28 +149,59 @@ class ConformingGitCredentialProvider(GitCredentialProvider):
         raise NotImplementedError
 
 
-class ConformingSecretBackend:
-    """A structural ``SecretBackend``: a plain class, because the contract is
-    a ``Protocol``. It spells ``contract_version`` and ``config_model`` for
-    the same reason every real backend does (Protocol bodies are not
-    inherited)."""
-
-    config_model: type[AgwRootModel[Any]] = AgwRootModel[str]
-
-    contract_version = 1
-    interactive = False
-
-    def not_ready(self) -> Readiness:
-        return Readiness.ready()
-
-    def would_attempt(self, secret: SecretDecl, mapping: MappingValue | None) -> bool:
-        return False
-
-    def describe_lookup(self, secret: SecretDecl, mapping: MappingValue | None) -> str | None:
+class _FixtureSecretClient:
+    def prepare(
+        self,
+        requests: tuple[SecretLookupRequest, ...],
+        *,
+        remaining_time: RemainingTime,
+    ) -> None:
         return None
 
-    def batch_get(self, wants: list[tuple[SecretDecl, MappingValue | None]]) -> dict[str, str]:
+    def resolve(
+        self,
+        requests: tuple[SecretLookupRequest, ...],
+        *,
+        remaining_time: RemainingTime,
+    ) -> Mapping[str, str]:
         return {}
+
+
+class ConformingSecretBackend(SecretBackend):
+    """A minimal concrete nominal secret backend for registration tests."""
+
+    config_model: ClassVar[type[AgwModel]] = AgwModel
+    mapping_model: ClassVar[type[AgwRootModel[Any]]] = AgwRootModel[str]
+
+    contract_version = 2
+    interactive = False
+
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        super().__init_subclass__(**kwargs)
+        _declare_fixture_config(cls, "secret-backend")
+
+    @classmethod
+    def backend_readiness(cls) -> Readiness:
+        return Readiness.ready()
+
+    @classmethod
+    def would_attempt(cls, secret_name: str, *, mapping_present: bool) -> bool:
+        return False
+
+    @classmethod
+    def describe_lookup(cls, secret_name: str, mapping: BaseModel | None) -> str | None:
+        return None
+
+    @classmethod
+    def create_client(
+        cls,
+        *,
+        source_name: str,
+        config: AgwModel,
+        interaction_broker: InteractionBroker | None,
+        remaining_time: RemainingTime,
+    ) -> AbstractContextManager[SecretSourceClient]:
+        return nullcontext(_FixtureSecretClient())
 
 
 class FixtureVMPlatform(ConformingVMPlatform):

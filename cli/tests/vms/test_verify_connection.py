@@ -95,7 +95,7 @@ def test_verify_connection_surfaces_failure_without_activation_or_mutation(
     for name in forbidden:
         monkeypatch.setattr(f"agentworks.vms.manager.{name}", forbidden_call)
     monkeypatch.setattr("agentworks.output.prompt", forbidden_call)
-    monkeypatch.setattr("agentworks.secrets.resolve.resolve_secrets", forbidden_call)
+    monkeypatch.setattr("agentworks.secrets.resolve.resolve_batch", forbidden_call)
     monkeypatch.setattr("agentworks.vms.sites.resolve_site", lambda site, registry: calls.append(("site", site)))
     monkeypatch.setattr("agentworks.transports.transport", lambda candidate, config: FailingTarget())
 

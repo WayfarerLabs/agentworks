@@ -4,10 +4,12 @@ Before any backup or edit, read only the selected `config.toml` and the resource
 exists. Record every pre-existing manifest as canonical `kind/name`, `operator-declared` origin
 variant, and manifest file path. For each manifest-producing retired section, record its canonical
 `kind/name`, the same origin variant, and an operator-chosen intended manifest file. Collapse nested
-tables into their parent resource. Exclude `[secret_backends.*]`, which produces no manifest. Omit
-source lines because edits to a multi-document file can shift them without changing origin. The
-caller owns this complete union as immutable expected identities. An inventory captured before
-upgrading can be useful additional evidence, but the procedure does not assume one exists.
+tables into their parent resource. Exclude `[secret_backends.*]` from the mechanical one-for-one
+inventory; active non-default backends require operator-named `secret-source` manifests during the
+final cutover. Omit source lines because edits to a multi-document file can shift them without
+changing origin. The caller owns this complete union as immutable expected identities. An inventory
+captured before upgrading can be useful additional evidence, but the procedure does not assume one
+exists.
 
 Next, preserve the selected `config.toml` and resources directory as separate untouched backups at
 fresh operator-selected destinations. Each destination must be distinct from its source and outside
@@ -30,22 +32,22 @@ schema is authoritative. This topic deliberately does not copy its fields.
 
 The release-history mapping is:
 
-| Retired section                    | Manifest kind                            |
-| ---------------------------------- | ---------------------------------------- |
-| `[secrets.*]`                      | `secret`                                 |
-| `[vm_templates.*]`                 | `vm-template`                            |
-| `[agent_templates.*]`              | `agent-template`                         |
-| `[workspace_templates.*]`          | `workspace-template`                     |
-| `[session_templates.*]`            | `session-template`                       |
-| `[git_credentials.*]`              | `git-credential`                         |
-| `[admin.config]` and `[admin.env]` | `admin-template` named `default`         |
-| `[named_console]`                  | `named-console-template` named `default` |
-| `[azure]` and `[proxmox]`          | `vm-site`                                |
-| `[apt_sources.*]`                  | `apt-source`                             |
-| `[apt_packages.*]`                 | `apt-package`                            |
-| `[system_install_commands.*]`      | `system-install-command`                 |
-| `[user_install_commands.*]`        | `user-install-command`                   |
-| `[secret_backends.*]`              | No manifest                              |
+| Retired section                    | Manifest kind                                     |
+| ---------------------------------- | ------------------------------------------------- |
+| `[secrets.*]`                      | `secret`                                          |
+| `[vm_templates.*]`                 | `vm-template`                                     |
+| `[agent_templates.*]`              | `agent-template`                                  |
+| `[workspace_templates.*]`          | `workspace-template`                              |
+| `[session_templates.*]`            | `session-template`                                |
+| `[git_credentials.*]`              | `git-credential`                                  |
+| `[admin.config]` and `[admin.env]` | `admin-template` named `default`                  |
+| `[named_console]`                  | `named-console-template` named `default`          |
+| `[azure]` and `[proxmox]`          | `vm-site`                                         |
+| `[apt_sources.*]`                  | `apt-source`                                      |
+| `[apt_packages.*]`                 | `apt-package`                                     |
+| `[system_install_commands.*]`      | `system-install-command`                          |
+| `[user_install_commands.*]`        | `user-install-command`                            |
+| `[secret_backends.*]`              | No one-for-one manifest; see source cutover below |
 
 For an ordinary named section, the section suffix becomes `metadata.name`, `description` moves to
 `metadata.description`, and the remaining values move under `spec`. Tagged capabilities need the
@@ -129,9 +131,15 @@ has a current shape and its mode and secret-reference intent are confirmed.
 
 ## Cut over once
 
-`[secret_backends.*]` is the one retired section family with no manifest replacement. Delete those
-empty declarations during the final TOML cutover, and activate desired backends through
-`[secret_config].backends`.
+`[secret_backends.*]` has no mechanical one-for-one replacement. The implied `env-var` and `prompt`
+sources keep their names and work without manifests. For every desired non-default backend, use
+`agw resource sample secret-source` to declare an operator-named source whose tagged
+`spec.backend.name` selects that implementation. Move implementation config to that backend block,
+then put the source name in `[secret_config].backends` and use it as the key in each secret's
+`backend_mappings`. The synthesized `env-var` and `prompt` names remain valid without manifests. For
+OnePassword, move the old mapping's account to the source and make every mapping one scalar `op://`
+reference. The optional positive timeout is new source configuration. A direct configured-backend
+name such as `onepassword` is a hard 0.14 error, not a compatibility alias.
 
 After every new manifest has passed its per-manifest doctor loop, remove all retired resource
 sections from `config.toml` in one edit. Run `agw resource list --origin operator --output json` and

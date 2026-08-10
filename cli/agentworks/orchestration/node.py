@@ -88,7 +88,7 @@ class Node(Readiness, Protocol):
     held capability instances (secrets are inputs the orchestrator
     resolves, never nodes). A node never calls another node's lifecycle
     stages and never resolves a secret, and it never PREDICTS whether
-    one would resolve: how a declared secret gets a value is the
+    one has an attemptable source: how a declared secret gets a value is the
     operation's concern, handled in the preflight sweep
     (:func:`~agentworks.orchestration.readiness.preflight_all`).
     """

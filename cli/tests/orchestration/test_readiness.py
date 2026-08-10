@@ -12,6 +12,7 @@ from agentworks.errors import ConfigError
 from agentworks.orchestration.readiness import preflight_all
 from agentworks.resources import Registry
 from agentworks.resources.reference import ResourceReference
+from agentworks.secrets.policy import InteractionPolicy
 
 
 @dataclass
@@ -44,7 +45,7 @@ def test_sweep_hits_every_node_in_order_with_one_context() -> None:
     log: list[tuple[str, RunContext]] = []
     nodes = [_N("vm-site/px", log), _N("git-credential/gh", log), _N("vm/box", log)]
     ctx = RunContext()
-    preflight_all(nodes, ctx, registry=Registry.empty())
+    preflight_all(nodes, ctx, registry=Registry.empty(), interaction=InteractionPolicy.REFUSE)
     assert [key for key, _ in log] == ["vm-site/px", "git-credential/gh", "vm/box"]
     assert all(seen is ctx for _, seen in log)
 
@@ -57,7 +58,7 @@ def test_sweep_propagates_the_first_failure() -> None:
         _N("vm/box", log),
     ]
     with pytest.raises(ConfigError, match="git-credential/gh"):
-        preflight_all(nodes, RunContext(), registry=Registry.empty())
+        preflight_all(nodes, RunContext(), registry=Registry.empty(), interaction=InteractionPolicy.REFUSE)
     # Nothing after the failure ran (the command aborts pre-mutation).
     assert [key for key, _ in log] == ["vm-site/px", "git-credential/gh"]
 
@@ -143,27 +144,21 @@ def _site_graph(tmp_path: Path, chain: str) -> tuple[object, object, list[object
     return config, registry, [vm_site_node(registry, "proxmox")]
 
 
-def test_sweep_predicts_resolvability_with_owner_usage_framing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Prediction moved OUT of node preflight and into the sweep, and it
-    kept the error verbatim: the node's key as owner, the secret's name,
-    its declared usage, and the describe hint."""
+def test_sweep_predicts_source_attemptability_without_probing_values(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An available env source is attemptable without reading its value."""
     config, registry, nodes = _site_graph(tmp_path, '"env-var"')
     monkeypatch.delenv("AW_SECRET_PROXMOX_TOKEN", raising=False)
 
-    with pytest.raises(ConfigError) as exc:
-        preflight_all(nodes, RunContext(config=config), registry=registry)  # type: ignore[arg-type]
-
-    assert str(exc.value) == (
-        "vm-site/proxmox: secret 'proxmox-token' (the Proxmox API token) is not resolvable by any active backend"
-    )
-    assert exc.value.hint is not None and "agw secret describe proxmox-token" in exc.value.hint
+    preflight_all(nodes, RunContext(config=config), registry=registry, interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
 
 def test_node_preflight_alone_does_not_predict(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The other half of the move, and the reason doctor comes out right
     for free: invoking the node's own preflight (what doctor does per
-    row) asks nothing about resolvability, so the same unresolvable
-    secret that fails the sweep above leaves the node itself healthy."""
+    row) asks nothing about source attemptability, so an absent current
+    env value leaves the node itself healthy."""
     config, _registry, nodes = _site_graph(tmp_path, '"env-var"')
     monkeypatch.delenv("AW_SECRET_PROXMOX_TOKEN", raising=False)
 
@@ -181,12 +176,12 @@ def test_sweep_fails_fast_non_interactively_on_a_prompt_only_secret(
     """
     from agentworks import output
 
-    config, registry, nodes = _site_graph(tmp_path, '"env-var", "prompt"')
+    config, registry, nodes = _site_graph(tmp_path, '"prompt"')
     monkeypatch.delenv("AW_SECRET_PROXMOX_TOKEN", raising=False)
 
     monkeypatch.setattr(output, "is_interactive", lambda: False)
-    with pytest.raises(ConfigError, match="not resolvable by any active backend"):
-        preflight_all(nodes, RunContext(config=config), registry=registry)  # type: ignore[arg-type]
+    with pytest.raises(ConfigError, match="not attemptable by any active source"):
+        preflight_all(nodes, RunContext(config=config), registry=registry, interaction=InteractionPolicy.REFUSE)  # type: ignore[arg-type]
 
     monkeypatch.setattr(output, "is_interactive", lambda: True)
-    preflight_all(nodes, RunContext(config=config), registry=registry)  # type: ignore[arg-type]
+    preflight_all(nodes, RunContext(config=config), registry=registry, interaction=InteractionPolicy.ALLOW)  # type: ignore[arg-type]

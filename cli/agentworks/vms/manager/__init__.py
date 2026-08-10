@@ -61,6 +61,7 @@ from .tailscale import (
     _ensure_tailscale,
     _is_tailscale_reachable,
     _tailscale_logout,
+    _tailscale_rejoin_required,
     _warned_tailscale_missing,
     port_forward_vm,
 )
@@ -75,6 +76,7 @@ __all__ = [
     "_human_bytes",
     "_init_log_hint",
     "_is_tailscale_reachable",
+    "_tailscale_rejoin_required",
     "_live_vm_boundary",
     "_lookup_or_synthesize_secret",
     "_mask_env_var_backend_for",

@@ -210,13 +210,14 @@ def test_run_checks_group_order_and_config_failure_placeholder(
     """Group order is a presentation choice decoupled from which checks
     need config: with config/registry unavailable, the report keeps its shape;
     the registry-dependent groups (VM platforms, VM sites, Secret backends,
-    Secrets) each render a skipped pointer (they precede the Configuration
-    group that explains the failure, so silent absence would read as "no
-    sites"/"no secrets") and every config-free group renders in presentation
-    order. VM platforms and Secret backends now read stored readiness off the
-    graph (R11), so they too need the registry and skip cleanly in degraded
-    mode. Integration for the same reason as the smoke test above: the
-    config-free groups probe the real environment.
+    Secret sources, Secrets) each retain their presentation slot around the
+    Configuration group that explains the failure and render a skipped pointer;
+    silent absence would read as "no sites"/"no secret sources"/"no secrets".
+    Every config-free group also renders in presentation order. VM platforms
+    and Secret backends now read stored readiness off the graph (R11), so they
+    too need the registry and skip cleanly in degraded mode. Integration for
+    the same reason as the smoke test above: the config-free groups probe the
+    real environment.
     """
     from agentworks import doctor
 
@@ -236,16 +237,33 @@ def test_run_checks_group_order_and_config_failure_placeholder(
         "VM sites",
         "Configuration",
         "Secret backends",
+        "Secret sources",
         "Secrets",
         "Database",
     ]
-    for group_name in ("VM platforms", "System plugins", "VM sites", "Secret backends", "Secrets"):
+    for group_name in (
+        "VM platforms",
+        "System plugins",
+        "VM sites",
+        "Secret backends",
+        "Secrets",
+    ):
         placeholder = next(g for g in report.groups if g.name == group_name).checks
         assert len(placeholder) == 1, group_name
         assert placeholder[0].status is doctor.Status.INFO, group_name
         message = placeholder[0].message or ""
         assert "skipped" in message, group_name
         assert "Configuration" in message, group_name
+
+    source_placeholder = next(g for g in report.groups if g.name == "Secret sources")
+    assert source_placeholder.checks == [
+        doctor.HealthCheck(
+            name="Declared sources",
+            status=doctor.Status.INFO,
+            message="skipped (config or manifests unavailable; see the Configuration group)",
+            hint=None,
+        )
+    ]
 
 
 @pytest.mark.integration

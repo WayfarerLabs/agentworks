@@ -18,13 +18,14 @@ from agentworks.resources.inspect import KindRow, ResourceDescription, ResourceL
 from agentworks.resources.kind import InstanceRef
 from agentworks.resources.reference import ReferenceEntry
 from agentworks.secrets.inspect import (
-    BackendMapping,
-    ResolutionPreview,
-    SecretCell,
     SecretDescription,
     SecretRow,
+    SecretSourceCell,
     SecretTable,
+    SourceMapping,
 )
+from agentworks.secrets.preview import PreviewCategory, ResolutionPreview, SkippedSource
+from agentworks.secrets.sources import SourceProvenance
 
 
 def test_operational_list_json_commands_are_closed_parseable_envelopes(monkeypatch) -> None:
@@ -489,19 +490,19 @@ def test_resource_list_json_is_parseable_deterministic_and_uses_safe_fields(monk
     assert resource["used_by_count"] is None
 
 
-def test_secret_list_json_preserves_backend_precedence_without_values(monkeypatch) -> None:
+def test_secret_list_json_preserves_source_precedence_without_values(monkeypatch) -> None:
     from agentworks import bootstrap, config
     from agentworks.secrets import inspect
 
     table = SecretTable(
-        backends=("first", "second"),
+        sources=("first", "second"),
         rows=(
             SecretRow(
                 name="token",
                 description="test token",
                 cells=(
-                    SecretCell("first", True, "TOKEN", None),
-                    SecretCell("second", False, None, "not configured"),
+                    SecretSourceCell("first", True, "TOKEN", None),
+                    SecretSourceCell("second", False, None, "not configured"),
                 ),
             ),
         ),
@@ -524,8 +525,8 @@ def test_secret_list_json_preserves_backend_precedence_without_values(monkeypatc
     assert result.exit_code == 0, result.output
     data = _json_document(result)["data"]
     assert isinstance(data, dict)
-    assert data["backends"] == ["first", "second"]
-    assert [item["backend"] for item in data["secrets"][0]["backends"]] == ["first", "second"]
+    assert data["sources"] == ["first", "second"]
+    assert [item["source"] for item in data["secrets"][0]["sources"]] == ["first", "second"]
     assert "value" not in result.stdout
 
 
@@ -596,7 +597,7 @@ def test_resource_kinds_and_describe_json_use_closed_data_shapes(monkeypatch) ->
     assert len(described["references"]) == 2
 
 
-def test_secret_describe_json_preserves_nulls_and_backend_order(monkeypatch) -> None:
+def test_secret_describe_json_preserves_nulls_and_source_order(monkeypatch) -> None:
     from agentworks import bootstrap, config
     from agentworks.cli.commands import secret
     from agentworks.secrets import inspect
@@ -609,11 +610,17 @@ def test_secret_describe_json_preserves_nulls_and_backend_order(monkeypatch) -> 
         hint=None,
         references=(),
         used_by=None,
-        backend_mappings=(
-            BackendMapping("first", True, "TOKEN", None),
-            BackendMapping("second", True, None, "backend unavailable"),
+        source_mappings=(
+            SourceMapping("first", "env-var", SourceProvenance.DECLARED, True, "TOKEN", None),
+            SourceMapping("second", "prompt", SourceProvenance.DECLARED, True, None, "source unavailable"),
         ),
-        resolution=ResolutionPreview("first", True, (("second", "backend unavailable"),)),
+        resolution=ResolutionPreview(
+            name="token",
+            category=PreviewCategory.ATTEMPTABLE,
+            source="first",
+            identifier="TOKEN",
+            skipped_not_ready=(SkippedSource("second", "source unavailable"),),
+        ),
     )
     monkeypatch.setattr(config, "load_config", lambda **_kwargs: object())
     monkeypatch.setattr(bootstrap, "load_request_registry", lambda _config, **_kwargs: object())
@@ -630,11 +637,11 @@ def test_secret_describe_json_preserves_nulls_and_backend_order(monkeypatch) -> 
         b"Referenced by:\n"
         b"  (none recorded)\n\n"
         b"Backend mappings:\n"
-        b"  - first: TOKEN\n"
-        b"  - second: (prompt at resolution time) (not ready: backend unavailable)\n\n"
+        b"  - first (env-var, declared): TOKEN\n"
+        b"  - second (prompt, declared): (prompt at resolution time) (not ready: source unavailable)\n\n"
         b"Resolution preview:\n"
-        b"  - skipped second: not ready: backend unavailable\n"
-        b"  would resolve via first\n",
+        b"  - skipped second: not ready: source unavailable\n"
+        b"  would attempt via first\n",
     )
 
     assert result.exit_code == 0, result.output
@@ -645,7 +652,8 @@ def test_secret_describe_json_preserves_nulls_and_backend_order(monkeypatch) -> 
     assert described["origin"] is None
     assert described["hint"] is None
     assert described["used_by"] is None
-    assert [mapping["backend"] for mapping in described["backend_mappings"]] == ["first", "second"]
+    assert [mapping["source"] for mapping in described["source_mappings"]] == ["first", "second"]
+    assert [mapping["backend"] for mapping in described["source_mappings"]] == ["env-var", "prompt"]
 
 
 def test_doctor_json_writes_complete_failing_report_before_exit(monkeypatch) -> None:

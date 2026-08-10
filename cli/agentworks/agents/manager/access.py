@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 import agentworks.agents.manager as _mgr
 from agentworks.errors import NotFoundError
+from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 from agentworks.vms.manager import gated_vm_boundary
 
 from ._common import (
@@ -36,6 +37,7 @@ def shell_agent(
     *,
     name: str,
     workspace_name: str | None = None,
+    interaction: InteractionPolicy,
 ) -> int:
     """Open a shell as an agent user on a VM.
 
@@ -49,6 +51,7 @@ def shell_agent(
     its just-in-time values seed the boundary resolver), and the
     held-active span covers the whole interactive session.
     """
+    interaction = validate_interaction_policy(interaction)
     agent = db.get_agent(name)
     if agent is None:
         raise NotFoundError(
@@ -86,6 +89,7 @@ def shell_agent(
         vm,
         targets=[_mgr._agent_direct_secret_target(scopes, label=f"agent-shell={agent.name}")],
         scope=agent_scope(db, vm.name, agent.name),
+        interaction=interaction,
     ) as (_vm_node, resolver, _ops_ctx):
         from agentworks.vms.sites import site_platform_name
 
@@ -135,6 +139,7 @@ def exec_agent(
     name: str,
     command: list[str],
     workspace_name: str | None = None,
+    interaction: InteractionPolicy,
 ) -> int:
     """Execute a command as an agent user on a VM via direct agent SSH.
 
@@ -152,6 +157,7 @@ def exec_agent(
     :func:`shell_agent`: the gate opens before the preflight sweep and
     the held-active span covers the streamed remote command.
     """
+    interaction = validate_interaction_policy(interaction)
     import shlex
 
     from agentworks.env import ResourceContext, compose_env
@@ -193,6 +199,7 @@ def exec_agent(
         vm,
         targets=[_mgr._agent_direct_secret_target(scopes, label=f"agent-exec={agent.name}")],
         scope=agent_scope(db, vm.name, agent.name),
+        interaction=interaction,
     ) as (_vm_node, resolver, _ops_ctx):
         from agentworks.vms.sites import site_platform_name
 

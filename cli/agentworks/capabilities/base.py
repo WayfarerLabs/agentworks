@@ -319,8 +319,8 @@ class Capability(ABC):
     ``description`` are: a default would make the version claim inherited
     rather than made, and bumping this base alongside a descriptor would then
     silently re-certify every impl that had not actually been migrated. Each
-    implementation states its own, exactly as the ``SecretBackend`` Protocol
-    kind's impls must."""
+    implementation states its own, exactly as nominal ``SecretBackend``
+    implementations must."""
 
     config_model: ClassVar[type[BaseModel]]
     """The config this capability OFFERS, as a model.
@@ -513,7 +513,7 @@ class Capability(ABC):
         preflight sweep (:func:`~agentworks.orchestration.readiness
         .preflight_all`). Whether a declared secret can be resolved is a
         property of the runtime world the operation is running in (the
-        active backend chain, this run's interactivity), not of the
+        active source chain and this run's exact interaction policy), not of the
         resource that named it, and a resource must not assume a concern
         that is not its own. An unresolvable secret still fails the sweep
         with the same owner/usage framing, without this instance or its

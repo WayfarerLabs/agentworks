@@ -87,3 +87,67 @@ def test_ssh_run_rejects_logging_sensitive_input_before_subprocess() -> None:
 
     process.assert_not_called()
     assert secret not in str(caught.value)
+
+
+def test_ssh_run_translates_sensitive_native_failure_without_exception_link() -> None:
+    secret = "ssh-native-failure-swordfish"
+    native_failure = OSError(f"write reflected {secret}")
+
+    with patch("agentworks.ssh.subprocess.run", side_effect=native_failure), pytest.raises(SSHError) as caught:
+        run(
+            SSHTarget(host="vm-host"),
+            "cat > /tmp/template.yaml",
+            input_text=secret,
+        )
+
+    assert str(caught.value) == "SSH stdin command could not be executed: cat > /tmp/template.yaml"
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    assert secret not in repr(caught.value)
+
+
+def test_ssh_run_sensitive_timeout_drops_partial_output_and_native_exception() -> None:
+    secret = "ssh-timeout-swordfish"
+    timeout = subprocess.TimeoutExpired(
+        ["ssh", "vm-host"],
+        5,
+        output=f"partial {secret}",
+        stderr=f"diagnostic {secret}",
+    )
+
+    with patch("agentworks.ssh.subprocess.run", side_effect=timeout), pytest.raises(SSHError) as caught:
+        run(
+            SSHTarget(host="vm-host"),
+            "cat > /tmp/template.yaml",
+            input_text=secret,
+            timeout=5,
+            retries=1,
+        )
+
+    assert str(caught.value) == "SSH command timed out after 1 attempts (5s each): cat > /tmp/template.yaml"
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    assert secret not in repr(caught.value)
+
+
+def test_ssh_run_non_sensitive_timeout_retries_logs_and_chains_last_timeout() -> None:
+    timeout = subprocess.TimeoutExpired(["ssh", "vm-host"], 5)
+    logger = MagicMock()
+    retried: list[tuple[int, int]] = []
+
+    with patch("agentworks.ssh.subprocess.run", side_effect=timeout), pytest.raises(SSHError) as caught:
+        run(
+            SSHTarget(host="vm-host"),
+            "echo ok",
+            timeout=5,
+            retries=2,
+            logger=logger,
+            on_retry=lambda attempt, retries: retried.append((attempt, retries)),
+        )
+
+    assert caught.value.__cause__ is timeout
+    assert retried == [(1, 2)]
+    assert logger.log_timeout.call_args_list == [
+        (("echo ok", 1, 2),),
+        (("echo ok", 2, 2),),
+    ]

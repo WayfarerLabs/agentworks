@@ -671,15 +671,14 @@ def test_a_nested_tagged_union_expands_every_arm_because_none_is_addressable() -
     assert placement.alternatives[1].summary == "Run limactl on another host over SSH."
 
 
-def test_a_root_model_config_is_described_as_a_value() -> None:
-    """A secret backend's per-secret mapping may be a bare string, which no
-    mapping-shaped model can be, so its config is a root model and there is
-    no field list to print."""
+def test_a_secret_backend_implementation_describes_its_source_config() -> None:
+    """Implementation references switch to the tagged source config when
+    secret-source becomes the declarable host."""
     reference = reference_for("secret-backend/env-var")
 
-    assert reference.spec == ()
-    assert reference.root_value is not None
-    assert reference.root_value.type_label == "string"
+    assert [entry.name for entry in reference.spec] == ["name"]
+    assert reference.spec[0].doc.choices == ("env-var",)
+    assert reference.root_value is None
 
 
 def test_an_unknown_kind_and_an_unknown_implementation_are_typed_refusals() -> None:

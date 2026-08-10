@@ -24,7 +24,7 @@ descriptor, the capability config union).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import StringConstraints, create_model
 from pydantic.fields import FieldInfo
@@ -33,7 +33,7 @@ from pydantic.json_schema import SkipJsonSchema
 from agentworks.declared_resource import DeclaredResource, EnvelopeMetadata
 from agentworks.errors import ValidationError
 from agentworks.resources import KIND_REGISTRY
-from agentworks.schema import AgwModel
+from agentworks.schema import AgwModel, NonEmptyStr
 from agentworks.schema._shape import unwrap_optional
 
 if TYPE_CHECKING:
@@ -81,27 +81,45 @@ def spec_model(kind: str) -> type[BaseModel]:
     arm, because ``harness_integration: null`` loads: dropping it would
     describe a document the loader accepts as invalid.
     """
+    _seat_plugin_capabilities()
     row = row_model(kind)
+    projected: type[BaseModel] = row
     descriptor = hosted_capability(kind)
-    if descriptor is None or descriptor.manifest_section is None:
-        return row
+    if descriptor is not None and descriptor.manifest_section is not None:
+        from agentworks.capabilities.config import capability_config_union
 
-    from agentworks.capabilities.config import capability_config_union
+        field_name = descriptor.manifest_section.naming_field
+        field = projected.model_fields[field_name]
+        union: Any = capability_config_union(descriptor.kind)
+        _declared, optional = unwrap_optional(field.annotation)
+        if optional:
+            union = union | None
+        projected = built_model(
+            f"{class_name(kind)}Spec",
+            base=projected,
+            doc=row.__doc__,
+            # The row's own FieldInfo, so the authored description and default
+            # survive onto the spliced field.
+            fields={field_name: (union, field)},
+        )
 
-    field_name = descriptor.manifest_section.naming_field
-    field = row.model_fields[field_name]
-    union: Any = capability_config_union(descriptor.kind)
-    _declared, optional = unwrap_optional(field.annotation)
-    if optional:
-        union = union | None
-    return built_model(
-        f"{class_name(kind)}Spec",
-        base=row,
-        doc=row.__doc__,
-        # The row's own FieldInfo, so the authored description and default
-        # survive onto the spliced field.
-        fields={field_name: (union, field)},
-    )
+    from agentworks.capabilities.config import capability_mapping_union
+    from agentworks.capabilities.descriptor import mapping_descriptors_for_host
+
+    for mapping_descriptor in mapping_descriptors_for_host(kind):
+        host = mapping_descriptor.mapping_host
+        assert host is not None
+        field = projected.model_fields[host.field_name]
+        key: Any = Annotated[NonEmptyStr, host.key_reference]
+        value: Any = capability_mapping_union(mapping_descriptor.kind)
+        mapping: Any = dict[key, value]
+        projected = built_model(
+            f"{class_name(kind)}Spec",
+            base=projected,
+            doc=row.__doc__,
+            fields={host.field_name: (mapping, field)},
+        )
+    return projected
 
 
 def metadata_model(kind: str) -> type[BaseModel]:
@@ -180,10 +198,9 @@ def hosted_capability(kind: str) -> CapabilityKindDescriptor | None:
 
     Classified on DISCRIMINATOR PRESENCE, never on whether the resulting
     annotation is still a union: ``Union[(X,)]`` collapses to ``X``, and a
-    capability kind may have one registered implementation. A kind
-    dispatched by map key (``secret-backend``) has no discriminator and no
-    union to splice; ``emission-lld.md`` section 5 records why its per-key
-    splice is not built.
+    capability kind may have one registered implementation. Map-keyed
+    consuming surfaces are projected separately from ``mapping_host`` by
+    :func:`spec_model`.
     """
     from agentworks.capabilities.descriptor import capability_descriptors
 

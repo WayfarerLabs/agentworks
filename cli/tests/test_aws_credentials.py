@@ -127,7 +127,8 @@ class TestCredentialSelection:
         credentials makes no live call."""
         from botocore.credentials import DeferredRefreshableCredentials
 
-        from agentworks.plugins.aws.platform import AwsAccessKeyAuth, _build_access_key_session
+        from agentworks.plugins.aws.auth import _build_access_key_session
+        from agentworks.plugins.aws.config import AwsAccessKeyAuth
 
         auth = AwsAccessKeyAuth(
             mode="access-key",
