@@ -378,7 +378,7 @@ def guide_contributions() -> tuple[TopicContribution, ...]:
             "Agentworks onboarding",
             "Start safely, inspect the current system, and take one consented step at a time.",
             inventory=True,
-            related_topics=("concept-migration",),
+            related_topics=("concept-manifesto", "concept-migration"),
         ),
         _concept(
             "concept-management",

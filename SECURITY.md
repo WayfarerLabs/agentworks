@@ -86,5 +86,9 @@ Vulnerabilities in upstream dependencies should normally be reported to the resp
 project. We are happy to help coordinate when ownership is unclear or when Agentworks turns an
 upstream flaw into a distinct vulnerability.
 
+Agentworks' Unix user boundary is not a kernel-level sandbox. Agents on the same VM share a kernel,
+so a local privilege escalation can provide a path between them. Use separate VMs when a stronger
+isolation boundary is required.
+
 [gh-private]:
   https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing-information-about-vulnerabilities/privately-reporting-a-security-vulnerability

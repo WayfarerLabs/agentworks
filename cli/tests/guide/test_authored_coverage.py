@@ -53,6 +53,8 @@ def test_manifesto_topic_points_to_the_canonical_document_without_restatement() 
     topic = _topic("concept-manifesto")
     blocks = {type(block): block.markdown for block in topic.blocks if hasattr(block, "markdown")}
 
+    assert tuple(map(str, topic.related_topics)) == ("concept-onboarding",)
+    assert "concept-manifesto" in tuple(map(str, _topic("concept-onboarding").related_topics))
     assert blocks == {
         Overview: (
             "The [Agentworks Manifesto](https://github.com/WayfarerLabs/agentworks/blob/main/docs/manifesto.md)\n"
