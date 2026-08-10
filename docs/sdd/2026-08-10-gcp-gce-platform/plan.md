@@ -113,10 +113,10 @@ dependency.
 
 ## Phase 2b: opaque multiline secret correction
 
-- [ ] Amend the shared secret-value contract so the env-var source preserves terminal CR/LF and
+- [x] Amend the shared secret-value contract so the env-var source preserves terminal CR/LF and
       resolution preserves all CR/LF as opaque string content while continuing to reject NUL, with
       value-free outcomes and exception graphs.
-- [ ] Move line-safety enforcement to the environment composition/reveal, Git credential, Proxmox
+- [x] Move line-safety enforcement to the environment composition/reveal, Git credential, Proxmox
       HTTP-header, and Tailscale stdin consumers whose syntax requires a single logical line; prove
       each rejection happens through pure consumer-owned validation immediately after delivery and
       preserves that path's existing resolve-to-mutation ordering, as well as happening before
@@ -124,15 +124,15 @@ dependency.
       the value in its exception graph. Pin zero-mutation VM-create and Tailscale-rekey paths; prove
       conditional repair stays lazy and validates immediately after late delivery but before any
       rejoin-specific mutation; retain final-sink checks as defense in depth.
-- [ ] Prove the GCP explicit-auth path accepts the exact pretty-printed LF and CRLF JSON downloaded
+- [x] Prove the GCP explicit-auth path accepts the exact pretty-printed LF and CRLF JSON downloaded
       from Google, including its terminal line ending, through the real env-var secret source and
       operation resolver, without compaction, base64 encoding, fallback, persistence, or value
       reflection.
-- [ ] Update the permanent secret contract, SSH environment ADR, GCP guide, samples or command
+- [x] Update the permanent secret contract, SSH environment ADR, GCP guide, samples or command
       references if affected, colocated Secrets guide contribution, VM-platform author contract, and
       GCP auth remediation so every operator surface teaches direct whole-document storage and
       sink-local restrictions accurately; pin guide rendering and safety.
-- [ ] Run focused secret/env/Git/Tailscale/GCP tests, Ruff, strict mypy, file lint, locked-SDD, and
+- [x] Run focused secret/env/Git/Tailscale/GCP tests, Ruff, strict mypy, file lint, locked-SDD, and
       full non-integration gates; obtain both required code reviews and resolve every valid finding.
 
 **DoD:** structured text secrets remain unchanged from source to capable consumer; GCP accepts the
@@ -140,6 +140,12 @@ downloaded JSON directly; line-oriented consumers still fail closed without expo
 existing secret name, backend, configuration, CLI, sample, or completion contract changes.
 
 ## Phase 3: integration, review, and live acceptance
+
+**Operator ruling, 2026-08-10:** for this effort, the PR draft/ready state is also the live-test
+dispatch signal. Draft means the exact head is not ready to test; ready asks the tester to run that
+head. A ready test request is not itself a merge-ready disposition. Any requested changes return the
+PR to draft before correction, and merge readiness still requires the passing live evidence and SDD
+lock below.
 
 - [ ] Update from current main and resolve any overlap with the merged vm-platform contract and
       provider-boundary enumeration.
@@ -160,10 +166,14 @@ existing secret name, backend, configuration, CLI, sample, or completion contrac
       prove both installers are idempotent; prove they created no guest authentication state; and
       prove the operator's pre-existing host credential baseline is unchanged. Watch the existing
       120-second install-command timeout explicitly during the `gcloud-cli` live pass.
-- [ ] Record exact offline/live/review evidence, add `locked.md`, post the detailed ready-for-review
-      disposition, and flip the PR from draft only when every requirement is true.
+- [ ] Once the offline gates, code reviews, and operator prerequisites are green, post the exact
+      head and flip the PR from draft to ready as the explicit request for this bounded live
+      acceptance.
+- [ ] After the live pass, record exact offline/live/review evidence, add `locked.md`, and post the
+      detailed merge-ready disposition only when every requirement is true.
 
 **DoD:** offline and authorized live evidence prove the shipped behavior and cleanup; reviews and
-forge checks are green; permanent docs match code; the merge-ready PR is truthfully locked.
+forge checks are green; permanent docs match code; the merge-ready PR is truthfully locked. The
+intermediate ready state requests testing but does not weaken this merge-ready definition.
 
 -- agw-ns-gcp-platform (effort lead)
