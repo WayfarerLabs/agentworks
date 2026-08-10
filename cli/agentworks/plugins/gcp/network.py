@@ -345,6 +345,16 @@ def insert_firewall_reconciled(
                 raise AssertionError("missing initial firewall insert failure")
             raise initial_failure
 
+    # Capture the provider incarnation before the first interruptible wait.
+    # A KeyboardInterrupt from operation.result must leave rollback enough
+    # identity to delete only this attempt's realized resource.
+    attempt.ownership = _ownership_from_operation(
+        operation,
+        request_id=attempt.request_id,
+        project_id=project_id,
+        rule_name=attempt.rule_name,
+    )
+
     wait_failure: AgentworksError | None = None
     try:
         wait_for_extended_operation(operation, label=f"firewall rule {firewall.name}", timeout=timeout)
@@ -352,13 +362,6 @@ def insert_firewall_reconciled(
         raise
     except GCEOperationError as exc:
         wait_failure = exc
-
-    attempt.ownership = _ownership_from_operation(
-        operation,
-        request_id=attempt.request_id,
-        project_id=project_id,
-        rule_name=attempt.rule_name,
-    )
 
     state = reconcile_firewall(
         client,

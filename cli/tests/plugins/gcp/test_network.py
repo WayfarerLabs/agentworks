@@ -63,7 +63,7 @@ class _Operation:
 
     def __init__(
         self,
-        failure: Exception | None = None,
+        failure: BaseException | None = None,
         *,
         request_id: str = _REQUEST_ID,
         target_id: int = 101,
@@ -412,6 +412,26 @@ def test_indeterminate_operation_reconciles_only_matching_resource_id_as_success
     assert operation.calls == [17]
 
 
+def test_wait_interrupt_leaves_operation_ownership_for_safe_rollback() -> None:
+    expected = _owned_rule("allow", priority=0, deny=False)
+    operation = _Operation(KeyboardInterrupt("stop"))
+    client = _FirewallClient(states=iter([]), operation=operation)
+    attempt = FirewallInsertAttempt("allow", _REQUEST_ID)
+
+    with pytest.raises(KeyboardInterrupt, match="stop"):
+        insert_firewall_reconciled(
+            client,
+            project_id="project-a",
+            firewall=expected,
+            attempt=attempt,
+            timeout=17,
+        )
+
+    assert attempt.ownership == FirewallOwnership("allow", "101")
+    assert operation.calls == [17]
+    assert [name for name, _kwargs in client.calls] == ["insert"]
+
+
 def test_pre_response_timeout_retries_once_with_same_request_id() -> None:
     expected = _owned_rule("allow", priority=0, deny=False)
     operation = _Operation()
@@ -548,6 +568,7 @@ def test_incomplete_or_wrong_operation_identity_is_never_owned(operation: _Opera
             timeout=17,
         )
     assert attempt.ownership is None
+    assert operation.calls == []
     assert [name for name, _kwargs in client.calls] == ["insert"]
 
 
