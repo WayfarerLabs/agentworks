@@ -148,9 +148,9 @@ correction. The final evidence record and SDD lock still follow the passing live
 
 - [x] Update from current main and resolve any overlap with the merged vm-platform contract and
       provider-boundary enumeration.
-- [ ] Run Ruff check/format, strict mypy, full parallel non-integration pytest, file lint, Rulesync
+- [x] Run Ruff check/format, strict mypy, full parallel non-integration pytest, file lint, Rulesync
       drift, locked-SDD, guide safety, and diff checks.
-- [ ] Run the required Agentworks project review and an independent fresh-eyes review; resolve every
+- [x] Run the required Agentworks project review and an independent fresh-eyes review; resolve every
       valid finding through the implementation agent and re-review.
 - [ ] Load the integration-testing and test-environment skills, inventory the operator-provided GCP
       project/zone/network/auth mode, verify classic-first network-policy order plus the absence of
