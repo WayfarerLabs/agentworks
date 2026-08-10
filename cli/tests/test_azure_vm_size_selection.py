@@ -13,7 +13,7 @@ from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.config import capability_config_references, validate_capability_config
 from agentworks.capabilities.vm_platform import ProvisionRequest
 from agentworks.errors import ConfigError
-from agentworks.plugins.azure.platform import (
+from agentworks.plugins.azure.config import (
     _DEFAULT_VM_SIZES,
     IMAGE_OFFER,
     IMAGE_OS_DISK_FLOOR_GIB,
@@ -21,10 +21,10 @@ from agentworks.plugins.azure.platform import (
     IMAGE_SKU,
     IMAGE_VERSION,
     AzureVMConfig,
-    AzureVMPlatform,
     _select_vm_size,
     _size_catalog,
 )
+from agentworks.plugins.azure.platform import AzureVMPlatform
 from agentworks.schema import RefOwner
 
 if TYPE_CHECKING:
@@ -65,7 +65,7 @@ class TestSelectVMSize:
         """Selection is order-independent (the minimum by (cpus, memory)),
         so an unsorted (operator) catalog still yields the true smallest
         fit."""
-        from agentworks.plugins.azure.platform import _VMSize
+        from agentworks.plugins.azure.config import _VMSize
 
         unsorted = (
             _VMSize(8, 32, "big"),

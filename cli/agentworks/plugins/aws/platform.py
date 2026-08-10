@@ -33,21 +33,12 @@ from agentworks.db import VMStatus
 from agentworks.errors import ConfigError, NotFoundError, StateError, TokenRejectedError
 from agentworks.plugins.aws.auth import _build_access_key_session, _build_ambient_session
 from agentworks.plugins.aws.config import (
-    _DEFAULT_INSTANCE_TYPES as _DEFAULT_INSTANCE_TYPES,
-)
-from agentworks.plugins.aws.config import (
-    AwsAccessKeyAuth as AwsAccessKeyAuth,
-)
-from agentworks.plugins.aws.config import (
     AwsAmbientAuth,
     AwsEC2Config,
     _generate_ec2_user_data,
     _instance_catalog,
     _InstanceType,
     _select_instance_type,
-)
-from agentworks.plugins.aws.config import (
-    AwsInstanceType as AwsInstanceType,
 )
 
 # The network-resource plumbing (the security-group exposure mechanics, the

@@ -16,15 +16,9 @@ from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscal
 from agentworks.db import VMStatus
 from agentworks.errors import NotFoundError, StateError
 from agentworks.plugins.azure.auth import (
-    _AZURE_IDENTITY_LOGGER as _AZURE_IDENTITY_LOGGER,
-)
-from agentworks.plugins.azure.auth import (
     _build_ambient_credential,
     _build_service_principal_credential,
     _quiet_azure_identity_logging,
-)
-from agentworks.plugins.azure.config import (
-    _DEFAULT_VM_SIZES as _DEFAULT_VM_SIZES,
 )
 from agentworks.plugins.azure.config import (
     IMAGE_OFFER,
@@ -36,15 +30,6 @@ from agentworks.plugins.azure.config import (
     AzureVMConfig,
     _select_vm_size,
     _size_catalog,
-)
-from agentworks.plugins.azure.config import (
-    AzureServicePrincipalAuth as AzureServicePrincipalAuth,
-)
-from agentworks.plugins.azure.config import (
-    AzureVMSize as AzureVMSize,
-)
-from agentworks.plugins.azure.config import (
-    _VMSize as _VMSize,
 )
 
 # The network-resource plumbing (public IP, the NSG exposure rules,
