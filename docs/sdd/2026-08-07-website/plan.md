@@ -425,19 +425,19 @@ eleven files at either supported site base.
 
 ## Phase 4G: continuous Lander expedition
 
-- [ ] Amend and review the FRD, HLA, this plan, and `brand-and-lander-lld.md` for one continuous
+- [x] Amend and review the FRD, HLA, this plan, and `brand-and-lander-lld.md` for one continuous
       forward expedition: seeded rolling terrain, elevated three-lander-width pads, single-building
       NOCs, carried fuel, progressive awards, repeated deployment, checkpoints, and vacuum crashes.
-- [ ] Delegate the LLD revision to an `agentworks-dev` subagent. It must pin the world seed and
+- [x] Delegate the LLD revision to an `agentworks-dev` subagent. It must pin the world seed and
       generator, minimum terrain diversity, rolling-window and camera boundaries,
       terrain/platform/building collision, stronger engine constants, site lifecycle, route-fuel
       proof and search resolution, difficulty curve, checkpoint semantics, DOM/SVG contract,
       animation timing, accessibility, reduced motion, deterministic vectors, and performance
       ceilings without changing completed plan records.
-- [ ] Lead-review the LLD against R7-R9/R21-R23, D7, AC5-AC8/AC18-AC19/AC22-AC24, the shared
+- [x] Lead-review the LLD against R7-R9/R21-R23, D7, AC5-AC8/AC18-AC19/AC22-AC24, the shared
       Lander/404 subtree, the no-framework constraint, and the in-memory-only privacy boundary;
       resolve every requirements or architecture conflict before implementation.
-- [ ] Obtain pre-implementation `agentworks-reviewer` approval of the material SDD revision through
+- [x] Obtain pre-implementation `agentworks-reviewer` approval of the material SDD revision through
       the stacked draft PR; address every valid artifact finding and re-review before coding.
 - [ ] Delegate implementation to an `agentworks-dev` subagent with ownership of the pure world
       module, flight/mission model, controller, shared scene, Lander CSS, focused tests, browser
