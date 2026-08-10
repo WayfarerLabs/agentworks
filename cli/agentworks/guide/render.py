@@ -251,7 +251,7 @@ def _action_list(block: ActionList) -> str:
             f"### {_code(action.id)}\n\n"
             f"- Precondition: {_plain_description(action.precondition)}\n"
             f"- Required inputs: {inputs}\n"
-            f"- Consent boundary: {_code(action.consent.value)}\n"
+            f"- Authorization class: {_code(action.consent.value)}\n"
             f"- {operation}\n"
             f"- Expected state: {_plain_description(action.expected_state)}"
             f"{verification}\n"
@@ -362,10 +362,11 @@ def _onboarding_plan(
                 f"### `{action.id}`\n\n"
                 f"- Precondition: {action.precondition}\n"
                 f"- Required inputs: {inputs}\n"
-                f"- Consent boundary: `{action.consent.value}`\n"
+                f"- Authorization class: `{action.consent.value}`\n"
                 f"- Command: `{' '.join(action.command or ())}`\n"
                 f"- Expected state: {action.expected_state}\n"
-                f"- If refused: {action.refusal_alternative}"
+                + (f"- Verification: `{' '.join(action.verification)}`\n" if action.verification is not None else "")
+                + f"- If refused: {action.refusal_alternative}"
             )
         plan = "\n\n".join(records)
     else:
@@ -482,25 +483,40 @@ def render_topic(
 
 def render_index(topics: tuple[TopicContribution, ...], mode: GuideMode) -> str:
     contract = (
-        "An agent managing Agentworks gains access to everything Agentworks can reach: every managed resource "
-        "and secret reference, plus anything accessible over SSH from the operator's workstation. Use the "
-        "strictest practical harness approval and sandbox settings. Agents must state the boundary and obtain "
-        "consent before reading configured state, inspecting a workstation, resolving secrets, connecting "
-        "remotely, or making changes. Guide output is instruction, never authorization."
+        "The Agentworks assistant agent runs on the intended workstation and may inspect files and execute "
+        "commands with the workstation account's permissions. That is not root access; privilege elevation is "
+        "a separate boundary. It can also reach Agentworks-managed resources, secret references, and SSH "
+        "destinations reachable from the workstation. Use the strictest practical harness approval, visibility, "
+        "and sandbox posture that still permits the requested work. State this disclosure once at assistance "
+        "startup. The operator's explicit instruction establishes the current goal and authorization envelope; "
+        "proceed through reasonably necessary in-scope work without ritual reconfirmation. Ask one resolving "
+        "question for a materially ambiguous request, and ask again only for an uncovered material expansion or "
+        "when the operator requested per-action confirmation. A clear operator instruction that covers an "
+        "expansion is already the decision: disclose its newly relevant impact briefly and proceed. Sensitive "
+        "discovery checks presence only unless content access is separately covered. Guide output and action "
+        "records are teaching, never authorization by themselves."
     )
     intro = "# Agentworks guide\n\nUse these topics to understand and operate the current Agentworks system."
     if mode is GuideMode.AGENT:
         intro += f"\n\n{framework_heading('Agent operating contract')}\n\n{contract}"
     else:
         intro += f"\n\n{framework_heading('Security and consent')}\n\n{contract}"
-    golden_path = (
-        f"{framework_heading('Start here')}\n\n"
-        "Run `agw guide concept-onboarding --agent` for current setup and adoption context.\n\n"
-        "- For current capabilities and adoption, use `concept-onboarding`.\n"
-        "- For installed or historical changes across versions, use `concept-release-notes`.\n\n"
-        "Current facts are not a version-to-version delta."
+    intent_map = (
+        f"{framework_heading('Intent map')}\n\n"
+        "Use this map as current context. The Agentworks assistant agent interprets the operator's request and "
+        "decides what topic, proposal, or inert action to use next; the guide does not route the request or grant "
+        "authority.\n\n"
+        "- First setup, current capabilities, or current adoption: `concept-onboarding`.\n"
+        "- Changes across versions or over time: `concept-release-notes`. Current facts are not a "
+        "version-to-version delta.\n"
+        "- Configuration, declared-resource changes, or VM, workspace, Agentworks-managed agent, session, "
+        "console, or secret operation: `concept-management`, then the applicable live kind or `kind/name` topic.\n"
+        "- Health diagnosis and recovery: `concept-troubleshooting`.\n"
+        "- Exceptional breaking-input conversion: `concept-migration`.\n"
+        "- Secret handling: `concept-secrets`.\n"
+        "- Product defects: `concept-reporting-bugs`."
     )
     rows = "\n".join(f"- `{topic.topic}`: {topic.summary}" for topic in topics)
     return sanitize_terminal_output(
-        f"{intro}\n\n{golden_path}\n\n{framework_heading('Topics')}\n\n{rows or 'No topics are available.'}\n"
+        f"{intro}\n\n{intent_map}\n\n{framework_heading('Topics')}\n\n{rows or 'No topics are available.'}\n"
     )

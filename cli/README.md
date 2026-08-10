@@ -18,9 +18,11 @@ uv tool install agentworks-cli
 The everyday command is `agw`. The longer form `agentworks` is also installed if you ever want to
 type it out; examples throughout this document use `agw`.
 
-Run `agw guide --agent` for an intent map and the complete live topic index. For temporal history,
-`agw guide concept-release-notes` reads the installed version's packaged canonical notes offline;
-current capability and adoption questions use `agw guide concept-onboarding` instead.
+Run `agw guide --agent` to give an Agentworks assistant agent the current assistance contract,
+intent map, and complete live topic index. The assistant decides what to do next; the guide does not
+route requests or grant authorization. Use `concept-onboarding` for repeatable first setup and
+current adoption, `concept-management` for ongoing operation, and `concept-release-notes` for the
+installed version's packaged canonical history. Current facts are not a version-to-version delta.
 
 ```bash
 # Initial setup

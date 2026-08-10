@@ -141,6 +141,8 @@ def test_every_covered_guide_action_requests_and_requires_exact_json_v1() -> Non
 
     assert [(str(action.id), field, command) for action, field, _operation, command in covered] == [
         ("run-doctor", "command", "doctor"),
+        ("create-first-vm", "verification", "vm.describe"),
+        ("create-first-session", "verification", "session.describe"),
         ("validate-manifest-set", "command", "doctor"),
         ("compare-operator-inventory", "command", "resource.list"),
         ("finish-doctor", "command", "doctor"),

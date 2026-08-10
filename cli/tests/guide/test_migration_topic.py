@@ -470,6 +470,6 @@ def test_migration_action_rendering_is_markdown_safe_and_mode_identical() -> Non
     human_actions = next(block for block in human.blocks if block.key.block_id == "actions")
     agent_actions = next(block for block in agent.blocks if block.key.block_id == "actions")
     assert human_actions.source_payload == agent_actions.source_payload
-    assert "Consent boundary: `mutate-agentworks`" in human_actions.markdown
+    assert "Authorization class: `mutate-agentworks`" in human_actions.markdown
     assert "[secret_config].backends" not in human_actions.markdown
     assert r"\[secret\_config\].backends" in human_actions.markdown

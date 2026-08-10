@@ -33,6 +33,7 @@ def test_unavailable_readiness_renders_and_assesses_as_unverifiable() -> None:
     assert assessment.findings[0].status is OnboardingStatus.UNVERIFIABLE
     assert assessment.findings[0].reason == reason
     assert ActionId("run-doctor") not in assessment.action_ids
+    assert assessment.action_ids[-2:] == (ActionId("create-first-vm"), ActionId("create-first-session"))
 
 
 def test_unavailable_readiness_is_explicit_in_dynamic_rendering() -> None:
@@ -69,20 +70,30 @@ def test_unavailable_readiness_is_explicit_in_dynamic_rendering() -> None:
     assert "not ready:" not in markdown
 
 
-def test_no_topic_modes_have_semantic_parity_and_golden_path_ordering() -> None:
+def test_no_topic_modes_have_semantic_parity_and_complete_intent_map() -> None:
     topics = guide_contributions()
     human = render_index(topics, GuideMode.HUMAN)
     agent = render_index(topics, GuideMode.AGENT)
 
-    disclosure = "An agent managing Agentworks gains access to everything Agentworks can reach"
-    onboarding = "Run `agw guide concept-onboarding --agent`"
+    disclosure = "The Agentworks assistant agent runs on the intended workstation"
     for markdown in (human, agent):
         assert all(line.startswith("## ⟦AGW framework⟧") for line in markdown.splitlines() if line.startswith("## "))
         disclosure_at = markdown.index(disclosure)
-        start_at = markdown.index("## ⟦AGW framework⟧ Start here")
-        onboarding_at = markdown.index(onboarding)
+        intent_at = markdown.index("## ⟦AGW framework⟧ Intent map")
         topics_at = markdown.index("## ⟦AGW framework⟧ Topics")
-        assert disclosure_at < start_at < onboarding_at < topics_at
+        assert disclosure_at < intent_at < topics_at
+        for destination in (
+            "concept-onboarding",
+            "concept-release-notes",
+            "concept-management",
+            "concept-troubleshooting",
+            "concept-migration",
+            "concept-secrets",
+            "concept-reporting-bugs",
+        ):
+            assert f"`{destination}`" in markdown[intent_at:topics_at]
+        assert "decides what topic, proposal, or inert action to use next" in markdown
+        assert "does not route the request or grant authority" in markdown
 
     human_semantics = human.replace("## ⟦AGW framework⟧ Security and consent", "## ⟦AGW framework⟧ Disclosure")
     agent_semantics = agent.replace("## ⟦AGW framework⟧ Agent operating contract", "## ⟦AGW framework⟧ Disclosure")

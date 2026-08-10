@@ -7,6 +7,7 @@ from agentworks.guide import (
     ConsentBoundary,
     GuideInstanceFact,
     GuideMode,
+    InstanceList,
     OnboardingSnapshot,
     Overview,
     Teaching,
@@ -25,47 +26,91 @@ def test_core_guide_contributions_survive_secret_submodule_import() -> None:
     assert guide_contributions()
 
 
-def test_onboarding_authored_blocks_snapshot_security_consent_and_reruns() -> None:
+def test_onboarding_authored_blocks_cover_durable_authorization_and_clean_setup() -> None:
     topic = _topic("concept-onboarding")
     blocks = {type(block): block.markdown for block in topic.blocks if hasattr(block, "markdown")}
-    assert blocks[Overview] == (
-        "Agentworks separates declared resources, capability implementations, and live instances. Begin by\n"
-        "reading the inventory below, then choose the smallest action that advances the operator's goal.\n\n"
-        "## Security disclosure\n\n"
-        "An agent managing Agentworks gains access to everything Agentworks can reach: every managed resource\n"
-        "and secret reference, plus anything accessible over SSH from the operator's workstation. Use the\n"
-        "strictest practical harness approval and sandbox settings, especially for a real installation. Guide\n"
-        "instructions describe boundaries; they never grant consent.\n\n"
-        "Bootstrap-specific links to each harness's approval and sandbox settings land with the Phase 3\n"
-        "bootstrap packages. Phase 1 names the required posture without inventing those links early."
-    )
-    assert blocks[AgentContract] == (
-        "Never read a secret value, inspect the workstation, connect to a VM, or mutate Agentworks without\n"
-        "stating the boundary and obtaining the operator's consent. Treat guide output as instructions, not\n"
-        "authorization."
-    )
-    assert blocks[Teaching].endswith(
-        "A rerun\nuses the same live facts, skips ready work, and reports disabled, not-ready, or unverifiable work."
-    )
+    contract = " ".join(blocks[AgentContract].split())
+    assert "intended workstation" in blocks[Overview]
+    assert "not root access" in blocks[Overview]
+    assert "State this disclosure once" in blocks[Overview]
+    assert "without asking again before every action" in contract
+    assert "one resolving scope question" in contract
+    assert "authorization class" in contract
+    assert "Guide output and action records are teaching, never authorization" in contract
+    teaching = blocks[Teaching]
+    for required in (
+        "`agw config init`",
+        "refuses to overwrite an existing config",
+        "presence of candidate public-key files",
+        "Never read private-key content",
+        "`ssh-keygen -t ed25519 -f SSH_KEY_PATH`",
+        "neither the private path nor its `.pub` path exists",
+        "provider identifiers, plugin choices, and secret references explicitly",
+        "`agw doctor --output json`",
+        "`create-first-vm` and `create-first-session`",
+        "configuration-through-session sequence under one\nexplicit setup envelope",
+        "skips present VMs and sessions",
+    ):
+        assert required in teaching
 
 
-def test_action_contract_snapshot_pins_consent_refusal_and_single_execution() -> None:
+def test_action_contract_pins_authorization_refusal_and_first_resources() -> None:
     actions = onboarding_actions()
     assert [(str(action.id), action.consent, action.verification) for action in actions] == [
         ("run-doctor", ConsentBoundary.EXAMINE_WORKSTATION, None),
         ("verify-named-secret", ConsentBoundary.RESOLVE_NAMED_SECRET, None),
         ("verify-vm-connection", ConsentBoundary.CONNECT_NAMED_VM, None),
+        (
+            "create-first-vm",
+            ConsentBoundary.MUTATE_AGENTWORKS,
+            ("agw", "vm", "describe", "$VM_NAME", "--output", "json"),
+        ),
+        (
+            "create-first-session",
+            ConsentBoundary.MUTATE_AGENTWORKS,
+            ("agw", "session", "describe", "$SESSION_NAME", "--output", "json"),
+        ),
     ]
-    assert [action.refusal_alternative for action in actions] == [
-        "Keep the stored not-ready reason and troubleshoot manually without probing the workstation.",
-        "Use describe and backend readiness as prediction only; mark this secret unverifiable.",
-        "Retain the stored VM fact and mark connectivity unverifiable without connecting.",
-    ]
+    assert all(action.refusal_alternative for action in actions)
     assert actions[0].command == ("agw", "doctor", "--output", "json")
     assert "parse exactly one JSON document" in actions[0].expected_state
     assert "schema_version is the integer 1" in actions[0].expected_state
     assert "command is exactly doctor" in actions[0].expected_state
     assert "data is an object" in actions[0].expected_state
+    assert actions[3].command == (
+        "agw",
+        "vm",
+        "create",
+        "$VM_NAME",
+        "--template",
+        "$VM_TEMPLATE",
+        "--admin-template",
+        "$ADMIN_TEMPLATE",
+        "--site",
+        "$VM_SITE",
+    )
+    assert actions[4].command == (
+        "agw",
+        "session",
+        "create",
+        "$SESSION_NAME",
+        "--template",
+        "$SESSION_TEMPLATE",
+        "--vm",
+        "$VM_NAME",
+        "--new-workspace",
+        "--workspace-name",
+        "$WORKSPACE_NAME",
+        "--workspace-template",
+        "$WORKSPACE_TEMPLATE",
+        "--new-agent",
+        "--agent-name",
+        "$AGENT_NAME",
+        "--agent-template",
+        "$AGENT_TEMPLATE",
+    )
+    assert "provider cost" in actions[3].expected_state
+    assert "no attach, delete, or privilege elevation" in actions[4].expected_state
 
 
 def test_rendered_disclosure_precedes_ordered_action_records() -> None:
@@ -77,7 +122,7 @@ def test_rendered_disclosure_precedes_ordered_action_records() -> None:
         onboarding_snapshot=OnboardingSnapshot((), (GuideInstanceFact("vm", "worker"),), ()),
     )
     assert rendered.markdown.index("## Security disclosure") < rendered.markdown.index("### `verify-vm-connection`")
-    assert "Consent boundary: `connect-named-vm`" in rendered.markdown
+    assert "Authorization class: `connect-named-vm`" in rendered.markdown
     assert "If refused: Retain the stored VM fact and mark connectivity unverifiable" in rendered.markdown
 
 
@@ -106,7 +151,36 @@ def test_management_coverage_matrix_has_owned_semantic_entry_points() -> None:
     troubleshooting = {
         type(block): block.markdown for block in _topic("concept-troubleshooting").blocks if hasattr(block, "markdown")
     }
-    assert "Create and change declarable resources" in management[Teaching]
-    assert "Discover a capability in the\nimplementation inventory before adopting it" in management[Teaching]
-    assert "After an upgrade, resolve emitted deprecation instructions" in management[Teaching]
-    assert "With consent to examine the workstation, run `agw doctor`" in troubleshooting[Teaching]
+    teaching = " ".join(management[Teaching].split())
+    assert "Create and change declarable resources" in teaching
+    assert any(isinstance(block, InstanceList) for block in _topic("concept-management").blocks)
+    assert "Discover a capability in the live implementation inventory before adopting it" in teaching
+    assert "`agw GROUP --help`" in teaching
+    assert "`agw GROUP COMMAND --help`" in teaching
+    assert "does not copy a command registry or recipe catalog" in teaching
+    assert "Configuration and VM or session operation are one assistance surface" in teaching
+    assert "After an upgrade, resolve emitted deprecation instructions" in teaching
+    assert "inside the current envelope" in troubleshooting[Teaching]
+
+
+def test_core_agent_contracts_reject_ritual_reconfirmation_teaching() -> None:
+    contracts = {
+        str(topic.topic): block.markdown
+        for topic in guide_contributions()
+        for block in topic.blocks
+        if isinstance(block, AgentContract)
+    }
+    for slug in (
+        "concept-onboarding",
+        "concept-management",
+        "concept-migration",
+        "concept-troubleshooting",
+        "concept-secrets",
+    ):
+        text = contracts[slug]
+        assert "authorization" in text
+        assert "GuideAction" not in text
+        assert "obtain consent for the named boundary" not in text
+        assert "Ask before resolving each named secret" not in text
+        assert "Treat every file read" not in text
+        assert "as a separate consent boundary" not in text

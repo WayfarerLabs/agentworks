@@ -110,15 +110,30 @@ def test_mixed_projected_facts_relationships_and_instances_keep_individual_statu
     assert assessment.relationship_findings[0].relationship.target == target
     assert assessment.relationship_findings[0].status is OnboardingStatus.DONE
     assert assessment.summary == type(assessment.summary)(done=3, not_ready=1, disabled=1, unverifiable=1)
-    assert assessment.action_ids == (ActionId("run-doctor"), ActionId("verify-vm-connection"))
+    assert assessment.action_ids == (
+        ActionId("run-doctor"),
+        ActionId("verify-vm-connection"),
+    )
 
 
 @pytest.mark.parametrize(
     ("outcome", "expected", "expected_actions"),
     [
-        (VerificationOutcome.VERIFIED, OnboardingStatus.DONE, ()),
-        (VerificationOutcome.FAILED, OnboardingStatus.NOT_READY, (ActionId("run-doctor"),)),
-        (VerificationOutcome.REFUSED, OnboardingStatus.UNVERIFIABLE, ()),
+        (
+            VerificationOutcome.VERIFIED,
+            OnboardingStatus.DONE,
+            (ActionId("create-first-vm"), ActionId("create-first-session")),
+        ),
+        (
+            VerificationOutcome.FAILED,
+            OnboardingStatus.NOT_READY,
+            (ActionId("run-doctor"), ActionId("create-first-vm"), ActionId("create-first-session")),
+        ),
+        (
+            VerificationOutcome.REFUSED,
+            OnboardingStatus.UNVERIFIABLE,
+            (ActionId("create-first-vm"), ActionId("create-first-session")),
+        ),
     ],
 )
 def test_target_scoped_secret_evidence_changes_only_its_fact(
@@ -143,7 +158,11 @@ def test_guided_and_replayable_outcomes_and_refusal_alternatives_are_equal() -> 
         _snapshot(instances=(GuideInstanceFact("vm", "worker"),)), verification_evidence=evidence
     )
     assert guided.findings == replayable.findings
-    assert guided_actions(guided) == replayable_actions(replayable) == ()
+    assert (
+        tuple(action.id for action in guided_actions(guided))
+        == tuple(action.id for action in replayable_actions(replayable))
+        == (ActionId("create-first-session"),)
+    )
     assert guided.findings[0].status is OnboardingStatus.UNVERIFIABLE
     assert guided.findings[0].reason == onboarding_actions()[2].refusal_alternative
 
@@ -154,7 +173,7 @@ def test_ready_rerun_with_accepted_proof_is_a_clean_no_op() -> None:
         verification_evidence=(_evidence("verify-named-secret", "secret", "token", VerificationOutcome.VERIFIED),),
     )
     assert assessment.findings[0].status is OnboardingStatus.DONE
-    assert assessment.actions == ()
+    assert assessment.action_ids == (ActionId("create-first-vm"), ActionId("create-first-session"))
 
 
 @pytest.mark.parametrize("kind", ["secret", "vm"])
@@ -162,7 +181,11 @@ def test_resource_named_after_its_kind_still_requires_explicit_proof(kind: str) 
     assessment = assess_onboarding(_snapshot(_fact(kind, kind)))
     assert assessment.findings[0].status is OnboardingStatus.UNVERIFIABLE
     expected = "verify-named-secret" if kind == "secret" else "verify-vm-connection"
-    assert assessment.action_ids == (ActionId(expected),)
+    assert assessment.action_ids == (
+        ActionId(expected),
+        ActionId("create-first-vm"),
+        ActionId("create-first-session"),
+    )
 
 
 def test_cli_replays_target_scoped_evidence_end_to_end(monkeypatch: pytest.MonkeyPatch, db: Database) -> None:
@@ -433,8 +456,11 @@ def test_malformed_mismatched_and_inapplicable_evidence_is_rejected(evidence: ob
         )
 
 
-def test_verification_actions_run_once_and_have_no_second_verification_command() -> None:
-    assert all(action.verification is None for action in onboarding_actions())
+def test_proof_actions_run_once_and_creation_actions_use_json_verification() -> None:
+    actions = onboarding_actions()
+    assert all(action.verification is None for action in actions[:3])
+    assert actions[3].verification == ("agw", "vm", "describe", "$VM_NAME", "--output", "json")
+    assert actions[4].verification == ("agw", "session", "describe", "$SESSION_NAME", "--output", "json")
 
 
 def test_action_validation_occurs_only_when_guide_operation_requests_records(
@@ -451,7 +477,7 @@ def test_action_validation_occurs_only_when_guide_operation_requests_records(
     monkeypatch.setattr(module, "validate_guide_action", record_action)
     assert calls == []
     module.onboarding_actions()
-    assert len(calls) == 3
+    assert len(calls) == 5
 
 
 def test_real_views_compose_snapshot_and_render_target_scoped_evidence(

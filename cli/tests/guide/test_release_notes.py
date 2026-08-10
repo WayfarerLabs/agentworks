@@ -147,8 +147,8 @@ def test_base_topic_uses_exact_installed_version_and_links_current_adoption(
 def test_top_level_guide_separates_current_facts_from_temporal_history() -> None:
     response = render_guide((), GuideMode.AGENT, load_config_fn=_broken)
 
-    assert "For current capabilities and adoption, use `concept-onboarding`" in response.markdown
-    assert "For installed or historical changes across versions, use `concept-release-notes`" in response.markdown
+    assert "First setup, current capabilities, or current adoption: `concept-onboarding`" in response.markdown
+    assert "Changes across versions or over time: `concept-release-notes`" in response.markdown
     assert "Current facts are not a version-to-version delta" in response.markdown
 
 

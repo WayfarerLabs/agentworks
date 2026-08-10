@@ -163,10 +163,10 @@ parse exactly one JSON document. Require `schema_version` to be the integer `1`,
 `resource.list`, and `data` to be an object before comparing the result with the caller-owned
 expected identities by `kind/name`, operator-declared origin variant, and intended manifest file
 path, ignoring source line. This normal inventory command may probe host readiness, so run it only
-with consent to examine the workstation. Any missing, extra, or wrongly originated resource returns
-to the untouched backups for investigation. Finish only when a final `agw doctor --output json`
-reports zero failures. Parse its one JSON document and apply the same integer version, exact
-`doctor` command, and object-data checks. Require `data.counts.fail` to equal `0` and require the
-`Database` group to contain a `Schema` check whose status is exactly `ok`. Require the command to
-exit `0` before recording completion. A stale schema warning is not migration completion, even
-though it is non-failing and a normal Agentworks command can migrate it.
+when workstation examination is inside the current envelope. Any missing, extra, or wrongly
+originated resource returns to the untouched backups for investigation. Finish only when a final
+`agw doctor --output json` reports zero failures. Parse its one JSON document and apply the same
+integer version, exact `doctor` command, and object-data checks. Require `data.counts.fail` to equal
+`0` and require the `Database` group to contain a `Schema` check whose status is exactly `ok`.
+Require the command to exit `0` before recording completion. A stale schema warning is not migration
+completion, even though it is non-failing and a normal Agentworks command can migrate it.
