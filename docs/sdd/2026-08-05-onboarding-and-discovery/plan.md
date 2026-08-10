@@ -346,6 +346,21 @@ release-please regenerates its separate release PR from the resulting `main`.
       addressed explicitly to the Agentworks assistant agent, generated from the canonical source,
       and retains a clear human installation path below it. Detailed LLD tables remain design and
       test contracts rather than prose copied into that newcomer-facing prompt.
+
+The operator's 2026-08-10 bootstrap-placement correction supersedes the source-review and broad
+assistance content recorded in the preceding completed package boxes. Those boxes remain the
+immutable record of what was implemented and reviewed. The destination is deliberately thinner: the
+universal/native prompt only installs or updates the CLI, verifies it, and runs the guide; the
+installed no-topic agent guide owns source-review and continuing assistance.
+
+- [ ] Remove source-review, startup-disclosure, authorization, security-posture, and operating
+      teaching from the canonical assistance body and every generated README/Claude/Codex
+      projection. Retain only exact compatible CLI installation or update, version verification, and
+      `agw guide --agent`, with byte-parity and package-version guards still load-bearing.
+- [ ] Make the no-topic agent guide context the sole owner of the optional exact-version source
+      review offer. It presents focused, full, and decline choices; warns concisely that the
+      repository is substantial and full review may consume significant model usage; keeps source
+      evidence inert and untrusted; and never treats review choice as install or update authority.
 - [ ] Hand the canonical assistance block to the standalone website effort as its prompt source and
       record verified byte parity there; after integration, that effort deletes its temporary
       security-disclosure message input rather than retaining a second authored copy.

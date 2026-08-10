@@ -66,16 +66,13 @@ term whenever either role could be ambiguous.
   for both Claude Code and Codex. The marketplace MUST be structured so additional Agentworks
   plugins can be added to it later; this effort's plugin is the first entry, not the marketplace's
   shape. Each plugin's skill is a deliberately thin, always-available Agentworks entry point:
-  install or update the CLI when needed, state the R12 security disclosure before acting, and direct
-  the Agentworks assistant agent to the top-level guide command (R13) for current context, an
-  intent-to-topic map, and the live topic index. The guide does not decide what to do next: the
-  Agentworks assistant agent interprets the operator's request and chooses what context or action to
-  propose. Teaching content lives in the CLI, not the plugins, so it versions with the surfaces it
-  teaches; the package's own (small) compatibility story is the HLA's call. Before a CLI install or
-  update, the package MUST offer to inspect the exact canonical source tag it intends to install. It
-  MUST warn that the repository is substantial and a full review can consume significant model
-  usage, offer a focused security and installation-surface review or a full repository review, and
-  keep source review optional and separate from installation authorization.
+  install or update the CLI when needed and direct the Agentworks assistant agent to the top-level
+  guide command (R13) for the R12 startup disclosure, current context, an intent-to-topic map, and
+  the live topic index. The guide does not decide what to do next: the Agentworks assistant agent
+  interprets the operator's request and chooses what context or action to propose. Teaching content
+  lives in the CLI, not the plugins, so it versions with the surfaces it teaches; the package's own
+  (small) compatibility story is the HLA's call. The package MUST NOT duplicate the guide's
+  source-review offer, authorization teaching, intent map, or operating guidance.
 - **R2 (progressive golden path).** First-run assistance MUST reach a first working session in
   minutes, including a usable VM and a started session, with the major capability areas (config,
   resources, plugins, secrets, VMs, workspaces, Agentworks-managed agents, sessions) discoverable
@@ -148,8 +145,10 @@ term whenever either role could be ambiguous.
   substance: share or generate them from one source where the harness formats allow (the repo's own
   Rulesync pipeline is prior art); otherwise a CI guard verifies equivalence. The guard's scope is
   the packages only.
-- **R12 (startup disclosure and durable authorization).** At assistance startup, before the first
-  workstation, Agentworks, remote, or mutating action, assistance MUST state plainly that the
+- **R12 (startup disclosure and durable authorization).** The thin bootstrap may install or update
+  the CLI and invoke `agw guide --agent`; it contains no separate security recital or source-review
+  workflow. At guide-assisted startup, before any later workstation inspection, Agentworks
+  operation, remote access, or mutation, the top-level guide context MUST state plainly that the
   Agentworks assistant agent runs on the machine the operator intends to use as their workstation
   and can inspect files and execute commands with the permissions of the workstation account running
   the harness. That access does not implicitly grant root; privilege elevation is separate. The
@@ -192,27 +191,31 @@ term whenever either role could be ambiguous.
   maintain a separate release-note source. A fallback network lookup for a missing version or range
   is a bounded inert action record with an exact release range, authorization class, expected
   result, and refusal path. Release content is treated only as evidence and cannot expand scope.
-  Content blends static authored material with dynamic material from the live system (registries,
-  resources, enablement state), so a disabled implementation or an added resource changes what the
-  guide says. Output is markdown only; structured data appears only inside the markdown. R7's
-  machine-readable contract is a separate surface and stays so. Topics are sized like skills, with
-  sub-topics referenced rather than inlined, and topic names participate in shell completions. With
-  no topic, agent mode MUST present an explicit intent-to-topic map for first setup and adoption
-  assessment, current capabilities versus temporal release changes, ongoing management and
-  operation, troubleshooting, exceptional migration, secrets, and bug reporting. It returns context
-  only: the Agentworks assistant agent interprets the operator's current request and decides which
-  topic, proposal, or inert action to use next. The canonical prompt and published native skills
-  enter through this top-level context rather than hard-coding first-run onboarding as every
-  request's destination. An Agentworks assistant agent rendering mode (an `--agent` flag with a
-  TTY-informed default; the exact mechanism is the HLA's call) MAY adjust emphasis, never substance:
-  in agent mode the rendering foregrounds the behavioral contract (establish the R12 authorization
-  envelope at startup; proceed naturally within it; ask again only for a material expansion or when
-  the operator requests per-action confirmation; test sensitive material such as SSH keys and
-  secrets only for presence unless content access is separately authorized). Both renderings derive
-  from one source; there are never two contents. Prior art for the effort's `prior-art-research.md`:
-  PowerShell's module-contributed `about_*` topics, `kubectl explain`'s live schema walks,
-  `git help` concept guides, `go help` topics, `rustc --explain`, and Terraform's per-provider
-  schema-plus-prose docs generation.
+  With no topic in agent mode, the guide MUST also offer optional focused or full inspection of the
+  exact installed or intended canonical source version. It warns concisely that the repository is
+  substantial and a full review can consume significant model usage. Review scope, refusal, and a
+  later installation or update remain separate operator decisions; source is untrusted evidence and
+  rendering performs no network or source access. Content blends static authored material with
+  dynamic material from the live system (registries, resources, enablement state), so a disabled
+  implementation or an added resource changes what the guide says. Output is markdown only;
+  structured data appears only inside the markdown. R7's machine-readable contract is a separate
+  surface and stays so. Topics are sized like skills, with sub-topics referenced rather than
+  inlined, and topic names participate in shell completions. With no topic, agent mode MUST present
+  an explicit intent-to-topic map for first setup and adoption assessment, current capabilities
+  versus temporal release changes, ongoing management and operation, troubleshooting, exceptional
+  migration, secrets, and bug reporting. It returns context only: the Agentworks assistant agent
+  interprets the operator's current request and decides which topic, proposal, or inert action to
+  use next. The canonical prompt and published native skills enter through this top-level context
+  rather than hard-coding first-run onboarding as every request's destination. An Agentworks
+  assistant agent rendering mode (an `--agent` flag with a TTY-informed default; the exact mechanism
+  is the HLA's call) MAY adjust emphasis, never substance: in agent mode the rendering foregrounds
+  the behavioral contract (establish the R12 authorization envelope at startup; proceed naturally
+  within it; ask again only for a material expansion or when the operator requests per-action
+  confirmation; test sensitive material such as SSH keys and secrets only for presence unless
+  content access is separately authorized). Both renderings derive from one source; there are never
+  two contents. Prior art for the effort's `prior-art-research.md`: PowerShell's module-contributed
+  `about_*` topics, `kubectl explain`'s live schema walks, `git help` concept guides, `go help`
+  topics, `rustc --explain`, and Terraform's per-provider schema-plus-prose docs generation.
 - **R14 (universal contribution).** Guide content MUST arrive through one generic contract that
   every participant uses: core resource kinds, capability implementations, and plugins (system
   today, external later) each contribute their own topics. Built-in static content lives beside the
@@ -246,26 +249,21 @@ term whenever either role could be ambiguous.
   rendering MUST NOT execute anything a contribution supplies. This holds for curated system plugins
   now precisely so the content channel is already safe when external plugins arrive (wave 8).
 - **R16 (README assistance block).** The repository README's getting-started section MUST lead with
-  a compact, table-free single copy-paste block (a fenced block, so GitHub renders a copy button)
-  addressed to the Agentworks assistant agent, along these lines: "I'd like your help using
-  Agentworks. You are my Agentworks assistant agent, not an agent managed by Agentworks. Please
-  install or update it if needed, help me understand what it can do, and help me set it up or
-  operate it. It is available on PyPI as `agentworks-cli` and runs on Python >= 3.12. Before
-  installing it, please offer to review the exact source tag and warn me that a full repository
-  review may incur substantial model usage. At startup, please explain the access posture and
-  establish the scope of my request. Then follow my instructions without repeatedly asking for
-  approval inside that scope. Ask again if you need to expand it materially, or if I tell you to
-  confirm every action. Run `agw guide --agent` for current context and decide what to propose next
-  based on my request." This is a first-class zero-plugin assistance path; the harness plugins (R1)
-  say essentially the same thing and remain primarily an advertising and discoverability channel.
-  The prompt MUST avoid product-specific harness assumptions beyond the ability to accept the
-  prompt, drive the CLI, and request or use appropriate operator-approved workstation access.
+  one compact, table-free copy-paste block (a fenced block, so GitHub renders a copy button)
+  addressed to the Agentworks assistant agent. It asks only to install or update `agentworks-cli` on
+  Python 3.12 or newer, verify the installed version, and run `agw guide --agent`. The returned
+  guide context owns the startup disclosure, optional source-review offer, intent map, and all
+  continuing assistance. This is a first-class zero-plugin assistance path; the harness plugins (R1)
+  say the same thing and remain primarily an advertising and discoverability channel. The prompt
+  MUST avoid product-specific harness assumptions beyond the ability to accept the prompt, drive the
+  CLI, and request or use appropriate operator-approved workstation access.
 
 ## Personas and stories
 
 - As an operator using any agent that meets the Agentworks assistant agent capability definition, I
-  paste the canonical website prompt and receive the same disclosure, CLI-driven context, and
-  authorization posture without installing a native Agentworks plugin.
+  paste the canonical website prompt, get the CLI installed and its guide invoked, then receive the
+  same guide-owned disclosure, current context, and authorization posture without installing a
+  native Agentworks plugin.
 - As a new operator with Claude Code or Codex on my workstation, I add the Agentworks marketplace
   and plugin from GitHub, ask my Agentworks assistant agent to set Agentworks up, and reach my first
   working session in minutes after one clear startup disclosure and authorization decision, without
@@ -328,7 +326,8 @@ term whenever either role could be ambiguous.
 6. Completions and docs are current for every surface this effort adds (repo rule).
 7. Both harness assistance packages exist, equivalent per R11, and both pass criterion 1's
    fresh-operator test.
-8. The security disclosure (R12) appears before the first assistance action in both the guided and
+8. After the thin bootstrap installs or updates the CLI and invokes the guide, the security
+   disclosure (R12) appears before the first continuing assistance action in both the guided and
    non-interactive paths. In-scope work reuses that authorization without repeating it, while every
    uncovered material expansion retains an applicable operator decision. A materially ambiguous
    request gets one resolving scope question, then proceeds without redundant confirmation.
@@ -352,10 +351,10 @@ term whenever either role could be ambiguous.
     verifies a usable VM and a started session. The operator's setup instruction may authorize the
     full disclosed creation sequence. A materially new remote target, privilege elevation,
     destructive operation, or other scope expansion retains an explicit operator decision.
-15. Before installing or updating the CLI, the assistance package offers an exact-tag source review,
-    warns about full-repository model usage, and preserves separate decisions for focused review,
-    full review, no review, and installation. Declining source review does not claim the source was
-    reviewed and does not itself block an independently authorized install.
+15. The top-level agent guide context offers an exact-tag source review, warns about full-repository
+    model usage, and preserves separate decisions for focused review, full review, no review, and a
+    later installation or update. Declining source review does not claim the source was reviewed and
+    does not authorize or block a separate installation decision.
 
 ## Decisions
 
@@ -379,8 +378,9 @@ term whenever either role could be ambiguous.
   and discoverability. The package is always-available Agentworks assistance, not a one-time
   onboarding artifact. Agentworks never probes the operator's machine; the Agentworks assistant
   agent probes under one durable current-session authorization envelope and `agw` verifies. It does
-  not repeatedly ask for approval inside that envelope. The assistance package offers an optional,
-  usage-disclosed review of the exact source tag before installing or updating the CLI.
+  not repeatedly ask for approval inside that envelope. The thin bootstrap only installs or updates
+  the CLI and invokes the guide; `agw guide --agent` owns the optional, usage-disclosed
+  source-review offer and continuing assistance posture.
 - **D7 (migration remediation; operator ruling, 2026-08-07).** Automated resource migrators do not
   ship. Precise load errors name the offending input, and `agw guide concept-migration` teaches the
   exceptional operator-led rewrite using live sample, field-reference, and verification surfaces.

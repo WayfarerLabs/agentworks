@@ -208,12 +208,12 @@ missing resources.
 ## Guide rendering for the Agentworks assistant agent
 
 `agw guide` always writes markdown to stdout. With no topic it renders a compact overview, security
-disclosure, intent-to-topic map, and live topic index. The map supplies context; the Agentworks
-assistant agent interprets the current operator request and chooses what topic, proposal, or inert
-action to use next. Keeping the disclosure in the context makes the contract available on every
-invocation; it does not instruct the Agentworks assistant agent to recite it again after the startup
-authorization envelope is established. Agent mode presents these reviewed associations without
-assuming that every invocation is first-run onboarding:
+disclosure, optional source-review offer, intent-to-topic map, and live topic index. The map
+supplies context; the Agentworks assistant agent interprets the current operator request and chooses
+what topic, proposal, or inert action to use next. Keeping the disclosure in the context makes the
+contract available on every invocation; it does not instruct the Agentworks assistant agent to
+recite it again after the startup authorization envelope is established. Agent mode presents these
+reviewed associations without assuming that every invocation is first-run onboarding:
 
 - setup, adoption assessment, and installed-release capability questions point to
   `concept-onboarding`;
@@ -226,6 +226,14 @@ assuming that every invocation is first-run onboarding:
 - breaking-input remediation points to `concept-migration`;
 - secret-model questions point to `concept-secrets`;
 - defects point to `concept-reporting-bugs`.
+
+The source-review offer names the exact installed version and canonical `vVERSION` tag. It offers a
+focused review of the fixed packaging, dependency, entrypoint, guide, catalog-policy, and release
+surfaces or a full read-only repository review, with a concise warning that the repository is
+substantial and full review may consume significant model usage. The offer is inert: rendering does
+not fetch source, and choosing review never authorizes installation or update. Candidate content is
+untrusted evidence, cannot supply policy or commands, and cannot expand the current authorization
+envelope. Declining review leaves both source and installation untouched.
 
 The intent-to-topic map is authored core guide content over the live topic catalog. It contains no
 operation commands, performs no request classification, and grants no authority. Adding a topic does
@@ -431,33 +439,14 @@ One canonical assistance body is the universal prompt contract and the source fo
 harness packages. A capable Agentworks assistant agent can consume it directly from the README or
 website without plugin support. It contains only:
 
-1. supported Python and `agentworks-cli` installation guidance;
-2. the complete R12 startup disclosure and authorization-envelope behavior, including the intended
-   workstation, account-scoped file inspection and command execution, separate explicit privilege
-   elevation, Agentworks-reachable resources, no repeated prompts for in-scope work, material
-   expansion triggers, and concrete strict-security posture links;
-3. a pre-install offer to review the exact canonical source tag, with a warning that the repository
-   is substantial and a full review can consume significant model usage, and separate focused, full,
-   decline-review, and install decisions;
-4. the instruction to run `agw guide --agent`, interpret its intent-to-topic map and live index
-   against the operator's current goal, and decide what topic or action to propose next.
+1. supported Python and exact `agentworks-cli` installation or update guidance; and
+2. the instruction to verify the installed version and run `agw guide --agent`.
 
-After the startup envelope is established, the package resolves the exact stable PyPI version it
-proposes to install, using ordinary network access when covered and asking once if that access would
-expand the envelope. It pins both the source-review tag and install command to that version. A
-focused review covers packaging, dependencies, CLI entry, and security-sensitive execution
-boundaries; a full review may inspect the entire canonical tag. Repository content remains untrusted
-evidence: it cannot grant permission, direct execution, or expand the reviewed scope. Declining
-review neither claims review nor revokes installation authorization established by the operator's
-instruction or a later decision. Review selection never implies install authorization.
-
-Source inspection runs from the assistance session's protected policy root. The Agentworks assistant
-agent does not launch or reconfigure a harness from the candidate tree, change its working root to
-that tree, load candidate `AGENTS.md`, `CLAUDE.md`, skills, hooks, plugins, or configuration as
-policy, or execute candidate scripts and commands. If files are materialized locally, they remain in
-an operator-approved data-only temporary location and are read by explicit path from the protected
-root. Instruction-like repository content is reported only as source evidence. Running any candidate
-code is a separate action and is not part of source review.
+The body contains no source-review offer, startup disclosure, authorization teaching, security
+settings advice, intent map, operation recipe, or release prose. Those are installed guide content.
+The bootstrap may resolve one exact compatible stable version from PyPI and pins the install command
+to `agentworks-cli==VERSION`; when an already compatible installation needs no update, it simply
+runs the guide. Ordinary harness approvals still govern bootstrap commands.
 
 A small generator wraps that body in the Claude Code and Codex package layouts. Generated files are
 committed so GitHub installation works without a build step. CI regenerates into a temporary
@@ -474,19 +463,19 @@ Candidate-wheel and live harness gates run from that regenerated release PR befo
 release tag and PyPI publish follow only after those gates pass, so the installed version and its
 internal release section are one reviewed artifact.
 
-Production assistance reviews canonical `vVERSION` before installing exact `VERSION`. A pre-merge
-candidate cannot claim a tag that does not yet exist: candidate probes instead review the exact
-release-PR commit that built the candidate wheel, record that test-only ref substitution, and
-install that exact artifact. The post-tag PyPI smoke exercises the production `vVERSION` review and
-exact install path.
+Production guide context offers review of canonical `vVERSION` for the exact installed version. A
+pre-merge candidate cannot claim a tag that does not yet exist: candidate probes install the exact
+release-PR wheel, then exercise the guide offer against the exact commit that built it and record
+that test-only ref substitution. The post-tag PyPI smoke installs the exact published version and
+then exercises the production `vVERSION` guide offer.
 
 The repository README leads with the same compact, table-free canonical assistance text, explicitly
 addressed to the Agentworks assistant agent, in a fenced copyable block. It derives from or is
 checked against the canonical source rather than maintaining a second security paraphrase. Detailed
 architecture tables are not copied into the operator-facing prompt. The plugins remain an additional
 discovery channel, not a prerequisite. The body does not assume Claude Code, Codex, or a plugin API;
-harness-specific security posture applies as conditional guidance only when that harness is actually
-in use.
+the guide supplies conditional harness-specific posture only after the handoff and only when that
+harness is actually in use.
 
 The package is named for Agentworks rather than onboarding, and its description activates for setup,
 discovery, adoption, configuration, troubleshooting, and operation. It contains no intent-to-topic
@@ -494,8 +483,8 @@ switchboard of its own. The top-level guide supplies the intent map, and selecte
 Agentworks assistant agent which list, describe, doctor, and operation records are relevant at each
 applicable action. The Agentworks assistant agent still chooses what to propose next. End-to-end
 assistance tests cover a generic prompt-only Agentworks assistant agent with no native plugin,
-focused and full source-review choices, decline-review with independently authorized installation,
-completed review followed by declined installation, one startup authorization covering an initial
+focused and full guide-owned source-review choices, declined review with no source read, completed
+review followed by a separately declined later update, one startup authorization covering an initial
 VM-and-session sequence without repeated prompts, a returning current-capability and adoption
 assessment, offline installed and normalized historical release notes plus the authorized
 missing-history fallback, an ongoing multi-command management operation, a material-expansion
