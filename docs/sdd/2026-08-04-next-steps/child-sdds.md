@@ -113,8 +113,12 @@ locked.
       residue, key deregistered; evidence pinned in that SDD's lock record)
 - [x] Saga-lead approval on the honest lock (2026-08-10); plan-history restore per the ruling and
       the #462 conflict integration ride the final push
-- [ ] Tester final pass, then merge; breaking reference slice ships in 0.14.0 (gates the cut per
-      `phasing.md` release mapping)
+- [x] Merged (2026-08-10) with the plan-history restore and the #462 conflict integration; the
+      saga-lead spot-check confirmed both seam suites (UserAbort pins, five-platform retention)
+      green at the merged head. The breaking reference slice's 0.14 gate is satisfied
+- [ ] Post-merge follow-up by the same lead (operator-coordinated, 2026-08-10): consolidate the
+      structural enforcement suite per the revised ruling AND fix the significant unit-test runtime
+      increase identified at merge; one small PR while context is loaded
 - [ ] Locked
 
 ### Installer plugins (pre-0.14 core slimming): 2026-08-07-installer-plugins
@@ -290,3 +294,9 @@ open-ended research placeholder.
     new pre-0.14 gates joined: the safer-migrations dispatched task (operator ruling) and the
     test-consolidation child (soft gate). The resource-CLI grammar break shares the window pending
     the operator's describe decision.
+14. Wave 3 merged (2026-08-10): the breaking-slice gate is satisfied. Unblocked by it: the manifesto
+    dispatched task's merge-order constraint is cleared (it awaits its rough cut and the operator
+    rewrite), and the security-architecture doc child can seed (carrying the per-platform
+    durable-surface inventory). The wave 3 lead owes the post-merge follow-up (enforcement-suite
+    consolidation plus the unit-test runtime fix). Open 0.14 gates: installer-plugins
+    implementation, the README bootstrap, safer migrations, and the test-consolidation soft gate.
