@@ -15,7 +15,7 @@ from __future__ import annotations
 from abc import abstractmethod
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
 from agentworks.capabilities.base import Capability, idempotent_op
 
@@ -27,6 +27,24 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import VMRow, VMStatus
     from agentworks.transports import Transport
+
+
+class BootstrapProgress(Protocol):
+    """Value-free progress sink for create-time VM bootstrap.
+
+    Platforms can report the bootstrap transcript through this narrow surface
+    without depending on the VM manager or the concrete logger that owns the
+    durable operation log. The manager retains construction and lifecycle
+    ownership of that logger.
+    """
+
+    def step(self, name: str) -> None: ...
+
+    def output(self, text: str) -> None: ...
+
+    def warning(self, msg: str) -> None: ...
+
+    def log_error(self, msg: str) -> None: ...
 
 
 @dataclass

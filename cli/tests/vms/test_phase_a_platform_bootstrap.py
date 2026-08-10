@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
+from agentworks.db import ProvisioningStatus
 from agentworks.vms.initializer import driver
 
 
@@ -68,3 +70,48 @@ def test_platform_complete_without_ip_never_selects_secret_bootstrap(
     run_bootstrap.assert_not_called()
     exec_target.run.assert_called_once_with("sudo tailscale ip -4")
     assert secret not in repr(exec_target.run.call_args_list)
+
+
+def test_wsl2_helper_result_is_persisted_at_manager_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    public_key = tmp_path / "id.pub"
+    public_key.write_text("ssh-ed25519 AAAA test\n")
+    db = MagicMock()
+    logger = MagicMock()
+    exec_target = MagicMock()
+    config = SimpleNamespace(
+        operator=SimpleNamespace(
+            ssh_public_key=public_key,
+            ssh_private_key=tmp_path / "id",
+        )
+    )
+    run_bootstrap = MagicMock(return_value="100.64.0.9")
+    monkeypatch.setattr(driver, "run_wsl2_bootstrap", run_bootstrap)
+
+    tailscale_ip = driver._run_bootstrap_script(
+        db,
+        config,
+        SimpleNamespace(),
+        "myvm",
+        exec_target,
+        "agw",
+        "wsl2--myvm",
+        logger,
+        tailscale_auth_key="tskey-test",
+        script_swap=0,
+    )
+
+    run_bootstrap.assert_called_once_with(
+        exec_target,
+        admin_username="agw",
+        ssh_public_key="ssh-ed25519 AAAA test",
+        tailscale_auth_key="tskey-test",
+        hostname="wsl2--myvm",
+        swap_gib=0,
+        progress=logger,
+    )
+    db.update_vm_tailscale.assert_called_once_with("myvm", "100.64.0.9")
+    db.update_vm_provisioning_status.assert_called_once_with("myvm", ProvisioningStatus.COMPLETE)
+    assert tailscale_ip == "100.64.0.9"
