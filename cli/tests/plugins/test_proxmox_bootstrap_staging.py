@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from agentworks.capabilities.base import RunContext
+from agentworks.errors import ProvisioningError
 from agentworks.plugins.proxmox.api import ProxmoxAPIError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 
@@ -154,10 +155,12 @@ def test_failure_output_is_not_repeated_to_observable_error_text(
         }
     )
 
-    assert _platform(monkeypatch, api)._run_bootstrap_via_agent("pve1", 100, _SCRIPT, RunContext()) is None
+    with pytest.raises(ProvisioningError, match=r"bootstrap failed \(exit 1\)") as caught:
+        _platform(monkeypatch, api)._run_bootstrap_via_agent("pve1", 100, _SCRIPT, RunContext())
 
-    assert warnings == ["Bootstrap failed (exit 1)"]
+    assert warnings == []
     assert _AUTH_KEY not in repr(warnings)
+    _assert_exception_graph_is_value_free(caught.value)
     assert api.files == {}
 
 
@@ -173,11 +176,12 @@ def test_forged_success_ip_is_not_returned_or_repeated(
         }
     )
 
-    result = _platform(monkeypatch, api)._run_bootstrap_via_agent("pve1", 100, _SCRIPT, RunContext())
+    with pytest.raises(ProvisioningError, match=r"bootstrap failed \(exit 0\)") as caught:
+        _platform(monkeypatch, api)._run_bootstrap_via_agent("pve1", 100, _SCRIPT, RunContext())
 
-    assert result is None
-    assert warnings == ["Bootstrap failed (exit 0)"]
+    assert warnings == []
     assert _AUTH_KEY not in repr(warnings)
+    _assert_exception_graph_is_value_free(caught.value)
     assert api.files == {}
 
 
@@ -203,8 +207,11 @@ def test_execute_unwind_removes_stage(
         with pytest.raises(type(execute_result)) as caught:
             platform._run_bootstrap_via_agent("pve1", 100, _SCRIPT, RunContext())
         assert caught.value is execute_result
+    elif execute_result is None:
+        with pytest.raises(ProvisioningError, match="bootstrap timed out"):
+            platform._run_bootstrap_via_agent("pve1", 100, _SCRIPT, RunContext())
     else:
-        assert platform._run_bootstrap_via_agent("pve1", 100, _SCRIPT, RunContext()) is None
+        raise AssertionError("unexpected non-exception execute result")
 
     assert api.files == {}
     assert api.modes == {}

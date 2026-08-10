@@ -31,6 +31,7 @@ import pytest
 
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest, ssh_exposure
+from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.errors import ConfigError, ConnectivityError
 from agentworks.plugins.azure import network as azure_network
 from agentworks.plugins.azure.network import (
@@ -74,6 +75,7 @@ def _stub_egress_detection(monkeypatch: pytest.MonkeyPatch) -> None:
     the failure branches."""
     monkeypatch.setattr(ssh_exposure, "_egress_ip_cache", None)
     monkeypatch.setattr(ssh_exposure, "detect_egress_ip", lambda: _DETECTED)
+    monkeypatch.setattr(EphemeralTailscaleBootstrap, "complete", lambda self, auth_key: "100.64.0.5")
 
 
 def _fail_detection(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -134,9 +136,8 @@ class TestCreate:
             admin_username="agentworks",
             ssh_public_key="ssh-ed25519 AAAA test",
             ssh_private_key=None,
-            # No Tailscale key: create skips the inline bootstrap wait,
-            # keeping the test hermetic (no SSH).
-            tailscale_auth_key=None,
+            tailscale_auth_key="tskey-test",
+            progress=MagicMock(),
             # The vm-template layer's resolved defaults, which is the only
             # shape a platform ever sees (the hardware fields are required).
             cpus=4,

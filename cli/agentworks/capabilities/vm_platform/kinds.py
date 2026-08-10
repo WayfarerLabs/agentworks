@@ -55,6 +55,12 @@ class _VMPlatformKind:
         A vm-platform knows how to create, start, stop, and delete VMs on one backend,
         and how to reach them over SSH once they exist.
 
+        Contract version 2 makes creation complete-or-raise: a platform completes its
+        Tailscale join before returning, reports bootstrap through the manager-owned
+        progress sink, and rolls back partial backend state before propagating failure.
+        A successful result may omit only the Tailscale IP; the VM domain then retries
+        IP discovery and verifies Tailscale SSH without replaying bootstrap.
+
         Platforms are code, not config: a vm-site selects one by writing its name inside
         `spec.platform`, and the keys allowed beside that name are the platform's own,
         which is why each documents its own config. Every registered platform publishes
@@ -119,7 +125,7 @@ def _readiness(name: str, impl: Any) -> Readiness:
 
 VM_PLATFORM_DESCRIPTOR = CapabilityKindDescriptor(
     kind="vm-platform",
-    contract_version=1,
+    contract_version=2,
     implementation_contract=VMPlatform,
     registry_policy=RegistryPolicy.CLASS_BY_NAME,
     registry=_registry,

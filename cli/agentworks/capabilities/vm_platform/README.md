@@ -74,8 +74,9 @@ A vm-platform stands up a machine and hands Agentworks an administrative foothol
   over the machine, reachable by the operator's installed SSH public key and never by password.
 - **MUST** provide a transport that runs arbitrary commands as the admin user: the single foothold
   every later provisioning step is driven through.
-- **MUST** join the VM to the operator's Tailscale tailnet when given an auth key (or otherwise make
-  it reachable), giving it a stable address for the life of the VM.
+- **MUST** consume the required Tailscale auth key, complete the join before `create()` returns, and
+  roll back partial backend state before propagating a join failure or interruption. IP discovery
+  may be deferred after a successful join; Phase A retries only `tailscale ip -4`.
 - **MUST** provision the VM to the requested cpus, memory, and disk, rounding up to the nearest
   available shape where the backend sells only fixed shapes. A backend that structurally cannot
   honor a per-VM shape (WSL2, whose limits are global) is the exception, and it **MUST** at least
@@ -237,12 +238,13 @@ transports are local); Azure and EC2 use it:
   intentional: the bootstrap ingress opens inside `create()` (cloud-init needs inbound SSH from the
   operator), and neither that nor this closing point is context-manager-shaped.
 - `secure_failed_vm(vm, ctx) -> None` (default no-op). Same contract as `post_tailscale_ready`, for
-  the paths where a create is kept without completing Phase A: the bootstrap or Tailscale
-  verification died (row marked FAILED) or the operator interrupted it mid-bootstrap (row status
-  untouched); the success-only hook never fired on either. Azure deletes the fixed-name bootstrap
-  allow and EC2 revokes the recorded bootstrap tuples, so the VM defaults to zero inbound exposure;
-  debugging survives via `vm shell --platform` (a fresh per-operation allow) and the platform's
-  serial console (not firewall-gated).
+  the paths where a completed create is kept after Phase A Tailscale SSH verification fails (row
+  marked FAILED) or the operator interrupts verification (row status untouched); the success-only
+  hook never fired on either. Create-time bootstrap failure stays inside the platform rollback
+  window and never reaches this hook. Azure deletes the fixed-name bootstrap allow and EC2 revokes
+  the recorded bootstrap tuples, so the VM defaults to zero inbound exposure; debugging survives via
+  `vm shell --platform` (a fresh per-operation allow) and the platform's serial console (not
+  firewall-gated).
 
 The two closing hooks and `transient_route` take `ctx` because opening or closing the firewall route
 (an Azure NSG rule, an EC2 security-group rule) is a backend call; the caller (Phase A's
@@ -286,16 +288,22 @@ a contract change is a hard cutover rather than a silent re-certification.
 - `legacy_platform_metadata(cls, row, legacy) -> dict[str, str]` maps pre-migration DB rows into the
   `platform_metadata` shape, consumed only by the one-shot DB migration.
 
-**Inputs and outputs** are uniform. Every `create` receives the same `ProvisionRequest` and returns
-a `ProvisionResult` whose `platform_metadata` is written verbatim to `vms.platform_metadata` and
-read back only by the owning platform (Lima stores `instance_name`, WSL2 `distro_name`, Azure
-`resource_id`, Proxmox `vmid` + `node`, EC2 `instance_id` + `security_group_id` + `region` +
-`backend_name`, and never the public IP, which it reads live). Add a platform-specific **input** by
-adding a field to `ProvisionRequest`, not by changing the protocol. But note the opposite pattern is
-also right: purely internal translation stays inside the platform. Azure's VM-size selection
-(mapping the request's `cpus`/`memory_gib`/`disk_gib` onto a concrete SKU, with a site-level
-`vm_sizes` override, per ADR 0018) lives entirely in `plugins/azure/platform.py` and adds nothing to
-`ProvisionRequest`.
+**Inputs and outputs** are uniform under vm-platform contract version 2. Every `create` receives the
+same `ProvisionRequest`, including a required resolved Tailscale auth key and a required value-free
+bootstrap-progress sink. A successful return means the platform completed Tailscale bootstrap;
+failure or interruption raises after platform-owned rollback. `ProvisionResult` carries the native
+transport, an optional Tailscale IP, and `platform_metadata`. The metadata is written verbatim to
+`vms.platform_metadata` and read back only by the owning platform (Lima stores `instance_name`, WSL2
+`distro_name`, Azure `resource_id`, Proxmox `vmid` + `node`, EC2 `instance_id` +
+`security_group_id` + `region` + `backend_name`, and never the public IP, which it reads live). An
+omitted IP means discovery failed after a successful join, not that bootstrap is incomplete. Phase A
+retries only `tailscale ip -4` before it records the address and verifies Tailscale SSH.
+
+Add a platform-specific **input** by adding a field to `ProvisionRequest`, not by changing the
+protocol. But note the opposite pattern is also right: purely internal translation stays inside the
+platform. Azure's VM-size selection (mapping the request's `cpus`/`memory_gib`/`disk_gib` onto a
+concrete SKU, with a site-level `vm_sizes` override, per ADR 0018) lives entirely in
+`plugins/azure/platform.py` and adds nothing to `ProvisionRequest`.
 
 ### How an Op Gets Its Dependencies
 
@@ -504,24 +512,34 @@ Standing up a VM splits into two stages with different owners and, crucially, di
 behavior. (These are a provisioning-timeline concept, orthogonal to the capability lifecycle stages
 and the operator-facing command banners that the rest of the codebase calls "phases.")
 
-- **Create-time bootstrap** is `create()` plus whatever the backend runs at creation time to get the
-  VM reachable over Tailscale. The shared payload is `bootstrap_script.py` (admin user, packages,
-  SSH key, swap, hostname, the Apple-vz SVE grub mask, Tailscale). Lima instance YAML, Azure
-  `custom_data`, and EC2 `UserData` retain credential-free forms of that payload. After it installs
-  Tailscale, `create()` sends the resolved key through one fixed guest command on the provisioning
-  transport's stdin. The value is absent from provider-retained configuration and host-side argv;
-  the guest `tailscale` process necessarily receives its `--auth-key` argument transiently. Proxmox
-  runs the key-bearing bootstrap from a private guest-agent staging file inside `create()`. WSL2
-  runs it from private local and guest staging during the create-only Phase A provisioning step.
-  Each staging file receives one verified removal attempt. **This stage runs once, at create.**
+- **Create-time bootstrap** is owned completely by `create()`, plus whatever the backend runs at
+  creation time to get the VM reachable over Tailscale. The shared payload is `bootstrap_script.py`
+  (admin user, packages, SSH key, swap, hostname, the Apple-vz SVE grub mask, Tailscale). Lima
+  instance YAML, Azure `custom_data`, and EC2 `UserData` retain credential-free forms of that
+  payload. After it installs Tailscale, `create()` sends the resolved key through one fixed guest
+  command on the provisioning transport's stdin. The value is absent from provider-retained
+  configuration and host-side argv; the guest `tailscale` process necessarily receives its
+  `--auth-key` argument transiently. Proxmox runs the key-bearing bootstrap from a private
+  guest-agent staging file inside `create()`. WSL2 runs its generated bootstrap from private local
+  and guest staging inside `create()`. Each staging file receives one verified removal attempt.
+  `create()` returns only after bootstrap succeeds and Tailscale joins, or it raises after rolling
+  back partial backend resources. **This stage runs once, at create.**
+- **Phase A** receives only the returned optional Tailscale IP and the provisioning transport. If
+  the platform could not discover an IP after joining, Phase A runs only `tailscale ip -4` over that
+  transport. It then records the IP and provisioning state, verifies Tailscale SSH, closes temporary
+  provisioning access, and syncs SSH config. It never receives the Tailscale key as a bootstrap
+  input, generates a bootstrap script, or touches bootstrap staging.
 - **Initialization** is `run_initialization` (`agentworks.vms.initializer`) plus VM hardening
   (`agentworks.vms.hardening`), run over a `Transport` against the created VM. It is
-  platform-agnostic. **It is re-runnable and is exactly what `agw vm reinit` re-runs.** (The Phase A
-  bootstrap/connectivity driver `bootstrap_vm` is provisioning, not this stage, and runs only at
-  create.)
+  platform-agnostic. **It is re-runnable and is exactly what `agw vm reinit` re-runs.** The Phase A
+  record-and-verify driver `bootstrap_vm` is provisioning, not this stage, and runs only at create.
 
-`request.tailscale_auth_key` is the seam control: when present, the platform joins Tailscale during
-create-time bootstrap; when `None`, every platform defers the join to Phase A provisioning.
+The required `request.tailscale_auth_key` is a domain-owned operation input. The vm-template
+declares its secret name and the VM manager resolves the value once, constructs the operation logger
+with the Tailscale key and git tokens in its redaction set before platform dispatch, and passes both
+the key and its value-free progress surface in the request. This is separate from platform-config
+secrets delivered through `ctx.secret(name)`. The manager owns and closes the same logger exactly
+once after platform bootstrap, Phase A, and initialization.
 
 A platform-native configuration that the provider retains must never contain the resolved key. The
 five final-inspection surfaces are Lima instance YAML, WSL2 and Proxmox bootstrap staging, Azure
@@ -652,8 +670,11 @@ YAML block scalar, remote shell). Two traps that have already occurred:
    the non-constructing `not_ready(config)` handles per-site tool checks (Lima with no `limactl`).
    `legacy_platform_metadata` is needed only when pre-migration rows must be mapped.
 5. Only the transport and lifecycle hooks required by the backend override their defaults.
-6. `bootstrap_script.py` / `cloud_init.py` supply the create-time payload instead of a
-   platform-specific reinvention.
+6. `create()` completes Tailscale bootstrap or raises after rollback. Use `bootstrap_script.py` /
+   `cloud_init.py` for the create-time payload instead of a platform-specific reinvention. Keep any
+   provider-retained payload credential-free and deliver the resolved key through the platform's
+   ephemeral mechanism. Return an optional IP only after a successful join; Phase A owns IP-only
+   rediscovery and Tailscale SSH verification.
 7. Dispatch, idempotency, and, where applicable, template-render tests belong under
    `cli/tests/vms/`; the next section lists the existing references.
 8. The implementation is checked against the preceding platform-development considerations before it
@@ -692,7 +713,8 @@ A new `Transport` subclass belongs under `cli/tests/transports/` alongside the p
 - `../base.py`: the `Capability` base and `RunContext`.
 - `bootstrap_script.py`, `cloud_init.py`, `skel.py`: shared create-time payload.
 - `agentworks.vms.initializer`: the two-phase init driver (`bootstrap_vm` for Phase A provisioning
-  bootstrap/connectivity, `run_initialization` for Phase B initialization).
+  state recording, optional IP-only rediscovery, and Tailscale SSH verification;
+  `run_initialization` for Phase B initialization).
 - `agentworks.vms.hardening`: the hardening steps, and the model for idempotent reconciliation that
   reaches existing VMs via `reinit`.
 - `agentworks.vms.sites`: how a `vm-site` binds a platform to config.
