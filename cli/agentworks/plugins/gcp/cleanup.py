@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, NoReturn
 
 from agentworks import output
 from agentworks.errors import AgentworksError
-from agentworks.plugins.gcp.compute import verify_zonal_operation
+from agentworks.plugins.gcp.compute import provider_resource_id, verify_zonal_operation
 from agentworks.plugins.gcp.errors import call_google, call_google_optional, wait_for_extended_operation
 from agentworks.plugins.gcp.network import (
     FirewallOwnership,
@@ -125,7 +125,7 @@ def _reconcile_instance(
         return state, None
     if instance is None:  # pragma: no cover - paired by _read_instance
         return InstanceState.INDETERMINATE, None
-    observed_id = _provider_resource_id(instance.id)
+    observed_id = provider_resource_id(instance.id)
     if ownership is None or observed_id is None:
         return InstanceState.INDETERMINATE, observed_id
     if observed_id != ownership.resource_id:
@@ -256,17 +256,6 @@ def rollback_partial_create(
         allow_result.observed_resource_id,
         deny_result.observed_resource_id,
     )
-
-
-def _provider_resource_id(value: object) -> str | None:
-    """Normalize one positive uint64 provider ID without accepting zero."""
-    if isinstance(value, bool) or not isinstance(value, int | str):
-        return None
-    try:
-        normalized = int(value)
-    except ValueError:
-        return None
-    return str(normalized) if normalized > 0 else None
 
 
 def rollback_then_raise(

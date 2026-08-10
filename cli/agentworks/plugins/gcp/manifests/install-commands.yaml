@@ -1,0 +1,28 @@
+# Optional guest tooling. GCE lifecycle uses the Python SDK and does not call
+# or authenticate gcloud. The default paths are overrideable only for isolated
+# installer tests; normal VM initialization uses the fixed system locations.
+apiVersion: agentworks/v1
+kind: system-install-command
+metadata:
+  name: gcloud-cli
+  description: Google Cloud CLI
+spec:
+  test_exec: gcloud
+  command: |
+    set -eu
+    keyring="${AGW_GCLOUD_KEYRING:-/usr/share/keyrings/cloud.google.gpg}"
+    source_file="${AGW_GCLOUD_SOURCE_FILE:-/etc/apt/sources.list.d/google-cloud-sdk.list}"
+    source_entry="deb [signed-by=${keyring}] https://packages.cloud.google.com/apt cloud-sdk main"
+    install -d -m 0755 "$(dirname "$keyring")" "$(dirname "$source_file")"
+    key_tmp="${keyring}.tmp"
+    source_tmp="${source_file}.tmp"
+    rm -f "$key_tmp" "$source_tmp"
+    curl --fail --silent --show-error https://packages.cloud.google.com/apt/doc/apt-key.gpg | \
+      gpg --dearmor --yes --output "$key_tmp"
+    chmod 0644 "$key_tmp"
+    mv -f "$key_tmp" "$keyring"
+    printf '%s\n' "$source_entry" > "$source_tmp"
+    chmod 0644 "$source_tmp"
+    mv -f "$source_tmp" "$source_file"
+    apt-get update -y
+    CLOUDSDK_SKIP_PY_COMPILATION=1 apt-get install -y google-cloud-cli

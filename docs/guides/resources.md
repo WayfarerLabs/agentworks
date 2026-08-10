@@ -274,7 +274,7 @@ recovery prerequisites.
   host's own credential chain (for Azure, `az login` / `AZURE_*` / managed identity / browser
   fallback; for AWS, environment, shared config, instance profile, SSO; for GCP, Application Default
   Credentials), which is what each wrapped SDK does when told nothing.
-  `auth: {mode: service-principal, ...}` and `auth: {mode: access-key, ...}`, and
+  `auth: {mode: service-principal, ...}`, `auth: {mode: access-key, ...}`, and
   `auth: {mode: service-account, ...}` name an explicit identity. An explicit identity is used and
   only it, so a rejected or expired credential fails the command rather than falling back to the
   ambient chain. The same shape reads back out: an `ambient` site declares no secret and shows no
@@ -477,11 +477,10 @@ system = ["azure"]
 - A plugin you have **not** enabled still publishes both its capability rows AND its bundled
   manifest resources, all **disabled**: a resource referencing a disabled capability is not-ready
   with an `enable plugin <name>` hint (not an unknown-name error), and a reference to a disabled
-  bundled resource (for example a template's `system_install_commands` naming the `az-cli`
-  install-command while `azure` is off) is refused at use with the same hint, never an unknown-name
-  error. A disabled plugin's resources are hidden from `resource list` and never block an operator's
-  identically-named resource, but they are present, so the reference always resolves to the friendly
-  hint.
+  bundled resource (for example a template's `system_install_commands` naming `az-cli` while `azure`
+  is off) is refused at use with the same hint, never an unknown-name error. A disabled plugin's
+  resources are hidden from `resource list` and never block an operator's identically-named
+  resource, but they are present, so the reference always resolves to the friendly hint.
 
 **Disabled resources are hidden by default.** `agw resource list` omits disabled rows; pass
 `--include-disabled` to reveal them. `--origin plugin` narrows the listing to plugin-contributed
@@ -508,14 +507,15 @@ use.
 
 **Which plugins you need follows from what your resources reference.** Enable `onepassword` if a
 declared secret source selects the `onepassword` backend; `proxmox` if a `vm-site` uses the
-`proxmox` platform; `gcp` if you use `gcp-gce`; `aws` if you use `aws-ec2`; `azure` if you use the
-`azure-vm` platform, the `azdo` (Azure DevOps) git-credential provider, or the `az-cli`
-install-command; and `claude` if a `session-template` uses the `claude-code` integration or a
-template installs the `claude` CLI. Until you do, a resource that references one is not-ready (or
-refused at use) with an "enable plugin `<name>`" hint, never a silent failure. The default local
-path (the `lima` / `wsl2` platforms, the `shell` harness integration, the `env-var` / `prompt`
-secret backends, and the `github` git-credential provider) needs no `[plugins]` entry at all.
-`agw doctor` lists every installed plugin and whether it is enabled.
+`proxmox` platform; `gcp` if you use `gcp-gce` or a template installs `gcloud-cli`; `aws` if you use
+`aws-ec2` or a template installs `aws-cli`; `azure` if you use the `azure-vm` platform, the `azdo`
+(Azure DevOps) git-credential provider, or the `az-cli` install-command; and `claude` if a
+`session-template` uses the `claude-code` integration or a template installs the `claude` CLI. Until
+you do, a resource that references one is not-ready (or refused at use) with an "enable plugin
+`<name>`" hint, never a silent failure. The default local path (the `lima` / `wsl2` platforms, the
+`shell` harness integration, the `env-var` / `prompt` secret backends, and the `github`
+git-credential provider) needs no `[plugins]` entry at all. `agw doctor` lists every installed
+plugin and whether it is enabled.
 
 ## Secrets: configured sources and implementation backends
 

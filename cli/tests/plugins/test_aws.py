@@ -18,6 +18,7 @@ import pytest
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.errors import StateError
+from agentworks.resources.access import ensure_recipe_enabled
 from agentworks.resources.graph import Enablement
 from agentworks.resources.inspect import describe_resource, list_resources
 
@@ -37,6 +38,15 @@ spec:
     name: aws-ec2
     region: us-east-1
     auth: { mode: ambient }
+"""
+
+_AWS_CLI_TEMPLATE = """
+apiVersion: agentworks/v1
+kind: vm-template
+metadata:
+  name: aws-tools
+spec:
+  system_install_commands: [aws-cli]
 """
 
 
@@ -63,7 +73,7 @@ def _config(tmp_path: Path, site: str = "", *, enabled: bool = False) -> Config:
     return load_config(cfg, warn_issues=False, warn_deprecations=False)
 
 
-def test_aws_seated_by_plugin() -> None:
+def test_aws_seated_by_vendor_bundle() -> None:
     from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
     from agentworks.plugins import SYSTEM_PLUGINS
 
@@ -71,9 +81,7 @@ def test_aws_seated_by_plugin() -> None:
     assert "aws-ec2" in VM_PLATFORM_REGISTRY
     plugin = SYSTEM_PLUGINS["aws"]
     assert set(plugin.capabilities) == {"vm-platform"}
-    # No bundled manifest: EC2 talks to AWS in-process, so it ships no
-    # install-command (unlike the azure plugin's az-cli).
-    assert plugin.manifests is None
+    assert plugin.manifests == "agentworks.plugins.aws"
 
 
 def test_aws_ec2_row_disabled_system_plugin_by_default(tmp_path: Path) -> None:
@@ -82,6 +90,49 @@ def test_aws_ec2_row_disabled_system_plugin_by_default(tmp_path: Path) -> None:
     assert row.origin.variant == "system-plugin"
     assert row.origin.plugin == "aws"
     assert registry.graph.enablement_of("vm-platform", "aws-ec2") is Enablement.disabled
+
+
+def test_aws_bundle_publishes_cli_disabled_with_verified_v2_payload(tmp_path: Path) -> None:
+    registry = build_registry(_config(tmp_path))
+    row = registry.lookup("system-install-command", "aws-cli")
+    assert row.origin.variant == "system-plugin"
+    assert row.origin.plugin == "aws"
+    assert registry.graph.enablement_of("system-install-command", "aws-cli") is Enablement.disabled
+    assert row.test_exec is None
+    assert "aws-cli/2" in row.command
+    assert "awscli-exe-linux-x86_64.zip" in row.command
+    assert "awscli-exe-linux-aarch64.zip" in row.command
+    assert "FB5DB77FD5C118B80511ADA8A6310ACC4672475C" in row.command
+    assert "gpg --batch --verify" in row.command
+    assert 'primary && $1 == "fpr"' in row.command
+    assert "trap 'rm -rf \"$temp_root\"' EXIT" in row.command
+    assert "trap 'exit 130' INT" in row.command
+    assert 'if test -d "$install_dir"; then' in row.command
+    assert '--install-dir "$install_dir" --bin-dir "$bin_dir" --update' in row.command
+    assert "aws configure" not in row.command
+
+
+def test_aws_cli_recipe_is_gated_until_aws_is_enabled(tmp_path: Path) -> None:
+    registry = build_registry(_config(tmp_path, _AWS_CLI_TEMPLATE))
+    with pytest.raises(StateError, match="enable plugin `aws`"):
+        ensure_recipe_enabled(registry, "vm-template", "aws-tools")
+
+    enabled = build_registry(_config(tmp_path, _AWS_CLI_TEMPLATE, enabled=True))
+    ensure_recipe_enabled(enabled, "vm-template", "aws-tools")
+
+
+def test_operator_aws_cli_override_wins_while_aws_is_disabled(tmp_path: Path) -> None:
+    override = """
+apiVersion: agentworks/v1
+kind: system-install-command
+metadata:
+  name: aws-cli
+spec:
+  command: echo operator-aws
+"""
+    row = build_registry(_config(tmp_path, override)).lookup("system-install-command", "aws-cli")
+    assert row.origin.variant == "operator-declared"
+    assert row.command == "echo operator-aws"
 
 
 def test_disabled_aws_ec2_hidden_from_list_shown_by_describe(tmp_path: Path) -> None:
@@ -121,6 +172,14 @@ def test_enabling_aws_makes_the_site_ready_and_resolvable(tmp_path: Path) -> Non
     platform = resolve_site("aws-dev", registry)  # no raise
     assert isinstance(platform, VMPlatform)
     assert platform.name == "aws-ec2"
+
+
+def test_aws_cli_is_discoverable_from_registry_surfaces(tmp_path: Path) -> None:
+    registry = build_registry(_config(tmp_path))
+    assert "aws-cli" not in {row.name for row in list_resources(registry).rows}
+    assert "aws-cli" in {
+        row.name for row in list_resources(registry, include_disabled=True).rows if row.kind == "system-install-command"
+    }
 
 
 def test_doctor_roster_lists_the_aws_plugin(tmp_path: Path) -> None:

@@ -1,0 +1,74 @@
+# Optional guest tooling. EC2 lifecycle uses boto3 and does not call or
+# authenticate aws. `test_exec` is deliberately absent: AWS CLI v1 and v2
+# share the same executable name, so the command performs its own v2 probe.
+apiVersion: agentworks/v1
+kind: system-install-command
+metadata:
+  name: aws-cli
+  description: AWS CLI v2
+spec:
+  command: |
+    set -eu
+    install_dir="${AGW_AWS_INSTALL_DIR:-/usr/local/aws-cli}"
+    bin_dir="${AGW_AWS_BIN_DIR:-/usr/local/bin}"
+    if command -v aws >/dev/null 2>&1 && aws --version 2>&1 | grep -q '^aws-cli/2\.'; then
+      exit 0
+    fi
+    case "$(uname -m)" in
+      x86_64) archive="awscli-exe-linux-x86_64.zip" ;;
+      aarch64) archive="awscli-exe-linux-aarch64.zip" ;;
+      *) echo "AWS CLI v2 is unsupported on architecture $(uname -m)" >&2; exit 1 ;;
+    esac
+    temp_root="$(mktemp -d)"
+    gnupg_home="$temp_root/gnupg"
+    trap 'rm -rf "$temp_root"' EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    mkdir -m 0700 "$gnupg_home"
+    archive_path="$temp_root/awscliv2.zip"
+    signature_path="$archive_path.sig"
+    key_path="$temp_root/aws-cli-team.asc"
+    curl --fail --silent --show-error "https://awscli.amazonaws.com/$archive" -o "$archive_path"
+    curl --fail --silent --show-error "https://awscli.amazonaws.com/$archive.sig" -o "$signature_path"
+    cat > "$key_path" <<'AGW_AWS_CLI_TEAM_KEY'
+    -----BEGIN PGP PUBLIC KEY BLOCK-----
+
+    mQINBF2Cr7UBEADJZHcgusOJl7ENSyumXh85z0TRV0xJorM2B/JL0kHOyigQluUG
+    ZMLhENaG0bYatdrKP+3H91lvK050pXwnO/R7fB/FSTouki4ciIx5OuLlnJZIxSzx
+    PqGl0mkxImLNbGWoi6Lto0LYxqHN2iQtzlwTVmq9733zd3XfcXrZ3+LblHAgEt5G
+    TfNxEKJ8soPLyWmwDH6HWCnjZ/aIQRBTIQ05uVeEoYxSh6wOai7ss/KveoSNBbYz
+    gbdzoqI2Y8cgH2nbfgp3DSasaLZEdCSsIsK1u05CinE7k2qZ7KgKAUIcT/cR/grk
+    C6VwsnDU0OUCideXcQ8WeHutqvgZH1JgKDbznoIzeQHJD238GEu+eKhRHcz8/jeG
+    94zkcgJOz3KbZGYMiTh277Fvj9zzvZsbMBCedV1BTg3TqgvdX4bdkhf5cH+7NtWO
+    lrFj6UwAsGukBTAOxC0l/dnSmZhJ7Z1KmEWilro/gOrjtOxqRQutlIqG22TaqoPG
+    fYVN+en3Zwbt97kcgZDwqbuykNt64oZWc4XKCa3mprEGC3IbJTBFqglXmZ7l9ywG
+    EEUJYOlb2XrSuPWml39beWdKM8kzr1OjnlOm6+lpTRCBfo0wa9F8YZRhHPAkwKkX
+    XDeOGpWRj4ohOx0d2GWkyV5xyN14p2tQOCdOODmz80yUTgRpPVQUtOEhXQARAQAB
+    tCFBV1MgQ0xJIFRlYW0gPGF3cy1jbGlAYW1hem9uLmNvbT6JAlQEEwEIAD4CGwMF
+    CwkIBwIGFQoJCAsCBBYCAwECHgECF4AWIQT7Xbd/1cEYuAURraimMQrMRnJHXAUC
+    akV0ygUJDqP4lQAKCRCmMQrMRnJHXFHjD/9eyZLYcKuQOlLvtqSDtUBiEZf6ZZjM
+    i3ygYH8rJNtuToUH+HvSpe819urJCquXhDrlK6N+aqW0hCLtNABJG/vsafIgvIYJ
+    hSGgpgtNnQyMV1jViRWqPjbouw8OkYKBThUfT1i2Y+wn58ifs6ODBCmTexWtXspA
+    Si+Gt49xDOW0APmbOPnI+a4HJW6tVEo6MWS0WjzpiBayR3d1A4pt4YrPfSdDgpLo
+    h2SLQqlRqvvVZJaWBjhkErNFpfsBA06sDcPEOb0G8LBUbR4WOcdvhe5LubJbZuxC
+    AG9kNPCVeQP1ixwjgjXKysaxeQ6rv0VzIQgRp6tLVLWhy6AKDNvLjFSsmXZ1Wl08
+    Y/RlOHXlzLuQMRE6sR1wOdRxc9TsrNWTGiBK65cvSWOy03JeBkQQ8pesqltiyxI9
+    U21kkgiXtTSKNGfKK8pO27D81YANhRqPK7iTp6kuFiY2WtOg90KTMNlIT+Ff85Y2
+    b1rHj6Z0SrCkJujhWk3IBPic/wJgz01LEc/OAdUPlby90RJZcIBhSlWhT7mXnXIO
+    c0HWlNQrns2s3CTyYwZSiSlYe9ApeLwhjDo8NhbFuCAy61l6O5UsR4AfZxx/rGKv
+    2wFb1/RN/P4gNe6vmxZAPjR0AQcwD3tc2McimOLr/22kmPz8IH3I0X7WoSFr0Biz
+    E91G7bb0hOb/cA==
+    =knv7
+    -----END PGP PUBLIC KEY BLOCK-----
+    AGW_AWS_CLI_TEAM_KEY
+    GNUPGHOME="$gnupg_home" gpg --batch --import "$key_path"
+    primary_fingerprint="$(GNUPGHOME="$gnupg_home" gpg --batch --with-colons --fingerprint --list-keys | awk -F: '$1 == "pub" {primary = 1; next} primary && $1 == "fpr" {print $10; exit}')"
+    test "$primary_fingerprint" = "FB5DB77FD5C118B80511ADA8A6310ACC4672475C"
+    GNUPGHOME="$gnupg_home" gpg --batch --verify "$signature_path" "$archive_path"
+    unzip -q "$archive_path" -d "$temp_root"
+    if test -d "$install_dir"; then
+      "$temp_root/aws/install" --install-dir "$install_dir" --bin-dir "$bin_dir" --update
+    else
+      "$temp_root/aws/install" --install-dir "$install_dir" --bin-dir "$bin_dir"
+    fi

@@ -17,6 +17,7 @@ from agentworks.errors import (
     NotFoundError,
     TokenRejectedError,
 )
+from agentworks.plugins.gcp.compute import canonical_resource_url, provider_resource_id
 from agentworks.plugins.gcp.errors import (
     GCEError,
     GCEOperationError,
@@ -73,7 +74,7 @@ class FirewallShape:
     def from_resource(cls, firewall: Any) -> FirewallShape:
         """Canonicalize a typed Compute ``Firewall`` for exact comparison."""
         return cls(
-            network=_canonical_resource_url(str(firewall.network)),
+            network=canonical_resource_url(str(firewall.network)),
             direction=str(firewall.direction or "INGRESS").upper(),
             disabled=bool(firewall.disabled),
             priority=int(firewall.priority),
@@ -197,7 +198,7 @@ def resolve_network(clients: GcpClientCache, ctx: RunContext, config: GcpGCEConf
         subnet_url = str(subnet.self_link)
         if not network_url or not subnet_url:
             raise GCEError(f"GCE subnetwork '{config.subnet}' returned incomplete network identity")
-        canonical = _canonical_resource_url(network_url)
+        canonical = canonical_resource_url(network_url)
         if not canonical.startswith(f"projects/{config.project_id}/"):
             raise ConfigError(
                 f"GCE subnetwork '{config.subnet}' belongs to a shared VPC host project, which gcp-gce does not support"
@@ -229,7 +230,7 @@ def get_network(
     network_url: str,
 ) -> Any:
     """Read the selected network from its resolved resource URL."""
-    network_name = _canonical_resource_url(network_url).rsplit("/", 1)[-1]
+    network_name = canonical_resource_url(network_url).rsplit("/", 1)[-1]
     client = clients.client("networks", ctx)
     network = call_google_optional(
         lambda: client.get(project=project_id, network=network_name),
@@ -241,7 +242,7 @@ def get_network(
             f"GCE network '{network_name}' does not exist in project '{project_id}'",
             hint="correct the vm-site subnet or restore the selected network before retrying",
         )
-    if _canonical_resource_url(str(network.self_link)) != _canonical_resource_url(network_url):
+    if canonical_resource_url(str(network.self_link)) != canonical_resource_url(network_url):
         raise ConfigError(f"GCE network '{network_name}' resolved to an unexpected resource identity")
     return network
 
@@ -347,7 +348,7 @@ def inspect_firewall(
     )
     if actual is None:
         return FirewallReconciliation(FirewallState.ABSENT, None)
-    observed_id = _provider_resource_id(actual.id)
+    observed_id = provider_resource_id(actual.id)
     if ownership is None:
         return FirewallReconciliation(FirewallState.INDETERMINATE, observed_id)
     if (
@@ -535,11 +536,11 @@ def _verify_firewall_operation(
 ) -> str:
     """Verify the GCE operation belongs to this request and capture its target."""
     expected_link = f"projects/{project_id}/global/firewalls/{rule_name}"
-    resource_id = _provider_resource_id(getattr(operation, "target_id", None))
+    resource_id = provider_resource_id(getattr(operation, "target_id", None))
     if (
         str(getattr(operation, "client_operation_id", "")) != request_id
         or str(getattr(operation, "operation_type", "")).lower() != operation_type
-        or _canonical_resource_url(str(getattr(operation, "target_link", ""))) != expected_link
+        or canonical_resource_url(str(getattr(operation, "target_link", ""))) != expected_link
         or resource_id is None
         or (expected_resource_id is not None and resource_id != expected_resource_id)
     ):
@@ -550,24 +551,6 @@ def _verify_firewall_operation(
             hint="retain the named rule until its provider identity can be established",
         )
     return resource_id
-
-
-def _provider_resource_id(value: object) -> str | None:
-    """Normalize one positive uint64 provider ID without accepting blank/zero."""
-    if isinstance(value, bool) or not isinstance(value, int | str):
-        return None
-    try:
-        normalized = int(value)
-    except ValueError:
-        return None
-    return str(normalized) if normalized > 0 else None
-
-
-def _canonical_resource_url(value: str) -> str:
-    marker = "/projects/"
-    if marker in value:
-        return value[value.index(marker) + 1 :].rstrip("/")
-    return value.lstrip("/").rstrip("/")
 
 
 def _protocols(entries: Iterable[Any]) -> tuple[ProtocolPorts, ...]:
@@ -585,7 +568,7 @@ def _protocols(entries: Iterable[Any]) -> tuple[ProtocolPorts, ...]:
 def _is_relevant_priority_zero(firewall: Any, *, network_url: str, target_tag: str | None) -> bool:
     if bool(firewall.disabled) or str(firewall.direction or "INGRESS").upper() != "INGRESS":
         return False
-    if int(firewall.priority) != 0 or _canonical_resource_url(str(firewall.network)) != _canonical_resource_url(
+    if int(firewall.priority) != 0 or canonical_resource_url(str(firewall.network)) != canonical_resource_url(
         network_url
     ):
         return False

@@ -318,13 +318,15 @@ def test_bundled_builtin_rows_match_oracle(tmp_path: Path) -> None:
     assert claude.origin.variant == "system-plugin"
     assert claude.origin.plugin == "claude"
 
-    # The migrated `az-cli` install-command is gone from the built-in bundle and
-    # now carries the `azure` system-plugin origin (Phase 11).
-    assert "az-cli" not in sys_cmds  # not a built-in row anymore
-    az_cli = kind_dict(registry, "system-install-command")["az-cli"]
-    assert az_cli.origin is not None
-    assert az_cli.origin.variant == "system-plugin"
-    assert az_cli.origin.plugin == "azure"
+    # Provider guest CLIs are plugin-owned optional tooling, never built-in
+    # provisioning dependencies. Their system-plugin origins remain visible
+    # even while the vendor plugin is disabled.
+    for name, plugin_name in (("az-cli", "azure"), ("aws-cli", "aws"), ("gcloud-cli", "gcp")):
+        assert name not in sys_cmds  # not a built-in row
+        command = kind_dict(registry, "system-install-command")[name]
+        assert command.origin is not None
+        assert command.origin.variant == "system-plugin"
+        assert command.origin.plugin == plugin_name
 
     # Provenance: every built-in row is a built-in origin pointed at the
     # bundled file for its kind (not the former agentworks.catalog source).

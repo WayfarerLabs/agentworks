@@ -192,8 +192,6 @@ def insert_instance_reconciled(
     if realized is not None:
         observed_id = provider_resource_id(realized.id)
         if observed_id == target_id:
-            if wait_failure is None:
-                return realized, attempt.ownership
             # A matching realized incarnation reconciles an indeterminate wait.
             return realized, attempt.ownership
         raise AlreadyExistsError(

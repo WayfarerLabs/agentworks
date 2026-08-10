@@ -1,23 +1,9 @@
-"""The ``aws`` system plugin: the EC2 VM platform, shipped as a separable,
-opt-in plugin (R11, R11.1).
+"""The opt-in ``aws`` vendor bundle and its EC2 contribution.
 
-A capability-only migration in the proxmox mould (no bundled manifests, no
-system-install-command): the plugin seats its ``EC2Platform`` into
-``VM_PLATFORM_REGISTRY`` through the ``vm-platform`` adapter and publishes a
-``vm-platform`` row with a ``system-plugin`` origin. The row is
-present-but-disabled until an operator opts in with
-``[plugins] system = ["aws"]``; while disabled a ``vm-site`` on the ``aws-ec2``
-platform is not-ready with the "enable plugin `aws`" hint and ``resolve_site``
-refuses it.
-
-Unlike the ``azure`` plugin there is no bundled ``system-install-command``: the
-platform talks to AWS in-process through boto3, so it needs no CLI tool
-installed in the fleet OS and therefore no install-command manifest. The
-platform is named ``aws-ec2``, not ``aws``: the capability is one specific AWS
-service, and other AWS services could plausibly back platforms of their own
-someday (the same one-service rationale ``azure-vm`` follows for Azure). The
-plugin (``aws``) and platform (``aws-ec2``) pairing reads uniformly with
-``azure`` / ``azure-vm``.
+The bundle publishes the ``aws-ec2`` VM platform and an optional guest-side
+``aws-cli`` installer. EC2 lifecycle continues to use boto3, never the guest
+CLI. Future AWS implementations retain their own capability contracts and
+service-specific names instead of introducing a provider-wide abstraction.
 
 ``base`` / ``bootstrap_script`` / ``cloud_init`` / ``ssh_exposure`` stay in the
 core ``vm-platform`` capability package: ``base`` is the platform contract every
@@ -34,6 +20,7 @@ from agentworks.plugins.base import Plugin
 
 PLUGIN = Plugin(
     name="aws",
-    description="Amazon EC2 VM platform",
+    description="Amazon EC2 VM platform and optional AWS CLI",
     capabilities={"vm-platform": (EC2Platform,)},
+    manifests="agentworks.plugins.aws",
 )

@@ -199,8 +199,9 @@ def test_disabled_secret_backend_makes_its_active_source_not_ready() -> None:
     )
     # ``publish_plugins`` also emits the claude and codex plugins' weak
     # install-command, example session-template, and example agent-template rows
-    # and the azure plugin's weak az-cli install-command row; disable them too so
-    # no weak row survives finalize unmarked (the weak-implies-disabled guard).
+    # and the vendor plugins' weak guest-CLI install-command rows; disable
+    # them too so no weak row survives finalize unmarked (the
+    # weak-implies-disabled guard).
     # The stub stands in for the real plugin source, which would disable every
     # not-enabled plugin's rows.
     registry.finalize(
@@ -209,6 +210,8 @@ def test_disabled_secret_backend_makes_its_active_source_not_ready() -> None:
                 ("secret-backend", "onepassword"),
                 ("user-install-command", "claude"),
                 ("system-install-command", "az-cli"),
+                ("system-install-command", "aws-cli"),
+                ("system-install-command", "gcloud-cli"),
                 ("user-install-command", "codex"),
                 ("session-template", "example-claude-strict"),
                 ("session-template", "example-claude-auto"),
@@ -278,12 +281,14 @@ def test_r9_9_mapping_is_validated_whether_or_not_its_backend_is_enabled(disable
         )
         # Always disable the claude and codex plugins' weak install-command,
         # example session-template, and example agent-template rows and the azure
-        # plugin's weak az-cli install-command row (all emitted by
+        # plugins' weak guest-CLI install-command rows (all emitted by
         # publish_plugins) so no weak row survives finalize unmarked; onepassword
         # is disabled only on the disabled branch.
         disabled = [
             ("user-install-command", "claude"),
             ("system-install-command", "az-cli"),
+            ("system-install-command", "aws-cli"),
+            ("system-install-command", "gcloud-cli"),
             ("user-install-command", "codex"),
             ("session-template", "example-claude-strict"),
             ("session-template", "example-claude-auto"),

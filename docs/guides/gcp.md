@@ -15,6 +15,17 @@ system = ["gcp"]
 The plugin is installed but disabled by default. Without this opt-in, its `gcp-gce` capability row
 is present but disabled and any site that names it is not-ready with an enable-plugin hint.
 
+## Optional guest Google Cloud CLI
+
+A VM template may request `gcloud-cli` through `system_install_commands`. When selected, it installs
+the current `google-cloud-cli` package in that Debian or Ubuntu guest from Google's signed apt
+repository. The installer reconciles its keyring and source file on retry, then sets
+`CLOUDSDK_SKIP_PY_COMPILATION=1` to keep initialization bounded. It performs no `gcloud auth` step.
+
+This is guest tooling only. GCE provisioning uses the Python SDK and host-side ADC, so neither
+enabling `gcp` nor selecting `gcloud-cli` changes host credentials, configures a guest account, or
+makes `gcloud` a lifecycle dependency.
+
 ## Google Cloud prerequisites
 
 Before declaring a site:

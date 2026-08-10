@@ -87,7 +87,8 @@ agw console delete my-console              # Extra shells are lost but sessions 
 - [Tailscale](https://tailscale.com/) installed and connected (for VM workspaces)
 - One of: [Lima](https://lima-vm.io/), Azure CLI (`az`), AWS credentials for EC2, Google Cloud
   credentials for GCE, [Proxmox](https://www.proxmox.com/), or WSL2 (for VM provisioning; Azure,
-  AWS, GCP, and Proxmox also need their [system plugin](#system-plugins) enabled)
+  AWS, GCP, and Proxmox also need their [system plugin](#system-plugins) enabled). The optional
+  guest `aws-cli` and `gcloud-cli` install commands are not host prerequisites.
 
 ## Global Options
 
@@ -391,11 +392,12 @@ Agentworks ships some vendor- and tool-specific capabilities (VM platforms, harn
 git-credential providers, secret backends) as **system plugins**: separable bundles that are
 installed but off by default. The shipped build installs `azure` (the `azure-vm` VM platform, the
 `azdo` git-credential provider, and the `az-cli` install-command), `proxmox` (the `proxmox` VM
-platform), `aws` (the `aws-ec2` VM platform), `gcp` (the `gcp-gce` VM platform), `onepassword` (the
-`onepassword` secret backend), `claude` (the `claude-code` harness integration and the `claude` CLI
-install-command), and `codex` (the `codex` harness integration and the `codex` CLI install-command).
-(This is a different sense of "plugin" from [Claude Code Plugins](#claude-code-plugins) below, which
-installs marketplace plugins into Claude Code itself.)
+platform), `aws` (the `aws-ec2` VM platform and optional guest `aws-cli`), `gcp` (the `gcp-gce` VM
+platform and optional guest `gcloud-cli`), `onepassword` (the `onepassword` secret backend),
+`claude` (the `claude-code` harness integration and the `claude` CLI install-command), and `codex`
+(the `codex` harness integration and the `codex` CLI install-command). (This is a different sense of
+"plugin" from [Claude Code Plugins](#claude-code-plugins) below, which installs marketplace plugins
+into Claude Code itself.)
 
 Opt in by name in `config.toml`:
 
@@ -420,7 +422,8 @@ See [docs/guides/resources.md](../docs/guides/resources.md#system-plugins) for t
 (origins, the disabled-resource semantics, config-error deferral) and the upgrade note for configs
 that relied on Azure, Proxmox, 1Password, or Claude Code before they became opt-in. Google Compute
 Engine setup, firewall prerequisites, JSON-secret compaction, and provider-ID-safe recovery are
-covered in [Using Google Compute Engine](../docs/guides/gcp.md).
+covered in [Using Google Compute Engine](../docs/guides/gcp.md); AWS guest CLI boundaries are in
+[Using AWS with Agentworks](../docs/guides/aws.md).
 
 ### Mise (Polyglot Tool Manager)
 
