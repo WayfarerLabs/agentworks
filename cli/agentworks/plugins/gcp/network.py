@@ -98,6 +98,14 @@ class FirewallState(Enum):
 
 
 @dataclass(frozen=True)
+class FirewallReconciliation:
+    """One firewall state plus the provider ID observed for that exact name."""
+
+    state: FirewallState
+    observed_resource_id: str | None
+
+
+@dataclass(frozen=True)
 class FirewallOwnership:
     """One server-assigned firewall incarnation safe to reconcile later."""
 
@@ -275,22 +283,39 @@ def reconcile_firewall(
     ownership: FirewallOwnership | None,
 ) -> FirewallState:
     """Resolve an exact-name rule only when its provider incarnation is owned."""
+    return inspect_firewall(
+        client,
+        project_id=project_id,
+        expected=expected,
+        ownership=ownership,
+    ).state
+
+
+def inspect_firewall(
+    client: Any,
+    *,
+    project_id: str,
+    expected: Any,
+    ownership: FirewallOwnership | None,
+) -> FirewallReconciliation:
+    """Return exact state and the server ID needed for safe recovery guidance."""
     actual = call_google_optional(
         lambda: client.get(project=project_id, firewall=expected.name),
         operation="reconciling a possible firewall rule",
         resource=f"firewall rule {project_id}/{expected.name}",
     )
     if actual is None:
-        return FirewallState.ABSENT
+        return FirewallReconciliation(FirewallState.ABSENT, None)
+    observed_id = _provider_resource_id(actual.id)
     if ownership is None:
-        return FirewallState.INDETERMINATE
+        return FirewallReconciliation(FirewallState.INDETERMINATE, observed_id)
     if (
         str(actual.name) == ownership.rule_name
-        and _provider_resource_id(actual.id) == ownership.resource_id
+        and observed_id == ownership.resource_id
         and FirewallShape.from_resource(actual) == FirewallShape.from_resource(expected)
     ):
-        return FirewallState.REALIZED
-    return FirewallState.MISMATCHED
+        return FirewallReconciliation(FirewallState.REALIZED, observed_id)
+    return FirewallReconciliation(FirewallState.MISMATCHED, observed_id)
 
 
 def insert_firewall_reconciled(
@@ -394,7 +419,7 @@ def delete_matching_firewall(
     expected: Any,
     ownership: FirewallOwnership | None,
     timeout: float,
-) -> FirewallState:
+) -> FirewallReconciliation:
     """Delete only a verified provider incarnation, then prove the result.
 
     GCE delete accepts only a rule name, not a provider-ID precondition. The
@@ -403,16 +428,16 @@ def delete_matching_firewall(
     name-based delete.
     """
     try:
-        state = reconcile_firewall(
+        result = inspect_firewall(
             client,
             project_id=project_id,
             expected=expected,
             ownership=ownership,
         )
     except AgentworksError:
-        return FirewallState.INDETERMINATE
-    if state is not FirewallState.REALIZED:
-        return state
+        return FirewallReconciliation(FirewallState.INDETERMINATE, None)
+    if result.state is not FirewallState.REALIZED:
+        return result
 
     try:
         operation = call_google(
@@ -425,14 +450,14 @@ def delete_matching_firewall(
         pass
 
     try:
-        return reconcile_firewall(
+        return inspect_firewall(
             client,
             project_id=project_id,
             expected=expected,
             ownership=ownership,
         )
     except AgentworksError:
-        return FirewallState.INDETERMINATE
+        return FirewallReconciliation(FirewallState.INDETERMINATE, None)
 
 
 def _ownership_from_operation(

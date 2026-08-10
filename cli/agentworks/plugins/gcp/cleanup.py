@@ -11,9 +11,10 @@ from agentworks.errors import AgentworksError
 from agentworks.plugins.gcp.errors import call_google, call_google_optional, wait_for_extended_operation
 from agentworks.plugins.gcp.network import (
     FirewallOwnership,
+    FirewallReconciliation,
     FirewallState,
     delete_matching_firewall,
-    reconcile_firewall,
+    inspect_firewall,
 )
 
 if TYPE_CHECKING:
@@ -25,13 +26,18 @@ class InstanceState(Enum):
     """What cleanup can prove about the possibly inserted instance."""
 
     ABSENT = "absent"
+    COLLISION = "collision"
     SURVIVING = "surviving"
     INDETERMINATE = "indeterminate"
 
 
 @dataclass(frozen=True)
 class InstanceOwnership:
-    """One server-assigned instance incarnation safe to delete by name."""
+    """One server-assigned instance incarnation safe to delete by name.
+
+    The Phase 2 insert seam must derive this from the operation identity before
+    its first interruptible wait, exactly as ``FirewallInsertAttempt`` does.
+    """
 
     resource_id: str
 
@@ -54,6 +60,9 @@ class RollbackReport:
     instance: InstanceState
     allow: FirewallState
     deny: FirewallState
+    instance_resource_id: str | None = None
+    allow_resource_id: str | None = None
+    deny_resource_id: str | None = None
 
     @property
     def clean(self) -> bool:
@@ -68,9 +77,14 @@ def probe_instance_state(
     instances: Any,
     *,
     coordinates: CleanupCoordinates,
+    ownership: InstanceOwnership | None,
 ) -> InstanceState:
     """Prove absence, survival, or indeterminacy by exact-name get."""
-    state, _instance = _read_instance(instances, coordinates=coordinates)
+    state, _observed_id = _reconcile_instance(
+        instances,
+        coordinates=coordinates,
+        ownership=ownership,
+    )
     return state
 
 
@@ -97,21 +111,41 @@ def _read_instance(
     return InstanceState.SURVIVING, instance
 
 
+def _reconcile_instance(
+    instances: Any,
+    *,
+    coordinates: CleanupCoordinates,
+    ownership: InstanceOwnership | None,
+) -> tuple[InstanceState, str | None]:
+    """Classify an exact-name instance and retain its observed provider ID."""
+    state, instance = _read_instance(instances, coordinates=coordinates)
+    if state is not InstanceState.SURVIVING:
+        return state, None
+    if instance is None:  # pragma: no cover - paired by _read_instance
+        return InstanceState.INDETERMINATE, None
+    observed_id = _provider_resource_id(instance.id)
+    if ownership is None or observed_id is None:
+        return InstanceState.INDETERMINATE, observed_id
+    if observed_id != ownership.resource_id:
+        return InstanceState.COLLISION, observed_id
+    return InstanceState.SURVIVING, observed_id
+
+
 def delete_instance_and_verify(
     instances: Any,
     *,
     coordinates: CleanupCoordinates,
     ownership: InstanceOwnership | None,
     timeout: float,
-) -> InstanceState:
+) -> tuple[InstanceState, str | None]:
     """Delete only the expected provider incarnation, then prove absence."""
-    state, instance = _read_instance(instances, coordinates=coordinates)
+    state, observed_id = _reconcile_instance(
+        instances,
+        coordinates=coordinates,
+        ownership=ownership,
+    )
     if state is not InstanceState.SURVIVING:
-        return state
-    if instance is None:  # pragma: no cover - paired by _read_instance
-        return InstanceState.INDETERMINATE
-    if ownership is None or _provider_resource_id(instance.id) != ownership.resource_id:
-        return InstanceState.SURVIVING
+        return state, observed_id
     try:
         operation = call_google(
             lambda: instances.delete(
@@ -125,7 +159,11 @@ def delete_instance_and_verify(
         wait_for_extended_operation(operation, label=f"instance {coordinates.instance_name}", timeout=timeout)
     except AgentworksError:
         pass
-    return probe_instance_state(instances, coordinates=coordinates)
+    return _reconcile_instance(
+        instances,
+        coordinates=coordinates,
+        ownership=ownership,
+    )
 
 
 def rollback_partial_create(
@@ -142,14 +180,14 @@ def rollback_partial_create(
     timeout: float,
 ) -> RollbackReport:
     """Close allow, remove possible instance, then conditionally remove deny."""
-    allow_state = delete_matching_firewall(
+    allow_result = delete_matching_firewall(
         firewalls,
         project_id=coordinates.project_id,
         expected=expected_allow,
         ownership=allow_ownership,
         timeout=timeout,
     )
-    instance_state = (
+    instance_state, instance_resource_id = (
         delete_instance_and_verify(
             instances,
             coordinates=coordinates,
@@ -157,10 +195,10 @@ def rollback_partial_create(
             timeout=timeout,
         )
         if instance_possible
-        else InstanceState.ABSENT
+        else (InstanceState.ABSENT, None)
     )
     if instance_state is InstanceState.ABSENT:
-        deny_state = delete_matching_firewall(
+        deny_result = delete_matching_firewall(
             firewalls,
             project_id=coordinates.project_id,
             expected=expected_deny,
@@ -168,13 +206,20 @@ def rollback_partial_create(
             timeout=timeout,
         )
     else:
-        deny_state = _inspect_firewall(
+        deny_result = _inspect_firewall(
             firewalls,
             coordinates.project_id,
             expected_deny,
             deny_ownership,
         )
-    return RollbackReport(instance_state, allow_state, deny_state)
+    return RollbackReport(
+        instance_state,
+        allow_result.state,
+        deny_result.state,
+        instance_resource_id,
+        allow_result.observed_resource_id,
+        deny_result.observed_resource_id,
+    )
 
 
 def _provider_resource_id(value: object) -> str | None:
@@ -192,6 +237,10 @@ def rollback_then_raise(
     primary: Exception,
     rollback: Callable[[], RollbackReport],
     coordinates: CleanupCoordinates,
+    *,
+    instance_ownership: InstanceOwnership | None,
+    allow_ownership: FirewallOwnership | None,
+    deny_ownership: FirewallOwnership | None,
 ) -> NoReturn:
     """Run bounded cleanup without replacing an ordinary primary failure."""
     report: RollbackReport | None = None
@@ -201,9 +250,26 @@ def rollback_then_raise(
     except Exception:
         cleanup_failed = True
     if cleanup_failed:
-        output.warn("GCE rollback failed unexpectedly. " + _manual_guidance(coordinates, None))
+        output.warn(
+            "GCE rollback failed unexpectedly. "
+            + _manual_guidance(
+                coordinates,
+                None,
+                instance_ownership=instance_ownership,
+                allow_ownership=allow_ownership,
+                deny_ownership=deny_ownership,
+            )
+        )
     if report is not None and not report.clean:
-        output.warn(_manual_guidance(coordinates, report))
+        output.warn(
+            _manual_guidance(
+                coordinates,
+                report,
+                instance_ownership=instance_ownership,
+                allow_ownership=allow_ownership,
+                deny_ownership=deny_ownership,
+            )
+        )
     raise primary
 
 
@@ -211,6 +277,10 @@ def rollback_after_interrupt(
     primary: KeyboardInterrupt,
     rollback: Callable[[], RollbackReport],
     coordinates: CleanupCoordinates,
+    *,
+    instance_ownership: InstanceOwnership | None,
+    allow_ownership: FirewallOwnership | None,
+    deny_ownership: FirewallOwnership | None,
 ) -> NoReturn:
     """Clean after the first interrupt; abandon promptly after the second."""
     output.warn(
@@ -226,11 +296,37 @@ def rollback_after_interrupt(
     except Exception:
         report = None
     if abandoned:
-        output.warn("Cleanup abandoned. " + _manual_guidance(coordinates, None))
+        output.warn(
+            "Cleanup abandoned. "
+            + _manual_guidance(
+                coordinates,
+                None,
+                instance_ownership=instance_ownership,
+                allow_ownership=allow_ownership,
+                deny_ownership=deny_ownership,
+            )
+        )
     elif report is None:
-        output.warn("GCE cleanup failed unexpectedly. " + _manual_guidance(coordinates, None))
+        output.warn(
+            "GCE cleanup failed unexpectedly. "
+            + _manual_guidance(
+                coordinates,
+                None,
+                instance_ownership=instance_ownership,
+                allow_ownership=allow_ownership,
+                deny_ownership=deny_ownership,
+            )
+        )
     elif not report.clean:
-        output.warn(_manual_guidance(coordinates, report))
+        output.warn(
+            _manual_guidance(
+                coordinates,
+                report,
+                instance_ownership=instance_ownership,
+                allow_ownership=allow_ownership,
+                deny_ownership=deny_ownership,
+            )
+        )
     raise primary
 
 
@@ -239,40 +335,139 @@ def _inspect_firewall(
     project_id: str,
     expected: Any,
     ownership: FirewallOwnership | None,
-) -> FirewallState:
+) -> FirewallReconciliation:
     try:
-        return reconcile_firewall(
+        return inspect_firewall(
             firewalls,
             project_id=project_id,
             expected=expected,
             ownership=ownership,
         )
     except AgentworksError:
-        return FirewallState.INDETERMINATE
+        return FirewallReconciliation(FirewallState.INDETERMINATE, None)
 
 
-def _manual_guidance(coordinates: CleanupCoordinates, report: RollbackReport | None) -> str:
+def _manual_guidance(
+    coordinates: CleanupCoordinates,
+    report: RollbackReport | None,
+    *,
+    instance_ownership: InstanceOwnership | None,
+    allow_ownership: FirewallOwnership | None,
+    deny_ownership: FirewallOwnership | None,
+) -> str:
     instance_needs_action = report is None or report.instance is not InstanceState.ABSENT
     allow_needs_action = report is None or report.allow is not FirewallState.ABSENT
     deny_needs_action = report is None or report.deny is not FirewallState.ABSENT
     actions = [
         f"project '{coordinates.project_id}', zone '{coordinates.zone}', instance '{coordinates.instance_name}', "
-        f"allow '{coordinates.allow_rule}', deny '{coordinates.deny_rule}'."
+        f"allow '{coordinates.allow_rule}', deny '{coordinates.deny_rule}'; expected provider IDs: "
+        f"instance '{_expected_id(instance_ownership)}', allow '{_expected_id(allow_ownership)}', "
+        f"deny '{_expected_id(deny_ownership)}'."
     ]
     if instance_needs_action:
+        instance_state = InstanceState.INDETERMINATE if report is None else report.instance
+        observed_id = None if report is None else report.instance_resource_id
         actions.append(
-            f"Run `gcloud compute instances delete {coordinates.instance_name} "
-            f"--project {coordinates.project_id} --zone {coordinates.zone}`."
+            _instance_guidance(
+                coordinates,
+                state=instance_state,
+                expected_id=None if instance_ownership is None else instance_ownership.resource_id,
+                observed_id=observed_id,
+            )
         )
-    for name, needed, state in (
-        (coordinates.allow_rule, allow_needs_action, None if report is None else report.allow),
-        (coordinates.deny_rule, deny_needs_action, None if report is None else report.deny),
+    for name, needed, state, expected_id, observed_id, role in (
+        (
+            coordinates.allow_rule,
+            allow_needs_action,
+            FirewallState.INDETERMINATE if report is None else report.allow,
+            None if allow_ownership is None else allow_ownership.resource_id,
+            None if report is None else report.allow_resource_id,
+            "allow",
+        ),
+        (
+            coordinates.deny_rule,
+            deny_needs_action,
+            FirewallState.INDETERMINATE if report is None else report.deny,
+            None if deny_ownership is None else deny_ownership.resource_id,
+            None if report is None else report.deny_resource_id,
+            "deny",
+        ),
     ):
         if not needed:
             continue
         actions.append(
-            f"Inspect `gcloud compute firewall-rules describe {name} --project {coordinates.project_id}`; "
-            f"delete it only if its complete shape is Agentworks-owned"
-            + ("." if state is not FirewallState.MISMATCHED else " (the observed shape mismatched).")
+            _firewall_guidance(
+                coordinates,
+                name=name,
+                role=role,
+                state=state,
+                expected_id=expected_id,
+                observed_id=observed_id,
+                instance_absent=report is not None and report.instance is InstanceState.ABSENT,
+            )
         )
     return "Manual cleanup: " + " ".join(actions)
+
+
+def _expected_id(ownership: InstanceOwnership | FirewallOwnership | None) -> str:
+    return "unknown" if ownership is None else ownership.resource_id
+
+
+def _instance_guidance(
+    coordinates: CleanupCoordinates,
+    *,
+    state: InstanceState,
+    expected_id: str | None,
+    observed_id: str | None,
+) -> str:
+    inspect = (
+        f"Inspect `gcloud compute instances describe {coordinates.instance_name} "
+        f"--project {coordinates.project_id} --zone {coordinates.zone} --format=value(id)`"
+    )
+    identity = f"expected provider ID '{expected_id or 'unknown'}', observed '{observed_id or 'unknown'}'"
+    if state is InstanceState.SURVIVING and expected_id is not None and observed_id == expected_id:
+        return (
+            f"Owned instance survivor ({identity}). {inspect}; only while it still reports provider ID "
+            f"'{expected_id}', run `gcloud compute instances delete {coordinates.instance_name} "
+            f"--project {coordinates.project_id} --zone {coordinates.zone}`."
+        )
+    if state is InstanceState.COLLISION:
+        return f"Same-name instance collision ({identity}). {inspect}; do not delete by name; escalate ownership."
+    return f"Instance ownership is unknown ({identity}). {inspect}; do not delete by name; escalate ownership."
+
+
+def _firewall_guidance(
+    coordinates: CleanupCoordinates,
+    *,
+    name: str,
+    role: str,
+    state: FirewallState,
+    expected_id: str | None,
+    observed_id: str | None,
+    instance_absent: bool,
+) -> str:
+    inspect = (
+        f"Inspect `gcloud compute firewall-rules describe {name} --project {coordinates.project_id} --format=value(id)`"
+    )
+    identity = f"expected provider ID '{expected_id or 'unknown'}', observed '{observed_id or 'unknown'}'"
+    if state is FirewallState.REALIZED and expected_id is not None and observed_id == expected_id:
+        if role == "deny" and not instance_absent:
+            return (
+                f"Owned deny rule retained while instance absence is unproven ({identity}). {inspect}; keep it until "
+                f"the owned instance is absent, then re-verify provider ID '{expected_id}' before running "
+                f"`gcloud compute firewall-rules delete {name} --project {coordinates.project_id}`."
+            )
+        return (
+            f"Owned {role} rule survivor ({identity}). {inspect}; only while it still reports provider ID "
+            f"'{expected_id}', run `gcloud compute firewall-rules delete {name} "
+            f"--project {coordinates.project_id}`."
+        )
+    if state is FirewallState.MISMATCHED:
+        return (
+            f"Same-name {role} rule collision or shape mismatch ({identity}). "
+            f"{inspect}; do not delete by name; escalate ownership."
+        )
+    return (
+        f"{role.capitalize()} rule ownership is unknown ({identity}). "
+        f"{inspect}; do not delete by name; escalate ownership."
+    )

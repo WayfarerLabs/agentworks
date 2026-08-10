@@ -28,6 +28,9 @@ _COORDINATES = CleanupCoordinates(
     deny_rule="vm-a-deny",
 )
 _NETWORK = "projects/project-a/global/networks/default"
+_INSTANCE_OWNERSHIP = InstanceOwnership("201")
+_ALLOW_OWNERSHIP = FirewallOwnership(_COORDINATES.allow_rule, "101")
+_DENY_OWNERSHIP = FirewallOwnership(_COORDINATES.deny_rule, "102")
 
 
 def _api_error(kind: type[Exception], message: str) -> Exception:
@@ -181,7 +184,12 @@ def test_surviving_instance_keeps_deny_and_reports_exact_state() -> None:
         instance_possible=True,
         timeout=9,
     )
-    assert report == RollbackReport(InstanceState.SURVIVING, FirewallState.ABSENT, FirewallState.REALIZED)
+    assert report.instance is InstanceState.SURVIVING
+    assert report.instance_resource_id == "201"
+    assert report.allow is FirewallState.ABSENT
+    assert report.allow_resource_id is None
+    assert report.deny is FirewallState.REALIZED
+    assert report.deny_resource_id == "102"
     assert "firewall:delete:vm-a-deny" not in log
 
 
@@ -209,6 +217,7 @@ def test_indeterminate_instance_keeps_deny() -> None:
         timeout=9,
     )
     assert report.instance is InstanceState.INDETERMINATE
+    assert report.instance_resource_id is None
     assert report.deny is FirewallState.REALIZED
     assert "firewall:delete:vm-a-deny" not in log
 
@@ -240,17 +249,24 @@ def test_mismatched_rule_is_retained_not_deleted() -> None:
 
 
 @pytest.mark.parametrize(
-    ("instance", "ownership"),
+    ("instance", "ownership", "expected_state", "observed_id"),
     [
-        (_instance(202), InstanceOwnership("201")),
-        (compute_v1.Instance(name=_COORDINATES.instance_name), InstanceOwnership("201")),
-        (_instance(201), None),
+        (_instance(202), InstanceOwnership("201"), InstanceState.COLLISION, "202"),
+        (
+            compute_v1.Instance(name=_COORDINATES.instance_name),
+            InstanceOwnership("201"),
+            InstanceState.INDETERMINATE,
+            None,
+        ),
+        (_instance(201), None, InstanceState.INDETERMINATE, "201"),
     ],
     ids=("different-id", "missing-id", "missing-ownership"),
 )
 def test_instance_without_matching_provider_ownership_is_retained(
     instance: compute_v1.Instance,
     ownership: InstanceOwnership | None,
+    expected_state: InstanceState,
+    observed_id: str | None,
 ) -> None:
     log: list[str] = []
     allow = _allow()
@@ -273,7 +289,8 @@ def test_instance_without_matching_provider_ownership_is_retained(
         instance_possible=True,
         timeout=9,
     )
-    assert report.instance is InstanceState.SURVIVING
+    assert report.instance is expected_state
+    assert report.instance_resource_id == observed_id
     assert report.deny is FirewallState.REALIZED
     assert "instance:delete" not in log
     assert "firewall:delete:vm-a-deny" not in log
@@ -289,6 +306,9 @@ def test_ordinary_cleanup_cannot_replace_primary_failure(monkeypatch: pytest.Mon
             primary,
             lambda: (_ for _ in ()).throw(RuntimeError("cleanup failed")),
             _COORDINATES,
+            instance_ownership=_INSTANCE_OWNERSHIP,
+            allow_ownership=_ALLOW_OWNERSHIP,
+            deny_ownership=_DENY_OWNERSHIP,
         )
 
     assert caught.value is primary
@@ -300,9 +320,12 @@ def test_ordinary_cleanup_cannot_replace_primary_failure(monkeypatch: pytest.Mon
     assert "instance 'vm-a'" in message
     assert "allow 'vm-a-allow'" in message
     assert "deny 'vm-a-deny'" in message
-    assert "gcloud compute instances delete vm-a --project project-a --zone us-central1-a" in message
+    assert "expected provider IDs: instance '201', allow '101', deny '102'" in message
+    assert "Instance ownership is unknown" in message
+    assert "gcloud compute instances delete vm-a --project project-a --zone us-central1-a" not in message
     assert "firewall-rules describe vm-a-allow --project project-a" in message
     assert "firewall-rules describe vm-a-deny --project project-a" in message
+    assert "firewall-rules delete" not in message
 
 
 def test_first_interrupt_rolls_back_and_reraises_original_identity(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -312,7 +335,14 @@ def test_first_interrupt_rolls_back_and_reraises_original_identity(monkeypatch: 
     report = RollbackReport(InstanceState.ABSENT, FirewallState.ABSENT, FirewallState.ABSENT)
 
     with pytest.raises(KeyboardInterrupt) as caught:
-        rollback_after_interrupt(primary, lambda: report, _COORDINATES)
+        rollback_after_interrupt(
+            primary,
+            lambda: report,
+            _COORDINATES,
+            instance_ownership=_INSTANCE_OWNERSHIP,
+            allow_ownership=_ALLOW_OWNERSHIP,
+            deny_ownership=_DENY_OWNERSHIP,
+        )
 
     assert caught.value is primary
     assert warnings == [
@@ -330,6 +360,9 @@ def test_second_interrupt_abandons_promptly_with_exact_safe_actions(monkeypatch:
             primary,
             lambda: (_ for _ in ()).throw(KeyboardInterrupt("second")),
             _COORDINATES,
+            instance_ownership=_INSTANCE_OWNERSHIP,
+            allow_ownership=_ALLOW_OWNERSHIP,
+            deny_ownership=_DENY_OWNERSHIP,
         )
 
     assert caught.value is primary
@@ -340,6 +373,88 @@ def test_second_interrupt_abandons_promptly_with_exact_safe_actions(monkeypatch:
     assert "instance 'vm-a'" in message
     assert "vm-a-allow" in message
     assert "vm-a-deny" in message
-    assert "gcloud compute instances delete vm-a --project project-a --zone us-central1-a" in message
+    assert "expected provider IDs: instance '201', allow '101', deny '102'" in message
+    assert "gcloud compute instances delete vm-a --project project-a --zone us-central1-a" not in message
     assert "firewall-rules describe vm-a-allow --project project-a" in message
     assert "firewall-rules describe vm-a-deny --project project-a" in message
+    assert "firewall-rules delete" not in message
+
+
+def _warning_for_report(monkeypatch: pytest.MonkeyPatch, report: RollbackReport) -> str:
+    warnings: list[str] = []
+    monkeypatch.setattr("agentworks.plugins.gcp.cleanup.output.warn", warnings.append)
+    primary = RuntimeError("primary")
+    with pytest.raises(RuntimeError) as caught:
+        rollback_then_raise(
+            primary,
+            lambda: report,
+            _COORDINATES,
+            instance_ownership=_INSTANCE_OWNERSHIP,
+            allow_ownership=_ALLOW_OWNERSHIP,
+            deny_ownership=_DENY_OWNERSHIP,
+        )
+    assert caught.value is primary
+    assert len(warnings) == 1
+    return warnings[0]
+
+
+def test_manual_guidance_recommends_delete_only_for_verified_owned_survivors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    message = _warning_for_report(
+        monkeypatch,
+        RollbackReport(
+            InstanceState.SURVIVING,
+            FirewallState.REALIZED,
+            FirewallState.REALIZED,
+            instance_resource_id="201",
+            allow_resource_id="101",
+            deny_resource_id="102",
+        ),
+    )
+    assert "Owned instance survivor (expected provider ID '201', observed '201')" in message
+    assert "gcloud compute instances delete vm-a --project project-a --zone us-central1-a" in message
+    assert "Owned allow rule survivor (expected provider ID '101', observed '101')" in message
+    assert "gcloud compute firewall-rules delete vm-a-allow --project project-a" in message
+    assert "Owned deny rule retained while instance absence is unproven" in message
+
+
+def test_manual_guidance_for_provider_id_collisions_is_inspect_and_escalate_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    message = _warning_for_report(
+        monkeypatch,
+        RollbackReport(
+            InstanceState.COLLISION,
+            FirewallState.MISMATCHED,
+            FirewallState.MISMATCHED,
+            instance_resource_id="202",
+            allow_resource_id="901",
+            deny_resource_id="902",
+        ),
+    )
+    assert "Same-name instance collision (expected provider ID '201', observed '202')" in message
+    assert "Same-name allow rule collision or shape mismatch (expected provider ID '101', observed '901')" in message
+    assert "Same-name deny rule collision or shape mismatch (expected provider ID '102', observed '902')" in message
+    assert message.count("do not delete by name; escalate ownership") == 3
+    assert "gcloud compute instances delete" not in message
+    assert "gcloud compute firewall-rules delete" not in message
+
+
+def test_manual_guidance_for_unknown_provider_ids_is_inspect_and_escalate_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    message = _warning_for_report(
+        monkeypatch,
+        RollbackReport(
+            InstanceState.INDETERMINATE,
+            FirewallState.INDETERMINATE,
+            FirewallState.INDETERMINATE,
+        ),
+    )
+    assert "Instance ownership is unknown (expected provider ID '201', observed 'unknown')" in message
+    assert "Allow rule ownership is unknown (expected provider ID '101', observed 'unknown')" in message
+    assert "Deny rule ownership is unknown (expected provider ID '102', observed 'unknown')" in message
+    assert message.count("do not delete by name; escalate ownership") == 3
+    assert "gcloud compute instances delete" not in message
+    assert "gcloud compute firewall-rules delete" not in message

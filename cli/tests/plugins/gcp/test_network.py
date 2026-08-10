@@ -431,6 +431,17 @@ def test_wait_interrupt_leaves_operation_ownership_for_safe_rollback() -> None:
     assert operation.calls == [17]
     assert [name for name, _kwargs in client.calls] == ["insert"]
 
+    rollback = _FirewallClient(states=iter([expected, None]))
+    result = delete_matching_firewall(
+        rollback,
+        project_id="project-a",
+        expected=expected,
+        ownership=attempt.ownership,
+        timeout=11,
+    )
+    assert result.state is FirewallState.ABSENT
+    assert [name for name, _kwargs in rollback.calls] == ["get", "delete", "get"]
+
 
 def test_pre_response_timeout_retries_once_with_same_request_id() -> None:
     expected = _owned_rule("allow", priority=0, deny=False)
@@ -575,30 +586,28 @@ def test_incomplete_or_wrong_operation_identity_is_never_owned(operation: _Opera
 def test_matching_firewall_delete_proves_absence_and_mismatch_is_retained() -> None:
     expected = _owned_rule("allow", priority=0, deny=False)
     client = _FirewallClient(states=iter([expected, None]))
-    assert (
-        delete_matching_firewall(
-            client,
-            project_id="project-a",
-            expected=expected,
-            ownership=FirewallOwnership("allow", "101"),
-            timeout=11,
-        )
-        is FirewallState.ABSENT
+    result = delete_matching_firewall(
+        client,
+        project_id="project-a",
+        expected=expected,
+        ownership=FirewallOwnership("allow", "101"),
+        timeout=11,
     )
+    assert result.state is FirewallState.ABSENT
+    assert result.observed_resource_id is None
     assert [name for name, _kwargs in client.calls] == ["get", "delete", "get"]
 
     mismatched = _owned_rule("allow", priority=1, deny=False)
     collision = _FirewallClient(states=iter([mismatched]))
-    assert (
-        delete_matching_firewall(
-            collision,
-            project_id="project-a",
-            expected=expected,
-            ownership=FirewallOwnership("allow", "101"),
-            timeout=11,
-        )
-        is FirewallState.MISMATCHED
+    result = delete_matching_firewall(
+        collision,
+        project_id="project-a",
+        expected=expected,
+        ownership=FirewallOwnership("allow", "101"),
+        timeout=11,
     )
+    assert result.state is FirewallState.MISMATCHED
+    assert result.observed_resource_id == "101"
     assert [name for name, _kwargs in collision.calls] == ["get"]
 
 
@@ -606,30 +615,28 @@ def test_same_name_and_shape_but_different_resource_id_is_never_deleted() -> Non
     expected = _owned_rule("allow", priority=0, deny=False)
     concurrent_winner = _owned_rule("allow", priority=0, deny=False, resource_id=202)
     client = _FirewallClient(states=iter([concurrent_winner]))
-    assert (
-        delete_matching_firewall(
-            client,
-            project_id="project-a",
-            expected=expected,
-            ownership=FirewallOwnership("allow", "101"),
-            timeout=11,
-        )
-        is FirewallState.MISMATCHED
+    result = delete_matching_firewall(
+        client,
+        project_id="project-a",
+        expected=expected,
+        ownership=FirewallOwnership("allow", "101"),
+        timeout=11,
     )
+    assert result.state is FirewallState.MISMATCHED
+    assert result.observed_resource_id == "202"
     assert [name for name, _kwargs in client.calls] == ["get"]
 
 
 def test_rule_without_provider_ownership_is_indeterminate_and_never_deleted() -> None:
     expected = _owned_rule("allow", priority=0, deny=False)
     client = _FirewallClient(states=iter([expected]))
-    assert (
-        delete_matching_firewall(
-            client,
-            project_id="project-a",
-            expected=expected,
-            ownership=None,
-            timeout=11,
-        )
-        is FirewallState.INDETERMINATE
+    result = delete_matching_firewall(
+        client,
+        project_id="project-a",
+        expected=expected,
+        ownership=None,
+        timeout=11,
     )
+    assert result.state is FirewallState.INDETERMINATE
+    assert result.observed_resource_id == "101"
     assert [name for name, _kwargs in client.calls] == ["get"]
