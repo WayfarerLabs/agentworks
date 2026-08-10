@@ -75,10 +75,15 @@ guide at `docs/guides/upgrading-to-0.14.md` contains the before/after configurat
   attempt on success, failure, timeout, and interruption. Lima, Azure, and AWS retain key-free
   provider payloads and join through stdin after boot. Remote Lima provision logs use the database
   VM identity, so normal deletion removes the exact log created for the VM.
-- A real remote-Lima run with a rotated key passed create, initialization, independent SSH and boot
-  checks, and deletion. The retained instance YAML was credential-free, and the independent final
-  sweep found no VM, database row, Lima instance or directory, detached artifact, log, SSH
-  reference, workspace file, or operation temp entry.
+- A real remote-Lima run at `383c0050` on 2026-08-10, using a rotated key, passed create,
+  initialization, independent SSH and boot checks, and deletion. The retained instance YAML was
+  credential-free, and the independent final sweep found no VM, database row, Lima instance or
+  directory, detached artifact, log, SSH reference, workspace file, or operation temp entry. The
+  later class-wide provider change retained Lima's established execution wrapper and fixed guest
+  command; its final Lima coverage is provider-shaped, not another live run.
+- The credential-free remote-Lima payload supersedes the staging mechanics added by main commits
+  `668826af` and `d8eeb916`: the staged template no longer contains the Tailscale key, so retaining
+  that hardening would add mechanism without protecting sensitive content.
 - Marking PR #453 ready triggered the repository's Copilot reviewer. It declined because the diff
   exceeds its 20,000-line limit, so the required fresh-eyes fallback is the independent cold review
   recorded in PR discussion.
