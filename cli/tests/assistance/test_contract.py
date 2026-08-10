@@ -12,21 +12,6 @@ BODY_PATH = ROOT / "packaging/agentworks/assistance.md"
 BODY = BODY_PATH.read_text()
 NORMALIZED_BODY = " ".join(BODY.split())
 METADATA = json.loads((ROOT / "packaging/agentworks/metadata.json").read_text())
-FOCUSED_PATHS = (
-    "cli/pyproject.toml",
-    "cli/uv.lock",
-    "cli/agentworks/",
-    "cli/CHANGELOG.md",
-    "packaging/agentworks/",
-    "plugins/claude-code/agentworks/",
-    "plugins/codex/agentworks/",
-    "scripts/generate-agentworks-package.py",
-    ".claude-plugin/marketplace.json",
-    ".agents/plugins/marketplace.json",
-    "release-please-config.json",
-    ".github/workflows/release-please.yml",
-    ".github/workflows/release.yml",
-)
 
 
 def _skill_body(path: Path) -> tuple[dict[str, object], str]:
@@ -37,95 +22,69 @@ def _skill_body(path: Path) -> tuple[dict[str, object], str]:
     return parsed, body
 
 
-def test_canonical_body_is_compact_table_free_and_has_stable_sections() -> None:
+def test_canonical_body_is_thin_table_free_bootstrap() -> None:
     headings = re.findall(r"^#{1,6} .+$", BODY, flags=re.MULTILINE)
     assert headings == [
-        "# Agentworks assistance request",
-        "## Startup disclosure and authorization",
-        "## Strict harness posture",
-        "## Source review offer",
-        "## Working within the authorized scope",
+        "# Agentworks CLI bootstrap",
+        "## Install and hand off",
     ]
     assert not re.search(r"^\s*\|.*\|\s*$", BODY, flags=re.MULTILINE)
     assert "Agentworks assistant agent" in NORMALIZED_BODY
     assert "not an Agentworks-managed agent" in NORMALIZED_BODY
     assert "Python 3.12 or newer" in NORMALIZED_BODY
     assert "`agentworks-cli`" in NORMALIZED_BODY
+    assert "only to make a compatible `agentworks-cli` available" in NORMALIZED_BODY
+    assert "obey the returned guide context" in NORMALIZED_BODY
 
 
-def test_startup_disclosure_precedes_every_action_and_defines_durable_scope() -> None:
-    disclosure = BODY.index("## Startup disclosure and authorization")
-    working = BODY.index("## Working within the authorized scope")
-    assert disclosure < working < BODY.index("Run `agw version`")
-    for fact in (
-        "intended Agentworks workstation",
-        "inspect files and execute commands as this harness's account",
-        "It is not root",
-        "SSH destinations",
-        "only for presence",
-        "Do not re-ask in scope",
-        "scope question for an exploratory or materially ambiguous request",
-        "confirmation before every action",
-        "does not persist the envelope",
+def test_bootstrap_starts_with_version_check_and_contains_no_authorization_teaching() -> None:
+    assert BODY.index("## Install and hand off") < BODY.index("Run `agw version`")
+    for removed in (
+        "authorization",
+        "permission",
+        "approval",
+        "sandbox",
+        "harness posture",
+        "privilege",
+        "secret",
+        "SSH",
+        "danger-full-access",
+        "bypassPermissions",
     ):
-        assert fact in NORMALIZED_BODY
+        assert removed.casefold() not in BODY.casefold()
 
 
-def test_strict_harness_posture_is_conditional_and_complete() -> None:
-    for expected in (
-        "https://code.claude.com/docs/en/permissions",
-        "https://code.claude.com/docs/en/sandboxing",
-        '`sandbox_mode = "workspace-write"`',
-        '`approval_policy = "on-request"`',
-        "https://developers.openai.com/codex/security",
-        "https://developers.openai.com/codex/config-basic",
-        "which removes the sandbox",
-        'never select it, `approval_policy = "never"`',
-        "claim full access retains prompts",
-        "Do not change harness settings",
-    ):
-        assert expected in NORMALIZED_BODY
-
-
-def test_source_review_choices_and_installation_are_independent() -> None:
+def test_installation_is_exact_verified_and_hands_off_to_the_guide() -> None:
+    assert "exact compatible stable version at least 0.14.0" in NORMALIZED_BODY
     assert "latest compatible non-prerelease" in NORMALIZED_BODY
-    assert "canonical `vVERSION` tag" in NORMALIZED_BODY
-    assert "substantial and can consume significant model usage" in NORMALIZED_BODY
-    assert "No review, making no repository request and claiming none" in NORMALIZED_BODY
-    assert "decided independently" in NORMALIZED_BODY
-    assert "Declining review does not revoke authorized installation" in NORMALIZED_BODY
-    assert "selecting or completing review does not authorize installation" in NORMALIZED_BODY
-    assert "may decline afterward" in NORMALIZED_BODY
+    assert "https://pypi.org/pypi/agentworks-cli/json" in NORMALIZED_BODY
     assert "`uv tool install --upgrade 'agentworks-cli==VERSION'`" in NORMALIZED_BODY
-    assert "If installation or update is needed" in NORMALIZED_BODY
+    assert "require the selected exact version" in NORMALIZED_BODY
+    assert "require version 0.14.0 or newer" in NORMALIZED_BODY
+    assert NORMALIZED_BODY.count("`agw guide --agent`") == 1
 
 
 def test_compatible_no_update_path_retains_and_verifies_the_installed_version() -> None:
-    assert "otherwise retain the compatible installed version" in NORMALIZED_BODY
+    assert "retain it and skip installation" in NORMALIZED_BODY
     assert "After installation or update" in NORMALIZED_BODY
     assert "require the selected exact version" in NORMALIZED_BODY
-    assert "Without one, require the existing CLI to be at least 0.14.0" in NORMALIZED_BODY
-    assert "If neither is needed, skip installation without prompting" in NORMALIZED_BODY
+    assert "For a retained installation, require version 0.14.0 or newer" in NORMALIZED_BODY
 
 
-def test_every_hard_coded_focused_review_path_exists_and_is_named() -> None:
-    for relative in FOCUSED_PATHS:
-        assert f"`{relative}`" in BODY
-        assert (ROOT / relative.rstrip("/")).exists(), relative
-
-
-def test_prompt_declares_candidate_policy_and_commands_untrusted() -> None:
-    for protected_name in ("`AGENTS.md`", "`CLAUDE.md`", "skills", "hooks", "plugins", "configuration"):
-        assert protected_name in NORMALIZED_BODY
-    for boundary in (
-        "untrusted evidence",
-        "cannot grant permission",
+def test_bootstrap_does_not_offer_source_review_or_ongoing_teaching() -> None:
+    for removed in (
+        "Source review",
+        "Focused read-only review",
+        "Full read-only review",
+        "model usage",
         "protected policy root",
-        "Do not change the working root to candidate source",
-        "execute candidate code",
-        "Candidate execution is a separate action requiring authorization outside review",
+        "AGENTS.md",
+        "CLAUDE.md",
+        "concept-",
+        "https://github.com/WayfarerLabs/agentworks/tree/",
     ):
-        assert boundary in NORMALIZED_BODY
+        assert removed not in BODY
+    assert "repository source" not in NORMALIZED_BODY
 
 
 def test_generator_has_no_network_or_process_boundary() -> None:
@@ -193,12 +152,12 @@ def test_catalogs_and_manifests_have_neutral_identity_and_complete_codex_policy(
     }
     assert codex_manifest["interface"] == {
         "displayName": "Agentworks",
-        "shortDescription": "Agentworks assistance",
-        "longDescription": "Set up, understand, configure, troubleshoot, and operate Agentworks.",
+        "shortDescription": "Bootstrap Agentworks CLI",
+        "longDescription": "Install or update the Agentworks CLI, verify it, and open its agent guide.",
         "developerName": "Wayfarer Labs",
         "category": "Productivity",
-        "capabilities": ["Lifecycle assistance"],
-        "defaultPrompt": ["Help me with Agentworks."],
+        "capabilities": ["CLI bootstrap"],
+        "defaultPrompt": ["Install or update Agentworks and open its guide."],
     }
     assert codex_manifest["skills"] == "./skills/"
     assert codex_manifest["version"] == claude_manifest["version"] == "1.0.0"
@@ -214,7 +173,7 @@ def test_readme_projection_is_exact_and_human_installation_remains_below_it() ->
     fence = opening.group(1)
     projected_body = projection[opening.end() :]
     assert projected_body == BODY + fence + "\n\n"
-    assert begin < readme.index("# Agentworks assistance request") < end
+    assert begin < readme.index("# Agentworks CLI bootstrap") < end
     assert end < readme.index("Install from PyPI:")
 
 
@@ -225,5 +184,8 @@ def test_permanent_installation_docs_use_https_and_do_not_claim_installation_is_
     assert "codex plugin marketplace add WayfarerLabs/agentworks" in docs
     assert "codex plugin add agentworks@agentworks" in docs
     normalized_docs = " ".join(docs.split())
-    assert "grant no workstation or Agentworks permission" in normalized_docs
+    assert "grants no workstation or Agentworks permission" in normalized_docs
     assert "0.14.0 or newer" in normalized_docs
+    assert "does not offer or perform repository source inspection" in normalized_docs
+    assert "guide owns all ongoing Agentworks teaching" in normalized_docs
+    assert "adds no authorization, security-setting, or harness-posture teaching" in normalized_docs
