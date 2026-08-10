@@ -5,7 +5,24 @@ engineering is going and what it costs to do safely. This is the argument behind
 [README](../README.md) describes what Agentworks does; this document explains why it exists and the
 convictions that shape it.
 
-## The Problem
+## Why Are We Doing This?
+
+AI can be an extraordinary force multiplier for software engineering. A capable model can explore
+unfamiliar systems, implement and test changes, review work, and sustain several lines of effort in
+parallel. Used well, it lets individual developers and small teams attempt work that would otherwise
+require far more time, people, and coordination.
+
+That opportunity is not simply about making individual tasks faster. It is about increasing both the
+amount and ambition of work one operator can direct. Realizing that potential takes more than
+opening more chat windows. Operators need to know which agents are doing what, which workloads are
+active, what tools and credentials each can access, how work is separated or shared, and how to keep
+it running when the workstation disconnects.
+
+Agentworks exists to make that kind of leverage practical: give capable agents real environments,
+establish context and tools, contain failure and compromise, and leave the operator in control. The
+rest of this document states the convictions behind that approach.
+
+## Our Convictions
 
 ### Agentic Engineering Is Risky
 
@@ -31,37 +48,18 @@ even be aware of the problem until it is too late.
 All of these risks suggest the same response: strong guardrails that contain the blast radius when
 things go sideways and leave the operator in control.
 
-### Autonomy Needs Control
-
-The operator should retain control over what agents are doing, how workloads are executed, and what
-resources they can access even as those workloads become more autonomous. Without reliable knowledge
-of what agents are doing, consistent environments, and contained blast radius, control is lost in
-practice even if it is notionally retained.
-
-A significant and growing part of the ecosystem treats loss of control as an inevitable cost of
-agentic autonomy. Agentworks takes the opposite position.
-
-### Workloads Need Structure
-
-Anyone who has had more than a few parallel agentic sessions has likely run into the problem of
-tracking which agents are doing what, which sessions are active, what tools and credentials are
-available in each session, how agents coordinate across repositories or working trees, and how to
-keep them running reliably when a workstation disconnects.
-
-These challenges impose real limits on how many agentic workloads one operator can manage. Solving
-them at the platform layer lets developers and their agents focus on shipping code instead of
-rebuilding infrastructure around every harness.
-
-Inconsistent workload environments create similar friction and risk. Some differences are
-intentional and should be preserved. Many are accidental and make every operation harder to reason
-about.
-
-## Our Convictions
-
 ### Autonomy and Control Are Not a Tradeoff
 
 Agentworks is built on the conviction that autonomy, security, and control are not mutually
 exclusive. A good platform should make it possible and straightforward to have all three.
+
+The operator should retain control over what agents are doing, how workloads are executed, and what
+resources they can access even as those workloads become more autonomous. Without reliable knowledge
+of what agents are doing, consistent environments, and a contained blast radius, control is lost in
+practice even if it is notionally retained.
+
+A significant and growing part of the ecosystem treats loss of control as an inevitable cost of
+agentic autonomy. Agentworks takes the opposite position.
 
 ### Give Agents Real Environments
 
