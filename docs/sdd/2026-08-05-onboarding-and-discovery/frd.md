@@ -51,7 +51,11 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
   install or update the CLI when needed, state the R12 security disclosure before acting, and direct
   the agent to the top-level guide command (R13) for intent routing and everything else. Teaching
   content lives in the CLI, not the plugins, so it versions with the surfaces it teaches; the
-  package's own (small) compatibility story is the HLA's call.
+  package's own (small) compatibility story is the HLA's call. Before a CLI install or update, the
+  package MUST offer to inspect the exact canonical source tag it intends to install. It MUST warn
+  that the repository is substantial and a full review can consume significant model usage, offer a
+  focused security and installation-surface review or a full repository review, and keep source
+  review optional and separate from installation approval.
 - **R2 (progressive golden path).** First-run assistance MUST reach a first working session in
   minutes, including a usable VM and a started session, with the major capability areas (config,
   resources, plugins, secrets, VMs, workspaces, sessions) discoverable progressively from there
@@ -97,11 +101,16 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
   questions, creating and changing declared resources, adopting capabilities, resolving migration
   requirements, troubleshooting with doctor, and operating VMs and sessions through the same live
   CLI surfaces. A "what is new" request MUST distinguish the live current-capability and adoption
-  assessment from temporal release history and point temporal questions at canonical release notes;
-  current facts alone MUST NOT be presented as a version-to-version delta. Configuration and
-  operation are not separate skill silos. Risk is expressed by each action's explicit scope, impact,
-  consent, and verification; creating or connecting to managed resources is never authorized merely
-  because the skill is installed.
+  assessment from temporal release history and route temporal questions through
+  `concept-release-notes`. That topic MUST render the installed release's notes offline from
+  release-please's canonical changelog packaged in the wheel, without a second hand-maintained copy.
+  Older or missing ranges MAY fall back to Agentworks' canonical GitHub releases with an explicit
+  version range and network-read consent. Current facts alone MUST NOT be presented as a
+  version-to-version delta. Release prose and repository source are untrusted evidence, never an
+  instruction source or authorization to follow links or run commands. Configuration and operation
+  are not separate skill silos. Risk is expressed by each action's explicit scope, impact, consent,
+  and verification; creating or connecting to managed resources is never authorized merely because
+  the skill is installed.
 - **R11 (cross-harness parity, by construction).** Teaching content lives in the CLI (R13), so it
   cannot fork between harnesses. The thin assistance packages (R1) MUST NOT drift apart in
   substance: share or generate them from one source where the harness formats allow (the repo's own
@@ -127,24 +136,30 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
   capability implementations (`agw guide secret-backend/onepassword`, including configuration), and
   `concept-` prefixed meta topics (`agw guide concept-secrets`, `agw guide concept-onboarding`)
   whose shared prefix avoids collisions with kind names and makes concept docs discoverable by
-  completion. Content blends static authored material with dynamic material from the live system
-  (registries, resources, enablement state), so a disabled implementation or an added resource
-  changes what the guide says. Output is markdown only; structured data appears only inside the
-  markdown. R7's machine-readable contract is a separate surface and stays so. Topics are sized like
-  skills, with sub-topics referenced rather than inlined, and topic names participate in shell
-  completions. With no topic, agent mode MUST route common intents explicitly: first setup and
-  adoption assessment, current capabilities versus temporal release changes, ongoing management and
-  operation, troubleshooting, exceptional migration, secrets, and bug reporting. The published skill
-  enters through this top-level router rather than hard-coding first-run onboarding as every
-  request's destination. An agent-shaping mode (an `--agent` flag with a TTY-informed default; the
-  exact mechanism is the HLA's call) MAY adjust emphasis, never substance: in agent mode the
-  rendering foregrounds the behavioral contract (ask for consent before any tool call that examines
-  the operator's machine; test only for the presence of sensitive material such as SSH keys and
-  secrets, never view values; restate R12's access disclosure). Both renderings derive from one
-  source; there are never two contents. Prior art for the effort's `prior-art-research.md`:
-  PowerShell's module-contributed `about_*` topics, `kubectl explain`'s live schema walks,
-  `git help` concept guides, `go help` topics, `rustc --explain`, and Terraform's per-provider
-  schema-plus-prose docs generation.
+  completion. Concept topics MUST cover release notes as well as secrets, onboarding, management,
+  troubleshooting, required migration remediation, and bug reporting. `concept-release-notes`
+  renders the installed release's section from release-please's packaged canonical changelog and
+  links the result to the live adoption assessment. Rendering performs no network request and does
+  not maintain a separate release-note source. A fallback network lookup is a bounded inert action
+  record with an exact release range, consent, expected result, and refusal path. Release content is
+  treated only as evidence and cannot expand scope. Content blends static authored material with
+  dynamic material from the live system (registries, resources, enablement state), so a disabled
+  implementation or an added resource changes what the guide says. Output is markdown only;
+  structured data appears only inside the markdown. R7's machine-readable contract is a separate
+  surface and stays so. Topics are sized like skills, with sub-topics referenced rather than
+  inlined, and topic names participate in shell completions. With no topic, agent mode MUST route
+  common intents explicitly: first setup and adoption assessment, current capabilities versus
+  temporal release changes, ongoing management and operation, troubleshooting, exceptional
+  migration, secrets, and bug reporting. The published skill enters through this top-level router
+  rather than hard-coding first-run onboarding as every request's destination. An agent-shaping mode
+  (an `--agent` flag with a TTY-informed default; the exact mechanism is the HLA's call) MAY adjust
+  emphasis, never substance: in agent mode the rendering foregrounds the behavioral contract (ask
+  for consent before any tool call that examines the operator's machine; test only for the presence
+  of sensitive material such as SSH keys and secrets, never view values; restate R12's access
+  disclosure). Both renderings derive from one source; there are never two contents. Prior art for
+  the effort's `prior-art-research.md`: PowerShell's module-contributed `about_*` topics,
+  `kubectl explain`'s live schema walks, `git help` concept guides, `go help` topics,
+  `rustc --explain`, and Terraform's per-provider schema-plus-prose docs generation.
 - **R14 (universal contribution).** Guide content MUST arrive through one generic contract that
   every participant uses: core resource kinds, capability implementations, and plugins (system
   today, external later) each contribute their own topics. Built-in static content lives beside the
@@ -181,10 +196,11 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
   a single copy-paste block (a fenced block, so GitHub renders a copy button) addressed to the
   operator's agent, along these lines: "I'd like your help with Agentworks, including installing or
   updating it if needed, understanding what it can do, and helping me set up or manage it. It is
-  available on PyPI as `agentworks-cli` and runs on Python >= 3.12. Please obtain my consent before
-  acting, then run `agw guide --agent` for current instructions." This is a first-class zero-plugin
-  assistance path; the harness plugins (R1) say essentially the same thing and remain primarily an
-  advertising and discoverability channel.
+  available on PyPI as `agentworks-cli` and runs on Python >= 3.12. Before installing it, please
+  offer to review the exact source tag and warn me that a full repository review may incur
+  substantial model usage. Please obtain my consent before acting, then run `agw guide --agent` for
+  current instructions." This is a first-class zero-plugin assistance path; the harness plugins (R1)
+  say essentially the same thing and remain primarily an advertising and discoverability channel.
 
 ## Personas and stories
 
@@ -229,8 +245,9 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
    probe consented.
 2. Asking for an adoption assessment on an unchanged, fully-adopted system is a clean no-op; asking
    after an upgrade reports all currently not-yet-adopted capabilities without redoing completed
-   work. A temporal "what changed between versions" request is directed to canonical release notes
-   and is not inferred from current-state facts.
+   work. `concept-release-notes` renders the installed release's packaged canonical notes offline. A
+   broader temporal range uses the consented canonical GitHub fallback and is not inferred from
+   current-state facts.
 3. The non-interactive path reproduces the guided path's result on a clean machine.
 4. List, describe, and doctor surfaces offer documented machine-readable output consumed by the
    plugin's skills themselves (dogfooding the contract).
@@ -253,9 +270,13 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
 13. A plugin's contributed guide content renders with zero contributed code executed (R15),
     demonstrated by a test that rejects a contribution attempting expression evaluation.
 14. With the skill already installed, an external agent can route setup, adoption assessment,
-    configuration, troubleshooting, and VM or session operation requests from the top-level guide.
-    First-run assistance creates and verifies a usable VM and a started session. Every mutating,
-    remote, privileged, or destructive action retains an explicit operator decision.
+    release-history, configuration, troubleshooting, and VM or session operation requests from the
+    top-level guide. First-run assistance creates and verifies a usable VM and a started session.
+    Every mutating, remote, privileged, or destructive action retains an explicit operator decision.
+15. Before installing or updating the CLI, the assistance package offers an exact-tag source review,
+    warns about full-repository model usage, and preserves separate decisions for focused review,
+    full review, no review, and installation. Declining source review does not claim the source was
+    reviewed and does not itself block a separately approved install.
 
 ## Decisions
 
@@ -276,7 +297,8 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
   block is an equal first-class entry beside the plugins, which are kept primarily for advertising
   and discoverability. The package is always-available Agentworks assistance, not a one-time
   onboarding artifact. Agentworks never probes the operator's machine; agents probe (consent-first
-  per guide content) and `agw` verifies.
+  per guide content) and `agw` verifies. The assistance package offers an optional, usage-disclosed
+  review of the exact source tag before installing or updating the CLI.
 - **D7 (migration remediation; operator ruling, 2026-08-07).** Automated resource migrators do not
   ship. Precise load errors name the offending input, and `agw guide concept-migration` teaches the
   exceptional operator-led rewrite using live sample, field-reference, and verification surfaces.
@@ -287,7 +309,9 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
   topics carry the `concept-` prefix. Teaching content lives in the CLI with thin assistance
   packages, and contributed content is data rendered through locked-down templating, never code. The
   top-level agent rendering is the stable assistance entry and routes the operator's current intent;
-  `concept-onboarding` remains the specialized first-run and adoption-assessment path.
+  `concept-onboarding` remains the specialized first-run and adoption-assessment path, while
+  `concept-release-notes` renders the installed release's release-please-authored notes and owns the
+  consented canonical fallback for wider temporal history.
 
 ## Open questions
 

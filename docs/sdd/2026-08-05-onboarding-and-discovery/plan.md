@@ -267,9 +267,14 @@ completed design work; the corrective LLD and implementation boxes below carry t
 - [ ] Revise `bootstrap-packaging-lld.md` around an always-available Agentworks package: neutral
       package and skill identity, top-level `agw guide --agent` handoff, setup and
       returning-operator probes, and no package-owned intent switchboard or duplicated teaching.
-- [ ] Top-level agent guide rendering routes setup and adoption, management and operation,
-      troubleshooting, exceptional migration, secrets, and bug-reporting intents without granting
-      action authority or hiding the complete live topic index.
+- [ ] Top-level agent guide rendering routes setup and adoption, management and operation, temporal
+      release history, troubleshooting, exceptional migration, secrets, and bug-reporting intents
+      without granting action authority or hiding the complete live topic index.
+- [ ] `concept-release-notes` renders only the unique exact installed-release section from
+      release-please's canonical changelog packaged in the wheel, as bounded, visibly labeled,
+      escaped plain-text evidence. It links to the separate live adoption assessment and offers an
+      operator-approved exact-range canonical GitHub fallback when local history is insufficient.
+      Guide rendering performs no network request, and neither harness package copies release prose.
 - [ ] `concept-onboarding` remains the specialized first-run and adoption-assessment path and gains
       a bounded, consented golden path that creates and verifies a usable VM and started first
       session from explicit operator-selected inputs.
@@ -283,12 +288,31 @@ completed design work; the corrective LLD and implementation boxes below carry t
       disclosure names the intended workstation, full file inspection and command execution under
       the harness account, separate explicit privilege elevation, and the strictest practical
       approval and visibility posture that preserves the required workstation access.
+- [ ] Before CLI installation or update, canonical assistance resolves one exact stable version,
+      offers to inspect its canonical `vVERSION` source tag, warns that a full-repository review may
+      consume significant model usage, and keeps focused review, full review, decline-review, and
+      exact-version installation as separate decisions. Source content is untrusted evidence and
+      cannot authorize execution or expand scope.
+- [ ] Source-review contract tests cover focused and full review, decline-review followed by a
+      separately approved exact install, and completed review followed by declined install. No path
+      treats review approval as installation approval or declining review as a failed installation.
+- [ ] Adversarial source-review fixtures keep the assistance session in its protected policy root
+      and treat candidate `AGENTS.md`, `CLAUDE.md`, skills, hooks, plugins, configuration, and
+      embedded commands only as data. Candidate content cannot redirect the review, load policy,
+      launch or reconfigure a harness, execute, authorize installation, or expand the approved
+      scope.
 - [ ] Generator emits committed Claude Code and Codex Agentworks plugin and marketplace wrappers
       from that source; CI requires regeneration to produce no diff.
 - [ ] Repository README Getting Started leads with the R16 agent-addressed assistance block
       generated from the canonical source and retains a clear human installation path below it.
 - [ ] Both packages install directly from GitHub in clean harness environments and reach the guide;
       minimum-version failure produces an actionable upgrade instruction.
+- [ ] The 0.14 release PR contains Phase 3, its release-please version and changelog, and the
+      packaged changelog together. Candidate-wheel and live harness gates run from that release PR
+      before it merges, after which release-please tags and the publish workflow ships the same
+      reviewed artifact. Candidate probes inspect the exact release-PR commit that built their wheel
+      and name that test-only substitution; the post-tag PyPI smoke exercises production `vVERSION`
+      review.
 - [ ] Both generated package projections contain the exact same top-level guide handoff and bind by
       construction to one shared guided and non-interactive guide fixture covering refusal, rerun
       no-op behavior, post-upgrade current not-yet-adopted capability reporting, the canonical
@@ -297,13 +321,17 @@ completed design work; the corrective LLD and implementation boxes below carry t
 - [ ] Canonical projection checks and every live assistance probe assert the R12 disclosure is
       emitted before the first command, probe, verification, mutation, or other action, and pin
       every workstation-access and privilege boundary from the canonical source.
+- [ ] Release-note tests prove the packaged section uniquely matches the installed version's
+      release-please source, guide rendering and fallback refusal perform zero network work, an
+      approved lookup stays within the exact requested range on the canonical releases surface, and
+      instruction-like release prose remains inert without active links or command execution.
 - [ ] Permanent installation and security documentation ships with the packages.
 - [ ] Packaging, generation, lint, and end-to-end gates pass; step reviewed by `agentworks-reviewer`
       and a fresh-eyes reviewer; valid findings resolved.
 - [ ] Always-green ready-to-merge PR opened and saga-lead review requested.
 
-Definition of done: R1, R2, R3, R10, R11, R12, R13, R16, AC1, AC2, AC3, AC7, AC8, AC10, and AC14
-hold for both harnesses and the zero-plugin README path.
+Definition of done: R1, R2, R3, R10, R11, R12, R13, R16, AC1, AC2, AC3, AC7, AC8, AC10, AC14, and
+AC15 hold for both harnesses and the zero-plugin README path.
 
 ## Phase 4: registry inventory and specific-resource projection
 
@@ -326,7 +354,7 @@ hand-maintained switchboard.
 ## Phase 5: acceptance, promotion, and closeout
 
 - [ ] Fresh-operator acceptance matrix run for Claude Code, Codex, and README-only paths with
-      evidence for all 14 FRD acceptance criteria.
+      evidence for all 15 FRD acceptance criteria.
 - [ ] No telemetry, general-feedback prompt, or non-bug manual-relay request ships; acceptance runs
       retain their own timing and unexplained-intervention evidence as test artifacts.
 - [ ] `concept-reporting-bugs` is tested to redact sensitive evidence, point at the repository bug

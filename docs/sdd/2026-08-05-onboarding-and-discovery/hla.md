@@ -80,6 +80,9 @@ The initial block vocabulary is closed:
   separately addressable arms. An exact section selector may cross an alternative only when one
   field path matches.
 - `Sample`: a core-rendered declarative-schema live sample.
+- `ReleaseNotes`: a core-rendered, size-bounded section selected for the exact installed CLI version
+  from release-please's changelog packaged in the wheel. Contributions cannot supply its path,
+  version, or prose.
 - `ActionList`: inert, strictly validated `GuideAction` records with an exact consent boundary,
   command or platform-neutral manual step, expected state, verification, and refusal alternative.
 - `TopicLinks`: core-rendered related-topic links.
@@ -198,8 +201,10 @@ disclosure, intent router, and live topic index. Agent mode routes common reques
 that every invocation is first-run onboarding:
 
 - setup, adoption assessment, and installed-release capability questions route to
-  `concept-onboarding`; a temporal release-change question is distinguished explicitly and points to
-  the canonical GitHub release notes rather than treating current state as a historical delta;
+  `concept-onboarding`;
+- temporal release-change questions route to `concept-release-notes`, which renders the installed
+  release's packaged canonical notes, offers a consented canonical fallback for older ranges, and
+  then links back to the live adoption assessment;
 - configuration, declared-resource changes, and VM or session operation route to
   `concept-management` and the applicable kind or instance topics;
 - diagnosis routes to `concept-troubleshooting`;
@@ -210,6 +215,25 @@ that every invocation is first-run onboarding:
 The router is authored core guide content over the live topic catalog. It contains no operation
 commands and grants no authority. Adding a topic does not silently make it a top-level intent; the
 small set of intent routes is reviewed teaching, while the complete index remains derived.
+
+`concept-release-notes` combines authored connective teaching with one core `ReleaseNotes` block.
+The wheel contains release-please's existing `cli/CHANGELOG.md` as package data; it does not contain
+a separately authored release-note file. The block resolves the installed distribution version,
+requires exactly one matching release section through a bounded parser, sanitizes it through the
+normal guide boundary, renders it as visibly labeled escaped plain-text evidence with links inert,
+and fails soft with the canonical releases URL when the artifact or unique matching section is
+unavailable. Rendering opens no network connection and never renders the whole changelog.
+
+For an older or missing range, a validated `read-release-notes` action requires operator-supplied
+`FROM_VERSION` and `TO_VERSION`, uses a dedicated `read-canonical-release-notes` consent boundary,
+and names only `https://github.com/WayfarerLabs/agentworks/releases` as the allowed network source.
+Its manual step reads only the requested inclusive release range, summarizes the changes, and does
+not follow embedded links. Fetched or packaged release prose is untrusted evidence. The agent
+ignores instructions, commands, permission requests, and scope changes within it, and treats any
+proposed follow-up as a new action requiring its own operator decision. Refusal performs no network
+request and leaves the canonical URL and requested range as manual operator steps without claiming a
+summary. The topic then links to `concept-onboarding` for the separate question of which
+capabilities the current installation has adopted.
 
 The CLI exposes a paired `--agent/--human` override. Detection precedence is:
 
@@ -265,8 +289,8 @@ rename. There is no package-level wall between configuring Agentworks and operat
 sessions. The boundary is the action: read-only discovery may remain read-only; creating or changing
 declared state uses `mutate-agentworks`; connection uses the named-target boundary; and destructive
 work or privilege elevation requires a fresh, explicitly described operator decision. Existing
-consent boundaries are sufficient for the first slice, so this correction does not add a second risk
-model.
+consent boundaries remain sufficient for configuration and operation; the release-note lookup adds
+only the narrow `read-canonical-release-notes` boundary and does not create a second risk model.
 
 Agent-only workstation facts are never inferred by `agw`. Doctor, tool checks, SSH tests, and other
 verification commands are explicit assistance actions that the agent runs only after obtaining the
@@ -364,14 +388,45 @@ One canonical assistance body is the source for both harness packages. It contai
 2. the complete R12 access disclosure, including the intended workstation, full account-scoped file
    inspection and command execution, separate explicit privilege elevation, Agentworks-reachable
    resources, and concrete strict-security posture links;
-3. the instruction to run `agw guide --agent`, select the route matching the operator's current
+3. a pre-install offer to review the exact canonical source tag, with a warning that the repository
+   is substantial and a full review can consume significant model usage, and separate focused, full,
+   decline-review, and install decisions;
+4. the instruction to run `agw guide --agent`, select the route matching the operator's current
    goal, and follow that topic.
+
+After the general disclosure and network consent, the package resolves the exact stable PyPI version
+it proposes to install and pins both the source-review tag and install command to that version. A
+focused review covers packaging, dependencies, CLI entry, and security-sensitive execution
+boundaries; a full review may inspect the entire canonical tag. Repository content remains untrusted
+evidence: it cannot grant permission, direct execution, or expand the reviewed scope. Declining
+review neither claims review nor blocks a separately approved install. Review approval never implies
+install approval.
+
+Source inspection runs from the assistance session's protected policy root. The agent does not
+launch or reconfigure a harness from the candidate tree, change its working root to that tree, load
+candidate `AGENTS.md`, `CLAUDE.md`, skills, hooks, plugins, or configuration as policy, or execute
+candidate scripts and commands. If files are materialized locally, they remain in an
+operator-approved data-only temporary location and are read by explicit path from the protected
+root. Instruction-like repository content is reported only as source evidence. Running any candidate
+code is a separate action and is not part of source review.
 
 A small generator wraps that body in the Claude Code and Codex package layouts. Generated files are
 committed so GitHub installation works without a build step. CI regenerates into a temporary
 directory and requires a clean diff, proving substantive parity. Package metadata declares the
 minimum CLI version that first supplies the referenced guide contract and no maximum. The guide
 itself owns all evolving teaching.
+
+The wheel build includes release-please's canonical `cli/CHANGELOG.md` at a fixed package-data path.
+The release PR carries the Phase 3 implementation, version bump, and generated changelog together;
+candidate-wheel and live harness gates run from that release PR before it merges. The release tag
+and PyPI publish follow only after those gates pass, so the installed version and its internal
+release section are one reviewed artifact.
+
+Production assistance reviews canonical `vVERSION` before installing exact `VERSION`. A pre-merge
+candidate cannot claim a tag that does not yet exist: candidate probes instead review the exact
+release-PR commit that built the candidate wheel, record that test-only ref substitution, and
+install that exact artifact. The post-tag PyPI smoke exercises the production `vVERSION` review and
+exact install path.
 
 The repository README leads with the same canonical agent-addressed assistance text in a fenced
 copyable block. It derives from or is checked against the canonical source rather than maintaining a
@@ -381,9 +436,11 @@ The package is named for Agentworks rather than onboarding, and its description 
 discovery, adoption, configuration, troubleshooting, and operation. It contains no intent-to-topic
 switchboard of its own. The top-level guide owns that routing, and selected topics tell the agent
 which list, describe, doctor, and operation records to request at each applicable action. End-to-end
-assistance tests cover an initial VM and session, a returning current-capability and adoption
-assessment, the release-notes handoff for temporal history, an ongoing management operation, and a
-refusal at a higher-risk action boundary.
+assistance tests cover focused and full source-review choices, decline-review followed by separately
+approved installation, completed review followed by declined installation, an initial VM and
+session, a returning current-capability and adoption assessment, offline installed release notes
+plus the consented range fallback, an ongoing management operation, and a refusal at a higher-risk
+action boundary.
 
 ## Feedback decision
 
