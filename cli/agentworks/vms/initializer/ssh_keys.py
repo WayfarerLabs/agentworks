@@ -141,11 +141,12 @@ def _apply_sve_mask(target: Transport, logger: SSHLogger) -> None:
 
     Apple's Virtualization.framework advertises SVE the guest cannot execute,
     so the first SVE instruction traps as SIGILL, surfacing in OpenSSL and thus
-    apt-over-https, git, and Python cryptography. Phase A masks this at create
-    via an ``arm64.nosve`` grub drop-in; this reconcile step installs the same
-    drop-in on an already-running VM so ``vm reinit`` repairs one provisioned
-    before the mask existed. The drop-in path and content are shared with the
-    Phase A step so the two writers cannot drift.
+    apt-over-https, git, and Python cryptography. Platform-owned create-time
+    bootstrap masks this via an ``arm64.nosve`` grub drop-in; this reconcile
+    step installs the same drop-in on an already-running VM so ``vm reinit``
+    repairs one provisioned before the mask existed. The drop-in path and
+    content are shared with the create-time bootstrap step so the two writers
+    cannot drift.
 
     Gated to Apple Virtualization guests that still advertise SVE, so it is a
     silent no-op everywhere else and on VMs already masked (``arm64.nosve``

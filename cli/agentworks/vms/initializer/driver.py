@@ -372,16 +372,17 @@ def _phase_b_setup(
         user_install_commands = kind_dict(registry, "user-install-command")
 
         # Non-fatal: ensure cloud-init won't regenerate SSH host keys on reboot.
-        # Runs first so VMs predating the Phase A step are repaired on reinit
-        # even if a later step warns. Idempotent overwrite with identical
-        # content.
+        # Runs first so VMs predating the create-time bootstrap step are
+        # repaired on reinit even if a later step warns. Idempotent overwrite
+        # with identical content.
         _preserve_ssh_host_keys(ts_target, logger)
 
         # Non-fatal: repair the Apple-vz SVE trap (arm64.nosve grub drop-in) on
-        # VMs provisioned before the Phase A mask existed. Runs early, before the
-        # crypto-dependent apt/source steps, so a broken VM at least gets the fix
-        # installed this pass; it needs a restart plus one more reinit to converge.
-        # A silent no-op on every non-Apple host and on already-masked VMs.
+        # VMs provisioned before the create-time bootstrap mask existed. Runs
+        # early, before the crypto-dependent apt/source steps, so a broken VM at
+        # least gets the fix installed this pass; it needs a restart plus one
+        # more reinit to converge. A silent no-op on every non-Apple host and on
+        # already-masked VMs.
         _apply_sve_mask(ts_target, logger)
 
         # Non-fatal: VM hardening (sysctl baseline + /proc hidepid>=1).
