@@ -17,6 +17,7 @@ from agentworks.ssh import SSHError, SSHLogger, SSHResult
 from agentworks.transports.wsl2 import WSL2Transport
 
 if TYPE_CHECKING:
+    from agentworks.capabilities.vm_platform import BootstrapProgress
     from tests.conftest import CapturedOutput
 
 _AUTH_KEY = "tskey-bootstrap-file-sentinel"
@@ -93,12 +94,34 @@ class _RecordingTransport:
         self.guest_files[remote_path] = path.read_bytes()
 
 
+class _RecordingProgress:
+    """Deliberately non-redacting sink that exposes helper output verbatim."""
+
+    def __init__(self) -> None:
+        self.steps: list[str] = []
+        self.outputs: list[str] = []
+        self.warnings: list[str] = []
+        self.errors: list[str] = []
+
+    def step(self, name: str) -> None:
+        self.steps.append(name)
+
+    def output(self, text: str) -> None:
+        self.outputs.append(text)
+
+    def warning(self, msg: str) -> None:
+        self.warnings.append(msg)
+
+    def log_error(self, msg: str) -> None:
+        self.errors.append(msg)
+
+
 def _call(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     transport: _RecordingTransport,
     *,
-    logger: SSHLogger | None = None,
+    progress: BootstrapProgress | None = None,
 ) -> str:
     monkeypatch.setattr(
         "agentworks.capabilities.vm_platform.wsl2_bootstrap.uuid.uuid4",
@@ -111,7 +134,7 @@ def _call(
         tailscale_auth_key=_AUTH_KEY,
         hostname="wsl2--vm1",
         swap_gib=0,
-        progress=logger if logger is not None else MagicMock(),
+        progress=progress if progress is not None else MagicMock(),
     )
 
 
@@ -147,7 +170,7 @@ def test_helper_does_not_close_manager_owned_progress(
     monkeypatch.setattr(ssh, "LOG_DIR", tmp_path / "logs")
     logger = SSHLogger("vm1", "vm-create", redactions=(_AUTH_KEY,))
 
-    assert _call(tmp_path, monkeypatch, _RecordingTransport(), logger=logger) == "100.64.0.9"
+    assert _call(tmp_path, monkeypatch, _RecordingTransport(), progress=logger) == "100.64.0.9"
     assert "# Finished:" not in logger.path.read_text()
 
     logger.close()
@@ -180,7 +203,7 @@ def test_structured_failure_output_is_redacted_from_console_log_and_error(
     )
 
     with pytest.raises(SSHError) as caught:
-        _call(tmp_path, monkeypatch, transport, logger=logger)
+        _call(tmp_path, monkeypatch, transport, progress=logger)
     logger.close()
 
     assert str(caught.value) == "Bootstrap script failed (exit 1)"
@@ -192,6 +215,39 @@ def test_structured_failure_output_is_redacted_from_console_log_and_error(
     assert durable_log.count("[REDACTED]") >= 4
     assert console.count("[REDACTED]") >= 4
     _assert_no_residue(transport)
+
+
+def test_helper_redacts_every_non_redacting_progress_surface(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transcript = "\n".join(
+        (
+            f"##STEP## step {_AUTH_KEY}",
+            f"##SUCCESS## success {_AUTH_KEY}",
+            f"##WARN## warning {_AUTH_KEY}",
+            f"##ERROR## error {_AUTH_KEY}",
+            f"raw transcript {_AUTH_KEY}",
+            "",
+        )
+    )
+    transport = _RecordingTransport(
+        execute_result=SSHResult(returncode=1, stdout=transcript, stderr=""),
+    )
+    progress = _RecordingProgress()
+
+    with pytest.raises(SSHError, match=r"Bootstrap script failed \(exit 1\)"):
+        _call(tmp_path, monkeypatch, transport, progress=progress)
+
+    assert progress.steps == ["step [REDACTED]"]
+    assert progress.outputs == [
+        "success [REDACTED]",
+        transcript.replace(_AUTH_KEY, "[REDACTED]"),
+    ]
+    assert progress.warnings == ["warning [REDACTED]"]
+    assert progress.errors == ["error [REDACTED]"]
+    for captured in (progress.steps, progress.outputs, progress.warnings, progress.errors):
+        assert _AUTH_KEY not in repr(captured)
 
 
 class _FailingTempFile:
