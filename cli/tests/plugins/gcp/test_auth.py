@@ -228,6 +228,31 @@ def test_credential_and_each_concrete_client_are_cached_once(monkeypatch: pytest
     assert set(cache._clients) == set(kinds)
 
 
+def test_client_construction_failure_is_mode_named_detached_and_not_cached(monkeypatch: pytest.MonkeyPatch) -> None:
+    from google.cloud import compute_v1
+
+    config = _config({"mode": "service-account", "secret": "svc-json"})
+    cache = GcpClientCache("gcp-site", config)
+    provider = RuntimeError(_SENTINEL)
+    provider.__cause__ = ValueError(_SENTINEL)
+
+    class FailingProjects:
+        def __init__(self, **_kwargs: object) -> None:
+            raise provider
+
+    monkeypatch.setattr("agentworks.plugins.gcp.auth.build_service_account_credential", lambda *_args: object())
+    monkeypatch.setattr(compute_v1, "ProjectsClient", FailingProjects)
+
+    with pytest.raises(GCEAuthenticationError) as caught:
+        cache.client("projects", _ctx())
+
+    assert "gcp-site" in str(caught.value)
+    assert "service-account" in str(caught.value)
+    assert "svc-json" in str(caught.value)
+    _assert_sentinel_absent(caught.value)
+    assert cache._clients == {}
+
+
 def test_gcp_foundation_import_does_not_publish_plugin_or_platform() -> None:
     from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
     from agentworks.plugins import SYSTEM_PLUGINS

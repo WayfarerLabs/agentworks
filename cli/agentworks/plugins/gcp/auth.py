@@ -151,6 +151,24 @@ class GcpClientCache:
             "instances": compute_v1.InstancesClient,
             "firewalls": compute_v1.FirewallsClient,
         }
-        built = constructors[kind](credentials=self.credential(ctx))
+        construction_failed = False
+        built: Any = None
+        try:
+            built = constructors[kind](credentials=self.credential(ctx))
+        except GCEAuthenticationError:
+            raise
+        except Exception:
+            construction_failed = True
+        if construction_failed or built is None:
+            auth = self._config.auth
+            mode = auth.mode
+            secret = f", secret '{auth.secret}'" if isinstance(auth, GcpServiceAccountAuth) else ""
+            raise GCEAuthenticationError(
+                f"could not construct Google Compute client '{kind}' for vm-site '{self._site_name}' "
+                f"(auth mode '{mode}'{secret})",
+                entity_kind="vm-site",
+                entity_name=self._site_name,
+                hint="check the selected credential and Google client configuration",
+            )
         self._clients[kind] = built
         return built
