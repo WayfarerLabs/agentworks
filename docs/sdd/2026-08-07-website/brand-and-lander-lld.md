@@ -1,6 +1,6 @@
 # LLD: AGW Brand and Continuous Lunar Deployment Lander
 
-<!-- cspell:ignore focusout imul keyup pointerdown PRNG repower -->
+<!-- cspell:ignore focusout imul keyup pointerdown pointerup PRNG repower -->
 <!-- cspell:ignore lerp Minkowski overspeed subinterval unhashed unmarginated -->
 <!-- cspell:ignore substep unitless uint32 quantized quantization -->
 
@@ -55,16 +55,24 @@ Implementation uses these permanent names:
 | `website/tests/lander-browser-checklist.md`            | Package-free browser, performance, and accessibility acceptance |
 
 The shipped artifact grows by exactly one file, `static/lander-world.js`. Tool and test files are
-not in the artifact. `lander-game.js` imports only `lander-model.js`. `lander-model.js` imports only
-pure exports from `lander-world.js`. `lander-world.js` imports neither production module, reads no
-DOM, clock, storage, or ambient randomness, and owns no mutable singleton. No other production
-module imports upward through this chain.
+not in the artifact. The production module DAG is exact:
+
+```text
+lander-game.js  -> lander-model.js -> lander-world.js
+       |--------------------------------^  read-only projection and seed helpers
+```
+
+`lander-game.js` imports the model API plus only the pure `cameraLeftForPose`, `terrainPath`,
+`targetIsOffscreen`, and `mixUint32` helpers directly from `lander-world.js`. `lander-model.js`
+imports pure world construction, retention, seed, and geometry exports. `lander-world.js` imports
+neither production module, reads no DOM, clock, storage, or ambient randomness, and owns no mutable
+singleton. No production module imports upward or sideways outside this DAG.
 
 The model is the sole mutable run authority. One run aggregate owns physics, fuel, mission state,
 seed, generator cursor, retained sites, active and target IDs, route proof, checkpoint, and crash
-debris. The controller owns browser listeners, the animation frame, focus, pointer capture, CSS
-projection, and entropy acquisition. It must not keep a second site, fuel, checkpoint, or mission
-copy.
+debris. The controller is the sole browser adapter and owns browser listeners, the animation frame,
+focus, pointer capture, CSS projection, and entropy acquisition. Neither lower module accesses a
+browser global. The controller must not keep a second site, fuel, checkpoint, or mission copy.
 
 Prefer each focused production, tool, or test module at or below 500 lines; every authored source
 must remain below 1,000. `website/site_validation.py` is already near the hard ceiling. It imports
@@ -235,8 +243,8 @@ return (value ^ (value >>> 16)) >>> 0;
 ```
 
 `sampleUnit` mixes `seed ^ Math.imul(stream, 0x9e3779b9) ^ Math.imul(index + 1, 0x85ebca6b)` and
-divides by `2 ** 32`. Streams `1`, `2`, `3`, `4`, and `5` are terrain boundaries, terrain
-orientation, template preference, corridor relief, and debris. Indexed samples make regeneration
+divides by `2 ** 32`. Streams `1`, `2`, `3`, `4`, and `5` are terrain boundaries, terrain motif-bank
+selection, template preference, corridor relief, and debris. Indexed samples make regeneration
 independent of call order. There is no mutable PRNG cursor inside the world module.
 
 The checked-in preflight scene uses `STATIC_WORLD_SEED=0x41475731`. Production START requests one
@@ -252,20 +260,36 @@ acquire a fresh seed. Restart reuses the current run seed and checkpoint.
 Constants are `CHUNK_WIDTH=50 m`, `TERRAIN_SAMPLE_SPACING=10 m`, and six vertices per chunk,
 including both boundaries. `lander-world.js` is the sole production owner of the exported chunk
 width; retention, model bounds, and controller projection import it rather than repeating `50`.
-Shared boundary height for integer boundary `b` is `1.5 + 4.5 * sampleUnit(seed,1,b)`. For local
-vertex `k` in `[0,5]`, interpolate the two boundary heights at `k/5`, then add the signed motif
-below. The sign is `+1` when `sampleUnit(seed,2,chunkIndex) >= 0.5`, otherwise `-1`.
+Shared boundary height for integer boundary `b` is `1.5 + 4.5 * sampleUnit(seed,1,b)`. The exact
+motif bank is:
 
 ```text
-k:       0     1      2     3      4    5
-motif:   0   +2.4   -1.5  +1.8   -1.1  0   metres
+k:    0     1      2     3      4    5
+M0:   0   +2.4   -1.5  +1.8   -1.1  0   metres
+M1:   0   -2.1   -0.8  +2.2   +1.0  0   metres
+M2:   0   +0.9   +2.5  +0.6   -1.9  0   metres
+M3:   0   -1.4   +1.3  +2.4   -0.5  0   metres
 ```
 
-Clamp final heights to `[0.5,7.5]`. Adjacent chunks share their boundary byte-for-byte. The motif
-guarantees both materially rising and falling sampled edges before a platform replacement; the world
-tests additionally prove that every retained representative window has one rise and one fall of at
-least `0.5 m`, at least four nonzero slopes, and no three equal consecutive samples outside site
-shelves.
+For seed `seed`, choose one traversal of the bank for the complete world:
+
+```text
+offset = floor(4*sampleUnit(seed,2,0))
+direction = sampleUnit(seed,2,1) < 0.5 ? 1 : 3
+positiveModulo(value,4) = ((value % 4)+4)%4
+motifIndex(chunkIndex) = positiveModulo(offset+direction*chunkIndex,4)
+```
+
+For local vertex `k` in `[0,5]`, interpolate the two boundary heights at `k/5`, add
+`MOTIFS[motifIndex(chunkIndex)][k]`, then clamp the final height to `[0.5,7.5]`. There is no motif
+orientation or sign step. Because `direction` is `1` or `3` modulo four, the selected indexes across
+any four consecutive chunks are all different, including across negative chunk indexes. Adjacent
+chunks share their boundary byte-for-byte because every motif begins and ends at zero. The bank
+guarantees varied shapes while seeded pseudorandom boundary trends vary their absolute slopes
+further. World tests prove the exact bank and traversal, four distinct indexes in every
+representative four-chunk window, one rise and one fall of at least `0.5 m`, at least four nonzero
+slopes, and no three equal consecutive samples outside site shelves. A single motif or repeated
+motif selection fails even if its sampled heights happen to retain rises and falls.
 
 `terrainHeightAt(seed,x)` linearly interpolates the enclosing sampled edge. A chunk path closes at
 world `y=-10`, below the view. Terrain is collision geometry, not merely art.
@@ -285,6 +309,14 @@ center delta:  78   81    84    87    90    93    96    99   102 m
 deck delta:     0  +1.6  -0.8  +0.8  -1.6    0   -0.8  +0.8    0 m
 ```
 
+The site-0 band guarantee remains structural with the motif bank. The shelf contains `x=49.8`, which
+is `98%` of the final sampled edge from `x=40` to the chunk boundary at `x=50`. Its clamped
+endpoints are at least `0.5` and `1.5`, respectively, so native height there is at least
+`lerp(0.5,1.5,0.98)=1.48`; site 0 top is therefore at least `2.28`. Every clamped shelf height is at
+most `7.5`, so its top is at most `8.3`. Later selection still inspects only the translated deck
+top, and the three zero-delta routes remain structurally eligible for every active deck in the band;
+the motif bank cannot change that termination proof.
+
 For site index `i`, let `base=floor(9*sampleUnit(seed,3,i))` and inspect all nine catalog slots in
 the order `slot=(base+4*c)%9` for `c=0..8`. Four and nine are relatively prime, so this is one
 complete seed-rotated permutation with no duplicate or omitted template. Select the first whose
@@ -303,7 +335,7 @@ knot heights are at least `-0.65 m`, so every eligible translation has absolute 
 native(n):
   x = 10*n; q = floor(n/5); k = n-5*q
   if k == 0: raw = boundary(q)
-  else: raw = lerp(boundary(q),boundary(q+1),k/5) + orientation(q)*motif[k]
+  else: raw = lerp(boundary(q),boundary(q+1),k/5) + MOTIFS[motifIndex(q)][k]
   return clamp(raw,0.5,7.5)
 
 originShelfRight = originCenter+4.8+9; targetShelfLeft = targetCenter-4.8
@@ -323,7 +355,7 @@ resume with the first native global sample strictly right of targetShelfRight
 join every adjacent emitted vertex with one straight segment
 ```
 
-`boundary`, `orientation`, and `motif` are exactly section 5.2; equality at the cap gets no relief.
+`boundary`, `MOTIFS`, and `motifIndex` are exactly section 5.2; equality at the cap gets no relief.
 For site 0, discard native samples in its closed shelf span, emit the two shelf endpoints at its
 `padBase`, and join each endpoint directly to the adjacent native sample outside the span. For later
 sites, the explicit target shelf vertices make the platform, the `2 m` gap, and the complete `7 m`
@@ -332,8 +364,8 @@ after `targetShelfRight` are the complete deterministic blends, with no hidden e
 sample. Duplicate chunk-boundary vertices collapse to one identical value. The model passes frozen
 geometry to pure `instantiateTemplateSite(seed,siteIndex,originSite,templateGeometry)`; the world
 never imports or selects the model catalog. Exact serialized vertices for every template at multiple
-translations and the three pinned seeds catch predicate, index, clamp, relief, shelf replacement,
-NOC foundation, and both blend boundaries.
+translations and the exact ordered seeds/translations in section 10.2 catch predicate, motif index,
+clamp, relief, shelf replacement, NOC foundation, and both blend boundaries.
 
 A catalog/schema or replay mismatch is an invariant error: site state is left unchanged, the run
 enters `generation-error`, and the live status becomes exactly
@@ -400,14 +432,14 @@ under `#lander-world`, 64 queued input records, one pointer, one animation frame
 timer. When enqueueing would create record 65, discard all queued edges, sample the controller's
 complete physical keyboard and pointer state, and enqueue exactly one `INPUT_SNAPSHOT` for the next
 integer simulation-step boundary. The snapshot contains the held physical codes plus pointer-active,
-pointer ID, anchor/current X, and pulse-deadline timestamp needed by section 11's mixer.
-Intermediate edges are deliberately lost; subsequent edges append after that record. This is
-deterministic degradation, not an ordering-preservation claim. A 100-site browser witness must keep
-these counts constant, show no increasing event-listener count, and keep active-game frame work
-below 4 ms at the 95th percentile on the pre-merge Chromium machine. Direct template selection,
-corridor construction, and exactly two proof replays together must finish below 25 ms at the 95th
-percentile and 50 ms maximum over the same witness; record actual results rather than weakening the
-ceiling.
+pointer ID, monotonically assigned pointer token, anchor/current X, completed pointer token, and
+pulse-deadline timestamp needed by section 11's mixer. Intermediate edges are deliberately lost;
+subsequent edges append after that record. This is deterministic degradation, not an
+ordering-preservation claim. A 100-site browser witness must keep these counts constant, show no
+increasing event-listener count, and keep active-game frame work below 4 ms at the 95th percentile
+on the pre-merge Chromium machine. Direct template selection, corridor construction, and exactly two
+proof replays together must finish below 25 ms at the 95th percentile and 50 ms maximum over the
+same witness; record actual results rather than weakening the ceiling.
 
 The right-edge cue is a fixed `44 by 44` scene-unit target at `(932,280)`. It contains a solid
 right-pointing arrow, not just motion. It is visible only after a target and its proof exist and
@@ -783,13 +815,14 @@ the derivation ordering treats the lower identical command index as canonical.
 Keep `website/tools/derive_lander_routes.mjs` permanently. It uses only Node built-ins and must not
 import production or test code; runtime, model, and tests must not import it. Version
 `agw-lander-route-deriver/v2` with recipes `agw-lander-route-recipes/v2` independently implements
-sections 5.3, 8, 9, and the reachable command table, including true gimbal force and
-neutral-collective assist. Its versioned per-template constructive recipes give command phase order
-and finite integer step ranges. Each recipe evaluates at least two and at most `2,000,000`
-lexicographically ordered combinations, records the exact evaluated count in its deterministic
-verification output, and chooses by `(burn,totalSteps,RLE lexicographic)`, failing rather than
-emitting an incomplete route. Every candidate must be safe in the three pinned seed/translation
-worlds. There is no beam, search heuristic, random retry, envelope relaxation, or runtime fallback.
+sections 5.2-5.3, 8, 9, and the reachable command table, including the motif-bank traversal, true
+gimbal force, and neutral-collective assist. Its versioned per-template constructive recipes give
+command phase order and finite integer step ranges. Each recipe evaluates at least two and at most
+`2,000,000` lexicographically ordered combinations, records the exact evaluated count in its
+deterministic verification output, and chooses by `(burn,totalSteps,RLE lexicographic)`, failing
+rather than emitting an incomplete route. Every candidate must be safe in all nine pinned
+seed/translation combinations per template. There is no beam, search heuristic, random retry,
+envelope relaxation, or runtime fallback.
 
 The exact invocation is:
 
@@ -805,9 +838,13 @@ clearance knots. Output schema `agw-lander-route-derived/v2` contains `deriverVe
 `recipeVersion`, exact per-route `combinationsEvaluated`, `physicsDigest`, `geometryDigest`, the
 ordered route records from section 10.1, `worldWitnesses`, `worldDigest`, and `outputDigest`.
 `worldWitnesses` contains exactly 81 independently reconstructed world descriptors: nine templates
-times three pinned seeds times three translations. Each descriptor includes `10 m` native/corridor
-samples, cap relief, both shelf replacements and native blends, both platforms and solid risers,
-exact shelf-based NOC foundations/buildings, mast colliders, and its own digest. Canonical JSON
+times three pinned seeds times three translations. Nesting is template outermost in section 10.1
+order, then seed in exact order `[1,0x12345678,0xffffffff]`, then origin translation in exact order
+`[(36,3.5),(117,5),(-42,6.5)]`, where each tuple is `(originCenter,originDeckTop)`. The serialized
+flat array follows that nested order without sorting or regrouping. Each descriptor includes the
+selected motif-bank offset, direction, and relevant per-chunk indexes; `10 m` native/corridor
+samples; cap relief; both shelf replacements and native blends; both platforms and solid risers;
+exact shelf-based NOC foundations/buildings; mast colliders; and its own digest. Canonical JSON
 recursively sorts object keys, preserves array order, uses `JSON.stringify` without whitespace, and
 hashes UTF-8 bytes with lowercase SHA-256. `geometryDigest` hashes the complete geometry object;
 `physicsDigest` hashes an object containing every named numeric constant in sections 8-10, including
@@ -815,22 +852,23 @@ gimbal and assist constants, plus the eight pre-assist command rows; `worldDiges
 ordered world descriptors; `outputDigest` hashes the output object with only `outputDigest` omitted.
 The file adds one unhashed trailing LF.
 
-The reviewed output is `website/tests/fixtures/lander-route-derived-v2.json`. Phase 4H deliberately
-regenerates all nine route schedules, demonstrated minima, success vectors, one-quantum failure
-literals, schedule digests, and the physics, world, and output digests. The production model embeds
-byte-equivalent template/route arrays and the four literal digest strings. Tests project those
-arrays back to the two schemas, compare canonical bytes with both fixtures, and recompute all
-digests before replay. Independent test-side reconstruction compares all 81 corridor vertex arrays,
-shelf/riser/NOC descriptors, and raw/native-resume samples to production with strict numeric
-equality and pins ULP-sensitive vectors so arithmetic reassociation fails. Thus the world and tool
-consume identical envelope values while independently implementing corridor construction, physics,
-assist, gimbal, and collision. Intentional regeneration writes to a temporary path, uses `--verify`
-against the checked fixture, reviews any mismatch, then atomically updates tool version/recipes, the
-derived fixture, production route/failure literals, all four digests, and their independent expected
-tests. The geometry fixture changes only if its reviewed template inputs change deliberately; never
-weaken clearance knots or proof bounds merely to make a recipe pass. Ordinary tests only verify
-checked data and never regenerate expectations. `website/README.md` will permanently teach this
-workflow. Neither fixture nor tool enters the 12-file artifact.
+The reviewed output is `website/tests/fixtures/lander-route-derived-v2.json`. Phase 4H's four-motif
+bank deliberately regenerates all nine route schedules, demonstrated minima, success vectors,
+one-quantum failure literals, schedule digests, all 81 ordered world descriptors and descriptor
+digests, and the physics, world, and output digests in one atomic review. The production model
+embeds byte-equivalent template/route arrays and the four literal digest strings. Tests project
+those arrays back to the two schemas, compare canonical bytes with both fixtures, and recompute all
+digests before replay. Independent test-side reconstruction compares all 81 motif selections,
+corridor vertex arrays, shelf/riser/NOC descriptors, and raw/native-resume samples to production
+with strict numeric equality and pins ULP-sensitive vectors so arithmetic reassociation fails. Thus
+the world and tool consume identical envelope values while independently implementing corridor
+construction, physics, assist, gimbal, and collision. Intentional regeneration writes to a temporary
+path, uses `--verify` against the checked fixture, reviews any mismatch, then atomically updates
+tool version/recipes, the derived fixture, production route/failure literals, all four digests, and
+their independent expected tests. The geometry fixture changes only if its reviewed template inputs
+change deliberately; never weaken clearance knots or proof bounds merely to make a recipe pass.
+Ordinary tests only verify checked data and never regenerate expectations. `website/README.md` will
+permanently teach this workflow. Neither fixture nor tool enters the 12-file artifact.
 
 Catalog tests replay every literal from an upright origin with `fuel=demonstratedMinimum`, using the
 exact production fixed-step gimbal/assist physics and translated shelf corridor. Each must land at
@@ -926,11 +964,25 @@ The last two values are the exact pointer-only result; they are not a second eng
 Section 8.2 arbitrates the pointer intent with the keyboard intent before producing the sole raw
 engine pair.
 
-A release within 180 ms and 10 CSS pixels retains a minimum 140 ms equal-thrust pulse. Pointer up,
-cancel, lost capture, stall discard, contact, blur, hide, exit, restart, and destroy use one
-idempotent teardown. `touch-action:none` applies only to the active flying shell. Elsewhere,
-scrolling, zoom, text selection, and links retain browser behavior. Flight input is ignored during
-service, launch, crash, and failure.
+Every accepted pointer down receives a monotonically increasing token distinct from its browser
+`pointerId`; reuse of a browser ID can never identify a later gesture as an earlier one. A release
+within 180 ms and 10 CSS pixels retains equal thrust until
+`pulseDeadline=pointerDownTimestamp+140 ms`. An eligible `pointerup` first records the completed
+pointer token and deadline in the physical snapshot, schedules a token-checked timeout for any
+remaining interval, records a capture-release association `{pointerId,token}`, and only then calls
+`releasePointerCapture`. A lost-capture event resolves its token through that association, never by
+matching a reusable `pointerId` alone.
+
+The browser may synchronously dispatch `lostpointercapture` from that release. If its released token
+equals the completed token and the deadline remains in the future, the handler clears capture-only
+bookkeeping but deliberately leaves the retained pulse, completed token, deadline, timer, and queued
+physical input intact. The timeout verifies the same completed token and deadline, enqueues the one
+pulse-end edge, and clears them. If the 140 ms minimum has already elapsed at pointerup, completion
+is immediate. `pointercancel`, a lost capture before eligible completion or for an unrelated token,
+stall discard, contact, blur, hide, exit, restart, and destroy invalidate both active and completed
+tokens and use the same idempotent full teardown. A resulting second event is a no-op. Flight input
+is ignored during service, launch, crash, and failure. `touch-action:none` applies only to the
+active flying shell; elsewhere, scrolling, zoom, text selection, and links retain browser behavior.
 
 `destroy()` cancels the frame, listeners, media-query listener, capture, pulse timer, active ARIA,
 status, and thrust; it hides and disables dead actions while leaving static recovery markup intact.
@@ -1016,49 +1068,54 @@ debris nodes, and enters the same final failed state in the contact task.
 Numerical physics tests use tolerance `1e-10`; strings, integers, states, seed values, DOM order,
 and serialized world descriptors are exact. Every schedule includes an explicit final callback.
 
-| Vector                | Input                                                                  | Expected result                                                                                              |
-| --------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Gravity, 120 steps    | `(10,30,0,0)`, zero angle/engines, fuel 30                             | `x=10`, `y=28.4875`, `vx=0`, `vy=-3`, fuel `30`                                                              |
-| Collective, 120 steps | Same pose, engines `(0.72,0.72)`                                       | `y=35.0215`, `vy=9.96`, angle/x unchanged, fuel `28.56`                                                      |
-| Turn-only vector      | One step from same pose, raw engines `(0,0.375)`, `s=-1`               | `ax=-1.04293235601545`, `ay=0.209815742496143`, `omega=-0.25`, angle `-0.00208333333333`, fuel `29.996875`   |
-| Combined turn vector  | One step from same pose, raw engines `(0.4125,0.7875)`, `s=-1`         | `ax=-3.33738353924943`, `ay=7.27141037598766`, `omega=-0.25`, angle `-0.00208333333333`, fuel `29.99`        |
-| Angular assist        | One step, angle `0`, omega `15`, raw engines `(0.72,0.72)`             | engines `(0.66,0.78)`, `s=0`, omega `14.92`, angle `0.124333333333`, fuel `29.988`; total thrust unchanged   |
-| Vacuum coast          | One step, angle `0`, omega `15`, zero engines                          | omega remains `15`, angle `0.125`, `vy=-0.025`; no translational or angular damping                          |
-| Exhaustion            | Fuel `0.005`, one step, engines `(1,1)`                                | Effective engines `(0.3,0.3)`, fuel exactly `0`                                                              |
-| Pointer vectors       | Rightward normalized drag `m=0,0.5,1`                                  | `(.72,.72)`, `(.75375,.56625)`, `(.7875,.4125)`; leftward values mirror exactly                              |
-| Mixed input ceiling   | Keyboard collective plus pointer full right                            | pointer owns `s=1`; engines `(.7875,.4125)`, total `1.2`, never component-combined                           |
-| Keyboard steer owner  | Keyboard left plus pointer full right                                  | keyboard owns `s=-1`; engines `(.4125,.7875)`, total `1.2`                                                   |
-| Canceled steer owner  | Both keyboard steers plus pointer half right                           | keyboard cancels; pointer owns `s=.5`; engines `(.75375,.56625)`, total `1.32`                               |
-| Empty-fuel direction  | Fuel `0`, raw engines `(.7875,.4125)`, retained physics `s=1`          | effective engines `(0,0)` and stored/rendered `commanded.vectorAngle=0`                                      |
-| Plumes                | `u=0,0.5,1`                                                            | scales `0.08,0.54,1`; opacities `0.25,0.625,1`                                                               |
-| First site            | Any normalized seed                                                    | ID `0`, center `36`, width `9.6`, shelf `[31.2,49.8]`, top=`shelf-span native maximum+0.8`, NOC bottom=shelf |
-| Pad parity            | Static and dynamic site with platform top `p`                          | shelf `p-0.8`; deck underside `p-0.35`; one solid riser polygon spans full width and exact `.45 m` interval  |
-| Ratio                 | Start at `3`; apply `nextAwardRatio` successively                      | `3`, `2.64`, `2.3448`, then strict decrease to constant `1+Number.EPSILON`; O(1) per call                    |
-| Safe inclusive edge   | Target top; `vx=1.6,vy=-2.5,angle=-10,omega=15`                        | safe contact                                                                                                 |
-| Unsafe epsilon        | Any one safe magnitude increased by `1e-9`                             | unsafe contact                                                                                               |
-| Swept unsafe equality | Hull only grazes a terrain/riser/mast edge between step endpoints      | closed 0.02 m expansion detects it; no visual tunneling                                                      |
-| Target-top separation | Safe descent over deck center; then a separate exact tangential graze  | descent uses true top crossing and can be safe; unresolved graze is unsafe                                   |
-| Frame equivalence     | Initial approach, no input, callbacks to 1,000 ms at 30, 60, and 120Hz | 120 steps; `x=30.8`, `y=30.0875`, `vx=0.8`, `vy=-3.4`, fuel `30`                                             |
-| Checkpoint replay     | Award, launch, crash, RESTART twice                                    | identical post-award fuel/site flags/next ratio; no can, award, ratio, or progress duplication               |
-| Catalog quantum       | Every checked-in reference template                                    | allowance `minimum` matches literal safe contact; `minimum-0.05` matches literal failure                     |
-| Input overflow        | 65 alternating edges before one step at 30, 60, and 120 Hz             | queue becomes one next-step physical-state snapshot; all frame schedules produce the same result             |
-| Long run              | 100 successful deterministic sites                                     | fixed work per ratio advance; bounded nodes/edges; reserve equals initial plus awards minus all burn         |
+| Vector                | Input                                                                      | Expected result                                                                                               |
+| --------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Gravity, 120 steps    | `(10,30,0,0)`, zero angle/engines, fuel 30                                 | `x=10`, `y=28.4875`, `vx=0`, `vy=-3`, fuel `30`                                                               |
+| Collective, 120 steps | Same pose, engines `(0.72,0.72)`                                           | `y=35.0215`, `vy=9.96`, angle/x unchanged, fuel `28.56`                                                       |
+| Turn-only vector      | One step from same pose, raw engines `(0,0.375)`, `s=-1`                   | `ax=-1.04293235601545`, `ay=0.209815742496143`, `omega=-0.25`, angle `-0.00208333333333`, fuel `29.996875`    |
+| Combined turn vector  | One step from same pose, raw engines `(0.4125,0.7875)`, `s=-1`             | `ax=-3.33738353924943`, `ay=7.27141037598766`, `omega=-0.25`, angle `-0.00208333333333`, fuel `29.99`         |
+| Angular assist        | One step, angle `0`, omega `15`, raw engines `(0.72,0.72)`                 | engines `(0.66,0.78)`, `s=0`, omega `14.92`, angle `0.124333333333`, fuel `29.988`; total thrust unchanged    |
+| Vacuum coast          | One step, angle `0`, omega `15`, zero engines                              | omega remains `15`, angle `0.125`, `vy=-0.025`; no translational or angular damping                           |
+| Exhaustion            | Fuel `0.005`, one step, engines `(1,1)`                                    | Effective engines `(0.3,0.3)`, fuel exactly `0`                                                               |
+| Pointer vectors       | Rightward normalized drag `m=0,0.5,1`                                      | `(.72,.72)`, `(.75375,.56625)`, `(.7875,.4125)`; leftward values mirror exactly                               |
+| Mixed input ceiling   | Keyboard collective plus pointer full right                                | pointer owns `s=1`; engines `(.7875,.4125)`, total `1.2`, never component-combined                            |
+| Keyboard steer owner  | Keyboard left plus pointer full right                                      | keyboard owns `s=-1`; engines `(.4125,.7875)`, total `1.2`                                                    |
+| Canceled steer owner  | Both keyboard steers plus pointer half right                               | keyboard cancels; pointer owns `s=.5`; engines `(.75375,.56625)`, total `1.32`                                |
+| Empty-fuel direction  | Fuel `0`, raw engines `(.7875,.4125)`, retained physics `s=1`              | effective engines `(0,0)` and stored/rendered `commanded.vectorAngle=0`                                       |
+| Plumes                | `u=0,0.5,1`                                                                | scales `0.08,0.54,1`; opacities `0.25,0.625,1`                                                                |
+| First site            | Any normalized seed                                                        | ID `0`, center `36`, width `9.6`, shelf `[31.2,49.8]`, top=`shelf-span native maximum+0.8`, NOC bottom=shelf  |
+| Pad parity            | Static and dynamic site with platform top `p`                              | shelf `p-0.8`; deck underside `p-0.35`; one solid riser polygon spans full width and exact `.45 m` interval   |
+| Ratio                 | Start at `3`; apply `nextAwardRatio` successively                          | `3`, `2.64`, `2.3448`, then strict decrease to constant `1+Number.EPSILON`; O(1) per call                     |
+| Safe inclusive edge   | Target top; `vx=1.6,vy=-2.5,angle=-10,omega=15`                            | safe contact                                                                                                  |
+| Unsafe epsilon        | Any one safe magnitude increased by `1e-9`                                 | unsafe contact                                                                                                |
+| Swept unsafe equality | Hull only grazes a terrain/riser/mast edge between step endpoints          | closed 0.02 m expansion detects it; no visual tunneling                                                       |
+| Target-top separation | Safe descent over deck center; then a separate exact tangential graze      | descent uses true top crossing and can be safe; unresolved graze is unsafe                                    |
+| Frame equivalence     | Initial approach, no input, callbacks to 1,000 ms at 30, 60, and 120Hz     | 120 steps; `x=30.8`, `y=30.0875`, `vx=0.8`, `vy=-3.4`, fuel `30`                                              |
+| Checkpoint replay     | Award, launch, crash, RESTART twice                                        | identical post-award fuel/site flags/next ratio; no can, award, ratio, or progress duplication                |
+| Catalog quantum       | Every checked-in reference template                                        | allowance `minimum` matches literal safe contact; `minimum-0.05` matches literal failure                      |
+| Short-tap capture     | Down at `0`, eligible up at `20`; release synchronously emits lost capture | token/deadline exist before release; pulse remains through `139.999`, ends once at `140`; later loss is no-op |
+| Input overflow        | 65 alternating edges before one step at 30, 60, and 120 Hz                 | queue becomes one next-step physical-state snapshot; all frame schedules produce the same result              |
+| Long run              | 100 successful deterministic sites                                         | fixed work per ratio advance; bounded nodes/edges; reserve equals initial plus awards minus all burn          |
 
 World tests pin complete JSON descriptors and route-proof digests for seeds `1`, `0x12345678`, and
-`0xffffffff`. The independent world fixtures begin with these exact values:
+`0xffffffff`, plus an independently authored static-scene vector. The fixtures begin with these
+exact values; traversal is `offset,direction; motifIndex(q=0..3)`:
 
-| Seed         | `mixUint32(seed)` | Chunk 0 heights                                                                             | Site 0 top          | Leg-1 template preference     |
-| ------------ | ----------------- | ------------------------------------------------------------------------------------------- | ------------------- | ----------------------------- |
-| `1`          | `1753845952`      | `3.948548639542,1.255567677598,4.862586715654,1.269605753710,3.876624791767,2.483643829823` | `4.676624791766517` | `102,87,99,84,96,81,93,78,90` |
-| `0x12345678` | `4125564054`      | `2.841359424172,5.434273882094,1.727188340016,5.220102797938,2.513017255859,3.805931713781` | `5.695252532888204` | `99,84,96,81,93,78,90,102,87` |
-| `0xffffffff` | `1734902346`      | `2.963124414906,0.500000000000,4.264027966233,0.864479741897,3.664931517560,2.465383293224` | `4.464931517560035` | `87,99,84,96,81,93,78,90,102` |
+| Seed                | `mixUint32(seed)` | Traversal      | Chunk 0 heights                                                                                                  | Site 0 top           | Leg-1 template preference     |
+| ------------------- | ----------------- | -------------- | ---------------------------------------------------------------------------------------------------------------- | -------------------- | ----------------------------- |
+| `1`                 | `1753845952`      | `0,1; 0,1,2,3` | `3.948548639542423,6.055567677598447,1.8625867156544702,4.869605753710493,1.6766247917665167,2.4836438298225403` | `5.286448038277216`  | `102,87,99,84,96,81,93,78,90` |
+| `0x12345678`        | `4125564054`      | `2,3; 2,1,0,3` | `2.8413594241719693,3.9342738820938394,5.72718834001571,4.02010279793758,1.7130172558594494,3.8059317137813196`  | `4.564073424622881`  | `99,84,96,81,93,78,90,102,87` |
+| `0xffffffff`        | `1734902346`      | `1,1; 1,2,3,0` | `2.9631244149059057,0.763576190569438,1.9640279662329705,4.864479741896503,3.564931517560035,2.4653832932235673` | `5.5085339549761265` | `87,99,84,96,81,93,78,90,102` |
+| `STATIC_WORLD_SEED` | `1076842847`      | `3,1; 3,0,1,2` | `4.29865836398676,3.1665419081225994,6.134425452258438,7.5,4.870192540530115,5.638076084665954`                  | `7.984423104863613`  | `78,90,102,87,99,84,96,81,93` |
 
-The static scene seed's site-0 top is exactly `7.386455021690577`. The implementation commit also
-records literal template schedules, success/failure vectors, envelopes, instantiated-site
-descriptors, and proof digests from section 10's independent derivation; tests must not generate
-expected values by calling the function under test. For each seed, tests cover at least three sites,
-terrain diversity, preference and eligibility order, guaranteed zero-delta selection, contact-time
-offscreen placement, both proof replays, exact award, and rolling-window eviction.
+The static row is the exact no-JavaScript site-0 descriptor for `0x41475731`; it is not an extra
+seed in the 81 derived descriptors. The implementation commit also records literal template
+schedules, success/failure vectors, envelopes, instantiated-site descriptors, and proof digests from
+section 10's independent derivation; tests must not generate expected values by calling the function
+under test. For each pinned derived seed, tests cover at least three sites, the exact motif bank and
+traversal across positive and negative chunks, terrain diversity, preference and eligibility order,
+guaranteed zero-delta selection, contact-time offscreen placement, both proof replays, exact award,
+and rolling-window eviction.
 
 ## 15. Verification matrix
 
@@ -1084,34 +1141,38 @@ static/lander-model.js
 static/lander-game.js
 ```
 
-| Layer                                                                   | Required coverage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `node --test website/tests/lander-world.test.mjs`                       | Mixer/seeds; exact `10 m` samples, `50 m` shared chunk boundaries, boundary/motif/clamp vectors and diversity; every shelf/corridor pseudocode branch, global index, cap equality, relief, complete target replacement, both native blends and deduplication; zero-delta eligibility; exact geometry digest; static/dynamic shelf, riser, NOC foundation, can, window, retention, offscreen, and immutability                                                                                                               |
-| `node --test website/tests/lander-model.test.mjs`                       | State/events; 9.0/80 physics, all digital/pointer rows, mixed-source steer ownership and axial ceiling, true gimbal force/sign, zero-effective vector reset, neutral-collective assist, total/fuel preservation, manual override and undamped coast; carry/scheduler/overflow; closed-margin riser/terrain/NOC equality/tangency, unchanged precedence, exact top safe crossing and grazing failure, inclusive limits and `+1e-9`; v2 catalog/digests, two replays, ratio/checkpoint/generation error/launch/debris/ordinal |
-| Derivation CLI fixture verification                                     | Run section 10.2's command to a temporary output with `--verify website/tests/fixtures/lander-route-derived-v2.json`; exact v2 deriver/recipe/schema, per-template counts in `[2,2,000,000]`, all nine regenerated minima/success/failure literals, all 81 strict world descriptors/digests, deterministic bytes, finite-exhaustion failure and nonzero mismatch/usage exits; import closure proves independence                                                                                                            |
-| `python -m unittest discover -s website/tests -p 'test_*.py'`           | Exact 12-file artifacts at both bases, excluding tools/fixtures; focused validation helper; local module closure; byte-equivalent static/dynamic shelf/riser and vertical battery subtree; transactional-init structure and hidden/disabled static Start; fuel/actions; local SVG/CSS; forbidden network, storage, audio, canvas, service-worker, navigation, cookie, and uncontrolled randomness                                                                                                                           |
-| Manual Chrome and Edge pre-merge; Firefox and Safari/WebKit post-launch | Start/focus; injected initialization failures restore exact static DOM; Space/arrows/vi/touch, simultaneous keyboard/pointer ownership and axial ceiling, pointer vector direction, gimbaled plumes, idle/exhausted vector reset, and visible assist; three sites across coarse rising/falling terrain; no pale pad aperture; flat pad/NOC shelves; bottom-to-top colored power stages; can/arrow/carry/empty fuel; relaxed boundary landings and over-bound crashes; checkpoint/Exit/hidden pause; zero game requests      |
-| Manual responsive and accessibility acceptance                          | 320 CSS pixels, 400 percent zoom, touch landscape, and wide viewport; no overflow or clipped actions; 44-pixel targets; logical focus; no trap; useful no-CSS/no-JS order; named fuel value; restrained live announcements; solid direction cue; static reduced-motion cue; silent decorative SVG; fixed-token 4.5:1 text and 3:1 necessary-graphic contrast                                                                                                                                                                |
-| Performance and longevity witness                                       | 100-site deterministic run; no more than five terrain paths, three sites, eight fragments, or 80 world descendants; direct selection/shelf-corridor/exactly-two-replay timing recorded; hidden tab has no frame or mission progress; normal active frame p95 below 4 ms; teardown leaves no listener, timer, capture, frame, enabled dead action, or growing retained history                                                                                                                                               |
-| Permanent documentation and repository gates                            | `website/README.md` teaches the tuned controls/physics and v2 intentional-regeneration workflow; browser checklist pins the visual/input/vacuum witnesses; file lint, locked-SDD, Rulesync drift, diff check, and module-size report pass without linking permanent docs back to this SDD                                                                                                                                                                                                                                   |
+| Layer                                                                   | Required coverage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `node --test website/tests/lander-world.test.mjs`                       | Mixer/seeds; exact `10 m` samples and `50 m` shared chunk boundaries; all four motif literals, pinned offset/direction vectors, positive and negative chunk traversal, and four distinct indexes in every four-chunk witness; boundary/motif/clamp diversity; every shelf/corridor pseudocode branch, global index, cap equality, relief, complete target replacement, both native blends and deduplication; site-0 band and zero-delta guarantees; exact geometry digest; static/dynamic shelf, riser, NOC foundation, can, window, retention, offscreen, and immutability                                                  |
+| `node --test website/tests/lander-model.test.mjs`                       | State/events; executable synchronous release/lost-capture short-tap token witness and unrelated-loss teardown; 9.0/80 physics, all digital/pointer rows, mixed-source steer ownership and axial ceiling, true gimbal force/sign, zero-effective vector reset, neutral-collective assist, total/fuel preservation, manual override and undamped coast; carry/scheduler/overflow; closed-margin riser/terrain/NOC equality/tangency, unchanged precedence, exact top safe crossing and grazing failure, inclusive limits and `+1e-9`; v2 catalog/digests, two replays, ratio/checkpoint/generation error/launch/debris/ordinal |
+| Derivation CLI fixture verification                                     | Run section 10.2's command to a temporary output with `--verify website/tests/fixtures/lander-route-derived-v2.json`; exact v2 deriver/recipe/schema; per-template counts in `[2,2,000,000]`; all nine regenerated minima/success/failure literals; all 81 strict world descriptors/digests in exact template, seed `[1,0x12345678,0xffffffff]`, translation `[(36,3.5),(117,5),(-42,6.5)]` nesting; deterministic bytes; finite-exhaustion failure and nonzero mismatch/usage exits; import closure proves independence                                                                                                     |
+| `python -m unittest discover -s website/tests -p 'test_*.py'`           | Exact 12-file artifacts at both bases, excluding tools/fixtures; focused validation helper; exact game-to-model/world, model-to-world, world-to-none module DAG; byte-equivalent static/dynamic shelf/riser and vertical battery subtree; transactional-init structure and hidden/disabled static Start; fuel/actions; local SVG/CSS; forbidden network, storage, audio, canvas, service-worker, navigation, cookie, and uncontrolled randomness                                                                                                                                                                             |
+| Manual Chrome and Edge pre-merge; Firefox and Safari/WebKit post-launch | Start/focus; injected initialization failures restore exact static DOM; Space/arrows/vi/touch, a short tap surviving automatic lost capture through its deadline, simultaneous keyboard/pointer ownership and axial ceiling, pointer vector direction, gimbaled plumes, idle/exhausted vector reset, and visible assist; three sites across four different coarse terrain motifs; no pale pad aperture; flat pad/NOC shelves; bottom-to-top colored power stages; can/arrow/carry/empty fuel; relaxed boundary landings and over-bound crashes; checkpoint/Exit/hidden pause; zero game requests                             |
+| Manual responsive and accessibility acceptance                          | 320 CSS pixels, 400 percent zoom, touch landscape, and wide viewport; no overflow or clipped actions; 44-pixel targets; logical focus; no trap; useful no-CSS/no-JS order; named fuel value; restrained live announcements; solid direction cue; static reduced-motion cue; silent decorative SVG; fixed-token 4.5:1 text and 3:1 necessary-graphic contrast                                                                                                                                                                                                                                                                 |
+| Performance and longevity witness                                       | 100-site deterministic run; no more than five terrain paths, three sites, eight fragments, or 80 world descendants; direct selection/shelf-corridor/exactly-two-replay timing recorded; hidden tab has no frame or mission progress; normal active frame p95 below 4 ms; teardown leaves no listener, timer, capture, frame, enabled dead action, or growing retained history                                                                                                                                                                                                                                                |
+| Permanent documentation and repository gates                            | `website/README.md` teaches the tuned controls/physics and v2 intentional-regeneration workflow; browser checklist pins the visual/input/vacuum witnesses; file lint, locked-SDD, Rulesync drift, diff check, and module-size report pass without linking permanent docs back to this SDD                                                                                                                                                                                                                                                                                                                                    |
 
 Mutation tests reject duplicated/moved shared markup, a second scheduler/controller/site authority,
 game checks added to the near-limit validator, artifact count drift, a sixth retained chunk,
 pad-width/elevation drift, a visual-only support fill or non-solid riser collider, an extra support
-node, `10 m`/`50 m`/boundary/motif/clamp drift, a shelf ending before or after `platformRight+9`,
+node, a production import outside the exact DAG, `10 m`/`50 m`/boundary/motif-bank/selector/clamp
+drift, a single or repeated terrain motif, a shelf ending before or after `platformRight+9`,
 native-derived NOC foundation, hidden shelf easing, fuel caps, can recollection, proof dependence on
 carried fuel, component-wise keyboard/pointer engine merging, mixed-input thrust above `1.44`,
 pointer override of a nonzero keyboard steer, canceled keyboard steer blocking an active pointer, an
-idle or exhausted nonzero `commanded.vectorAngle`, route proofs that omit launch, ratio
-recomputation from `completedSites`, any runtime planner/search/fuel scan or third proof replay, a
-catalog command outside the reachable table, passive damping, assist while coasting or steering,
-assist that changes total thrust/fuel, reversed or cosmetic-only gimbal, stale 8.4/70 integration,
-old landing limits, horizontal/reversed/mistimed battery fill, color-only battery meaning,
-production-derived expected fixtures, v1 derived output, partial route/world regeneration,
-derivation-tool imports, corridor or 81-descriptor digest drift, open or unmarginated unsafe
-collision, margin-expanded target top, partial initialization residue, retained-node growth,
-monotonic-furthest-X camera state, zero normal-motion debris, assist applied to fragments,
-animated-only direction, atmospheric crash effects, or a durable/network surface.
+idle or exhausted nonzero `commanded.vectorAngle`, recording a completed pointer token after capture
+release, clearing its live pulse on the resulting lost-capture event, ignoring unrelated lost
+capture, matching pulse completion by reusable pointer ID instead of token, an unguarded or
+duplicate pulse timeout, route proofs that omit launch, ratio recomputation from `completedSites`,
+any runtime planner/search/fuel scan or third proof replay, a catalog command outside the reachable
+table, passive damping, assist while coasting or steering, assist that changes total thrust/fuel,
+reversed or cosmetic-only gimbal, stale 8.4/70 integration, old landing limits,
+horizontal/reversed/mistimed battery fill, color-only battery meaning, production-derived expected
+fixtures, v1 derived output, partial route/world regeneration, wrong world-witness seed/translation
+nesting, derivation-tool imports, motif selection, corridor, or 81-descriptor digest drift, open or
+unmarginated unsafe collision, margin-expanded target top, partial initialization residue,
+retained-node growth, monotonic-furthest-X camera state, zero normal-motion debris, assist applied
+to fragments, animated-only direction, atmospheric crash effects, or a durable/network surface.
 
 ## 16. Traceability
 
