@@ -25,19 +25,19 @@ contract and no schema guesswork.
 
 ## Phase 1: unregistered provider foundation
 
-- [ ] Add current stable Google Compute/auth dependencies and regenerate the lock file.
-- [ ] Implement the auth union, machine catalog, `GcpGCEConfig`, size selection, and image-family
+- [x] Add current stable Google Compute/auth dependencies and regenerate the lock file.
+- [x] Implement the auth union, machine catalog, `GcpGCEConfig`, size selection, and image-family
       mapping with exact schema/default/reference tests, including omitted-versus-null outer auth.
-- [ ] Implement secret-free ambient and service-account credential builders. The explicit builder
+- [x] Implement secret-free ambient and service-account credential builders. The explicit builder
       consumes one complete JSON secret, never falls back, and does not retain or chain raw parser
       failures.
-- [ ] Implement typed Google API/operation mapping plus read-only project, zone, default-network,
+- [x] Implement typed Google API/operation mapping plus read-only project, zone, default-network,
       subnet, network-policy enforcement order, live machine shape, `debian-cloud` image, exact
       retained-name collision, priority-zero allow/deny conflict, and external-IP helpers.
-- [ ] Implement bounded instance/firewall rollback, including exact-shape reconciliation after
+- [x] Implement bounded instance/firewall rollback, including exact-shape reconciliation after
       indeterminate deny/allow inserts only after request/operation/provider-ID ownership proof,
       plus first/second-interrupt cleanup helpers with exact survivor/manual-removal tests.
-- [ ] Generalize `EphemeralTailscaleBootstrap` with the approved non-secret readiness command/label
+- [x] Generalize `EphemeralTailscaleBootstrap` with the approved non-secret readiness command/label
       while preserving Azure/AWS defaults and all stdin/non-reflection tests.
 
 **DoD:** the new package remains unregistered and therefore unshipped; its reusable provider
