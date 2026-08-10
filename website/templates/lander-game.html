@@ -9,67 +9,79 @@
         >
             <title id="lander-scene-title">Lunar deployment scene</title>
             <desc id="lander-scene-description">
-                An AGW lander hovers above a lunar surface, a marked landing zone, and a dark network operations
-                center.
+                An AGW lander hovers above a varied lunar surface, an elevated helipad with a gas can, and a dark
+                network operations center.
             </desc>
-
             <rect id="scene-sky" width="1000" height="640" />
             <path id="scene-stars" d="M90 98h2m122-31h2m235 63h2m198-48h2m173 91h2" />
-            <path id="scene-terrain" d="M0 548H1000V640H0Z" />
-            <line id="landing-zone" x1="180" y1="548" x2="420" y2="548" />
-            <g id="landing-zone-markers" aria-hidden="true">
-                <path d="M180 548v16m240-16v16" />
+            <g id="lander-world" aria-hidden="true">
+                <g id="terrain-layer">
+                    <path
+                        class="terrain-chunk"
+                        data-chunk-index="0"
+                        d="M0 509.342L40 495.556L80 513.77L120 493.985L160 508.199L200 500.413L240 515.011L280 497.609L312 504.804L408 504.804L440 524.097L480 502.791L520 519.486L560 502.18L600 506.875L640 493.828L680 512.78L720 493.733L760 508.685L800 501.638L840 489.091L880 508.544L920 489.997L960 505.45L1000 498.902L1000 648L0 648Z"
+                    />
+                </g>
+                <g id="site-layer">
+                    <g class="lander-site" data-site-id="0" data-can="present" data-power="off" data-noc-stage="0">
+                        <g class="landing-platform">
+                            <rect x="312" y="496.804" width="96" height="3.5" />
+                            <path class="helipad-mark" d="M351 498.5v-20m18 20v-20m-18 10h18" />
+                        </g>
+                        <path class="platform-supports" d="M326 500.304v8m68-8v13" />
+                        <g class="gas-can" transform="translate(390 482)">
+                            <path d="M-7 0h14v15H-7Zm4-5h7v5h-7Zm10 7h4v8H7" />
+                        </g>
+                        <g class="noc-building">
+                            <path d="M428 496.804v-72h70v72Z" />
+                            <path class="noc-entry" d="M428 479h13v18h-13Z" />
+                        </g>
+                        <g class="noc-battery">
+                            <rect x="441" y="443" width="40" height="22" rx="2" />
+                            <path class="battery-terminal" d="M481 449h5v10h-5" />
+                            <path class="battery-bar battery-bar-1" d="M446 448h5v12h-5Z" />
+                            <path class="battery-bar battery-bar-2" d="M454 448h5v12h-5Z" />
+                            <path class="battery-bar battery-bar-3" d="M462 448h5v12h-5Z" />
+                            <path class="battery-bar battery-bar-4" d="M470 448h5v12h-5Z" />
+                        </g>
+                        <g class="noc-antenna">
+                            <path class="antenna-mast" d="M463 424.804v-32" />
+                            <circle class="antenna-head" cx="463" cy="391" r="4" />
+                            <path class="antenna-signal" d="M472 387a15 15 0 0 1 0 16m8-24a26 26 0 0 1 0 32" />
+                        </g>
+                    </g>
+                </g>
+                <g id="debris-layer"></g>
+                <g id="mission-lander">
+                    <use id="mission-left-engine" href="{{SITE_BASE}}assets/agw-rocket.svg#agw-engine-left" />
+                    <use id="mission-right-engine" href="{{SITE_BASE}}assets/agw-rocket.svg#agw-engine-right" />
+                    <use id="mission-mark" href="{{SITE_BASE}}assets/agw-rocket.svg#agw-mark" />
+                    <path id="mission-bay-lip" d="M126 248h52v12h-52" />
+                </g>
+                <g id="mission-agent">
+                    <rect x="-5" y="-9" width="10" height="11" rx="1" />
+                    <path d="M-3 2v7m6-7v7M-2-5l2 2-2 2m3 0h2" />
+                </g>
             </g>
-
-            <g id="noc" aria-hidden="true">
-                <rect id="noc-west" x="540" y="506" width="50" height="42" />
-                <rect id="noc-server" x="600" y="480" width="60" height="68" />
-                <rect id="noc-east" x="670" y="500" width="50" height="48" />
-                <g id="noc-west-window">
-                    <rect x="550" y="517" width="22" height="12" />
-                    <path d="M557 517v12m8-12v12" />
-                </g>
-                <g id="noc-server-bars">
-                    <path d="M613 495h34m-34 12h34m-34 12h34" />
-                    <circle cx="617" cy="495" r="3" />
-                    <circle cx="617" cy="507" r="3" />
-                    <circle cx="617" cy="519" r="3" />
-                </g>
-                <g id="noc-east-window">
-                    <rect x="682" y="511" width="25" height="14" />
-                    <path d="M690 511v14m9-14v14" />
-                </g>
-                <g id="noc-antenna">
-                    <path d="M695 500v-32" />
-                    <circle cx="695" cy="468" r="4" />
-                </g>
-                <g id="noc-signals">
-                    <path d="M704 464a15 15 0 0 1 0 16" />
-                    <path d="M712 456a26 26 0 0 1 0 32" />
-                </g>
-                <path id="noc-entry" d="M540 537h9v11h-9Z" />
-            </g>
-
-            <g id="mission-lander" aria-hidden="true">
-                <use id="mission-left-engine" href="{{SITE_BASE}}assets/agw-rocket.svg#agw-engine-left" />
-                <use id="mission-right-engine" href="{{SITE_BASE}}assets/agw-rocket.svg#agw-engine-right" />
-                <use id="mission-mark" href="{{SITE_BASE}}assets/agw-rocket.svg#agw-mark" />
-                <path id="mission-bay-lip" d="M126 248h52v12h-52" />
-            </g>
-
-            <g id="mission-agent" aria-hidden="true">
-                <rect x="-5" y="-9" width="10" height="11" rx="1" />
-                <path d="M-3 2v7m6-7v7M-2-5l2 2-2 2m3 0h2" />
+            <g id="crash-flash" aria-hidden="true"><ellipse cx="0" cy="0" rx="16" ry="9" /></g>
+            <g id="next-site-cue" aria-hidden="true" transform="translate(932 280)">
+                <path d="M0 14h24V4l20 18-20 18V30H0Z" />
             </g>
         </svg>
-        <button id="lander-start" type="button" hidden aria-label="Start lunar deployment mission"></button>
+        <button id="lander-start" type="button" hidden disabled aria-label="Start lunar deployment mission"></button>
     </div>
+    <p id="lander-fuel" hidden>
+        <span id="lander-fuel-label">Fuel reserve</span>:
+        <output id="lander-fuel-value" aria-labelledby="lander-fuel-label">0.0</output>
+    </p>
+    <span id="lander-target-direction" class="visually-hidden" hidden>Next site is to the right.</span>
     <p id="lander-controls" hidden>
-        Thrust: Space or Up. Turn: Left/H or Right/L. Escape exits. R restarts after success or failure.
+        Thrust: Space or Up. Turn: Left/H or Right/L. Tap or hold to thrust; drag to turn. R restarts after a crash.
+        Escape exits.
     </p>
     <div id="lander-actions" hidden>
         <button id="lander-exit" type="button">Exit mission</button>
-        <button id="lander-restart" type="button" hidden>Restart mission</button>
+        <button id="lander-restart" type="button" hidden disabled>Restart mission</button>
     </div>
     <p id="lander-status" role="status" aria-live="polite" aria-atomic="true"></p>
 </section>

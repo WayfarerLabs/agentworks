@@ -17,6 +17,7 @@ if str(WEBSITE_DIR) not in sys.path:
     sys.path.insert(0, str(WEBSITE_DIR))
 
 from site_asset_validation import validate_favicon_asset  # noqa: E402
+from site_game_validation import validate_game_manifest  # noqa: E402
 from site_content import (  # noqa: E402
     CLI_SECRETS_URL,
     CONTRACTS,
@@ -90,6 +91,7 @@ FULL_MANIFEST: Final = frozenset(
         Path("security/index.html"),
         Path("static/lander-game.js"),
         Path("static/lander-model.js"),
+        Path("static/lander-world.js"),
         Path("static/lander.css"),
         Path("static/site.css"),
     }
@@ -99,6 +101,7 @@ FULL_MANIFEST: Final = frozenset(
 def _render_artifact(repo_root: Path, site_base: str) -> tuple[dict[Path, bytes], frozenset[Path]]:
     website = repo_root / "website"
     manifest = FULL_MANIFEST
+    validate_game_manifest(manifest)
     substitutions = extract_content(repo_root)
     fragment_source = _read_utf8(website / "templates" / "lander-game.html")
     lander_game = render_named_template("lander-game.html", fragment_source, site_base, {})
@@ -120,6 +123,7 @@ def _render_artifact(repo_root: Path, site_base: str) -> tuple[dict[Path, bytes]
         Path("assets/agw-rocket.svg"): website / "assets/agw-rocket.svg",
         Path("static/lander-game.js"): website / "static/lander-game.js",
         Path("static/lander-model.js"): website / "static/lander-model.js",
+        Path("static/lander-world.js"): website / "static/lander-world.js",
         Path("static/lander.css"): website / "static/lander.css",
         Path("static/site.css"): website / "static/site.css",
     }
