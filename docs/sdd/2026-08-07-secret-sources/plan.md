@@ -300,10 +300,9 @@ externally observable disclosure boundaries.
       reintroducing process-memory ownership or traceback machinery.
 - [x] Align remote Lima provision-log identity with VM deletion so a successful delete removes the
       log created for that VM.
-- [ ] Prove the mistaken path is gone with structural deny-list scans and diff review against the
+- [x] Prove the mistaken path is gone with structural deny-list scans and diff review against the
       reference, then run focused behavior tests, the full non-integration suite, static/repository
-      gates, independent review, and supported-version CI. The local scans, tests, gates, and review
-      are complete; supported-version CI remains pending on the corrected remote head.
+      gates, independent review, and supported-version CI.
 - [ ] Re-truth the prospective lock and acceptance counts. The pre-unwind live remote-Lima run
       passed with a rotated key; repeat it at the final post-unwind head and record the final
       evidence.
