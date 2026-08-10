@@ -1,6 +1,6 @@
 # HLA: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander refinement in design
+- Status: Interim implementation complete; continuous Lander implementation in review
 - Date: 2026-08-07
 - Last revised: 2026-08-10
 - FRD: `frd.md`

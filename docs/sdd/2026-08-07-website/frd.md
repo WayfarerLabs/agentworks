@@ -1,6 +1,6 @@
 # FRD: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander refinement in design
+- Status: Interim implementation complete; continuous Lander implementation in review
 - Date: 2026-08-07
 - Last revised: 2026-08-10
 - Seeded by: the saga lead, at operator request. This is a standalone effort, deliberately NOT a
@@ -18,10 +18,13 @@ notice.
 
 The operator's sizing mandate is the controlling constraint: **super simple at first**. The first
 slice is a small static site, its publishing pipeline, and one optional interactive surprise shared
-by a dedicated Lander page and the otherwise useful 404 page. It may ship in two complete stages: a
-useful public landing page while the onboarding contract is still in development, followed by the
-canonical bootstrap as soon as that contract lands. Every ambition beyond that is recorded as a
-growth path so nothing forecloses it, and none of it is in scope now.
+by a dedicated Lander page and the otherwise useful 404 page. The operator later selected the
+continuous expedition in R21-R23 as the bounded form of that surprise; it adds no product surface,
+backend, framework, persistence, telemetry, or activation dependency to PR #439. The site may ship
+in two complete stages: a useful public landing page while the onboarding contract is still in
+development, followed by the canonical bootstrap as soon as that contract lands. Every ambition
+beyond the accepted static site and continuous surprise is recorded as a growth path so nothing
+forecloses it, and none of it is in scope now.
 
 ## Requirements (first slice)
 

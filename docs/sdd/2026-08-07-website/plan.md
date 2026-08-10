@@ -1,6 +1,6 @@
 # Plan: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander refinement in design
+- Status: Interim implementation complete; continuous Lander implementation in review
 - Date: 2026-08-07
 - Last revised: 2026-08-10
 - FRD: `frd.md`
@@ -97,6 +97,15 @@ Operator evidence:
   text and bold the complete `SSH-over-Tailscale control plane` phrase on Home. Exact browser build
   strings were not supplied; the permanent checklist records that limitation and keeps the broader
   post-launch engine/device rows open.
+- 2026-08-10: the operator explicitly approves the continuous expedition as a new stacked PR after
+  reviewing its design: a continuous seeded world, varied lunar terrain, one battery-and-antenna NOC
+  beside each elevated three-lander-width pad, carried fuel and consumable cans, offscreen-next
+  cues, stronger physics, vacuum crash presentation, last-pad restart, and a decaying multiplier on
+  a demonstrated route allowance. This deliberately expands the optional first-release surprise to
+  R21-R23 without making PR #439's reviewed site merge-readiness depend on the redesign. The final
+  derivation evaluates 45 finite candidates for each of nine templates, 405 total, and runtime
+  performs only the selected template's two proof replays; it is not the earlier up-to-two-million
+  runtime-search concept questioned at the design checkpoint.
 - 2026-08-09: with operator approval, repository Pages is enabled with GitHub Actions as its source
   at the default project URL and HTTPS enforcement on. The automatically created `github-pages`
   environment uses custom deployment-branch policies and has exactly one policy, branch `main`; no
@@ -442,9 +451,9 @@ eleven files at either supported site base.
 - [x] Lead-review the LLD against R7-R9/R21-R23, D7, AC5-AC8/AC18-AC19/AC22-AC24, the shared
       Lander/404 subtree, the no-framework constraint, and the in-memory-only privacy boundary;
       resolve every requirements or architecture conflict before implementation.
-- [x] Obtain pre-implementation `agentworks-reviewer` approval of the material SDD revision through
+- [ ] Obtain pre-implementation `agentworks-reviewer` approval of the material SDD revision through
       the stacked draft PR; address every valid artifact finding and re-review before coding.
-- [ ] Delegate implementation to an `agentworks-dev` subagent with ownership of the pure world
+- [x] Delegate implementation to an `agentworks-dev` subagent with ownership of the pure world
       module, flight/mission model, controller, shared scene, Lander CSS, focused tests, browser
       checklist, builder manifest/validation, and permanent `website/README.md` updates. Isolate its
       worktree and preserve concurrent changes.

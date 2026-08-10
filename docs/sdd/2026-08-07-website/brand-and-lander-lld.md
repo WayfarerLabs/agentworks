@@ -4,7 +4,7 @@
 <!-- cspell:ignore lerp Minkowski overspeed subinterval unhashed unmarginated -->
 <!-- cspell:ignore substep unitless uint32 quantized quantization -->
 
-- Status: Continuous Lander refinement designed; implementation pending
+- Status: Continuous Lander implementation in review
 - Date: 2026-08-10
 - FRD: `frd.md`, specifically R6-R9 and R15-R23
 - HLA: `hla.md`, specifically D5 and D7
@@ -476,7 +476,7 @@ seed
 completedSites
 awardRatio = already advanced ratio for the next site's award
 generatorCursor
-pose.x = clamp(raw contact x, platformLeft + 1.6, platformRight - 1.6)
+pose.x = platform center
 pose.y = platform top
 pose.vx = pose.vy = pose.angle = pose.angularVelocity = 0
 fuel = exact post-award reserve
@@ -603,12 +603,14 @@ abs(normalizeDegrees(angle)) <= 8.0
 abs(angularVelocity) <= 12.0
 ```
 
-After classifying the raw angled contact, settle upright: clamp reference `x` to
-`[platformLeft+1.6,platformRight-1.6]`, set reference `y` to the platform top, set angle to zero,
-and set both linear velocities and angular velocity to zero. This makes both transformed feet remain
-on the closed deck span and supplies the exact later checkpoint pose. Gas-can art and antenna signal
-arcs do not collide. Contact with a consumed/powered site's platform during a later leg is unsafe;
-only the current target can complete a leg.
+After classifying the raw angled contact, settle upright at the exact platform center: set reference
+`x` to the platform center, set reference `y` to the platform top, set angle to zero, and set both
+linear velocities and angular velocity to zero. Both legal margin contacts therefore normalize to
+the same deterministic settled pose before the route proof, award, or checkpoint commits. This makes
+both transformed feet remain on the closed deck span and makes the later automatic launch use the
+pose that the route catalog actually proves. Gas-can art and antenna signal arcs do not collide.
+Contact with a consumed/powered site's platform during a later leg is unsafe; only the current
+target can complete a leg.
 
 Per-leg bounds are `x >= checkpointCenter-45`, `x <= targetCenter+65`, and `y <= 56`. Before the
 first checkpoint, use `x>=-5`. Crossing a bound is unsafe only when no earlier swept collision
@@ -704,12 +706,13 @@ fuel resolution; it makes no claim about a lower-fuel schedule or a global physi
 
 At site creation, direct selection translates the chosen literal geometry and constructs a
 provisional checkpoint identical to the future real checkpoint except for fuel and the proof being
-formed. It includes seed, upright origin pose, completed count, next award ratio, generator cursor,
-site IDs, retained descriptors, collected current can, and powered current NOC. For each of exactly
-two defensive replays, replace only fuel: first with the literal demonstrated minimum, then with one
-quantum less. Neither replay reads carried reserve or award ratio. The first must reproduce success
-and the second its checked-in failure. Any mismatch takes the defensive `generation-error` path;
-there is no runtime search, optimization, descent, retry, or alternate-template loop.
+formed. It includes seed, the centered upright settled origin pose, completed count, next award
+ratio, generator cursor, site IDs, retained descriptors, collected current can, and powered current
+NOC. For each of exactly two defensive replays, replace only fuel: first with the literal
+demonstrated minimum, then with one quantum less. Neither replay reads carried reserve or award
+ratio. The first must reproduce success and the second its checked-in failure. Any mismatch takes
+the defensive `generation-error` path; there is no runtime search, optimization, descent, retry, or
+alternate-template loop.
 
 ### 10.3 Demonstrated minimum and award
 
