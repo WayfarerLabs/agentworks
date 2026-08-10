@@ -90,8 +90,8 @@ Supersession is not error (operator ruling, 2026-08-10). When a scope correction
 before it ever merges, the truthful checked boxes recording that work remain in the plan: the work
 happened, and "it never shipped" does not make a done-work record false. The clean-slate standard
 applies to everything around those boxes instead (narration, correction framing, definitions of
-done, and unchecked boxes of the abandoned direction all strip), with at most a one-line note
-recording the supersession.
+done, and unchecked boxes of the abandoned direction all strip), with exactly one short note
+recording the supersession, which is what the reviewer's exception keys on.
 
 Mutability also follows ownership. An agent working an effort edits that effort's SDD artifacts and
 no other's: do not update another SDD's content (a saga SDD's ledger, a sibling effort's plan)

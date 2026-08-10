@@ -31,7 +31,8 @@ below are subagent work; the role itself is not.
 - At session start, enumerate in-flight child PRs (`gh pr list`) and check the ledger for efforts
   whose next PR is expected. Arm a background watch for each open draft flipping to ready (and for
   unexpected close or merge, so silence cannot mask a surprise). Review a PR when it goes ready
-  without waiting for the operator to ask.
+  without waiting for the operator to ask, and review a draft PR carrying the `review-requested`
+  label (a checkpoint review; remove the label when the review is delivered).
 - Re-review on the draft-to-ready transition after an effort absorbs findings (the dev-process
   skill's handoff convention); poll ready PRs' heads against the last head you reviewed as the
   missed-edge fallback. A review verdict stands until the findings are absorbed or successfully
