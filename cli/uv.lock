@@ -44,7 +44,7 @@ requires-dist = [
     { name = "azure-mgmt-resource", specifier = ">=26.0.0" },
     { name = "boto3", specifier = ">=1.43.62" },
     { name = "click", specifier = ">=8.3" },
-    { name = "google-auth", specifier = ">=2.56.0" },
+    { name = "google-auth", specifier = ">=2.56.3" },
     { name = "google-cloud-compute", specifier = ">=1.50.0" },
     { name = "pydantic", specifier = ">=2.13.4,<3" },
     { name = "pyyaml", specifier = ">=6.0.3" },

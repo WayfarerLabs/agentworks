@@ -61,14 +61,30 @@ def test_service_account_secret_null_and_omission_select_the_well_known_default(
     "blob",
     [
         {**_BASE, "project_id": ""},
+        {**_BASE, "project_id": " \t"},
         {**_BASE, "zone": ""},
+        {**_BASE, "zone": "\n "},
         {**_BASE, "subnet": ""},
+        {**_BASE, "subnet": "\u2003"},
         {**_BASE, "machine_types": []},
         {**_BASE, "auth": {"mode": "service-account", "secret": ""}},
+        {**_BASE, "auth": {"mode": "service-account", "secret": " \t"}},
         {**_BASE, "auth": {"mode": "service-account", "ambient": True}},
         {**_BASE, "auth": {"mode": "unknown"}},
     ],
-    ids=("project", "zone", "subnet", "empty-catalog", "blank-secret", "mixed-arm", "unknown-arm"),
+    ids=(
+        "empty-project",
+        "blank-project",
+        "empty-zone",
+        "blank-zone",
+        "empty-subnet",
+        "blank-subnet",
+        "empty-catalog",
+        "empty-secret",
+        "blank-secret",
+        "mixed-arm",
+        "unknown-arm",
+    ),
 )
 def test_closed_schema_rejects_invalid_or_mixed_shapes(blob: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
@@ -88,6 +104,7 @@ def test_machine_counts_are_strict_positive_integers(field: str, bad: object) ->
     "change",
     [
         {"type": ""},
+        {"type": " \t"},
         {"arch": "sparc"},
         {"extra": "nope"},
     ],
@@ -133,6 +150,17 @@ def test_selection_is_order_independent_and_satisfies_both_axes() -> None:
     assert select_machine_type(tuple(reversed(entries)), cpus=4, memory_gib=16) == expected
     assert select_machine_type(entries, cpus=5, memory_gib=16).type == "wide-cpu"
     assert select_machine_type(entries, cpus=4, memory_gib=17).type == "wide-memory"
+
+
+def test_equal_shape_selection_uses_provider_type_then_arch_as_total_tie_break() -> None:
+    entries = (
+        MachineTypeSelection(4, 16, "type-z", "x86_64"),
+        MachineTypeSelection(4, 16, "type-a", "x86_64"),
+        MachineTypeSelection(4, 16, "type-a", "arm64"),
+    )
+    expected = MachineTypeSelection(4, 16, "type-a", "arm64")
+    assert select_machine_type(entries, cpus=2, memory_gib=8) == expected
+    assert select_machine_type(tuple(reversed(entries)), cpus=2, memory_gib=8) == expected
 
 
 def test_selection_failure_is_typed_and_names_the_largest_entry() -> None:
