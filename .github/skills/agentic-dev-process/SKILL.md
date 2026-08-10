@@ -243,20 +243,22 @@ ones.
   and the system works when it merges; for a stack entry, "when it merges" means when its prefix
   lands. An incomplete solution is not a smaller version of a complete one (the
   development-principles rule); every merged PR is complete and honest on its own terms.
-- **PR stack: a sequence of increments that together make up a full feature.** GitHub's native
-  stacked pull requests are the vehicle where available: each entry targets its parent's branch,
-  which materializes the stack (the GraphQL `PullRequestStack` type exposes membership; the gh CLI
-  has no stack verbs yet, so create entries by branch targeting and read stacks via the API). Devs
-  plow forward on later entries while reviewers take earlier ones in bite-sized units, each with its
-  own handoffs. **The cascade rule**: a substantial change to entry N obligates the author to flip
-  entries N+1 onward to draft until each is rebased and re-handed-off; the stack makes "everything
-  downstream, and only that, needs reconsideration" a mechanical signal instead of a judgment call.
-  Keep stacks to roughly two to five entries: deeper stacks usually mean increments too thin to be
-  honest working systems, and rebase churn grows with depth. Merge bottom-up. Stacks are single-repo
-  by construction; in a poly-repo environment (not this repo today) the analog is coordinated
-  non-stacked PRs with cross-references and an agreed landing order. This practice is affordable
-  because CI checks are fast (about two minutes); protect that economy, because per-entry CI is the
-  price of the layering.
+- **PR stack: a sequence of increments that together make up a full feature.** Agents build stacks
+  as branch-targeted PR chains: each entry's PR targets its parent's branch, and GitHub retargets
+  the children when a parent merges and its branch is deleted. GitHub's native stacked-PR objects
+  (the GraphQL `PullRequestStack` type) are read-only today, verified empirically 2026-08-10: no
+  mutation, no gh verb, and branch targeting alone does not materialize them, so native stacks are
+  created only in the web UI for now. The chain form delivers the full layering regardless; adopt
+  the native objects when API or CLI write support arrives. Devs plow forward on later entries while
+  reviewers take earlier ones in bite-sized units, each with its own handoffs. **The cascade rule**:
+  a substantial change to entry N obligates the author to flip entries N+1 onward to draft until
+  each is rebased and re-handed-off; the stack makes "everything downstream, and only that, needs
+  reconsideration" a mechanical signal instead of a judgment call. Keep stacks to roughly two to
+  five entries: deeper stacks usually mean increments too thin to be honest working systems, and
+  rebase churn grows with depth. Merge bottom-up. Stacks are single-repo by construction; in a
+  poly-repo environment (not this repo today) the analog is coordinated non-stacked PRs with
+  cross-references and an agreed landing order. This practice is affordable because CI checks are
+  fast (about two minutes); protect that economy, because per-entry CI is the price of the layering.
 
 ## 7. Get a fresh-eyes pass: Copilot if available, else a generic review here
 
