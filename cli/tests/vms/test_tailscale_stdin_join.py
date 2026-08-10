@@ -36,14 +36,15 @@ class _RecordingTransport:
 class _ReadinessTransport:
     logger = None
 
-    def __init__(self, *, fail_command: str) -> None:
+    def __init__(self, *, fail_command: str, failure: BaseException | None = None) -> None:
         self.fail_command = fail_command
+        self.failure = failure if failure is not None else SSHError(f"safe failure for {fail_command}")
         self.calls: list[tuple[str, dict[str, object]]] = []
 
     def run(self, command: str, **kwargs: object) -> SSHResult:
         self.calls.append((command, kwargs))
         if command == self.fail_command:
-            raise SSHError(f"safe failure for {command}")
+            raise self.failure
         return SSHResult(returncode=0, stdout="", stderr="")
 
 
@@ -118,4 +119,29 @@ def test_cloud_init_wait_failure_raises_typed_without_delivering_key() -> None:
     ]
     assert all("input_text" not in kwargs for _command, kwargs in target.calls)
     assert _SENTINEL not in repr(caught.value)
+    assert _SENTINEL not in repr(target.calls)
+
+
+@pytest.mark.parametrize(
+    ("failure_command", "expected_commands"),
+    [
+        ("echo ok", ["echo ok"]),
+        ("cloud-init status --wait", ["echo ok", "cloud-init status --wait"]),
+    ],
+    ids=("ssh-readiness", "cloud-init-wait"),
+)
+def test_readiness_interrupt_preserves_identity_without_delivering_key(
+    failure_command: str,
+    expected_commands: list[str],
+) -> None:
+    interrupt = KeyboardInterrupt(f"interrupted during {failure_command}")
+    target = _ReadinessTransport(fail_command=failure_command, failure=interrupt)
+
+    with pytest.raises(KeyboardInterrupt) as caught:
+        EphemeralTailscaleBootstrap(target).complete(_SENTINEL)  # type: ignore[arg-type]
+
+    assert caught.value is interrupt
+    assert [command for command, _kwargs in target.calls] == expected_commands
+    assert all("input_text" not in kwargs for _command, kwargs in target.calls)
+    assert not any("agentworks-bootstrap" in command for command, _kwargs in target.calls)
     assert _SENTINEL not in repr(target.calls)

@@ -29,6 +29,7 @@ import base64
 import time
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -39,6 +40,7 @@ from agentworks.plugins.azure.network import AzureError
 from agentworks.plugins.azure.platform import AzureVMPlatform
 from agentworks.ssh import SSHError
 from agentworks.transports import SSHTransport
+from agentworks.vms.initializer import driver as initializer_driver
 from tests._azure_platform_support import _install_fakes
 
 if TYPE_CHECKING:
@@ -109,22 +111,52 @@ def _interrupt_the_wait(monkeypatch: pytest.MonkeyPatch) -> KeyboardInterrupt:
 
 
 class TestInterruptDuringInlineWait:
+    @pytest.mark.parametrize(
+        ("failure_command", "expected_commands"),
+        [
+            ("echo ok", ["echo ok"]),
+            ("cloud-init status --wait", ["echo ok", "cloud-init status --wait"]),
+        ],
+        ids=("ssh-readiness", "cloud-init-wait"),
+    )
     def test_rolls_back_the_full_resource_set_and_reraises(
-        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        captured_output: CapturedOutput,
+        failure_command: str,
+        expected_commands: list[str],
     ) -> None:
-        """The issue's scenario: every resource exists when the wait is
-        interrupted, so the rollback deletes the VM first (it holds the
-        NIC and disk) and then the name-based set, and the interrupt
-        propagates for the caller's row unwind."""
+        """A real readiness-command interrupt rolls back the full resource
+        set before fixed-stdin delivery or Phase A fallback can run."""
         fakes = _install_fakes(monkeypatch, vm_exists_lookup=False)
         # A managed OS disk with the owner tag, as Azure names them.
         fakes.compute.disks.disks = [SimpleNamespace(name="vm1_OsDisk_1", tags={"owner": "agentworks"})]
-        interrupt = _interrupt_the_wait(monkeypatch)
+        interrupt = KeyboardInterrupt(f"interrupted during {failure_command}")
+        calls: list[tuple[str, dict[str, object]]] = []
+
+        def _interrupt_readiness(self: SSHTransport, command: str, **kwargs: object) -> object:
+            calls.append((command, kwargs))
+            if command == failure_command:
+                raise interrupt
+            return SimpleNamespace(stdout="", returncode=0)
+
+        monkeypatch.setattr(SSHTransport, "run", _interrupt_readiness)
+        fallback = MagicMock(side_effect=AssertionError("Phase A fallback reached"))
+        monkeypatch.setattr(initializer_driver, "_run_bootstrap_script", fallback)
 
         with pytest.raises(KeyboardInterrupt) as exc:
             _platform().create(_request(tailscale=True), RunContext())
 
         assert exc.value is interrupt
+        assert [command for command, _kwargs in calls] == expected_commands
+        assert all("input_text" not in kwargs for _command, kwargs in calls)
+        assert not any("agentworks-bootstrap" in command for command, _kwargs in calls)
+        fallback.assert_not_called()
+        vm = fakes.compute.virtual_machines.created[0][2]
+        retained_cloud_init = base64.b64decode(vm.os_profile.custom_data).decode()
+        assert _SENTINEL not in retained_cloud_init
+        assert _SENTINEL not in repr(calls)
+        assert _SENTINEL not in repr(captured_output.lines)
         assert fakes.compute.virtual_machines.deleted == [("rg1", "vm1")]
         assert fakes.network.network_interfaces.deleted == [("rg1", "vm1-nic")]
         assert fakes.network.public_ip_addresses.deleted == [("rg1", "vm1-ip")]
