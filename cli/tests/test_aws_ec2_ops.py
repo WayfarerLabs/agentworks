@@ -441,18 +441,33 @@ class TestCreateRollback:
         assert rec.kwargs_for("terminate_instances") == {"InstanceIds": ["i-123"]}
         assert rec.kwargs_for("delete_security_group") == {"GroupId": "sg-123"}
 
+    @pytest.mark.parametrize(
+        ("failure_command", "expected_commands"),
+        [
+            ("echo ok", ["echo ok"]),
+            ("cloud-init status --wait", ["echo ok", "cloud-init status --wait"]),
+        ],
+        ids=("ssh-readiness", "cloud-init-wait"),
+    )
     def test_second_interrupt_abandons_cleanup_loudly(
-        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        captured_output: CapturedOutput,
+        failure_command: str,
+        expected_commands: list[str],
     ) -> None:
         """A second Ctrl-C during the rollback abandons it (naming the region
         and tag for manual cleanup) instead of wedging; the ORIGINAL interrupt
         still propagates."""
         install_fakes(monkeypatch)
-        interrupt = KeyboardInterrupt("first")
+        interrupt = KeyboardInterrupt(f"interrupted during {failure_command}")
+        calls: list[tuple[str, dict[str, object]]] = []
 
         def _interrupt_readiness(self: SSHTransport, command: str, **kwargs: object) -> object:
-            del self, command, kwargs
-            raise interrupt
+            calls.append((command, kwargs))
+            if command == failure_command:
+                raise interrupt
+            return SimpleNamespace(stdout="", returncode=0)
 
         cleanup_calls: list[dict[str, object]] = []
 
@@ -466,6 +481,8 @@ class TestCreateRollback:
         with pytest.raises(KeyboardInterrupt) as caught:
             _platform().create(_request(tailscale="tskey-abc"), RunContext(config=_config()))
         assert caught.value is interrupt
+        assert [command for command, _kwargs in calls] == expected_commands
+        assert all("input_text" not in kwargs for _command, kwargs in calls)
         assert cleanup_calls == [{"InstanceIds": ["i-123"]}]
         abandoned = [warning for warning in captured_output.warnings if "Cleanup abandoned" in warning]
         assert abandoned == [

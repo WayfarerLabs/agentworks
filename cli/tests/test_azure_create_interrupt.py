@@ -171,27 +171,50 @@ class TestInterruptDuringInlineWait:
         assert set(kinds[1:]) == {"nic", "ip", "nsg", "vnet", "disk"}
         assert any("Ctrl-C again to abandon" in w for w in captured_output.warnings)
 
+    @pytest.mark.parametrize(
+        ("failure_command", "expected_commands"),
+        [
+            ("echo ok", ["echo ok"]),
+            ("cloud-init status --wait", ["echo ok", "cloud-init status --wait"]),
+        ],
+        ids=("ssh-readiness", "cloud-init-wait"),
+    )
     def test_second_interrupt_abandons_cleanup_loudly(
-        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        captured_output: CapturedOutput,
+        failure_command: str,
+        expected_commands: list[str],
     ) -> None:
-        """A second Ctrl-C during the cleanup abandons it instead of
-        wedging: no further deletes are attempted, the warning names the
-        resource group and name prefix for manual cleanup, and the
-        ORIGINAL interrupt still propagates."""
+        """A readiness interrupt followed by cleanup interruption preserves
+        the first interrupt and gives exact manual-removal coordinates."""
         fakes = _install_fakes(monkeypatch, vm_exists_lookup=False)
-        interrupt = _interrupt_the_wait(monkeypatch)
+        interrupt = KeyboardInterrupt(f"interrupted during {failure_command}")
+        calls: list[tuple[str, dict[str, object]]] = []
+
+        def _interrupt_readiness(self: SSHTransport, command: str, **kwargs: object) -> object:
+            calls.append((command, kwargs))
+            if command == failure_command:
+                raise interrupt
+            return SimpleNamespace(stdout="", returncode=0)
+
+        monkeypatch.setattr(SSHTransport, "run", _interrupt_readiness)
         fakes.compute.virtual_machines.delete_error = KeyboardInterrupt("second")
 
         with pytest.raises(KeyboardInterrupt) as exc:
             _platform().create(_request(tailscale=True), RunContext())
 
         assert exc.value is interrupt
+        assert [command for command, _kwargs in calls] == expected_commands
+        assert all("input_text" not in kwargs for _command, kwargs in calls)
         # Abandoned at the first cleanup step: nothing else was touched.
         assert fakes.network.network_interfaces.deleted == []
         assert fakes.network.public_ip_addresses.deleted == []
-        (abandoned,) = [w for w in captured_output.warnings if "Cleanup abandoned" in w]
-        assert "'vm1*'" in abandoned
-        assert "resource group 'rg1'" in abandoned
+        abandoned = [warning for warning in captured_output.warnings if "Cleanup abandoned" in warning]
+        assert abandoned == [
+            "Cleanup abandoned: Azure resources named 'vm1*' may remain in resource group "
+            "'rg1'; delete them there manually."
+        ]
 
     def test_vm_delete_failure_during_rollback_warns_and_reraises(
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
