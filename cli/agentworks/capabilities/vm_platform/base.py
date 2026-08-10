@@ -15,7 +15,7 @@ from __future__ import annotations
 from abc import abstractmethod
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
 from agentworks.capabilities.base import Capability, idempotent_op
 
@@ -27,6 +27,24 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import VMRow, VMStatus
     from agentworks.transports import Transport
+
+
+class BootstrapProgress(Protocol):
+    """Value-free progress sink for create-time VM bootstrap.
+
+    Platforms can report the bootstrap transcript through this narrow surface
+    without depending on the VM manager or the concrete logger that owns the
+    durable operation log. The manager retains construction and lifecycle
+    ownership of that logger.
+    """
+
+    def step(self, name: str) -> None: ...
+
+    def output(self, text: str) -> None: ...
+
+    def warning(self, msg: str) -> None: ...
+
+    def log_error(self, msg: str) -> None: ...
 
 
 @dataclass
@@ -59,9 +77,13 @@ class ProvisionRequest:
     # Path to the operator's SSH private key, for platforms whose
     # native transport is plain SSH during create (azure, proxmox).
     ssh_private_key: Path | None
-    # None: the platform defers Tailscale bootstrap to Phase A (wsl2
-    # always; lima/azure/proxmox when no key was resolvable).
-    tailscale_auth_key: str | None
+    # Domain-owned operation input: the vm-template declares the secret name
+    # and the VM manager resolves its value before platform dispatch. This is
+    # intentionally separate from platform-config secrets delivered by ctx.
+    tailscale_auth_key: str
+    # Value-free sink for platform-owned create-time bootstrap progress. The
+    # VM manager owns its construction, redactions, and lifecycle.
+    progress: BootstrapProgress
     cpus: int
     memory_gib: int
     disk_gib: int
@@ -80,7 +102,6 @@ class ProvisionResult:
 
     native_transport: Transport
     platform_metadata: dict[str, str] = field(default_factory=dict)
-    bootstrap_complete: bool = False
     tailscale_ip: str | None = None
 
 
@@ -196,6 +217,9 @@ class VMPlatform(Capability):
           the exact backend identifier in ``platform_metadata`` so every
           later operation targets the created resource.
         - Create the resource(s).
+        - Complete create-time bootstrap, including the Tailscale join, before
+          returning. A successful join may return without an IP when discovery
+          failed; the manager retries only ``tailscale ip -4`` in that case.
         - Roll back partial backend state before letting a failure OR
           an operator interrupt (``KeyboardInterrupt``) propagate: the
           caller's unwind deletes only the DB row, so any backend
@@ -309,11 +333,13 @@ class VMPlatform(Capability):
         """
 
     def secure_failed_vm(self, vm: VMRow, ctx: RunContext) -> None:  # noqa: B027  # intentional concrete no-op
-        """Hook called when a create is kept without completing Phase A:
-        the bootstrap or Tailscale verification died (the row is marked
-        FAILED) or the operator interrupted it mid-bootstrap (the row
-        keeps its in-flight status), and the VM is kept for debugging
-        rather than rolled back.
+        """Hook called when a created VM is kept after Phase A fails:
+        post-create Tailscale verification died (the row is marked FAILED) or
+        the operator interrupted verification (the row keeps its in-flight
+        status), and the VM is kept for debugging rather than rolled back.
+
+        Create-time bootstrap failures never reach this hook. They raise from
+        :meth:`create` while the platform's backend rollback window is open.
 
         Default no-op. Same contract as :meth:`post_tailscale_ready`
         (which only fires on success): close provisioning access. Azure

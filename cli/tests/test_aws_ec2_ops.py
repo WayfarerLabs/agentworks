@@ -6,25 +6,46 @@ interrupt), status mapping, and the idempotent delete.
 
 from __future__ import annotations
 
+import gzip
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
+from unittest.mock import MagicMock
 
 import pytest
 
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest
-from agentworks.capabilities.vm_platform.tailscale_join import BootstrapCompletion, EphemeralTailscaleBootstrap
+from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
 from agentworks.errors import ConfigError, StateError
 from agentworks.plugins.aws.network import EC2Error, poke_ssh_allow, remove_ssh_allow
 from agentworks.plugins.aws.platform import EC2Platform
+from agentworks.ssh import SSHError
+from agentworks.transports import SSHTransport
 from tests._aws_fakes import Controls, client_error, install_fakes, stub_egress, unreachable
 
 if TYPE_CHECKING:
     from tests._aws_fakes import Recorder
+    from tests.conftest import CapturedOutput
 
 _DETECTED = "203.0.113.9"
 _DETECTED_PREFIX = f"{_DETECTED}/32"
+_SENTINEL = "tskey-aws-readiness-'sentinel"
+
+
+def _assert_exception_graph_is_value_free(failure: BaseException) -> None:
+    pending = [failure]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        assert _SENTINEL not in repr(current)
+        if current.__cause__ is not None:
+            pending.append(current.__cause__)
+        if current.__context__ is not None:
+            pending.append(current.__context__)
 
 
 @pytest.fixture(autouse=True)
@@ -32,6 +53,12 @@ def _stub_egress_detection(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every test runs with the shared operator egress detection stubbed (never
     a live probe) and a clean per-process cache."""
     stub_egress(monkeypatch, _DETECTED)
+
+    def _successful_bootstrap(self: SSHTransport, command: str, **kwargs: object) -> object:
+        del self, kwargs
+        return SimpleNamespace(stdout="100.64.0.5\n" if command == "tailscale ip -4" else "", returncode=0)
+
+    monkeypatch.setattr(SSHTransport, "run", _successful_bootstrap)
 
 
 def _platform(**extra: object) -> EC2Platform:
@@ -44,7 +71,7 @@ def _request(
     *,
     cpus: int = 2,
     memory: int = 8,
-    tailscale: str | None = None,
+    tailscale: str = "tskey-test",
     disk: int = 50,
     swap: int = 4,
     ssh_key: str = "ssh-ed25519 AAAA test",
@@ -60,6 +87,7 @@ def _request(
         ssh_public_key=ssh_key,
         ssh_private_key=None,
         tailscale_auth_key=tailscale,
+        progress=MagicMock(),
         cpus=cpus,
         memory_gib=memory,
         disk_gib=disk,
@@ -183,7 +211,7 @@ class TestCreate:
         monkeypatch.setattr(
             EphemeralTailscaleBootstrap,
             "complete",
-            lambda self, auth_key: BootstrapCompletion(True, "100.64.0.5"),
+            lambda self, auth_key: "100.64.0.5",
         )
         rsa_key = "ssh-rsa " + ("A" * 716) + " agw@host"
         _platform().create(_request(tailscale="tskey-abc", ssh_key=rsa_key), RunContext(config=_config()))
@@ -264,10 +292,9 @@ class TestCreate:
         monkeypatch.setattr(
             EphemeralTailscaleBootstrap,
             "complete",
-            lambda self, auth_key: BootstrapCompletion(True, "100.64.0.5"),
+            lambda self, auth_key: "100.64.0.5",
         )
         result = _platform().create(_request(tailscale="tskey-abc"), RunContext(config=_config()))
-        assert result.bootstrap_complete is True
         assert result.tailscale_ip == "100.64.0.5"
 
 
@@ -306,41 +333,163 @@ class TestCreateRollback:
         assert "terminate_instances" in methods
         assert "delete_security_group" in methods
 
+    @pytest.mark.parametrize(
+        ("failure_command", "message", "expected_commands"),
+        [
+            ("echo ok", "SSH did not become ready", ["echo ok"] * 30),
+            (
+                "cloud-init status --wait",
+                "cloud-init did not complete",
+                ["echo ok", "cloud-init status --wait"],
+            ),
+        ],
+        ids=("ssh-readiness-exhaustion", "cloud-init-wait-failure"),
+    )
+    def test_readiness_failure_is_safe_and_rolls_back_before_key_delivery(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        captured_output: CapturedOutput,
+        failure_command: str,
+        message: str,
+        expected_commands: list[str],
+    ) -> None:
+        """Provider-retained user-data stays credential-free and readiness
+        failures remove the instance and security group without stdin join or
+        generated-script staging."""
+        rec = install_fakes(monkeypatch)
+        calls: list[tuple[str, dict[str, object]]] = []
+
+        def _readiness_failure(self: SSHTransport, command: str, **kwargs: object) -> object:
+            calls.append((command, kwargs))
+            if command == failure_command:
+                raise SSHError(f"safe failure for {command}")
+            return SimpleNamespace(stdout="", returncode=0)
+
+        monkeypatch.setattr(SSHTransport, "run", _readiness_failure)
+        monkeypatch.setattr("agentworks.capabilities.vm_platform.tailscale_join.time.sleep", lambda _seconds: None)
+
+        with pytest.raises(EC2Error, match=message) as caught:
+            _platform().create(_request(tailscale=_SENTINEL), RunContext(config=_config()))
+
+        assert [command for command, _kwargs in calls] == expected_commands
+        assert all("input_text" not in kwargs for _command, kwargs in calls)
+        assert not any("agentworks-bootstrap" in command for command, _kwargs in calls)
+        retained_user_data = gzip.decompress(rec.kwargs_for("run_instances")["UserData"]).decode()
+        assert _SENTINEL not in retained_user_data
+        assert _SENTINEL not in repr(calls)
+        methods = rec.methods("ec2")
+        assert "terminate_instances" in methods
+        assert "delete_security_group" in methods
+        _assert_exception_graph_is_value_free(caught.value)
+        assert _SENTINEL not in repr(captured_output.lines)
+
+    @pytest.mark.parametrize(
+        ("failure_command", "expected_commands"),
+        [
+            ("echo ok", ["echo ok"]),
+            ("cloud-init status --wait", ["echo ok", "cloud-init status --wait"]),
+        ],
+        ids=("ssh-readiness", "cloud-init-wait"),
+    )
+    def test_readiness_interrupt_rolls_back_before_key_delivery(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        captured_output: CapturedOutput,
+        failure_command: str,
+        expected_commands: list[str],
+    ) -> None:
+        rec = install_fakes(monkeypatch)
+        interrupt = KeyboardInterrupt(f"interrupted during {failure_command}")
+        calls: list[tuple[str, dict[str, object]]] = []
+
+        def _interrupt_readiness(self: SSHTransport, command: str, **kwargs: object) -> object:
+            calls.append((command, kwargs))
+            if command == failure_command:
+                raise interrupt
+            return SimpleNamespace(stdout="", returncode=0)
+
+        monkeypatch.setattr(SSHTransport, "run", _interrupt_readiness)
+        with pytest.raises(KeyboardInterrupt) as caught:
+            _platform().create(_request(tailscale=_SENTINEL), RunContext(config=_config()))
+
+        assert caught.value is interrupt
+        assert [command for command, _kwargs in calls] == expected_commands
+        assert all("input_text" not in kwargs for _command, kwargs in calls)
+        assert not any("agentworks-bootstrap" in command for command, _kwargs in calls)
+        retained_user_data = gzip.decompress(rec.kwargs_for("run_instances")["UserData"]).decode()
+        assert _SENTINEL not in retained_user_data
+        assert _SENTINEL not in repr(calls)
+        assert _SENTINEL not in repr(captured_output.lines)
+        assert rec.kwargs_for("terminate_instances") == {"InstanceIds": ["i-123"]}
+        assert rec.kwargs_for("delete_security_group") == {"GroupId": "sg-123"}
+
     def test_rolls_back_on_keyboard_interrupt(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """An operator Ctrl-C during the inline bootstrap wait rolls back the
         partial resource set (terminate + delete SG) and re-raises the
         interrupt for the caller's row unwind."""
         rec = install_fakes(monkeypatch)
 
-        def _interrupt(self: EphemeralTailscaleBootstrap, auth_key: str) -> BootstrapCompletion:
-            raise KeyboardInterrupt("first")
+        interrupt = KeyboardInterrupt("first")
 
-        monkeypatch.setattr(EphemeralTailscaleBootstrap, "complete", _interrupt)
-        with pytest.raises(KeyboardInterrupt):
+        def _interrupt(self: SSHTransport, command: str, **kwargs: object) -> object:
+            del self, command, kwargs
+            raise interrupt
+
+        monkeypatch.setattr(SSHTransport, "run", _interrupt)
+        with pytest.raises(KeyboardInterrupt) as caught:
             _platform().create(_request(tailscale="tskey-abc"), RunContext(config=_config()))
-        methods = rec.methods("ec2")
-        assert "terminate_instances" in methods
-        assert "delete_security_group" in methods
+        assert caught.value is interrupt
+        assert rec.kwargs_for("terminate_instances") == {"InstanceIds": ["i-123"]}
+        assert rec.kwargs_for("delete_security_group") == {"GroupId": "sg-123"}
 
+    @pytest.mark.parametrize(
+        ("failure_command", "expected_commands"),
+        [
+            ("echo ok", ["echo ok"]),
+            ("cloud-init status --wait", ["echo ok", "cloud-init status --wait"]),
+        ],
+        ids=("ssh-readiness", "cloud-init-wait"),
+    )
     def test_second_interrupt_abandons_cleanup_loudly(
-        self, monkeypatch: pytest.MonkeyPatch, captured_output: Any
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        captured_output: CapturedOutput,
+        failure_command: str,
+        expected_commands: list[str],
     ) -> None:
         """A second Ctrl-C during the rollback abandons it (naming the region
         and tag for manual cleanup) instead of wedging; the ORIGINAL interrupt
         still propagates."""
         install_fakes(monkeypatch)
-        monkeypatch.setattr(
-            EphemeralTailscaleBootstrap,
-            "complete",
-            lambda self, auth_key: (_ for _ in ()).throw(KeyboardInterrupt("first")),
-        )
-        monkeypatch.setattr(
-            "tests._aws_fakes._FakeEC2.terminate_instances",
-            lambda self, **kw: (_ for _ in ()).throw(KeyboardInterrupt("second")),
-        )
-        with pytest.raises(KeyboardInterrupt):
+        interrupt = KeyboardInterrupt(f"interrupted during {failure_command}")
+        calls: list[tuple[str, dict[str, object]]] = []
+
+        def _interrupt_readiness(self: SSHTransport, command: str, **kwargs: object) -> object:
+            calls.append((command, kwargs))
+            if command == failure_command:
+                raise interrupt
+            return SimpleNamespace(stdout="", returncode=0)
+
+        cleanup_calls: list[dict[str, object]] = []
+
+        def _interrupt_cleanup(self: object, **kwargs: object) -> object:
+            del self
+            cleanup_calls.append(kwargs)
+            raise KeyboardInterrupt("second")
+
+        monkeypatch.setattr(SSHTransport, "run", _interrupt_readiness)
+        monkeypatch.setattr("tests._aws_fakes._FakeEC2.terminate_instances", _interrupt_cleanup)
+        with pytest.raises(KeyboardInterrupt) as caught:
             _platform().create(_request(tailscale="tskey-abc"), RunContext(config=_config()))
-        assert any("Cleanup abandoned" in w for w in captured_output.warnings)
+        assert caught.value is interrupt
+        assert [command for command, _kwargs in calls] == expected_commands
+        assert all("input_text" not in kwargs for _command, kwargs in calls)
+        assert cleanup_calls == [{"InstanceIds": ["i-123"]}]
+        abandoned = [warning for warning in captured_output.warnings if "Cleanup abandoned" in warning]
+        assert abandoned == [
+            "Cleanup abandoned: EC2 resources tagged 'agentworks:vm=dev' may remain in region "
+            "'us-east-1'; terminate the instance and delete its security group there manually."
+        ]
 
 
 class TestCloseProvisioningHooks:

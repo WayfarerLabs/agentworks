@@ -1,8 +1,8 @@
-"""Phase A bootstrap script generation and output parsing.
+"""Create-time bootstrap script generation and output parsing.
 
-Generates a self-contained bash script that runs all Phase A (bootstrap)
-steps on a fresh VM. The script uses structured markers in stdout so the
-Python side can drive logging and console output.
+Generates a self-contained bash script that a vm-platform runs during
+``create()`` on a fresh VM. The script uses structured markers in stdout so
+the platform can drive logging and console output.
 
 Markers:
   ##STEP## <name>       - step boundary
@@ -22,7 +22,7 @@ from agentworks.capabilities.vm_platform.skel import BASHRC, ZSHRC
 # Canonical cloud-init drop-in that stops host-key regeneration on stop/start.
 # By default cloud-init may delete and regenerate /etc/ssh/ssh_host_* on some
 # boot events, which makes SSH clients reject the connection with a changed
-# host key. This drop-in is written here during Phase A and reconciled during
+# host key. This drop-in is written here during create-time bootstrap and reconciled during
 # Phase B (initializer._preserve_ssh_host_keys), so VMs provisioned before it
 # existed get repaired on `vm reinit`.
 SSH_PRESERVE_KEYS_PATH = "/etc/cloud/cloud.cfg.d/99-preserve-ssh-keys.cfg"
@@ -38,7 +38,7 @@ SSH_PRESERVE_KEYS_CONTENT = "".join(f"{line}\n" for line in SSH_PRESERVE_KEYS_LI
 REBOOT_SENTINEL_PATH = "/run/agentworks-reboot-required"
 
 # grub drop-in that disables SVE at the kernel cmdline on Apple Virtualization
-# guests (see the "Mask SVE" step below for the why). Shared by the Phase A
+# guests (see the "Mask SVE" step below for the why). Shared by the create-time
 # bootstrap step and the Phase B reconcile step (initializer._apply_sve_mask),
 # which repairs VMs provisioned before the mask existed, so the two writers
 # cannot drift. The GRUB_CMDLINE_LINUX line references the shell var by name;
@@ -257,12 +257,12 @@ def generate_bootstrap_script(
     hostname: str,
     swap: int,
 ) -> str:
-    """Generate the Phase A bootstrap script with parameters baked in.
+    """Generate the create-time bootstrap script with parameters baked in.
 
-    ``tailscale_auth_key=None`` leaves the join step deferred. Provider
-    adapters use this persistence-safe shape whenever their platform retains
-    the script, then deliver the resolved key through a separate ephemeral
-    boundary after the retained script has run.
+    ``tailscale_auth_key=None`` omits the join from the generated payload.
+    Provider adapters use this persistence-safe shape whenever their platform
+    retains the script, then deliver the required resolved key through their
+    declared ephemeral create-time boundary after the retained script has run.
 
     ``swap`` (GiB, 0 to disable) is required rather than defaulted: the
     vm-template layer resolves it and every caller has the resolved value

@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks import output
+from agentworks.errors import ProvisioningError
 from agentworks.ssh import SSHError
 
 if TYPE_CHECKING:
@@ -37,54 +37,41 @@ def join_tailscale_ephemerally(
     )
 
 
-@dataclass(frozen=True)
-class BootstrapCompletion:
-    """Whether provider bootstrap finished, plus its optional tailnet IP."""
-
-    complete: bool
-    tailscale_ip: str | None = None
-
-
 class EphemeralTailscaleBootstrap:
     """Finish a key-free cloud bootstrap through one post-boot stdin join."""
 
     def __init__(self, target: Transport) -> None:
         self._target = target
 
-    def complete(self, auth_key: str) -> BootstrapCompletion:
+    def complete(self, auth_key: str) -> str | None:
         """Wait for cloud-init, join exactly once, then discover the IP.
 
-        Readiness failure leaves the entire operation for Phase A and never
-        sends the key. Once the join command succeeds, later IP-discovery
-        failure remains a completed bootstrap so Phase A cannot deliver the
-        credential a second time.
+        Readiness failure raises before sending the key so the platform's
+        create rollback can remove the partial VM. Once the join command
+        succeeds, later IP-discovery failure remains a completed bootstrap so
+        Phase A cannot deliver the credential a second time.
         """
-        if not self._wait_for_cloud_init():
-            return BootstrapCompletion(complete=False)
+        self._wait_for_cloud_init()
 
         join_tailscale_ephemerally(self._target, auth_key, timeout=30)
-        return BootstrapCompletion(complete=True, tailscale_ip=self._tailscale_ip())
+        return self._tailscale_ip()
 
-    def _wait_for_cloud_init(self) -> bool:
+    def _wait_for_cloud_init(self) -> None:
         output.detail("Waiting for cloud-init bootstrap to complete (this may take several minutes)...")
 
         for attempt in range(30):
             try:
                 self._target.run("echo ok", check=True, timeout=10)
                 break
-            except SSHError:
+            except SSHError as exc:
                 if attempt == 29:
-                    output.warn("SSH not available, deferring bootstrap to Phase A")
-                    return False
+                    raise ProvisioningError("SSH did not become ready for create-time bootstrap") from exc
                 time.sleep(10)
 
         try:
             self._target.run("cloud-init status --wait", check=True, timeout=600)
         except SSHError as exc:
-            output.warn(f"cloud-init wait failed: {exc}")
-            output.warn("Deferring bootstrap to Phase A")
-            return False
-        return True
+            raise ProvisioningError("cloud-init did not complete successfully during create-time bootstrap") from exc
 
     def _tailscale_ip(self) -> str | None:
         try:

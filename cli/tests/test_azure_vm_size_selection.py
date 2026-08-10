@@ -6,12 +6,14 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
+from unittest.mock import MagicMock
 
 import pytest
 
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.config import capability_config_references, validate_capability_config
 from agentworks.capabilities.vm_platform import ProvisionRequest
+from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.errors import ConfigError
 from agentworks.plugins.azure.config import (
     _DEFAULT_VM_SIZES,
@@ -162,11 +164,10 @@ class TestCreateProvisioningOutput:
         monkeypatch.setattr(AzureVMPlatform, "_compute_client", lambda self, az, ctx: fake_compute)
         monkeypatch.setattr(AzureVMPlatform, "_network_client", lambda self, az, ctx: fake_network)
         monkeypatch.setattr(AzureVMPlatform, "_vm_exists", lambda self, compute, rg, name: False)
+        monkeypatch.setattr(EphemeralTailscaleBootstrap, "complete", lambda self, auth_key: "100.64.0.5")
 
     @staticmethod
     def _request(*, cpus: int, memory: int, disk: int = 50, swap: int = 4) -> ProvisionRequest:
-        # tailscale_auth_key=None keeps create() on the minimal-cloud-init
-        # path, so it never waits for a bootstrap that has no VM to reach.
         return ProvisionRequest(
             vm_name="dev",
             hostname="dev",
@@ -174,7 +175,8 @@ class TestCreateProvisioningOutput:
             admin_username="agw",
             ssh_public_key="ssh-ed25519 AAAA test",
             ssh_private_key=None,
-            tailscale_auth_key=None,
+            tailscale_auth_key="tskey-test",
+            progress=MagicMock(),
             cpus=cpus,
             memory_gib=memory,
             disk_gib=disk,
@@ -281,6 +283,7 @@ class TestCreateOSDiskClamp:
         monkeypatch.setattr(AzureVMPlatform, "_compute_client", lambda self, az, ctx: fake_compute)
         monkeypatch.setattr(AzureVMPlatform, "_network_client", lambda self, az, ctx: fake_network)
         monkeypatch.setattr(AzureVMPlatform, "_vm_exists", lambda self, compute, rg, name: False)
+        monkeypatch.setattr(EphemeralTailscaleBootstrap, "complete", lambda self, auth_key: "100.64.0.5")
         request = ProvisionRequest(
             vm_name="dev",
             hostname="dev",
@@ -288,7 +291,8 @@ class TestCreateOSDiskClamp:
             admin_username="agw",
             ssh_public_key="ssh-ed25519 AAAA test",
             ssh_private_key=None,
-            tailscale_auth_key=None,
+            tailscale_auth_key="tskey-test",
+            progress=MagicMock(),
             cpus=2,
             memory_gib=8,
             disk_gib=disk_gib,

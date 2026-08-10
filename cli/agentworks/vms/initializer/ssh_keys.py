@@ -104,14 +104,14 @@ def _preserve_ssh_host_keys(
     """Stop cloud-init from regenerating SSH host keys on stop/start.
 
     Writes the cloud-init drop-in that pins existing host keys. This also runs
-    during Phase A bootstrap, but reconciling it here means VMs provisioned
+    during create-time bootstrap, but reconciling it here means VMs provisioned
     before the drop-in existed get repaired on ``vm reinit`` -- otherwise their
     host key changes on the next reboot and SSH fails with a changed-host-key
     error until the operator clears known_hosts by hand.
 
     Inert on platforms without cloud-init (e.g. WSL2): the file is simply never
     read. Written unconditionally to keep the step platform-agnostic, matching
-    the Phase A bootstrap step.
+    the create-time bootstrap step.
     """
     from pathlib import PurePosixPath
 
@@ -141,11 +141,12 @@ def _apply_sve_mask(target: Transport, logger: SSHLogger) -> None:
 
     Apple's Virtualization.framework advertises SVE the guest cannot execute,
     so the first SVE instruction traps as SIGILL, surfacing in OpenSSL and thus
-    apt-over-https, git, and Python cryptography. Phase A masks this at create
-    via an ``arm64.nosve`` grub drop-in; this reconcile step installs the same
-    drop-in on an already-running VM so ``vm reinit`` repairs one provisioned
-    before the mask existed. The drop-in path and content are shared with the
-    Phase A step so the two writers cannot drift.
+    apt-over-https, git, and Python cryptography. Platform-owned create-time
+    bootstrap masks this via an ``arm64.nosve`` grub drop-in; this reconcile
+    step installs the same drop-in on an already-running VM so ``vm reinit``
+    repairs one provisioned before the mask existed. The drop-in path and
+    content are shared with the create-time bootstrap step so the two writers
+    cannot drift.
 
     Gated to Apple Virtualization guests that still advertise SVE, so it is a
     silent no-op everywhere else and on VMs already masked (``arm64.nosve``

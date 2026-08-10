@@ -27,6 +27,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
+from unittest.mock import MagicMock
 from urllib.parse import urlparse
 
 import pytest
@@ -55,8 +56,8 @@ def _request() -> ProvisionRequest:
         admin_username="agw",
         ssh_public_key="ssh-ed25519 AAAA test",
         ssh_private_key=None,
-        # wsl2 always defers Tailscale to Phase A.
-        tailscale_auth_key=None,
+        tailscale_auth_key="tskey-test",
+        progress=MagicMock(),
         # The vm-template layer's resolved defaults, which is the only
         # shape a platform ever sees (the hardware fields are required).
         cpus=4,
@@ -114,6 +115,7 @@ def _wire(
     monkeypatch.setattr(wsl2, "_powershell", _fake_powershell)
     monkeypatch.setattr(wsl2, "_download_debian_rootfs", lambda tarball: None)
     monkeypatch.setattr(WSL2Platform, "_distro_exists", staticmethod(lambda name: False))
+    monkeypatch.setattr(wsl2, "run_wsl2_bootstrap", lambda *args, **kwargs: "100.64.0.7")
     return calls
 
 
@@ -121,6 +123,39 @@ def _assert_teardown_ran(calls: _Calls) -> None:
     assert calls.wsl("--unregister vm1") == ["--unregister vm1"]
     (remove,) = calls.ps("Remove-Item")
     assert str(wsl2._wsl_base_path() / "vm1") in remove
+
+
+def test_success_runs_primary_bootstrap_before_create_returns(monkeypatch: pytest.MonkeyPatch) -> None:
+    _wire(monkeypatch)
+    request = _request()
+    bootstrap = MagicMock(return_value="100.64.0.7")
+    monkeypatch.setattr(wsl2, "run_wsl2_bootstrap", bootstrap)
+
+    result = WSL2Platform("wsl2", {}).create(request, RunContext())
+
+    assert WSL2Platform.contract_version == 2
+    assert result.tailscale_ip == "100.64.0.7"
+    bootstrap.assert_called_once()
+    assert bootstrap.call_args.kwargs == {
+        "admin_username": "agw",
+        "ssh_public_key": "ssh-ed25519 AAAA test",
+        "tailscale_auth_key": "tskey-test",
+        "hostname": "vm1",
+        "swap_gib": 0,
+        "progress": request.progress,
+    }
+
+
+def test_primary_bootstrap_failure_cleans_up_and_reraises(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _wire(monkeypatch)
+    failure = RuntimeError("bootstrap exploded")
+    monkeypatch.setattr(wsl2, "run_wsl2_bootstrap", MagicMock(side_effect=failure))
+
+    with pytest.raises(RuntimeError) as exc:
+        WSL2Platform("wsl2", {}).create(_request(), RunContext())
+
+    assert exc.value is failure
+    _assert_teardown_ran(calls)
 
 
 def test_failure_mid_provision_cleans_up_and_reraises(
@@ -140,14 +175,14 @@ def test_failure_mid_provision_cleans_up_and_reraises(
     assert not any("Cleanup abandoned" in w for w in captured_output.warnings)
 
 
-def test_interrupt_during_the_final_restart_cleans_up_and_reraises_the_original(
+def test_interrupt_during_primary_bootstrap_cleans_up_and_reraises_the_original(
     monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
 ) -> None:
-    """A Ctrl-C at the very end of the span (the systemd restart boot)
-    still tears down the fully imported distro, and the ORIGINAL
+    """A Ctrl-C during the moved bootstrap still tears down the fully imported distro, and the ORIGINAL
     interrupt propagates for the caller's row unwind (identity pin)."""
     interrupt = KeyboardInterrupt("first")
-    calls = _wire(monkeypatch, errors={"echo ok": interrupt})
+    calls = _wire(monkeypatch)
+    monkeypatch.setattr(wsl2, "run_wsl2_bootstrap", MagicMock(side_effect=interrupt))
 
     with pytest.raises(KeyboardInterrupt) as exc:
         WSL2Platform("wsl2", {}).create(_request(), RunContext())
@@ -165,10 +200,8 @@ def test_second_interrupt_abandons_cleanup_loudly(
     removal is never reached, the warning names the exact removal
     command, and the ORIGINAL interrupt still propagates."""
     interrupt = KeyboardInterrupt("first")
-    calls = _wire(
-        monkeypatch,
-        errors={"echo ok": interrupt, "--unregister": KeyboardInterrupt("second")},
-    )
+    calls = _wire(monkeypatch, errors={"--unregister": KeyboardInterrupt("second")})
+    monkeypatch.setattr(wsl2, "run_wsl2_bootstrap", MagicMock(side_effect=interrupt))
 
     with pytest.raises(KeyboardInterrupt) as exc:
         WSL2Platform("wsl2", {}).create(_request(), RunContext())

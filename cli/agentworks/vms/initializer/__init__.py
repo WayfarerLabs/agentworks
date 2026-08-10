@@ -1,12 +1,14 @@
 """VM lifecycle: provisioning (one-time) and initialization (repeatable).
 
 Two phases:
-  A. Provisioning (over provisioning transport): bootstrap, SSH key, Tailscale join.
-     One-time, platform-specific, pass/fail. Tracked via provisioning_status.
+  A. Provisioning (over provisioning transport): record platform-owned bootstrap
+     and verify Tailscale SSH. One-time, pass/fail. Tracked via provisioning_status.
   B. Initialization (over Tailscale SSH): packages, install commands, git credentials,
      dotfiles. Repeatable via `vm reinit`. Tracked via init_status.
 
-Phase A steps are fatal: if they fail, the VM is unreachable and useless.
+Phase A IP discovery and Tailscale SSH verification are fatal: if they fail,
+the VM is unreachable and useless. Post-ready cleanup and SSH-config sync are
+non-fatal: failures produce warnings and continue into Phase B.
 Phase B steps are non-fatal: failures produce warnings and a 'partial' status.
 
 This package preserves the flat ``agentworks.vms.initializer`` import
@@ -39,7 +41,6 @@ from .credentials import (
 from .driver import (
     _phase_a_bootstrap,
     _phase_b_setup,
-    _run_bootstrap_script,
     bootstrap_vm,
     install_claude_plugins,
     run_initialization,
@@ -107,7 +108,6 @@ __all__ = [
     "_phase_b_setup",
     "_preserve_ssh_host_keys",
     "_reconcile_authorized_keys",
-    "_run_bootstrap_script",
     "_run_install_commands",
     "_write_agentworks_identity_profile",
     "_write_agentworks_profile",

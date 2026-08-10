@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks.capabilities.vm_platform.base import (
+    BootstrapProgress,
     ProvisionRequest,
     ProvisionResult,
     VMPlatform,
@@ -33,6 +34,7 @@ if TYPE_CHECKING:
     from agentworks.origin import Origin
 
 __all__ = [
+    "BootstrapProgress",
     "VM_PLATFORM_REGISTRY",
     "LimaPlatform",
     "ProvisionRequest",
