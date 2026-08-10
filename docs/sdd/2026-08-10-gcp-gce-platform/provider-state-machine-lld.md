@@ -13,7 +13,8 @@ For one VM, derive before mutation and store after create:
 - `project_id`, `zone`, normalized `backend_name`, and learned instance provider ID;
 - unique instance `network_tag`;
 - stable `deny_rule` and provisioning `allow_rule` names plus learned provider IDs;
-- network/subnet resource URL and access-config name `External NAT`.
+- network/subnet resource URL, normalized provisioning SSH source prefixes, and access-config name
+  `External NAT`.
 
 Every retained name starts from the UTF-8 `request.hostname`. Define `stem` by lowercasing,
 replacing each run outside `[a-z0-9-]` with `-`, trimming hyphens, using `agw` if empty, and
@@ -140,6 +141,12 @@ interrupt during the operation wait, realized and absent indeterminate outcomes,
 same-name/same-shape different-ID race, and mismatched concurrent replacement. GCE has no
 resource-ID precondition on firewall delete, so verification immediately before name-based delete
 addresses ordinary concurrent insertion but cannot make hostile delete/recreate replacement atomic.
+
+Later lifecycle and rollback reconstruct the expected stable allow from the persisted canonical
+network URL, target tag, normalized provisioning source prefixes, and fixed direction, priority,
+protocol, and port contract. They never use the observed live firewall as its own expected shape.
+Provider-ID equality without equality to that independently reconstructed original shape is a
+collision and is retained.
 
 A second `KeyboardInterrupt` stops cleanup promptly. The original interrupt object remains the one
 re-raised. Output names project, zone, instance, allow, deny, and exact console/CLI deletion actions

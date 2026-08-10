@@ -233,9 +233,10 @@ existing VM-platform interface is sufficient.
   auxiliary rule residue after proven absence warns precisely.
 - `display_backend_name`: `<instance>@<zone>`.
 - `platform_metadata`: instance name and provider ID, project, zone, canonical network and optional
-  subnet URLs, network tag, allow/deny rule names and provider IDs, and access-config name. It
-  excludes IP addresses and credentials. Later lifecycle and cleanup use these persisted network and
-  provider identities rather than mutable site configuration or same-name resource shape.
+  subnet URLs, normalized provisioning SSH source prefixes, network tag, allow/deny rule names and
+  provider IDs, and access-config name. It excludes guest/external IP addresses and credentials.
+  Later lifecycle and cleanup use these persisted network, source-prefix, and provider identities
+  rather than mutable site configuration or observed same-name resource shape.
 - native transport: live external IP from the lifetime access config; `transient_route` owns only
   the per-operation scoped inbound allow.
 
@@ -263,6 +264,11 @@ project/zone/instance and both firewall rules, retains the deny when needed, and
 interrupt. Manual delete commands are emitted only for resources whose provider IDs still match the
 persisted owned IDs; collisions or unknown identities receive inspect/escalate guidance without a
 name-based delete recommendation.
+
+Every later stable-allow cleanup reconstructs the original expected shape independently from the
+persisted canonical network, target tag, normalized provisioning prefixes, and fixed firewall
+contract. A live same-ID rule is not its own expectation; any shape change is retained as a
+collision.
 
 Google API authentication/permission, not-found, quota, collision, operation, readiness, and cleanup
 failures map to existing Agentworks error categories where one fits. Provider exceptions are
