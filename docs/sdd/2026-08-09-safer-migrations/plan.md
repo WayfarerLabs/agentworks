@@ -51,18 +51,18 @@ behavior. Live validation uses a temporary isolated home and no operator state.
 
 ## Phase 1: Direct backup and restore
 
-- [ ] Add the focused `agentworks.db` online-copy service with adjacent backup directory creation,
+- [x] Add the focused `agentworks.db` online-copy service with adjacent backup directory creation,
       separate manual and automatic names, collision safety, source validation, restore direction,
       incomplete-destination cleanup, restrictive file creation, a fixed busy deadline, and
       automatic-only retention of five. Put the version-appropriate schema-sentinel map beside the
       migration ladder with its future-maintenance comment.
-- [ ] Add the singular `agw database` group with `backup` and `restore BACKUP_PATH [--yes/-y]`.
+- [x] Add the singular `agw database` group with `backup` and `restore BACKUP_PATH [--yes/-y]`.
       Neither command may call `get_db()` or construct the migrating `Database` facade.
-- [ ] Keep backup status and restore confirmation on stderr, keep the successful backup path as the
+- [x] Keep backup status and restore confirmation on stderr, keep the successful backup path as the
       only stdout value, and refuse non-interactive restore without `--yes`.
-- [ ] Add native restore-file completion in bash, zsh, PowerShell, and completion specs; update the
+- [x] Add native restore-file completion in bash, zsh, PowerShell, and completion specs; update the
       CLI README and command reference with the now-shipped command behavior.
-- [ ] Test WAL-visible copy, validation-before-destination-open, source/destination direction,
+- [x] Test WAL-visible copy, validation-before-destination-open, source/destination direction,
       generic SQLite rejection, the version-appropriate map across every historical schema version,
       current-version common-sentinel lookalike rejection, future-version restore refusal before
       destination open, identical-path refusal, held-lock deadline, restrictive POSIX modes,
