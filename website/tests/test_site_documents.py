@@ -183,33 +183,33 @@ class QuietHandler(SimpleHTTPRequestHandler):
 
 def browser_geometry(output: Path, width: int) -> dict[str, object]:
     chromium = next(
-        (candidate for name in ("chromium", "chromium-browser", "google-chrome") if (candidate := shutil.which(name))),
+        (candidate for name in ("google-chrome", "chromium", "chromium-browser") if (candidate := shutil.which(name))),
         None,
     )
     if chromium is None:
         raise AssertionError("Chromium or Google Chrome is required for responsive website geometry tests")
     harness = output / "geometry.html"
+    manifesto = (output / "manifesto/index.html").read_text(encoding="utf-8")
     harness.write_text(
-        """<!doctype html>
-<html><body style="margin: 0"><iframe id="target" src="/manifesto/"
-style="width: 100vw; height: 100vh; border: 0"></iframe><pre id="result">pending</pre>
-<script>
-const target = document.querySelector("#target");
-target.addEventListener("load", () => {
-    const doc = target.contentDocument;
-    const rect = (selector) => {
-        const value = doc.querySelector(selector).getBoundingClientRect();
-        return {top: value.top, right: value.right, bottom: value.bottom, left: value.left};
-    };
-    const layout = doc.querySelector(".long-form-layout");
-    document.querySelector("#result").textContent = JSON.stringify({
-        display: target.contentWindow.getComputedStyle(layout).display,
-        title: rect(".long-form-layout > h1"),
-        toc: rect(".long-form-layout > .page-toc"),
-        body: rect(".long-form-layout > .long-form-body"),
-    });
+        manifesto.replace(
+            "</body>",
+            '<pre id="result">pending</pre><script src="/geometry.js"></script></body>',
+            1,
+        ),
+        encoding="utf-8",
+    )
+    (output / "geometry.js").write_text(
+        """const rect = (selector) => {
+    const value = document.querySelector(selector).getBoundingClientRect();
+    return {top: value.top, right: value.right, bottom: value.bottom, left: value.left};
+};
+const layout = document.querySelector(".long-form-layout");
+document.querySelector("#result").textContent = JSON.stringify({
+    display: getComputedStyle(layout).display,
+    title: rect(".long-form-layout > h1"),
+    toc: rect(".long-form-layout > .page-toc"),
+    body: rect(".long-form-layout > .long-form-body"),
 });
-</script></body></html>
 """,
         encoding="utf-8",
     )
@@ -228,7 +228,7 @@ target.addEventListener("load", () => {
                 "--hide-scrollbars",
                 f"--user-data-dir={profile.name}",
                 f"--window-size={width},1000",
-                "--virtual-time-budget=3000",
+                "--virtual-time-budget=1000",
                 "--dump-dom",
                 f"http://127.0.0.1:{port}/geometry.html",
             ),
