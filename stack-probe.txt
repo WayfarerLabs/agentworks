@@ -1,1 +1,2 @@
 stack probe entry A (throwaway; delete with branch)
+stack probe entry B
