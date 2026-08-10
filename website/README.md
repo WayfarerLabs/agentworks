@@ -12,10 +12,10 @@ the repository-sourced identity and states that guided onboarding is not yet pub
 Manifesto presents the complete long-form argument from `docs/why-agentworks.md`, while a separate
 Security page provides practical depth and a GitHub reporting route. The shared header places the
 GitHub and PyPI destinations once per page. A dedicated Lander page presents the same continuous
-lunar-deployment expedition used as progressive enhancement on the useful 404 fallback. The shared footer
-places the Manifesto, Security, and icon-only Lander destinations once per page. Home contains no
-substitute command or copy control. A later change will replace the notice with the canonical
-onboarding source after that source is available on `main`.
+lunar-deployment expedition used as progressive enhancement on the useful 404 fallback. The shared
+footer places the Manifesto, Security, and icon-only Lander destinations once per page. Home
+contains no substitute command or copy control. A later change will replace the notice with the
+canonical onboarding source after that source is available on `main`.
 
 ## Local build and test
 
@@ -39,8 +39,8 @@ Then open `http://localhost:8000/`, `http://localhost:8000/manifesto/`,
 
 Game work normally uses `/lander/` from this complete build; fallback acceptance also exercises the
 actual `/404.html`. Both shells receive one already-rendered `lander-game.html` fragment and load
-the same CSS, controller, model, and pure world generator. The builder has no partial-output mode because every breadcrumb
-and footer links to the other generated pages.
+the same CSS, controller, model, and pure world generator. The builder has no partial-output mode
+because every breadcrumb and footer links to the other generated pages.
 
 Run the automated suites and repository checks:
 
@@ -95,8 +95,8 @@ This is the builder's only output shape. The manifest is explicit in `build.py`;
 recursively copies source directories or permits a generated local link outside the manifest.
 
 The game keeps its route catalog reviewable and independent from runtime generation. Geometry lives
-in `tests/fixtures/lander-route-geometry-v1.json`; it contains no schedule or fuel result. Regenerate
-to a temporary path and verify the reviewed fixture with:
+in `tests/fixtures/lander-route-geometry-v1.json`; it contains no schedule or fuel result.
+Regenerate to a temporary path and verify the reviewed fixture with:
 
 ```bash
 node website/tools/derive_lander_routes.mjs \
