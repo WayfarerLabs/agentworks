@@ -1,0 +1,37 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 240 425"
+  role="img"
+  aria-labelledby="title description"
+>
+  <title id="title">Agentworks symmetric soft-stack AGW rocket monogram</title>
+  <desc id="description">
+    Custom A, G, and W shapes form a connected rocket. The G has four matching rounded corners; only
+    its right-side opening and inward stroke break the symmetry of an O.
+  </desc>
+
+  <g fill="currentColor">
+    <path
+      data-letter="W"
+      transform="translate(0 29)"
+      d="M32 274h40l21 68 15-68h24l15 68 21-68h40l-32 112h-35l-21-53-21 53H64L32 274Z"
+    />
+
+    <path
+      data-letter="G"
+      d="M191 184a34 34 0 0 0-34-34H83a34 34 0 0 0-34 34v78a34 34 0 0 0 34 34h74a34 34 0 0 0 34-34v-22h-73"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="34"
+      stroke-linecap="square"
+      stroke-linejoin="round"
+    />
+
+    <path
+      data-letter="A"
+      fill-rule="evenodd"
+      clip-rule="evenodd"
+      d="M120 10 204 143h-40l-15-27H91l-15 27H36L120 10Zm0 55-18 32h36l-18-32Z"
+    />
+  </g>
+</svg>

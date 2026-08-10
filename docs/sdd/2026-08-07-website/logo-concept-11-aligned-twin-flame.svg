@@ -1,0 +1,75 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 240 520"
+  role="img"
+  aria-labelledby="title description"
+>
+  <title id="title">Agentworks AGW rocket with aligned twin flames</title>
+  <desc id="description">
+    A graphite AGW rocket monogram with a compact, layered orange flame aligned beneath each bottom
+    elbow of the W. Pale yellow cores sit inside orange and deep orange-red exhaust layers.
+  </desc>
+
+  <g data-layer="flame" aria-hidden="true">
+    <g data-engine="left">
+      <path
+        data-temperature="cool-edge"
+        fill="#d94a1e"
+        d="M64 405c5.5 7 11.5 10 17.5 10s12-3 17.5-10c-2 40-7.5 75-17.5 106-10-31-15.5-66-17.5-106Z"
+      />
+      <path
+        data-temperature="warm-middle"
+        fill="#ff7a00"
+        d="M70 410c4 5 7.5 7 11.5 7s7.5-2 11.5-7c-1.5 28-5 54-11.5 76-6.5-22-10-48-11.5-76Z"
+      />
+      <path
+        data-temperature="hot-core"
+        fill="#ffe09a"
+        d="M76.5 413c1.5 3 3 5 5 5s3.5-2 5-5c-.75 18-2.25 34-5 48-2.75-14-4.25-30-5-48Z"
+      />
+    </g>
+
+    <g data-engine="right">
+      <path
+        data-temperature="cool-edge"
+        fill="#d94a1e"
+        d="M141 405c5.5 7 11.5 10 17.5 10s12-3 17.5-10c-2 40-7.5 75-17.5 106-10-31-15.5-66-17.5-106Z"
+      />
+      <path
+        data-temperature="warm-middle"
+        fill="#ff7a00"
+        d="M147 410c4 5 7.5 7 11.5 7s7.5-2 11.5-7c-1.5 28-5 54-11.5 76-6.5-22-10-48-11.5-76Z"
+      />
+      <path
+        data-temperature="hot-core"
+        fill="#ffe09a"
+        d="M153.5 413c1.5 3 3 5 5 5s3.5-2 5-5c-.75 18-2.25 34-5 48-2.75-14-4.25-30-5-48Z"
+      />
+    </g>
+  </g>
+
+  <g data-layer="mark" fill="#292b30">
+    <path
+      data-letter="W"
+      transform="translate(0 29)"
+      d="M32 274h40l21 68 15-68h24l15 68 21-68h40l-32 112h-35l-21-53-21 53H64L32 274Z"
+    />
+
+    <path
+      data-letter="G"
+      d="M191 184a34 34 0 0 0-34-34H83a34 34 0 0 0-34 34v78a34 34 0 0 0 34 34h74a34 34 0 0 0 34-34v-22h-73"
+      fill="none"
+      stroke="#292b30"
+      stroke-width="34"
+      stroke-linecap="square"
+      stroke-linejoin="round"
+    />
+
+    <path
+      data-letter="A"
+      fill-rule="evenodd"
+      clip-rule="evenodd"
+      d="M120 10 204 143h-40l-15-27H91l-15 27H36L120 10Zm0 55-18 32h36l-18-32Z"
+    />
+  </g>
+</svg>

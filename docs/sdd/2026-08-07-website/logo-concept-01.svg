@@ -1,0 +1,31 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 240 400"
+  role="img"
+  aria-labelledby="title description"
+>
+  <title id="title">Agentworks AGW rocket monogram</title>
+  <desc id="description">
+    Block letters A, G, and W stacked into the silhouette of a rocket. The A forms the nosecone, the
+    G forms the body, and the W forms two engines.
+  </desc>
+
+  <g fill="currentColor">
+    <path
+      data-letter="A"
+      fill-rule="evenodd"
+      clip-rule="evenodd"
+      d="M120 12 202 134h-39l-14-24H91l-14 24H38L120 12Zm0 53-17 29h34l-17-29Z"
+    />
+
+    <path
+      data-letter="G"
+      d="M48 144h148v32H84v72h78v-20h-40v-30h74v82H48V144Z"
+    />
+
+    <path
+      data-letter="W"
+      d="M34 292h39l20 57 14-57h26l14 57 20-57h39l-31 92h-35l-20-45-20 45H65l-31-92Z"
+    />
+  </g>
+</svg>

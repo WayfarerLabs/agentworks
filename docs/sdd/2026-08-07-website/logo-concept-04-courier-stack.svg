@@ -1,0 +1,27 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 240 400"
+  role="img"
+  aria-labelledby="title description"
+>
+  <title id="title">Agentworks Courier AGW rocket study</title>
+  <desc id="description">
+    Extra-bold Courier-style letters A, G, and W overlap vertically to suggest a rocket, with the A
+    as its nosecone and the W as its engines.
+  </desc>
+
+  <g
+    fill="currentColor"
+    stroke="currentColor"
+    stroke-width="3"
+    paint-order="stroke fill"
+    font-family="Courier, 'Courier New', monospace"
+    font-size="164"
+    font-weight="900"
+    text-anchor="middle"
+  >
+    <text data-letter="A" x="120" y="142">A</text>
+    <text data-letter="G" x="120" y="250">G</text>
+    <text data-letter="W" x="120" y="348">W</text>
+  </g>
+</svg>

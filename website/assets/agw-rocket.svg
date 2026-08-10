@@ -1,0 +1,76 @@
+<svg
+    id="agw-rocket"
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 240 520"
+    role="img"
+    aria-labelledby="agw-rocket-title agw-rocket-description"
+>
+    <title id="agw-rocket-title">Agentworks AGW rocket with twin layered flames</title>
+    <desc id="agw-rocket-description">
+        A graphite AGW rocket monogram with one compact, layered orange flame beneath each leg of the W.
+        Pale yellow cores sit inside orange and deep orange-red exhaust layers.
+    </desc>
+
+    <g id="agw-plumes" aria-hidden="true">
+        <g id="agw-engine-left">
+            <path
+                id="agw-left-cool-edge"
+                fill="#d94a1e"
+                d="M60 401c7 9 14 14 22 14s15-5 22-14c-2 42-9 79-22 110-13-31-20-68-22-110Z"
+            />
+            <path
+                id="agw-left-warm-middle"
+                fill="#ff7a00"
+                d="M68 408c5 6 9 9 14 9s9-3 14-9c-2 29-6 56-14 78-8-22-12-49-14-78Z"
+            />
+            <path
+                id="agw-left-hot-core"
+                fill="#ffe09a"
+                d="M75 412c2 4 5 6 7 6s5-2 7-6c-1 18-3 35-7 49-4-14-6-31-7-49Z"
+            />
+        </g>
+
+        <g id="agw-engine-right">
+            <path
+                id="agw-right-cool-edge"
+                fill="#d94a1e"
+                d="M136 401c7 9 14 14 22 14s15-5 22-14c-2 42-9 79-22 110-13-31-20-68-22-110Z"
+            />
+            <path
+                id="agw-right-warm-middle"
+                fill="#ff7a00"
+                d="M144 408c5 6 9 9 14 9s9-3 14-9c-2 29-6 56-14 78-8-22-12-49-14-78Z"
+            />
+            <path
+                id="agw-right-hot-core"
+                fill="#ffe09a"
+                d="M151 412c2 4 5 6 7 6s5-2 7-6c-1 18-3 35-7 49-4-14-6-31-7-49Z"
+            />
+        </g>
+    </g>
+
+    <g id="agw-mark" fill="#292b30">
+        <path
+            id="agw-letter-w"
+            transform="translate(0 29)"
+            d="M32 274h40l21 68 15-68h24l15 68 21-68h40l-32 112h-35l-21-53-21 53H64L32 274Z"
+        />
+
+        <path
+            id="agw-letter-g"
+            d="M191 184a34 34 0 0 0-34-34H83a34 34 0 0 0-34 34v78a34 34 0 0 0 34 34h74a34 34 0 0 0 34-34v-22h-73"
+            fill="none"
+            stroke="#292b30"
+            stroke-width="34"
+            stroke-linecap="square"
+            stroke-linejoin="round"
+        />
+
+        <path
+            id="agw-letter-a"
+            fill-rule="evenodd"
+            clip-rule="evenodd"
+            d="M120 10 204 143h-40l-15-27H91l-15 27H36L120 10Zm0 55-18 32h36l-18-32Z"
+        />
+    </g>
+</svg>

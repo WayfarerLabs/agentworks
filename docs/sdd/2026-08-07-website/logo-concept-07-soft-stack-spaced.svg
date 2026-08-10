@@ -1,0 +1,38 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 240 425"
+  role="img"
+  aria-labelledby="title description"
+>
+  <title id="title">Agentworks spaced soft-stack AGW rocket monogram</title>
+  <desc id="description">
+    The letters A, G, and W form a tall rocket with matching shallow overlaps between each letter.
+    Part of the open space beneath the A crossbar remains visible above the rounded G body.
+  </desc>
+
+  <g fill="currentColor">
+    <path
+      data-letter="W"
+      transform="translate(0 29)"
+      d="M32 274h40l21 68 15-68h24l15 68 21-68h40l-32 112h-35l-21-53-21 53H64L32 274Z"
+    />
+
+    <path
+      data-letter="G"
+      transform="translate(0 20)"
+      d="M187 157c-17-18-39-27-67-27H96c-31 0-48 19-48 50v47c0 32 18 49 49 49h84v-63h-57"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="34"
+      stroke-linecap="square"
+      stroke-linejoin="round"
+    />
+
+    <path
+      data-letter="A"
+      fill-rule="evenodd"
+      clip-rule="evenodd"
+      d="M120 10 204 143h-40l-15-27H91l-15 27H36L120 10Zm0 55-18 32h36l-18-32Z"
+    />
+  </g>
+</svg>

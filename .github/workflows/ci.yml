@@ -127,19 +127,58 @@ jobs:
       - name: ./scripts/check-locked-sdds.sh
         run: ./scripts/check-locked-sdds.sh "${{ steps.base.outputs.ref }}"
 
+  website:
+    name: Website
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source commit
+        uses: actions/checkout@v7
+        with:
+          clean: true
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+
+      - name: Python website tests
+        run: python3 -m unittest discover -s website/tests -p 'test_*.py'
+
+      - name: Node website model tests
+        run: node --test website/tests/lander-model.test.mjs
+
+      - name: Verify deterministic full builds
+        run: |
+          python3 website/build.py --repo-root . --output "${RUNNER_TEMP}/site-root-a" --site-base /
+          python3 website/build.py --repo-root . --output "${RUNNER_TEMP}/site-root-b" --site-base /
+          diff --recursive --no-dereference "${RUNNER_TEMP}/site-root-a" "${RUNNER_TEMP}/site-root-b"
+          python3 website/build.py --repo-root . --output "${RUNNER_TEMP}/site-project-a" --site-base /agentworks/
+          python3 website/build.py --repo-root . --output "${RUNNER_TEMP}/site-project-b" --site-base /agentworks/
+          diff --recursive --no-dereference "${RUNNER_TEMP}/site-project-a" "${RUNNER_TEMP}/site-project-b"
+
   # Umbrella job: require this single check in branch protection on main.
   # Adding a new job to CI means adding it to `needs:` below, so the
   # required-checks list lives in the workflow file (alongside the jobs)
   # rather than in GitHub settings that can drift silently.
   ci-success:
     if: always()
-    needs: [python-checks, test, lint-files, rulesync-drift, locked-sdds]
+    needs: [python-checks, test, lint-files, rulesync-drift, locked-sdds, website]
     runs-on: ubuntu-latest
     steps:
       - name: Verify all required jobs passed
+        env:
+          REQUIRED_RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
-          if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
-            echo "::error::One or more required CI jobs failed or were cancelled."
+          read -r -a results <<< "$REQUIRED_RESULTS"
+          if [[ "${#results[@]}" -ne 6 ]]; then
+            echo "::error::Expected six required CI job results."
             exit 1
           fi
+          for result in "${results[@]}"; do
+            if [[ "$result" != "success" ]]; then
+              echo "::error::A required CI job ended with non-success result: $result."
+              exit 1
+            fi
+          done
           echo "All required CI jobs passed."

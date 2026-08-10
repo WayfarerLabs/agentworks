@@ -1,0 +1,55 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 240 540"
+  role="img"
+  aria-labelledby="title description"
+>
+  <title id="title">Agentworks AGW rocket with layered flame</title>
+  <desc id="description">
+    A graphite AGW rocket monogram above one restrained exhaust cone. The flame transitions inward
+    from deep orange-red to orange and then pale yellow at its hottest core.
+  </desc>
+
+  <g data-layer="flame" aria-hidden="true">
+    <path
+      data-temperature="cool-edge"
+      fill="#d94a1e"
+      d="M64 405c16 8 33 12 56 12s40-4 56-12c-3 46-22 88-56 125-34-37-53-79-56-125Z"
+    />
+    <path
+      data-temperature="warm-middle"
+      fill="#ff7a00"
+      d="M78 407c12 8 26 12 42 12s30-4 42-12c-5 38-19 71-42 98-23-27-37-60-42-98Z"
+    />
+    <path
+      data-temperature="hot-core"
+      fill="#ffe09a"
+      d="M99 411c7 5 14 7 21 7s14-2 21-7c-3 24-10 44-21 61-11-17-18-37-21-61Z"
+    />
+  </g>
+
+  <g data-layer="mark" fill="#292b30">
+    <path
+      data-letter="W"
+      transform="translate(0 29)"
+      d="M32 274h40l21 68 15-68h24l15 68 21-68h40l-32 112h-35l-21-53-21 53H64L32 274Z"
+    />
+
+    <path
+      data-letter="G"
+      d="M191 184a34 34 0 0 0-34-34H83a34 34 0 0 0-34 34v78a34 34 0 0 0 34 34h74a34 34 0 0 0 34-34v-22h-73"
+      fill="none"
+      stroke="#292b30"
+      stroke-width="34"
+      stroke-linecap="square"
+      stroke-linejoin="round"
+    />
+
+    <path
+      data-letter="A"
+      fill-rule="evenodd"
+      clip-rule="evenodd"
+      d="M120 10 204 143h-40l-15-27H91l-15 27H36L120 10Zm0 55-18 32h36l-18-32Z"
+    />
+  </g>
+</svg>
