@@ -377,8 +377,20 @@ long-form prose model, and a future source rename requires changing exactly one 
 - [x] Add independent source-to-navigation semantic witnesses, synthetic `h2`/`h3` nesting and
       escaping coverage, fragment validation, no-heading behavior, and CSS layout assertions without
       pinning the current documents' heading inventories.
-- [ ] Run focused and complete repository gates, rebuild the port-8766 preview, obtain an
+- [x] Run focused and complete repository gates, rebuild the port-8766 preview, obtain an
       `agentworks-reviewer` approval, update PR #439, and monitor its required checks.
+
+Review evidence (2026-08-10): the first `agentworks-reviewer` pass found that the wide grid held the
+document body below the complete contents rail and that declaration-only CSS assertions could not
+prove geometry. The implementation grouped the post-`h1` body beside the rail and added computed
+Chromium geometry witnesses at 1600 and 390 CSS pixels. A follow-up required the browser witness to
+fail instead of skip when no supported browser exists. GitHub Actions then exposed an
+iframe-specific Chromium hang; the final test-only fix measures a same-origin copy of the complete
+generated document directly. The reviewer approved exact commit `264bfb92` with no Blocking or
+Important findings. The exact commit passed 108 Python website tests, 22 Node model tests,
+deterministic root and project-base ten-file builds, all complete repository CI jobs on Python
+3.12/3.13/3.14, Ruff and mypy, file lint, locked-SDD and Rulesync drift checks, and CodeQL. Its
+root-base artifact was rebuilt and all five routes returned HTTP 200 from the port-8766 preview.
 
 Definition of done: Manifesto and Security automatically expose an accessible `h2`/`h3` contents
 navigation derived from their complete current Markdown source, inline after `h1` by default and in
