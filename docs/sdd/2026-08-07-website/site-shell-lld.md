@@ -30,12 +30,16 @@ A later onboarding phase replaces that notice through its own canonical contract
 | `website/templates/lander.html`      | Dedicated semantic shell for the shared lunar deployment game               |
 | `website/templates/404.html`         | Useful error surface and progressively enhanced lander                      |
 | `website/templates/lander-game.html` | Sole template source for the reusable game subtree                          |
+| `website/assets/agw-favicon.svg`     | Flame-free browser icon projection of the selected mark                     |
 | `website/assets/agw-rocket.svg`      | Selected self-contained brand mark                                          |
 | `website/static/site.css`            | Shared tokens, shell, document presentation, focus, and reflow              |
 | `website/static/lander.css`          | Shared Lander/404 scene and mission presentation                            |
 | `website/static/lander-model.js`     | Pure deterministic lander model                                             |
 | `website/static/lander-game.js`      | Page-agnostic game controller                                               |
 | `website/build.py`                   | Closed inputs, rendering, validation, manifest, and atomic installation     |
+| `website/site_content.py`            | Complete Markdown projection and safe HTML rendering                        |
+| `website/site_validation.py`         | Template, shell, CSS, and local-reference validation                        |
+| `website/site_asset_validation.py`   | Exact canonical and favicon head-link contracts                             |
 | `website/tests/`                     | Source, template, generated-document, builder, workflow, and game contracts |
 | `website/README.md`                  | Permanent build, content-ownership, publishing, and recovery runbook        |
 
@@ -44,6 +48,7 @@ The complete generated artifact is exactly:
 ```text
 404.html
 index.html
+assets/agw-favicon.svg
 assets/agw-rocket.svg
 manifesto/index.html
 lander/index.html
@@ -209,16 +214,17 @@ canary for off-screen absolute positioning. No home-grown general CSS parser is 
 
 `website/build.py` remains the executable CLI and artifact orchestrator. Content projection and
 Markdown rendering move to `website/site_content.py`; template, CSS, shell, and local-reference
-validation move to `website/site_validation.py`. Each production module and each test module remains
-below 1,000 lines. The split preserves one public build command and introduces no package or runtime
-dependency.
+validation move to `website/site_validation.py`; exact canonical and favicon head-link validation
+lives in the focused `website/site_asset_validation.py`. Each production module and each test module
+remains below 1,000 lines. The split preserves one public build command and introduces no package or
+runtime dependency.
 
-Tests own a literal expected ten-file manifest independent of production constants. They scan every
-static JavaScript module import, resolve same-origin relative imports against its emitted path, and
-require the target in that literal manifest; a missing `lander-model.js` mutation must fail. A
-malicious reviewed-link canary containing quotes, ampersands, and an attempted attribute boundary
-must serialize as one escaped `href` with no injected attribute. These witnesses pin manifest and
-attribute safety without duplicating the whole builder implementation.
+Tests own a literal expected eleven-file manifest independent of production constants. They scan
+every static JavaScript module import, resolve same-origin relative imports against its emitted
+path, and require the target in that literal manifest; a missing `lander-model.js` mutation must
+fail. A malicious reviewed-link canary containing quotes, ampersands, and an attempted attribute
+boundary must serialize as one escaped `href` with no injected attribute. These witnesses pin
+manifest and attribute safety without duplicating the whole builder implementation.
 
 The same inputs and arguments produce byte-identical output. Artifacts contain no timestamps,
 environment prose, or generated `CNAME`, and successful builds leave the repository clean.
@@ -269,7 +275,7 @@ specified as two to three times the current compact `1.2rem` header mark; no CSS
 | Source completeness and safety | Complete-source projection, single-`h1`, UTF-8, fence, syntax, and link-map failure tests                                      |
 | Template closure               | Token vocabulary, exact shell tree, HTML-hidden CTA, icon, breadcrumb, image, route-duplicate, and ownership mutation tests    |
 | Generated semantics            | Five-page metadata, canonicals, landmarks, headings, skip links, shell, no-duplicate links, scripts, and local-reference tests |
-| Exact artifacts                | The complete ten-file manifest at `/` and `/agentworks/`; no partial API or CLI option                                         |
+| Exact artifacts                | The complete eleven-file manifest at `/` and `/agentworks/`; no partial API or CLI option                                      |
 | Determinism and safety         | Repeated byte snapshots, hostile output trees, rollback injection, path and symlink tests                                      |
 | Lander/404 preservation        | Shared-subtree identity, Python source/build tests, and Node model/controller contracts                                        |
 | Browser acceptance             | `website/tests/lander-browser-checklist.md` pending five-page manual run                                                       |

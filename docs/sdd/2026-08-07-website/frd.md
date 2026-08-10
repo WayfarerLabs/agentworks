@@ -140,6 +140,10 @@ growth path so nothing forecloses it, and none of it is in scope now.
   enough horizontal room exists, the same navigation becomes a left rail beside the document. It
   uses ordinary same-page anchors, remains useful without CSS or JavaScript, and introduces no
   duplicate body prose or alternate document model.
+- R20. Every generated page advertises one local SVG favicon showing the selected neutral graphite
+  A/G/W rocket mark without exhaust. The favicon preserves the exact selected mark geometry, has no
+  flame paths or colors, resolves beneath both supported site bases, and adds no remote request,
+  runtime script, font, or hand-maintained raster fallback.
 
 ## Settled constraints (inherited; do not reopen)
 
@@ -254,6 +258,11 @@ merged and settled on `main`. The first slice must not build toward them specula
   beneath their preceding `h2`; every fragment resolves to exactly one generated heading ID. The
   default flow places the navigation after the `h1`, and a tested wide-screen media query moves it
   into a left column without changing source order or requiring JavaScript.
+- AC21. Home, Manifesto, Security, Lander, and 404 each contain exactly one
+  `rel="icon" type="image/svg+xml"` link to the emitted flame-free favicon beneath the selected site
+  base. Automated asset checks prove its A/G/W path and presentation attributes equal the selected
+  mark in `agw-rocket.svg`, while plume identifiers, flame colors, scripts, animation, images, and
+  external references are absent.
 
 ## Settled implementation rulings
 

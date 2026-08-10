@@ -25,6 +25,7 @@ EXPECTED_FILES = frozenset(
         Path("lander/index.html"),
         Path("manifesto/index.html"),
         Path("security/index.html"),
+        Path("assets/agw-favicon.svg"),
         Path("assets/agw-rocket.svg"),
         Path("static/lander-game.js"),
         Path("static/lander-model.js"),
@@ -480,6 +481,37 @@ class RocketAssetTests(unittest.TestCase):
             self.assertEqual(self.by_id[f"agw-{side}-warm-middle"].attrib["fill"], "#ff7a00")
             self.assertEqual(self.by_id[f"agw-{side}-hot-core"].attrib["fill"], "#ffe09a")
         self.assertEqual(self.by_id["agw-mark"].attrib["fill"], "#292b30")
+
+
+class FaviconAssetTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.favicon_path = WEBSITE / "assets" / "agw-favicon.svg"
+        cls.favicon_source = cls.favicon_path.read_text(encoding="utf-8")
+        cls.favicon_root = ET.fromstring(cls.favicon_source)
+        cls.favicon_by_id = {
+            element.attrib["id"]: element for element in cls.favicon_root.iter() if "id" in element.attrib
+        }
+        rocket_root = ET.fromstring((WEBSITE / "assets" / "agw-rocket.svg").read_text(encoding="utf-8"))
+        cls.rocket_by_id = {element.attrib["id"]: element for element in rocket_root.iter() if "id" in element.attrib}
+
+    def test_favicon_is_a_self_contained_flame_free_mark(self) -> None:
+        self.assertEqual(self.favicon_root.attrib, {"viewBox": "0 0 240 425"})
+        self.assertEqual(
+            set(self.favicon_by_id),
+            {"agw-mark", "agw-letter-a", "agw-letter-g", "agw-letter-w"},
+        )
+        without_namespace = self.favicon_source.replace('xmlns="http://www.w3.org/2000/svg"', "")
+        self.assertNotRegex(without_namespace, r"<(?:script|style|image|use|animate)\b|https?://")
+        self.assertNotRegex(self.favicon_source, r"plume|engine|#d94a1e|#ff7a00|#ffe09a")
+
+    def test_favicon_geometry_matches_the_selected_mark_exactly(self) -> None:
+        for element_id in ("agw-mark", "agw-letter-a", "agw-letter-g", "agw-letter-w"):
+            with self.subTest(element_id=element_id):
+                self.assertEqual(
+                    self.favicon_by_id[element_id].attrib,
+                    self.rocket_by_id[element_id].attrib,
+                )
 
 
 if __name__ == "__main__":

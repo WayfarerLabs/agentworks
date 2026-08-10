@@ -22,7 +22,8 @@ Implementation uses these permanent names:
 
 | File                                        | Responsibility                                                  |
 | ------------------------------------------- | --------------------------------------------------------------- |
-| `website/assets/agw-rocket.svg`             | Sole source for the selected A, G, W, and twin-plume paths      |
+| `website/assets/agw-rocket.svg`             | Canonical selected A, G, W, and twin-plume geometry             |
+| `website/assets/agw-favicon.svg`            | Flame-free browser projection of the selected A/G/W mark        |
 | `website/templates/404.html`                | Semantic 404 shell with the shared game placeholder             |
 | `website/templates/lander.html`             | Dedicated Lander shell with the shared game placeholder         |
 | `website/templates/lander-game.html`        | Sole source for the complete reusable game subtree              |
@@ -36,7 +37,7 @@ Implementation uses these permanent names:
 
 `lander-game.js` alone imports the model and owns the frame and pointer; no scheduler is duplicated.
 The production build-time seam is `website/build.py --repo-root ROOT --output OUT --site-base BASE`.
-It renders the complete linked ten-file site; game work serves `/lander/` from that artifact and
+It renders the complete linked eleven-file site; game work serves `/lander/` from that artifact and
 fallback acceptance also exercises `/404.html`. `BASE` is a slash-bounded URL path; `/` and
 `/agentworks/` pass. A closed ASCII segment grammar rejects encoding, whitespace, controls, HTML
 delimiters, URL components, backslashes, `//`, and dot segments. Output beneath the repository is
@@ -69,7 +70,15 @@ The body color is `#292b30`. Each engine preserves, from outside to inside, `#d9
 and `#ffe09a`. CSS transforms only the two `#mission-*-engine` use elements, never their nested
 temperature layers.
 
-### 3.2 Lander reference point
+### 3.2 Favicon projection
+
+`agw-favicon.svg` uses `viewBox="0 0 240 425"` and contains only `#agw-mark` plus its three selected
+letter paths. Their complete presentation attributes match the canonical elements in
+`agw-rocket.svg`. The projection contains no plume or engine IDs, flame colors, script, style,
+animation, image, use element, external reference, intrinsic width, or intrinsic height. Every page
+references it through one site-base-aware `rel="icon" type="image/svg+xml"` link.
+
+### 3.3 Lander reference point
 
 The physics pose `(x, y, angle)` refers to the midpoint between the W's two lowest solid points at
 asset coordinate `(120, 415)`. The inline scene applies transforms in this order:
@@ -485,10 +494,10 @@ Log manual rows in the checklist with date, browser/version, viewport, motion se
 The exact root-base demo is
 `python3 website/build.py --repo-root . --output /tmp/agentworks-site-demo --site-base /`, then
 `python3 -m http.server --directory /tmp/agentworks-site-demo 8000`. Open `/lander/` for game work
-and `/404.html` for fallback acceptance. The output is the complete ten-file artifact: `index.html`,
-`manifesto/index.html`, `security/index.html`, `lander/index.html`, `404.html`,
-`assets/agw-rocket.svg`, `static/site.css`, `static/lander.css`, `static/lander-model.js`, and
-`static/lander-game.js`.
+and `/404.html` for fallback acceptance. The output is the complete eleven-file artifact:
+`index.html`, `manifesto/index.html`, `security/index.html`, `lander/index.html`, `404.html`,
+`assets/agw-favicon.svg`, `assets/agw-rocket.svg`, `static/site.css`, `static/lander.css`,
+`static/lander-model.js`, and `static/lander-game.js`.
 
 | Layer                                                                   | Required coverage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

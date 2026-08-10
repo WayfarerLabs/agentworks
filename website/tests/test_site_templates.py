@@ -454,6 +454,24 @@ class TemplateContractTests(RepositoryFixture):
                 ):
                     site_builder._validate_template(name, changed)
 
+    def test_shell_favicon_is_exact_and_shared(self) -> None:
+        favicon = '<link rel="icon" type="image/svg+xml" href="{{SITE_BASE}}assets/agw-favicon.svg" />'
+        for name in site_builder.TEMPLATE_METADATA:
+            template = (self.root / "website/templates" / name).read_text(encoding="utf-8")
+            self.assertEqual(template.count(favicon), 1)
+            variants = (
+                template.replace(favicon, "", 1),
+                template.replace("assets/agw-favicon.svg", "assets/agw-rocket.svg", 1),
+                template.replace('type="image/svg+xml"', 'type="image/png"', 1),
+                template.replace(favicon, f"{favicon}\n        {favicon}", 1),
+            )
+            for changed in variants:
+                with (
+                    self.subTest(name=name),
+                    self.assertRaisesRegex(ValueError, "favicon"),
+                ):
+                    site_builder._validate_template(name, changed)
+
     def test_game_shell_description_and_csp_are_exact_and_shared(self) -> None:
         policies = []
         for name in ("lander.html", "404.html"):

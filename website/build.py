@@ -84,6 +84,7 @@ FULL_MANIFEST: Final = frozenset(
         Path("index.html"),
         Path("manifesto/index.html"),
         Path("lander/index.html"),
+        Path("assets/agw-favicon.svg"),
         Path("assets/agw-rocket.svg"),
         Path("security/index.html"),
         Path("static/lander-game.js"),
@@ -114,6 +115,7 @@ def _render_artifact(repo_root: Path, site_base: str) -> tuple[dict[Path, bytes]
         destination = TEMPLATE_DESTINATIONS[name]
         rendered[destination] = render_named_template(name, template, site_base, shell_substitutions).encode()
     copies = {
+        Path("assets/agw-favicon.svg"): website / "assets/agw-favicon.svg",
         Path("assets/agw-rocket.svg"): website / "assets/agw-rocket.svg",
         Path("static/lander-game.js"): website / "static/lander-game.js",
         Path("static/lander-model.js"): website / "static/lander-model.js",

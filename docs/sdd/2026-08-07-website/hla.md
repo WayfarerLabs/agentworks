@@ -202,6 +202,11 @@ Lander, and 404 header contexts retain the shared compact size. The final checke
 self-contained, font-independent, semantic where displayed as content, and reusable without this
 SDD.
 
+Every document head references one local SVG favicon that projects the same exact neutral A/G/W mark
+without the twin plumes. The dedicated projection keeps browser icon behavior independent of SVG
+fragment support; automated geometry equality checks keep it synchronized with the selected mark. It
+remains transparent and self-contained, with no raster fallback or additional runtime request.
+
 The presentation should feel like a capable workbench rather than a generic SaaS landing page:
 simple but powerful, with strong typography, restrained color, visible structure, and efficient
 density. Terminal and TUI paradigms appear through monospaced accents, crisp panel boundaries,

@@ -397,6 +397,21 @@ navigation derived from their complete current Markdown source, inline after `h1
 a left rail only when enough horizontal room exists, with no manually synchronized heading
 inventory.
 
+## Phase 4F: flame-free site favicon
+
+- [x] Amend the FRD, HLA, shell LLD, plan, and permanent website runbook with the favicon contract
+      and expanded eleven-file artifact.
+- [x] Add one transparent SVG favicon containing only the neutral A/G/W mark, reference it exactly
+      once from every generated page, and preserve root and project-base rendering.
+- [x] Add independent manifest, template-mutation, local-reference, flame-absence, self-containment,
+      and exact selected-mark geometry witnesses.
+- [ ] Run focused and complete gates, obtain `agentworks-reviewer` approval, rebuild the port-8766
+      preview, update PR #439, and monitor every required check.
+
+Definition of done: every page advertises the same local SVG favicon, the emitted icon contains the
+selected A/G/W rocket mark without flames, and the deterministic site artifact contains exactly
+eleven files at either supported site base.
+
 ## Phase 5: CI and default Pages deployment
 
 - [x] Delegate workflow implementation to an `agentworks-dev` subagent with ownership of the Pages

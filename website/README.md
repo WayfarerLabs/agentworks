@@ -78,6 +78,7 @@ Generated output is not maintained or edited. The complete output contains exact
 ```text
 404.html
 index.html
+assets/agw-favicon.svg
 assets/agw-rocket.svg
 manifesto/index.html
 lander/index.html
@@ -173,6 +174,10 @@ service icon has one pinned direct path; its adjacent visible text supplies the 
 Those local and external destinations are not repeated in the body. On 404, the linked home crumb is
 the sole visible route-home action.
 
+Every page head references `assets/agw-favicon.svg`, a transparent, flame-free projection of the
+neutral A/G/W mark. Its geometry is checked against `assets/agw-rocket.svg`; maintain the selected
+mark there and update the favicon projection in the same reviewed change.
+
 Build artifacts are disposable projections of the templates and permanent sources; maintain the
 sources, not generated HTML.
 
@@ -211,8 +216,8 @@ the publishing workflow first runs from a merged `main` commit.
 5. Set `agentworks.build` as this repository's custom domain. Do not mutate DNS yet.
 6. On the same already verified implementation merge-push workflow, use GitHub's **Re-run all
    jobs**. Prove the rerun checked out the same source SHA, normalized `site_base=/`, built and
-   uploaded the exact root-base ten-file artifact, and deployed that artifact successfully. If the
-   deployment fails or cannot be verified, execute the activation rollback below.
+   uploaded the exact root-base eleven-file artifact, and deployed that artifact successfully. If
+   the deployment fails or cannot be verified, execute the activation rollback below.
 7. Re-inventory DNS. Only after the same-SHA root deployment is proven, obtain explicit operator
    approval for the exact cutover and then change only the identified parking records.
 8. Verify apex content, the `www` redirect, certificate hostname, and HTTPS enforcement.
@@ -235,7 +240,7 @@ verified, leave all DNS records unchanged and detach the repository custom-domai
 the WayfarerLabs organization verification and its TXT record, along with every unrelated DNS
 record. On the same latest verified `main` push workflow, use **Re-run all jobs** again. Verify that
 `configure-pages` selected `/agentworks/`, that the rerun checked out the same source SHA, and that
-the exact project-base ten-file artifact deployed successfully. Verify that same SHA at
+the exact project-base eleven-file artifact deployed successfully. Verify that same SHA at
 `https://wayfarerlabs.github.io/agentworks/`, then stop. Retry custom-domain activation only through
 the full reviewed sequence above.
 

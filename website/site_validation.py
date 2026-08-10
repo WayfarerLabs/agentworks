@@ -8,6 +8,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Final, NamedTuple
 
+from site_asset_validation import validate_head_links
 from site_content import (
     CLI_SECRETS_URL,
     EMAIL_ADDRESS_PATTERN,
@@ -427,19 +428,13 @@ def _validate_shared_shell(name: str, template: str) -> None:
         [i for i in _children(parser, head_index) if elements[i].tag == "title"],
         f"{name}: one document title is required",
     )
-    canonical_index = _one(
-        parser,
-        [
-            i
-            for i in _children(parser, head_index)
-            if elements[i].tag == "link" and elements[i].attributes.get("rel") == "canonical"
-        ],
-        f"{name}: one canonical link is required",
-    )
     if _normalized_text(elements[title_index].text) != expected_title:
         raise ValueError(f"{name}: document title must be {expected_title!r}")
-    if elements[canonical_index].attributes.get("href") != expected_canonical:
-        raise ValueError(f"{name}: canonical URL must be {expected_canonical}")
+    validate_head_links(
+        name,
+        [(elements[i].tag, elements[i].attributes) for i in _children(parser, head_index)],
+        expected_canonical,
+    )
     if name in GAME_DESCRIPTIONS:
         description_index = _one(
             parser,
