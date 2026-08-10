@@ -73,10 +73,11 @@ ladder without creating an empty pre-migration backup or showing a migration not
 On the first ordinary 0.14 command that needs writable state:
 
 1. Agentworks reads the current and target schema versions without migration.
-2. For stale state, it qualifies that first observation under the dedicated migration lock. A caller
-   that observed the lock as busy and still sees stale state refuses. If the first acquisition finds
-   the lock free, a caller whose version or schema cookie changed but remains stale also refuses.
-   Either case may have observed another process's partial migration.
+2. For stale state, it acquires the dedicated migration lock and treats the earlier observation only
+   as a trigger. The locked read must exactly match the canonical table-and-column shape for its
+   claimed completed version. A caller that observed the lock as busy and still sees stale state, a
+   caller whose locked shape is partial, or a caller whose version or schema cookie changed but
+   remains stale refuses.
 3. It announces the pending transition on stderr, including for JSON and names-only output.
 4. An interactive operator accepts or declines a default-yes backup prompt. A non-interactive caller
    uses the default-true focused setting.

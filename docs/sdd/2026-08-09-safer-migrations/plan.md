@@ -43,6 +43,9 @@ behavior. Live validation uses a temporary isolated home and no operator state.
 - [x] Independently review the saga-conditional amendments: version-appropriate restore schema,
       first-observation lock qualification, suppression-surviving notices, and legacy installed
       completion safety.
+- [x] Correct and independently re-review the withdrawn race settlement in a compliant draft round:
+      canonical version-shape conformance under the first migration lock, plus the precise tainted
+      read and release-before-acquisition witness.
 - [x] Obtain the saga lead's phased artifact ruling and confirm the singular `database` CLI home.
 - [x] Delete the branch-seeded task brief before taking the artifact PR out of draft.
 - DoD: the functional contract, architecture, compatibility path, implementation sequence, and scope
@@ -77,11 +80,13 @@ behavior. Live validation uses a temporary isolated home and no operator state.
 
 - [x] Add WAL-aware non-migrating schema inspection and safe writable-open sequencing to the same
       database safety service. Serialize stale opens with one persistent dedicated SQLite lock,
-      qualify the first stale observation under that lock, compare it with the preliminary version
-      and schema cookie, recheck after interaction, refuse an overlapped or changed-but-stale
-      observation, refuse malformed and future schema, complete any selected backup before
-      `Database` construction, close construction failures, and raise a kind-based `StateError` with
-      the exact platform-aware recovery command or the explicit no-backup fact.
+      treat the preliminary stale observation only as a lock-acquisition trigger, require canonical
+      version-shape conformance under that first lock, compare the locked version and schema cookie
+      with the preliminary tokens, recheck after interaction, refuse an overlapped,
+      shape-mismatched, or changed-but-stale observation, refuse malformed and future schema,
+      complete any selected backup before `Database` construction, close construction failures, and
+      raise a kind-based `StateError` with the exact platform-aware recovery command or the explicit
+      no-backup fact.
 - [x] Add the strict default-true `DatabaseConfig` and focused `[database]` loader. Full config
       includes the section; only stale non-interactive opens use the focused projection.
 - [x] Update `get_db()` to own notice, interactive default-yes prompt, and non-interactive setting
@@ -106,11 +111,11 @@ behavior. Live validation uses a temporary isolated home and no operator state.
       non-interactive default, opt-out, and invalid focused config; backup-before-first-statement;
       backup failure prevention and retry guidance; partial failure recovery; POSIX and PowerShell
       command rendering; two-process serialized recheck with one backup; staggered late-inspector
-      partial-migration refusal while the lock is held and after a changed-stale actor releases it
-      before the first acquisition; interactive JSON and names-only stdout purity with the required
-      stderr notice; doctor; the single writable-construction-site inventory; and byte-identical
-      zero-output completion probes, including shell-wrapped warning, invalid-config, and pre-0.14
-      marker-free cases.
+      partial-migration refusal while the lock is held and after an actor releases it between a
+      tainted preliminary read and the first acquisition; interactive JSON and names-only stdout
+      purity with the required stderr notice; doctor; the single writable-construction-site
+      inventory; and byte-identical zero-output completion probes, including shell-wrapped warning,
+      invalid-config, and pre-0.14 marker-free cases.
 - DoD: every writable production open follows the reviewed safety flow, every completion probe is
   non-mutating, all permanent teaching matches behavior, and the complete gate and project-specific
   review have no unresolved valid finding.
@@ -120,10 +125,11 @@ behavior. Live validation uses a temporary isolated home and no operator state.
 - [ ] As the invoking session, fetch the PR's real head and base; prove the checkout matches the
       remote head; and check freshness and merge conflicts with current `main`. Save and preserve an
       `agw-state` snapshot first only if the planned run can touch operator state.
-- [ ] Run five mutation checks: force migration before backup, bypass initial stale qualification,
-      remove only the preliminary-to-qualified version/cookie comparison, remove the
-      post-interaction schema recheck, and force completion through a writable open. Each must fail
-      a focused test; restore production behavior afterward.
+- [ ] Run six mutation checks: force migration before backup, bypass initial stale qualification,
+      remove canonical version-shape conformance under the first lock, remove only the
+      preliminary-to-qualified version/cookie comparison, remove the post-interaction schema
+      recheck, and force completion through a writable open. Each must fail a focused test; restore
+      production behavior afterward.
 - [ ] Run the full gate from a clean tree and record the exact commands and results in the PR.
 - [ ] Have an independent fresh-eyes reviewer inspect the complete implementation, tests, docs, and
       SDD traceability; return every valid finding to the implementing agent and re-review fixes.
