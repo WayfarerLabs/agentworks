@@ -1,7 +1,7 @@
 # Child SDDs
 
 - Status: Active ledger
-- Last updated: 2026-08-08
+- Last updated: 2026-08-10
 
 This is the saga's tracking document, the analog of an ordinary SDD's `plan.md`. Completed
 checkboxes are immutable records, per the standard rule. The saga SDD locks when every entry here is
@@ -76,8 +76,17 @@ locked.
       byte-identical, and the round-3 projection-growth follow-up was re-reviewed by execution with
       both new structural pins mutation-verified; the `guide-contributions` always-on rule is now in
       effect
-- [ ] Remaining phases (machine-readable output, bootstraps, wave 2 adoption, closeout) per the
-      effort's per-phase PR plan
+- [x] Machine-readable output phase merged (PR #462, 2026-08-10) after an operator scope correction
+      (2026-08-09: the doctor database-copy/hostile-filesystem snapshot subsystem removed as an
+      unpriced contract — "totally not a good trade") and a clean-slate round; final shape is one
+      domain fact record serialized for human and JSON doctor alike, errors on the ordinary stderr
+      route, and non-migrating doctor kept as authorized behavior at essentially zero marginal cost
+      (operator ruling, 2026-08-09). Multi-round saga-lead and integration reviews converged with
+      mutation-verified fixes (UserAbort re-raise, malformed-schema fail-closed, restored VM-state
+      warning); the plan's checked history restored per the plan-history ruling (see Standing
+      process rulings)
+- [ ] Remaining phases (bootstraps including the README bootstrap that gates 0.14, wave 2 adoption,
+      closeout) per the effort's per-phase PR plan
 - [ ] Locked
 
 ### Wave 3: 2026-08-07-secret-sources
@@ -87,11 +96,25 @@ locked.
 - [x] FRD merged to `main` (PR #443, 2026-08-08; ownership transferred to the effort lead, whose
       design review converged the same day on PR #453, the conventional-prefix successor of PR #452,
       recording the operator's 0.14 hard-break ruling for direct backend references)
-- [ ] Picked up by an effort lead (HLA, plan)
-- [ ] Implementation complete (two-level model, synthesized sources, resolution API, singleton
-      exception removed, map-keyed hosting, relocation)
-- [ ] Breaking reference slice ships in 0.14.0 (direct backend references hard-error; gates the cut
-      per `phasing.md` release mapping)
+- [x] Picked up by an effort lead (HLA, plan, LLDs; design converged on PR #453)
+- [x] Implementation complete and verified by execution across multiple review rounds (two-level
+      model, synthesized sources, resolution API, singleton exception removed, map-keyed hosting,
+      relocation, 0.14 hard break round-tripped on the installed CLI)
+- [x] Secret-memory contract narrowed by operator scope correction (2026-08-09): the
+      frame-erasure/ownership-fence machinery unwound to main parity; the durable contract is
+      no-persistence, no-argv/logs/exception-objects, late resolution, stdin delivery, with
+      in-memory retention explicitly best-effort (process as trust boundary; recorded permanently in
+      that SDD and `capabilities/vm_platform/README.md`)
+- [x] Provider-retained payload class closed by enumeration (2026-08-10): all five platform surfaces
+      (Lima YAML, WSL2 and Proxmox staging, Azure custom_data, AWS UserData) key-free or
+      hygienically transient, each pinned by a retention test on the final submitted artifact;
+      post-boot stdin join unified across azure/aws/lima/initializer/rekey
+- [x] Live remote-Lima acceptance passed with a rotated key (at head 383c0050, 2026-08-10; zero
+      residue, key deregistered; evidence pinned in that SDD's lock record)
+- [x] Saga-lead approval on the honest lock (2026-08-10); plan-history restore per the ruling and
+      the #462 conflict integration ride the final push
+- [ ] Tester final pass, then merge; breaking reference slice ships in 0.14.0 (gates the cut per
+      `phasing.md` release mapping)
 - [ ] Locked
 
 ### Installer plugins (pre-0.14 core slimming): 2026-08-07-installer-plugins
@@ -103,6 +126,11 @@ locked.
 - [x] FRD merged to `main` (PR #440, 2026-08-08; ownership transferred to the effort lead)
 - [x] Picked up by an effort lead (inventory-first: R1 inventory draft PR #451 in phased artifact
       review, three saga-lead findings pending as of 2026-08-08)
+- [x] Design set reviewed (2026-08-09, endorse with conditions at head c5696f54: HLA, plan,
+      migration strategy, and the resource-disable LLD verified code-grounded; all three R1
+      inventory findings genuinely resolved; conditions are the saga-rename absorption on rebase,
+      two LLD self-contradictions, and naming the reserved-built-ins-become-replaceable consequence;
+      the shadow-validation machinery question carries a trim-unless-justified presumption)
 - [ ] Implementation complete (moves, disabled errors, guide topics, upgrade-guide step)
 - [ ] Ships in 0.14.0 (gates the cut per `phasing.md` release mapping)
 - [ ] Locked
@@ -123,6 +151,40 @@ mechanism); tracked here because its outcome gates the 0.14.0 cut per `phasing.m
       codified in `cli/agentworks/capabilities/README.md`
 - [ ] Ships in 0.14.0 (gates the cut per `phasing.md` release mapping)
 
+### Dispatched task (not a child SDD): concise operator content
+
+Operator-dispatched directly to the former wave 2 agent (2026-08-09, before the message-signature
+and coordination rules landed; the coordination gap it exposed fed the operator-responsibilities
+discussion, still open).
+
+- [x] Reviewed by the saga lead (execution pass; fixes verified) and merged (PR #463, 2026-08-09)
+
+### Dispatched task (not a child SDD): manifesto consolidation
+
+Brief seeded on `docs/manifesto` (2026-08-09); picked up by the `agw-manifesto` session
+(2026-08-10). Conviction-voiced content gets one home (`docs/manifesto.md`, renamed from
+`why-agentworks.md`), a `concept-manifesto` guide topic, and a development-principles clause; the
+operator personally rewrites the assembled text before merge (rough-cut/placeholder expectation
+pinned in the brief). Merge-gated on wave 3; the rename updates the website's canonical-source
+selection in lockstep (CI enforces).
+
+- [x] Ruled and brief seeded (2026-08-09; website-coordination constraint updated 2026-08-09 after
+      the website Phase 4B design landed; rough-cut expectation added 2026-08-10)
+- [ ] Survey, rough cut, operator rewrite, merge
+
+### Dispatched task (not a child SDD): safer migrations
+
+Brief seeded on `feat/safer-migrations` (2026-08-10); picked up by the `agw-safer-migrate` session.
+Table-stakes migration UX (operator ruling, 2026-08-09): pre-migration notice with backup offer
+(auto-backup in non-interactive with config opt-out), backup and restore CLI commands, and
+migration-failure messages that print the exact restore invocation. SQLite online backup API; the
+FRD frames the value honestly (wrong-migrations and version rollback, not crash recovery). Scope
+discipline pinned in the brief against the twin-correction failure mode; the CLI command home
+coordinates with the pending resource-CLI grammar decision.
+
+- [x] Ruled and brief seeded (2026-08-10)
+- [ ] SDD, implementation, review; lands before the 0.14.0 tag (gates the cut per `phasing.md`)
+
 ### Not yet spawned
 
 Planned children, seeded when their prerequisites land (see `phasing.md`):
@@ -132,13 +194,45 @@ Planned children, seeded when their prerequisites land (see `phasing.md`):
 - Wave 6: agentic artifacts and distillation
 - Wave 7: structured control
 - Wave 8: external plugin API
+- Pre-0.14 test-consolidation child (operator ruling, 2026-08-09): an aggressive trim pass runs just
+  before the 0.14.0 cut, soft-gating the tag; the saga lead's accumulating dossier (including the
+  wave 3 enforcement-suite structural pins, whose deferral comments name this child as owner) is its
+  R1 input. The closeout-wave pass remains the final sweep.
+- Resource-CLI grammar child (pending operator decision): `describe-kind` becomes `explain`
+  (matching kubectl's verb), a top-level `agw graph` command owns all relational views with
+  focal-node, kind-filter, direction, depth, and format axes, `describe`'s fate is an open A-or-B
+  (remove, or rebuild as the kind-aware card with a per-kind detail hook), `--write` semantics
+  unify, and the CLI-hygiene audit bundle rides along; breaking, so it shares the pre-0.14 window
+- Security-architecture doc child: seeds after wave 3 merges; carries the per-platform
+  durable-surface inventory (what each provider retains) so provider-boundary reviews check a list
+  rather than rediscovering the class incident-by-incident (lesson from wave 3's three-round class
+  discovery)
 - Closeout wave: comprehensive security, test-consolidation, and cleanup review (gates the lock)
 
 Not children of this saga (explicitly out of scope, see `target-state.md`): the
 named-console-template selector SDD, the herdr effort, the companion-shell and resilient-attach
 wins, and the agentworks.build website (`docs/sdd/2026-08-07-website/`, seeded 2026-08-07; the saga
 lead seeds and reviews it like a child, but it does not gate the saga lock). They proceed
-standalone.
+standalone. Website status (2026-08-10): five-page topology (Home, generated Manifesto, Security,
+404, and the operator-authorized dedicated Lander page) implemented and convergence-verified;
+operator acceptance ruling moves the Firefox/WebKit/screen-reader/touch matrix to post-launch
+validation against the public host (rows explicit and unchecked, required before that effort's
+lock), with Chrome/Edge preview as the pre-merge browser gate.
+
+## Standing process rulings (recorded here; skill/rule changes ride the next governance pass)
+
+- **Plan-history ruling (operator, 2026-08-10):** completed plan steps may never be removed — no
+  exception for never-merged, superseded, or expunged work. Everything else strips clean under a
+  scope correction (narration, correction framing, abandoned unchecked boxes, definitions of done,
+  evidence prose, PR bodies). The sdd skill's checkbox rule stands as written; a clarifying sentence
+  lands in the skill so this is not re-litigated.
+- **Contract pricing (operator, 2026-08-09, from the twin scope corrections on #462 and #453):**
+  adversarial verification verifies the contract — it never expands it. More than two or three fix
+  rounds on one finding is a contract smell: stop and re-price the requirement with the operator
+  instead of growing machinery. Reviewers price requirements, not just implementations.
+- **Class sweeps (saga lead, 2026-08-10, from wave 3's provider-boundary rounds):** the first
+  instance of a contract-violation class triggers enumeration of every implementation of the same
+  seam, each verified on its durable surface, before the class is called fixed.
 
 ## Issue intake (2026-08-05)
 
@@ -189,3 +283,10 @@ open-ended research placeholder.
     awaiting merge and implementation), and the onboarding README bootstrap (later onboarding
     phase). The git-credential restructure gate is satisfied (PR #455, merged 2026-08-08). The cut
     waits for the three open gates.
+13. Gate status (2026-08-10, post-#462): onboarding's machine-readable output phase is merged (PR
+    #462); the README bootstrap gate stays open. Wave 3 (PR #453) is saga-lead-approved with the
+    lock honest, pending the #462 conflict integration, the plan-history restore, and the tester's
+    final pass. Installer-plugins design is endorsed with conditions; implementation is next. Two
+    new pre-0.14 gates joined: the safer-migrations dispatched task (operator ruling) and the
+    test-consolidation child (soft gate). The resource-CLI grammar break shares the window pending
+    the operator's describe decision.

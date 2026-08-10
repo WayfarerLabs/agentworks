@@ -251,6 +251,19 @@ the old inputs. One consequence stays on the ledger: the manifest surface curren
 deprecation warn-window channel, so a future manifest-shape deprecation must rebuild one or ship as
 a hard break with guide coverage.
 
+**Requirements are priced like code** (operator rulings, 2026-08-09, from the twin scope
+corrections). Two efforts grew multi-thousand-line defensive subsystems from requirements no owner
+had priced: doctor's hostile-filesystem snapshot protocol (defending a diagnostic read against
+threats outside the workstation trust model) and wave 3's frame-erasure machinery (attempting to
+prove a Python string never survives in any traceback frame, when immutable strings make the process
+the only real trust boundary). Both were unwound to simple, honest contracts: doctor reads state
+through an ordinary read-only open and says so, and secret handling promises no persistence, no
+argv/logs/exception-objects, late resolution, and stdin delivery, with in-memory retention
+explicitly best-effort. The durable posture: adversarial verification verifies the contract and
+never expands it; a finding that survives two or three fix rounds indicates a contract to re-price
+with the operator, not machinery to grow; and where absolute in-memory elimination is ever truly
+required, the sanctioned design is an isolated short-lived process, not application-layer cleanup.
+
 ### Cross-cutting: anchored projections (all destinations)
 
 A recurring principle, now named (operator agreement, 2026-08-05), that child SDDs should test

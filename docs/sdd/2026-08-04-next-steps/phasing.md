@@ -129,9 +129,14 @@ off whenever bandwidth allows, on its own merits and its own schedule.
   rides the cut as well (operator ruling, 2026-08-08): direct backend references hard-error with the
   exact rewrite and no warn window, because prompt and env-var spellings cross unchanged through
   synthesized sources and the affected surface is effectively the operator's own onepassword config;
-  wave 3's breaking slice therefore gates the cut alongside the installer-plugins child. While
-  `main` holds unreleased breaking changes, urgent operator fixes ship from a `0.13.x` backport
-  branch.
+  wave 3's breaking slice therefore gates the cut alongside the installer-plugins child. Two later
+  gates joined (2026-08-09/10): the safer-migrations dispatched task (operator ruling: pre-migration
+  notice, backup, and restore are table-stakes UX for the release that migrates every existing
+  install, and the backup is also the 0.14-to-0.13 rollback path), and the pre-0.14
+  test-consolidation child as a soft gate (the trim runs while the context is loaded, before the
+  repo draws post-release attention). The resource-CLI grammar break shares the window if the
+  operator blesses it: breaking surface changes belong in the same cushioned release. While `main`
+  holds unreleased breaking changes, urgent operator fixes ship from a `0.13.x` backport branch.
 - **Later:** remaining waves map to releases as they prove out; no need to pin numbers now.
 
 ## Open ordering decisions
