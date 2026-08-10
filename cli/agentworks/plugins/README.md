@@ -206,9 +206,15 @@ class ExampleCloudConfig(AgwModel):
 class ExampleCloudPlatform(VMPlatform):
     name: ClassVar[str] = "example-cloud"
     description: ClassVar[str] = "Example Cloud VMs (region-scoped)"
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int] = 2
     config_model: ClassVar[type[AgwModel]] = ExampleCloudConfig
 ```
+
+For vm-platform contract version 2, `create()` receives a required Tailscale auth key and a
+value-free bootstrap-progress sink in `ProvisionRequest`. It must finish the Tailscale join before
+returning or raise after rolling back partial backend state. A successful `ProvisionResult` may omit
+the Tailscale IP only when join succeeded but IP discovery did not; the manager then performs
+IP-only rediscovery and Tailscale SSH verification. There is no older-contract adapter.
 
 A site then writes `platform: {name: example-cloud, region: us-west-2}`, and `api_token` resolves to
 the `example-cloud-token` secret because the field was omitted. An OMITTED reference field and an

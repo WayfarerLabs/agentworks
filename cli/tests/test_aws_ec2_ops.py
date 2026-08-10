@@ -15,14 +15,13 @@ import pytest
 
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest
-from agentworks.capabilities.vm_platform.tailscale_join import BootstrapCompletion, EphemeralTailscaleBootstrap
+from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
 from agentworks.errors import ConfigError, StateError
 from agentworks.plugins.aws.network import EC2Error, poke_ssh_allow, remove_ssh_allow
 from agentworks.plugins.aws.platform import EC2Platform
 from agentworks.ssh import SSHError
 from agentworks.transports import SSHTransport
-from agentworks.vms.initializer import driver as initializer_driver
 from tests._aws_fakes import Controls, client_error, install_fakes, stub_egress, unreachable
 
 if TYPE_CHECKING:
@@ -55,6 +54,12 @@ def _stub_egress_detection(monkeypatch: pytest.MonkeyPatch) -> None:
     a live probe) and a clean per-process cache."""
     stub_egress(monkeypatch, _DETECTED)
 
+    def _successful_bootstrap(self: SSHTransport, command: str, **kwargs: object) -> object:
+        del self, kwargs
+        return SimpleNamespace(stdout="100.64.0.5\n" if command == "tailscale ip -4" else "", returncode=0)
+
+    monkeypatch.setattr(SSHTransport, "run", _successful_bootstrap)
+
 
 def _platform(**extra: object) -> EC2Platform:
     """A platform on a site that selects the ambient credential chain
@@ -66,7 +71,7 @@ def _request(
     *,
     cpus: int = 2,
     memory: int = 8,
-    tailscale: str | None = None,
+    tailscale: str = "tskey-test",
     disk: int = 50,
     swap: int = 4,
     ssh_key: str = "ssh-ed25519 AAAA test",
@@ -82,6 +87,7 @@ def _request(
         ssh_public_key=ssh_key,
         ssh_private_key=None,
         tailscale_auth_key=tailscale,
+        progress=MagicMock(),
         cpus=cpus,
         memory_gib=memory,
         disk_gib=disk,
@@ -205,7 +211,7 @@ class TestCreate:
         monkeypatch.setattr(
             EphemeralTailscaleBootstrap,
             "complete",
-            lambda self, auth_key: BootstrapCompletion(True, "100.64.0.5"),
+            lambda self, auth_key: "100.64.0.5",
         )
         rsa_key = "ssh-rsa " + ("A" * 716) + " agw@host"
         _platform().create(_request(tailscale="tskey-abc", ssh_key=rsa_key), RunContext(config=_config()))
@@ -286,10 +292,9 @@ class TestCreate:
         monkeypatch.setattr(
             EphemeralTailscaleBootstrap,
             "complete",
-            lambda self, auth_key: BootstrapCompletion(True, "100.64.0.5"),
+            lambda self, auth_key: "100.64.0.5",
         )
         result = _platform().create(_request(tailscale="tskey-abc"), RunContext(config=_config()))
-        assert result.bootstrap_complete is True
         assert result.tailscale_ip == "100.64.0.5"
 
 
@@ -386,7 +391,7 @@ class TestCreateRollback:
         ],
         ids=("ssh-readiness", "cloud-init-wait"),
     )
-    def test_readiness_interrupt_rolls_back_before_key_delivery_or_fallback(
+    def test_readiness_interrupt_rolls_back_before_key_delivery(
         self,
         monkeypatch: pytest.MonkeyPatch,
         captured_output: CapturedOutput,
@@ -404,9 +409,6 @@ class TestCreateRollback:
             return SimpleNamespace(stdout="", returncode=0)
 
         monkeypatch.setattr(SSHTransport, "run", _interrupt_readiness)
-        fallback = MagicMock(side_effect=AssertionError("Phase A fallback reached"))
-        monkeypatch.setattr(initializer_driver, "_run_bootstrap_script", fallback)
-
         with pytest.raises(KeyboardInterrupt) as caught:
             _platform().create(_request(tailscale=_SENTINEL), RunContext(config=_config()))
 
@@ -414,7 +416,6 @@ class TestCreateRollback:
         assert [command for command, _kwargs in calls] == expected_commands
         assert all("input_text" not in kwargs for _command, kwargs in calls)
         assert not any("agentworks-bootstrap" in command for command, _kwargs in calls)
-        fallback.assert_not_called()
         retained_user_data = gzip.decompress(rec.kwargs_for("run_instances")["UserData"]).decode()
         assert _SENTINEL not in retained_user_data
         assert _SENTINEL not in repr(calls)

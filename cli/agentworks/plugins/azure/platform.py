@@ -82,7 +82,7 @@ class AzureVMPlatform(VMPlatform):
     one specific Azure service, and other Azure services could plausibly
     back platforms of their own someday."""
 
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int] = 2
     name: ClassVar[str] = "azure-vm"
     description: ClassVar[str] = "Azure Virtual Machines (subscription + resource group)"
     config_model: ClassVar[type[AzureVMConfig]] = AzureVMConfig
@@ -113,6 +113,10 @@ class AzureVMPlatform(VMPlatform):
         identity), which is what `DefaultAzureCredential` does when told nothing.
         `auth: {mode: service-principal, ...}` replaces that chain entirely for this
         site: a rejected client secret then fails the command rather than falling back.
+
+        Azure retains a credential-free bootstrap payload. After cloud-init is ready,
+        creation sends the required Tailscale key through one fixed SSH command on stdin
+        and returns only after join succeeds. Failure rolls the new Azure resources back.
 
         Ships as the opt-in `azure` system plugin, so a site stays not-ready until
         `[plugins] system` lists it.
@@ -417,19 +421,15 @@ class AzureVMPlatform(VMPlatform):
         # Azure retains custom_data. Embed the complete bootstrap with an
         # empty Tailscale key, then deliver the resolved key once over the
         # post-boot provisioning transport below.
-        if tailscale_auth_key:
-            bootstrap = generate_bootstrap_script(
-                admin_username=admin_username,
-                ssh_public_key=ssh_pub_key,
-                provisioning_packages=PROVISIONING_PACKAGES,
-                tailscale_auth_key=None,
-                hostname=request.hostname,
-                swap=swap,
-            )
-            cloud_init = generate_cloud_init(bootstrap)
-        else:
-            # No Tailscale key: minimal cloud-init, bootstrap deferred to Phase A
-            cloud_init = "#cloud-config\npackage_update: true\npackages:\n  - openssh-server\n"
+        bootstrap = generate_bootstrap_script(
+            admin_username=admin_username,
+            ssh_public_key=ssh_pub_key,
+            provisioning_packages=PROVISIONING_PACKAGES,
+            tailscale_auth_key=None,
+            hostname=request.hostname,
+            swap=swap,
+        )
+        cloud_init = generate_cloud_init(bootstrap)
         cloud_init_b64 = base64.b64encode(cloud_init.encode()).decode()
 
         # SDK model classes are imported function-locally like the SDK
@@ -642,12 +642,7 @@ class AzureVMPlatform(VMPlatform):
 
                 # The provider-retained bootstrap installed Tailscale without
                 # a credential. Wait for it, then join once over stdin.
-                tailscale_ip = None
-                bootstrap_complete = False
-                if tailscale_auth_key:
-                    completion = EphemeralTailscaleBootstrap(prov_transport).complete(tailscale_auth_key)
-                    bootstrap_complete = completion.complete
-                    tailscale_ip = completion.tailscale_ip
+                tailscale_ip = EphemeralTailscaleBootstrap(prov_transport).complete(tailscale_auth_key)
             except Exception as exc:
                 output.detail("Cleaning up resources...")
                 # The teardown captures a VM-delete failure rather than
@@ -670,7 +665,6 @@ class AzureVMPlatform(VMPlatform):
         return ProvisionResult(
             native_transport=prov_transport,
             platform_metadata=metadata,
-            bootstrap_complete=bootstrap_complete,
             tailscale_ip=tailscale_ip,
         )
 
@@ -846,14 +840,15 @@ class AzureVMPlatform(VMPlatform):
         self._remove_ssh_allow(vm, ctx, BOOTSTRAP_ALLOW_RULE_NAME)
 
     def secure_failed_vm(self, vm: VMRow, ctx: RunContext) -> None:
-        """Fail closed: close provisioning access on a kept, not-completed VM.
+        """Fail closed after kept post-create verification failure.
 
         Mirrors :meth:`post_tailscale_ready`, which only fires on
-        success: a VM whose bootstrap or Tailscale verification died
-        (marked FAILED) or was interrupted mid-bootstrap (row status
-        untouched by the abort) is kept for debugging, and this hook
-        deletes the fixed-name bootstrap allow so it defaults to zero
-        inbound exposure. Debugging and recovery stay possible: ``vm
+        success: a VM whose Tailscale SSH verification died (marked
+        FAILED) or was interrupted during verification (row status
+        untouched by the abort) is kept for debugging, and this hook deletes
+        the fixed-name bootstrap allow so it defaults to zero inbound
+        exposure. Create-time bootstrap failures roll back inside
+        :meth:`create` and never reach this hook. Debugging and recovery stay possible: ``vm
         shell --platform`` and ``vm delete`` poke a fresh transient
         allow via :meth:`transient_route`, and the Azure serial console
         is not NSG-gated.

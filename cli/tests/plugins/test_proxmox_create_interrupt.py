@@ -28,6 +28,7 @@ from __future__ import annotations
 import sys
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -227,7 +228,8 @@ def _request(*, tailscale: bool) -> ProvisionRequest:
         admin_username="agentworks",
         ssh_public_key="ssh-ed25519 AAAA test",
         ssh_private_key=None,
-        tailscale_auth_key=_SENTINEL if tailscale else None,
+        tailscale_auth_key=_SENTINEL if tailscale else "tskey-test",
+        progress=MagicMock(),
         # The vm-template layer's resolved defaults, which is the only
         # shape a platform ever sees (the hardware fields are required).
         cpus=4,
@@ -668,7 +670,7 @@ class TestProvisionResultTransport:
 
         target = result.native_transport
         assert isinstance(target, SSHTransport)
-        assert target.host == "10.0.0.5"
+        assert target.host == "100.64.0.7"
         assert target.user == "agentworks"
         assert target.force_tty is expected
 

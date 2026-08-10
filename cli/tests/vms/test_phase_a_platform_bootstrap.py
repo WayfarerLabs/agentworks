@@ -1,13 +1,15 @@
-"""Platform-complete Phase A discovers connectivity without replaying secrets."""
+"""Complete-or-raise Phase A records and verifies platform bootstrap."""
 
 from __future__ import annotations
 
-from pathlib import Path
+import inspect
+from dataclasses import fields
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
+from agentworks.capabilities.vm_platform import ProvisionRequest, ProvisionResult, tailscale_join
 from agentworks.db import ProvisioningStatus
 from agentworks.vms.initializer import driver
 
@@ -15,20 +17,42 @@ from agentworks.vms.initializer import driver
 class _TailscaleTransport:
     def __init__(self, **kwargs: object) -> None:
         self.kwargs = kwargs
-        self.commands: list[str] = []
+        self.commands: list[tuple[str, dict[str, object]]] = []
 
     def run(self, command: str, **kwargs: object) -> SimpleNamespace:
-        del kwargs
-        self.commands.append(command)
+        self.commands.append((command, kwargs))
         return SimpleNamespace(stdout="ok\n", returncode=0)
 
 
-@pytest.mark.parametrize("discovery_failure", [None, KeyboardInterrupt("stop")], ids=("ordinary", "interrupt"))
-def test_platform_complete_without_ip_never_selects_secret_bootstrap(
+def test_fallback_era_contract_shapes_are_structurally_absent() -> None:
+    request_fields = {item.name: item for item in fields(ProvisionRequest)}
+    result_fields = {item.name for item in fields(ProvisionResult)}
+
+    assert request_fields["tailscale_auth_key"].type == "str"
+    assert "progress" in request_fields
+    assert "bootstrap_complete" not in result_fields
+    assert not hasattr(tailscale_join, "BootstrapCompletion")
+
+    phase_a_parameters = set(inspect.signature(driver._phase_a_bootstrap).parameters)
+    assert phase_a_parameters == {
+        "db",
+        "config",
+        "vm_name",
+        "exec_target",
+        "admin_username",
+        "logger",
+        "tailscale_ip",
+    }
+    driver_source = inspect.getsource(driver)
+    assert "run_wsl2_bootstrap" not in driver_source
+    assert "generate_bootstrap_script" not in driver_source
+
+
+@pytest.mark.parametrize("discovery_failure", [None, KeyboardInterrupt("stop")], ids=("success", "interrupt"))
+def test_missing_platform_ip_runs_only_ip_discovery(
     monkeypatch: pytest.MonkeyPatch,
     discovery_failure: BaseException | None,
 ) -> None:
-    secret = "phase-a-fallback-sentinel"
     db = MagicMock()
     logger = MagicMock()
     exec_target = MagicMock()
@@ -38,80 +62,49 @@ def test_platform_complete_without_ip_never_selects_secret_bootstrap(
         exec_target.run.side_effect = discovery_failure
     config = SimpleNamespace(operator=SimpleNamespace(ssh_private_key="/tmp/test-key"))
     monkeypatch.setattr(driver, "SSHTransport", _TailscaleTransport)
-    run_bootstrap = MagicMock(side_effect=AssertionError("secret bootstrap selected"))
-    monkeypatch.setattr(driver, "_run_bootstrap_script", run_bootstrap)
 
     def call() -> _TailscaleTransport:
         return driver._phase_a_bootstrap(
             db,
             config,
-            SimpleNamespace(),
             "myvm",
             exec_target,
-            "/home/agw",
             "agw",
-            "lima--myvm",
             logger,
-            tailscale_auth_key=secret,
-            script_swap=4,
-            bootstrap_complete=True,
             tailscale_ip=None,
         )  # type: ignore[return-value]
 
     if discovery_failure is None:
         ts_target = call()
         assert ts_target.kwargs["host"] == "100.64.0.8"
+        assert ts_target.commands == [("echo ok", {"timeout": 15})]
         db.update_vm_tailscale.assert_called_once_with("myvm", "100.64.0.8")
+        db.update_vm_provisioning_status.assert_any_call("myvm", ProvisioningStatus.COMPLETE)
     else:
         with pytest.raises(type(discovery_failure)) as caught:
             call()
         assert caught.value is discovery_failure
 
-    run_bootstrap.assert_not_called()
-    exec_target.run.assert_called_once_with("sudo tailscale ip -4")
-    assert secret not in repr(exec_target.run.call_args_list)
+    exec_target.run.assert_called_once_with("tailscale ip -4", sudo=True)
 
 
-def test_wsl2_helper_result_is_persisted_at_manager_boundary(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    public_key = tmp_path / "id.pub"
-    public_key.write_text("ssh-ed25519 AAAA test\n")
+def test_returned_platform_ip_skips_provisioning_transport(monkeypatch: pytest.MonkeyPatch) -> None:
     db = MagicMock()
     logger = MagicMock()
     exec_target = MagicMock()
-    config = SimpleNamespace(
-        operator=SimpleNamespace(
-            ssh_public_key=public_key,
-            ssh_private_key=tmp_path / "id",
-        )
-    )
-    run_bootstrap = MagicMock(return_value="100.64.0.9")
-    monkeypatch.setattr(driver, "run_wsl2_bootstrap", run_bootstrap)
+    config = SimpleNamespace(operator=SimpleNamespace(ssh_private_key="/tmp/test-key"))
+    monkeypatch.setattr(driver, "SSHTransport", _TailscaleTransport)
 
-    tailscale_ip = driver._run_bootstrap_script(
+    ts_target = driver._phase_a_bootstrap(
         db,
         config,
-        SimpleNamespace(),
         "myvm",
         exec_target,
         "agw",
-        "wsl2--myvm",
         logger,
-        tailscale_auth_key="tskey-test",
-        script_swap=0,
+        tailscale_ip="100.64.0.9",
     )
 
-    run_bootstrap.assert_called_once_with(
-        exec_target,
-        admin_username="agw",
-        ssh_public_key="ssh-ed25519 AAAA test",
-        tailscale_auth_key="tskey-test",
-        hostname="wsl2--myvm",
-        swap_gib=0,
-        progress=logger,
-    )
+    exec_target.run.assert_not_called()
+    assert ts_target.kwargs["host"] == "100.64.0.9"  # type: ignore[attr-defined]
     db.update_vm_tailscale.assert_called_once_with("myvm", "100.64.0.9")
-    db.update_vm_provisioning_status.assert_called_once_with("myvm", ProvisioningStatus.COMPLETE)
-    assert tailscale_ip == "100.64.0.9"

@@ -7,8 +7,9 @@ imports below for why those calls are routed through the package object
 rather than a plain top-level import.
 
 ``create_vm`` splits the initializer's two phases across its output
-sections: Phase A (``bootstrap_vm``: bootstrap + Tailscale connectivity +
-SSH-config sync) is the tail of the ``Provisioning`` section, and Phase B
+sections: Phase A (``bootstrap_vm``: record the platform-owned bootstrap,
+verify Tailscale connectivity, and sync SSH config) is the tail of the
+``Provisioning`` section, and Phase B
 (``run_initialization``) runs after it as the ``VM Initialization`` /
 ``Admin Initialization`` sections. A single keepalive hold (an
 ``ExitStack`` entered before Phase A, released after Phase B) spans both,
@@ -288,7 +289,7 @@ def create_vm(
     # (Tailscale SSH); the other platforms' hold is a no-op. It is entered
     # (into ``init_stack``) just before Phase A and released when the stack
     # exits, after Phase B, on every path. Provisioning (platform create +
-    # Phase A bootstrap/connectivity) and Initialization (Phase B) are
+    # Phase A state recording/connectivity) and Initialization (Phase B) are
     # sibling output sections either side of the stack's Phase-A/Phase-B
     # split; ``_warn_init_cancel`` / ``_raise_init_failure`` map a failure
     # in either phase to the same operator-facing outcome.
@@ -353,6 +354,38 @@ def create_vm(
             # resolved) at the composition root above; dispatch is just ops now.
             platform_obj = site_node.platform
             from agentworks.capabilities.vm_platform import ProvisionRequest
+            from agentworks.ssh import SSHLogger
+
+            # One manager-owned log spans platform bootstrap, Phase A, and
+            # initialization. Construct it before dispatch so WSL2 can report
+            # its platform-owned bootstrap through the same redacted sink.
+            # Register the close on the surrounding stack exactly once; every
+            # success, failure, and interrupt after construction exits it. A
+            # close error warns but cannot replace the primary operation result.
+            try:
+                logger = SSHLogger(
+                    vm_name,
+                    "vm-create",
+                    redactions=(tailscale_auth_key, *git_tokens.values()),
+                )
+            except (KeyboardInterrupt, UserAbort):
+                log.unwind()
+                raise
+            except Exception as e:
+                log.unwind()
+                raise ProvisioningError(
+                    f"could not create the provisioning log: {e}",
+                    entity_kind="vm",
+                    entity_name=vm_name,
+                ) from e
+
+            def _close_create_logger() -> None:
+                try:
+                    logger.close()
+                except Exception as close_error:
+                    output.warn(f"could not close provisioning log {logger.display_path}: {close_error}")
+
+            init_stack.callback(_close_create_logger)
 
             request = ProvisionRequest(
                 vm_name=vm_name,
@@ -362,6 +395,7 @@ def create_vm(
                 ssh_public_key=config.operator.ssh_public_key.read_text().strip(),
                 ssh_private_key=config.operator.ssh_private_key,
                 tailscale_auth_key=tailscale_auth_key,
+                progress=logger,
                 cpus=resolved_cpus,
                 memory_gib=resolved_memory,
                 disk_gib=resolved_disk,
@@ -388,6 +422,7 @@ def create_vm(
                 # side (#338).
                 output.warn(f"Cancelling vm create '{vm_name}'... rolling back.")
                 log.unwind()
+                output.warn(f"Log: {logger.display_path}")
                 raise
             except UserAbort:
                 # No prompt lives in this span today (the boundary resolve ran
@@ -395,11 +430,12 @@ def create_vm(
                 # never downgrade to a ProvisioningError; roll back like the
                 # KeyboardInterrupt twin above.
                 log.unwind()
+                output.warn(f"Log: {logger.display_path}")
                 raise
             except Exception as e:
                 log.unwind()
                 raise ProvisioningError(
-                    f"provisioning failed: {e}",
+                    f"provisioning failed: {e}\nDetails: {logger.display_path}",
                     entity_kind="vm",
                     entity_name=vm_name,
                 ) from e
@@ -411,7 +447,7 @@ def create_vm(
             # platform is the column's only reader.
             db.update_vm_platform_metadata(vm_name, result.platform_metadata)
 
-            # -- Phase A: bootstrap + connectivity (the tail of Provisioning) --
+            # -- Phase A: record + verify connectivity (the tail of Provisioning) --
             # Past the unwind window: if anything below fails, the VM exists on
             # the remote host and is kept (debuggable, reinit-able). The hold is
             # entered here so it spans Phase A and Phase B; the row exists (the
@@ -425,18 +461,15 @@ def create_vm(
                 # so a failure to open it maps like any other init failure, as
                 # it did when the hold was entered inside the old initialize_vm.
                 init_stack.enter_context(platform_obj.vm_active(init_row, config=config))
-                ts_target, logger, home = _mgr.bootstrap_vm(
+                ts_target, home = _mgr.bootstrap_vm(
                     db,
                     config,
-                    vm_tmpl,
                     vm_name,
                     result.native_transport,
                     platform_obj,
                     platform_ctx,
+                    logger,
                     admin_username=resolved_admin_username,
-                    tailscale_auth_key=tailscale_auth_key,
-                    git_tokens=git_tokens,
-                    bootstrap_complete=result.bootstrap_complete,
                     tailscale_ip=result.tailscale_ip,
                     on_tailscale_ready=_on_tailscale_ready,
                 )

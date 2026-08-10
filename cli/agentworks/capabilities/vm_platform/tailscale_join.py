@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks import output
@@ -38,21 +37,13 @@ def join_tailscale_ephemerally(
     )
 
 
-@dataclass(frozen=True)
-class BootstrapCompletion:
-    """Whether provider bootstrap finished, plus its optional tailnet IP."""
-
-    complete: bool
-    tailscale_ip: str | None = None
-
-
 class EphemeralTailscaleBootstrap:
     """Finish a key-free cloud bootstrap through one post-boot stdin join."""
 
     def __init__(self, target: Transport) -> None:
         self._target = target
 
-    def complete(self, auth_key: str) -> BootstrapCompletion:
+    def complete(self, auth_key: str) -> str | None:
         """Wait for cloud-init, join exactly once, then discover the IP.
 
         Readiness failure raises before sending the key so the platform's
@@ -63,7 +54,7 @@ class EphemeralTailscaleBootstrap:
         self._wait_for_cloud_init()
 
         join_tailscale_ephemerally(self._target, auth_key, timeout=30)
-        return BootstrapCompletion(complete=True, tailscale_ip=self._tailscale_ip())
+        return self._tailscale_ip()
 
     def _wait_for_cloud_init(self) -> None:
         output.detail("Waiting for cloud-init bootstrap to complete (this may take several minutes)...")

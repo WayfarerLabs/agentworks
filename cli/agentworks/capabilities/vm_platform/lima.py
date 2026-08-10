@@ -153,7 +153,7 @@ class LimaConfig(AgwModel):
 class LimaPlatform(VMPlatform):
     """Runs VMs via limactl, locally or on a remote host over SSH."""
 
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int] = 2
     name: ClassVar[str] = "lima"
     description: ClassVar[str] = "Lima VMs (local, or on a remote host via SSH)"
     config_model: ClassVar[type[LimaConfig]] = LimaConfig
@@ -176,6 +176,10 @@ class LimaPlatform(VMPlatform):
         built-in `lima-local` site is. `placement: {mode: ssh, host: me@gpu-box}`
         runs `limactl` on that host over SSH, so the VMs live on a shared box and
         nothing but SSH is needed here.
+
+        Creation retains a credential-free provision script, then sends the required
+        Tailscale key through one fixed guest command on stdin. It returns only after
+        the join succeeds, or raises after removing the partial instance.
 
         Local sites need `limactl` installed here and report not-ready without it.
         Remote sites need nothing locally.
@@ -341,21 +345,14 @@ class LimaPlatform(VMPlatform):
         # render them through `limactl list --json`. Embed only the non-secret
         # bootstrap shape; the resolved Tailscale key crosses the post-start
         # stdin boundary below and never enters this provider configuration.
-        if request.tailscale_auth_key:
-            provision_script = generate_bootstrap_script(
-                admin_username=request.admin_username,
-                ssh_public_key=request.ssh_public_key,
-                provisioning_packages=PROVISIONING_PACKAGES,
-                tailscale_auth_key=None,
-                hostname=request.hostname,
-                swap=swap,
-            )
-        else:
-            # No Tailscale key: provision block is a no-op.
-            # Phase A bootstrap will handle everything separately.
-            provision_script = (
-                "#!/bin/bash\necho '##STEP## Provision'\necho '##SUCCESS## no-op (deferred to Phase A)'\n"
-            )
+        provision_script = generate_bootstrap_script(
+            admin_username=request.admin_username,
+            ssh_public_key=request.ssh_public_key,
+            provisioning_packages=PROVISIONING_PACKAGES,
+            tailscale_auth_key=None,
+            hostname=request.hostname,
+            swap=swap,
+        )
 
         # Indent the provision script for YAML embedding (6 spaces)
         indented_script = textwrap.indent(provision_script, "      ")
@@ -383,15 +380,8 @@ class LimaPlatform(VMPlatform):
             output.detail(f"Lima VM '{instance_name}' created.")
 
             tailscale_ip = None
-            bootstrap_complete = False
-            if request.tailscale_auth_key:
-                output.detail("Joining Tailscale...")
-                self._join_tailscale_ephemerally(instance_name, request.tailscale_auth_key)
-                # The secret-bearing operation is complete. A later discovery
-                # failure must not select the Phase A bootstrap script, which
-                # would deliver the key a second time through a different
-                # boundary. Phase A can rediscover the IP without the key.
-                bootstrap_complete = True
+            output.detail("Joining Tailscale...")
+            self._join_tailscale_ephemerally(instance_name, request.tailscale_auth_key)
 
             # Some bootstrap steps (currently the Apple-vz SVE mask, see
             # bootstrap_script) only take effect after a reboot, and rebooting
@@ -411,17 +401,16 @@ class LimaPlatform(VMPlatform):
                 output.detail(f"A bootstrap step needs a reboot; restarting '{instance_name}'...")
                 self._run_lima(f"limactl restart {instance_name}")
 
-            # If Tailscale was joined through the ephemeral boundary,
-            # extract the IP without retaining the key in provider state.
-            if request.tailscale_auth_key:
-                output.detail("Retrieving Tailscale IP...")
-                try:
-                    ip_output = self._run_lima(f"limactl shell {instance_name} sudo tailscale ip -4")
-                    tailscale_ip = ip_output.strip()
-                    output.detail(f"Tailscale IP: {tailscale_ip}")
-                except SSHError as e:
-                    output.warn(f"could not retrieve Tailscale IP: {e}")
-                    output.warn("Tailscale is joined; Phase A will retry IP discovery without the auth key.")
+            # Extract the IP without retaining the key in provider state. A
+            # discovery failure is safe: the manager retries only this query.
+            output.detail("Retrieving Tailscale IP...")
+            try:
+                ip_output = self._run_lima(f"limactl shell {instance_name} sudo tailscale ip -4")
+                tailscale_ip = ip_output.strip()
+                output.detail(f"Tailscale IP: {tailscale_ip}")
+            except SSHError as e:
+                output.warn(f"could not retrieve Tailscale IP: {e}")
+                output.warn("Tailscale is joined; Phase A will retry IP discovery without the auth key.")
         except KeyboardInterrupt:
             self._rollback_create_on_interrupt(instance_name)
             raise
@@ -433,7 +422,6 @@ class LimaPlatform(VMPlatform):
         return ProvisionResult(
             native_transport=self._transport_for(instance_name),
             platform_metadata={"instance_name": instance_name},
-            bootstrap_complete=bootstrap_complete,
             tailscale_ip=tailscale_ip,
         )
 

@@ -40,7 +40,6 @@ from agentworks.plugins.azure.network import AzureError
 from agentworks.plugins.azure.platform import AzureVMPlatform
 from agentworks.ssh import SSHError
 from agentworks.transports import SSHTransport
-from agentworks.vms.initializer import driver as initializer_driver
 from tests._azure_platform_support import _install_fakes
 
 if TYPE_CHECKING:
@@ -73,14 +72,19 @@ def _stub_egress_detection(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ssh_exposure, "_egress_ip_cache", None)
     monkeypatch.setattr(ssh_exposure, "detect_egress_ip", lambda: "198.18.0.7")
 
+    def _successful_bootstrap(self: SSHTransport, command: str, **kwargs: object) -> object:
+        del self, kwargs
+        return SimpleNamespace(stdout="100.64.0.5\n" if command == "tailscale ip -4" else "", returncode=0)
+
+    monkeypatch.setattr(SSHTransport, "run", _successful_bootstrap)
+
 
 def _platform() -> AzureVMPlatform:
     return AzureVMPlatform("az-site", dict(_CONFIG))
 
 
 def _request(*, tailscale: bool) -> ProvisionRequest:
-    """With a Tailscale key create runs the inline bootstrap wait;
-    without one it returns straight after the resources are up."""
+    """Use the sentinel for reflection checks, otherwise a regular required key."""
     return ProvisionRequest(
         vm_name="vm1",
         hostname="vm1",
@@ -88,7 +92,8 @@ def _request(*, tailscale: bool) -> ProvisionRequest:
         admin_username="agentworks",
         ssh_public_key="ssh-ed25519 AAAA test",
         ssh_private_key=None,
-        tailscale_auth_key=_SENTINEL if tailscale else None,
+        tailscale_auth_key=_SENTINEL if tailscale else "tskey-test",
+        progress=MagicMock(),
         # The vm-template layer's resolved defaults, which is the only
         # shape a platform ever sees (the hardware fields are required).
         cpus=4,
@@ -127,7 +132,7 @@ class TestInterruptDuringInlineWait:
         expected_commands: list[str],
     ) -> None:
         """A real readiness-command interrupt rolls back the full resource
-        set before fixed-stdin delivery or Phase A fallback can run."""
+        set before fixed-stdin delivery can run."""
         fakes = _install_fakes(monkeypatch, vm_exists_lookup=False)
         # A managed OS disk with the owner tag, as Azure names them.
         fakes.compute.disks.disks = [SimpleNamespace(name="vm1_OsDisk_1", tags={"owner": "agentworks"})]
@@ -141,9 +146,6 @@ class TestInterruptDuringInlineWait:
             return SimpleNamespace(stdout="", returncode=0)
 
         monkeypatch.setattr(SSHTransport, "run", _interrupt_readiness)
-        fallback = MagicMock(side_effect=AssertionError("Phase A fallback reached"))
-        monkeypatch.setattr(initializer_driver, "_run_bootstrap_script", fallback)
-
         with pytest.raises(KeyboardInterrupt) as exc:
             _platform().create(_request(tailscale=True), RunContext())
 
@@ -151,7 +153,6 @@ class TestInterruptDuringInlineWait:
         assert [command for command, _kwargs in calls] == expected_commands
         assert all("input_text" not in kwargs for _command, kwargs in calls)
         assert not any("agentworks-bootstrap" in command for command, _kwargs in calls)
-        fallback.assert_not_called()
         vm = fakes.compute.virtual_machines.created[0][2]
         retained_cloud_init = base64.b64decode(vm.os_profile.custom_data).decode()
         assert _SENTINEL not in retained_cloud_init

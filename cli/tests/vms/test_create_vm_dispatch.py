@@ -84,7 +84,6 @@ def test_create_vm_request_shape_and_row(
         return ProvisionResult(
             native_transport=SimpleNamespace(),  # type: ignore[arg-type]
             platform_metadata={"instance_name": "dvm"},
-            bootstrap_complete=True,
             tailscale_ip="100.64.0.7",
         )
 
@@ -94,7 +93,7 @@ def test_create_vm_request_shape_and_row(
     monkeypatch.setattr(
         vm_manager,
         "bootstrap_vm",
-        lambda *a, **k: (SimpleNamespace(), SimpleNamespace(), "/home/agentworks"),
+        lambda *a, **k: (SimpleNamespace(), "/home/agentworks"),
     )
     monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: None)
 
@@ -149,7 +148,6 @@ def test_create_vm_stores_and_provisions_selected_admin_template(
         return ProvisionResult(
             native_transport=SimpleNamespace(),  # type: ignore[arg-type]
             platform_metadata={"instance_name": "wvm"},
-            bootstrap_complete=True,
             tailscale_ip="100.64.0.9",
         )
 
@@ -159,7 +157,7 @@ def test_create_vm_stores_and_provisions_selected_admin_template(
     monkeypatch.setattr(
         vm_manager,
         "bootstrap_vm",
-        lambda *a, **k: (SimpleNamespace(), SimpleNamespace(), "/home/agentworks"),
+        lambda *a, **k: (SimpleNamespace(), "/home/agentworks"),
     )
     monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: None)
 
@@ -258,7 +256,6 @@ def test_create_vm_composes_r11_hostname_with_slug(
         return ProvisionResult(
             native_transport=SimpleNamespace(),  # type: ignore[arg-type]
             platform_metadata={"instance_name": "team-a-svm"},
-            bootstrap_complete=True,
             tailscale_ip="100.64.0.8",
         )
 
@@ -268,7 +265,7 @@ def test_create_vm_composes_r11_hostname_with_slug(
     monkeypatch.setattr(
         vm_manager,
         "bootstrap_vm",
-        lambda *a, **k: (SimpleNamespace(), SimpleNamespace(), "/home/agentworks"),
+        lambda *a, **k: (SimpleNamespace(), "/home/agentworks"),
     )
     monkeypatch.setattr(vm_manager, "run_initialization", lambda *a, **k: None)
 

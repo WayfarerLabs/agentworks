@@ -104,14 +104,14 @@ def _preserve_ssh_host_keys(
     """Stop cloud-init from regenerating SSH host keys on stop/start.
 
     Writes the cloud-init drop-in that pins existing host keys. This also runs
-    during Phase A bootstrap, but reconciling it here means VMs provisioned
+    during create-time bootstrap, but reconciling it here means VMs provisioned
     before the drop-in existed get repaired on ``vm reinit`` -- otherwise their
     host key changes on the next reboot and SSH fails with a changed-host-key
     error until the operator clears known_hosts by hand.
 
     Inert on platforms without cloud-init (e.g. WSL2): the file is simply never
     read. Written unconditionally to keep the step platform-agnostic, matching
-    the Phase A bootstrap step.
+    the create-time bootstrap step.
     """
     from pathlib import PurePosixPath
 
