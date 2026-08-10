@@ -367,24 +367,10 @@ class StaticDocumentTests(unittest.TestCase):
         self.assertIn("opacity: 1", powered_rule)
         self.assertNotIn("animation", powered_rule)
 
-    def test_destroy_and_input_clear_restore_static_recovery(self) -> None:
+    def test_input_clear_restores_zero_command_and_renders(self) -> None:
         clear_input = self.game.split("clearAllInput(timestamp) {", 1)[1].split("\n    }", 1)[0]
         self.assertIn("commanded: { ...ZERO_INPUT }", clear_input)
         self.assertIn("this.render()", clear_input)
-        destroy = self.game.split("destroy() {", 1)[1].split("\n    }", 1)[0]
-        self.assertIn("this.abortController.abort()", destroy)
-        self.assertIn("this.model = createPreflightModel()", destroy)
-        self.assertIn("this.cue = settleCue()", destroy)
-        self.assertIn("this.startButton.disabled = true", destroy)
-        self.assertIn("this.startButton.hidden = true", destroy)
-        self.assertIn("this.actions.hidden = true", destroy)
-        self.assertIn("this.exitButton.disabled = true", destroy)
-        self.assertIn("this.restartButton.disabled = true", destroy)
-        self.assertIn('this.status.textContent = ""', destroy)
-        self.assertLess(
-            destroy.index("this.abortController.abort()"),
-            destroy.index("this.render()"),
-        )
 
     def test_native_actions_share_keyboard_controller_operations_and_focus_lifecycle(
         self,

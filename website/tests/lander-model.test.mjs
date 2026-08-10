@@ -74,6 +74,102 @@ function schedule(hertz, edges = []) {
     return { clock, model };
 }
 
+class FakeElement {
+    constructor(parentElement = null) {
+        this.parentElement = parentElement;
+        this.hidden = false;
+        this.disabled = false;
+        this.tabIndex = -1;
+        this.textContent = "";
+        this.dataset = {};
+        this.attributes = new Map();
+        this.style = { setProperty() {} };
+    }
+
+    addEventListener() {}
+
+    setAttribute(name, value) {
+        this.attributes.set(name, value);
+    }
+
+    removeAttribute(name) {
+        this.attributes.delete(name);
+    }
+
+    focus() {
+        document.activeElement = this;
+    }
+}
+
+function createControllerFixture() {
+    const root = new FakeElement();
+    const actions = new FakeElement(root);
+    const elements = {
+        "#lander-scene-shell": new FakeElement(root),
+        "#lander-scene": new FakeElement(root),
+        "#lander-start": new FakeElement(root),
+        "#lander-controls": new FakeElement(root),
+        "#lander-actions": actions,
+        "#lander-exit": new FakeElement(actions),
+        "#lander-restart": new FakeElement(actions),
+        "#lander-status": new FakeElement(root),
+    };
+    root.querySelector = (selector) => elements[selector];
+    return { root, ...Object.fromEntries(Object.entries(elements).map(([key, value]) => [key.slice(1), value])) };
+}
+
+let controllerModule;
+
+async function loadControllerModule() {
+    if (!controllerModule) {
+        const automaticFixture = createControllerFixture();
+        globalThis.Element = FakeElement;
+        globalThis.document = {
+            activeElement: null,
+            body: new FakeElement(),
+            hidden: true,
+            addEventListener() {},
+            querySelector: () => automaticFixture.root,
+        };
+        globalThis.window = {
+            addEventListener() {},
+            setTimeout,
+        };
+        globalThis.matchMedia = () => ({
+            matches: false,
+            addEventListener() {},
+        });
+        globalThis.requestAnimationFrame = () => 1;
+        globalThis.cancelAnimationFrame = () => {};
+        controllerModule = await import("../static/lander-game.js");
+    }
+    return controllerModule;
+}
+
+function isEffectivelyVisible(element) {
+    for (let current = element; current; current = current.parentElement) {
+        if (current.hidden) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function isEffectivelyFocusable(element) {
+    return isEffectivelyVisible(element) && !element.disabled;
+}
+
+function assertDestroyedActions(fixture) {
+    assert.equal(fixture["lander-actions"].hidden, true);
+    assert.equal(isEffectivelyVisible(fixture["lander-exit"]), false);
+    assert.equal(fixture["lander-exit"].disabled, true);
+    assert.equal(isEffectivelyFocusable(fixture["lander-exit"]), false);
+    assert.equal(fixture["lander-restart"].hidden, true);
+    assert.equal(isEffectivelyVisible(fixture["lander-restart"]), false);
+    assert.equal(fixture["lander-restart"].disabled, true);
+    assert.equal(isEffectivelyFocusable(fixture["lander-restart"]), false);
+}
+
 test("the controller imports the one model scheduler instead of duplicating it", async () => {
     const controller = await readFile(new URL("../static/lander-game.js", import.meta.url), "utf8");
     assert.match(controller, /advanceSimulation/);
@@ -394,4 +490,41 @@ test("the subtle cue is one-shot and exit creates strict settled preflight", () 
     assert.deepEqual(exited, createPreflightModel());
     const restarted = transitionMission(powered, "RESTART");
     assert.deepEqual(restarted, createFlightModel());
+});
+
+test("destroy hides and disables native actions from an active controller", async () => {
+    const { LanderGameController } = await loadControllerModule();
+    const fixture = createControllerFixture();
+    const controller = new LanderGameController(fixture.root);
+    controller.start(false, 0);
+
+    assert.equal(fixture["lander-actions"].hidden, false);
+    assert.equal(isEffectivelyFocusable(fixture["lander-exit"]), true);
+    assert.equal(fixture["lander-restart"].hidden, true);
+    assert.equal(isEffectivelyFocusable(fixture["lander-restart"]), false);
+
+    controller.destroy();
+
+    assert.equal(controller.model.state, "preflight");
+    assertDestroyedActions(fixture);
+});
+
+test("destroy removes focusable native actions from a terminal controller", async () => {
+    const { LanderGameController } = await loadControllerModule();
+    const fixture = createControllerFixture();
+    const controller = new LanderGameController(fixture.root);
+    controller.start(false, 0);
+    controller.model = transitionMission(controller.model, "UNSAFE_CONTACT");
+    controller.render();
+
+    assert.equal(controller.model.state, "failed");
+    assert.equal(fixture["lander-actions"].hidden, false);
+    assert.equal(isEffectivelyFocusable(fixture["lander-exit"]), true);
+    assert.equal(fixture["lander-restart"].hidden, false);
+    assert.equal(isEffectivelyFocusable(fixture["lander-restart"]), true);
+
+    controller.destroy();
+
+    assert.equal(controller.model.state, "preflight");
+    assertDestroyedActions(fixture);
 });

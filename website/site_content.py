@@ -24,20 +24,6 @@ README_SOURCE_URL: Final = f"{REPOSITORY_URL}/blob/main/README.md"
 IDEMPOTENCY_URL: Final = f"{REPOSITORY_URL}/blob/main/docs/guides/idempotency.md"
 CLI_SECRETS_URL: Final = f"{REPOSITORY_URL}/blob/main/cli/README.md#environment-variables-and-secrets"
 PYPI_URL: Final = "https://pypi.org/project/agentworks-cli/"
-SERVICE_ICON_PATHS: Final = {
-    REPOSITORY_URL: (
-        "M8 .7a7.5 7.5 0 0 0-2.4 14.6v-2c-1.8.4-2.2-.8-2.2-.8-.3-.8-.8-1-1-1.1-.7-.5.1-.5.1-.5.8.1 "
-        "1.2.8 1.2.8.7 1.2 1.8.9 2.2.7.1-.5.3-.9.5-1.1-1.5-.2-3-.7-3-3.3 0-.7.2-1.3.7-1.8-.1-.2-.3-.9.1-1.8 0 "
-        "0 .6-.2 2.1.7A7 7 0 0 1 8 4.1a7 7 0 0 1 1.9.3c1.5-.9 2.1-.7 2.1-.7.4.9.2 1.6.1 1.8.5.5.7 1.1.7 1.8 0 "
-        "2.6-1.6 3.1-3 3.3.3.2.5.6.5 1.2v3.5A7.5 7.5 0 0 0 8 .7Z"
-    ),
-    PYPI_URL: (
-        "M7.8 1.1c-3.4 0-3.2 1.5-3.2 1.5v1.5h3.3v.5H3.3S1 4.3 1 8s2 3.6 2 3.6h1.2V9.9s-.1-2 2-2h3.3s1.9 0 "
-        "1.9-1.8V3s.3-1.9-3.6-1.9Zm-1.8 1a.6.6 0 1 1 0 1.2.6.6 0 0 1 0-1.2Zm2.2 12.8c3.4 0 3.2-1.5 "
-        "3.2-1.5v-1.5H8.1v-.5h4.6S15 11.7 15 8s-2-3.6-2-3.6h-1.2v1.7s.1 2-2 2H6.5s-1.9 0-1.9 1.8V13s-.3 1.9 "
-        "3.6 1.9Zm1.8-1a.6.6 0 1 1 0-1.2.6.6 0 0 1 0 1.2Z"
-    ),
-}
 MANIFESTO_SOURCE_SHA256: Final = "dba90181c0c3fca415d965ac4eb3933525044ffe560ec1ef2561be83e875d207"
 MANIFESTO_HEADINGS: Final = (
     (1, "Why Agentworks"),
@@ -60,22 +46,6 @@ SOURCE_RELATIVE_URLS: Final = {
 REPORTING_URL: Final = (
     "https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing-"
     "information-about-vulnerabilities/privately-reporting-a-security-vulnerability"
-)
-APPROVED_EXTERNAL_URLS: Final = frozenset(
-    {
-        "https://agentworks.build/",
-        "https://agentworks.build/manifesto/",
-        "https://agentworks.build/security/",
-        "https://agentworks.build/404.html",
-        REPOSITORY_URL,
-        PYPI_URL,
-        README_SOURCE_URL,
-        IDEMPOTENCY_URL,
-        f"{REPOSITORY_URL}/security/policy",
-        f"{REPOSITORY_URL}/issues/224",
-        CLI_SECRETS_URL,
-        REPORTING_URL,
-    }
 )
 
 
