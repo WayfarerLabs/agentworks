@@ -41,11 +41,11 @@ retain their established spellings; prose uses the full role name whenever ambig
 | Concern                 | Decision                                                                                                                                                                                                                                                                                          |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Canonical body          | `packaging/agentworks/assistance.md` is the universal copy/paste prompt and only authored package body. It owns its prose, security posture, and links.                                                                                                                                           |
-| Canonical metadata      | `packaging/agentworks/metadata.json` owns machine metadata only: identity, package version, minimum CLI version, publisher fields, display name, and shared short/long descriptions.                                                                                                              |
+| Canonical metadata      | `packaging/agentworks/metadata.json` owns machine metadata only: identity, package version, minimum CLI version, publisher fields, display name, `skillDescription`, and interface descriptions. `skillDescription` alone supplies both generated skill-frontmatter descriptions.                 |
 | Identity                | Both marketplaces, both plugins, and both skills use the neutral name `agentworks`. The native install identity is `agentworks@agentworks`.                                                                                                                                                       |
 | Minimum CLI             | `agentworks-cli >=0.14.0`, with no maximum. Version 0.14.0 first contains the guide companion this package invokes.                                                                                                                                                                               |
 | Projection              | `scripts/generate-agentworks-package.py` emits two native wrappers from one body and metadata record. Generated skill bodies are byte-identical after frontmatter.                                                                                                                                |
-| README parity           | One marked region under README `## Getting Started` contains the canonical body exactly inside a collision-proof generated fence. The generator owns only that region.                                                                                                                            |
+| README parity           | One marked region under README `## Getting Started` contains the compact, table-free canonical body exactly inside a collision-proof generated fence. The generator owns only that region; detailed tables below describe the design and tests rather than text copied into the prompt.           |
 | Runtime behavior        | The inert canonical body, whether pasted directly or loaded as a native skill, tells the Agentworks assistant agent to disclose once, establish a working authorization envelope, offer bounded source review, check or install the CLI, and request guide context. It performs no action itself. |
 | Teaching ownership      | The top-level guide owns the intent-to-topic map and the installed guide topics own teaching. Native assistance packages contain no intent map, recipes, or release prose.                                                                                                                        |
 | Current versus temporal | Live guide facts answer current capability and adoption questions. The packaged normalized release-please changelog answers exact installed and historical versions offline; canonical GitHub releases are the authorized fallback only for locally missing history.                              |
@@ -113,8 +113,22 @@ headings and order are stable:
 4. `Source review offer`
 5. `Working within the authorized scope`
 
-The body is deliberately thin. It contains no topic choice, operation recipe, generated inventory,
-or historical release text.
+The body is deliberately thin and table-free. Each stable section is concise; the detailed tables
+and enumerations in this LLD specify behavior and acceptance rather than literal operator-facing
+copy. The body contains no topic choice, operation recipe, generated inventory, or historical
+release text.
+
+`metadata.json.skillDescription` contains the one generated skill description:
+
+```text
+Help with any Agentworks setup, discovery, adoption, configuration, troubleshooting, VM operation,
+or session operation request. Use whenever the operator asks to install, understand, configure,
+troubleshoot, or operate Agentworks.
+```
+
+The generator copies that field byte-for-byte into both `SKILL.md` frontmatter documents. Codex
+`interface.shortDescription` and `interface.longDescription` remain separate marketplace display
+fields; neither is allowed to become a third skill-description spelling.
 
 The opening calls its addressee the **Agentworks assistant agent** and states that this is the
 external helper using Agentworks with the operator, not an Agentworks-managed agent resource. That
@@ -205,7 +219,9 @@ that metadata as untrusted evidence and selects the latest non-prerelease versio
 minimum. The resulting installation is pinned to `agentworks-cli==VERSION`; a range is never treated
 as an exact review target.
 
-Assistance then offers these two inert choices before proceeding with installation:
+Assistance then offers two compact, table-free choices before proceeding with installation. The
+following LLD table pins their records and tests; it is not copied literally into the canonical
+prompt:
 
 | Action                   | Exact scope and result                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -375,11 +391,12 @@ authority.
 dynamic `ReleaseNotes` block, and related links. It contains no hand-maintained release prose. The
 block reads only the changelog packaged in the installed wheel and performs no network access. Its
 contribution shape contains only `type` and `id`; no contributor can supply a path or prose payload.
-The base topic selects the installed version. The guide catalog also derives strict dynamic
+The base topic selects the installed version. The core guide catalog owns and derives strict dynamic
 `concept-release-notes/vMAJOR-MINOR-PATCH` topics from the packaged changelog's validated stable
 headers, so one exact historical section can be selected without adding flags to the generic guide
 command. For example, changelog version `0.13.0` maps one-to-one to `concept-release-notes/v0-13-0`;
-the slug contains no dots and satisfies the existing guide identity grammar.
+contributors cannot mint that namespace, and the slug contains no dots and satisfies the existing
+guide identity grammar.
 
 Release-please-managed `cli/CHANGELOG.md` remains the sole history source. Before Phase 3 packaging,
 one reviewed normalization consolidates the duplicate 0.13 sections, preserving the curated manual
@@ -565,6 +582,8 @@ state and points the Agentworks assistant agent to troubleshooting without retry
   change the protected policy or working root, launch or reconfigure a harness, execute, authorize
   install, or expand the selected review scope.
 - A merge-base CI test rejects package-content changes without a package-version bump.
+- A focused-review contract test asserts that every hard-coded repository path in the focused scope
+  exists at the tested HEAD, so a rename cannot silently narrow or invalidate the promised review.
 - `claude plugin validate --strict` validates the Claude package and marketplace. The clean install
   uses the explicit HTTPS repository URL with SSH keys, SSH agent, Git credential helpers, and Git
   credential environment removed.

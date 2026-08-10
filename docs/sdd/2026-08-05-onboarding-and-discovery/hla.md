@@ -241,12 +241,13 @@ repository has no corresponding tag or release. Release-please remains the only 
 
 The block defaults to the installed distribution version. Strict dynamic
 `concept-release-notes/vMAJOR-MINOR-PATCH` topics expose every exact normalized packaged section,
-and the topic catalog lists those versions for completion and discovery. An Agentworks assistant
-agent answers a multi-release question by requesting the applicable exact-version topics; the
-renderer still emits only one bounded section per topic. Each section requires exactly one matching
-header through a bounded parser, is sanitized through the normal guide boundary, and renders as
-visibly labeled escaped plain-text evidence with links inert. Rendering opens no network connection
-and never renders the whole changelog.
+and the core guide catalog owns their derivation, lookup, and completion inventory. For example,
+version `0.13.0` is owned and exposed as `concept-release-notes/v0-13-0`; contributors cannot mint
+that namespace. An Agentworks assistant agent answers a multi-release question by requesting the
+applicable exact-version topics; the renderer still emits only one bounded section per topic. Each
+section requires exactly one matching header through a bounded parser, is sanitized through the
+normal guide boundary, and renders as visibly labeled escaped plain-text evidence with links inert.
+Rendering opens no network connection and never renders the whole changelog.
 
 For a version or range absent from local packaged history, a validated `read-release-notes` action
 requires operator-supplied `FROM_VERSION` and `TO_VERSION`, uses a dedicated
@@ -479,12 +480,13 @@ release-PR commit that built the candidate wheel, record that test-only ref subs
 install that exact artifact. The post-tag PyPI smoke exercises the production `vVERSION` review and
 exact install path.
 
-The repository README leads with the same canonical assistance text, explicitly addressed to the
-Agentworks assistant agent, in a fenced copyable block. It derives from or is checked against the
-canonical source rather than maintaining a second security paraphrase. The plugins remain an
-additional discovery channel, not a prerequisite. The body does not assume Claude Code, Codex, or a
-plugin API; harness-specific security posture applies as conditional guidance only when that harness
-is actually in use.
+The repository README leads with the same compact, table-free canonical assistance text, explicitly
+addressed to the Agentworks assistant agent, in a fenced copyable block. It derives from or is
+checked against the canonical source rather than maintaining a second security paraphrase. Detailed
+architecture tables are not copied into the operator-facing prompt. The plugins remain an additional
+discovery channel, not a prerequisite. The body does not assume Claude Code, Codex, or a plugin API;
+harness-specific security posture applies as conditional guidance only when that harness is actually
+in use.
 
 The package is named for Agentworks rather than onboarding, and its description activates for setup,
 discovery, adoption, configuration, troubleshooting, and operation. It contains no intent-to-topic
@@ -550,7 +552,7 @@ The implementation audits other development roles for a real need rather than co
 blindly, then regenerates and commits the Claude Code, Codex, and Copilot projections with the
 existing Rulesync drift check.
 
-`agw guide` and JSON v1 are additive. Bootstrap packages state their minimum compatible CLI.
+`agw guide` and JSON v1 are additive. Assistance packages state their minimum compatible CLI.
 Breaking changes follow the repository's warn-then-reject runway where one exists. Remediation is
 precise errors plus `concept-migration`, not an automated migrator. Machine-contract changes keep
 their own explicit versioning and compatibility rules.

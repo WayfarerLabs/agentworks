@@ -2,21 +2,21 @@
 
 - Status: Draft
 - Start date: 2026-08-05
-- Roadmap: `docs/sdd/2026-08-04-next-steps` (this effort is the onboarding-and-discovery child,
-  destination 1 of that roadmap; the user perspective in its `inputs/` is the source material)
+- Saga: `docs/sdd/2026-08-04-next-steps` (this effort is the onboarding-and-discovery child,
+  destination 1 of that saga; the user perspective in its `inputs/` is the source material)
 - Related SDDs: `docs/sdd/2026-07-31-declarative-schema` (wave 2, running in parallel; its schema
   emission, samples, and describe surfaces are this effort's raw material as they land)
 
 ## Summary
 
 Agentworks has accumulated substantial functionality and complexity, and operator feedback says it
-is a lot to take in. This effort delivers the roadmap's first destination: always-available
-assistance that helps an operator set Agentworks up, discover what it can do, adopt newly available
+is a lot to take in. This effort delivers the saga's first destination: always-available assistance
+that helps an operator set Agentworks up, discover what it can do, adopt newly available
 capabilities, maintain its configuration, and operate it over time. The experience scales with the
 surface because it is derived from the platform's own registries, schemas, and samples, and it
 serves human operators and Agentworks assistant agents alike.
 
-The delivery model is plan A from the roadmap's user perspective: an operator already has a capable
+The delivery model is plan A from the saga's user perspective: an operator already has a capable
 assistant agent on their workstation and uses it whenever they want help with Agentworks, including
 setup and ongoing management. The universal entry is the copy/paste prompt from the repository and
 website. Agentworks also publishes native marketplace and plugin integrations for Claude Code and
@@ -246,20 +246,20 @@ term whenever either role could be ambiguous.
   rendering MUST NOT execute anything a contribution supplies. This holds for curated system plugins
   now precisely so the content channel is already safe when external plugins arrive (wave 8).
 - **R16 (README assistance block).** The repository README's getting-started section MUST lead with
-  a single copy-paste block (a fenced block, so GitHub renders a copy button) addressed to the
-  Agentworks assistant agent, along these lines: "I'd like your help using Agentworks. You are my
-  Agentworks assistant agent, not an agent managed by Agentworks. Please install or update it if
-  needed, help me understand what it can do, and help me set it up or operate it. It is available on
-  PyPI as `agentworks-cli` and runs on Python >= 3.12. Before installing it, please offer to review
-  the exact source tag and warn me that a full repository review may incur substantial model usage.
-  At startup, please explain the access posture and establish the scope of my request. Then follow
-  my instructions without repeatedly asking for approval inside that scope. Ask again if you need to
-  expand it materially, or if I tell you to confirm every action. Run `agw guide --agent` for
-  current context and decide what to propose next based on my request." This is a first-class
-  zero-plugin assistance path; the harness plugins (R1) say essentially the same thing and remain
-  primarily an advertising and discoverability channel. The prompt MUST avoid product-specific
-  harness assumptions beyond the ability to accept the prompt, drive the CLI, and request or use
-  appropriate operator-approved workstation access.
+  a compact, table-free single copy-paste block (a fenced block, so GitHub renders a copy button)
+  addressed to the Agentworks assistant agent, along these lines: "I'd like your help using
+  Agentworks. You are my Agentworks assistant agent, not an agent managed by Agentworks. Please
+  install or update it if needed, help me understand what it can do, and help me set it up or
+  operate it. It is available on PyPI as `agentworks-cli` and runs on Python >= 3.12. Before
+  installing it, please offer to review the exact source tag and warn me that a full repository
+  review may incur substantial model usage. At startup, please explain the access posture and
+  establish the scope of my request. Then follow my instructions without repeatedly asking for
+  approval inside that scope. Ask again if you need to expand it materially, or if I tell you to
+  confirm every action. Run `agw guide --agent` for current context and decide what to propose next
+  based on my request." This is a first-class zero-plugin assistance path; the harness plugins (R1)
+  say essentially the same thing and remain primarily an advertising and discoverability channel.
+  The prompt MUST avoid product-specific harness assumptions beyond the ability to accept the
+  prompt, drive the CLI, and request or use appropriate operator-approved workstation access.
 
 ## Personas and stories
 
@@ -360,7 +360,7 @@ term whenever either role could be ambiguous.
 ## Decisions
 
 - **D1 (plan A).** The vanilla-harness plugin model is settled (operator ruling recorded in the
-  roadmap's user perspective and target-state) for the two native integrations; this FRD does not
+  saga's user perspective and target-state) for the two native integrations; this FRD does not
   reopen it. R16's universal copy/paste prompt keeps native plugin support optional for any other
   capable Agentworks assistant agent.
 - **D2 (parallel to wave 2).** This effort seeds now, consumes wave 2's surfaces as they land, and

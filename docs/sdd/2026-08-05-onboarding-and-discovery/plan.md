@@ -33,9 +33,9 @@
 - [x] `hla.md` resolves every FRD-assigned question: onboarding state, agent mode, JSON contract,
       universal contributions, safe template vocabulary, taxonomy, multi-topic behavior, bootstrap
       compatibility/parity, and feedback.
-- [ ] Wave 2 confirms or raises concerns with the early contract before building plan section 2.8;
-      the resolved outcome is incorporated into the HLA without depending on provisional branch
-      code.
+- [x] Wave 2 confirmed all five early-contract alignments in its 2026-08-06 plan section 2.8
+      settlement, including the two scope clarifications. The landed `TopicProse`, reference, and
+      sample services and this effort's HLA and adapter incorporate that outcome from `main`.
 - [x] HLA and plan reviewed by `agentworks-reviewer`; every valid finding resolved.
 - [x] Artifact files lint clean with vocabulary scoped in this SDD's `.cspell.json`.
 - [x] Artifact-only commit pushed and draft PR opened for roadmap-lead pre-implementation review.
@@ -315,6 +315,13 @@ release-please regenerates its separate release PR from the resulting `main`.
       requested goal, treats an explicit operator instruction as authorization without a redundant
       confirmation, does not repeat risks or approval questions for every in-scope step, and honors
       an operator preference for narrower or per-action confirmation.
+- [ ] Reconcile every shipped core guide contribution with the durable authorization envelope,
+      explicitly including `concept-onboarding`, `concept-management`, `concept-migration`,
+      `concept-troubleshooting`, and `concept-secrets`. Teaching and `AgentContract` prose treats
+      `GuideAction.consent` as an authorization class rather than a mandatory per-action prompt,
+      proceeds through covered work without re-asking, and still stops for refusal, ambiguity, an
+      uncovered material expansion, or an operator-selected confirm-every-action preference.
+      Contract tests reject contradictory per-action-consent teaching.
 - [ ] Before CLI installation or update, canonical assistance resolves one exact stable version,
       offers to inspect its canonical `vVERSION` source tag, warns that a full-repository review may
       consume significant model usage, and keeps focused review, full review, decline-review, and
@@ -323,19 +330,22 @@ release-please regenerates its separate release PR from the resulting `main`.
 - [ ] Source-review contract tests cover focused and full review, decline-review followed by a
       previously authorized exact install, and completed review followed by declined install. No
       path treats review selection as installation authorization or declining review as a failed
-      installation; installation may already be covered by the operator's startup instruction.
+      installation; installation may already be covered by the operator's startup instruction. Every
+      repository path hard-coded into the focused-review scope must exist at the tested HEAD.
 - [ ] Adversarial source-review fixtures keep the assistance session in its protected policy root
       and treat candidate `AGENTS.md`, `CLAUDE.md`, skills, hooks, plugins, configuration, and
       embedded commands only as data. Candidate content cannot redirect the review, load policy,
       launch or reconfigure a harness, execute, authorize installation, or expand the approved
       scope.
 - [ ] Generator emits committed Claude Code and Codex Agentworks plugin and marketplace wrappers
-      from that source; CI requires regeneration to produce no diff. README projection chooses an
-      outer backtick fence longer than the canonical body's longest backtick run, preserving the
-      canonical body bytes without forbidding ordinary fenced examples.
-- [ ] Repository README Getting Started leads with the R16 assistance block addressed explicitly to
-      the Agentworks assistant agent, generated from the canonical source, and retains a clear human
-      installation path below it.
+      from that source; CI requires regeneration to produce no diff. The exact
+      `metadata.json.skillDescription` field owns both generated skill-frontmatter descriptions.
+      README projection chooses an outer backtick fence longer than the canonical body's longest
+      backtick run, preserving the canonical body bytes without forbidding ordinary fenced examples.
+- [ ] Repository README Getting Started leads with the compact, table-free R16 assistance block
+      addressed explicitly to the Agentworks assistant agent, generated from the canonical source,
+      and retains a clear human installation path below it. Detailed LLD tables remain design and
+      test contracts rather than prose copied into that newcomer-facing prompt.
 - [ ] Hand the canonical assistance block to the standalone website effort as its prompt source and
       record verified byte parity there; after integration, that effort deletes its temporary
       security-disclosure message input rather than retaining a second authored copy.
