@@ -382,7 +382,7 @@ def create_vm(
             def _close_create_logger() -> None:
                 try:
                     logger.close()
-                except Exception as close_error:
+                except BaseException as close_error:
                     output.warn(f"could not close provisioning log {logger.display_path}: {close_error}")
 
             init_stack.callback(_close_create_logger)

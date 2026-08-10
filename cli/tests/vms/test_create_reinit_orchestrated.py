@@ -241,6 +241,7 @@ def test_create_failure_closes_logger_once_without_replacing_primary(
     from agentworks.errors import ProvisioningError
 
     closes: list[str] = []
+    close_interrupt = KeyboardInterrupt("close interrupted")
 
     class _LoggerSpy:
         display_path = "~/.config/agentworks/logs/failvm-vm-create.log"
@@ -252,8 +253,7 @@ def test_create_failure_closes_logger_once_without_replacing_primary(
 
         def close(self) -> None:
             closes.append("close")
-            if isinstance(failure, RuntimeError):
-                raise OSError("close exploded")
+            raise close_interrupt
 
     monkeypatch.setattr("agentworks.ssh.SSHLogger", _LoggerSpy)
 
@@ -277,8 +277,10 @@ def test_create_failure_closes_logger_once_without_replacing_primary(
 
     assert closes == ["close"]
     assert db.get_vm("failvm") is None
-    if isinstance(failure, RuntimeError):
-        assert any("could not close provisioning log" in warning for warning in captured_output.warnings)
+    assert any(
+        "could not close provisioning log ~/.config/agentworks/logs/failvm-vm-create.log: close interrupted" in warning
+        for warning in captured_output.warnings
+    )
 
 
 # -- vm create: unwind parity ------------------------------------------------
