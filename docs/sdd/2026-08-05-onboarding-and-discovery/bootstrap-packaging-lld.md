@@ -450,9 +450,11 @@ Production metadata and prose always require `agentworks-cli >=0.14.0`. Candidat
 built 0.14.0 release-candidate wheel directly at the package-install boundary. This settled HLA
 decision tests the unreleased CLI without changing the production command, metadata, or source.
 
-Release choreography is explicit: Phase 3 merges after candidate gates pass; release automation tags
-and publishes 0.14 from that main commit; then the post-publish smoke runs the exact production PyPI
-command and tagged marketplace. The short main-before-PyPI interval is expected. A failed publish
+The ready, reviewed Phase 3 implementation commit is incorporated into the 0.14 release-please PR
+and does not merge independently to main. That release PR lands the README and bootstrap, version
+bump, and release metadata on main in one release commit. Release-please creates the tag and release
+from that commit, `release.yml` publishes it, and the post-PyPI smoke runs the exact production
+install and tagged marketplace. Only the tag-to-PyPI interval is transitional. A publish failure
 blocks release completion and never causes a silent branch, archive, or alternate-index install.
 
 Every live transcript is checked for a strict prefix: disclosure, operator decision, then the first
@@ -495,4 +497,5 @@ current official `interface` contract and installed plugin validator.
 
 A delegated developer authored this LLD under the onboarding-and-discovery lead's ownership. The
 lead reviewed it. This artifact is intended for a draft checkpoint PR and merges only after saga
-review converges.
+review converges. The saga/release lead owns coordination and inclusion of the ready Phase 3
+implementation in the 0.14 release PR.
