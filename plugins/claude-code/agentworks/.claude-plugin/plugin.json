@@ -1,7 +1,7 @@
 {
   "name": "agentworks",
   "version": "1.0.0",
-  "description": "Always-available assistance for setting up, discovering, configuring, troubleshooting, and operating Agentworks.",
+  "description": "Bootstrap the Agentworks CLI and hand off to its built-in agent guide.",
   "author": {
     "name": "Wayfarer Labs",
     "url": "https://github.com/WayfarerLabs"

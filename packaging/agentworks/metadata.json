@@ -2,7 +2,7 @@
   "name": "agentworks",
   "packageVersion": "1.0.0",
   "minimumCliVersion": "0.14.0",
-  "description": "Always-available assistance for setting up, discovering, configuring, troubleshooting, and operating Agentworks.",
+  "description": "Bootstrap the Agentworks CLI and hand off to its built-in agent guide.",
   "publisher": {
     "name": "Wayfarer Labs",
     "url": "https://github.com/WayfarerLabs"
@@ -11,12 +11,12 @@
   "repository": "https://github.com/WayfarerLabs/agentworks",
   "license": "MIT",
   "displayName": "Agentworks",
-  "skillDescription": "Help with any Agentworks setup, discovery, adoption, configuration, troubleshooting, VM operation, or session operation request. Use whenever the operator asks to install, understand, configure, troubleshoot, or operate Agentworks.",
+  "skillDescription": "Install or update the Agentworks CLI, verify its version, and run its built-in agent guide. Use when the operator wants to bootstrap Agentworks assistance.",
   "interface": {
-    "shortDescription": "Agentworks assistance",
-    "longDescription": "Set up, understand, configure, troubleshoot, and operate Agentworks.",
+    "shortDescription": "Bootstrap Agentworks CLI",
+    "longDescription": "Install or update the Agentworks CLI, verify it, and open its agent guide.",
     "category": "Productivity",
-    "capabilities": ["Lifecycle assistance"],
-    "defaultPrompt": ["Help me with Agentworks."]
+    "capabilities": ["CLI bootstrap"],
+    "defaultPrompt": ["Install or update Agentworks and open its guide."]
   }
 }

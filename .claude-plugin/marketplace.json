@@ -1,14 +1,14 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
   "name": "agentworks",
-  "description": "Always-available assistance for setting up, discovering, configuring, troubleshooting, and operating Agentworks.",
+  "description": "Bootstrap the Agentworks CLI and hand off to its built-in agent guide.",
   "owner": {
     "name": "Wayfarer Labs"
   },
   "plugins": [
     {
       "name": "agentworks",
-      "description": "Always-available assistance for setting up, discovering, configuring, troubleshooting, and operating Agentworks.",
+      "description": "Bootstrap the Agentworks CLI and hand off to its built-in agent guide.",
       "source": "./plugins/claude-code/agentworks"
     }
   ]
