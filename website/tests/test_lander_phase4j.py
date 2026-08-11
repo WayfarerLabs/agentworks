@@ -145,6 +145,34 @@ class ArcadeMarkupTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     validate_game_contract(mutation)
 
+    def test_control_line_sources_reject_empty_duplicate_and_moved_structure(self) -> None:
+        keyboard = re.search(
+            r'<span class="lander-controls-line lander-controls-keyboard">[^<]+</span>',
+            self.fragment,
+        )
+        touch = re.search(
+            r'<span class="lander-controls-line lander-controls-touch">[^<]+</span>',
+            self.fragment,
+        )
+        self.assertIsNotNone(keyboard)
+        self.assertIsNotNone(touch)
+        assert keyboard is not None and touch is not None
+        mutations = (
+            self.fragment.replace(keyboard.group(0),
+                                  '<span class="lander-controls-line lander-controls-keyboard"> </span>', 1),
+            self.fragment.replace(touch.group(0), f'{keyboard.group(0)}\n                {touch.group(0)}', 1),
+            self.fragment.replace(keyboard.group(0), "", 1).replace(
+                '</p>\n            <button id="lander-exit"',
+                f'</p>\n            {keyboard.group(0)}\n            <button id="lander-exit"',
+                1,
+            ),
+        )
+        for index, mutation in enumerate(mutations):
+            with self.subTest(index=index):
+                self.assertNotEqual(mutation, self.fragment)
+                with self.assertRaises(ValueError):
+                    validate_game_contract(mutation)
+
     def test_reviewed_root_and_required_tag_identities_reject_stray_structure(self) -> None:
         fuel_label = re.search(r'<span id="lander-fuel-label"[^>]*>.*?</span>', self.fragment, re.DOTALL)
         self.assertIsNotNone(fuel_label)

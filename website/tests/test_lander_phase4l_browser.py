@@ -14,6 +14,7 @@ from pathlib import Path
 
 from lander_chromium_phase4k import (
     DevToolsConnection,
+    _button_names,
     _devtools_target,
     _QuietHandler,
     dispatch_key,
@@ -93,14 +94,21 @@ fail(powered);
 outside.focus();
 const crashFocus = document.activeElement.id;
 const scrollBefore = {x: scrollX, y: scrollY};
+const retryContract = {
+    children: [...restart.children].map((child) => ({tag: child.localName, className: child.className})),
+    label: restart.firstElementChild.textContent.trim(),
+    labelRects: restart.firstElementChild.getClientRects().length,
+    hint: restart.lastElementChild.textContent.trim(),
+    hintHidden: restart.lastElementChild.getAttribute("aria-hidden"),
+    shortcut: restart.getAttribute("aria-keyshortcuts"),
+};
 order.length = 0;
 window.phase4l = {
     controller, shell, restart, powered, expected, order, layout, projection, fail,
     firstResult() {
         return {projection: projection(controller.model), focus: document.activeElement.id,
             order: structuredClone(order), scrollBefore, scrollAfter: {x: scrollX, y: scrollY},
-            crashFocus, retryClicks, retry: {label: restart.firstElementChild.textContent.trim(),
-                hint: restart.lastElementChild.textContent.trim(), shortcut: restart.getAttribute("aria-keyshortcuts")}};
+            crashFocus, retryClicks, retry: structuredClone(retryContract)};
     },
     prepareSecond() { fail(controller.model); shell.focus(); order.length = 0; },
     secondResult() { return {projection: projection(controller.model), focus: document.activeElement.id,
@@ -145,7 +153,7 @@ def browser_phase4l_contract(output: Path) -> dict[str, object]:
             f"--user-data-dir={profile.name}", "about:blank",
         ), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env={**os.environ, "HOME": profile.name})
         connection = DevToolsConnection(_devtools_target(Path(profile.name), process))
-        for domain in ("Runtime", "Page"):
+        for domain in ("Runtime", "Page", "Accessibility"):
             connection.call(f"{domain}.enable")
         connection.call("Emulation.setDeviceMetricsOverride", {
             "width": 320, "height": 640, "deviceScaleFactor": 1, "mobile": False,
@@ -162,8 +170,19 @@ def browser_phase4l_contract(output: Path) -> dict[str, object]:
             "width": 320, "height": 900, "deviceScaleFactor": 4, "mobile": False,
         })
         result["zoomEquivalent"] = connection.evaluate("phase4l.layout()")
+        retry_tree = connection.call("Accessibility.getFullAXTree")
+        hint_remote = connection.call("Runtime.evaluate", {
+            "expression": "phase4l.restart.lastElementChild",
+            "returnByValue": False,
+        })
+        hint_tree = connection.call("Accessibility.getPartialAXTree", {
+            "objectId": hint_remote["result"]["objectId"],
+            "fetchRelatives": False,
+        })
         connection.evaluate("phase4l.restart.click()")
         result["clickRetry"] = connection.evaluate("phase4l.firstResult()")
+        result["retryButtonNames"] = _button_names(retry_tree)
+        result["retryHintAxIgnored"] = [node.get("ignored", False) for node in hint_tree["nodes"]]
         connection.evaluate("phase4l.prepareSecond()")
         dispatch_key(connection, "KeyR")
         result["keyRetry"] = connection.evaluate("phase4l.secondResult()")
@@ -213,7 +232,20 @@ class Phase4LBrowserTests(RepositoryFixture):
         self.assertEqual(click["scrollBefore"], click["scrollAfter"])
         self.assertEqual(click["order"], ["render", {"focus": {"preventScroll": True}}])
         self.assertEqual(click["retryClicks"], 1)
-        self.assertEqual(click["retry"], {"label": "Retry", "hint": "r", "shortcut": "r"})
+        retry = click["retry"]
+        self.assertEqual(retry["children"], [
+            {"tag": "span", "className": "lander-action-label"},
+            {"tag": "span", "className": "lander-key-hint"},
+        ])
+        self.assertTrue(retry["label"])
+        self.assertEqual(retry["labelRects"], 1)
+        self.assertTrue(retry["hint"])
+        self.assertEqual(retry["hintHidden"], "true")
+        self.assertEqual(retry["shortcut"], "r")
+        self.assertEqual(result["retryButtonNames"].count(retry["label"]), 1)
+        self.assertNotIn(f'{retry["label"]} {retry["hint"]}', result["retryButtonNames"])
+        self.assertTrue(result["retryHintAxIgnored"])
+        self.assertTrue(all(result["retryHintAxIgnored"]))
         key = result["keyRetry"]
         self.assertEqual(key["projection"], expected)
         self.assertEqual(key["focus"], "lander-scene-shell")

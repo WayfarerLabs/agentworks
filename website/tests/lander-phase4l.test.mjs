@@ -54,9 +54,10 @@ test("Phase 4L controls are exactly two ordered nonwrapping DOM lines with narro
         "lander-controls-line lander-controls-keyboard",
         "lander-controls-line lander-controls-touch",
     ]);
-    const [keyboard, touch] = fixture.elements["lander-controls"].children;
-    assert.match(keyboard.textContent, /^Space\/Up/);
-    assert.match(touch.textContent, /^Touch:/);
+    for (const line of fixture.elements["lander-controls"].children) {
+        assert.equal(line.children.length, 0);
+        assert.ok(line.textContent.trim().length > 0);
+    }
     const [template, css] = await Promise.all([
         readFile(new URL("templates/lander-game.html", ROOT), "utf8"),
         readFile(new URL("static/lander.css", ROOT), "utf8"),
@@ -155,6 +156,12 @@ test("Retry click and r restore the exact checkpoint twice after complete input 
         cans: controller.model.retainedSites.filter(({ canCollected }) => canCollected).map(({ id }) => id),
         powered: controller.model.retainedSites.filter((site) => site.powered).map(({ id }) => id),
     }, awarded);
-    assert.equal(fixture.elements["lander-restart-label"].textContent, "Retry");
+    const retry = fixture.elements["lander-restart"];
+    assert.deepEqual(retry.children.map(({ className }) => className),
+        ["lander-action-label", "lander-key-hint"]);
+    assert.ok(fixture.elements["lander-restart-label"].textContent.trim().length > 0);
+    assert.ok(fixture.elements["lander-restart-hint"].textContent.trim().length > 0);
+    assert.equal(fixture.elements["lander-restart-hint"].attributes.get("aria-hidden"), "true");
+    assert.equal(retry.attributes.get("aria-keyshortcuts"), "r");
     controller.destroy();
 });
