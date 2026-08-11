@@ -248,16 +248,27 @@ ones.
   is always a complete handoff state. Remove it for good when checkpoint reviews are no longer
   wanted (the request is absorbed, or the PR flips ready). Consumers watch label and push events or
   poll `gh pr list --label review-requested`.
-- **The author-owned `awaiting-direction` label means "reviews are in, the operator has not yet
-  ruled"** (operator convention, 2026-08-11). The author applies it immediately after posting its
-  reading of a PR-level review (section 7a) and drops it when starting the directed round. It is the
-  visible counterpart to a state that used to be invisible: a reviewed head where nobody has yet
-  decided what happens. It composes with whatever state the PR is already in rather than replacing
-  it: a ready PR carrying this label is still claiming merge intent, and the label says that claim
-  is now the operator's to accept, redirect, or reject. Reviewers seeing it know the findings are
-  landed and no round is in flight, so a second review of the same head adds nothing. Distinguish it
-  from `review-requested`, which asks for eyes; this one says the eyes have been and the decision is
-  pending.
+- **The author-owned `awaiting-direction` label means "at least one PR-level review has landed and
+  awaits the operator's direction"** (operator convention, 2026-08-11). The author applies it
+  immediately after posting its reading of a review (section 7a) and drops it when starting the
+  directed round. It is the visible counterpart to a state that used to be invisible: a reviewed
+  head where nobody has yet decided what happens. It composes with whatever state the PR is already
+  in rather than replacing it: a ready PR carrying this label is still claiming merge intent, and
+  the label says that claim is now the operator's to accept, redirect, or reject.
+
+  Read the "at least one" literally. Several review lanes run independently (the project reviewer, a
+  fresh-eyes pass, the integration tester, the saga lead), they finish at different times, and the
+  first to land must not suppress the rest: the label is not a completion claim, and no lane should
+  skip a head because another lane got there first. Every consumer keeps tracking the last head it
+  reviewed, exactly as with ready and `review-requested`. There is deliberately no consolidation
+  owner and no "all lanes reported" condition, because the operator is the consolidator now:
+  whatever has landed when they look is what they triage, and a lane reporting later adds to the
+  pile rather than arriving too late to matter. Deciding when there is enough information to act is
+  the judgment this whole convention moves back to the operator.
+
+  Distinguish it from `review-requested`, which asks for eyes; this one says eyes have been and the
+  decision is pending.
+
 - **A handoff is the unit of PR-level review, defined exactly.** A handoff is a discrete,
   machine-visible event where the author presents an exact head for review, with three required
   components: (1) a pushed head that is complete on its own terms (green, no mid-flight partials),
@@ -319,9 +330,11 @@ misses.
   together. This pass is deliberately exempt from section 4's reviewer-tier floor: it is a
   complementary lens, not the reviewer of record, which stays bound by that floor.
 
-Either way, apply the same finding stance as section 5 (push back on the wrong, fix the valid).
-Reserve this for **code-heavy** slices; a doc-only or closeout change has little for a fresh-eyes
-pass to catch, so a lead review is enough there.
+Either way, these are PR-level findings, so section 7a governs the response: read them, post your
+reading, and wait for the operator's direction. Triaging them is the point (a fresh-eyes pass
+catches what the values checklist waves through), and forming a view on each is your job; opening a
+fix round on your own initiative is not. Reserve this for **code-heavy** slices; a doc-only or
+closeout change has little for a fresh-eyes pass to catch, so a lead review is enough there.
 
 ## 7a. Responding to a review: you read it, the operator decides it
 
@@ -356,9 +369,12 @@ Two reasons this is worth the latency, and the second is the one that made it no
   the codebase. The `github-input-trust` rule states the trust model; this section is what it means
   for day-to-day work.
 
-Scope note: this governs **PR-level** reviews. The author's own subagent reviews (section 5) are
-unaffected and keep their fix loop, because they run before anyone else's attention is engaged and
-they are how a change becomes worth reviewing at all.
+Scope note: this governs **PR-level** reviews, meaning findings published to a shared channel where
+they cannot be authenticated. The author's own subagent reviews (section 5) are unaffected and keep
+their fix loop: they run before anyone else's attention is engaged, publish nothing, trust no
+outside input, and are how a change becomes worth reviewing at all. The `github-input-trust` rule
+draws the same line from the trust side, and the two texts must keep agreeing; if you find them
+diverging, that is a finding.
 
 ## 8. Escalate the big stuff; otherwise keep moving
 

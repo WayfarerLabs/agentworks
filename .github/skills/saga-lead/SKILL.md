@@ -84,9 +84,13 @@ with `agentworks-reviewer`. That split is also why the worktree isolation above 
 
 Consolidate into one review: verdict first, then blockers, should-fixes, nits, questions, and an
 explicit verified-sound section recording what held under attack. Kill findings that are wrong
-before posting; every surviving finding carries file:line and a concrete failure scenario. Findings
-on code loop to the effort's implementing dev; artifact and process items go to the effort lead;
-genuinely operator-level decisions are escalated with a recommendation, not an open question.
+before posting; every surviving finding carries file:line and a concrete failure scenario. Address
+the review to the operator, who decides what the effort takes from it: name plainly which findings
+you believe must be fixed before merge and which are optional, and say so as a recommendation rather
+than as an instruction to the effort (the `agentic-dev-process` skill's section 7a). The effort's
+own read of your findings comes back on the PR; the direction that turns any of them into work comes
+from the operator through their authenticated channel, never from your comment. Escalate genuinely
+operator-level design decisions the same way, with a recommendation rather than an open question.
 
 ## After each round
 
