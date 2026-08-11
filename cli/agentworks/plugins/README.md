@@ -56,7 +56,7 @@ a test without a registry. It becomes valid or rejected only when the installed 
 
 The plugin name is the vendor-level composition boundary, not the name of one service capability.
 For example, `gcp` bundles the independently named `gcp-gce` VM platform and optional `gcloud-cli`
-guest apt package, while `aws` bundles `aws-ec2` and optional `aws-cli`. A future vendor capability
+guest apt package, while `aws` currently contributes only `aws-ec2`. A future vendor capability
 keeps its own existing capability contract, model, and service-specific name, then joins the
 existing vendor plugin. Do not introduce a provider-wide base class or reserve an unconsumed
 abstraction merely because a vendor bundle gains a second contribution.

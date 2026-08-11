@@ -320,12 +320,11 @@ def test_bundled_builtin_rows_match_oracle(tmp_path: Path) -> None:
     # Provider guest CLIs are plugin-owned optional tooling, never built-in
     # provisioning dependencies. Their system-plugin origins remain visible
     # even while the vendor plugin is disabled.
-    for name, plugin_name in (("az-cli", "azure"), ("aws-cli", "aws")):
-        assert name not in sys_cmds  # not a built-in row
-        command = kind_dict(registry, "system-install-command")[name]
-        assert command.origin is not None
-        assert command.origin.variant == "system-plugin"
-        assert command.origin.plugin == plugin_name
+    assert "az-cli" not in sys_cmds  # not a built-in row
+    az_cli = kind_dict(registry, "system-install-command")["az-cli"]
+    assert az_cli.origin is not None
+    assert az_cli.origin.variant == "system-plugin"
+    assert az_cli.origin.plugin == "azure"
     for kind, name in (("apt-source", "google-cloud-cli"), ("apt-package", "gcloud-cli")):
         entry = kind_dict(registry, kind)[name]
         assert entry.origin is not None
