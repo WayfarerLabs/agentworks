@@ -202,17 +202,17 @@ forge checks are green; permanent docs match code; the merge-ready PR is truthfu
 
 ### Phase 3b: catalog and machine-compatibility correction
 
-- [ ] Add `e2-small` and `e2-medium` ahead of the standard E2 built-in ladder, with deterministic
+- [x] Add `e2-small` and `e2-medium` ahead of the standard E2 built-in ladder, with deterministic
       size-selection tests and permanent teaching that they expose two guest vCPUs but sustain an
       aggregate 0.5 and 1 vCPU respectively with automatic bursting.
-- [ ] Reject known live incompatibilities with the CPU-only, Balanced Persistent Disk contract
+- [x] Reject known live incompatibilities with the CPU-only, Balanced Persistent Disk contract
       before mutation using provider fields rather than a machine-name allowlist. Reject populated
       zero Persistent Disk capacity or required guest accelerators with a typed, actionable,
       secret-free configuration error that names the selected machine type and supported boundary;
       accept omitted output-only capacity as unknown. Because GCE has no read-only complete
       machine/disk-pair validator, add fixed prerequisite plus machine/`pd-balanced` guidance to
       residual definitive instance-insert failures and retain bounded rollback.
-- [ ] Add a DONE structured-operation regression proving a longer string containing
+- [x] Add a DONE structured-operation regression proving a longer string containing
       `ZONE_RESOURCE_POOL_EXHAUSTED` remains a generic definitive `GCEOperationError`, then run the
       focused and repository gates plus both required code reviews and resolve every valid finding.
 - [ ] Post the signed exact-head handoff and flip the PR from draft to ready for the next
