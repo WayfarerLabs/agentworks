@@ -180,10 +180,12 @@ The complete-or-raise sequence is:
    `(cpus, memory, type, arch)` so equal-shape catalogs remain order-independent; resolve the live
    machine type and verify its CPU and memory match the catalog declaration. If GCE populates the
    output-only architecture field, it must also match; an omitted value is unknown and leaves the
-   declaration authoritative. Reject a known-incompatible live type whose `maximum_persistent_disks`
-   is zero or which declares required guest accelerators, with guidance naming the selected type and
-   current CPU-only, Balanced Persistent Disk support boundary. These provider fields do not prove
-   complete pair compatibility. Resolve `projects/debian-cloud/global/images/family/debian-12` or
+   declaration authoritative. Reject a known-incompatible live type whose presence-tracked
+   `maximum_persistent_disks` is populated as zero or which declares required guest accelerators,
+   with guidance naming the selected type and current CPU-only, Balanced Persistent Disk support
+   boundary. An omitted capacity field is unknown and proceeds to insert, just like omitted
+   architecture. These provider fields do not prove complete pair compatibility. Resolve
+   `projects/debian-cloud/global/images/family/debian-12` or
    `projects/debian-cloud/global/images/family/debian-12-arm64` and the zonal `pd-balanced` disk
    request. Hyperdisk support remains an additive future storage profile rather than an inferred
    machine-name allowlist.
@@ -212,11 +214,11 @@ The complete-or-raise sequence is:
 
 Because GCE has no read-only complete machine/disk-pair validation API, a definite instance-insert
 rejection that is not a separately typed capacity or quota failure retains its definitive operation
-type but adds fixed guidance to verify that the selected machine type accepts a CPU-only Debian 12
-VM with a `pd-balanced` boot disk. The diagnostic names only caller-authored machine and disk
-labels, never provider text or objects. Create still enters its ordinary bounded rollback, which is
-usually a no-op for a provider-rejected request but remains correct for every accepted partial
-state.
+type but adds fixed guidance to verify IAM, quota, and request prerequisites first, then that the
+selected machine type accepts a CPU-only Debian 12 VM with a `pd-balanced` boot disk. The diagnostic
+names only caller-authored machine and disk labels, never provider text or objects. Create still
+enters its ordinary bounded rollback, which is usually a no-op for a provider-rejected request but
+remains correct for every accepted partial state.
 
 The final insert body is retained provider state, so a provider-shaped test inspects the fully built
 request object. It must contain neither the Tailscale sentinel nor the service-account JSON

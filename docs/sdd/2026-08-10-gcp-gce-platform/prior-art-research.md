@@ -72,9 +72,11 @@ Decisions:
   [Persistent Disk compatibility table](https://docs.cloud.google.com/compute/docs/disks/persistent-disks#machine_series_support)
   shows that some current series, including N4, do not support Persistent Disk. The live
   [`MachineType` resource](https://docs.cloud.google.com/compute/docs/reference/rest/v1/machineTypes)
-  exposes `maximumPersistentDisks` and required guest accelerators, which identify known
-  incompatibilities without a brittle machine-name allowlist. Neither that resource nor the zonal
-  `DiskType` resource validates a complete machine/disk pair before `instances.insert`.
+  exposes presence-tracked `maximumPersistentDisks` and required guest accelerators, which identify
+  known incompatibilities without a brittle machine-name allowlist. An omitted output-only scalar
+  reads as zero through the Python property and must be distinguished through proto presence.
+  Neither that resource nor the zonal `DiskType` resource validates a complete machine/disk pair
+  before `instances.insert`.
 
 Decisions:
 
@@ -85,13 +87,15 @@ Decisions:
   catalog value without deriving architecture from the machine-type name;
 - put `e2-small` and `e2-medium` ahead of the standard E2 defaults and teach their shared-core
   sustained/burst behavior rather than presenting them as full-core equivalents;
-- reject a selected live type before mutation when it reports no Persistent Disk capacity or
-  required accelerators, naming the current CPU-only `pd-balanced` support boundary; keep the
-  literal catalog extensible and add Hyperdisk through a future explicit storage profile rather than
-  series-name inference;
+- reject a selected live type before mutation when it populates zero Persistent Disk capacity or
+  required accelerators, naming the current CPU-only `pd-balanced` support boundary; accept omitted
+  capacity as unknown rather than interpreting its proto scalar default; keep the literal catalog
+  extensible and add Hyperdisk through a future explicit storage profile rather than series-name
+  inference;
 - treat those fields as known-incompatibility filters, not complete pair proof; give every residual
-  definitive instance-insert rejection a fixed, provider-text-free hint to verify the selected
-  machine type's CPU-only Debian 12 and `pd-balanced` compatibility before retrying;
+  definitive instance-insert rejection a fixed, provider-text-free hint to verify IAM, quota, and
+  request prerequisites before the selected machine type's CPU-only Debian 12 and `pd-balanced`
+  compatibility;
 - map `x86_64` to `debian-12` and `arm64` to `debian-12-arm64`.
 - resolve both families from the public `debian-cloud` image project, never the target project.
 

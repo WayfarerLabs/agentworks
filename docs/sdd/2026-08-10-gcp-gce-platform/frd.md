@@ -165,16 +165,17 @@ owned firewall names, never credentials or a cached public IP.
 Create uses the smallest selected machine type, then verifies its provider-reported CPU and memory
 before choosing the matching Debian 12 image. When GCE populates its optional output architecture,
 that value must also match the declaration; omission is unknown and leaves the declared catalog
-authoritative. A live type reporting zero Persistent Disk capacity or required accelerators fails
-with actionable configuration guidance before the first provider mutation. GCE exposes no read-only
+authoritative. A live type with a populated zero Persistent Disk capacity or required accelerators
+fails with actionable configuration guidance before the first provider mutation; an omitted
+output-only capacity field is unknown and proceeds to the provider insert. GCE exposes no read-only
 complete machine/disk-pair validator, so a residual incompatibility rejected by `instances.insert`
-fails definitively with fixed, actionable machine/`pd-balanced` guidance and runs the normal bounded
-rollback. Create uses a balanced persistent boot disk sized from the VM template and explicitly
-marked `auto_delete`, instance-metadata SSH keys with project keys blocked, and deterministic
-GCE-valid instance, tag, and firewall names. Exact bounded SHA-256-based derivations make every
-retained identity collision-safe for underscores, leading digits, case, invalid runs, suffix
-reservation, and truncation. Start/stop guard on live state to enforce idempotency, and public IP
-reads always use live provider state.
+fails definitively with fixed prerequisite plus machine/`pd-balanced` guidance and runs the normal
+bounded rollback. Create uses a balanced persistent boot disk sized from the VM template and
+explicitly marked `auto_delete`, instance-metadata SSH keys with project keys blocked, and
+deterministic GCE-valid instance, tag, and firewall names. Exact bounded SHA-256-based derivations
+make every retained identity collision-safe for underscores, leading digits, case, invalid runs,
+suffix reservation, and truncation. Start/stop guard on live state to enforce idempotency, and
+public IP reads always use live provider state.
 
 ### R9: failure and interrupt semantics
 
@@ -187,11 +188,12 @@ promptly and names the project, zone, instance, firewall rules, and manual remov
 
 A completed Google operation with a structured failure is definitive, even when the SDK surfaces an
 HTTP-shaped exception from `result()`. The observed `ZONE_RESOURCE_POOL_EXHAUSTED` code becomes a
-typed capacity failure that names the selected zone and tells the operator to retry later or choose
-another zone. Other completed failures remain definitive and cannot be reconciled into success.
-Inspect-before-retry guidance is reserved for waits whose completion and outcome cannot be
-established. Provider messages, details, credentials, and exception objects never enter the safe
-diagnostic graph.
+typed capacity failure. A zonal instance operation names the selected zone and tells the operator to
+retry later or choose another zone; a global operation says only to retry later rather than falsely
+attributing its capacity to the VM zone. Other completed failures remain definitive and cannot be
+reconciled into success. Inspect-before-retry guidance is reserved for waits whose completion and
+outcome cannot be established. Provider messages, details, credentials, and exception objects never
+enter the safe diagnostic graph.
 
 Deletion first makes a best-effort close of the provisioning allow, then attempts VM deletion even
 if that close fails, and deletes the deny only after VM absence is proven. It is idempotent for

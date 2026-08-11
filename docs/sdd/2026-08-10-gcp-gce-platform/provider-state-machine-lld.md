@@ -48,8 +48,9 @@ Create may enter mutation only after all of these succeed:
 4. operator IPv4 SSH-prefix resolution;
 5. `AFTER_CLASSIC_FIREWALL` network-policy order plus classic VPC priority-zero allow/deny conflict
    inspection;
-6. machine catalog selection plus live CPU/memory, conditional architecture, nonzero
-   `maximum_persistent_disks`, and empty required-accelerator verification;
+6. machine catalog selection plus live CPU/memory, conditional architecture, present-zero
+   `maximum_persistent_disks`, and empty required-accelerator verification; omitted presence-tracked
+   output fields remain unknown rather than inheriting proto scalar defaults;
 7. `debian-cloud` Debian image-family and zonal `pd-balanced` disk-type resolution;
 8. instance, stable firewall-name, and normalized-name collision checks;
 9. credential-free startup request construction.
@@ -61,9 +62,9 @@ provider cleanup; the existing manager exception path removes the pending row.
 
 The live machine fields reject known incompatibilities but do not prove the complete
 machine/`pd-balanced` pair. GCE exposes no read-only pair validator. A residual definitive instance
-insert rejection therefore retains `GCEOperationError`, adds fixed guidance naming the selected
-machine type and `pd-balanced` support boundary, and follows ordinary bounded rollback without
-rendering or retaining provider text.
+insert rejection therefore retains `GCEOperationError`, adds fixed guidance to verify IAM, quota,
+and request prerequisites before the selected machine type and `pd-balanced` support boundary, and
+follows ordinary bounded rollback without rendering or retaining provider text.
 
 ## Create transitions
 
@@ -137,11 +138,11 @@ absence, while a same-name different-ID instance is retained as a collision.
 
 Extended-operation waits return through three typed failure outcomes:
 
-| Wait outcome                                                               | Type                             | Caller behavior                                                                                                                        |
-| -------------------------------------------------------------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| DONE with `operation.error.errors[*].code == ZONE_RESOURCE_POOL_EXHAUSTED` | `GCECapacityError`               | definitive; inserts, power operations, and create propagate; guide names the selected zone and says retry later or select another zone |
-| DONE with another, missing, or malformed structured error                  | `GCEOperationError`              | definitive; inserts and power operations propagate without live-state success reconciliation                                           |
-| timeout/transport failure with no DONE structured outcome                  | `GCEIndeterminateOperationError` | instance/firewall inserts may reconcile matching owned live state; power operations propagate with inspect-before-retry guidance       |
+| Wait outcome                                                               | Type                             | Caller behavior                                                                                                                                                             |
+| -------------------------------------------------------------------------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| DONE with `operation.error.errors[*].code == ZONE_RESOURCE_POOL_EXHAUSTED` | `GCECapacityError`               | definitive; inserts, power operations, and create propagate; zonal waits name the selected zone and allow another-zone guidance, while global waits say only to retry later |
+| DONE with another, missing, or malformed structured error                  | `GCEOperationError`              | definitive; inserts and power operations propagate without live-state success reconciliation                                                                                |
+| timeout/transport failure with no DONE structured outcome                  | `GCEIndeterminateOperationError` | instance/firewall inserts may reconcile matching owned live state; power operations propagate with inspect-before-retry guidance                                            |
 
 The classifier establishes DONE only from the already-returned operation's cached
 `operation.status == compute_v1.Operation.Status.DONE`. It never calls `operation.done()` or makes a
