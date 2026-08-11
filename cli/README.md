@@ -246,7 +246,7 @@ applicability screen: a declaration with no ready, permitted source that would e
 with a hint (`agw secret describe <name>` shows how each source maps it), before any prompt and
 before any VM is started. Actual presence, authentication, transport, and provider failures remain
 the typed resolution boundary's job. The set of secrets is computed from the command's static
-filters (positional targets, `--vm`, `--workspace`, `--agent`, etc.) -- dynamic predicates like
+filters (positional targets, `--vm`, `--workspace`, `--agent`, etc.); dynamic predicates like
 `--all-stopped` apply later, so the prompted set may over-approximate. Non-interactive mode (no TTY
 or `--non-interactive`) surfaces missing secrets as `SecretUnavailableError` with a per-secret hint
 naming which sources were tried. Commands that join existing shells (`session attach`,
@@ -254,7 +254,7 @@ naming which sources were tried. Commands that join existing shells (`session at
 secrets.
 
 **Miss semantics:** what "not found" means depends on the selected backend. Conventional sources
-(`env-var`, `prompt`) treat a missing value as a soft miss and fall through to the next source -- a
+(`env-var`, `prompt`) treat a missing value as a soft miss and fall through to the next source. A
 `GITHUB_TOKEN` env var that isn't set is just-not-set, not a config error. Persistent-store clients
 treat an explicit mapping that does not resolve as a typed hard mapping failure, and the chain halts
 for that secret so a wrong `op://` URI cannot be masked by a prompt.

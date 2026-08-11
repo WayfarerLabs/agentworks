@@ -22,6 +22,7 @@ from agentworks.errors import (
     TokenRejectedError,
 )
 from agentworks.plugins.gcp.compute import (
+    _proto_field_is_present,
     get_project,
     get_zone,
     live_external_ipv4,
@@ -216,6 +217,34 @@ def test_unrecognized_sdk_shape_treats_required_scalar_as_absent() -> None:
             _CONFIG,
             selected,
         )
+
+
+@pytest.mark.parametrize("error", [AttributeError("drift"), TypeError("drift"), ValueError("drift")])
+def test_proto_plus_conversion_shape_errors_fall_back_to_absent(error: Exception) -> None:
+    class _DriftedProtoPlus:
+        @staticmethod
+        def pb(_message: object) -> object:
+            raise error
+
+    assert _proto_field_is_present(_DriftedProtoPlus(), "guest_cpus") is False
+
+
+@pytest.mark.parametrize("error", [TypeError("drift"), ValueError("drift")])
+def test_protobuf_presence_shape_errors_fall_back_to_absent(error: Exception) -> None:
+    class _DriftedProtobuf:
+        def HasField(self, _field_name: str) -> bool:  # noqa: N802 - protobuf API spelling
+            raise error
+
+    assert _proto_field_is_present(_DriftedProtobuf(), "guest_cpus") is False
+
+
+def test_unexpected_proto_presence_failure_is_not_masked_as_absence() -> None:
+    class _BrokenProtobuf:
+        def HasField(self, _field_name: str) -> bool:  # noqa: N802 - protobuf API spelling
+            raise RuntimeError("provider bug")
+
+    with pytest.raises(RuntimeError, match="provider bug"):
+        _proto_field_is_present(_BrokenProtobuf(), "guest_cpus")
 
 
 def test_live_machine_architecture_mismatch_fails_before_mutation() -> None:

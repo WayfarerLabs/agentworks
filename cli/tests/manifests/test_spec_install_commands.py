@@ -66,13 +66,6 @@ def test_the_optional_fields_default() -> None:
     assert (row.path, row.test_exec, row.test_file, row.test_dir, row.description) == ([], None, None, None, None)
 
 
-def test_test_exec_schema_describes_name_and_executable_path_semantics() -> None:
-    description = SystemInstallCommandEntry.model_json_schema()["properties"]["test_exec"]["description"]
-
-    assert "containing '/' is a path checked with 'test -x'" in description
-    assert "bare name is resolved on PATH in the target user's login shell" in description
-
-
 # -- What an operator reads when it is wrong ----------------------------------
 
 

@@ -431,16 +431,21 @@ is added as its own integration with its own config vocabulary. `claude-code` ab
 Claude-specific `model` / `permission_mode` fields) is one worked example; the core assumes no
 particular runtime, and a session runs whatever integration its template selects.
 
-## Install-command completion predicates
+## Install-command reruns and optional checks
 
-Install commands may combine `test_exec`, `test_file`, and `test_dir`; initialization skips the
-command only when every non-empty predicate passes. A bare `test_exec` value such as `my-tool` is
-resolved on `PATH` in the target user's login shell. A value containing `/`, such as
-`/usr/local/bin/my-tool` or `./bin/my-tool`, is an executable path checked directly with `test -x`.
-Path predicates do not depend on login-shell startup files and do not pass for a non-executable
-file. In `test_file` and `test_dir`, a leading `~` resolves to the target user's home.
+Every system and user install command must be safe and idempotent on every invocation. Agentworks
+runs commands during init and may run them again during every reinit. The optional `test_exec`,
+`test_file`, and `test_dir` fields are early-exit optimizations, not the mechanism that makes a
+command idempotent.
 
-Use multiple predicates when one artifact alone cannot prove completion. For example:
+`test_exec` resolves a command on `PATH` in the target user's login shell. `test_file` and
+`test_dir` check for an existing path; a leading `~` resolves to the target user's home. When a
+command declares multiple non-empty checks, Agentworks skips it only when every check passes. With
+no checks, the command always runs.
+
+Declare checks only when their success means no work is needed. Omit them when the command should
+reconcile or update managed state on every init and reinit. For example, this command may skip once
+both completion artifacts exist:
 
 ```yaml
 apiVersion: agentworks/v1
@@ -448,9 +453,9 @@ kind: system-install-command
 metadata:
   name: my-tool
 spec:
-  command: install-my-tool
-  test_exec: /usr/local/bin/my-tool
-  test_file: /usr/local/lib/my-tool/.install-complete
+  command: install-my-tool-safely
+  test_exec: my-tool
+  test_file: ~/.local/share/my-tool/install-complete
 ```
 
 ## Built-ins and overrides

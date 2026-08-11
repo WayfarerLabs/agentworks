@@ -1,15 +1,8 @@
-"""The ``aws`` system plugin: the opt-in EC2 vm-platform.
-
-A capability-only plugin in the proxmox mould (no bundled manifest, no
-install-command). It drives ``build_registry`` on real config and pins that its
-one contribution, the ``aws-ec2`` vm-platform, publishes present-but-disabled with
-a ``system-plugin`` origin until the operator opts in with
-``[plugins] system = ["aws"]``, at which point a ``vm-site`` on it becomes
-ready and resolvable.
-"""
+"""The ``aws`` system plugin: EC2 platform plus optional guest AWS CLI."""
 
 from __future__ import annotations
 
+import shlex
 from textwrap import dedent
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
@@ -100,23 +93,11 @@ def test_aws_bundle_publishes_cli_disabled_with_verified_v2_payload(tmp_path: Pa
     assert row.origin.variant == "system-plugin"
     assert row.origin.plugin == "aws"
     assert registry.graph.enablement_of("system-install-command", "aws-cli") is Enablement.disabled
-    assert row.test_exec == "/usr/local/bin/aws"
-    assert row.test_file == "/usr/local/aws-cli/.agentworks-v2-complete"
-    managed_check = 'if test -f "$completion_marker" && test -x "$public_launcher" && test -x "$managed_binary"; then'
-    marker_removal = 'sudo rm -f -- "$completion_marker"'
-    postcondition = 'if ! test -x "$public_launcher" || ! test -x "$managed_binary"; then'
-    marker_write = 'sudo install -m 0644 /dev/null "$completion_marker"'
-    assert managed_check in row.command
-    assert marker_removal in row.command
-    assert postcondition in row.command
-    assert marker_write in row.command
-    assert row.command.index(managed_check) < row.command.index(marker_removal) < row.command.index("command -v aws")
-    assert (
-        row.command.index('sudo "$temp_root/aws/install"')
-        < row.command.index(postcondition)
-        < row.command.index(marker_write)
-    )
-    assert "aws-cli/2" in row.command
+    assert (row.test_exec, row.test_file, row.test_dir) == (None, None, None)
+    assert ".agentworks-v2-complete" not in row.command
+    assert "command -v aws" not in row.command
+    assert "aws --version" not in row.command
+    assert "test -x" not in row.command
     assert "awscli-exe-linux-x86_64.zip" in row.command
     assert "awscli-exe-linux-aarch64.zip" in row.command
     assert "FB5DB77FD5C118B80511ADA8A6310ACC4672475C" in row.command
@@ -125,13 +106,12 @@ def test_aws_bundle_publishes_cli_disabled_with_verified_v2_payload(tmp_path: Pa
     assert "trap 'rm -rf \"$temp_root\"' EXIT" in row.command
     assert "trap 'exit 130' INT" in row.command
     assert 'if test -e "$install_dir" || test -L "$install_dir"; then' in row.command
-    assert 'if test "$managed_update" -eq 1; then' in row.command
     assert 'sudo "$temp_root/aws/install"' in row.command
     assert '--install-dir "$install_dir" --bin-dir "$bin_dir" --update' in row.command
     assert "aws configure" not in row.command
 
 
-def test_completed_managed_aws_cli_uses_short_runner_predicate_only(tmp_path: Path) -> None:
+def test_aws_cli_without_predicates_runs_recipe_through_production_initializer(tmp_path: Path) -> None:
     row = build_registry(_config(tmp_path)).lookup("system-install-command", "aws-cli")
     target = MagicMock()
     target.run.return_value = MagicMock(returncode=0)
@@ -147,10 +127,9 @@ def test_completed_managed_aws_cli_uses_short_runner_predicate_only(tmp_path: Pa
     )
 
     assert paths == []
-    [predicate] = target.run.call_args_list
-    assert predicate.args[0] == ("test -x /usr/local/bin/aws && test -f /usr/local/aws-cli/.agentworks-v2-complete")
-    assert predicate.kwargs == {"check": False, "timeout": 10}
-    assert all(call.kwargs.get("timeout") != 120 for call in target.run.call_args_list)
+    [install] = target.run.call_args_list
+    assert shlex.split(install.args[0]) == ["zsh", "-lc", row.command]
+    assert install.kwargs == {"timeout": 120}
 
 
 def test_aws_cli_recipe_is_gated_until_aws_is_enabled(tmp_path: Path) -> None:

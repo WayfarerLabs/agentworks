@@ -16,25 +16,14 @@ detached signature, checks the embedded AWS CLI Team public key's full fingerpri
 archive before extraction. It uses a private temporary directory and GnuPG home, then installs or
 updates explicitly at `/usr/local/aws-cli` with the launcher in `/usr/local/bin`.
 
-On initialization and reinitialization, the runner requires both an executable public launcher at
-`/usr/local/bin/aws` and Agentworks' durable completion marker at
-`/usr/local/aws-cli/.agentworks-v2-complete`. The command also requires the managed internal
-`/usr/local/aws-cli/v2/current/bin/aws` executable. A completed managed installation therefore skips
-the 120-second installer transport without running the relatively heavy CLI.
+The resource deliberately declares no completion checks, so every initialization and
+reinitialization runs the verified recipe. Each run downloads and verifies the official archive; an
+`aws` executable already on `PATH`, whether v1 or v2, never short-circuits the recipe. If
+`/usr/local/aws-cli` is absent, the command performs the official fresh install. If that managed
+path exists, including as a partial installation, it invokes the official installer with `--update`.
 
-These are structural completion checks: Agentworks checks both executable paths and the marker, but
-does not execute or hash the managed CLI to detect arbitrary later byte-content corruption. A
-missing marker, launcher, internal executable, or executable bit enters the installer's explicit
-recovery path.
-
-Before a managed repair, Agentworks removes the old marker. It recreates the marker only after the
-verified official installer exits successfully and unprivileged executable checks pass for both the
-public launcher and internal binary. A failed update or malformed zero-exit installer result
-therefore leaves the marker absent so the next initialization retries. If no managed layout exists,
-the command checks `aws --version` and leaves a valid external AWS CLI v2 on `PATH` alone. AWS CLI
-v1 and partial managed layouts continue through the verified v2 install or `--update`. Unsupported
-architectures, installer failure, key fingerprint changes, and invalid signatures stop
-initialization without writing the completion marker.
+Unsupported architectures, installer failure, key fingerprint changes, and invalid signatures stop
+initialization. The private temporary directory is cleaned on success and failure.
 
 The command is guest tooling, not a credential mechanism. EC2 provisioning continues to use boto3
 and the host's configured AWS credential chain. The guest installer never runs `aws configure`,

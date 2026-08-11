@@ -55,30 +55,27 @@ class _InstallCommandEntry(DeclaredResource):
     # operator MUST fill in here, and it is the shape worth teaching: a
     # fetch piped to a shell, which is what most vendor installers are.
     command: str = Field(examples=["curl -fsSL https://example.com/install.sh | bash"])
-    """The shell command to run.
-
-    Run at VM init and again at reinit, so write it to be idempotent."""
+    """The shell command to run. It must be safe and idempotent on every
+    invocation because init and reinit may run it again."""
 
     path: list[str] = Field(default_factory=list)
     """Directories prepended to ``PATH`` for the duration of the command."""
 
-    test_exec: str | None = Field(
-        default=None,
-        examples=["my-tool"],
-        description=(
-            "An installed executable predicate. A value containing '/' is a path checked with "
-            "'test -x'; a bare name is resolved on PATH in the target user's login shell. "
-            "When multiple non-empty test_* fields are set, all must pass to skip the install."
-        ),
-    )
+    test_exec: str | None = Field(default=None, examples=["my-tool"])
+    """Optional early-exit optimization that checks whether this command is
+    already on ``PATH``. It is not the command's idempotency mechanism. When
+    multiple non-empty ``test_*`` fields are set, all must pass to skip the
+    install."""
 
     test_file: str | None = None
-    """Check whether this file already exists. ``~`` resolves to the target
-    user's home."""
+    """Optional early-exit optimization that checks whether this file exists.
+    A leading ``~`` resolves to the target user's home. It is not the
+    command's idempotency mechanism."""
 
     test_dir: str | None = None
-    """Check whether this directory already exists. ``~`` resolves to the
-    target user's home."""
+    """Optional early-exit optimization that checks whether this directory
+    exists. A leading ``~`` resolves to the target user's home. It is not the
+    command's idempotency mechanism."""
 
     @model_validator(mode="before")
     @classmethod
@@ -177,15 +174,15 @@ class _SystemInstallCommandKind:
         overview="""
         A system-install-command installs system-wide tooling that apt cannot: a vendor
         install script, a binary release, anything that ends up outside a package. It
-        runs as root during `agw vm create` and again on `agw vm reinit`, so write it to
-        be safe to run twice.
+        runs as root during `agw vm create` and again on every `agw vm reinit`. The
+        command must be safe and idempotent on every run.
 
         A vm-template refers to it by name through `system_install_commands`. Declare
-        any combination of `test_exec`, `test_file`, and `test_dir`; init skips the
-        command only when every non-empty declared test passes. A `test_exec` value
-        containing `/` is an executable path checked directly with `test -x`; a bare
-        name is resolved on PATH in the target user's login shell. With no non-empty
-        tests, the command always runs.
+        any combination of `test_exec`, `test_file`, and `test_dir` as optional
+        early-exit optimizations; they do not make a command idempotent. Init skips the
+        command only when every non-empty declared test passes. With no non-empty tests,
+        the command always runs. Omit tests when the command should reconcile or update
+        its managed state on every init and reinit.
         """,
     )
     model: type[DeclaredResource] = SystemInstallCommandEntry
@@ -209,16 +206,16 @@ class _UserInstallCommandKind:
         overview="""
         A user-install-command installs per-user tooling: something that belongs in one
         user's home rather than on the whole machine. It runs unprivileged, once for the
-        admin user and once for each agent user whose template names it, and it re-runs
-        on reinit, so write it to be safe to run twice.
+        admin user and once for each agent user whose template names it, and it runs
+        again on reinit. The command must be safe and idempotent on every run.
 
         An admin-template or agent-template refers to it by name through
         `user_install_commands`. Declare any combination of `test_exec`, `test_file`,
-        and `test_dir`; init skips the command only when every non-empty declared test
-        passes. A `test_exec` value containing `/` is an executable path checked
-        directly with `test -x`; a bare name is resolved on PATH in the target user's
-        login shell. With no non-empty tests, it always runs. In `test_file` and
-        `test_dir`, `~` is the target user's home, not the operator's.
+        and `test_dir` as optional early-exit optimizations; they do not make a command
+        idempotent. Init skips the command only when every non-empty declared test
+        passes. With no non-empty tests, it always runs. Omit tests when the command
+        should reconcile or update its managed state on every init and reinit. In
+        `test_file` and `test_dir`, `~` is the target user's home, not the operator's.
         """,
     )
     model: type[DeclaredResource] = UserInstallCommandEntry

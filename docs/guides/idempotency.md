@@ -3,6 +3,15 @@
 Agentworks init, reinit, and repair operations are safe to re-run where listed below. This document
 states the guarantees and limitations for `vm reinit`, `agent reinit`, and `workspace repair`.
 
+## Install commands
+
+Every system and user install command must be safe and idempotent on every invocation. Init and
+reinit may both run the command. The optional `test_exec`, `test_file`, and `test_dir` fields are
+early-exit optimizations only; they are not the idempotency mechanism. When at least one check is
+declared, Agentworks skips the command only when every declared check passes. With no checks, the
+command always runs. Omit checks when reconciliation or updating is desired on every init and
+reinit.
+
 ## Re-pointing the bound template
 
 `agent reinit` accepts `--update-template <name>`. The DB declares the desired state and reinit
@@ -46,13 +55,13 @@ failures produce warnings and a `partial` status.
 
 These add things on reinit but do not remove them when removed from config:
 
-| Step                    | Notes                                                                                                                     |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| Apt packages            | Never removed. Transitive deps not cleaned up. Too risky for reinit.                                                      |
-| Snap packages           | Never removed.                                                                                                            |
-| System install commands | Not uninstalled when removed from config. Skipped only when at least one test is declared and every declared test passes. |
-| User install commands   | Same as system install commands.                                                                                          |
-| Mise packages           | When `mise_prune_on_reinit = false`, stale tool versions are not removed.                                                 |
+| Step                    | Notes                                                                                                  |
+| ----------------------- | ------------------------------------------------------------------------------------------------------ |
+| Apt packages            | Never removed. Transitive deps not cleaned up. Too risky for reinit.                                   |
+| Snap packages           | Never removed.                                                                                         |
+| System install commands | Not uninstalled when removed from config. Commands must be idempotent; optional checks may skip a run. |
+| User install commands   | Same as system install commands.                                                                       |
+| Mise packages           | When `mise_prune_on_reinit = false`, stale tool versions are not removed.                              |
 
 ### Other
 

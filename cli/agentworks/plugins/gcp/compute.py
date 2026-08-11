@@ -156,23 +156,23 @@ def verify_live_machine_type(
 def _proto_field_is_present(message: Any, field_name: str) -> bool:
     """Check scalar presence, treating an unrecognized SDK shape as absent.
 
-    Proto-plus normally exposes its underlying protobuf through ``pb``. If a
-    future SDK shape cannot be converted or does not expose presence for the
-    named field, callers receive ``False`` instead of consuming a protobuf
-    scalar default. Required fields then fail as unknown provider shape, while
-    optional output fields remain unknown.
+    Proto-plus normally exposes its underlying protobuf through ``pb``. Known
+    representation errors from SDK shape drift fall back to ``False`` instead
+    of consuming a protobuf scalar default. Required fields then fail as an
+    unknown provider shape, while optional output fields remain unknown.
+    Unexpected exceptions propagate instead of being mistaken for absence.
     """
     try:
         proto_plus_converter = getattr(type(message), "pb", None)
         protobuf = proto_plus_converter(message) if callable(proto_plus_converter) else message
-    except Exception:
+    except (AttributeError, TypeError, ValueError):
         return False
     has_field = getattr(protobuf, "HasField", None)
     if not callable(has_field):
         return False
     try:
         return bool(has_field(field_name))
-    except Exception:
+    except (TypeError, ValueError):
         return False
 
 

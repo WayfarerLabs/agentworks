@@ -207,25 +207,6 @@ def test_run_install_commands_skips_when_test_exec_found() -> None:
     assert not any("curl" in c for c in run_calls)
 
 
-def test_run_install_commands_uses_plain_executable_path_predicate() -> None:
-    target = MagicMock()
-    target.run.return_value = MagicMock(stdout="", stderr="", returncode=0, ok=True)
-    entries = {
-        "path-tool": UserInstallCommandEntry(
-            name="path-tool",
-            command="run-path-install",
-            test_exec="/opt/path tool/bin/tool",
-        ),
-    }
-    logger = MagicMock()
-
-    _run_install_commands(target, ["path-tool"], entries, "zsh", "/home/agentworks", logger)
-
-    [predicate] = target.run.call_args_list
-    assert predicate.args[0] == "test -x '/opt/path tool/bin/tool'"
-    assert predicate.kwargs == {"check": False, "timeout": 10}
-
-
 def test_run_install_commands_runs_when_test_exec_missing() -> None:
     """When test_exec command is not found, install runs normally."""
     target = MagicMock()

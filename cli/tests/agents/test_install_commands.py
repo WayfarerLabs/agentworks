@@ -5,8 +5,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import pytest
-
 from agentworks.agents.initializer import _run_agent_install_commands
 from agentworks.install_commands import UserInstallCommandEntry
 
@@ -15,7 +13,7 @@ def _run_commands(entry: UserInstallCommandEntry, *, test_returncode: int) -> Ma
     target = MagicMock()
 
     def run_side_effect(command: str, **kwargs: object) -> MagicMock:
-        is_test = "command -v" in command or "test -x" in command or "test -f" in command or "test -d" in command
+        is_test = "command -v" in command or "test -f" in command or "test -d" in command
         returncode = test_returncode if is_test else 0
         return MagicMock(returncode=returncode, ok=returncode == 0, stdout="", stderr="")
 
@@ -81,19 +79,3 @@ def test_agent_install_runs_with_zero_non_empty_tests() -> None:
     commands = [call.args[0] for call in target.run.call_args_list]
     assert not any("command -v" in command or "test -f" in command or "test -d" in command for command in commands)
     assert any("run-agent-install" in command for command in commands)
-
-
-@pytest.mark.parametrize("test_returncode", [0, 1], ids=("executable", "not-executable"))
-def test_agent_install_runner_uses_plain_executable_path_predicate(test_returncode: int) -> None:
-    entry = UserInstallCommandEntry(
-        name="path-tool",
-        command="run-agent-install",
-        test_exec="/opt/path tool/bin/tool",
-    )
-
-    target = _run_commands(entry, test_returncode=test_returncode)
-
-    commands = [call.args[0] for call in target.run.call_args_list]
-    predicate = next(command for command in commands if "test -x" in command)
-    assert predicate == "test -x '/opt/path tool/bin/tool'"
-    assert (not any("run-agent-install" in command for command in commands)) is (test_returncode == 0)
