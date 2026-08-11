@@ -32,7 +32,10 @@ codex plugin add agentworks@agentworks
 Both packages require `agentworks-cli` 0.14.0 or newer. The bootstrap retains a compatible
 installation unless an update was requested. Otherwise it selects one compatible stable exact
 version at least 0.14.0, runs the pinned `agentworks-cli==VERSION` installation, verifies the
-result, and then invokes the guide. It does not offer or perform repository source inspection.
+result, and then invokes the guide. If no compatible stable release is available, it does not
+install or update the CLI or invoke the guide, and the operator should retry after the release is
+published. It does not use a pre-release, a lower version, or an unpinned latest version. It does
+not offer or perform repository source inspection.
 
 The bootstrap adds no authorization, security-setting, or harness-posture teaching. Ordinary harness
 approvals and restrictions apply independently of the package. The guide owns any later security or

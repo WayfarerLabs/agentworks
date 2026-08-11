@@ -61,7 +61,7 @@ def test_installation_is_exact_verified_and_hands_off_to_the_guide() -> None:
     assert "`uv tool install --upgrade 'agentworks-cli==VERSION'`" in NORMALIZED_BODY
     assert "require the selected exact version" in NORMALIZED_BODY
     assert "require version 0.14.0 or newer" in NORMALIZED_BODY
-    assert NORMALIZED_BODY.count("`agw guide --agent`") == 1
+    assert NORMALIZED_BODY.count("`agw guide --agent`") == 2
 
 
 def test_compatible_no_update_path_retains_and_verifies_the_installed_version() -> None:
@@ -69,6 +69,15 @@ def test_compatible_no_update_path_retains_and_verifies_the_installed_version() 
     assert "After installation or update" in NORMALIZED_BODY
     assert "require the selected exact version" in NORMALIZED_BODY
     assert "For a retained installation, require version 0.14.0 or newer" in NORMALIZED_BODY
+
+
+def test_no_compatible_stable_release_stops_before_installation_or_guide() -> None:
+    assert (
+        "If no exact compatible stable version at least 0.14.0 is available, explain that no compatible "
+        "stable release is available. Make no installation or update attempt, do not run `agw guide "
+        "--agent`, and ask me to retry after the release is published. Do not use a pre-release, a lower "
+        "version, or an unpinned latest version."
+    ) in NORMALIZED_BODY
 
 
 def test_bootstrap_does_not_offer_source_review_or_ongoing_teaching() -> None:
@@ -110,7 +119,7 @@ def test_generated_packages_are_inert_and_share_the_canonical_handoff() -> None:
         assert body == BODY
         assert frontmatter["description"] == METADATA["skillDescription"]
         assert "allowed-tools" not in frontmatter
-        assert body.count("`agw guide --agent`") == 1
+        assert " ".join(body.split()).count("`agw guide --agent`") == 2
     for root in (
         ROOT / "plugins/claude-code/agentworks",
         ROOT / "plugins/codex/agentworks",
@@ -189,3 +198,6 @@ def test_permanent_installation_docs_use_https_and_do_not_claim_installation_is_
     assert "does not offer or perform repository source inspection" in normalized_docs
     assert "guide owns all ongoing Agentworks teaching" in normalized_docs
     assert "adds no authorization, security-setting, or harness-posture teaching" in normalized_docs
+    assert "If no compatible stable release is available" in docs
+    assert "does not install or update the CLI or invoke the guide" in normalized_docs
+    assert "retry after the release is published" in normalized_docs
