@@ -166,12 +166,11 @@ Create uses the smallest selected machine type, then verifies its provider-repor
 before choosing the matching Debian 12 image. When GCE populates its optional output architecture,
 that value must also match the declaration; omission is unknown and leaves the declared catalog
 authoritative. A live type reporting zero Persistent Disk capacity or required accelerators fails
-with actionable configuration guidance before the first provider mutation. GCE exposes no
-read-only complete machine/disk-pair validator, so a residual incompatibility rejected by
-`instances.insert` fails definitively with fixed, actionable machine/`pd-balanced` guidance and
-runs the normal bounded rollback. Create uses a balanced persistent boot disk sized from the VM
-template and explicitly marked `auto_delete`, instance-metadata SSH keys with project keys blocked,
-and deterministic
+with actionable configuration guidance before the first provider mutation. GCE exposes no read-only
+complete machine/disk-pair validator, so a residual incompatibility rejected by `instances.insert`
+fails definitively with fixed, actionable machine/`pd-balanced` guidance and runs the normal bounded
+rollback. Create uses a balanced persistent boot disk sized from the VM template and explicitly
+marked `auto_delete`, instance-metadata SSH keys with project keys blocked, and deterministic
 GCE-valid instance, tag, and firewall names. Exact bounded SHA-256-based derivations make every
 retained identity collision-safe for underscores, leading digits, case, invalid runs, suffix
 reservation, and truncation. Start/stop guard on live state to enforce idempotency, and public IP
@@ -226,7 +225,7 @@ durable-material mutation.
 
 Provider-shaped operation tests distinguish DONE HTTP 503 failures carrying the exact structured
 `ZONE_RESOURCE_POOL_EXHAUSTED` code, DONE failures carrying an unknown or malformed structured
-shape, strict superstrings of the capacity token, and timeout/non-DONE waits. They prove exact
+shape, longer strings containing the capacity token, and timeout/non-DONE waits. They prove exact
 equality is required for capacity classification, only the last case is indeterminate, definitive
 failures cannot reconcile to insert success, capacity guidance names the zone without reflecting
 provider text, and every resulting exception graph is detached and secret-free. Rollback tests

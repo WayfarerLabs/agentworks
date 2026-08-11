@@ -152,7 +152,7 @@ exception objects. Delete and rollback are postcondition-driven exceptions to th
 after any wait failure they inspect provider state, accept only verified absence, retain survivors
 or mismatches, and preserve the deny when an instance may remain.
 
-Capacity classification uses strict code equality. A malformed value or superstring such as
+Capacity classification uses strict code equality. A malformed value or longer string such as
 `PREFIX_ZONE_RESOURCE_POOL_EXHAUSTED` is an ordinary definitive `GCEOperationError`, never a
 `GCECapacityError`.
 

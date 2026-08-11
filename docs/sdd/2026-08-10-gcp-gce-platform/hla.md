@@ -88,16 +88,16 @@ The field is named `subnet`, not `subnet_id`, because GCE resolves a subnetwork 
 region derived from `zone`; callers do not provide a provider-generated identifier.
 
 The immutable built-in catalog is `(2, 2, e2-small, x86_64)`, `(2, 4, e2-medium, x86_64)`,
-`(2, 8, e2-standard-2, x86_64)`, `(4, 16, e2-standard-4, x86_64)`,
-`(8, 32, e2-standard-8, x86_64)`, `(16, 64, e2-standard-16, x86_64)`, and
-`(32, 128, e2-standard-32, x86_64)`, with memory in GiB. The shared-core entries expose two vCPUs
-to the guest but sustain an aggregate 0.5 and 1 vCPU respectively, with automatic bursting. An
-override may name Arm types and selects the `debian-12-arm64` image family rather than `debian-12`.
-E2/x86 is the default because its broad zone availability makes a portable built-in catalog;
-T2A/Arm availability is limited to a narrower zone set and remains an explicit override.
-Unsupported size requests and known live incompatibilities with the platform's CPU-only,
-`pd-balanced` boot contract fail before mutation. Residual provider-only pair incompatibilities
-fail definitively during insert with fixed operator guidance and bounded rollback.
+`(2, 8, e2-standard-2, x86_64)`, `(4, 16, e2-standard-4, x86_64)`, `(8, 32, e2-standard-8, x86_64)`,
+`(16, 64, e2-standard-16, x86_64)`, and `(32, 128, e2-standard-32, x86_64)`, with memory in GiB. The
+shared-core entries expose two vCPUs to the guest but sustain an aggregate 0.5 and 1 vCPU
+respectively, with automatic bursting. An override may name Arm types and selects the
+`debian-12-arm64` image family rather than `debian-12`. E2/x86 is the default because its broad zone
+availability makes a portable built-in catalog; T2A/Arm availability is limited to a narrower zone
+set and remains an explicit override. Unsupported size requests and known live incompatibilities
+with the platform's CPU-only, `pd-balanced` boot contract fail before mutation. Residual
+provider-only pair incompatibilities fail definitively during insert with fixed operator guidance
+and bounded rollback.
 
 ## Dependency and credential boundary
 
@@ -180,11 +180,10 @@ The complete-or-raise sequence is:
    `(cpus, memory, type, arch)` so equal-shape catalogs remain order-independent; resolve the live
    machine type and verify its CPU and memory match the catalog declaration. If GCE populates the
    output-only architecture field, it must also match; an omitted value is unknown and leaves the
-   declaration authoritative. Reject a known-incompatible live type whose
-   `maximum_persistent_disks` is zero or which declares required guest accelerators, with guidance
-   naming the selected type and current CPU-only, Balanced Persistent Disk support boundary. These
-   provider fields do not prove complete pair compatibility. Resolve
-   `projects/debian-cloud/global/images/family/debian-12` or
+   declaration authoritative. Reject a known-incompatible live type whose `maximum_persistent_disks`
+   is zero or which declares required guest accelerators, with guidance naming the selected type and
+   current CPU-only, Balanced Persistent Disk support boundary. These provider fields do not prove
+   complete pair compatibility. Resolve `projects/debian-cloud/global/images/family/debian-12` or
    `projects/debian-cloud/global/images/family/debian-12-arm64` and the zonal `pd-balanced` disk
    request. Hyperdisk support remains an additive future storage profile rather than an inferred
    machine-name allowlist.
@@ -214,9 +213,10 @@ The complete-or-raise sequence is:
 Because GCE has no read-only complete machine/disk-pair validation API, a definite instance-insert
 rejection that is not a separately typed capacity or quota failure retains its definitive operation
 type but adds fixed guidance to verify that the selected machine type accepts a CPU-only Debian 12
-VM with a `pd-balanced` boot disk. The diagnostic names only caller-authored machine and disk labels,
-never provider text or objects. Create still enters its ordinary bounded rollback, which is usually
-a no-op for a provider-rejected request but remains correct for every accepted partial state.
+VM with a `pd-balanced` boot disk. The diagnostic names only caller-authored machine and disk
+labels, never provider text or objects. Create still enters its ordinary bounded rollback, which is
+usually a no-op for a provider-rejected request but remains correct for every accepted partial
+state.
 
 The final insert body is retained provider state, so a provider-shaped test inspects the fully built
 request object. It must contain neither the Tailscale sentinel nor the service-account JSON
