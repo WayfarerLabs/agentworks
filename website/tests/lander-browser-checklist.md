@@ -41,10 +41,10 @@ evidence for their named source only; they do not accept the current game.
       doorway and remains visible through every NOC power stage, departure, rolling-window
       reconciliation, and checkpoint restart. Exit restores the exact empty doorway and a fresh run
       has no installed glyph. The existing site group gains no descendant.
-- [ ] Confirm `Agent Deployed!` and `Crashed!` use centered bordered in-stage panels with exactly
-      one polite live status. Launch, Restart, and Exit remain native 44-pixel actions in that
-      source order; only the state-appropriate actions are enabled and visible. Focus returns to the
-      scene after Launch/Restart and to Start after Exit.
+- [ ] Confirm the reviewed deployment and crash copy use centered bordered in-stage panels with
+      exactly one polite live status. Launch, Restart, and Exit remain native 44-pixel actions in
+      that source order; only the state-appropriate actions are enabled and visible. Focus returns
+      to the scene after Launch/Restart and to Start after Exit.
 - [ ] Activate every native action by pointer and touch. Its event must not start, steer, capture,
       or pulse flight input; each action fires once through its native click. Repeat with
       interactive and editable descendants placed inside the active stage.
@@ -355,17 +355,17 @@ new run records the refined source.
 - [x] A fast, tilted, rotating, one-foot-outside, surface-short, operations-center, or out-of-bounds
       contact enters the restrained failure state. Nothing flashes, shakes, explodes, moves the
       page, changes the home link, or emits sound.
-- [ ] Failure announces exactly `Crashed!` in the sole live status, shows Restart then Exit in the
-      centered bordered panel, and accepts both recovery paths.
+- [ ] Failure announces the reviewed crash copy in the sole live status, shows Restart then Exit in
+      the centered bordered panel, and accepts both recovery paths.
 - [x] After safe touchdown at normal motion, the G bay opens, the terminal-shaped agent descends,
       crosses the surface, and enters the west operations-center door.
 - [ ] Power proceeds vertically through four sharp-cornered battery bars at 200 ms intervals, then
       through three bilaterally symmetric signal arches at 1,000, 1,200, and 1,400 ms. There is no
       battery terminal, nub, rounded battery corner, or duplicate payoff.
-- [ ] At power completion, the sole live status says exactly `Agent Deployed!`; the matching banner
-      is centered over the scene when space permits and moves to the top-right at 30 rem or narrower
-      without overlapping the complete left fuel overlay. The lander, mission clock, pose, and fuel
-      then remain unchanged indefinitely until effective player thrust.
+- [ ] At power completion, the sole live status presents the reviewed deployment copy; the matching
+      banner remains centered over the scene at every width without overlapping the complete left
+      fuel overlay. The lander, mission clock, pose, and fuel then remain unchanged indefinitely
+      until effective player thrust.
 - [ ] Space, Up, held pointer or touch, short tap, and native Launch all depart from the same
       launch-ready checkpoint. Turn-only input remains restrained; the first effective collective
       burns and integrates in that same fixed step, and early release receives ordinary gravity.

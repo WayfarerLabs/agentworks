@@ -682,9 +682,9 @@ review-clean, browser-accepted, and merge-ready.
       README, and browser checklist as one coherent change. Preserve the sole status and fuel
       authorities, static/dynamic identity, and Phase 4I physics/route/world fixtures.
 - [x] Prove deterministic refuel interpolation and transfer, reduced-motion equivalence, installed
-      agent persistence across service/checkpoint/restart/retention, exact success/crash text and
-      action focus, terrain-to-control-rail separation, narrow/zoom non-overlap, hidden-page pause,
-      no font/network/storage additions, and the unchanged world ceiling and route digests.
+      agent persistence across service/checkpoint/restart/retention, structural success/crash state
+      and action focus, terrain-to-control-rail separation, narrow/zoom non-overlap, hidden-page
+      pause, no font/network/storage additions, and the unchanged world ceiling and route digests.
 - [ ] Run focused website suites, deterministic root/project builds, complete repository gates,
       artifact/code/fresh-eyes reviews, and automated Chromium acceptance; resolve every valid
       finding and re-review the immutable integrated head.
