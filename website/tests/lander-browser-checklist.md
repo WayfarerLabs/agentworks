@@ -24,24 +24,24 @@ they do not accept the current game.
       motifs. Each target has one elevated H platform exactly three lander widths long, one gas can,
       and one solid NOC on a shared flat shelf. Confirm the solid support face has no pale aperture.
       The can disappears once, fuel increases once, the agent enters, the vertical battery fills
-      red/orange/pale-yellow/mint from bottom to top, the antenna powers at 1,000 ms, and actual-fuel
-      launch returns to player-controlled flight.
+      red/orange/pale-yellow/mint from bottom to top, the antenna powers at 1,000 ms, and
+      actual-fuel launch returns to player-controlled flight.
 - [ ] Confirm the next site begins fully offscreen right after service. The solid arrow blinks only
       while that target remains offscreen; it is static with reduced motion and has equivalent
       visually hidden direction text.
 - [ ] Confirm visible fuel changes by tenths without repetitive live announcements. Spend fuel on
       thrust, carry excess through multiple sites, and verify empty fuel produces no thrust.
-- [ ] Crash on terrain, a platform end or underside, the solid riser, the NOC, and the mast. Normal motion
-      shows one brief compact flash and exactly eight ballistic fragments for 600 milliseconds, with
-      no smoke, dust, sound, shake, or page movement. Reduced motion reaches the same failed state
-      with no moving debris.
+- [ ] Crash on terrain, a platform end or underside, the solid riser, the NOC, and the mast. Normal
+      motion shows one brief compact flash and exactly eight ballistic fragments for 600
+      milliseconds, with no smoke, dust, sound, shake, or page movement. Reduced motion reaches the
+      same failed state with no moving debris.
 - [ ] Restart after crashes before and after a powered site. Before the first checkpoint, restart
       restores the same seeded initial approach. Afterward, it starts on the last powered pad,
       relaunches using fuel, and never duplicates the can, award, progress, ratio, or power
       sequence.
 - [ ] Fly far enough for the camera and rolling window to move in both directions. At every sampled
-      point, count at most five terrain paths, three site groups, eight debris nodes, and 80 children
-      under `#lander-world`; discarded sites do not return as retained history.
+      point, count at most five terrain paths, three site groups, eight debris nodes, and 80
+      children under `#lander-world`; discarded sites do not return as retained history.
 - [ ] Exercise straight, turn-only, and combined keyboard thrust plus pointer/touch at half and full
       drag. Confirm steering visibly gimbals both plumes, reduces forward thrust, never exceeds
       straight collective, and keyboard steer owns direction during simultaneous pointer input.
@@ -50,8 +50,8 @@ they do not accept the current game.
 - [ ] Perform a short primary tap whose browser-generated `lostpointercapture` fires synchronously.
       Confirm thrust remains active through 139.999 ms, ends once at 140 ms, and cancel/blur/hide
       tears it down immediately. Repeat with a reused browser pointer ID.
-- [ ] Land exactly at the inclusive 1.6 m/s horizontal, 2.5 m/s descent, 10 degree tilt, and
-      15 degree/s rotation limits; increase each independently and confirm a crash.
+- [ ] Land exactly at the inclusive 1.6 m/s horizontal, 2.5 m/s descent, 10 degree tilt, and 15
+      degree/s rotation limits; increase each independently and confirm a crash.
 - [ ] Hide and restore the tab during flight, arrow blink, service, launch, and crash. Hidden time
       advances none of them, input and pointer capture clear, and the first visible frame only
       resets timing.

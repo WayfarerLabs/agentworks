@@ -76,14 +76,15 @@ The Lander uses fixed-step vacuum physics. Space or Up commands collective thrus
 Right/L steer. Steered thrust is deliberately vectored by up to 18 degrees and uses less total
 forward thrust than straight collective. A powered neutral collective redistributes thrust between
 the two engines to arrest rotation without adding drag or changing fuel use. Pointer and touch input
-use the same bounded mixer: press for collective, drag horizontally to steer, and a short tap retains
-a 140 ms pulse. Safe landing limits are inclusive at 1.6 m/s horizontal speed, 2.5 m/s descent,
-10 degrees of tilt, and 15 degrees/s rotation.
+use the same bounded mixer: press for collective, drag horizontally to steer, and a short tap
+retains a 140 ms pulse. Safe landing limits are inclusive at 1.6 m/s horizontal speed, 2.5 m/s
+descent, 10 degrees of tilt, and 15 degrees/s rotation.
 
 Terrain is deterministic per run, sampled every 10 m in 50 m chunks from four visibly different
-motifs. Each platform and NOC share one flat shelf. The 9.6 m deck stands 0.8 m above it on a solid,
-collidable support face; the NOC battery fills four colored bars bottom-to-top before its antenna
-powers. These shapes, fills, and outlines preserve their meaning without relying on color alone.
+motifs. Each platform and NOC share one flat shelf. The 9.6 m deck stands 0.8 m above it on a solid
+support face that collides with the spacecraft; the NOC battery fills four colored bars
+bottom-to-top before its antenna powers. These shapes, fills, and outlines preserve their meaning
+without relying on color alone.
 
 ## Artifact contract
 

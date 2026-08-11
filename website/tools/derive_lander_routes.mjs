@@ -636,7 +636,7 @@ async function main() {
             worldWitnesses,
         };
         output.outputDigest = digest(output);
-        const serialized = `${canonicalBytes(output)}\n`;
+        const serialized = `${JSON.stringify(canonical(output), null, 2)}\n`;
         await writeFile(options.output, serialized, "utf8");
         if (options.verify) {
             const expected = await readFile(options.verify, "utf8");
