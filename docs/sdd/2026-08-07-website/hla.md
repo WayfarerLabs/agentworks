@@ -2,7 +2,7 @@
 
 - Status: Canonical assistance integration complete; production acceptance in progress
 - Date: 2026-08-07
-- Last revised: 2026-08-10
+- Last revised: 2026-08-11
 - FRD: `frd.md`
 - Research: `prior-art-research.md`
 - Brand direction: `brand-direction.md`
@@ -319,10 +319,10 @@ The artifact boundary is portable: another static host can accept the generated 
 changing content or build contracts. Hosting-specific behavior stays in the workflow and operator
 runbook.
 
-The workflow first goes live with the interim release. The onboarding integration later uses the
-same merge-to-`main` path; it neither adds a second Pages project nor changes domain configuration.
-This exercises the delivery system and custom 404 before the upstream content dependency is ready,
-while keeping every deployed artifact reproducible from its source commit.
+The workflow first went live with the complete pre-assistance release. PR #480 then carries the
+canonical assistance source and website integration through the same merge-to-`main` path; it adds
+neither a second Pages project nor a domain change. This preserves the proven delivery system and
+custom 404 while keeping every deployed artifact reproducible from its source commit.
 
 ### D9. DNS and domain setup are explicit one-time operations
 
@@ -346,24 +346,19 @@ rollback, and recovery. Setup and go-live are ordered so deployment exists befor
 DNS values are copied from current GitHub documentation during go-live and recorded in acceptance
 evidence. They are not hidden in application code. No wildcard record is created.
 
-The DNS cutover belongs to the interim release, after that artifact passes acceptance at the default
-Pages URL. The onboarding release is then an ordinary site-source deployment. Production closeout
-waits until the canonical bootstrap is live and AC3/AC4 are accepted; the existence of a healthy
-interim domain does not lock the effort early.
+The DNS cutover belonged to the first complete release after that artifact passed acceptance at the
+default Pages URL. The canonical-assistance integration is an ordinary site-source deployment.
+Production closeout waits until the canonical bootstrap is live and AC3/AC4 are accepted; the
+existing healthy domain does not lock the effort early.
 
 ### D10. The interim-to-complete transition is explicit and disposable
 
-The checked-in main-page template initially contains one bounded interim notice at the future
-bootstrap position. The builder requires and emits that notice in the interim release, but has no
-`preview` flag, environment-dependent content, hidden complete template, or optional branch that
-pretends to consume onboarding. Tests assert that no bootstrap code region, copy affordance,
-installation instruction, or bootstrap JavaScript is present.
-
-Once the canonical onboarding contract is merged, the onboarding integration deletes the notice,
-adds the real source as a required builder input, emits the verified `pre`/`code` region, and adds
-the focused copy enhancement. Tests then invert the contract: the interim notice is forbidden and
-bootstrap identity is mandatory. This keeps temporary behavior obvious and removable instead of
-turning a two-step delivery need into permanent configuration machinery.
+The first checked-in main-page template contained one bounded availability notice at the future
+bootstrap position, with no preview mode or hidden complete template. PR #480 deletes that temporary
+notice, makes the canonical assistance source a required builder input, emits the verified
+`pre`/`code` region, and adds the focused copy enhancement. Current tests forbid the retired notice
+and require exact bootstrap identity. The transition leaves no permanent configuration branch or
+second authored prompt.
 
 ## Component topology
 

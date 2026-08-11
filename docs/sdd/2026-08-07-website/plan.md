@@ -1,32 +1,30 @@
 # Plan: The agentworks.build Website
 
-- Status: Interim implementation complete; release acceptance in progress
+- Status: Canonical assistance integration implemented; production acceptance pending
 - Date: 2026-08-07
-- Last revised: 2026-08-09
+- Last revised: 2026-08-11
 - FRD: `frd.md`
 - HLA: `hla.md`
 - Research: `prior-art-research.md`
 
 ## Delivery shape
 
-This effort now uses two complete website releases, a small interim acceptance-evidence PR, and a
-final closeout PR. The operator's 2026-08-08 direction still governs incomplete design/demo work:
-the existing website PR (number 439) remains draft and does not merge merely to publish artifacts or
-the game. The 2026-08-09 direction defines a new complete first release: that PR may become ready
-and merge when the useful interim Home, Manifesto, Security, dedicated Lander, selected brand,
-accepted custom 404, shared footer/game contracts, CI, automatic Pages deployment, runbook, and
-default-host acceptance are all complete. The custom-domain activation then publishes that honest
-interim release at `agentworks.build`, and the small evidence PR records the observed result.
+This effort records two complete website releases and a final closeout. Phases 0 through 6 preserve
+the first-release journey: PR #439 delivered the useful Home, Manifesto, Security, Lander, custom
+404, shared shell/game contracts, CI, Pages deployment, and runbook without pretending the still-
+developing assistance prompt existed.
 
-After onboarding Phase 3 lands on `main`, a separately reviewed integration PR replaces the bounded
-availability notice with the canonical README bootstrap and copy enhancement. It does not redesign
-the page, fork the content, or create another deployment path. A final closeout PR records complete
-production acceptance, final truthful checkbox flips, and `locked.md`.
+The operator's 2026-08-10 correction then authorized the onboarding-and-discovery effort lead to
+integrate the canonical assistance source and reconcile this effort's FRD, HLA, plan, and shell LLD
+inside PR #480. Phases 7 and 8 are that jointly delivered integration, not a later main-only PR: the
+same feature PR replaces the retired availability notice with the canonical prompt and copy
+enhancement without redesigning the site or creating another deployment path. The website effort
+retains ownership of production acceptance and the final closeout PR.
 
-`locked.md` never merges before AC1-AC19 and R1-R18 are accepted in production. Every earlier merge
-is independently useful and operable: the interim release does not claim onboarding exists, and the
-onboarding release consumes only the eventual canonical contract from `main`. No website code binds
-to the onboarding feature branch.
+`locked.md` never merges before AC1-AC19 and R1-R18 are accepted in production. The first release
+was independently useful and operable without an onboarding claim. The integrated release consumes
+the canonical source from the same reviewed PR while preserving deterministic source identity; no
+permanent website code binds to a branch-only or duplicated contract.
 
 ## Phase 0: design convergence and coordination
 

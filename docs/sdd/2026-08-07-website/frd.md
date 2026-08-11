@@ -2,11 +2,14 @@
 
 - Status: Canonical assistance integration complete; production acceptance in progress
 - Date: 2026-08-07
-- Last revised: 2026-08-10
+- Last revised: 2026-08-11
 - Seeded by: the saga lead, at operator request. This is a standalone effort, deliberately NOT a
   child of the 2026-08-04-next-steps saga (see that saga's `target-state.md` out-of-scope section
   for the recorded relationship). It follows the ordinary SDD process: the effort lead owns the HLA
   and plan; the saga lead reviews PRs.
+- Integration delegation: on 2026-08-10 the operator authorized the onboarding-and-discovery effort
+  lead to reconcile this FRD, HLA, plan, and shell LLD while integrating the canonical assistance
+  source in PR #480. The website effort retains production acceptance and closeout ownership.
 
 ## Purpose
 

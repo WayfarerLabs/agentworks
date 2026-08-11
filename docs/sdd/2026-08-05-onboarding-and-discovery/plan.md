@@ -269,16 +269,16 @@ The completed checkpoint above records the initial onboarding-centered package d
 operator's 2026-08-10 lifecycle-assistance correction supersedes that lens without erasing the
 completed design work; the corrective LLD and implementation boxes below carry the destination.
 
-Phase 3 ships through one pull request. The current artifact review is only a design gate inside
-that draft PR: it does not merge after design approval. The same branch and PR carry implementation,
-review, live validation, release preparation, and every remaining Phase 3 gate, and become ready for
-merge only when the entire feature is complete and green. After that feature PR merges normally,
-release-please regenerates its separate release PR from the resulting `main`.
+Phase 3 ships through one pull request. That PR began with an in-branch design gate and then carried
+the implementation, tests, review, live validation, documentation, and release preparation on the
+same branch. It becomes ready for merge only when the complete feature handoff is green. After the
+feature PR merges normally, release-please regenerates its separate release PR from the resulting
+`main`.
 
 - [x] Revise `bootstrap-packaging-lld.md` around an always-available Agentworks package: neutral
       package and skill identity, top-level `agw guide --agent` handoff, setup and
       returning-operator probes, and no package-owned intent switchboard or duplicated teaching.
-- [ ] Top-level guide rendering for the Agentworks assistant agent presents an intent-to-topic map
+- [x] Top-level guide rendering for the Agentworks assistant agent presents an intent-to-topic map
       for setup and adoption, management and operation, temporal release history, troubleshooting,
       exceptional migration, secrets, and bug reporting without granting action authority or hiding
       the complete live topic index. The Agentworks assistant agent decides what to propose next.
@@ -291,14 +291,14 @@ release-please regenerates its separate release PR from the resulting `main`.
       It links to the separate live adoption assessment and offers an operator-approved exact-range
       canonical GitHub fallback only when local history is insufficient. Guide rendering performs no
       network request, and neither harness package copies release prose.
-- [ ] `concept-onboarding` remains the specialized first-run and adoption-assessment path and gains
+- [x] `concept-onboarding` remains the specialized first-run and adoption-assessment path and gains
       a bounded, authorized golden path that initializes absent settings through `agw config init`,
       selects an existing SSH key pair by presence-only inspection or offers authorized generation
       of a non-overwriting Ed25519 pair, collects explicit provider and plugin inputs, verifies
       readiness with doctor, then creates and verifies a usable VM and started first session from
       explicit operator-selected inputs. One startup setup envelope can cover the complete
       configuration-through-session sequence without repeated approval prompts.
-- [ ] `concept-management` presents live kind and instance facts for ongoing configuration and VM or
+- [x] `concept-management` presents live kind and instance facts for ongoing configuration and VM or
       session operation, then points to existing JSON facts and the applicable built-in CLI group or
       command help for exact syntax. It adds no command registry or copied recipe catalog.
       Configuration and operation remain one assistance surface. Actions already covered by the
@@ -315,7 +315,7 @@ release-please regenerates its separate release PR from the resulting `main`.
       requested goal, treats an explicit operator instruction as authorization without a redundant
       confirmation, does not repeat risks or approval questions for every in-scope step, and honors
       an operator preference for narrower or per-action confirmation.
-- [ ] Reconcile every shipped core guide contribution with the durable authorization envelope,
+- [x] Reconcile every shipped core guide contribution with the durable authorization envelope,
       explicitly including `concept-onboarding`, `concept-management`, `concept-migration`,
       `concept-troubleshooting`, and `concept-secrets`. Teaching and `AgentContract` prose treats
       `GuideAction.consent` as an authorization class rather than a mandatory per-action prompt,
