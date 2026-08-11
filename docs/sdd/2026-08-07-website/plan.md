@@ -632,7 +632,7 @@ and every regenerated route/world fixture are exact, reviewed, and browser-accep
       and structure changes, including the player-reachable launch prefix, exact two-replay success,
       one-quantum exhaustion, collision/render parity, no award duplication, and bounded
       runtime/DOM.
-- [ ] Run focused website suites, deterministic root/project builds, complete repository gates, and
+- [x] Run focused website suites, deterministic root/project builds, complete repository gates, and
       cold project/fresh-eyes reviews; resolve every valid finding through the implementing
       subagent.
 - [ ] Refresh the port-8766 preview from the exact reviewed commit and exercise current Chrome and
