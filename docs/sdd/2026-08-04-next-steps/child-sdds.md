@@ -177,7 +177,11 @@ selection in lockstep (CI enforces).
 
 - [x] Ruled and brief seeded (2026-08-09; website-coordination constraint updated 2026-08-09 after
       the website Phase 4B design landed; rough-cut expectation added 2026-08-10)
-- [ ] Survey, rough cut, operator rewrite, merge
+- [x] Survey, rough cut, operator rewrite, merge (PR #470, merged 2026-08-10 following the
+      operator's direct approval posted on the PR: docs/manifesto.md is the single conviction-voiced
+      home, the website consumes it with the Home identity re-pinned atomically per the landing
+      order, the kernel-boundary disclosure relocated to SECURITY.md, the concept-manifesto guide
+      topic teaches by pointing, and the development-principles clause names the destination)
 
 ### Dispatched task (not a child SDD): safer migrations
 
@@ -238,17 +242,17 @@ Chrome/Edge acceptance recorded and the residual deferred matrix explicitly acce
 domain activation follows the pinned rollback-capable runbook at the operator's choosing.
 Post-launch obligations (Firefox/WebKit, spoken screen reader, physical touch/device rows) stay
 explicit and unchecked, required before that effort's final closeout. The manifesto task's atomic
-rebase obligation (manifesto source path plus Home block re-pins) is now active, and the
-continuous-lander stack entry moves to main.
+rebase obligation (manifesto source path plus Home block re-pins) was discharged by PR #470's merge
+on 2026-08-10, and the continuous-lander stack entry now targets main.
 
 ## Standing process rulings
 
 Permanent homes landed via PRs #473/#474/#477/#481: the sdd skill's supersession paragraph; the
 dev-process draft/ready handoff, author-owned review-requested label, exact handoff definition,
 subagent-review taxonomy, and commit/PR/stack layering with the cascade rule; and the saga-lead
-review triggers matching them. The operator's 2026-08-10 enforcement calibration is codified in the
-dev-process skill's poller rule (PR #489): a handoff gap is reported while the review proceeds in
-good faith, and review is withheld only for unaddressed substantive findings.
+review triggers matching them. (A previously recorded enforcement-calibration note was retracted by
+the operator on 2026-08-10 as personal guidance to the saga lead, not process; the dev-process
+poller rule stands as merged in PR #481, and PR #489 closed unmerged.)
 
 - **Plan-history ruling (operator, 2026-08-10):** completed plan steps may never be removed — no
   exception for never-merged, superseded, or expunged work. Everything else strips clean under a
