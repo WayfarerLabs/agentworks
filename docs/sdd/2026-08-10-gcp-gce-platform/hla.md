@@ -7,8 +7,8 @@ proven by Azure:
 
 - `__init__.py`: one `Plugin(name="gcp")` descriptor contributing `GCEPlatform` and anchoring
   bundled manifests;
-- `manifests/cli-packages.yaml`: optional guest-side `google-cloud-cli` apt source and `gcloud-cli`
-  apt package;
+- `manifests/apt.yaml`: optional guest-side `google-cloud-cli` apt source and `gcloud-cli` apt
+  package;
 - `config.py`: auth union, site model, machine-type catalog and selection;
 - `auth.py`: ambient/service-account credential construction and secret-free error mapping;
 - `network.py`: Compute API error mapping, external access, firewall, rollback, and cleanup helpers;
