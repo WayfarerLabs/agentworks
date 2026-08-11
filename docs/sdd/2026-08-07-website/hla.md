@@ -316,17 +316,19 @@ does not imply unbounded DOM or terrain history.
 Each deterministic site replaces a deliberately wide terrain span with one flat shelf carrying a
 materially elevated platform exactly three lander widths long and one solid NOC building beside it.
 Non-site terrain uses wider, irregular samples and stronger bounded elevation changes rather than a
-fine alternating motif. Collider-backed exposed trusses and scaffolding join the platform and NOC as
-one elevated structure within its physical envelope, so the elevation reads intentionally without a
-long exposed sky strip or a decorative opening the lander could appear able to traverse. A safe
-landing under the pinned, modestly relaxed speed and attitude limits consumes that site's one gas
-can exactly once. The fuel award is computed only after the next site exists: a deterministic
-reference plan starts at the post-refuel, post-power platform checkpoint, includes the pinned
-player-reachable launch prefix, uses the same immutable physics profile as play, and demonstrates a
-safe next landing to establish its conservative minimum fuel. The award is that minimum multiplied
-by a monotonic ratio beginning near three and approaching one. It is added to the carried reserve
-without erasing unused fuel. Fixed-seed tests pin both the route proof and the smallest successful
-allowance within the LLD's search resolution.
+fine alternating motif. One collider-backed open truss uses continuous top and bottom chords, a
+uniform sequence of alternating triangular braces, and supporting posts across the complete
+platform-to-NOC span. It has no region-specific pad, connector, or NOC brace pattern, so the site
+reads as one elevated engineered structure without a long exposed sky strip, repeated X fields, or a
+decorative opening the lander could appear able to traverse. A safe landing under the pinned,
+modestly relaxed speed and attitude limits consumes that site's one gas can exactly once. The fuel
+award is computed only after the next site exists: a deterministic reference plan starts at the
+post-refuel, post-power platform checkpoint, includes the pinned player-reachable launch prefix,
+uses the same immutable physics profile as play, and demonstrates a safe next landing to establish
+its conservative minimum fuel. The award is that minimum multiplied by a monotonic ratio beginning
+near three and approaching one. It is added to the carried reserve without erasing unused fuel.
+Fixed-seed tests pin both the route proof and the smallest successful allowance within the LLD's
+search resolution.
 
 After refueling, the G opening acts as a deployment bay: a small terminal-inspired agent reaches the
 surface and enters the single NOC. A clean rectangular vertical phone-battery-style indicator, with

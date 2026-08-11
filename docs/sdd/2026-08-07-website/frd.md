@@ -162,19 +162,21 @@ forecloses it, and none of it is in scope now.
   presents visibly rising, falling, and sloped lunar-lander terrain between sites and a
   deterministic sequence of sites generated from one fresh in-memory run seed. Each site has one
   materially elevated helicopter-style landing platform exactly three lander widths long beside one
-  compact NOC building. Exposed collider-backed trusses and scaffolding visibly connect the platform
-  and NOC into one supported structure; decorative openings must not imply a traversable gap where
-  the collision model is solid. Terrain changes at deliberately wide intervals with stronger,
-  irregular elevation changes between sites rather than a fine repeated sawtooth; every platform and
-  its NOC occupy one flat site shelf. The elevated platform reads as a supported structure without
-  exposing a long sky-colored slot beneath its deck. A safe landing collects that platform's single
-  gas can into the lander's visible fuel reserve, deploys an agent from the G opening, fills a clean
-  rectangular vertical, multicolor phone-battery-style power indicator without a terminal nub, then
-  builds a vertically symmetric network signal through the final three power stages. Completing the
-  sequence exposes the exact visible and announced banner `Agent Deployed!` while the lander waits
-  safely on the pad. The deployed agent remains visibly installed at that NOC while the powered site
-  is retained in the run's rolling world. The player must command the subsequent liftoff; there is
-  no automatic launch and no terminal success after a deployment.
+  compact NOC building. One continuous collider-backed exposed truss spans beneath the complete
+  platform-to-NOC structure with a uniform alternating-triangle rhythm and supporting posts rather
+  than separate pad, connector, and NOC fields of X braces; decorative openings must not imply a
+  traversable gap where the collision model is solid. Terrain changes at deliberately wide intervals
+  with stronger, irregular elevation changes between sites rather than a fine repeated sawtooth;
+  every platform and its NOC occupy one flat site shelf. The elevated platform reads as a supported
+  structure without exposing a long sky-colored slot beneath its deck. A safe landing collects that
+  platform's single gas can into the lander's visible fuel reserve, deploys an agent from the G
+  opening, fills a clean rectangular vertical, multicolor phone-battery-style power indicator
+  without a terminal nub, then builds a vertically symmetric network signal through the final three
+  power stages. Completing the sequence exposes the exact visible and announced banner
+  `Agent Deployed!` while the lander waits safely on the pad. The deployed agent remains visibly
+  installed at that NOC while the powered site is retained in the run's rolling world. The player
+  must command the subsequent liftoff; there is no automatic launch and no terminal success after a
+  deployment.
 - R22. After each safe landing, the next site is deterministically placed beyond the right edge of
   the current view. A visible right-edge arrow blinks while that target remains offscreen and hides
   once the site enters view; under reduced motion it remains a static direction cue. Before issuing
@@ -338,14 +340,15 @@ merged and settled on `main`. The first slice must not build toward them specula
   positions, and fuel awards are byte-for-byte repeatable. Representative seeds meet the LLD's
   minimum terrain-diversity constraints and visibly include coarse rising, falling, and sloped
   non-platform spans separated by the LLD's wider sample interval. Every retained platform and NOC
-  stands on one flat shelf, while the platform deck remains visibly and physically elevated on its
-  collider-backed exposed trusses and scaffolding that attach the pad to its NOC, without an
-  uninterrupted sky-colored rectangle beneath it or a visual opening that contradicts collision.
-  Each award equals the next route's deterministic demonstrated minimum multiplied by a monotonic
-  ratio that is approximately three for the first award and approaches one without crossing it. A
-  test-controlled reference flight reaches and safely lands on every representative generated next
-  platform using no more than the calculated minimum; a one-step-smaller tested allowance cannot
-  complete that same reference plan.
+  stands on one flat shelf, while the platform deck remains visibly and physically elevated on one
+  continuous collider-backed exposed truss that attaches the pad to its NOC with a uniform
+  alternating-triangle structural rhythm, without separate brace fields, an uninterrupted
+  sky-colored rectangle beneath it, or a visual opening that contradicts collision. Each award
+  equals the next route's deterministic demonstrated minimum multiplied by a monotonic ratio that is
+  approximately three for the first award and approaches one without crossing it. A test-controlled
+  reference flight reaches and safely lands on every representative generated next platform using no
+  more than the calculated minimum; a one-step-smaller tested allowance cannot complete that same
+  reference plan.
 - AC23. While the next site is right of the viewport, a visible right-pointing cue is present and
   blinks only when motion is allowed and the document is active. It becomes static under reduced
   motion, pauses while hidden, and disappears when the target enters view. Direction is never
