@@ -380,17 +380,21 @@ executable-path `test_exec` plus the Agentworks-owned completion marker
 `/usr/local/aws-cli/.agentworks-v2-complete`. The shared install-command contract treats a
 slash-containing `test_exec` as a path checked with `test -x` in both VM and agent runners, while a
 bare name retains the existing PATH lookup. The AWS command requires the marker, public launcher,
-and canonical internal v2 executable before taking its managed fast path. It writes the marker only
-after the verified official installer succeeds, so a missing marker, launcher, internal executable,
-or executable bit enters the update path instead of becoming a false completion. Reinitialization
-can therefore skip a completed managed installation without executing the relatively heavy CLI on a
-constrained guest. The command keeps its own `aws --version` fast path for a valid v2 installation
-at another location; v1 continues through the v2 install path. An incomplete prior installation is
-reconciled with the official installer's explicit `--update`, `--install-dir`, and `--bin-dir`
-options, and temporary artifacts are removed on success or failure. Unsupported architectures,
-signing-key drift, and invalid signatures fail clearly. The installer never runs `aws configure`,
-writes a credentials/profile file, or participates in EC2 lifecycle code, which continues to use
-boto3.
+and canonical internal v2 executable before taking its managed fast path. Before any managed repair,
+it removes a prior marker so a failed update cannot leave stale success state. After the verified
+official installer exits successfully, the command requires both public and internal executables to
+pass `test -x` before recreating the marker. A missing marker, launcher, internal executable, or
+executable bit therefore enters the update path; installer failure or malformed success leaves the
+marker absent. Reinitialization can skip a completed managed installation without executing the
+relatively heavy CLI on a constrained guest. The structural predicate records the last successful
+verified install plus the required executable paths; it does not hash or execute the CLI to detect
+arbitrary later content modification. The command keeps its own `aws --version` fast path for a
+valid v2 installation at another location; v1 continues through the v2 install path. An incomplete
+prior installation is reconciled with the official installer's explicit `--update`, `--install-dir`,
+and `--bin-dir` options, and temporary artifacts are removed on success or failure. Unsupported
+architectures, signing-key drift, and invalid signatures fail clearly. The installer never runs
+`aws configure`, writes a credentials/profile file, or participates in EC2 lifecycle code, which
+continues to use boto3.
 
 Permanent edits cover the installed-plugin list, VM platform list, command reference, resources
 guide, plugin author contract, vm-platform author contract, capability durable-surface enumeration,

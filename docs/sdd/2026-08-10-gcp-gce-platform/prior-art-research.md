@@ -228,10 +228,10 @@ Decisions:
 - extend the shared `test_exec` contract so slash-containing values use `test -x` rather than
   shell-dependent `command -v`, then require the managed public launcher plus an Agentworks-owned
   completion marker in the runner;
-- have the command require that marker plus both public and internal executables, write the marker
-  only after successful verified installation, and retain an in-command `aws --version` fast path
-  for a valid v2 installation elsewhere; an existing v1 executable proceeds through the v2
-  installation;
+- have the command require that marker plus both public and internal executables, invalidate a prior
+  marker before managed repair, and recreate it only after successful verified installation plus
+  executable postconditions; retain an in-command `aws --version` fast path for a valid v2
+  installation elsewhere, while an existing v1 executable proceeds through the v2 installation;
 - select the current official AWS CLI v2 archive by normalized guest architecture and fail clearly
   on an unsupported architecture;
 - download the matching detached signature, import the reviewed AWS key into a private temporary
