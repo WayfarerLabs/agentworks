@@ -232,7 +232,7 @@ simple default stays behavior-identical without a manifest:
 - `env-var` -- reads from the operator's process env. Default convention is
   `AW_SECRET_<UPPER_SNAKE_CASE>`, overridable per secret via the secret's `backend_mappings`
   (`env-var: CUSTOM_NAME`).
-- `prompt` -- interactive prompt; you are never asked for the same secret twice in one command.
+- `prompt`: interactive prompt; you are never asked for the same secret twice in one command.
   Plan-wide prompting happens before the command starts changing anything. Conditional Tailscale
   repair is deliberately lazy: healthy and already-connected paths never ask for a repair key, and a
   stopped VM may start before late key delivery. The delivered key is validated before any

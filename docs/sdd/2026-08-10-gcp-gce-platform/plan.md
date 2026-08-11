@@ -147,17 +147,17 @@ correction. The final evidence record and SDD lock still follow the passing live
       drift, locked-SDD, guide safety, and diff checks.
 - [x] Run the required Agentworks project review and an independent fresh-eyes review; resolve every
       valid finding through the implementation agent and re-review.
-- [ ] Load the integration-testing and test-environment skills, inventory the operator-provided GCP
+- [x] Load the integration-testing and test-environment skills, inventory the operator-provided GCP
       project/zone/network/auth mode, verify classic-first network-policy order plus the absence of
       conflicting organization/folder terminal rules, set explicit resource/time/cost budgets, and
       obtain operator authorization before any live mutation or credential use.
-- [ ] Run one bounded create/init/Tailscale/lifecycle acceptance using an explicit `machine_types`
+- [x] Run one bounded create/init/Tailscale/lifecycle acceptance using an explicit `machine_types`
       override selecting `e2-small` so the opt-in shared-core path is witnessed. While the VM still
       exists, independently query the realized instance and exact `machineTypes.get` CPU, memory,
       architecture, shared-CPU, disk-capacity presence, and accelerator fields, and prove the
       instance has no guest service account or OAuth scopes. Then delete it and query the project to
       prove zero instance, disk, firewall, and address residue.
-- [ ] In that bounded acceptance, select the `gcloud-cli` apt package; verify `gcloud` is available
+- [x] In that bounded acceptance, select the `gcloud-cli` apt package; verify `gcloud` is available
       in the guest with no authenticated Google account. Rerun initialization and prove apt
       converges cleanly again without a partial result; prove the resources created no guest
       authentication state; and prove the operator's pre-existing host credential baseline is
@@ -165,8 +165,8 @@ correction. The final evidence record and SDD lock still follow the passing live
 - [x] Once the offline gates, code reviews, and operator prerequisites are green, post the exact
       head and flip the PR from draft to ready as the explicit request for this bounded live
       acceptance.
-- [ ] After the live pass, record exact offline/live/review evidence, add `locked.md`, and post the
-      detailed merge-ready disposition only when every requirement is true.
+- [x] After the live pass, record exact offline/live/review evidence and add `locked.md` only when
+      every requirement is true.
 
 ### Phase 3a: second live rejection correction
 
@@ -306,11 +306,30 @@ the VM template's general `snap` field. This effort ships no AWS CLI resource or
 - [x] Preserve the reviewed GCP apt-source/package correction and the general install-command author
       guidance. Add no AWS replacement, prose tests, or install-command tests.
 - [x] Run focused/full gates and both required reviews; resolve every valid finding.
-- [x] Push the final exact head, post one signed handoff, and use the next draft-to-ready transition
-      to request the GCP-only live charter above.
+- [x] Push reviewed code head `af194476`, post one signed handoff, and use a draft-to-ready
+      transition to request the GCP-only live charter. The later record-only `1faabbdf` head was
+      pushed while ready and did not receive its own transition; Phase 3g supplies a compliant final
+      closeout round.
 
 **DoD:** this PR contains no AWS CLI resource, permanent/operator documentation, sample, test,
 acceptance requirement, or publication change; the pre-existing AWS EC2 platform remains
 capability-only; GCP behavior and general install-command guidance remain coherent and green.
+
+### Phase 3g: live-pass closeout
+
+- [x] Correct the inaccurate Phase 3f handoff record and keep this PR draft throughout the in-tree
+      closeout work.
+- [x] Remove the GCP CPU-description prose-pinning assertion and replace the remaining prohibited
+      README double-dash punctuation without adding replacement prose tests.
+- [x] Record the authorized `us-central1-a` capacity rollback, the independent capacity survey, and
+      the successful `us-east1-b` Agentworks acceptance, including the exact realized provider/guest
+      fields, reinit convergence, lifecycle, credential neutrality, classic-first default-network
+      gate, and independent zero-residue result.
+- [x] Run proportionate closeout gates and the required review, resolve every valid finding, and
+      prepare `locked.md` plus the final merge-ready tree.
+
+**DoD:** the exact live product acceptance has passed; the review fixes and historical record are
+correct; permanent docs remain sufficient without the SDD; the effort is locked; and the tree is
+ready for one final handoff.
 
 -- agw-ns-gcp-platform (effort lead)
