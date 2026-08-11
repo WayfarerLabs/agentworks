@@ -462,6 +462,20 @@ Look for:
 - New conventions encoded in code without first being agreed in a doc. New conventions should land
   in an ADR or rulesync rule before they spread through the codebase.
 
+### 12b. A finding outside the change's machinery is a discovery, not a task
+
+When you find a real defect that the change did not cause and cannot fix without touching shared
+machinery, report it as out of scope and say where it belongs. Do not ask this change to fix it. The
+test is whether the fix touches machinery this effort owns; the two settling questions are whether
+the bug reproduces with the change reverted, and whether the fix alters behavior for consumers who
+never asked for this effort. The `agentic-dev-process` skill's section 1a states the standard.
+
+This applies to your own findings with full force: a review round that expands the contract is worse
+than a missed nit, because it spends the author's rounds on semantics no one signed up to judge, and
+the resulting change ships without the design pass its real consumers deserved. Give the finding its
+full technical weight (root cause, evidence, call sites) so the follow-on effort starts from your
+work, then leave it out of the disposition.
+
 ### 12a. Tests police behavior, never our own prose
 
 A test that asserts on the wording of prose we author (guide content, CLI messages, docs, skills,

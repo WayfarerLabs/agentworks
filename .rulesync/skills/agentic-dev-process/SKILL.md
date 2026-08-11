@@ -38,6 +38,40 @@ Before touching anything, decide how big this is, because the size picks the tra
   contract or is hard to undo, lighter for a localized change that follows an existing pattern. If
   still unsure, ask (the `ask-questions` rule).
 
+## 1a. Findings that belong to someone else
+
+An effort in flight will surface defects outside its own scope, and the strongest pull in this whole
+process is to fix what you just found while the context is loaded. Resist it. Outside of bug fixes
+for the work in question, **modifications to core logic and shared contracts are their own
+efforts**, even when your effort is the thing that found the bug.
+
+The test is not "did we find it here." It is: **does the fix touch machinery this effort owns?**
+Shared machinery means anything with consumers beyond this effort: a predicate or contract every
+plugin declares against, a transport every platform uses, a base class, a shared manifest schema, an
+error taxonomy. When the fix lands there, the finding is a discovery, not a task.
+
+Two questions settle almost every case:
+
+- **Would this bug reproduce with this effort reverted?** If yes, it is pre-existing and not yours.
+- **Does the fix change behavior for consumers who never asked for this effort?** If yes, it needs
+  its own design pass, because those consumers are not represented in your review.
+
+What to do instead, and it is cheap: file the finding with the root cause, the evidence, and the
+call-site inventory you already have in your head, so the follow-on effort starts where you left off
+rather than from scratch. If the work is already written, move the commits to their own branch and
+revert them here; re-homing costs a rebase, while merging them costs the shared contract its design
+pass. Then say plainly in the PR that the defect is known, tracked, and out of scope. A documented
+known issue is a normal, honest state for a merge.
+
+The cost of getting this wrong is not abstract. A cloud-platform PR that absorbed a shared
+install-predicate fix grew a shell-compatibility matrix, reddened CI on an unrelated host-inventory
+assumption, and spent several review rounds on semantics no reviewer had signed up to judge, while
+the platform work sat finished and waiting.
+
+This applies symmetrically to reviewers. Do not ask an effort to fix a defect outside its machinery;
+asking for it is how the scope grows, and a review round that expands the contract is the failure
+mode section 5's finding stance exists to prevent.
+
 ## 2. Large efforts: spec with SDD
 
 Drive significant work through the `sdd` skill: the FRD, HLA, plan, and any LLDs, in the feature
