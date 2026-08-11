@@ -75,10 +75,13 @@ def test_no_topic_offer_uses_exact_installed_tag_and_preserves_assistant_decisio
             "runs on the intended workstation",
             "inspect files and execute commands with the workstation account's permissions",
             "That is not root access; privilege elevation is a separate boundary",
+            "reach Agentworks-managed resources, secret references, and SSH destinations reachable from the "
+            "workstation",
             "strictest practical harness approval, visibility, and sandbox posture that still permits the "
             "requested work",
             "durable authorization envelope for the current assistance session",
             "without ritual reconfirmation",
+            "Sensitive discovery checks presence only unless content access is separately covered",
         ):
             assert required_clause in markdown
 
