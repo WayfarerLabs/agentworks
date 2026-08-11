@@ -2,9 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-    FAILURE_STATUS,
     ROUTE_DIGESTS,
-    SUCCESS_STATUS,
     advanceMissionSequence,
     agentInstalled,
     createRun,
@@ -78,7 +76,6 @@ test("reduced motion and a mid-refuel motion change reach the same atomic launch
     assert.equal(toggled.state, "launching");
     assert.equal(toggled.refuel, null);
     for (const result of [reduced, toggled]) {
-        assert.equal(result.status, SUCCESS_STATUS);
         assert.equal(result.fuel, result.legDepartureFuel);
         assert.equal(fuelGaugeLevel(result), 1);
         assert.ok(result.checkpoint);
@@ -92,13 +89,10 @@ test("refuel presentation is excluded from failure, restart, and preflight autho
     ready = advanceMissionSequence(ready, 1.8);
     ready = advanceMissionSequence(ready, 1.4);
     assert.equal(ready.refuel, null);
-    const failed = { ...ready, state: "failed", refuel: { siteId: 0, fromLevel: 0.2, progress: 0.4 },
-        status: FAILURE_STATUS };
+    const failed = { ...ready, state: "failed", refuel: { siteId: 0, fromLevel: 0.2, progress: 0.4 } };
     const restored = transitionMission(failed, "RESTART");
     assert.equal(restored.refuel, null);
-    assert.equal(restored.status, SUCCESS_STATUS);
     assert.equal(transitionMission(restored, "EXIT").refuel, null);
-    assert.equal(FAILURE_STATUS, "Crashed!");
 });
 
 test("installed-agent projection begins at NOC stage one and survives powered checkpoints", () => {
@@ -112,7 +106,7 @@ test("installed-agent projection begins at NOC stage one and survives powered ch
     const stageOneModel = advanceMissionSequence(model, 0.2);
     assert.equal(agentInstalled(stageOneModel.retainedSites.find((site) => site.id === model.activeSiteId)), true);
     const powered = advanceMissionSequence(model, 1.4);
-    const restarted = transitionMission({ ...powered, state: "failed", status: FAILURE_STATUS }, "RESTART");
+    const restarted = transitionMission({ ...powered, state: "failed" }, "RESTART");
     assert.ok(restarted.retainedSites.filter((site) => site.powered).every(agentInstalled));
 });
 
@@ -202,8 +196,29 @@ test("action descendants never create pointer flight input and stage owns all po
     controller.destroy();
 });
 
+test("active description follows the exact offscreen predicate without referencing hidden text", async () => {
+    const run = createRun({ seed: 1 });
+    const target = run.retainedSites.find((site) => site.id === run.targetSiteId);
+    const boundary = cameraLeftForPose(run.pose) + 100;
+    const withTargetLeft = (platformLeft) => ({
+        ...run,
+        retainedSites: run.retainedSites.map((site) => site.id === target.id ? { ...site, platformLeft } : site),
+    });
+    const { controller, elements } = await controllerAt(withTargetLeft(boundary));
+    const permanent = ["lander-scene-description", "lander-controls", "lander-fuel", "lander-status"];
+    assert.deepEqual(elements["lander-scene-shell"].attributes.get("aria-describedby").split(" "), permanent);
+    assert.equal(elements["lander-target-direction"].hidden, true);
+
+    controller.model = withTargetLeft(boundary + Number.EPSILON * boundary);
+    controller.render();
+    assert.deepEqual(elements["lander-scene-shell"].attributes.get("aria-describedby").split(" "),
+        [...permanent.slice(0, -1), "lander-target-direction", permanent.at(-1)]);
+    assert.equal(elements["lander-target-direction"].hidden, false);
+    controller.destroy();
+});
+
 test("outcome projection keeps exact banner/action states and source order", async () => {
-    const ready = advanceMissionSequence(beginService(true), 0);
+    const ready = { ...advanceMissionSequence(beginService(true), 0), status: "sentinel" };
     const { controller, elements, root } = await controllerAt(ready);
     assert.deepEqual(elements["lander-actions"].children,
         [elements["lander-launch"], elements["lander-restart"], elements["lander-exit"]]);
@@ -211,14 +226,13 @@ test("outcome projection keeps exact banner/action states and source order", asy
     assert.equal(elements["lander-launch"].hidden, false);
     assert.equal(elements["lander-restart"].hidden, true);
     assert.equal(elements["lander-exit"].hidden, false);
-    controller.model = { ...ready, state: "failed", status: FAILURE_STATUS };
+    controller.model = { ...ready, state: "failed" };
     controller.render();
     assert.equal(root.dataset.banner, "crashed");
     assert.equal(elements["lander-launch"].hidden, true);
     assert.equal(elements["lander-restart"].hidden, false);
-    assert.equal(elements["lander-status"].textContent, "Crashed!");
-    controller.model = { ...ready, state: "generation-error",
-        status: "Mission generation failed. Use Exit mission to start a new run." };
+    assert.equal(elements["lander-status"].textContent, controller.model.status);
+    controller.model = { ...ready, state: "generation-error" };
     controller.render();
     assert.equal(root.dataset.banner, "error");
     assert.equal(elements["lander-launch"].hidden, true);

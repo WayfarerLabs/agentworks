@@ -65,7 +65,7 @@ class ArcadeMarkupTests(unittest.TestCase):
         self.assertNotIn("this.lander_fuel_value.value", self.game)
         self.assertNotIn("data-fuel-band", self.fragment + self.css + self.game)
 
-    def test_action_source_order_names_and_static_focus_exclusion_are_exact(self) -> None:
+    def test_action_source_order_identities_and_static_focus_exclusion_are_exact(self) -> None:
         actions = ["lander-launch", "lander-restart", "lander-exit"]
         self.assertEqual(
             [self.fragment.index(f'id="{identifier}"') for identifier in actions],
@@ -81,17 +81,26 @@ class ArcadeMarkupTests(unittest.TestCase):
         self.assertIn("min-block-size: 44px", action_rule)
         self.assertIn("pointer-events: auto", action_rule)
 
+    def test_banner_projection_uses_model_state_flags_without_status_copy(self) -> None:
+        projection = self.game.split("this.root.dataset.banner =", 1)[1].split(";", 1)[0]
+        self.assertNotIn("status", projection)
+        for authority in ("launchReady", "failed", 'this.model.state === "generation-error"'):
+            self.assertIn(authority, projection)
+
     def test_mutations_catch_duplicate_authorities_wrong_order_and_missing_static_agent_state(self) -> None:
+        launch = re.search(r'<button id="lander-launch"[^>]*>.*?</button>', self.fragment, re.DOTALL)
+        restart = re.search(r'<button id="lander-restart"[^>]*>.*?</button>', self.fragment, re.DOTALL)
+        self.assertIsNotNone(launch)
+        self.assertIsNotNone(restart)
+        assert launch is not None and restart is not None
+        wrong_order = self.fragment.replace(launch.group(0), "ACTION_PLACEHOLDER", 1)
+        wrong_order = wrong_order.replace(restart.group(0), launch.group(0), 1)
+        wrong_order = wrong_order.replace("ACTION_PLACEHOLDER", restart.group(0), 1)
         mutations = (
             self.fragment.replace('<span id="lander-fuel-value"', '<output id="lander-fuel-value"', 1),
             self.fragment.replace('<span id="lander-fuel-gauge"', '<meter id="lander-fuel-gauge"', 1),
             self.fragment.replace('data-agent="absent" ', "", 1),
-            self.fragment.replace(
-                '<button id="lander-launch" type="button" hidden disabled>Launch</button>\n'
-                '                    <button id="lander-restart"',
-                '<button id="lander-restart"',
-                1,
-            ),
+            wrong_order,
             self.fragment.replace('aria-live="polite"', 'aria-live="polite"></p><p aria-live="polite"', 1),
         )
         for index, mutation in enumerate(mutations):

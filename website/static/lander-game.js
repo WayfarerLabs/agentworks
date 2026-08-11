@@ -243,10 +243,10 @@ export class LanderGameController {
         this.lander_scene_shell.tabIndex = 0;
         this.lander_scene_shell.setAttribute("role", "application");
         this.lander_scene_shell.setAttribute("aria-label", "Lunar deployment game");
-        this.lander_scene_shell.setAttribute("aria-describedby", "lander-controls lander-fuel lander-target-direction lander-status");
         this.lander_scene.setAttribute("aria-hidden", "true");
+        this.render();
         this.lander_scene_shell.focus({ preventScroll: true });
-        this.render(); this.requestFrame();
+        this.requestFrame();
     }
 
     exit() {
@@ -565,6 +565,12 @@ export class LanderGameController {
         const offscreen = targetIsOffscreen(target, cameraLeft);
         this.root.dataset.targetOffscreen = String(offscreen);
         this.lander_target_direction.hidden = !offscreen;
+        if (this.model.state !== "preflight") {
+            const descriptions = ["lander-scene-description", "lander-controls", "lander-fuel"];
+            if (offscreen) descriptions.push("lander-target-direction");
+            descriptions.push("lander-status");
+            this.lander_scene_shell.setAttribute("aria-describedby", descriptions.join(" "));
+        }
         const fuel = this.model.state === "preflight" ? "0.0" : this.model.fuel.toFixed(1);
         if (this.lander_fuel_value.textContent !== fuel) this.lander_fuel_value.textContent = fuel;
         const gauge = fuelGaugeLevel(this.model);
@@ -583,9 +589,8 @@ export class LanderGameController {
         this.lander_launch.hidden = !launchReady; this.lander_launch.disabled = !launchReady;
         const failed = this.model.state === "failed";
         this.lander_restart.hidden = !failed; this.lander_restart.disabled = !failed;
-        this.root.dataset.banner = launchReady && this.model.status === "Agent Deployed!" ? "deployed" :
-            failed && this.model.status === "Crashed!" ? "crashed" :
-                this.model.state === "generation-error" ? "error" : "none";
+        this.root.dataset.banner = launchReady ? "deployed" : failed ? "crashed" :
+            this.model.state === "generation-error" ? "error" : "none";
     }
 
     destroy() {

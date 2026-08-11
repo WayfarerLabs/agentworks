@@ -95,7 +95,7 @@ controls.hidden = false;
 outcome.hidden = false;
 restart.hidden = false;
 restart.disabled = false;
-status.textContent = "Crashed!";
+status.textContent = "x";
 game.dataset.banner = "crashed";
 game.dataset.refueling = new URLSearchParams(location.search).get("refuel") !== "off" ? "true" : "false";
 game.dataset.fuelLevel = "danger";
@@ -112,7 +112,7 @@ const pseudo = getComputedStyle(stage, "::after");
 const actions = [...document.querySelectorAll("#lander-actions button:not([hidden])")];
 const result = {
     stage: rect(stage), controls: rect(controls), gauge: rect(gauge), outcome: rect(outcome),
-    status: rect(status), actions: actions.map((button) => ({text: button.textContent, rect: rect(button)})),
+    status: rect(status), actions: actions.map((button) => ({id: button.id, rect: rect(button)})),
     pseudo: {width: pseudo.width, height: pseudo.height, pointerEvents: pseudo.pointerEvents,
         imageRendering: pseudo.imageRendering, backgroundColor: pseudo.backgroundColor,
         backgroundImage: pseudo.backgroundImage, backgroundSize: pseudo.backgroundSize,
@@ -212,7 +212,99 @@ document.querySelector("#phase4j-result").textContent = JSON.stringify(result);
     return result
 
 
+def browser_description_contract(output: Path) -> dict[str, object]:
+    chromium = next(
+        (candidate for name in ("google-chrome", "chromium", "chromium-browser")
+         if (candidate := shutil.which(name))),
+        None,
+    )
+    if chromium is None:
+        raise AssertionError("Chromium or Google Chrome is required for Lander description contracts")
+    page = output / "lander/index.html"
+    source = page.read_text(encoding="utf-8")
+    probe_script = """
+import { landerGameController as controller } from "/static/lander-game.js";
+const shell = document.querySelector("#lander-scene-shell");
+const direction = document.querySelector("#lander-target-direction");
+const resultElement = document.querySelector("#phase4j-description-result");
+controller.start(false, performance.now());
+const targetId = controller.model.targetSiteId;
+const cameraLeft = Math.max(0, controller.model.pose.x - 35);
+const withTargetLeft = (platformLeft) => {
+    controller.model = {...controller.model, retainedSites: controller.model.retainedSites.map((site) =>
+        site.id === targetId ? {...site, platformLeft} : site)};
+    controller.render();
+};
+const snapshot = () => ({
+    ids: shell.getAttribute("aria-describedby").split(" "),
+    resolved: shell.ariaDescribedByElements.map((element) => element.id),
+    directionHidden: direction.hidden,
+});
+withTargetLeft(cameraLeft + 100);
+const boundary = snapshot();
+withTargetLeft(cameraLeft + 100 + 1e-9);
+const offscreen = snapshot();
+resultElement.textContent = JSON.stringify({boundary, offscreen});
+controller.destroy();
+"""
+    probe = ('<pre id="phase4j-description-result">pending</pre>'
+             '<script type="module" src="/phase4j-description.js"></script>')
+    probe_path = output / "phase4j-description.js"
+    probe_path.write_text(probe_script, encoding="utf-8")
+    page.write_text(source.replace("</body>", f"{probe}</body>", 1), encoding="utf-8")
+    server = ThreadingHTTPServer(("127.0.0.1", 0), partial(QuietHandler, directory=str(output)))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    profile = tempfile.TemporaryDirectory()
+    try:
+        completed = subprocess.run(
+            (
+                chromium,
+                "--headless",
+                "--disable-gpu",
+                "--no-sandbox",
+                "--hide-scrollbars",
+                f"--user-data-dir={profile.name}",
+                "--window-size=960,1000",
+                "--virtual-time-budget=1000",
+                "--dump-dom",
+                f"http://127.0.0.1:{server.server_address[1]}/lander/",
+            ),
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=20,
+            env={**os.environ, "HOME": profile.name},
+        )
+    finally:
+        page.write_text(source, encoding="utf-8")
+        probe_path.unlink(missing_ok=True)
+        profile.cleanup()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+    match = re.search(r'<pre id="phase4j-description-result">([^<]+)</pre>', completed.stdout)
+    if match is None or match.group(1) == "pending":
+        raise AssertionError(f"Chromium did not return Phase 4J descriptions: {completed.stderr[-1000:]}")
+    return json.loads(html.unescape(match.group(1)))
+
+
 class ArcadeBrowserTests(RepositoryFixture):
+    def test_active_description_resolves_only_visible_conditional_relationships(self) -> None:
+        result = browser_description_contract(self.build())
+        permanent = ["lander-scene-description", "lander-controls", "lander-fuel", "lander-status"]
+        self.assertEqual(result["boundary"], {
+            "ids": permanent,
+            "resolved": permanent,
+            "directionHidden": True,
+        })
+        offscreen = [*permanent[:-1], "lander-target-direction", permanent[-1]]
+        self.assertEqual(result["offscreen"], {
+            "ids": offscreen,
+            "resolved": offscreen,
+            "directionHidden": False,
+        })
+
     def test_narrow_and_full_width_chrome_stays_inside_the_stage_above_the_rail(self) -> None:
         output = self.build()
         for width in (320, 960):
@@ -228,8 +320,8 @@ class ArcadeBrowserTests(RepositoryFixture):
                 self.assertGreaterEqual(outcome["left"], stage["left"])
                 self.assertLessEqual(outcome["right"], stage["right"])
                 self.assertTrue(gauge["right"] <= outcome["left"] or outcome["right"] <= gauge["left"])
-                self.assertEqual([action["text"] for action in result["actions"]],
-                                 ["Restart mission", "Exit mission"])
+                self.assertEqual([action["id"] for action in result["actions"]],
+                                 ["lander-restart", "lander-exit"])
                 for action in result["actions"]:
                     self.assertGreaterEqual(action["rect"]["width"], 44)
                     self.assertGreaterEqual(action["rect"]["height"], 44)
