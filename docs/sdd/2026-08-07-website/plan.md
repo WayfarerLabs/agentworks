@@ -812,10 +812,10 @@ separate Phase 4K acceptance is expected.
       derivation and fixture regeneration.
 - [x] Obtain an `agentworks-reviewer` approval of the Phase 4L artifact amendment and resolve every
       valid finding before changing production or canonical fixture code.
-- [ ] Delegate implementation to an `agentworks-dev` subagent in an isolated worktree. Update the
+- [x] Delegate implementation to an `agentworks-dev` subagent in an isolated worktree. Update the
       shared fragment/CSS, world geometry and projection, model proof constants and literals,
       validators, focused tests, permanent README, and browser checklist as one coherent change.
-- [ ] Prove keyboard instructions occupy the first rail line and touch instructions the second
+- [x] Prove keyboard instructions occupy the first rail line and touch instructions the second
       without internal wrapping at the accepted layouts; Retry retains `r`, restores the exact
       checkpoint site/pose/fuel/progress without duplicate award, and returns focus to the scene;
       the complete pad-to-NOC scaffold has one continuous alternating-triangle rhythm, three
@@ -824,7 +824,7 @@ separate Phase 4K acceptance is expected.
       `2, 1.5, 1.25, 1.125, ...` by powered-base number and carried excess remains additive;
       `2.0/3.2/15/22` equality contacts are safe while independent epsilon excesses crash; all nine
       constructive routes, world witnesses, and one-quantum failures regenerate deterministically.
-- [ ] Run focused website suites, deterministic root/project builds, complete repository gates,
+- [x] Run focused website suites, deterministic root/project builds, complete repository gates,
       artifact/code/fresh-eyes reviews, and automated Chromium acceptance; resolve every valid
       finding and re-review the immutable integrated head.
 - [ ] Refresh port 8766 from the exact reviewed head and obtain operator Chrome and Edge acceptance
@@ -856,6 +856,23 @@ termination, the 17-member truss and three native-foot colliders, all aperture b
 generation vectors, 81 strict-terrain world witnesses, 36 constructive candidates, 162 selected
 replays, byte-identical route records, and all four regenerated digests. File lint, locked-SDD,
 Rulesync, and diff checks passed.
+
+Implementation and automated-review evidence (2026-08-11): exact integrated head `c9825a04`
+implements native site terrain, a shallow continuous Warren truss, three full-length
+deck-to-native-foot pylons, split fill/open-surface terrain projection, two controls rows, Retry,
+the `2.0/3.2/15/22` landing envelope, and the direct refuel-ratio sequence. Cold review found and
+closed a shortened-pylon projection, a degenerate strict-X range, missing Phase 4L
+controller/browser witnesses, and authored-prose test pins. The corrected ordinary derivation
+verifies 81 world descriptors, 36 candidates, 162 selected replays, byte-identical route records,
+geometry digest `2cc7b145...14195`, physics digest `34a7cb64...92e`, world digest `c191e4ae...4995`,
+and output digest `239a33c5...48b9`. Final automated evidence passes 70 Node tests, 142 website
+Python tests, 7,754 repository tests, deterministic root/project builds, file lint, locked-SDD,
+Rulesync, workflow, and diff gates. Two independent reviewers approved the exact immutable head with
+no finding. Isolated headless Chromium 151 showed no vertical terrain seam while moving forward and
+backward, exact three-pylon terrain contact, two non-wrapping controls rows at 320 CSS pixels and
+400-percent equivalent, exact twice-repeated checkpoint Retry, 75 maximum world descendants, and
+100-site bounded generation. This is automated Chromium evidence only; operator Chrome and Edge
+acceptance remains open.
 
 Definition of done: controls have deterministic two-line layout without awkward internal wrapping;
 Retry's name and behavior agree; checkpoint restoration is exact and mutation-protected; the whole
