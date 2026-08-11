@@ -82,6 +82,7 @@ def browser_arcade_contract(output: Path, width: int, screenshot: bool = False) 
     probe_script = """
 const game = document.querySelector("#lander-game");
 const stage = document.querySelector("#lander-scene-stage");
+const rail = document.querySelector("#lander-controls-rail");
 const controls = document.querySelector("#lander-controls");
 const fuel = document.querySelector("#lander-fuel");
 const fuelLabel = document.querySelector("#lander-fuel-label");
@@ -91,7 +92,7 @@ const outcome = document.querySelector("#lander-outcome");
 const status = document.querySelector("#lander-status");
 const restart = document.querySelector("#lander-restart");
 fuel.hidden = false;
-controls.hidden = false;
+rail.hidden = false;
 outcome.hidden = false;
 restart.hidden = false;
 restart.disabled = false;
@@ -109,9 +110,9 @@ const rect = (element) => {
         width: value.width, height: value.height};
 };
 const pseudo = getComputedStyle(stage, "::after");
-const actions = [...document.querySelectorAll("#lander-actions button:not([hidden])")];
+const actions = [restart, document.querySelector("#lander-exit")].filter((button) => !button.hidden);
 const result = {
-    stage: rect(stage), controls: rect(controls), gauge: rect(gauge), outcome: rect(outcome),
+    stage: rect(stage), rail: rect(rail), controls: rect(controls), gauge: rect(gauge), outcome: rect(outcome),
     status: rect(status), actions: actions.map((button) => ({id: button.id, rect: rect(button)})),
     pseudo: {width: pseudo.width, height: pseudo.height, pointerEvents: pseudo.pointerEvents,
         imageRendering: pseudo.imageRendering, backgroundColor: pseudo.backgroundColor,
@@ -292,7 +293,8 @@ controller.destroy();
 class ArcadeBrowserTests(RepositoryFixture):
     def test_active_description_resolves_only_visible_conditional_relationships(self) -> None:
         result = browser_description_contract(self.build())
-        permanent = ["lander-scene-description", "lander-controls", "lander-fuel", "lander-status"]
+        permanent = ["lander-scene-description", "lander-controls", "lander-fuel-label",
+                     "lander-fuel-value", "lander-status"]
         self.assertEqual(result["boundary"], {
             "ids": permanent,
             "resolved": permanent,
@@ -311,10 +313,10 @@ class ArcadeBrowserTests(RepositoryFixture):
             with self.subTest(width=width):
                 result = browser_arcade_contract(output, width)
                 stage = result["stage"]
-                controls = result["controls"]
+                rail = result["rail"]
                 gauge = result["gauge"]
                 outcome = result["outcome"]
-                self.assertLessEqual(stage["bottom"], controls["top"])
+                self.assertLessEqual(stage["bottom"], rail["top"])
                 self.assertGreaterEqual(gauge["left"], stage["left"])
                 self.assertLessEqual(gauge["right"], stage["right"])
                 self.assertGreaterEqual(outcome["left"], stage["left"])
@@ -322,6 +324,8 @@ class ArcadeBrowserTests(RepositoryFixture):
                 self.assertTrue(gauge["right"] <= outcome["left"] or outcome["right"] <= gauge["left"])
                 self.assertEqual([action["id"] for action in result["actions"]],
                                  ["lander-restart", "lander-exit"])
+                exit_rect = result["actions"][1]["rect"]
+                self.assertLessEqual(result["controls"]["right"], exit_rect["left"])
                 for action in result["actions"]:
                     self.assertGreaterEqual(action["rect"]["width"], 44)
                     self.assertGreaterEqual(action["rect"]["height"], 44)

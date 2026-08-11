@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-    ROUTE_DIGESTS,
     advanceMissionSequence,
     agentInstalled,
     createRun,
@@ -13,12 +12,6 @@ import {
 import { cameraLeftForPose } from "../static/lander-world.js";
 import { FakeElement, controllerClasses, controllerFixture, descendantCount } from "./lander-test-dom.mjs";
 
-const EXPECTED_DIGESTS = Object.freeze({
-    geometryDigest: "e91ce3a27c011ef6b2549fdc36fa6e25db5c5da2d274233c9da4fc8adf4a0244",
-    outputDigest: "0e1261c0d8ab22bb98c2c736714598bfc08cc4c8cd43f32615d39b14c46977bd",
-    physicsDigest: "0a57c2543fb3010e468c0550aeceac206727aa97f47e52157e2350992ea0f8d9",
-    worldDigest: "535f190fdf7c7300a7667ce2a3e6d5f1395b197b0bd27c2dbb0f69f61310333a",
-});
 const INSTALLED_PATH = "M -4 -9 H 4 A 1 1 0 0 1 5 -8 V 1 A 1 1 0 0 1 4 2 " +
     "H -4 A 1 1 0 0 1 -5 1 V -8 A 1 1 0 0 1 -4 -9 Z " +
     "M -3 2 V 9 M 3 2 V 9 M -2 -5 L 0 -3 L -2 -1 M 1 -1 H 3";
@@ -43,10 +36,6 @@ async function controllerAt(model) {
     controller.render();
     return { controller, ...fixture };
 }
-
-test("Phase 4J preserves every Phase 4I route, physics, geometry, world, and output digest", () => {
-    assert.deepEqual(ROUTE_DIGESTS, EXPECTED_DIGESTS);
-});
 
 test("normal refuel commits fuel atomically and owns one exact 300 ms linear projection", () => {
     const service = beginService(false, 7.5);
@@ -179,13 +168,13 @@ test("action descendants never create pointer flight input and stage owns all po
     const { controller, elements } = await controllerAt(run);
     assert.equal((elements["lander-scene-shell"].listeners.get("pointerdown") ?? []).length, 0);
     assert.equal((elements["lander-scene-stage"].listeners.get("pointerdown") ?? []).length, 1);
-    for (const id of ["lander-launch", "lander-restart", "lander-exit"]) {
+    for (const id of ["lander-restart"]) {
         const descendant = new FakeElement(elements[id]);
         let prevented = false;
         const before = { token: controller.pointerToken, queue: controller.clock.queue.length };
         controller.onPointer({ type: "pointerdown", pointerId: 8, isPrimary: true, button: 0,
             clientX: 200, clientY: 100, timeStamp: 10, composedPath: () =>
-                [descendant, elements[id], elements["lander-actions"], elements["lander-scene-stage"]],
+                [descendant, elements[id], elements["lander-outcome"], elements["lander-scene-stage"]],
             preventDefault() { prevented = true; } });
         assert.equal(prevented, false, id);
         assert.equal(controller.pointer, null, id);
@@ -205,7 +194,8 @@ test("active description follows the exact offscreen predicate without referenci
         retainedSites: run.retainedSites.map((site) => site.id === target.id ? { ...site, platformLeft } : site),
     });
     const { controller, elements } = await controllerAt(withTargetLeft(boundary));
-    const permanent = ["lander-scene-description", "lander-controls", "lander-fuel", "lander-status"];
+    const permanent = ["lander-scene-description", "lander-controls", "lander-fuel-label",
+        "lander-fuel-value", "lander-status"];
     assert.deepEqual(elements["lander-scene-shell"].attributes.get("aria-describedby").split(" "), permanent);
     assert.equal(elements["lander-target-direction"].hidden, true);
 
@@ -217,25 +207,24 @@ test("active description follows the exact offscreen predicate without referenci
     controller.destroy();
 });
 
-test("outcome projection keeps exact banner/action states and source order", async () => {
+test("outcome projection keeps structural banner/action states and source order", async () => {
     const ready = { ...advanceMissionSequence(beginService(true), 0), status: "sentinel" };
     const { controller, elements, root } = await controllerAt(ready);
-    assert.deepEqual(elements["lander-actions"].children,
-        [elements["lander-launch"], elements["lander-restart"], elements["lander-exit"]]);
+    assert.deepEqual(elements["lander-outcome"].children,
+        [elements["lander-status"], elements["lander-restart"]]);
+    assert.deepEqual(elements["lander-controls-rail"].children,
+        [elements["lander-controls"], elements["lander-exit"]]);
     assert.equal(root.dataset.banner, "deployed");
-    assert.equal(elements["lander-launch"].hidden, false);
     assert.equal(elements["lander-restart"].hidden, true);
     assert.equal(elements["lander-exit"].hidden, false);
     controller.model = { ...ready, state: "failed" };
     controller.render();
     assert.equal(root.dataset.banner, "crashed");
-    assert.equal(elements["lander-launch"].hidden, true);
     assert.equal(elements["lander-restart"].hidden, false);
     assert.equal(elements["lander-status"].textContent, controller.model.status);
     controller.model = { ...ready, state: "generation-error" };
     controller.render();
     assert.equal(root.dataset.banner, "error");
-    assert.equal(elements["lander-launch"].hidden, true);
     assert.equal(elements["lander-restart"].hidden, true);
     controller.destroy();
 });

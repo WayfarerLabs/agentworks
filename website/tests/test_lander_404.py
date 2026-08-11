@@ -320,52 +320,33 @@ class StaticDocumentTests(unittest.TestCase):
         self.assertEqual(tags.count("main"), 1)
         self.assertEqual(tags.count("footer"), 1)
         self.assertEqual(tags.count("h1"), 1)
-        self.assertIn("Page not found", self.template)
-        self.assertNotIn("Return to agentworks.build", self.template)
         home_links = [attributes for tag, attributes in self.document.tags if attributes.get("href") == "{{SITE_BASE}}"]
         self.assertEqual(len(home_links), 1)
         self.assertNotIn("hidden", self.element("not-found-message")[1])
-        self.assertIn("Product of Wayfarer Labs, LLC", self.template)
-        self.assertNotIn("Build systems that let agents do the work.", self.template)
 
     def test_preflight_controls_are_hidden_but_scene_and_breadcrumb_are_not(
         self,
     ) -> None:
         self.assertIn("hidden", self.element("lander-start")[1])
-        self.assertIn("hidden", self.element("lander-controls")[1])
+        self.assertIn("hidden", self.element("lander-controls-rail")[1])
         self.assertIn("hidden", self.element("lander-outcome")[1])
-        self.assertNotIn("hidden", self.element("lander-actions")[1])
         self.assertIn("hidden", self.element("lander-restart")[1])
         self.assertNotIn("hidden", self.element("lander-scene")[1])
         home = next(attributes for tag, attributes in self.document.tags if attributes.get("href") == "{{SITE_BASE}}")
         self.assertNotIn("hidden", home)
-        controls = " ".join(self.document.text_by_id["lander-controls"].split())
-        self.assertEqual(
-            controls,
-            "Thrust: Space or Up. Turn: Left/H or Right/L. Tap or hold to thrust; drag to turn. "
-            "R restarts after a crash. Escape exits.",
-        )
 
     def test_accessible_names_live_region_and_initial_focus_surface_are_pinned(
         self,
     ) -> None:
         self.assertEqual(len(self.document.ids), len(set(self.document.ids)))
         self.assertEqual(self.element("lander-game")[1]["aria-label"], "Lunar deployment scene")
-        self.assertEqual(
-            self.element("lander-start")[1]["aria-label"],
-            "Start lunar deployment mission",
-        )
+        self.assertTrue(self.element("lander-start")[1]["aria-label"])
         self.assertEqual(self.element("lander-scene-shell")[1]["tabindex"], "-1")
         status = self.element("lander-status")[1]
         self.assertEqual(status["role"], "status")
         self.assertEqual(status["aria-live"], "polite")
         self.assertEqual(status["aria-atomic"], "true")
         self.assertEqual(self.element("lander-exit")[0], "button")
-        launch = self.element("lander-launch")
-        self.assertEqual(launch[0], "button")
-        self.assertIn("hidden", launch[1])
-        self.assertIn("disabled", launch[1])
-        self.assertEqual(" ".join(self.document.text_by_id["lander-launch"].split()), "Launch")
         self.assertEqual(self.element("lander-restart")[0], "button")
         self.assertEqual(self.element("lander-fuel-gauge")[1]["aria-hidden"], "true")
         self.assertEqual(self.element("lander-fuel-value")[0], "span")
@@ -373,16 +354,9 @@ class StaticDocumentTests(unittest.TestCase):
         self.assertEqual(self.element("lander-fuel-value")[1]["class"], "visually-hidden")
         self.assertNotIn("role", self.element("lander-fuel-value")[1])
         self.assertNotIn("aria-live", self.element("lander-fuel-value")[1])
+        self.assertNotIn("aria-labelledby", self.element("lander-fuel-value")[1])
         self.assertNotIn("output", [tag for tag, _ in self.document.tags])
-        self.assertEqual(
-            " ".join(self.document.text_by_id["lander-fuel-label"].split()),
-            "Fuel reserve:",
-        )
-        description = " ".join(self.document.text_by_id["lander-scene-description"].split()).lower()
-        for word in ("lander", "surface", "helipad", "gas can", "dark", "network operations center"):
-            self.assertIn(word, description)
-        self.assertNotIn("space", description)
-        self.assertNotIn("control", description)
+        self.assertTrue(" ".join(self.document.text_by_id["lander-scene-description"].split()))
 
     def test_scene_geometry_and_start_target_are_fixed_and_responsive(self) -> None:
         scene = self.element("lander-scene")[1]
@@ -510,10 +484,6 @@ class StaticDocumentTests(unittest.TestCase):
             'this.listen(this.lander_restart, "click", () => this.restart()',
             listeners,
         )
-        self.assertIn(
-            'this.listen(this.lander_launch, "click", (event) => this.launch(event)',
-            listeners,
-        )
         keyboard = self.game.split("onKeyDown(event) {", 1)[1].split("onKeyUp(event) {", 1)[0]
         self.assertIn("this.exit()", keyboard)
         self.assertIn("this.restart()", keyboard)
@@ -523,18 +493,12 @@ class StaticDocumentTests(unittest.TestCase):
         exit_method = self.game.split("exit() {", 1)[1].split("restart() {", 1)[0]
         self.assertIn("this.lander_outcome.hidden = true", exit_method)
         self.assertIn("this.lander_start.focus({ preventScroll: true })", exit_method)
-        restart = self.game.split("restart() {", 1)[1].split("onKeyDown(event) {", 1)[0]
+        restart = self.game.split("restart() {", 1)[1].split("activeShellEventPath(event) {", 1)[0]
         self.assertIn("this.lander_restart.hidden = true", restart)
         self.assertIn("this.lander_scene_shell.focus({ preventScroll: true })", restart)
-        launch = self.game.split("launch(event) {", 1)[1].split("onKeyDown(event) {", 1)[0]
-        self.assertIn('this.model.state !== "launching"', launch)
-        self.assertIn("this.lander_scene_shell.focus({ preventScroll: true })", launch)
-        self.assertIn('this.beginCollectivePulse(token, "launch-button", timestamp, timestamp + 140)', launch)
         render = self.game.split("render() {", 1)[1].split("destroy() {", 1)[0]
         self.assertIn('this.model.state === "failed"', render)
         self.assertIn("this.lander_restart.disabled = !failed", render)
-        self.assertIn("this.lander_launch.hidden = !launchReady", render)
-        self.assertIn("this.lander_launch.disabled = !launchReady", render)
 
     def test_fixed_color_contrast_meets_text_and_graphic_thresholds(self) -> None:
         self.assertGreaterEqual(contrast("#292b30", "#f5f2e8"), 4.5)

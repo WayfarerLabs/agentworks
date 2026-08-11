@@ -143,15 +143,14 @@ class TemplateContractTests(RepositoryFixture):
                     site_builder._validate_template(name, changed)
 
     def test_detail_page_headings_reject_provenance_eyebrows(self) -> None:
-        headings = {
-            "lander.html": "We need to deploy some agents!",
-            "404.html": "Page not found",
-        }
-        for name, heading in headings.items():
+        for name in ("lander.html", "404.html"):
             template = (self.root / "website/templates" / name).read_text(encoding="utf-8")
+            heading = re.search(r"<h1>([^<]+)</h1>", template)
+            self.assertIsNotNone(heading)
+            assert heading is not None
             changed = template.replace(
-                f"<h1>{heading}</h1>",
-                f'<p class="eyebrow">Generated from the repository</p><h1>{heading}</h1>',
+                heading.group(0),
+                f'<p class="eyebrow">Context</p>{heading.group(0)}',
                 1,
             )
             with (
@@ -459,8 +458,10 @@ class TemplateContractTests(RepositoryFixture):
                 if canonical != "https://agentworks.build/security/"
                 else "https://agentworks.build/"
             )
+            title_mutation = (template.replace(f"<title>{title}</title>", "<title>Drifted</title>", 1)
+                              if title is not None else re.sub(r"<title>[^<]+</title>", "<title></title>", template, count=1))
             for changed in (
-                template.replace(f"<title>{title}</title>", "<title>Drifted</title>", 1),
+                title_mutation,
                 template.replace(f'href="{canonical}"', f'href="{drifted_canonical}"', 1),
                 template.replace(
                     f'<link rel="canonical" href="{canonical}" />',

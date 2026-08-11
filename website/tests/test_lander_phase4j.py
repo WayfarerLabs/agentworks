@@ -26,14 +26,16 @@ class ArcadeMarkupTests(unittest.TestCase):
             "lander-target-direction",
             "lander-outcome",
             "lander-status",
-            "lander-actions",
+            "lander-restart",
+            "lander-controls-rail",
             "lander-controls",
+            "lander-exit",
         ]
         positions = [self.fragment.index(f'id="{identifier}"') for identifier in order]
         self.assertEqual(positions, sorted(positions))
         shell = self.css.split("#lander-scene-shell {", 1)[1].split("}", 1)[0]
         stage = self.css.split("#lander-scene-stage {", 1)[1].split("}", 1)[0]
-        controls = self.css.rsplit("#lander-controls:not([hidden]) {", 1)[1].split("}", 1)[0]
+        controls = self.css.rsplit("#lander-controls-rail:not([hidden]) {", 1)[1].split("}", 1)[0]
         self.assertNotIn("aspect-ratio", shell)
         self.assertIn("flex-direction: column", shell)
         self.assertIn("aspect-ratio: 25 / 16", stage)
@@ -52,7 +54,6 @@ class ArcadeMarkupTests(unittest.TestCase):
         self.assertEqual(value[1], {
             "id": "lander-fuel-value",
             "class": "visually-hidden",
-            "aria-labelledby": "lander-fuel-label",
         })
         self.assertEqual(label, ("span", {"id": "lander-fuel-label", "class": "visually-hidden"}))
         self.assertEqual(self.element("lander-fuel-gauge")[1], {
@@ -66,20 +67,21 @@ class ArcadeMarkupTests(unittest.TestCase):
         self.assertNotIn("data-fuel-band", self.fragment + self.css + self.game)
 
     def test_action_source_order_identities_and_static_focus_exclusion_are_exact(self) -> None:
-        actions = ["lander-launch", "lander-restart", "lander-exit"]
+        actions = ["lander-restart", "lander-exit"]
         self.assertEqual(
             [self.fragment.index(f'id="{identifier}"') for identifier in actions],
             sorted(self.fragment.index(f'id="{identifier}"') for identifier in actions),
         )
-        self.assertEqual(self.element("lander-launch"),
-                         ("button", {"id": "lander-launch", "type": "button", "hidden": None, "disabled": None}))
         self.assertEqual(self.element("lander-restart"),
-                         ("button", {"id": "lander-restart", "type": "button", "hidden": None, "disabled": None}))
-        self.assertEqual(self.element("lander-exit"), ("button", {"id": "lander-exit", "type": "button"}))
-        action_rule = self.css.split("#lander-actions button {", 1)[1].split("}", 1)[0]
+                         ("button", {"id": "lander-restart", "type": "button", "hidden": None,
+                                     "disabled": None, "aria-keyshortcuts": "r"}))
+        self.assertEqual(self.element("lander-exit"),
+                         ("button", {"id": "lander-exit", "type": "button", "disabled": None,
+                                     "aria-keyshortcuts": "Escape"}))
+        action_rule = self.css.split("#lander-restart,\n#lander-exit {", 1)[1].split("}", 1)[0]
         self.assertIn("min-inline-size: 44px", action_rule)
         self.assertIn("min-block-size: 44px", action_rule)
-        self.assertIn("pointer-events: auto", action_rule)
+        self.assertIn("display: inline-grid", action_rule)
 
     def test_banner_projection_uses_model_state_flags_without_status_copy(self) -> None:
         projection = self.game.split("this.root.dataset.banner =", 1)[1].split(";", 1)[0]
@@ -88,19 +90,17 @@ class ArcadeMarkupTests(unittest.TestCase):
             self.assertIn(authority, projection)
 
     def test_mutations_catch_duplicate_authorities_wrong_order_and_missing_static_agent_state(self) -> None:
-        launch = re.search(r'<button id="lander-launch"[^>]*>.*?</button>', self.fragment, re.DOTALL)
         restart = re.search(r'<button id="lander-restart"[^>]*>.*?</button>', self.fragment, re.DOTALL)
-        self.assertIsNotNone(launch)
         self.assertIsNotNone(restart)
-        assert launch is not None and restart is not None
-        wrong_order = self.fragment.replace(launch.group(0), "ACTION_PLACEHOLDER", 1)
-        wrong_order = wrong_order.replace(restart.group(0), launch.group(0), 1)
-        wrong_order = wrong_order.replace("ACTION_PLACEHOLDER", restart.group(0), 1)
+        assert restart is not None
+        wrong_parent = self.fragment.replace(restart.group(0), "", 1).replace(
+            '<button id="lander-exit"', f'{restart.group(0)}\n            <button id="lander-exit"', 1
+        )
         mutations = (
             self.fragment.replace('<span id="lander-fuel-value"', '<output id="lander-fuel-value"', 1),
             self.fragment.replace('<span id="lander-fuel-gauge"', '<meter id="lander-fuel-gauge"', 1),
             self.fragment.replace('data-agent="absent" ', "", 1),
-            wrong_order,
+            wrong_parent,
             self.fragment.replace('aria-live="polite"', 'aria-live="polite"></p><p aria-live="polite"', 1),
         )
         for index, mutation in enumerate(mutations):

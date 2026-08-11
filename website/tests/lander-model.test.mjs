@@ -411,18 +411,24 @@ test("production route proof rejects a weak or inexact launch prefix before coll
 test("safe target top is inclusive and epsilon excess is unsafe", () => {
     const model = createRun({ seed: 1 });
     const target = model.retainedSites[0];
-    const previous = { x: target.center, y: target.platformTop + 0.5, vx: 1.6, vy: -2.5,
-        angle: -10, angularVelocity: 15 };
+    const previous = { x: target.center, y: target.platformTop + 0.5, vx: 1.8, vy: -2.8,
+        angle: -12, angularVelocity: 18 };
     const next = { ...previous, y: target.platformTop + 0.2 };
     assert.equal(classifySweptContact(model, previous, next).kind, "safe");
     const limits = [
-        ["vx", 1.6], ["vy", -2.5], ["angle", -10], ["angularVelocity", 15],
+        ["vx", 1.8], ["vy", -2.8], ["angle", -12], ["angularVelocity", 18],
     ];
     for (const [field, limit] of limits) {
         const excess = limit + Math.sign(limit) * 1e-9;
         assert.equal(classifySweptContact(model, { ...previous, [field]: excess },
             { ...next, [field]: excess }).kind, "unsafe", `${field} beyond the inclusive limit must crash`);
     }
+    for (const [field, value] of [["vx", -1.8], ["angle", 12], ["angularVelocity", -18]]) {
+        assert.equal(classifySweptContact(model, { ...previous, [field]: value },
+            { ...next, [field]: value }).kind, "safe", `${field} mirrors through absolute value`);
+    }
+    assert.equal(classifySweptContact(model, { ...previous, vy: 1e-9 }, { ...next, vy: 1e-9 }).kind,
+        "unsafe", "upward contact is unsafe");
     const tangent = { x: target.center, y: target.platformTop, vx: 0, vy: 0, angle: 0, angularVelocity: 0 };
     assert.equal(classifySweptContact(model, tangent, { ...tangent, x: tangent.x + 0.01 }).cause, "grazing");
 
@@ -543,7 +549,8 @@ test("destroy restores the pristine static DOM from active and failed controller
         const controller = new LanderGameController(fixture.root);
         const elements = fixture.elements;
         elements["lander-scene-shell"].setAttribute("role", "application");
-        elements["lander-outcome"].hidden = false; elements["lander-exit"].disabled = false;
+        elements["lander-outcome"].hidden = false; elements["lander-controls-rail"].hidden = false;
+        elements["lander-exit"].disabled = false;
         elements["lander-status"].textContent = terminal ? FAILURE_STATUS : "Mission underway.";
         if (terminal) { elements["lander-restart"].hidden = false; elements["lander-restart"].disabled = false; }
         fixture.root.style.setProperty("--lander-x", "999px");
@@ -585,13 +592,13 @@ test("short pointer tap survives automatic lost capture for its full pulse", asy
         clientX: 103, clientY: 52, timeStamp: 50 });
     assert.equal(stage.hasPointerCapture(7), false);
     assert.equal(controller.pointer, null); assert.deepEqual(controller.collectivePulse,
-        { active: true, token: 1, source: "pointer-tap", deadline: 140 });
+        { active: true, token: 1, deadline: 140 });
     assert.notEqual(controller.pulseTimer, null);
     assert.ok(controller.clock.queue.some((edge) => edge.token === 1 && edge.left === 0.72 && edge.right === 0.72));
     assert.equal(controller.clock.queue.at(-1).physical.collectivePulse.token, 1);
     controller.endCollectivePulse(140);
     assert.deepEqual(controller.collectivePulse,
-        { active: false, token: null, source: null, deadline: null });
+        { active: false, token: null, deadline: null });
     assert.equal(controller.pulseTimer, null);
     assert.equal(controller.clock.queue.at(-1).timestamp, 140);
     assert.equal(controller.clock.queue.at(-1).left, 0);

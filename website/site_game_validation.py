@@ -36,9 +36,8 @@ EXPECTED_GAME_IDS = frozenset(
         "lander-target-direction",
         "lander-outcome",
         "lander-controls",
-        "lander-actions",
+        "lander-controls-rail",
         "lander-exit",
-        "lander-launch",
         "lander-restart",
         "lander-status",
     }
@@ -58,14 +57,27 @@ class _FragmentParser(HTMLParser):
         super().__init__()
         self.ids: list[str] = []
         self.tags: list[tuple[str, dict[str, str | None]]] = []
+        self.parents: dict[str, str | None] = {}
+        self.tag_parents: list[tuple[str, dict[str, str | None], str | None]] = []
+        self.stack: list[tuple[str, str | None]] = []
         self.text: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attributes = dict(attrs)
         self.tags.append((tag, attributes))
+        parent = next((identifier for _, identifier in reversed(self.stack) if identifier is not None), None)
+        self.tag_parents.append((tag, attributes, parent))
         identifier = attributes.get("id")
         if identifier is not None:
             self.ids.append(identifier)
+            self.parents[identifier] = parent
+        self.stack.append((tag, identifier))
+
+    def handle_endtag(self, tag: str) -> None:
+        while self.stack:
+            open_tag, _ = self.stack.pop()
+            if open_tag == tag:
+                break
 
     def handle_data(self, data: str) -> None:
         self.text.append(data)
@@ -115,18 +127,28 @@ def validate_game_contract(template: str) -> None:
     if tag != "span" or fuel_value != {
         "id": "lander-fuel-value",
         "class": "visually-hidden",
-        "aria-labelledby": "lander-fuel-label",
     }:
-        raise ValueError("lander-game.html: hidden fuel value naming contract is invalid")
+        raise ValueError("lander-game.html: hidden fuel value contract is invalid")
     tag, fuel_label = _one(parser, "lander-fuel-label")
     if tag != "span" or fuel_label != {"id": "lander-fuel-label", "class": "visually-hidden"}:
         raise ValueError("lander-game.html: hidden fuel label contract is invalid")
     _, restart = _one(parser, "lander-restart")
-    if restart != {"id": "lander-restart", "type": "button", "hidden": None, "disabled": None}:
+    if restart != {
+        "id": "lander-restart",
+        "type": "button",
+        "hidden": None,
+        "disabled": None,
+        "aria-keyshortcuts": "r",
+    }:
         raise ValueError("lander-game.html: static Restart must be hidden and disabled")
-    _, launch = _one(parser, "lander-launch")
-    if launch != {"id": "lander-launch", "type": "button", "hidden": None, "disabled": None}:
-        raise ValueError("lander-game.html: static Launch must be hidden and disabled")
+    _, exit_action = _one(parser, "lander-exit")
+    if exit_action != {
+        "id": "lander-exit",
+        "type": "button",
+        "disabled": None,
+        "aria-keyshortcuts": "Escape",
+    }:
+        raise ValueError("lander-game.html: static Exit must be disabled")
     _, gauge = _one(parser, "lander-fuel-gauge")
     if gauge != {"id": "lander-fuel-gauge", "aria-hidden": "true"}:
         raise ValueError("lander-game.html: fuel gauge must remain decorative")
@@ -141,26 +163,38 @@ def validate_game_contract(template: str) -> None:
         "aria-atomic": "true",
     }:
         raise ValueError("lander-game.html: sole status live region contract is invalid")
+    _, rail = _one(parser, "lander-controls-rail")
+    if rail != {"id": "lander-controls-rail", "hidden": None}:
+        raise ValueError("lander-game.html: static controls rail must be hidden")
+    tag, controls = _one(parser, "lander-controls")
+    if tag != "p" or controls != {"id": "lander-controls"}:
+        raise ValueError("lander-game.html: controls must be ordinary rail prose")
     if sum(attributes.get("aria-live") is not None for _, attributes in parser.tags) != 1:
         raise ValueError("lander-game.html: exactly one live region is required")
     if any(tag in {"meter", "output", "progress"} for tag, _ in parser.tags):
         raise ValueError("lander-game.html: duplicate semantic fuel authorities are forbidden")
-    normalized = " ".join(" ".join(parser.text).split())
-    controls = (
-        "Thrust: Space or Up. Turn: Left/H or Right/L. Tap or hold to thrust; drag to turn. "
-        "R restarts after a crash. Escape exits."
-    )
-    if controls not in normalized:
-        raise ValueError("lander-game.html: control text contract is invalid")
     stage_positions = [template.index(f'id="{identifier}"') for identifier in
                        ("lander-scene-stage", "lander-scene", "lander-start", "lander-fuel",
-                        "lander-target-direction", "lander-outcome", "lander-status", "lander-actions")]
-    if stage_positions != sorted(stage_positions) or template.index('id="lander-controls"') < stage_positions[-1]:
-        raise ValueError("lander-game.html: stage, outcome, action, and rail order is invalid")
-    action_positions = [template.index(f'id="{identifier}"') for identifier in
-                        ("lander-launch", "lander-restart", "lander-exit")]
-    if action_positions != sorted(action_positions):
-        raise ValueError("lander-game.html: Launch, Restart, and Exit order is invalid")
+                        "lander-target-direction", "lander-outcome", "lander-status", "lander-restart",
+                        "lander-controls-rail", "lander-controls", "lander-exit")]
+    if stage_positions != sorted(stage_positions):
+        raise ValueError("lander-game.html: stage, outcome, Restart, and controls rail order is invalid")
+    expected_parents = {
+        "lander-scene-stage": "lander-scene-shell",
+        "lander-outcome": "lander-scene-stage",
+        "lander-status": "lander-outcome",
+        "lander-restart": "lander-outcome",
+        "lander-controls-rail": "lander-scene-shell",
+        "lander-controls": "lander-controls-rail",
+        "lander-exit": "lander-controls-rail",
+    }
+    if any(parser.parents.get(identifier) != parent for identifier, parent in expected_parents.items()):
+        raise ValueError("lander-game.html: action and controls parent structure is invalid")
+    for identifier in ("lander-restart", "lander-exit"):
+        children = [attributes for tag, attributes, parent in parser.tag_parents
+                    if tag == "span" and parent == identifier]
+        if children != [{}, {"class": "lander-key-hint", "aria-hidden": "true"}]:
+            raise ValueError(f"lander-game.html: #{identifier} label and hint structure is invalid")
     for required in (
         'class="terrain-chunk"',
         'data-chunk-index="-1"',

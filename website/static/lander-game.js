@@ -30,6 +30,11 @@ const FLIGHT_CODES = new Set(["Space", "ArrowUp", "ArrowLeft", "ArrowRight", "Ke
 const ZERO_INPUT = Object.freeze({ left: 0, right: 0, vectorAngle: 0 });
 const INTERACTIVE_POINTER_TARGET =
     'a[href],button,input,select,textarea,summary,[contenteditable]:not([contenteditable="false"])';
+const INTERACTIVE_KEY_TARGET =
+    'a[href],button,input,select,textarea,summary,[contenteditable]:not([contenteditable="false"]),' +
+    '[role="button"],[role="link"],[role="checkbox"],[role="radio"],[role="switch"],[role="menuitem"],' +
+    '[role="option"],[role="slider"],[role="spinbutton"],[role="textbox"],' +
+    '[tabindex]:not([tabindex="-1"]):not(#lander-scene-shell)';
 const INSTALLED_AGENT_PATH = "M -4 -9 H 4 A 1 1 0 0 1 5 -8 V 1 A 1 1 0 0 1 4 2 " +
     "H -4 A 1 1 0 0 1 -5 1 V -8 A 1 1 0 0 1 -4 -9 Z " +
     "M -3 2 V 9 M 3 2 V 9 M -2 -5 L 0 -3 L -2 -1 M 1 -1 H 3";
@@ -63,6 +68,26 @@ function isEditable(target) {
 export function isInteractivePointerEvent(event) {
     return event.composedPath().some((node) =>
         node instanceof Element && Boolean(node.closest(INTERACTIVE_POINTER_TARGET)));
+}
+
+function eventElementPath(event) {
+    if (typeof event.composedPath === "function") {
+        const path = event.composedPath();
+        if (path.length) return path;
+    }
+    const path = [];
+    let node = event.target;
+    while (node instanceof Element) {
+        path.push(node);
+        node = node.parentElement;
+    }
+    return path;
+}
+
+export function isInteractiveKeyEvent(event) {
+    const composedPath = typeof event.composedPath === "function" ? event.composedPath() : [];
+    const path = composedPath.length ? composedPath : [event.target];
+    return path.some((node) => node instanceof Element && Boolean(node.closest(INTERACTIVE_KEY_TARGET)));
 }
 
 function freshSeed() {
@@ -153,7 +178,7 @@ export class LanderGameController {
         this.pristine = snapshot;
         for (const id of ["lander-scene-shell", "lander-scene", "lander-start", "lander-fuel", "lander-fuel-value",
             "lander-fuel-gauge", "lander-fuel-gauge-fill", "lander-target-direction", "lander-controls",
-            "lander-scene-stage", "lander-outcome", "lander-actions", "lander-exit", "lander-launch",
+            "lander-scene-stage", "lander-outcome", "lander-controls-rail", "lander-exit",
             "lander-restart", "lander-status",
             "terrain-layer", "site-layer", "debris-layer", "mission-agent"]) {
             const name = id.replaceAll("-", "_");
@@ -166,7 +191,7 @@ export class LanderGameController {
         this.pointerInput = ZERO_INPUT;
         this.pointer = null;
         this.pointerToken = 0;
-        this.collectivePulse = { active: false, token: null, source: null, deadline: null };
+        this.collectivePulse = { active: false, token: null, deadline: null };
         this.releasedCapture = null;
         this.pulseTimer = null;
         this.frameId = null;
@@ -196,7 +221,6 @@ export class LanderGameController {
     installListeners() {
         this.listen(this.lander_start, "click", () => this.start(false, performance.now()));
         this.listen(this.lander_exit, "click", () => this.exit());
-        this.listen(this.lander_launch, "click", (event) => this.launch(event));
         this.listen(this.lander_restart, "click", () => this.restart());
         this.listen(document, "keydown", (event) => this.onKeyDown(event));
         this.listen(document, "keyup", (event) => this.onKeyUp(event));
@@ -238,7 +262,7 @@ export class LanderGameController {
         this.heldKeys.clear();
         if (holdSpace) { this.heldKeys.add("Space"); this.queueInput(timestamp); }
         this.lander_start.hidden = true; this.lander_start.disabled = true;
-        this.lander_fuel.hidden = false; this.lander_controls.hidden = false; this.lander_outcome.hidden = false;
+        this.lander_fuel.hidden = false; this.lander_controls_rail.hidden = false; this.lander_outcome.hidden = false;
         this.lander_exit.disabled = false;
         this.lander_scene_shell.tabIndex = 0;
         this.lander_scene_shell.setAttribute("role", "application");
@@ -257,9 +281,8 @@ export class LanderGameController {
         this.lander_scene_shell.tabIndex = -1;
         for (const attribute of ["role", "aria-label", "aria-describedby"]) this.lander_scene_shell.removeAttribute(attribute);
         this.lander_scene.removeAttribute("aria-hidden");
-        this.lander_fuel.hidden = true; this.lander_target_direction.hidden = true; this.lander_controls.hidden = true;
+        this.lander_fuel.hidden = true; this.lander_target_direction.hidden = true; this.lander_controls_rail.hidden = true;
         this.lander_outcome.hidden = true; this.lander_exit.disabled = true;
-        this.lander_launch.hidden = true; this.lander_launch.disabled = true;
         this.lander_restart.hidden = true; this.lander_restart.disabled = true;
         this.lander_start.hidden = false; this.lander_start.disabled = false;
         this.lander_status.textContent = "";
@@ -283,16 +306,9 @@ export class LanderGameController {
         this.render(); this.lander_scene_shell.focus({ preventScroll: true }); this.requestFrame();
     }
 
-    launch(event) {
-        if (this.model.state !== "launching" || this.model.launchStarted ||
-            this.lander_launch.hidden || this.lander_launch.disabled) return;
-        this.lander_scene_shell.focus({ preventScroll: true });
-        const timestamp = eventTime(event);
-        const token = ++this.pointerToken;
-        this.beginCollectivePulse(token, "launch-button", timestamp, timestamp + 140);
+    activeShellEventPath(event) {
+        return ACTIVE_STATES.has(this.model.state) && eventElementPath(event).includes(this.lander_scene_shell);
     }
-
-    activePath(event) { return ACTIVE_STATES.has(this.model.state) && event.composedPath().includes(this.lander_scene_shell); }
 
     onKeyDown(event) {
         if (this.model.state === "preflight") {
@@ -302,9 +318,10 @@ export class LanderGameController {
             }
             return;
         }
-        if (!this.activePath(event)) return;
+        if (!this.activeShellEventPath(event)) return;
         if (event.key === "Escape" && unmodified(event)) { event.preventDefault(); this.exit(); return; }
         if (event.key.toLowerCase() === "r" && unmodified(event) && this.model.state === "failed") { event.preventDefault(); this.restart(); return; }
+        if (isInteractiveKeyEvent(event)) return;
         const control = physicalControl(event);
         if (!["flying", "launching"].includes(this.model.state) || !control || !unmodified(event, true)) return;
         event.preventDefault();
@@ -313,8 +330,10 @@ export class LanderGameController {
     }
 
     onKeyUp(event) {
+        if (!this.activeShellEventPath(event)) return;
         const control = physicalControl(event);
         if (!control || !this.heldKeys.delete(control)) return;
+        event.preventDefault();
         if (["flying", "launching"].includes(this.model.state)) this.queueInput(eventTime(event));
     }
 
@@ -327,8 +346,8 @@ export class LanderGameController {
                 return;
             }
             this.releasedCapture = null;
-            if (this.collectivePulse.active && this.collectivePulse.source === "pointer-tap" &&
-                this.collectivePulse.token === released.token && eventTime(event) < this.collectivePulse.deadline) return;
+            if (this.collectivePulse.active && this.collectivePulse.token === released.token &&
+                eventTime(event) < this.collectivePulse.deadline) return;
             this.finishPointer(released.token, eventTime(event), true);
             return;
         }
@@ -358,7 +377,7 @@ export class LanderGameController {
                 const deadline = pointer.started + 140;
                 this.releasedCapture = { pointerId: pointer.id, token: pointer.token };
                 this.pointer = null; this.pointerInput = ZERO_INPUT;
-                this.beginCollectivePulse(pointer.token, "pointer-tap", eventTime(event), deadline);
+                this.beginCollectivePulse(pointer.token, eventTime(event), deadline);
                 if (this.lander_scene_stage.hasPointerCapture(pointer.id)) {
                     this.lander_scene_stage.releasePointerCapture(pointer.id);
                 }
@@ -380,9 +399,9 @@ export class LanderGameController {
         if (["flying", "launching"].includes(this.model.state)) this.queueInput(timestamp);
     }
 
-    beginCollectivePulse(token, source, timestamp, deadline) {
+    beginCollectivePulse(token, timestamp, deadline) {
         this.endCollectivePulse(timestamp);
-        this.collectivePulse = { active: true, token, source, deadline };
+        this.collectivePulse = { active: true, token, deadline };
         this.queueInput(timestamp, token);
         if (deadline <= timestamp) { this.endCollectivePulse(timestamp, false, timestamp); return; }
         this.pulseTimer = setTimeout(() => {
@@ -397,7 +416,7 @@ export class LanderGameController {
         const token = this.collectivePulse.token;
         const endTimestamp = immediateTimestamp ?? Math.min(timestamp, this.collectivePulse.deadline);
         if (this.pulseTimer !== null) { clearTimeout(this.pulseTimer); this.pulseTimer = null; }
-        this.collectivePulse = { active: false, token: null, source: null, deadline: null };
+        this.collectivePulse = { active: false, token: null, deadline: null };
         if (prune) this.clock = removeQueuedInputEdges(this.clock, token);
         this.queueInput(endTimestamp, token);
     }
@@ -410,7 +429,7 @@ export class LanderGameController {
         if (this.pulseTimer !== null) { clearTimeout(this.pulseTimer); this.pulseTimer = null; }
         this.pointerInput = ZERO_INPUT;
         if (token !== undefined) this.clock = removeQueuedInputEdges(this.clock, token);
-        this.collectivePulse = { active: false, token: null, source: null, deadline: null };
+        this.collectivePulse = { active: false, token: null, deadline: null };
         if (pointer && this.lander_scene_stage.hasPointerCapture(pointer.id)) {
             this.lander_scene_stage.releasePointerCapture(pointer.id);
         }
@@ -543,6 +562,11 @@ export class LanderGameController {
 
     render() {
         const pose = this.model.pose;
+        const activeMission = ACTIVE_STATES.has(this.model.state);
+        this.lander_fuel.hidden = !activeMission;
+        this.lander_outcome.hidden = !activeMission;
+        this.lander_controls_rail.hidden = !activeMission;
+        this.lander_exit.disabled = !activeMission;
         const cameraLeft = cameraLeftForPose(pose);
         const left = plumeForThrust(this.model.commanded.left); const right = plumeForThrust(this.model.commanded.right);
         this.root.dataset.missionState = this.model.state; this.root.dataset.cue = this.cue.state;
@@ -566,7 +590,7 @@ export class LanderGameController {
         this.root.dataset.targetOffscreen = String(offscreen);
         this.lander_target_direction.hidden = !offscreen;
         if (this.model.state !== "preflight") {
-            const descriptions = ["lander-scene-description", "lander-controls", "lander-fuel"];
+            const descriptions = ["lander-scene-description", "lander-controls", "lander-fuel-label", "lander-fuel-value"];
             if (offscreen) descriptions.push("lander-target-direction");
             descriptions.push("lander-status");
             this.lander_scene_shell.setAttribute("aria-describedby", descriptions.join(" "));
@@ -586,7 +610,6 @@ export class LanderGameController {
         if (this.lander_status.textContent !== this.model.status) this.lander_status.textContent = this.model.status;
         const launchReady = this.model.state === "launching" && !this.model.launchStarted;
         this.root.dataset.launchReady = String(launchReady);
-        this.lander_launch.hidden = !launchReady; this.lander_launch.disabled = !launchReady;
         const failed = this.model.state === "failed";
         this.lander_restart.hidden = !failed; this.lander_restart.disabled = !failed;
         this.root.dataset.banner = launchReady ? "deployed" : failed ? "crashed" :

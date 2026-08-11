@@ -85,21 +85,25 @@
             <p id="lander-fuel" hidden>
                 <span id="lander-fuel-gauge" aria-hidden="true"><span id="lander-fuel-gauge-fill"></span></span>
                 <span id="lander-fuel-label" class="visually-hidden">Fuel reserve:</span>
-                <span id="lander-fuel-value" class="visually-hidden" aria-labelledby="lander-fuel-label">0.0</span>
+                <span id="lander-fuel-value" class="visually-hidden">0.0</span>
             </p>
             <span id="lander-target-direction" class="visually-hidden" hidden>Next site is to the right.</span>
             <div id="lander-outcome" hidden>
                 <p id="lander-status" role="status" aria-live="polite" aria-atomic="true"></p>
-                <div id="lander-actions">
-                    <button id="lander-launch" type="button" hidden disabled>Launch</button>
-                    <button id="lander-restart" type="button" hidden disabled>Restart mission</button>
-                    <button id="lander-exit" type="button">Exit mission</button>
-                </div>
+                <button id="lander-restart" type="button" hidden disabled aria-keyshortcuts="r">
+                    <span>Restart mission</span>
+                    <span class="lander-key-hint" aria-hidden="true">r</span>
+                </button>
             </div>
         </div>
-        <p id="lander-controls" hidden>
-            Thrust: Space or Up. Turn: Left/H or Right/L. Tap or hold to thrust; drag to turn. R restarts after a
-            crash. Escape exits.
-        </p>
+        <div id="lander-controls-rail" hidden>
+            <p id="lander-controls">
+                Thrust: Space or Up. Turn: Left/H or Right/L. Tap or hold to thrust; drag to turn.
+            </p>
+            <button id="lander-exit" type="button" disabled aria-keyshortcuts="Escape">
+                <span>Exit mission</span>
+                <span class="lander-key-hint" aria-hidden="true">&lt;esc&gt;</span>
+            </button>
+        </div>
     </div>
 </section>

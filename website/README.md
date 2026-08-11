@@ -50,6 +50,7 @@ node --test website/tests/lander-model.test.mjs
 node --test website/tests/lander-world.test.mjs
 node --test website/tests/lander-phase4i.test.mjs
 node --test website/tests/lander-phase4j.test.mjs
+node --test website/tests/lander-phase4k.test.mjs
 ./scripts/lint-files.sh
 ./scripts/check-locked-sdds.sh
 ./scripts/rulesync-upgen.sh --check
@@ -80,8 +81,8 @@ Right/L steer. Steered thrust is deliberately vectored by up to 30 degrees and u
 forward thrust than straight collective. A powered neutral collective redistributes thrust between
 the two engines to arrest rotation without adding drag or changing fuel use. Pointer and touch input
 use the same bounded mixer: press for collective, drag horizontally to steer, and a short tap
-retains a 140 ms pulse. Safe landing limits are inclusive at 1.6 m/s horizontal speed, 2.5 m/s
-descent, 10 degrees of tilt, and 15 degrees/s rotation.
+retains a 140 ms pulse. Safe landing limits are inclusive at 1.8 m/s horizontal speed, 2.8 m/s
+descent, 12 degrees of tilt, and 18 degrees/s rotation.
 
 Terrain is deterministic per run, sampled every 10 m in 50 m chunks from four visibly different
 motifs. Each platform and NOC share one flat shelf. The 9.6 m deck stands 2.4 m above it. One open,
@@ -150,28 +151,33 @@ fuel or advancing progress.
 
 The left vertical gauge is visual-only. Its bottom-up height and bright danger-red, caution-amber,
 or ready-green indicator independently project fuel against the exact reserve at the start of the
-current leg. A visually hidden, ordinary, non-live span named `Fuel reserve` is the sole accessible
-rounded value; exact model fuel remains unrounded and uncapped. Normal motion projects the collected
-can toward the gauge and raises the fill linearly over the model-owned 300 ms refuel interval.
-Reduced motion, or enabling reduced motion mid-refuel, exposes the same committed fuel and
-checkpoint atomically without a transfer. Hiding the document freezes model time, while resize and
-the first visible frame project the same progress again from current stage and gauge rectangles.
+current leg. Visually hidden, ordinary, non-live label and value spans expose the fuel relationship
+as two ordered scene-description references; the label names the separate rounded value. Exact model
+fuel remains unrounded and uncapped. Normal motion projects the collected can toward the gauge and
+raises the fill linearly over the model-owned 300 ms refuel interval. Reduced motion, or enabling
+reduced motion mid-refuel, exposes the same committed fuel and checkpoint atomically without a
+transfer. Hiding the document freezes model time, while resize and the first visible frame project
+the same progress again from current stage and gauge rectangles.
 
 The sole status live region presents centered bordered `Agent Deployed!` and `Crashed!` arcade
-panels. Launch then Exit appear below the deployment result; Restart then Exit appear below the
-crash result; generation errors retain Exit alone. The persistent native controls stay at least 44
-CSS pixels in each dimension and return focus through the same model lifecycle as keyboard input.
-The concise control sentence occupies a normal-flow dark rail after the complete 25:16 scene stage,
-so it cannot cover terrain or overlays. Pointer flight handlers belong only to the stage, reject
-interactive or editable composed paths before preventing or capturing, and disable touch gestures
-only during active flight or launch.
+panels. A failure-only native Restart follows the status inside that outcome; a persistent native
+Exit follows the concise control sentence in the normal-flow rail after the complete 25:16 scene
+stage. Both controls stay at least 44 CSS pixels in each dimension. Their visible second-line
+keyboard hints are excluded from their accessible names, while `aria-keyshortcuts` exposes `r` and
+`Escape`. Restart returns focus to the scene and Exit returns it to Start. The rail cannot cover
+terrain or overlays, and its instructions describe flight controls without duplicating departure
+commands. Pointer flight handlers belong only to the stage, reject interactive or editable composed
+paths before preventing or capturing, and disable touch gestures only during active flight or
+departure. Keyboard flight handling first requires the event path to contain the active shell,
+handles in-shell Exit or failed-run restart, then rejects interactive or editable paths before
+accepting physical flight keys; outside-shell keys have no game effect.
 
 At the first NOC power stage, the existing doorway path becomes the installed-agent glyph without
 adding a site node or mutable world field. It stays installed whenever that retained site is
 powered, including later legs, crash, checkpoint restoration, and restart. After all four battery
 and three signal stages complete, `Agent Deployed!` remains visible while the lander waits on the
-pad without spending fuel. Depart with Space, Up, pointer or touch thrust, or the native Launch
-button.
+pad without spending fuel. Depart through the ordinary keyboard, vi, pointer, or touch flight
+controls.
 
 All three CLI paths are required. The output must be outside the repository. The site base is an
 ASCII, slash-bounded same-origin path such as `/` or `/agentworks/`; absolute URLs, dot segments,

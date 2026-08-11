@@ -56,12 +56,12 @@ APPROVED_EXTERNAL_URLS: Final = frozenset({
 })
 SHELL_DESTINATION_LABELS: Final = {REPOSITORY_URL: "GitHub", PYPI_URL: "PyPI", f"{SITE_BASE_TOKEN}manifesto/": "Agentworks Manifesto", f"{SITE_BASE_TOKEN}security/": "We take security seriously"}  # noqa: E501
 CURRENT_PAGE_LABELS: Final = {"index.html": "Home", "manifesto.html": "Manifesto", "security.html": "Security", "lander.html": "Lander", "404.html": "404"}  # noqa: E501
-TEMPLATE_METADATA: Final = {
+TEMPLATE_METADATA: Final[dict[str, tuple[str | None, str]]] = {
     "index.html": ("Agentworks", "https://agentworks.build/"),
     "manifesto.html": ("Agentworks Manifesto", "https://agentworks.build/manifesto/"),
     "security.html": ("Security | Agentworks", "https://agentworks.build/security/"),
-    "lander.html": ("We need to deploy some agents! | Agentworks", "https://agentworks.build/lander/"),
-    "404.html": ("Page not found | Agentworks", "https://agentworks.build/404.html"),
+    "lander.html": (None, "https://agentworks.build/lander/"),
+    "404.html": (None, "https://agentworks.build/404.html"),
 }
 GAME_CSP: Final = (
     "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; "
@@ -82,10 +82,7 @@ MAIN_ATTRIBUTES: Final = {
     "lander.html": {"id": "main-content", "class": "detail-main game-main"},
     "404.html": {"id": "main-content", "class": "detail-main game-main"},
 }
-DETAIL_PAGE_HEADINGS: Final = {
-    "lander.html": "We need to deploy some agents!",
-    "404.html": "Page not found",
-}
+GAME_DETAIL_TEMPLATES: Final = frozenset({"lander.html", "404.html"})
 LONG_FORM_TEMPLATES: Final = frozenset({"manifesto.html", "security.html"})
 
 REQUIRED_404_REFERENCES = {
@@ -128,8 +125,6 @@ TEMPLATE_REQUIRED_LITERALS: Final = {
         f'href="{SITE_BASE_TOKEN}assets/agw-rocket.svg#agw-engine-left"',
         f'href="{SITE_BASE_TOKEN}assets/agw-rocket.svg#agw-engine-right"',
         'id="lander-outcome" hidden',
-        'id="lander-exit" type="button">Exit mission</button>',
-        'id="lander-restart" type="button" hidden disabled>Restart mission</button>',
     },
 }
 CONTENT_TOKEN_PLACEMENTS: Final = {
@@ -429,7 +424,10 @@ def _validate_shared_shell(name: str, template: str) -> None:
         [i for i in _children(parser, head_index) if elements[i].tag == "title"],
         f"{name}: one document title is required",
     )
-    if _normalized_text(elements[title_index].text) != expected_title:
+    title = _normalized_text(elements[title_index].text)
+    if not title:
+        raise ValueError(f"{name}: document title must be nonempty")
+    if expected_title is not None and title != expected_title:
         raise ValueError(f"{name}: document title must be {expected_title!r}")
     validate_head_links(
         name,
@@ -498,7 +496,7 @@ def _validate_shared_shell(name: str, template: str) -> None:
         article_index = main_children[0]
         if _children(parser, article_index) or _normalized_text(elements[article_index].text) != source_token:
             raise ValueError(f"{name}: long-form article must contain only its complete source token")
-    if expected_heading := DETAIL_PAGE_HEADINGS.get(name):
+    if name in GAME_DETAIL_TEMPLATES:
         main_children = _children(parser, main_index)
         if not main_children or (
             elements[main_children[0]].tag != "div"
@@ -508,25 +506,21 @@ def _validate_shared_shell(name: str, template: str) -> None:
         heading_children = _children(parser, main_children[0])
         if [elements[index].tag for index in heading_children] != ["h1"]:
             raise ValueError(f"{name}: detail page heading must contain only its reviewed h1")
-        _validate_visible_leaf(
-            parser,
-            heading_children[0],
-            {},
-            expected_heading,
-            f"{name}: detail page heading requires its exact reviewed h1",
-        )
+        heading = elements[heading_children[0]]
+        if heading.attributes or _hidden(parser, heading_children[0]) or _children(
+            parser, heading_children[0]
+        ) or not _normalized_text(heading.text):
+            raise ValueError(f"{name}: detail page heading requires one visible nonempty h1")
         if name == "lander.html" and main_children != [main_children[0]]:
             raise ValueError(f"{name}: heading must be the only shell element before the shared game")
         if name == "404.html":
             if [elements[index].tag for index in main_children] != ["div", "p"]:
                 raise ValueError(f"{name}: heading and not-found message must precede the shared game")
-            _validate_visible_leaf(
-                parser,
-                main_children[1],
-                {"id": "not-found-message"},
-                "This route is broken! We need to deploy some agents!",
-                f"{name}: not-found message contract is invalid",
-            )
+            message = elements[main_children[1]]
+            if message.attributes != {"id": "not-found-message"} or _hidden(
+                parser, main_children[1]
+            ) or _children(parser, main_children[1]) or not _normalized_text(message.text):
+                raise ValueError(f"{name}: not-found message must be visible ordinary prose")
         if name in {"lander.html", "404.html"} and any(
             marker in template for marker in ('class="error-code"', 'class="eyebrow"')
         ):

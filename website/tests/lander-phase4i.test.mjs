@@ -200,10 +200,10 @@ test("controller tears down the held keyboard and captured pointer at atomic lau
     }
 });
 
-test("launch-ready is quiescent and a fresh key, pointer, or native Launch wakes the same fixed step", async () => {
+test("launch-ready is quiescent and a fresh key or pointer wakes the same fixed step", async () => {
     const ready = serviceFirstSite();
-    for (const authority of ["keyboard", "pointer", "native"]) {
-        const { animation, controller, elements, timestamp } = await controllerAt(ready, performance.now());
+    for (const authority of ["keyboard", "pointer"]) {
+        const { animation, controller, timestamp } = await controllerAt(ready, performance.now());
         controller.frame(timestamp);
         const idle = { clock: structuredClone(controller.clock), pose: structuredClone(controller.model.pose),
             fuel: controller.model.fuel, renders: controller.root.setCount };
@@ -213,17 +213,10 @@ test("launch-ready is quiescent and a fresh key, pointer, or native Launch wakes
         assert.equal(controller.model.fuel, idle.fuel); assert.equal(controller.root.setCount, idle.renders);
         const edgeTime = timestamp + 2010;
         if (authority === "keyboard") controller.onKeyDown(keyEvent(controller, "keydown", "Space", edgeTime));
-        else if (authority === "pointer") controller.onPointer(pointerEvent(controller, "pointerdown", 9, edgeTime));
-        else controller.launch({ timeStamp: edgeTime });
+        else controller.onPointer(pointerEvent(controller, "pointerdown", 9, edgeTime));
         assert.equal(animation.pending, 1);
-        if (authority === "native") {
-            assert.equal(globalThis.document.activeElement, controller.lander_scene_shell);
-            assert.equal(controller.collectivePulse.active, true); assert.equal(controller.collectivePulse.source, "launch-button");
-            assert.equal(controller.collectivePulse.deadline, edgeTime + 140); assert.equal(controller.clock.queue.at(-1).token, controller.collectivePulse.token);
-        }
         animation.step(edgeTime + 1000 / 120);
         assert.equal(controller.model.launchStarted, true); assert.equal(controller.model.status, "");
-        assert.equal(elements["lander-launch"].hidden, true); assert.equal(elements["lander-launch"].disabled, true);
         assert.ok(controller.model.fuel < ready.fuel); assert.ok(animation.pending > 0);
         controller.destroy();
     }

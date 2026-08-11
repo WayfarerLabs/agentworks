@@ -35,8 +35,14 @@ export class FakeElement {
         for (let current = this; current; current = current.parentElement) {
             if (current.tagName === "button" && selector.includes("button")) return current;
             if (current.tagName === "a" && current.attributes.has("href") && selector.includes("a[href]")) return current;
+            if (["input", "select", "textarea", "summary"].includes(current.tagName) &&
+                selector.includes(current.tagName)) return current;
             if (current.attributes.has("contenteditable") &&
                 current.attributes.get("contenteditable") !== "false" && selector.includes("[contenteditable]")) return current;
+            const role = current.attributes.get("role");
+            if (role && selector.includes(`[role="${role}"]`)) return current;
+            if (current.attributes.has("tabindex") && current.attributes.get("tabindex") !== "-1" &&
+                current !== current.root?.elements?.["lander-scene-shell"] && selector.includes("[tabindex]")) return current;
         }
         return null;
     }
@@ -76,25 +82,39 @@ export class FakeElement {
 }
 
 export function controllerFixture() {
-    const root = new FakeElement(); const outcome = new FakeElement(root); const actions = new FakeElement(outcome);
+    const root = new FakeElement();
     const ids = ["lander-scene-shell", "lander-scene", "lander-start", "lander-fuel", "lander-fuel-value",
         "lander-fuel-gauge", "lander-fuel-gauge-fill", "lander-target-direction", "lander-controls",
-        "lander-scene-stage", "lander-outcome", "lander-actions", "lander-exit", "lander-launch",
+        "lander-scene-stage", "lander-outcome", "lander-controls-rail", "lander-exit",
         "lander-restart", "lander-status", "terrain-layer", "site-layer", "debris-layer", "mission-agent"];
     const elements = Object.fromEntries(ids.map((id) => [id, new FakeElement(root)]));
-    elements["lander-outcome"] = outcome; elements["lander-actions"] = actions;
-    for (const id of ["lander-exit", "lander-launch", "lander-restart"]) {
-        elements[id].parentElement = actions; elements[id].tagName = "button";
+    const shell = elements["lander-scene-shell"];
+    const stage = elements["lander-scene-stage"];
+    const outcome = elements["lander-outcome"];
+    const rail = elements["lander-controls-rail"];
+    root.append(shell);
+    shell.append(stage, rail);
+    stage.append(elements["lander-scene"], elements["lander-start"], elements["lander-fuel"],
+        elements["lander-target-direction"], outcome);
+    outcome.append(elements["lander-status"], elements["lander-restart"]);
+    rail.append(elements["lander-controls"], elements["lander-exit"]);
+    for (const id of ["lander-start", "lander-exit", "lander-restart"]) elements[id].tagName = "button";
+    elements["lander-restart"].setAttribute("aria-keyshortcuts", "r");
+    elements["lander-exit"].setAttribute("aria-keyshortcuts", "Escape");
+    for (const id of ["lander-exit", "lander-restart"]) {
+        const label = new FakeElement(elements[id]); label.tagName = "span";
+        const hint = new FakeElement(elements[id]); hint.tagName = "span";
+        hint.setAttribute("class", "lander-key-hint"); hint.setAttribute("aria-hidden", "true");
+        elements[id].append(label, hint);
+        elements[`${id}-label`] = label; elements[`${id}-hint`] = hint;
     }
-    actions.append(elements["lander-launch"], elements["lander-restart"], elements["lander-exit"]);
-    elements["lander-launch"].parentElement = actions; elements["lander-restart"].parentElement = actions;
     elements["lander-start"].hidden = true; elements["lander-start"].disabled = true;
-    outcome.hidden = true; elements["lander-exit"].disabled = true;
-    elements["lander-launch"].hidden = true; elements["lander-launch"].disabled = true;
+    outcome.hidden = true; rail.hidden = true; elements["lander-exit"].disabled = true;
     elements["lander-restart"].hidden = true; elements["lander-restart"].disabled = true;
     elements["lander-fuel-gauge"].rect = { left: 12, top: 12, width: 16, height: 112 };
     root.querySelector = (selector) => elements[selector.slice(1)] ?? FakeElement.prototype.querySelector.call(root, selector);
     root.cloneNode = () => controllerFixture().root; root.elements = elements;
+    for (const element of Object.values(elements)) element.root = root;
     return { root, elements };
 }
 

@@ -22,13 +22,13 @@ evidence for their named source only; they do not accept the current game.
 
 - [ ] At normal and 400-percent-equivalent reflow, verify the game is a 25:16 scene stage followed
       by a separate normal-flow controls rail. Terrain, fuel, outcomes, and actions stay inside the
-      stage; controls stay below it. Nothing overlaps or creates horizontal page overflow at 320 CSS
-      pixels.
+      stage, except for the persistent Exit after the rail's controls prose. Nothing overlaps or
+      creates horizontal page overflow at 320 CSS pixels.
 - [ ] Confirm the left fuel gauge has a graphite boundary, dark track, and one bright bottom-origin
       level. Its color changes independently from its height: orange-red at or below 20 percent,
       amber above 20 through 50 percent, and mint above 50 percent. No numeric fuel value is
-      visible. Inspect accessibility output and confirm exactly one hidden `Fuel reserve` value and
-      no meter, progress, or output role.
+      visible. Inspect accessibility output and confirm separate hidden fuel label and value spans
+      occur as ordered scene-description references, with no meter, progress, or output role.
 - [ ] Service a site with normal motion. The fuel award commits once, then one 20 by 22 pixel
       graphite-and-orange can moves in a straight line from the site's screen position to the gauge
       over exactly 300 milliseconds while the gauge fills linearly. Resize during transfer and
@@ -42,9 +42,11 @@ evidence for their named source only; they do not accept the current game.
       reconciliation, and checkpoint restart. Exit restores the exact empty doorway and a fresh run
       has no installed glyph. The existing site group gains no descendant.
 - [ ] Confirm the reviewed deployment and crash copy use centered bordered in-stage panels with
-      exactly one polite live status. Launch, Restart, and Exit remain native 44-pixel actions in
-      that source order; only the state-appropriate actions are enabled and visible. Focus returns
-      to the scene after Launch/Restart and to Start after Exit.
+      exactly one polite live status. Restart follows that status and appears only after failure. A
+      persistent Exit follows the controls prose in the final normal-flow rail whenever the shell is
+      active. Both native actions remain at least 44 CSS pixels, have visible second-line `r` and
+      `<esc>` hints excluded from their accessible names, and expose the matching keyboard
+      shortcuts. Focus returns to the scene after Restart and to Start after Exit.
 - [ ] Activate every native action by pointer and touch. Its event must not start, steer, capture,
       or pulse flight input; each action fires once through its native click. Repeat with
       interactive and editable descendants placed inside the active stage.
@@ -61,7 +63,7 @@ evidence for their named source only; they do not accept the current game.
       and one solid NOC on a shared flat shelf. Confirm its attached scaffold is visibly open, with
       no filled backing face or pale artifact. The can disappears once, fuel increases once, the
       agent enters, the four battery bars fill red/orange/pale-yellow/mint from bottom to top, the
-      three signal arches power in order, and manual launch returns to player-controlled flight.
+      three signal arches power in order, and manual departure returns to player-controlled flight.
 - [ ] Confirm the next site begins fully offscreen right after service. The solid arrow blinks only
       while that target remains offscreen; it is static with reduced motion and has equivalent
       visually hidden direction text.
@@ -74,7 +76,8 @@ evidence for their named source only; they do not accept the current game.
 - [ ] Restart after crashes before and after a powered site. Before the first checkpoint, restart
       restores the same seeded initial approach. Afterward, it starts on the last powered pad,
       relaunches using fuel, and never duplicates the can, award, progress, ratio, or power
-      sequence.
+      sequence. Depart from the launch-ready pad with ordinary keyboard, vi, pointer, and touch
+      flight controls; confirm no native Launch action exists.
 - [ ] Fly far enough for the camera and rolling window to move in both directions. At every sampled
       point, count at most five terrain paths, three site groups, eight debris nodes, and 80
       children under `#lander-world`; discarded sites do not return as retained history.
@@ -86,7 +89,7 @@ evidence for their named source only; they do not accept the current game.
 - [ ] Perform a short primary tap whose browser-generated `lostpointercapture` fires synchronously.
       Confirm thrust remains active through 139.999 ms, ends once at 140 ms, and cancel/blur/hide
       tears it down immediately. Repeat with a reused browser pointer ID.
-- [ ] Land exactly at the inclusive 1.6 m/s horizontal, 2.5 m/s descent, 10 degree tilt, and 15
+- [ ] Land exactly at the inclusive 1.8 m/s horizontal, 2.8 m/s descent, 12 degree tilt, and 18
       degree/s rotation limits; increase each independently and confirm a crash.
 - [ ] Hide and restore the tab during flight, arrow blink, service, launch, and crash. Hidden time
       advances none of them, input and pointer capture clear, and the first visible frame only
@@ -324,9 +327,17 @@ new run records the refined source.
 - [ ] After a crash, both R and native `Restart mission` restore the last powered-pad checkpoint,
       carried fuel, leg-relative gauge, `Agent Deployed!` banner, and shell focus without
       recollecting the can. Restart is hidden and disabled outside `failed`.
-- [ ] In launch-ready state, the native `Launch` action is a 44 CSS-pixel target and the only
-      additional action tab stop. Activation focuses the scene before the action hides, produces one
-      140 ms equal-thrust pulse, and never exposes Launch and Restart together.
+- [ ] In every active state, Exit remains the rail's bottom-right 44 CSS-pixel action and follows
+      the shell in game-subtree tab order. Failed state alone inserts the 44 CSS-pixel Restart
+      between shell and Exit. Their visible second-line hints are excluded from their accessible
+      names, and their shortcut semantics expose `r` and `Escape`.
+- [ ] During flying, launch-ready, and failed states, focus the header and breadcrumb and target
+      each element and a descendant with Escape, R, Space, Up, arrows, H, and L key-down/key-up
+      pairs. Every event remains ordinary page input without prevention or game state, action,
+      focus, input, pose, or fuel changes.
+- [ ] Focus Exit and Restart and repeat Space, Enter, arrows, H, and L against both the button and
+      each nested span. Space or Enter invokes exactly one native action; the other keys neither
+      activate an action nor create flight input.
 - [ ] During play the scene SVG and all decorative descendants are silent to a screen reader. The
       shell is announced as `Lunar deployment game`, controls are described once, and status changes
       are polite and restrained.
@@ -355,8 +366,9 @@ new run records the refined source.
 - [x] A fast, tilted, rotating, one-foot-outside, surface-short, operations-center, or out-of-bounds
       contact enters the restrained failure state. Nothing flashes, shakes, explodes, moves the
       page, changes the home link, or emits sound.
-- [ ] Failure announces the reviewed crash copy in the sole live status, shows Restart then Exit in
-      the centered bordered panel, and accepts both recovery paths.
+- [ ] Failure announces the reviewed crash copy in the sole live status, shows only Restart beneath
+      that centered bordered panel, retains Exit in the final controls rail, and accepts both
+      recovery paths.
 - [x] After safe touchdown at normal motion, the G bay opens, the terminal-shaped agent descends,
       crosses the surface, and enters the west operations-center door.
 - [ ] Power proceeds vertically through four sharp-cornered battery bars at 200 ms intervals, then
@@ -366,9 +378,10 @@ new run records the refined source.
       banner remains centered over the scene at every width without overlapping the complete left
       fuel overlay. The lander, mission clock, pose, and fuel then remain unchanged indefinitely
       until effective player thrust.
-- [ ] Space, Up, held pointer or touch, short tap, and native Launch all depart from the same
-      launch-ready checkpoint. Turn-only input remains restrained; the first effective collective
-      burns and integrates in that same fixed step, and early release receives ordinary gravity.
+- [ ] Space, Up, either combined with vi or arrow steering, held pointer or touch, and short tap all
+      depart from the same launch-ready checkpoint through ordinary flight input. Turn-only input
+      remains restrained; the first effective collective burns and integrates in that same fixed
+      step, and early release receives ordinary gravity. No native Launch action exists.
 - [ ] With reduced motion enabled before touchdown, safe contact atomically shows all four battery
       bars, three signal arches, powered NOC, checkpoint, gauge, and banner without automatic
       departure. Physics remains playable.
@@ -378,7 +391,8 @@ new run records the refined source.
       reload.
 - [ ] The vertical left gauge starts each leg full, drains relative to that leg's departure reserve,
       fills linearly during the 300-millisecond award transfer, and restores exactly after restart.
-      The rounded hidden `Fuel reserve` span is the only named fuel value and is not live.
+      Separate rounded hidden label and value spans form one ordered accessible description segment;
+      neither is live or a meter, progress element, or output.
 - [ ] Every static and generated site uses one visibly open scaffold path with no backing rectangle,
       butt caps, round joins, attached connector and NOC underframe, and no pale artifact. Collision
       still rejects the complete conservative underframe, connector, NOC, and mast envelopes.
