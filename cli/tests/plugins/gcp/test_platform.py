@@ -50,12 +50,17 @@ class _Operation:
         target_link: str,
         target_id: int,
         failure: BaseException | None = None,
+        *,
+        status: object = None,
+        error: object = None,
     ) -> None:
         self.client_operation_id = request_id
         self.operation_type = operation_type
         self.target_link = target_link
         self.target_id = target_id
         self.failure = failure
+        self.status = status
+        self.error = error
         self.waits: list[float] = []
 
     def result(self, *, timeout: float) -> None:
@@ -127,6 +132,7 @@ class _Instances:
         self.get_failures: list[Exception] = []
         self.insert_failures: list[Exception | None] = []
         self.insert_wait_failures: list[BaseException] = []
+        self.insert_operation_errors: list[object] = []
         self.delete_failures: list[Exception] = []
 
     def get(self, **_kwargs: object) -> compute_v1.Instance:
@@ -150,6 +156,7 @@ class _Instances:
             request.request_id,
             "insert",
             self.insert_wait_failures.pop(0) if self.insert_wait_failures else None,
+            error=self.insert_operation_errors.pop(0) if self.insert_operation_errors else None,
         )
 
     def start(self, *, request: compute_v1.StartInstanceRequest, **_kwargs: object) -> _Operation:
@@ -178,6 +185,8 @@ class _Instances:
         request_id: str,
         operation_type: str,
         failure: BaseException | None = None,
+        *,
+        error: object = None,
     ) -> _Operation:
         name = "vm-a"
         if self.resource is not None:
@@ -188,6 +197,8 @@ class _Instances:
             f"projects/{_PROJECT}/zones/{_ZONE}/instances/{name}",
             201,
             failure,
+            status=compute_v1.Operation.Status.DONE if error is not None else None,
+            error=error,
         )
 
 
@@ -213,6 +224,8 @@ class _Cache:
                     guest_cpus=2,
                     memory_mb=8192,
                     architecture="x86_64",
+                    maximum_persistent_disks=128,
+                    accelerators=[],
                 )
             ),
             "images": SimpleNamespace(
@@ -376,6 +389,10 @@ def test_rendered_gcp_guide_teaches_safe_selected_zone_capacity_recovery() -> No
     assert "Retry later\nor select another compatible zone" in rendered
     assert "inspect the named resource before retrying" in rendered
     assert "Provider\ndiagnostics and credential material are never rendered" in rendered
+    assert "burstable `e2-small` and `e2-medium`" in rendered
+    assert "sustain aggregate 0.5 and 1 vCPU" in rendered
+    assert "choose `e2-standard-2` for sustained two-vCPU work" in rendered
+    assert "`pd-balanced` boundary" in rendered
     assert "ZONE_RESOURCE_POOL_EXHAUSTED" not in rendered
     assert _TAILSCALE_SENTINEL not in rendered
     assert _SERVICE_SENTINEL not in rendered
@@ -669,6 +686,71 @@ def test_join_failure_rolls_back_and_exception_graph_is_secret_free(
         assert _TAILSCALE_SENTINEL not in str(current)
         assert _SERVICE_SENTINEL not in str(current)
         pending.extend((current.__cause__, current.__context__))
+
+
+@pytest.mark.parametrize(
+    "machine",
+    [
+        compute_v1.MachineType(
+            name="e2-standard-2",
+            self_link=f"projects/{_PROJECT}/zones/{_ZONE}/machineTypes/e2-standard-2",
+            guest_cpus=2,
+            memory_mb=8192,
+            architecture="x86_64",
+            maximum_persistent_disks=0,
+            accelerators=[],
+        ),
+        compute_v1.MachineType(
+            name="e2-standard-2",
+            self_link=f"projects/{_PROJECT}/zones/{_ZONE}/machineTypes/e2-standard-2",
+            guest_cpus=2,
+            memory_mb=8192,
+            architecture="x86_64",
+            maximum_persistent_disks=128,
+            accelerators=[compute_v1.Accelerators(guest_accelerator_count=1, guest_accelerator_type="required")],
+        ),
+    ],
+    ids=("no-persistent-disk", "required-accelerator"),
+)
+def test_known_machine_incompatibility_stays_pre_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+    machine: compute_v1.MachineType,
+) -> None:
+    platform, cache = _platform(monkeypatch, _Transport())
+    cache.clients["machine-types"] = SimpleNamespace(get=lambda **_kwargs: machine)
+
+    with pytest.raises(ConfigError, match="e2-standard-2"):
+        platform.create(_request(), _ctx())
+
+    assert cache.firewalls.insert_requests == []
+    assert cache.instances.insert_requests == []
+
+
+def test_residual_definitive_insert_rejection_rolls_back_and_stays_detached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    platform, cache = _platform(monkeypatch, _Transport())
+    provider_sentinel = "provider-private-insert-SENTINEL"
+    provider = _api_error(api_exceptions.ServiceUnavailable, provider_sentinel)
+    provider.__cause__ = RuntimeError(provider_sentinel)
+    cache.instances.insert_wait_failures = [provider]
+    cache.instances.insert_operation_errors = [
+        compute_v1.Error(errors=[compute_v1.Errors(code="UNKNOWN", message=provider_sentinel)])
+    ]
+
+    with pytest.raises(GCEOperationError) as caught:
+        platform.create(_request(), _ctx())
+
+    assert type(caught.value) is GCEOperationError
+    assert "e2-standard-2" in str(caught.value)
+    assert "CPU-only Debian 12" in (caught.value.hint or "")
+    assert "pd-balanced" in (caught.value.hint or "")
+    assert cache.instances.resource is None
+    assert len(cache.instances.delete_requests) == 1
+    assert cache.firewalls.resources == {}
+    assert provider_sentinel not in f"{caught.value!s} {caught.value!r} {vars(caught.value)!r}"
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
 def test_runup_is_authenticated_read_only_and_create_collision_stays_p0(

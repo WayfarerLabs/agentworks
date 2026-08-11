@@ -434,11 +434,9 @@ def insert_firewall_reconciled(
         wait_for_extended_operation(
             operation,
             label=f"firewall rule {firewall.name}",
-            zone=zone,
+            zone=None,
             timeout=timeout,
         )
-    except (AlreadyExistsError, AuthorizationError, NotFoundError, TokenRejectedError, GCEQuotaError):
-        raise
     except GCEIndeterminateOperationError as exc:
         wait_failure = exc
 
@@ -521,7 +519,7 @@ def delete_matching_firewall(
         wait_for_extended_operation(
             operation,
             label=f"firewall rule {expected.name}",
-            zone=zone,
+            zone=None,
             timeout=timeout,
         )
     except AgentworksError:

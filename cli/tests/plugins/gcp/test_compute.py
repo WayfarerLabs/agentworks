@@ -99,6 +99,8 @@ def test_live_machine_shape_and_architecture_are_verified() -> None:
         guest_cpus=4,
         memory_mb=16384,
         architecture="ARM64",
+        maximum_persistent_disks=128,
+        accelerators=[],
     )
     client = _GetClient(machine)
     cache = _Cache(**{"machine-types": client})
@@ -113,6 +115,8 @@ def test_live_e2_micro_shape_accepts_omitted_provider_architecture() -> None:
         name="e2-micro",
         guest_cpus=2,
         memory_mb=1024,
+        maximum_persistent_disks=128,
+        accelerators=[],
     )
     client = _GetClient(machine)
     cache = _Cache(**{"machine-types": client})
@@ -126,9 +130,14 @@ def test_live_e2_micro_shape_accepts_omitted_provider_architecture() -> None:
 @pytest.mark.parametrize(
     "machine",
     [
-        compute_v1.MachineType(guest_cpus=8, memory_mb=16384),
-        compute_v1.MachineType(guest_cpus=4, memory_mb=8192),
-        compute_v1.MachineType(guest_cpus=4, memory_mb=16384, architecture="X86_64"),
+        compute_v1.MachineType(guest_cpus=8, memory_mb=16384, maximum_persistent_disks=128),
+        compute_v1.MachineType(guest_cpus=4, memory_mb=8192, maximum_persistent_disks=128),
+        compute_v1.MachineType(
+            guest_cpus=4,
+            memory_mb=16384,
+            architecture="X86_64",
+            maximum_persistent_disks=128,
+        ),
     ],
     ids=("cpus", "memory", "architecture"),
 )
@@ -137,6 +146,47 @@ def test_live_machine_mismatch_fails_before_mutation(machine: compute_v1.Machine
     selected = MachineTypeSelection(4, 16, "t2a-standard-4", "arm64")
     with pytest.raises(ConfigError, match="does not match"):
         verify_live_machine_type(cache, RunContext(), _CONFIG, selected)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "machine",
+    [
+        compute_v1.MachineType(
+            guest_cpus=4,
+            memory_mb=16384,
+            architecture="ARM64",
+            maximum_persistent_disks=0,
+            accelerators=[],
+        ),
+        compute_v1.MachineType(
+            guest_cpus=4,
+            memory_mb=16384,
+            architecture="ARM64",
+            maximum_persistent_disks=128,
+            accelerators=[compute_v1.Accelerators(guest_accelerator_count=1, guest_accelerator_type="required-type")],
+        ),
+    ],
+    ids=("no-persistent-disk", "required-accelerator"),
+)
+def test_known_live_machine_incompatibility_is_actionable_detached_config_error(
+    machine: compute_v1.MachineType,
+) -> None:
+    selected = MachineTypeSelection(4, 16, "caller-authored-type", "arm64")
+    with pytest.raises(ConfigError) as caught:
+        verify_live_machine_type(  # type: ignore[arg-type]
+            _Cache(**{"machine-types": _GetClient(machine)}),
+            RunContext(),
+            _CONFIG,
+            selected,
+        )
+
+    assert "caller-authored-type" in str(caught.value)
+    assert "Persistent Disk" in (caught.value.hint or "")
+    assert "requires no guest accelerator" in (caught.value.hint or "")
+    assert "CPU-only Debian 12" in (caught.value.hint or "")
+    assert "pd-balanced" in (caught.value.hint or "")
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
 def test_image_family_uses_public_project_and_matching_architecture() -> None:

@@ -12,7 +12,7 @@ from google.cloud import compute_v1
 from agentworks.capabilities.base import RunContext
 from agentworks.errors import AlreadyExistsError, AuthorizationError, ConfigError
 from agentworks.plugins.gcp.config import GcpGCEConfig
-from agentworks.plugins.gcp.errors import GCEIndeterminateOperationError, GCEOperationError
+from agentworks.plugins.gcp.errors import GCECapacityError, GCEIndeterminateOperationError, GCEOperationError
 from agentworks.plugins.gcp.network import (
     FirewallInsertAttempt,
     FirewallOwnership,
@@ -514,6 +514,30 @@ def test_done_generic_failure_never_reconciles_matching_firewall_to_success() ->
         )
 
     assert type(caught.value) is GCEOperationError
+    assert [name for name, _kwargs in client.calls] == ["insert"]
+
+
+def test_done_capacity_firewall_failure_does_not_attribute_the_vm_zone() -> None:
+    expected = _owned_rule("allow", priority=0, deny=False)
+    operation = _Operation(
+        _api_error(api_exceptions.ServiceUnavailable, "provider-private-detail"),
+        status=compute_v1.Operation.Status.DONE,
+        error=compute_v1.Error(errors=[compute_v1.Errors(code="ZONE_RESOURCE_POOL_EXHAUSTED")]),
+    )
+    client = _FirewallClient(states=iter([expected]), operation=operation)
+
+    with pytest.raises(GCECapacityError) as caught:
+        insert_firewall_reconciled(
+            client,
+            project_id="project-a",
+            zone="us-central1-a",
+            firewall=expected,
+            attempt=FirewallInsertAttempt("allow", _REQUEST_ID),
+            timeout=17,
+        )
+
+    assert "us-central1-a" not in f"{caught.value} {caught.value.hint}"
+    assert caught.value.hint == "retry later"
     assert [name for name, _kwargs in client.calls] == ["insert"]
 
 

@@ -134,7 +134,7 @@ def call_google_optional[T](call: Callable[[], T], *, operation: str, resource: 
     raise failure
 
 
-def wait_for_extended_operation(operation: Any, *, label: str, zone: str, timeout: float) -> None:
+def wait_for_extended_operation(operation: Any, *, label: str, zone: str | None, timeout: float) -> None:
     """Wait once for a Compute extended operation and sanitize failure data."""
     failure: AgentworksError | None = None
     try:
@@ -176,15 +176,17 @@ def _completed_operation_failure(
     structured_error: _StructuredOperationError,
     *,
     label: str,
-    zone: str,
+    zone: str | None,
 ) -> GCEOperationError:
     """Classify one DONE failure from its allowlisted structured code only."""
     if structured_error is _StructuredOperationError.CAPACITY:
+        location = f" in zone '{zone}'" if zone is not None else ""
+        hint = f"retry later or select another zone instead of '{zone}'" if zone is not None else "retry later"
         return GCECapacityError(
-            f"Google Cloud had insufficient capacity in zone '{zone}' while waiting for {label}",
+            f"Google Cloud had insufficient capacity{location} while waiting for {label}",
             entity_kind="gcp-resource",
             entity_name=label,
-            hint=f"retry later or select another zone instead of '{zone}'",
+            hint=hint,
         )
     return GCEOperationError(
         f"Google Cloud operation failed while waiting for {label}",

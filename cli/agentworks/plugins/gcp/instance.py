@@ -23,6 +23,7 @@ from agentworks.plugins.gcp.compute import (
     verify_zonal_operation,
 )
 from agentworks.plugins.gcp.errors import (
+    GCECapacityError,
     GCEError,
     GCEIndeterminateOperationError,
     GCEOperationError,
@@ -120,6 +121,7 @@ def insert_instance_reconciled(
     project_id: str,
     zone: str,
     instance: Any,
+    selected_machine_type: str,
     attempt: InstanceInsertAttempt,
     timeout: float,
 ) -> tuple[Any, InstanceOwnership]:
@@ -178,12 +180,27 @@ def insert_instance_reconciled(
     attempt.ownership = InstanceOwnership(resource_id=target_id)
 
     wait_failure: AgentworksError | None = None
+    definitive_failure: GCEOperationError | None = None
     try:
         wait_for_extended_operation(operation, label=f"instance {instance.name}", zone=zone, timeout=timeout)
-    except (AlreadyExistsError, AuthorizationError, NotFoundError, TokenRejectedError, GCEQuotaError):
+    except GCECapacityError:
         raise
     except GCEIndeterminateOperationError as exc:
         wait_failure = exc
+    except GCEOperationError:
+        definitive_failure = GCEOperationError(
+            f"Google Cloud rejected instance '{instance.name}' while inserting selected machine type "
+            f"'{selected_machine_type}'",
+            entity_kind="gcp-instance",
+            entity_name=str(instance.name),
+            hint=(
+                f"verify that machine type '{selected_machine_type}' supports a CPU-only Debian 12 VM with a "
+                "'pd-balanced' boot disk, or choose a compatible machine_types entry"
+            ),
+        )
+
+    if definitive_failure is not None:
+        raise definitive_failure
 
     realized = call_google_optional(
         lambda: client.get(project=project_id, zone=zone, instance=instance.name),

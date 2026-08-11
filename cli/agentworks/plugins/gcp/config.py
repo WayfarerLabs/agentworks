@@ -92,6 +92,8 @@ class MachineTypeSelection(NamedTuple):
 
 
 DEFAULT_MACHINE_TYPES: tuple[MachineTypeSelection, ...] = (
+    MachineTypeSelection(2, 2, "e2-small", "x86_64"),
+    MachineTypeSelection(2, 4, "e2-medium", "x86_64"),
     MachineTypeSelection(2, 8, "e2-standard-2", "x86_64"),
     MachineTypeSelection(4, 16, "e2-standard-4", "x86_64"),
     MachineTypeSelection(8, 32, "e2-standard-8", "x86_64"),

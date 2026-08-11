@@ -102,7 +102,7 @@ def verify_live_machine_type(
     config: GcpGCEConfig,
     selected: MachineTypeSelection,
 ) -> Any:
-    """Verify provider CPU and memory plus any reported architecture."""
+    """Verify provider shape and known CPU-only Persistent Disk compatibility."""
     client = clients.client("machine-types", ctx)
     machine = call_google_optional(
         lambda: client.get(
@@ -129,6 +129,15 @@ def verify_live_machine_type(
             f"provider reports {live_cpus} vCPU / {live_memory_mib} MiB / {live_arch or 'unknown architecture'}, "
             f"site declares {selected.cpus} vCPU / {selected.memory_gib * 1024} MiB / {selected.arch}",
             hint="correct the machine_types entry rather than provisioning a different live shape",
+        )
+    if int(machine.maximum_persistent_disks) == 0 or bool(machine.accelerators):
+        raise ConfigError(
+            f"GCE machine type '{selected.type}' is incompatible with this platform's storage or accelerator contract",
+            hint=(
+                f"select a machine_types entry where '{selected.type}' supports Persistent Disk and requires no "
+                "guest accelerator; gcp-gce currently provisions a CPU-only Debian 12 VM with a "
+                "'pd-balanced' boot disk"
+            ),
         )
     return machine
 

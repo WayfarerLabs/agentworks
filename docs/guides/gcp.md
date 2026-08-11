@@ -118,6 +118,25 @@ the selected derived credential; it does not persist the JSON, attach it to the 
 to ADC if the explicit document is rejected. Ordinary LF or CRLF formatting, including a terminal
 line ending, is accepted without compaction, base64 encoding, or rewriting.
 
+## Choose machine capacity
+
+The built-in catalog starts with `e2-small` (2 GiB) and `e2-medium` (4 GiB), followed by the E2
+standard ladder. Both shared-core types expose two vCPUs to the guest, but their aggregate sustained
+CPU is 0.5 vCPU and 1 vCPU respectively, with automatic bursting. Use `e2-standard-2` (8 GiB) when
+the workload needs sustained two-vCPU capacity rather than short bursts.
+
+Before mutation, Agentworks verifies the selected live machine's declared CPU, memory, optional
+architecture, Persistent Disk capacity, and required accelerators. A machine with no Persistent Disk
+capacity or a required guest accelerator is outside the current CPU-only Debian 12 and `pd-balanced`
+boot-disk boundary and fails as a configuration error. This check uses provider fields, not the
+machine-type name.
+
+Compute Engine has no read-only validator for every machine-type and boot-disk pair. A remaining
+definitive `instances.insert` rejection therefore names the selected machine type and asks you to
+verify its CPU-only Debian 12 and `pd-balanced` compatibility, while Agentworks performs bounded
+rollback. It never renders the provider's message, code, or object. Future Hyperdisk support will be
+an additive storage profile; Agentworks does not infer it from a machine-series name.
+
 ## Create and operate a VM
 
 Validate the declared surface before creating anything:

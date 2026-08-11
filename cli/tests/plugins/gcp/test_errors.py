@@ -164,6 +164,36 @@ def test_done_unknown_or_malformed_failure_is_definitive_generic_and_safe(error:
     _assert_detached_and_safe(caught.value)
 
 
+def test_done_capacity_code_strict_superstring_is_definitive_generic() -> None:
+    operation = _ExtendedOperation(
+        status=compute_v1.Operation.Status.DONE,
+        error=_operation_error(SimpleNamespace(code="PREFIX_ZONE_RESOURCE_POOL_EXHAUSTED", message=_SENTINEL)),
+        failure=_provider_503(),
+    )
+
+    with pytest.raises(GCEOperationError) as caught:
+        wait_for_extended_operation(operation, label="instance vm-a", zone=_ZONE, timeout=21)
+
+    assert type(caught.value) is GCEOperationError
+    assert _ZONE not in str(caught.value)
+    _assert_detached_and_safe(caught.value)
+
+
+def test_global_operation_capacity_guidance_does_not_claim_the_vm_zone() -> None:
+    operation = _ExtendedOperation(
+        status=compute_v1.Operation.Status.DONE,
+        error=_operation_error(SimpleNamespace(code="ZONE_RESOURCE_POOL_EXHAUSTED", message=_SENTINEL)),
+        failure=_provider_503(),
+    )
+
+    with pytest.raises(GCECapacityError) as caught:
+        wait_for_extended_operation(operation, label="firewall rule allow", zone=None, timeout=22)
+
+    assert _ZONE not in f"{caught.value} {caught.value.hint}"
+    assert caught.value.hint == "retry later"
+    _assert_detached_and_safe(caught.value)
+
+
 def test_non_done_timeout_is_the_only_indeterminate_operation_outcome() -> None:
     provider = TimeoutError(_SENTINEL)
     provider.__cause__ = RuntimeError(_SENTINEL)

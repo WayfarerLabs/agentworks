@@ -20,6 +20,7 @@ from agentworks.plugins.gcp.network import NetworkSelection
 
 _REQUEST_ID = "d1486754-0828-49ff-b788-66938c44a5ea"
 _NETWORK = "projects/project-a/global/networks/default"
+_SENTINEL = "provider-private-secret-SENTINEL"
 
 
 def _api_error(kind: type[Exception], message: str) -> Exception:
@@ -135,6 +136,7 @@ def test_insert_retains_typed_request_and_ownership_before_wait() -> None:
             project_id="project-a",
             zone="us-central1-a",
             instance=realized,
+            selected_machine_type="e2-standard-2",
             attempt=attempt,
             timeout=17,
         )
@@ -156,6 +158,7 @@ def test_indeterminate_wait_reconciles_only_matching_provider_id() -> None:
         project_id="project-a",
         zone="us-central1-a",
         instance=expected,
+        selected_machine_type="e2-standard-2",
         attempt=attempt,
         timeout=17,
     )
@@ -170,6 +173,7 @@ def test_indeterminate_wait_reconciles_only_matching_provider_id() -> None:
             project_id="project-a",
             zone="us-central1-a",
             instance=expected,
+            selected_machine_type="e2-standard-2",
             attempt=InstanceInsertAttempt("vm-a", _REQUEST_ID),
             timeout=17,
         )
@@ -191,6 +195,7 @@ def test_done_capacity_failure_never_reconciles_matching_instance_to_success() -
             project_id="project-a",
             zone="us-central1-a",
             instance=_resource(),
+            selected_machine_type="e2-standard-2",
             attempt=InstanceInsertAttempt("vm-a", _REQUEST_ID),
             timeout=17,
         )
@@ -198,6 +203,39 @@ def test_done_capacity_failure_never_reconciles_matching_instance_to_success() -
     assert "us-central1-a" in str(caught.value)
     assert "retry later or select another zone" in (caught.value.hint or "")
     assert [name for name, _kwargs in client.calls] == ["insert"]
+
+
+def test_residual_definitive_insert_rejection_has_fixed_machine_disk_guidance() -> None:
+    realized = _resource()
+    realized.id = 201
+    provider = _api_error(api_exceptions.ServiceUnavailable, _SENTINEL)
+    provider.__cause__ = RuntimeError(_SENTINEL)
+    operation = _Operation(
+        failure=provider,
+        status=compute_v1.Operation.Status.DONE,
+        error=compute_v1.Error(errors=[compute_v1.Errors(code="UNKNOWN", message=_SENTINEL)]),
+    )
+    client = _Instances(iter([realized]), operation=operation)
+
+    with pytest.raises(GCEOperationError) as caught:
+        insert_instance_reconciled(
+            client,
+            project_id="project-a",
+            zone="us-central1-a",
+            instance=_resource(),
+            selected_machine_type="caller-authored-type",
+            attempt=InstanceInsertAttempt("vm-a", _REQUEST_ID),
+            timeout=17,
+        )
+
+    assert type(caught.value) is GCEOperationError
+    assert "caller-authored-type" in str(caught.value)
+    assert "CPU-only Debian 12" in (caught.value.hint or "")
+    assert "pd-balanced" in (caught.value.hint or "")
+    assert [name for name, _kwargs in client.calls] == ["insert"]
+    assert _SENTINEL not in f"{caught.value!s} {caught.value!r} {vars(caught.value)!r}"
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
 def test_non_done_permission_poll_failure_reconciles_matching_instance() -> None:
@@ -214,6 +252,7 @@ def test_non_done_permission_poll_failure_reconciles_matching_instance() -> None
         project_id="project-a",
         zone="us-central1-a",
         instance=_resource(),
+        selected_machine_type="e2-standard-2",
         attempt=InstanceInsertAttempt("vm-a", _REQUEST_ID),
         timeout=17,
     )
@@ -240,6 +279,7 @@ def test_incomplete_operation_identity_is_never_owned(operation: _Operation) -> 
             project_id="project-a",
             zone="us-central1-a",
             instance=_resource(),
+            selected_machine_type="e2-standard-2",
             attempt=attempt,
             timeout=17,
         )
@@ -257,6 +297,7 @@ def test_definite_already_exists_never_shape_reconciles() -> None:
             project_id="project-a",
             zone="us-central1-a",
             instance=_resource(),
+            selected_machine_type="e2-standard-2",
             attempt=InstanceInsertAttempt("vm-a", _REQUEST_ID),
             timeout=17,
         )

@@ -199,6 +199,12 @@ class GCEPlatform(VMPlatform):
         the operator to inspect the named resource before retrying. Provider
         diagnostics and credential material are never rendered.
 
+        The built-in catalog starts with burstable `e2-small` and `e2-medium`.
+        Both expose two guest vCPUs but sustain aggregate 0.5 and 1 vCPU;
+        choose `e2-standard-2` for sustained two-vCPU work. Known machine
+        incompatibilities fail before mutation. Residual definitive insert
+        rejection names the selected machine and `pd-balanced` boundary.
+
         Ships as the opt-in `gcp` system plugin. Enable it explicitly before a
         `gcp-gce` vm-site becomes ready.
         """,
@@ -374,6 +380,7 @@ class GCEPlatform(VMPlatform):
                 project_id=self.config.project_id,
                 zone=self.config.zone,
                 instance=instance,
+                selected_machine_type=selected.type,
                 attempt=instance_attempt,
                 timeout=_OPERATION_TIMEOUT_SECONDS,
             )
