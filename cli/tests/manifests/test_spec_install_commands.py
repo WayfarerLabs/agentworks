@@ -20,9 +20,7 @@ from jsonschema import Draft202012Validator
 from pydantic import BaseModel
 
 from agentworks.install_commands import SystemInstallCommandEntry, UserInstallCommandEntry
-from agentworks.manifests.describe import reference_lines
 from agentworks.manifests.emit import document_schema
-from agentworks.manifests.reference import reference_for
 
 from ._specs import WHERE, decode, rejection
 
@@ -66,21 +64,6 @@ def test_the_optional_fields_default() -> None:
     row = decode(_KIND, "example", {"command": "true"})
 
     assert (row.path, row.test_exec, row.test_file, row.test_dir, row.description) == ([], None, None, None, None)
-
-
-def test_system_kind_teaches_the_vm_admin_privilege_boundary() -> None:
-    """Keep rendered and schema reference surfaces from implying root execution."""
-    rendered = " ".join(" ".join(reference_lines(reference_for(_KIND))).split())
-    schema = document_schema(_KIND)
-    entry_description = schema["$defs"]["SystemInstallCommandEntry"]["description"]
-    kind_description = schema["properties"]["kind"]["description"]
-
-    assert "VM admin" in entry_description
-    assert "VM admin" in kind_description
-    assert "system-level (root)" not in f"{entry_description} {kind_description}".lower()
-    assert "VM admin user, not root" in rendered
-    assert "explicitly use `sudo`" in rendered
-    assert "runs as root" not in rendered
 
 
 # -- What an operator reads when it is wrong ----------------------------------

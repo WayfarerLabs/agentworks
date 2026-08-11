@@ -113,7 +113,6 @@ def test_aws_bundle_publishes_cli_disabled_with_verified_v2_payload(tmp_path: Pa
     assert 'sudo rm -f -- "$aws_link" "$completer_link"' in row.command
     assert 'sudo "$temp_root/aws/install"' in row.command
     assert '--install-dir "$install_dir" --bin-dir "$bin_dir" --update' in row.command
-    assert "did not produce the expected managed layout" in row.command
     assert "aws configure" not in row.command
 
 

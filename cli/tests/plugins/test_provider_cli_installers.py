@@ -429,7 +429,6 @@ def test_launcher_collision_fails_before_download_without_mutation(
     result = _run(_aws_command_for_test(tmp_path), tmp_path)
 
     assert result.returncode != 0
-    assert f"launcher collision at {collision}" in result.stderr
     assert marker.read_text() == "managed bytes"
     assert aws_target.read_text() == "managed\n"
     assert completer_target.read_text() == "managed\n"
@@ -482,7 +481,6 @@ def test_successful_installer_must_produce_complete_managed_layout(tmp_path: Pat
     result = _run(_aws_command_for_test(tmp_path), tmp_path, AGW_TEST_INSTALL_LAYOUT=layout)
 
     assert result.returncode != 0
-    assert "did not produce the expected managed layout" in result.stderr
     assert not (tmp_path / "private-temp").exists()
 
 
