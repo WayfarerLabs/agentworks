@@ -16,6 +16,7 @@ import {
     removeQueuedInputEdges,
     resetSimulationAccumulator,
     settleCue,
+    TURN_DIFFERENTIAL,
     transitionMission,
     updateRetention,
 } from "./lander-model.js";
@@ -184,6 +185,11 @@ export class LanderGameController {
     }
 
     queueInput(timestamp, token = null) {
+        const launchReadyIdle = this.model.state === "launching" && !this.model.launchStarted && this.frameId === null;
+        if (launchReadyIdle) {
+            this.clock = resetSimulationAccumulator(this.clock, timestamp);
+            this.previousFrame = timestamp;
+        }
         const held = Object.fromEntries([...this.heldKeys].map((key) => [key, true]));
         const collective = this.pointer ? this.pointerInput : this.collectivePulse.active ?
             { left: 0.72, right: 0.72 } : ZERO_INPUT;
@@ -194,6 +200,7 @@ export class LanderGameController {
                 token: this.pointer.token }) : Object.freeze({ active: false }),
             collectivePulse: Object.freeze({ ...this.collectivePulse }) });
         this.clock = enqueueInputEdge(this.clock, { timestamp, ...request, token, physical });
+        this.requestFrame();
     }
 
     start(holdSpace, timestamp) {
@@ -368,7 +375,7 @@ export class LanderGameController {
         this.queueInput(endTimestamp, token);
     }
 
-    clearAllInput(timestamp) {
+    clearAllInput(timestamp, quiesce = false) {
         this.heldKeys.clear();
         const pointer = this.pointer;
         const token = pointer?.token ?? this.collectivePulse.token;
@@ -380,7 +387,8 @@ export class LanderGameController {
         if (pointer && this.lander_scene_shell.hasPointerCapture(pointer.id)) {
             this.lander_scene_shell.releasePointerCapture(pointer.id);
         }
-        this.clock = clearSimulationInput(this.clock, timestamp);
+        this.clock = quiesce ? { ...this.clock, timestamp, queue: [], input: { ...ZERO_INPUT }, accumulator: 0 } :
+            clearSimulationInput(this.clock, timestamp);
         this.model = { ...this.model, commanded: { ...ZERO_INPUT } };
     }
 
@@ -416,10 +424,15 @@ export class LanderGameController {
         } else if (["landed", "deploying", "powering", "crashing"].includes(this.model.state)) {
             this.model = updateRetention(advanceMissionSequence(this.model, elapsed, this.motion.matches));
         }
-        if (["flying", "launching"].includes(previousState) &&
-            !["flying", "launching"].includes(this.model.state)) this.clearAllInput(timestamp);
+        const reachedLaunchReady = previousState === "flying" && this.model.state === "launching" && !this.model.launchStarted;
+        if (reachedLaunchReady || (["flying", "launching"].includes(previousState) &&
+            !["flying", "launching"].includes(this.model.state))) this.clearAllInput(timestamp, reachedLaunchReady);
         this.render();
-        if (["flying", "landed", "deploying", "powering", "launching", "crashing"].includes(this.model.state) ||
+        const launchReady = this.model.state === "launching" && !this.model.launchStarted;
+        const pendingLaunchInput = launchReady && (this.clock.queue.length > 0 ||
+            this.clock.input.left + this.clock.input.right > TURN_DIFFERENTIAL);
+        if (["flying", "landed", "deploying", "powering", "crashing"].includes(this.model.state) ||
+            (this.model.state === "launching" && (!launchReady || pendingLaunchInput)) ||
             (this.model.state === "preflight" && this.cue.state === "running")) this.requestFrame();
     }
 

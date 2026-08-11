@@ -123,19 +123,21 @@ node website/tools/derive_lander_routes.mjs \
 ```
 
 The v4 deriver uses the v2 geometry schema and v3 recipe family, Node built-ins, versioned finite
-phase ranges, reachable keyboard commands, and independent copies of the physics, collision
+compact phase ranges, reachable keyboard commands, and independent copies of the physics, collision
 geometry, terrain motifs, shelf construction, scaffold, connector, NOC, and mast. Each template
-evaluates two explicit candidates, for 18 total and well below the 256-per-template and 2,304-total
-bounds. Its reviewed output contains all nine routes and 81 ordered world descriptors. Verification
-also replays each selected success and one-quantum failure across all nine worlds, for 162 selected
-replays. A successful route is classified using the raw replay. Only its reviewed success and
-exhaustion pose components are serialized to nine decimal places, keeping native trigonometric
-last-bit variation out of the canonical fixture while remaining inside the runtime proof tolerance.
-World descriptors retain their exact unrounded values. A deliberate route or world change updates
-the tool version/ranges, reviewed v2 fixture, copied production literals, and all four digests
-atomically. Runtime code performs exactly the successful and one-quantum-smaller proof replays for
-the directly selected literal. It never imports the tool, scans fuel allowances, or plans a route in
-the browser.
+begins with the exact player-reachable `[1,90]` request and evaluates four candidates from two
+independently variable pre-contact ranges, for 36 total and well below the 256-per-template and
+2,304-total bounds. The comparator selects among materially distinct safe outcomes; no selected
+schedule is embedded phase-for-phase as its own verifier. Its reviewed output contains all nine
+routes and 81 ordered world descriptors. Verification also replays each selected success and
+one-quantum failure across all nine worlds, for 162 selected replays. A successful route is
+classified using the raw replay. Only its reviewed success and exhaustion pose components are
+serialized to nine decimal places, keeping native trigonometric last-bit variation out of the
+canonical fixture while remaining inside the runtime proof tolerance. World descriptors retain their
+exact unrounded values. A deliberate route or world change updates the ranges, reviewed v3 fixture,
+copied production literals, and all four digests atomically. Runtime code performs exactly the
+successful and one-quantum-smaller proof replays for the directly selected literal. It never imports
+the tool, scans fuel allowances, or plans a route in the browser.
 
 During a run, the model retains at most five terrain chunks, the active and target sites plus one
 previous powered site, one input queue of at most 64 records, and eight crash fragments. Fuel has no

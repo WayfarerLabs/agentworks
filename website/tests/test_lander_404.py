@@ -495,10 +495,14 @@ class StaticDocumentTests(unittest.TestCase):
                 self.assertEqual(transformed_origin(transform, origin, {}), origin)
 
     def test_input_clear_restores_zero_command_and_renders(self) -> None:
-        clear_input = self.game.split("clearAllInput(timestamp) {", 1)[1].split("\n    }", 1)[0]
+        clear_input = self.game.split("clearAllInput(timestamp, quiesce = false) {", 1)[1].split("\n    }", 1)[0]
         self.assertIn("commanded: { ...ZERO_INPUT }", clear_input)
         self.assertIn("vectorAngle: 0", self.game)
         self.assertIn("clearSimulationInput", clear_input)
+        frame = self.game.split("frame(timestamp) {", 1)[1].split("reconcileWorld() {", 1)[0]
+        self.assertIn('previousState === "flying" && this.model.state === "launching"', frame)
+        self.assertIn("if (reachedLaunchReady ||", frame)
+        self.assertIn("this.clearAllInput(timestamp, reachedLaunchReady)", frame)
 
     def test_native_actions_share_keyboard_controller_operations_and_focus_lifecycle(
         self,

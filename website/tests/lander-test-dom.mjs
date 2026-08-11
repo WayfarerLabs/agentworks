@@ -1,0 +1,126 @@
+export class FakeElement {
+    constructor(parentElement = null) {
+        this.parentElement = parentElement; this.hidden = false; this.disabled = false; this.tabIndex = -1;
+        this.textContent = ""; this.value = "0.0"; this.dataset = {}; this.attributes = new Map(); this.children = [];
+        this.setCount = 0; this.listeners = new Map(); this.capturedPointers = new Set();
+        const properties = new Map();
+        this.style = { setProperty: (name, value) => properties.set(name, value),
+            getPropertyValue: (name) => properties.get(name) ?? "",
+            removeProperty: (name) => properties.delete(name), properties };
+    }
+    addEventListener(type, listener) {
+        const listeners = this.listeners.get(type) ?? [];
+        listeners.push(listener); this.listeners.set(type, listeners);
+    }
+    removeEventListener(type, listener) {
+        this.listeners.set(type, (this.listeners.get(type) ?? []).filter((candidate) => candidate !== listener));
+    }
+    dispatchEvent(event) {
+        event.target ??= this; event.currentTarget = this; this.lastEventTime = event.timeStamp;
+        event.composedPath ??= () => [this];
+        event.preventDefault ??= () => { event.defaultPrevented = true; };
+        for (const listener of [...(this.listeners.get(event.type) ?? [])]) listener(event);
+        return !event.defaultPrevented;
+    }
+    setAttribute(name, value) {
+        this.setCount += 1; this.attributes.set(name, String(value));
+        if (name === "class") this.className = String(value);
+        if (name.startsWith("data-")) {
+            this.dataset[name.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = String(value);
+        }
+    }
+    removeAttribute(name) { this.attributes.delete(name); }
+    append(...nodes) { for (const node of nodes) { node.parentElement = this; this.children.push(node); } }
+    replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
+    replaceWith(node) { this.replacement = node; }
+    remove() {
+        if (this.parentElement) this.parentElement.children = this.parentElement.children.filter((node) => node !== this);
+    }
+    focus() { globalThis.document.activeElement = this; }
+    setPointerCapture(pointerId) { this.capturedPointers.add(pointerId); }
+    hasPointerCapture(pointerId) { return this.capturedPointers.has(pointerId); }
+    releasePointerCapture(pointerId) {
+        if (!this.capturedPointers.delete(pointerId)) return;
+        this.dispatchEvent({ type: "lostpointercapture", pointerId, timeStamp: this.lastEventTime ?? performance.now() });
+    }
+    getBoundingClientRect() { return { width: 1000 }; }
+    get firstElementChild() { return this.children[0] ?? null; }
+    get lastElementChild() { return this.children.at(-1) ?? null; }
+    querySelector(selector) {
+        const matches = (node) => selector.startsWith(".") ? node.className?.split(" ").includes(selector.slice(1)) :
+            selector.startsWith("[data-site-id=") ? node.dataset.siteId === selector.match(/"(.*)"/)[1] :
+                node.tagName === selector;
+        for (const child of this.children) {
+            if (matches(child)) return child;
+            const nested = child.querySelector(selector); if (nested) return nested;
+        }
+        return null;
+    }
+    cloneNode(deep = false) {
+        const clone = new FakeElement(); clone.hidden = this.hidden; clone.disabled = this.disabled;
+        clone.tabIndex = this.tabIndex; clone.textContent = this.textContent; clone.value = this.value;
+        clone.dataset = { ...this.dataset }; clone.attributes = new Map(this.attributes); clone.className = this.className;
+        if (deep) clone.append(...this.children.map((child) => child.cloneNode(true)));
+        return clone;
+    }
+}
+
+export function controllerFixture() {
+    const root = new FakeElement(); const actions = new FakeElement(root);
+    const ids = ["lander-scene-shell", "lander-scene", "lander-start", "lander-fuel", "lander-fuel-value",
+        "lander-fuel-gauge-fill", "lander-target-direction", "lander-controls", "lander-actions", "lander-exit",
+        "lander-launch", "lander-restart", "lander-status", "terrain-layer", "site-layer", "debris-layer", "mission-agent"];
+    const elements = Object.fromEntries(ids.map((id) => [id, new FakeElement(root)]));
+    elements["lander-actions"] = actions; elements["lander-exit"].parentElement = actions;
+    elements["lander-launch"].parentElement = actions; elements["lander-restart"].parentElement = actions;
+    elements["lander-start"].hidden = true; elements["lander-start"].disabled = true;
+    actions.hidden = true; elements["lander-exit"].disabled = true;
+    elements["lander-launch"].hidden = true; elements["lander-launch"].disabled = true;
+    elements["lander-restart"].hidden = true; elements["lander-restart"].disabled = true;
+    root.querySelector = (selector) => elements[selector.slice(1)] ?? FakeElement.prototype.querySelector.call(root, selector);
+    root.cloneNode = () => controllerFixture().root; root.elements = elements;
+    return { root, elements };
+}
+
+let controllerModule;
+export async function controllerClasses() {
+    if (!controllerModule) {
+        globalThis.Element = FakeElement;
+        globalThis.document = { activeElement: null, body: new FakeElement(), hidden: true,
+            addEventListener() {}, removeEventListener() {}, createElementNS: (_, name) => {
+                const element = new FakeElement(); element.tagName = name; return element;
+            }, querySelector: (selector) =>
+                selector === "#lander-scene" ? { namespaceURI: "http://www.w3.org/2000/svg" } : null };
+        globalThis.window = { addEventListener() {}, removeEventListener() {} };
+        globalThis.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+        globalThis.requestAnimationFrame = () => 1; globalThis.cancelAnimationFrame = () => {};
+        controllerModule = await import("../static/lander-game.js");
+    }
+    return controllerModule;
+}
+
+export function focusable(element) {
+    for (let current = element; current; current = current.parentElement) if (current.hidden) return false;
+    return !element.disabled;
+}
+
+export function descendantCount(element) {
+    return element.children.reduce((total, child) => total + 1 + descendantCount(child), 0);
+}
+
+export function animationHarness() {
+    let nextId = 1;
+    const callbacks = new Map();
+    return {
+        cancel(id) { callbacks.delete(id); },
+        get pending() { return callbacks.size; },
+        request(callback) { const id = nextId; nextId += 1; callbacks.set(id, callback); return id; },
+        step(timestamp) {
+            const scheduled = [...callbacks.values()]; callbacks.clear();
+            for (const callback of scheduled) callback(timestamp);
+        },
+        advance(from, to, interval = 1000 / 60) {
+            for (let timestamp = from + interval; timestamp <= to + 1e-9; timestamp += interval) this.step(timestamp);
+        },
+    };
+}

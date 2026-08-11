@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
+import { FakeElement, controllerClasses, controllerFixture, descendantCount, focusable } from "./lander-test-dom.mjs";
+
 import {
     ENGINE_ACCELERATION,
     MAX_THRUST_VECTOR,
@@ -44,7 +46,6 @@ import {
     STATIC_WORLD_SEED,
     corridorVertices,
     instantiateTemplateSite,
-    siteScaffoldPath,
     siteStructure,
     siteFoundationBottom,
     terrainSample,
@@ -89,117 +90,6 @@ function stepMany(pose, request, fuel, count) {
         reserve = result.thrust.fuel;
     }
     return { pose: current, fuel: reserve };
-}
-
-class FakeElement {
-    constructor(parentElement = null) {
-        this.parentElement = parentElement; this.hidden = false; this.disabled = false; this.tabIndex = -1;
-        this.textContent = ""; this.value = "0.0"; this.dataset = {}; this.attributes = new Map(); this.children = [];
-        this.setCount = 0;
-        this.listeners = new Map(); this.capturedPointers = new Set();
-        const properties = new Map();
-        this.style = { setProperty: (name, value) => properties.set(name, value),
-            getPropertyValue: (name) => properties.get(name) ?? "",
-            removeProperty: (name) => properties.delete(name), properties };
-    }
-    addEventListener(type, listener) {
-        const listeners = this.listeners.get(type) ?? [];
-        listeners.push(listener); this.listeners.set(type, listeners);
-    }
-    removeEventListener(type, listener) {
-        this.listeners.set(type, (this.listeners.get(type) ?? []).filter((candidate) => candidate !== listener));
-    }
-    dispatchEvent(event) {
-        event.target ??= this; event.currentTarget = this; this.lastEventTime = event.timeStamp;
-        event.composedPath ??= () => [this];
-        event.preventDefault ??= () => { event.defaultPrevented = true; };
-        for (const listener of [...(this.listeners.get(event.type) ?? [])]) listener(event);
-        return !event.defaultPrevented;
-    }
-    setAttribute(name, value) {
-        this.setCount += 1;
-        this.attributes.set(name, String(value));
-        if (name === "class") this.className = String(value);
-        if (name.startsWith("data-")) this.dataset[name.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = String(value);
-    }
-    removeAttribute(name) { this.attributes.delete(name); }
-    append(...nodes) { for (const node of nodes) { node.parentElement = this; this.children.push(node); } }
-    replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
-    replaceWith(node) { this.replacement = node; }
-    remove() { if (this.parentElement) this.parentElement.children = this.parentElement.children.filter((node) => node !== this); }
-    focus() { globalThis.document.activeElement = this; }
-    setPointerCapture(pointerId) { this.capturedPointers.add(pointerId); }
-    hasPointerCapture(pointerId) { return this.capturedPointers.has(pointerId); }
-    releasePointerCapture(pointerId) {
-        if (!this.capturedPointers.delete(pointerId)) return;
-        this.dispatchEvent({ type: "lostpointercapture", pointerId, timeStamp: this.lastEventTime ?? performance.now() });
-    }
-    getBoundingClientRect() { return { width: 1000 }; }
-    get firstElementChild() { return this.children[0] ?? null; }
-    get lastElementChild() { return this.children.at(-1) ?? null; }
-    querySelector(selector) {
-        const matches = (node) => selector.startsWith(".") ? node.className?.split(" ").includes(selector.slice(1)) :
-            selector.startsWith("[data-site-id=") ? node.dataset.siteId === selector.match(/"(.*)"/)[1] :
-                node.tagName === selector;
-        for (const child of this.children) {
-            if (matches(child)) return child;
-            const nested = child.querySelector(selector); if (nested) return nested;
-        }
-        return null;
-    }
-    cloneNode(deep = false) {
-        const clone = new FakeElement(); clone.hidden = this.hidden; clone.disabled = this.disabled;
-        clone.tabIndex = this.tabIndex; clone.textContent = this.textContent; clone.value = this.value;
-        clone.dataset = { ...this.dataset }; clone.attributes = new Map(this.attributes); clone.className = this.className;
-        if (deep) clone.append(...this.children.map((child) => child.cloneNode(true)));
-        return clone;
-    }
-}
-
-function controllerFixture() {
-    const root = new FakeElement(); const actions = new FakeElement(root);
-    const ids = ["lander-scene-shell", "lander-scene", "lander-start", "lander-fuel", "lander-fuel-value",
-        "lander-fuel-gauge-fill", "lander-target-direction", "lander-controls", "lander-actions", "lander-exit",
-        "lander-launch", "lander-restart", "lander-status",
-        "terrain-layer", "site-layer", "debris-layer", "mission-agent"];
-    const elements = Object.fromEntries(ids.map((id) => [id, new FakeElement(root)]));
-    elements["lander-actions"] = actions; elements["lander-exit"].parentElement = actions;
-    elements["lander-launch"].parentElement = actions;
-    elements["lander-restart"].parentElement = actions;
-    elements["lander-start"].hidden = true; elements["lander-start"].disabled = true;
-    actions.hidden = true; elements["lander-exit"].disabled = true;
-    elements["lander-launch"].hidden = true; elements["lander-launch"].disabled = true;
-    elements["lander-restart"].hidden = true; elements["lander-restart"].disabled = true;
-    root.querySelector = (selector) => elements[selector.slice(1)] ?? FakeElement.prototype.querySelector.call(root, selector);
-    root.cloneNode = () => controllerFixture().root;
-    root.elements = elements;
-    return { root, elements };
-}
-
-let controllerModule;
-async function controllerClasses() {
-    if (!controllerModule) {
-        globalThis.Element = FakeElement;
-        globalThis.document = { activeElement: null, body: new FakeElement(), hidden: true,
-            addEventListener() {}, removeEventListener() {}, createElementNS: (_, name) => {
-                const element = new FakeElement(); element.tagName = name; return element;
-            }, querySelector: (selector) =>
-                selector === "#lander-scene" ? { namespaceURI: "http://www.w3.org/2000/svg" } : null };
-        globalThis.window = { addEventListener() {}, removeEventListener() {} };
-        globalThis.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
-        globalThis.requestAnimationFrame = () => 1; globalThis.cancelAnimationFrame = () => {};
-        controllerModule = await import("../static/lander-game.js");
-    }
-    return controllerModule;
-}
-
-function focusable(element) {
-    for (let current = element; current; current = current.parentElement) if (current.hidden) return false;
-    return !element.disabled;
-}
-
-function descendantCount(element) {
-    return element.children.reduce((total, child) => total + 1 + descendantCount(child), 0);
 }
 
 test("9.0 engine physics, true gimbal, assist, input arbitration, and plumes match fixed vectors", () => {
@@ -271,10 +161,12 @@ test("award ratio starts at three, strictly decays, and remains above one", () =
     assert.equal(ratio, 1 + Number.EPSILON);
 });
 
-test("all nine copied route literals pass exactly two defensive replays", () => {
+test("all nine compact route literals begin at the reachable launch edge and pass defensive replays", () => {
     assert.equal(REFERENCE_TEMPLATES.length, 9);
     for (const template of REFERENCE_TEMPLATES) {
         assert.deepEqual(template.runs[0], [1, 90]);
+        assert.ok(template.runs.length <= 64);
+        assert.equal(template.combinationsEvaluated, 4);
         assert.ok(template.runs.reduce((total, run) => total + run[1], 0) <= 2880);
         close(template.demonstratedMinimum / FUEL_QUANTUM, Math.round(template.demonstratedMinimum / FUEL_QUANTUM));
         const proof = proveTemplate(template);
@@ -384,14 +276,22 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
             close(site.mast.top - site.mast.bottom, 3.2);
         }
     }
-    assert.ok(derived.routes.every((route) => route.combinationsEvaluated === 2));
+    assert.ok(derived.routes.every((route) => route.combinationsEvaluated === 4));
     for (const route of derived.routes) {
         for (const result of [route.success, route.smallerFailure]) {
             for (const value of Object.values(result.pose)) assert.equal(value, Number(value.toFixed(9)));
         }
     }
-    assert.deepEqual(derived.routes[0].runs.slice(0, 3), [[1, 90], [0, 1], [1, 20]]);
+    assert.ok(derived.routes.every((route) => route.runs.length <= 64 && route.runs[0][0] === 1 &&
+        route.runs[0][1] === 90));
     assert.equal(spawnSync(process.execPath, [tool, "--bogus"]).status, 2);
+
+    const authorityCopy = join(directory, "authority.json");
+    const authorityBytes = await readFile(fixture, "utf8"); await writeFile(authorityCopy, authorityBytes, "utf8");
+    const samePath = spawnSync(process.execPath,
+        [tool, "--geometry", geometry, "--output", authorityCopy, "--verify", authorityCopy], { encoding: "utf8" });
+    assert.equal(samePath.status, 2); assert.match(samePath.stderr, /must resolve to different paths/);
+    assert.equal(await readFile(authorityCopy, "utf8"), authorityBytes);
 
     const blockedGeometry = join(directory, "blocked-geometry.json");
     const blocked = JSON.parse(await readFile(geometry, "utf8"));
@@ -401,10 +301,52 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
         "--verify", fixture]).status, 1);
 
     const changedTool = join(directory, "changed-recipes.mjs");
-    const changedSource = (await readFile(tool, "utf8")).replace("[3,65,65]", "[3,1,1]");
+    const changedSource = (await readFile(tool, "utf8")).replace("[[1,90],[0,1],[1,20]", "[[1,89],[0,1],[1,20]");
     assert.notEqual(changedSource, await readFile(tool, "utf8"));
     await writeFile(changedTool, changedSource, "utf8");
     assert.equal(spawnSync(process.execPath, [changedTool, "--geometry", geometry, "--output", output]).status, 1);
+
+    const weakPrefixTool = join(directory, "weak-prefix.mjs");
+    const weakPrefixSource = (await readFile(tool, "utf8"))
+        .replace("[[1,90],[0,1],[1,20]", "[[2,90],[0,1],[1,20]")
+        .replace("if (canonicalBytes(reviewed[0]) !== canonicalBytes([1, 90, 90])) {", "if (false) {");
+    await writeFile(weakPrefixTool, weakPrefixSource, "utf8");
+    const rerunWeakPrefix = spawnSync(process.execPath,
+        [weakPrefixTool, "--geometry", geometry, "--output", output], { encoding: "utf8" });
+    assert.equal(rerunWeakPrefix.status, 1);
+    assert.match(rerunWeakPrefix.stderr, /first request must exceed the launch threshold/);
+
+    const fixedOnlyTool = join(directory, "fixed-only.mjs");
+    const fixedOnlySource = (await readFile(tool, "utf8")).replaceAll("left + 1", "left").replaceAll("right + 1", "right");
+    await writeFile(fixedOnlyTool, fixedOnlySource, "utf8");
+    const fixedOnly = spawnSync(process.execPath, [fixedOnlyTool, "--geometry", geometry, "--output", output], { encoding: "utf8" });
+    assert.equal(fixedOnly.status, 1); assert.match(fixedOnly.stderr, /two independently ranged phases|finite recipe budget/);
+
+    const postContactTool = join(directory, "post-contact-ranges.mjs");
+    const familySource = `const rangedAttitudeFamily = (prefix, left, separator, right, suffix) => [
+    ...fixedPhases(prefix),
+    [3, left, left + 1],
+    ...fixedPhases([separator]),
+    [3, right, right + 1],
+    ...fixedPhases(suffix),
+];`;
+    const postContactFamily = `const rangedAttitudeFamily = (prefix, left, separator, right, suffix) => [
+    ...fixedPhases(prefix), [3, left, left], ...fixedPhases([separator]), [3, right, right], ...fixedPhases(suffix),
+    [0, 1, 2], [1, 1, 1], [0, 1, 2],
+];`;
+    const postContactSource = (await readFile(tool, "utf8")).replace(familySource, postContactFamily);
+    assert.notEqual(postContactSource, await readFile(tool, "utf8"));
+    await writeFile(postContactTool, postContactSource, "utf8");
+    const postContact = spawnSync(process.execPath,
+        [postContactTool, "--geometry", geometry, "--output", output], { encoding: "utf8" });
+    assert.equal(postContact.status, 1); assert.match(postContact.stderr, /needs distinct safe outcomes/);
+
+    const excessivePhasesTool = join(directory, "excessive-phases.mjs");
+    const excessivePhasesSource = (await readFile(tool, "utf8")).replace("MAX_RECIPE_PHASES = 64", "MAX_RECIPE_PHASES = 8");
+    await writeFile(excessivePhasesTool, excessivePhasesSource, "utf8");
+    const excessivePhases = spawnSync(process.execPath,
+        [excessivePhasesTool, "--geometry", geometry, "--output", output], { encoding: "utf8" });
+    assert.equal(excessivePhases.status, 1); assert.match(excessivePhases.stderr, /invalid recipe phase count/);
 
     const obstructedWorldTool = join(directory, "obstructed-world.mjs");
     const obstructedWorldSource = (await readFile(tool, "utf8")).replace(
@@ -456,6 +398,14 @@ test("the old route-78 target crossing is rejected by the exact landing envelope
         platformTop: 0, platformBottom: -0.35, clearanceKnots: current.clearanceKnots };
     assert.throws(() => proveTemplate(current, { seed: 1, originSite, targetSite,
         terrainVertices: [[4.8,-0.8],[72,50],[73.2,-0.8],[82.8,-0.8],[100,-0.8]] }), /Route proof mismatch/);
+});
+
+test("production route proof rejects a weak or inexact launch prefix before collision replay", () => {
+    const template = REFERENCE_TEMPLATES[0];
+    assert.throws(() => proveTemplate({ ...template, runs: [[2, 90], ...template.runs.slice(1)] }),
+        /must begin with exact \[1,90\] launch request/);
+    assert.throws(() => proveTemplate({ ...template, runs: [[1, 89], ...template.runs.slice(1)] }),
+        /must begin with exact \[1,90\] launch request/);
 });
 
 test("safe target top is inclusive and epsilon excess is unsafe", () => {
@@ -809,7 +759,6 @@ test("static and dynamic scaffold, battery, signal, and collider geometry stay i
     assert.ok(staticSupport);
     const support = group.querySelector(".site-scaffold");
     assert.equal(support.attributes.get("d"), staticSupport[1]);
-    assert.equal(support.attributes.get("d"), siteScaffoldPath(active));
     const left = active.platformLeft * 10; const right = active.platformRight * 10;
     const top = 548 - active.platformTop * 10; const bottom = 548 - active.platformBottom * 10;
     const structure = siteStructure(active);
