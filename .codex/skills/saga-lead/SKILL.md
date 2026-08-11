@@ -23,8 +23,8 @@ below are subagent work; the role itself is not.
 - The lead seeds child efforts (FRDs plus settled constraints), reviews their PRs, and keeps the
   ledger honest. The lead never edits a child effort's implementation or its lead-owned artifacts
   (the seeded FRD included, once its seeding PR merges and ownership transfers per the `sdd` skill);
-  findings and direction flow through PR comments and the message-passing convention in the `sdd`
-  skill.
+  findings and recommendations flow through PR comments and the message-passing convention in the
+  `sdd` skill, and work is authorized only by the operator's authenticated direction.
 
 ## Watch child efforts; review without being asked
 
