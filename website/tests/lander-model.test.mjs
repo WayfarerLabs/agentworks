@@ -480,6 +480,15 @@ test("closed unsafe geometry catches slopes, platform equality, solid riser, mas
     assert.equal(classifySweptContact(base, earlierUnsafe, laterTop).cause, "noc");
 });
 
+test("collision uses exact retained 10 metre terrain and rejects the stale fallback seam", () => {
+    const model = createRun({ seed: 1 });
+    assert.ok(model.terrainVertices.some(([x, y]) => x === 10 && y === 6.055567677598447));
+    const cornerPose = { x: 10, y: 5.8, vx: 0, vy: 0, angle: 0, angularVelocity: 0 };
+    assert.equal(classifySweptContact(model, cornerPose, cornerPose).cause, "terrain");
+    assert.throws(() => classifySweptContact({ ...model, terrainVertices: null }, cornerPose, cornerPose),
+        /requires retained terrain vertices/);
+});
+
 test("safe landing creates next target, adds uncapped award, and begins service", () => {
     let model = createRun({ seed: 1 });
     const target = model.retainedSites[0];

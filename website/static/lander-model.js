@@ -11,7 +11,6 @@ import {
     selectTemplate,
     siteFoundationBottom,
     STATIC_WORLD_SEED,
-    terrainHeightAt,
     terrainVerticesForWindow,
 } from "./lander-world.js";
 
@@ -247,14 +246,14 @@ export function createPreflightModel() {
 export function createRun({ seed, reducedMotion = false } = {}) {
     const runSeed = normalizeSeed(seed);
     const firstSite = createFirstSite(runSeed);
-    return {
+    return updateRetention({
         state: "flying", seed: runSeed, reducedMotion, missionSeconds: 0, completedSites: 0,
         awardRatio: 3, pose: initialPose(), commanded: { ...ZERO }, fuel: 30,
         generatorCursor: 1, retainedChunks: retainedChunkIndexes(0), retainedSites: [firstSite],
         activeSiteId: null, targetSiteId: 0, targetRouteProof: null, touchdownPose: null,
         sequenceSeconds: 0, agent: null, nocStage: 0, checkpoint: null, failureCause: null,
         crashOrdinal: 0, crash: null, status: "Mission underway.", launchCleared: false,
-    };
+    });
 }
 
 export function createFlightModel(options = {}) {
@@ -348,14 +347,8 @@ function polygonDistanceSquared(left, right) {
 }
 
 function terrainSegments(model, bounds) {
-    let vertices = model.terrainVertices;
-    if (!vertices) {
-        const first = Math.floor((((bounds.left + bounds.right) / 2) - 10) / 4);
-        vertices = Array.from({ length: 7 }, (_, index) => {
-            const x = (first + index) * 4;
-            return [x, terrainHeightAt(model.seed, x)];
-        });
-    }
+    const vertices = model.terrainVertices;
+    if (!vertices) throw new TypeError("Collision classification requires retained terrain vertices");
     const segments = [];
     for (let index = 1; index < vertices.length; index += 1) {
         const left = { x: vertices[index - 1][0], y: vertices[index - 1][1] };
