@@ -28,6 +28,7 @@ import {
     mixDigitalInput,
     mixEngineRequests,
     nextAwardRatio,
+    platformRiserBounds,
     plumeForThrust,
     pointerEngineRequests,
     proveTemplate,
@@ -42,6 +43,8 @@ import {
     instantiateTemplateSite,
     siteFoundationBottom,
     terrainSample,
+    terrainPath,
+    terrainVerticesForRange,
     terrainVerticesForWindow,
 } from "../static/lander-world.js";
 
@@ -654,6 +657,31 @@ test("a rapid reused pointer supersedes the old pulse and ignores its stale dead
     controller.destroy();
 });
 
+test("an overdue pulse ends at its deadline before a reused pointer starts", async () => {
+    const { LanderGameController } = await controllerClasses();
+    const fixture = controllerFixture(); const controller = new LanderGameController(fixture.root);
+    controller.model = createRun({ seed: 1 });
+    const shell = fixture.elements["lander-scene-shell"];
+    shell.dispatchEvent({ type: "pointerdown", pointerId: 7, isPrimary: true, button: 0,
+        clientX: 100, clientY: 50, timeStamp: 0 });
+    shell.dispatchEvent({ type: "pointerup", pointerId: 7, isPrimary: true, button: 0,
+        clientX: 102, clientY: 50, timeStamp: 20 });
+    const delayedTimer = controller.pulseTimer;
+    shell.dispatchEvent({ type: "pointerdown", pointerId: 7, isPrimary: true, button: 0,
+        clientX: 200, clientY: 50, timeStamp: 200 });
+    assert.deepEqual(controller.clock.queue.slice(-2).map(({ timestamp, left, right, token }) =>
+        ({ timestamp, left, right, token })), [
+        { timestamp: 140, left: 0, right: 0, token: null },
+        { timestamp: 200, left: 0.72, right: 0.72, token: 2 },
+    ]);
+    assert.equal(controller.pointer.token, 2); assert.equal(controller.pulseTimer, null);
+    assert.notEqual(delayedTimer, controller.pulseTimer);
+    controller.completePointerPulse(1, 140, 200);
+    assert.equal(controller.pointer.token, 2);
+    assert.deepEqual(controller.pointerInput, { left: 0.72, right: 0.72 });
+    controller.destroy();
+});
+
 test("live reduced-motion changes persist into crash behavior in both directions", async () => {
     const { LanderGameController } = await controllerClasses();
     const fixture = controllerFixture(); const controller = new LanderGameController(fixture.root);
@@ -738,7 +766,13 @@ test("static and dynamic support, battery, shelf, and riser geometry stay identi
     const left = active.platformLeft * 10; const right = active.platformRight * 10;
     const top = 548 - active.platformTop * 10; const bottom = 548 - active.platformBottom * 10;
     const shelf = 548 - active.foundationBottom * 10;
-    assert.ok(support.attributes.get("d").startsWith(`M${left} ${bottom}H${right}V${shelf}H${left}Z`));
+    const riser = platformRiserBounds(active);
+    assert.deepEqual(riser, { left: active.platformLeft, right: active.platformRight,
+        bottom: active.platformTop - 0.8, top: active.platformBottom });
+    assert.equal(support.attributes.get("d").match(/^M[^M]+Z/)[0],
+        `M${riser.left * 10} ${548 - riser.top * 10}H${riser.right * 10}` +
+        `V${548 - riser.bottom * 10}H${riser.left * 10}Z`);
+    assert.equal(shelf, 548 - riser.bottom * 10);
     const riserPose = { x: active.center, y: active.foundationBottom + 0.2,
         vx: 0, vy: 0, angle: 180, angularVelocity: 0 };
     assert.equal(classifySweptContact(model, riserPose, riserPose).cause, "riser");
@@ -842,11 +876,19 @@ test("retention and DOM reconciliation change only at bounded window keys", asyn
     const { LanderGameController } = await controllerClasses();
     const fixture = controllerFixture(); const controller = new LanderGameController(fixture.root);
     controller.model = model; controller.render();
-    const terrainPath = fixture.elements["terrain-layer"].children[0];
-    const writes = terrainPath.setCount;
+    const terrainNode = fixture.elements["terrain-layer"].children[0];
+    const writes = terrainNode.setCount;
     controller.model = updateRetention({ ...model, pose: { ...model.pose, x: model.pose.x + 1 } });
     controller.render();
-    assert.equal(terrainPath.setCount, writes);
+    assert.equal(terrainNode.setCount, writes);
+    const crossing = Object.freeze([[0, 2], [40, 4], [64, 4], [100, 3]].map(Object.freeze));
+    controller.model = { ...model, terrainVertices: crossing, retainedChunks: [0, 1], retainedSites: [],
+        retentionKey: "crossing-shelf" };
+    controller.render();
+    assert.deepEqual(fixture.elements["terrain-layer"].children.map((node) => node.attributes.get("d")), [
+        terrainPath(terrainVerticesForRange(crossing, 0, 50)),
+        terrainPath(terrainVerticesForRange(crossing, 50, 100)),
+    ]);
     controller.model = changed; controller.render();
     assert.notEqual(controller.worldWindowKey, key);
     controller.root.style.setProperty("--crash-x", "900px");

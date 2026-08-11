@@ -367,6 +367,11 @@ function belowTerrain(hull, segment) {
     });
 }
 
+export function platformRiserBounds(site) {
+    return Object.freeze({ left: site.platformLeft, right: site.platformRight,
+        bottom: site.platformTop - 0.8, top: site.platformBottom });
+}
+
 function unsafeFeatures(model, pose, target, ignoredTopSiteId = null) {
     const features = [];
     for (const site of model.retainedSites) {
@@ -382,12 +387,12 @@ function unsafeFeatures(model, pose, target, ignoredTopSiteId = null) {
             features.push({ cause: "platform", priority: 2,
                 polygon: rectangle(site.platformLeft, site.platformRight, site.platformBottom, site.platformTop) });
         }
-        const padBase = site.platformTop - 0.8;
+        const riser = platformRiserBounds(site);
         features.push({ cause: "riser", priority: 2,
-            polygon: rectangle(site.platformLeft, site.platformRight, padBase, site.platformBottom) });
+            polygon: rectangle(riser.left, riser.right, riser.bottom, riser.top) });
         const buildingLeft = site.platformRight + 2;
         const buildingRight = buildingLeft + 7;
-        const foundationBottom = site.foundationBottom ?? padBase;
+        const foundationBottom = site.foundationBottom ?? riser.bottom;
         const roof = site.platformTop + 7.2;
         features.push({ cause: "noc", priority: 1,
             polygon: rectangle(buildingLeft, buildingRight, foundationBottom, roof) });

@@ -153,15 +153,13 @@
 
 #mission-left-engine {
     opacity: var(--left-plume-opacity);
-    transform: translate(0, 401px) rotate(var(--thrust-vector-angle)) scale(1, var(--left-plume-scale))
-        translate(0, -401px);
+    transform: rotate(var(--thrust-vector-angle)) scale(1, var(--left-plume-scale));
     transform-origin: 82px 401px;
 }
 
 #mission-right-engine {
     opacity: var(--right-plume-opacity);
-    transform: translate(0, 401px) rotate(var(--thrust-vector-angle)) scale(1, var(--right-plume-scale))
-        translate(0, -401px);
+    transform: rotate(var(--thrust-vector-angle)) scale(1, var(--right-plume-scale));
     transform-origin: 158px 401px;
 }
 
@@ -290,11 +288,11 @@
 @keyframes agw-preflight-cue {
     0%,
     100% {
-        transform: translate(0, 401px) scale(1, 0.08) translate(0, -401px);
+        transform: scale(1, 0.08);
     }
 
     50% {
-        transform: translate(0, 401px) scale(1, 0.28) translate(0, -401px);
+        transform: scale(1, 0.28);
     }
 }
 

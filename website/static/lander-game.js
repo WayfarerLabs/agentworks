@@ -289,7 +289,8 @@ export class LanderGameController {
             event.preventDefault();
             const timestamp = eventTime(event);
             if (this.completedPointer) {
-                this.completePointerPulse(this.completedPointer.token, this.completedPointer.deadline, timestamp);
+                const { token, deadline } = this.completedPointer;
+                this.completePointerPulse(token, deadline, Math.min(timestamp, deadline));
             }
             const token = ++this.pointerToken;
             this.pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, currentX: event.clientX,

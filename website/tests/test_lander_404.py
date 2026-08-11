@@ -85,6 +85,38 @@ def contrast(first: str, second: str) -> float:
     return (light + 0.05) / (dark + 0.05)
 
 
+def transformed_origin(
+    transform: str,
+    origin: tuple[float, float],
+    replacements: dict[str, str],
+) -> tuple[float, float]:
+    """Execute the SVG transform list against its CSS transform origin."""
+    for variable, value in replacements.items():
+        transform = transform.replace(f"var({variable})", value)
+    point = [0.0, 0.0]
+    functions = re.findall(r"([a-z]+)\(([^)]*)\)", transform)
+    for name, source in reversed(functions):
+        values = [
+            float(value.removesuffix("px").removesuffix("deg"))
+            for value in re.split(r"[,\s]+", source.strip())
+        ]
+        if name == "translate":
+            point[0] += values[0]
+            point[1] += values[1] if len(values) > 1 else 0
+        elif name == "scale":
+            point[0] *= values[0]
+            point[1] *= values[1] if len(values) > 1 else values[0]
+        elif name == "rotate":
+            radians = math.radians(values[0])
+            point = [
+                point[0] * math.cos(radians) - point[1] * math.sin(radians),
+                point[0] * math.sin(radians) + point[1] * math.cos(radians),
+            ]
+        else:
+            raise AssertionError(f"unsupported transform function: {name}")
+    return origin[0] + point[0], origin[1] + point[1]
+
+
 GLOBAL_OBJECT = r"(?:\bwindow\b|\bglobalThis\b)"
 
 
@@ -396,6 +428,45 @@ class StaticDocumentTests(unittest.TestCase):
         powered_rule = self.css.split('.lander-site[data-power="on"] .antenna-signal {', 1)[1].split("}", 1)[0]
         self.assertIn("opacity: 1", powered_rule)
         self.assertNotIn("animation", powered_rule)
+
+    def test_engine_transforms_keep_both_nozzle_anchors_fixed(self) -> None:
+        engines = {
+            "#mission-left-engine": ((82.0, 401.0), "--left-plume-scale"),
+            "#mission-right-engine": ((158.0, 401.0), "--right-plume-scale"),
+        }
+        for selector, (origin, scale_variable) in engines.items():
+            block = re.search(
+                rf"{re.escape(selector)}\s*\{{([^}}]+)\}}",
+                self.css,
+                re.DOTALL,
+            )
+            self.assertIsNotNone(block)
+            transform = re.search(r"transform:\s*([^;]+);", block[1], re.DOTALL)
+            declared_origin = re.search(
+                r"transform-origin:\s*([\d.]+)px\s+([\d.]+)px",
+                block[1],
+            )
+            self.assertIsNotNone(transform)
+            self.assertIsNotNone(declared_origin)
+            self.assertEqual(tuple(map(float, declared_origin.groups())), origin)
+            for angle in (-18, 18):
+                for scale in (0.08, 0.5, 1):
+                    actual = transformed_origin(
+                        transform[1],
+                        origin,
+                        {
+                            "--thrust-vector-angle": f"{angle}deg",
+                            scale_variable: str(scale),
+                        },
+                    )
+                    self.assertAlmostEqual(actual[0], origin[0])
+                    self.assertAlmostEqual(actual[1], origin[1])
+        cue = self.css.split("@keyframes agw-preflight-cue {", 1)[1].split(
+            "@keyframes agw-target-cue", 1
+        )[0]
+        for transform in re.findall(r"transform:\s*([^;]+);", cue):
+            for origin, _ in engines.values():
+                self.assertEqual(transformed_origin(transform, origin, {}), origin)
 
     def test_input_clear_restores_zero_command_and_renders(self) -> None:
         clear_input = self.game.split("clearAllInput(timestamp) {", 1)[1].split("\n    }", 1)[0]
