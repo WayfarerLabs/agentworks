@@ -43,9 +43,9 @@ below are subagent work; the role itself is not.
   not materialize it.
 - Re-review on the draft-to-ready transition after an effort absorbs findings (the dev-process
   skill's handoff convention); poll ready PRs' heads against the last head you reviewed as the
-  missed-edge fallback. A review verdict stands until the operator resolves it: a directed fix round
-  or an accepted pushback. Track open verdicts in your reports; recording them in the ledger is
-  mutation and waits for direction.
+  missed-edge fallback. A review verdict stands until the operator resolves it: a directed fix
+  round, an accepted pushback, or an explicit accepted risk. Track open verdicts in your reports;
+  recording them in the ledger is mutation and waits for direction.
 - The lead reviews; the operator merges. Never merge a child PR. When GitHub refuses a formal review
   verdict (a PR owned by the same account), post the review as a comment with the verdict stated in
   the first line.

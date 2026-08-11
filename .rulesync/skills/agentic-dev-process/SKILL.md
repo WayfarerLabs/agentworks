@@ -252,10 +252,10 @@ ones.
   poll `gh pr list --label review-requested`.
 - **The author-owned `awaiting-direction` label means "at least one PR-level review has landed and
   awaits the operator's direction"** (operator convention, 2026-08-11). The author applies it on
-  posting a reading (section 7a) and drops it when the directed round starts; it composes with the
-  PR's existing state (a ready PR carrying it still claims merge intent). "At least one" is literal:
-  never a completion claim, no lane skips a head because another reviewed it first, and there is no
-  consolidation owner because the operator is the consolidator.
+  posting a reading (section 7a) and drops it once direction has disposed every open reading; it
+  composes with the PR's existing state (a ready PR carrying it still claims merge intent). "At
+  least one" is literal: never a completion claim, no lane skips a head because another reviewed it
+  first, and there is no consolidation owner because the operator is the consolidator.
 - **A handoff is the unit of PR-level review, defined exactly.** A handoff is a discrete,
   machine-visible event where the author presents an exact head for review, with three required
   components: (1) a pushed head that is complete on its own terms (green, no mid-flight partials),
@@ -332,11 +332,13 @@ stop. Lanes finish at different times, so more reviews will land on the same hea
 reading, promptly, and the label stays on. Going quiet after the first review is the failure mode
 here.
 
-A fix round starts only on the operator's direction through their authenticated channel: drop the
-label, go draft, do what was directed and nothing more, push, and post a round comment citing the
-direction; the citation is what makes an overgrown round visible. The boundary is the channel, not
-the reviewer: anything published waits for direction, whoever produced it, while your own private
-reviews (section 5) keep their fix loop.
+A fix round starts only on the operator's direction through their authenticated channel: go draft,
+do what was directed and nothing more, push, and post a round comment citing the direction; the
+citation is what makes an overgrown round visible. The label comes off only when every reading has a
+disposition (a directed fix, an accepted pushback, or an explicit accepted risk); a round that
+leaves any finding undirected keeps it on. The boundary is the channel, not the reviewer: anything
+published waits for direction, whoever produced it, while your own private reviews (section 5) keep
+their fix loop.
 
 ## 8. Escalate the big stuff; otherwise keep moving
 
