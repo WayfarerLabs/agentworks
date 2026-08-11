@@ -1,7 +1,6 @@
 # Plan: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander final tuning implementation
-  review-clean, operator Chrome and Edge acceptance pending
+- Status: Interim implementation complete; continuous Lander Phase 4I artifact review in progress
 - Date: 2026-08-07
 - Last revised: 2026-08-10
 - FRD: `frd.md`
@@ -103,10 +102,11 @@ Operator evidence:
   beside each elevated three-lander-width pad, carried fuel and consumable cans, offscreen-next
   cues, stronger physics, vacuum crash presentation, last-pad restart, and a decaying multiplier on
   a demonstrated route allowance. This deliberately expands the optional first-release surprise to
-  R21-R23 without making PR #439's reviewed site merge-readiness depend on the redesign. The final
-  derivation evaluates 45 finite candidates for each of nine templates, 405 total, and runtime
-  performs only the selected template's two proof replays; it is not the earlier up-to-two-million
-  runtime-search concept questioned at the design checkpoint.
+  R21-R23 without making PR #439's reviewed site merge-readiness depend on the redesign. The initial
+  constructive pass evaluated 45 finite candidates for each of nine templates; the final Phase 4H
+  recipe evaluates 81 per template, 729 total, and runtime performs only the selected template's two
+  proof replays. Neither is the earlier up-to-two-million runtime-search concept questioned at the
+  design checkpoint.
 - 2026-08-09: with operator approval, repository Pages is enabled with GitHub Actions as its source
   at the default project URL and HTTPS enforcement on. The automatically created `github-pages`
   environment uses custom deployment-branch policies and has exactly one policy, branch `main`; no
@@ -617,7 +617,7 @@ and every regenerated route/world fixture are exact, reviewed, and browser-accep
       materially lower steering axial thrust, and one visibly elevated pad/NOC scaffold structure.
       Pin the exact new Lander and 404 copy plus the clean battery and symmetric network-signal
       direction.
-- [ ] Delegate and lead-review an exact LLD amendment that pins gauge semantics and geometry,
+- [x] Delegate and lead-review an exact LLD amendment that pins gauge semantics and geometry,
       deployment banner ownership, launch-ready state/input/restart behavior, fuel preservation,
       player-reachable proof prefix, vector-force targets, platform/scaffold collision and
       rendering, battery/signal geometry and timing, route/world regeneration, DOM bounds, and
