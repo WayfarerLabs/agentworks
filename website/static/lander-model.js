@@ -112,6 +112,8 @@ export const REFERENCE_TEMPLATES = freeze(ROUTES.map((row, index) => routeRecord
 const STEP_MILLISECONDS = STEP_SECONDS * 1000;
 const HULL = Object.freeze([[-1.6, 0], [1.6, 0], [1.6, 6.5], [-1.6, 6.5]]);
 const ZERO = Object.freeze({ left: 0, right: 0, vectorAngle: 0 });
+const STRAIGHT_ENGINE_REQUEST = 0.72;
+const STRAIGHT_COLLECTIVE_TOTAL = STRAIGHT_ENGINE_REQUEST * 2;
 
 export function normalizeDegrees(degrees) {
     return ((((degrees + 180) % 360) + 360) % 360) - 180;
@@ -134,15 +136,21 @@ export function plumeForThrust(thrust) {
     return { scaleY: 0.08 + 0.92 * command, opacity: 0.25 + 0.75 * command };
 }
 
+export function collectiveRequestForSteer(steer, turningTotal, turnDifferential) {
+    const normalized = clamp(steer, -1, 1);
+    const total = STRAIGHT_COLLECTIVE_TOTAL -
+        (STRAIGHT_COLLECTIVE_TOTAL - turningTotal) * Math.abs(normalized);
+    const difference = turnDifferential * normalized;
+    return { left: (total + difference) / 2, right: (total - difference) / 2 };
+}
+
 export function mixDigitalInput(held) {
     const collective = Boolean(held.Space || held.ArrowUp);
     const left = Boolean(held.ArrowLeft || held.KeyH);
     const right = Boolean(held.ArrowRight || held.KeyL);
     const steer = left === right ? 0 : left ? -1 : 1;
     if (collective) {
-        if (steer < 0) return { left: 0.4125, right: 0.7875 };
-        if (steer > 0) return { left: 0.7875, right: 0.4125 };
-        return { left: 0.72, right: 0.72 };
+        return collectiveRequestForSteer(steer, TURNING_TOTAL, TURN_DIFFERENTIAL);
     }
     if (steer < 0) return { left: 0, right: TURN_DIFFERENTIAL };
     if (steer > 0) return { left: TURN_DIFFERENTIAL, right: 0 };
@@ -160,9 +168,7 @@ export function mixEngineRequests(keyboard, pointer) {
         const total = TURN_DIFFERENTIAL * Math.abs(steer);
         return { left: steer > 0 ? total : 0, right: steer < 0 ? total : 0 };
     }
-    const base = 0.72 - 0.12 * Math.abs(steer);
-    const halfDifference = 0.1875 * steer;
-    return { left: base + halfDifference, right: base - halfDifference };
+    return collectiveRequestForSteer(steer, TURNING_TOTAL, TURN_DIFFERENTIAL);
 }
 
 export function pointerEngineRequests(displacement, sceneWidth) {
@@ -170,8 +176,7 @@ export function pointerEngineRequests(displacement, sceneWidth) {
     const fullBiasDistance = Math.max(56, sceneWidth * 0.18);
     const magnitude = clamp((Math.abs(displacement) - deadZone) / (fullBiasDistance - deadZone), 0, 1);
     const bias = Math.sign(displacement) * magnitude;
-    const base = 0.72 - 0.12 * Math.abs(bias);
-    return { left: base + 0.1875 * bias, right: base - 0.1875 * bias };
+    return collectiveRequestForSteer(bias, TURNING_TOTAL, TURN_DIFFERENTIAL);
 }
 
 export function effectiveThrust(requested, fuel, seconds = STEP_SECONDS, angularVelocity = 0) {

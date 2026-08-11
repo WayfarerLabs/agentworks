@@ -14,10 +14,13 @@ import {
     REFERENCE_TEMPLATES,
     ROUTE_DIGESTS,
     STEP_SECONDS,
+    TURN_DIFFERENTIAL,
+    TURNING_TOTAL,
     advanceMissionSequence,
     advanceSimulation,
     classifySweptContact,
     checkpointPoseForContact,
+    collectiveRequestForSteer,
     createCueState,
     createPreflightModel,
     createRun,
@@ -196,6 +199,8 @@ function descendantCount(element) {
 test("9.0 engine physics, true gimbal, assist, input arbitration, and plumes match fixed vectors", () => {
     assert.equal(ENGINE_ACCELERATION, 9);
     assert.equal(MAX_THRUST_VECTOR, 18);
+    assert.equal(TURNING_TOTAL, 1.2);
+    assert.equal(TURN_DIFFERENTIAL, 0.375);
     const pose = { x: 10, y: 30, vx: 0, vy: 0, angle: 0, angularVelocity: 0 };
     const gravity = stepMany(pose, { left: 0, right: 0 }, 30, 120);
     close(gravity.pose.y, 28.4875); close(gravity.pose.vy, -3); close(gravity.fuel, 30);
@@ -234,7 +239,18 @@ test("9.0 engine physics, true gimbal, assist, input arbitration, and plumes mat
     assert.deepEqual(mixEngineRequests(mixDigitalInput({ Space: true }), pointer), pointer);
     assert.deepEqual(mixEngineRequests(mixDigitalInput({ ArrowLeft: true }), pointer),
         { left: 0.4125, right: 0.7875 });
-    assert.ok(pointer.left + pointer.right <= 1.44);
+    for (const command of [digitalRows[4][1], digitalRows[5][1], pointer,
+        pointerEngineRequests(-1000, 1000)]) {
+        close(command.left + command.right, TURNING_TOTAL);
+        close(Math.abs(command.left - command.right), TURN_DIFFERENTIAL);
+        assert.ok(command.left + command.right <= 1.44);
+    }
+    const halfSteer = pointerEngineRequests(95, 1000);
+    close(halfSteer.left + halfSteer.right, (1.44 + TURNING_TOTAL) / 2);
+    close(halfSteer.left - halfSteer.right, TURN_DIFFERENTIAL / 2);
+    const alternateAuthority = collectiveRequestForSteer(1, 1, 0.2);
+    close(alternateAuthority.left + alternateAuthority.right, 1);
+    close(alternateAuthority.left - alternateAuthority.right, 0.2);
     assert.deepEqual(plumeForThrust(0.5), { scaleY: 0.54, opacity: 0.625 });
 });
 
