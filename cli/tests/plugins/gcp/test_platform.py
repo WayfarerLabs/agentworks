@@ -385,8 +385,9 @@ def test_rendered_gcp_guide_teaches_safe_selected_zone_capacity_recovery() -> No
         load_config_fn=unavailable_config,
     ).markdown
 
-    assert "A definitive capacity failure names the selected zone" in rendered
-    assert "Retry later\nor select another compatible zone" in rendered
+    assert "A definitive zonal instance-capacity failure names the selected" in rendered
+    assert "selected zone.\nRetry later or select another compatible zone" in rendered
+    assert "A global capacity\nfailure says only to retry later" in rendered
     assert "inspect the named resource before retrying" in rendered
     assert "Provider\ndiagnostics and credential material are never rendered" in rendered
     assert "burstable `e2-small` and `e2-medium`" in rendered
@@ -710,7 +711,7 @@ def test_join_failure_rolls_back_and_exception_graph_is_secret_free(
             accelerators=[compute_v1.Accelerators(guest_accelerator_count=1, guest_accelerator_type="required")],
         ),
     ],
-    ids=("no-persistent-disk", "required-accelerator"),
+    ids=("present-zero-persistent-disk", "required-accelerator"),
 )
 def test_known_machine_incompatibility_stays_pre_mutation(
     monkeypatch: pytest.MonkeyPatch,
@@ -743,6 +744,7 @@ def test_residual_definitive_insert_rejection_rolls_back_and_stays_detached(
 
     assert type(caught.value) is GCEOperationError
     assert "e2-standard-2" in str(caught.value)
+    assert "IAM, quota, and request prerequisites first" in (caught.value.hint or "")
     assert "CPU-only Debian 12" in (caught.value.hint or "")
     assert "pd-balanced" in (caught.value.hint or "")
     assert cache.instances.resource is None

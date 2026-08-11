@@ -194,9 +194,10 @@ class GCEPlatform(VMPlatform):
         fixed-command stdin. The external IPv4 remains attached for outbound
         access but is read live and never persisted.
 
-        A definitive capacity failure names the selected zone. Retry later
-        or select another compatible zone. Indeterminate waits instead tell
-        the operator to inspect the named resource before retrying. Provider
+        A definitive zonal instance-capacity failure names the selected zone.
+        Retry later or select another compatible zone. A global capacity
+        failure says only to retry later. Indeterminate waits instead tell the
+        operator to inspect the named resource before retrying. Provider
         diagnostics and credential material are never rendered.
 
         The built-in catalog starts with burstable `e2-small` and `e2-medium`.
@@ -355,7 +356,6 @@ class GCEPlatform(VMPlatform):
             deny_ownership = insert_firewall_reconciled(
                 firewalls,
                 project_id=self.config.project_id,
-                zone=self.config.zone,
                 firewall=deny,
                 attempt=deny_attempt,
                 timeout=_OPERATION_TIMEOUT_SECONDS,
@@ -366,7 +366,6 @@ class GCEPlatform(VMPlatform):
             allow_ownership = insert_firewall_reconciled(
                 firewalls,
                 project_id=self.config.project_id,
-                zone=self.config.zone,
                 firewall=allow,
                 attempt=allow_attempt,
                 timeout=_OPERATION_TIMEOUT_SECONDS,
@@ -614,7 +613,6 @@ class GCEPlatform(VMPlatform):
             insert_firewall_reconciled(
                 firewalls,
                 project_id=identity.project_id,
-                zone=identity.zone,
                 firewall=route,
                 attempt=attempt,
                 timeout=_OPERATION_TIMEOUT_SECONDS,
@@ -624,7 +622,6 @@ class GCEPlatform(VMPlatform):
             result = delete_matching_firewall(
                 firewalls,
                 project_id=identity.project_id,
-                zone=identity.zone,
                 expected=route,
                 ownership=attempt.ownership,
                 timeout=_OPERATION_TIMEOUT_SECONDS,
@@ -711,7 +708,6 @@ class GCEPlatform(VMPlatform):
             result = delete_matching_firewall(
                 firewalls,
                 project_id=identity.project_id,
-                zone=identity.zone,
                 expected=expected,
                 ownership=FirewallOwnership(identity.allow_rule, identity.allow_rule_id),
                 timeout=_OPERATION_TIMEOUT_SECONDS,

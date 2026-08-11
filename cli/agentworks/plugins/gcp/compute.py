@@ -130,7 +130,8 @@ def verify_live_machine_type(
             f"site declares {selected.cpus} vCPU / {selected.memory_gib * 1024} MiB / {selected.arch}",
             hint="correct the machine_types entry rather than provisioning a different live shape",
         )
-    if int(machine.maximum_persistent_disks) == 0 or bool(machine.accelerators):
+    maximum_disks_is_present = _proto_field_is_present(machine, "maximum_persistent_disks")
+    if (maximum_disks_is_present and int(machine.maximum_persistent_disks) == 0) or bool(machine.accelerators):
         raise ConfigError(
             f"GCE machine type '{selected.type}' is incompatible with this platform's storage or accelerator contract",
             hint=(
@@ -140,6 +141,19 @@ def verify_live_machine_type(
             ),
         )
     return machine
+
+
+def _proto_field_is_present(message: Any, field_name: str) -> bool:
+    """Check scalar presence on either a proto-plus wrapper or protobuf."""
+    proto_plus_converter = getattr(type(message), "pb", None)
+    protobuf = proto_plus_converter(message) if callable(proto_plus_converter) else message
+    has_field = getattr(protobuf, "HasField", None)
+    if not callable(has_field):
+        return False
+    try:
+        return bool(has_field(field_name))
+    except ValueError:
+        return False
 
 
 def resolve_debian_image(

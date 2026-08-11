@@ -224,7 +224,6 @@ def rollback_partial_create(
     allow_result = delete_matching_firewall(
         firewalls,
         project_id=coordinates.project_id,
-        zone=coordinates.zone,
         expected=expected_allow,
         ownership=allow_ownership,
         timeout=timeout,
@@ -243,7 +242,6 @@ def rollback_partial_create(
         deny_result = delete_matching_firewall(
             firewalls,
             project_id=coordinates.project_id,
-            zone=coordinates.zone,
             expected=expected_deny,
             ownership=deny_ownership,
             timeout=timeout,

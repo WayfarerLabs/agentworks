@@ -127,15 +127,17 @@ the workload needs sustained two-vCPU capacity rather than short bursts.
 
 Before mutation, Agentworks verifies the selected live machine's declared CPU, memory, optional
 architecture, Persistent Disk capacity, and required accelerators. A machine with no Persistent Disk
-capacity or a required guest accelerator is outside the current CPU-only Debian 12 and `pd-balanced`
-boot-disk boundary and fails as a configuration error. This check uses provider fields, not the
-machine-type name.
+capacity explicitly reported by the provider, or a required guest accelerator, is outside the
+current CPU-only Debian 12 and `pd-balanced` boot-disk boundary and fails as a configuration error.
+An omitted capacity field remains unknown. This check uses provider fields, not the machine-type
+name.
 
 Compute Engine has no read-only validator for every machine-type and boot-disk pair. A remaining
 definitive `instances.insert` rejection therefore names the selected machine type and asks you to
-verify its CPU-only Debian 12 and `pd-balanced` compatibility, while Agentworks performs bounded
-rollback. It never renders the provider's message, code, or object. Future Hyperdisk support will be
-an additive storage profile; Agentworks does not infer it from a machine-series name.
+verify IAM, quota, and request prerequisites first, then its CPU-only Debian 12 and `pd-balanced`
+compatibility, while Agentworks performs bounded rollback. It never renders the provider's message,
+code, or object. Future Hyperdisk support will be an additive storage profile; Agentworks does not
+infer it from a machine-series name.
 
 ## Create and operate a VM
 
@@ -156,12 +158,13 @@ through fixed-command SSH stdin. The resulting VM row records the original canon
 source prefixes so later cleanup can reconstruct the create-time allow independently; it still does
 not store the VM's external IPv4.
 
-If Google Cloud reports insufficient capacity in the selected zone, Agentworks treats that completed
-operation as a definitive failure and rolls back the partial create. Retry later or select another
-zone that is compatible with the configured subnet, network, and machine type. This differs from an
-indeterminate wait: when Agentworks cannot establish the operation outcome, inspect the named
-resource before retrying. Agentworks does not render the provider's error message, details, or raw
-error code in either case.
+If Google Cloud reports insufficient zonal instance capacity, Agentworks treats that completed
+operation as a definitive failure, names the selected zone, and rolls back the partial create. Retry
+later or select another zone that is compatible with the configured subnet, network, and machine
+type. A global operation capacity failure says only to retry later and does not attribute the
+failure to the VM zone. This differs from an indeterminate wait: when Agentworks cannot establish
+the operation outcome, inspect the named resource before retrying. Agentworks does not render the
+provider's error message, details, or raw error code in either case.
 
 The external IPv4 is an outbound and recovery route, not standing inbound exposure. Agentworks reads
 it live after power transitions and never stores it. After Tailscale is ready, Agentworks closes the

@@ -189,13 +189,14 @@ def insert_instance_reconciled(
         wait_failure = exc
     except GCEOperationError:
         definitive_failure = GCEOperationError(
-            f"Google Cloud rejected instance '{instance.name}' while inserting selected machine type "
+            f"Google Cloud rejected instance '{instance.name}' while using selected machine type "
             f"'{selected_machine_type}'",
             entity_kind="gcp-instance",
             entity_name=str(instance.name),
             hint=(
-                f"verify that machine type '{selected_machine_type}' supports a CPU-only Debian 12 VM with a "
-                "'pd-balanced' boot disk, or choose a compatible machine_types entry"
+                "verify IAM, quota, and request prerequisites first; then verify that selected machine type "
+                f"'{selected_machine_type}' supports a CPU-only Debian 12 VM with a 'pd-balanced' boot disk, "
+                "or choose a compatible machine_types entry"
             ),
         )
 

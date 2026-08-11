@@ -409,7 +409,6 @@ def test_indeterminate_operation_reconciles_only_matching_resource_id_as_success
     assert insert_firewall_reconciled(
         client,
         project_id="project-a",
-        zone="us-central1-a",
         firewall=expected,
         attempt=attempt,
         timeout=17,
@@ -434,7 +433,6 @@ def test_wait_interrupt_leaves_operation_ownership_for_safe_rollback() -> None:
         insert_firewall_reconciled(
             client,
             project_id="project-a",
-            zone="us-central1-a",
             firewall=expected,
             attempt=attempt,
             timeout=17,
@@ -448,7 +446,6 @@ def test_wait_interrupt_leaves_operation_ownership_for_safe_rollback() -> None:
     result = delete_matching_firewall(
         rollback,
         project_id="project-a",
-        zone="us-central1-a",
         expected=expected,
         ownership=attempt.ownership,
         timeout=11,
@@ -468,7 +465,6 @@ def test_pre_response_timeout_retries_once_with_same_request_id() -> None:
     assert insert_firewall_reconciled(
         client,
         project_id="project-a",
-        zone="us-central1-a",
         firewall=expected,
         attempt=attempt,
         timeout=17,
@@ -485,7 +481,6 @@ def test_indeterminate_insert_absence_preserves_sanitized_timeout() -> None:
         insert_firewall_reconciled(
             client,
             project_id="project-a",
-            zone="us-central1-a",
             firewall=expected,
             attempt=FirewallInsertAttempt("allow", _REQUEST_ID),
             timeout=17,
@@ -507,7 +502,6 @@ def test_done_generic_failure_never_reconciles_matching_firewall_to_success() ->
         insert_firewall_reconciled(
             client,
             project_id="project-a",
-            zone="us-central1-a",
             firewall=expected,
             attempt=FirewallInsertAttempt("allow", _REQUEST_ID),
             timeout=17,
@@ -530,7 +524,6 @@ def test_done_capacity_firewall_failure_does_not_attribute_the_vm_zone() -> None
         insert_firewall_reconciled(
             client,
             project_id="project-a",
-            zone="us-central1-a",
             firewall=expected,
             attempt=FirewallInsertAttempt("allow", _REQUEST_ID),
             timeout=17,
@@ -556,7 +549,6 @@ def test_indeterminate_insert_mismatch_is_collision_and_never_deleted(observed: 
         insert_firewall_reconciled(
             client,
             project_id="project-a",
-            zone="us-central1-a",
             firewall=expected,
             attempt=FirewallInsertAttempt("allow", _REQUEST_ID),
             timeout=17,
@@ -574,7 +566,6 @@ def test_definite_already_exists_is_collision_without_shape_reconciliation() -> 
         insert_firewall_reconciled(
             client,
             project_id="project-a",
-            zone="us-central1-a",
             firewall=expected,
             attempt=FirewallInsertAttempt("allow", _REQUEST_ID),
             timeout=17,
@@ -597,7 +588,6 @@ def test_same_request_retry_already_exists_remains_collision() -> None:
         insert_firewall_reconciled(
             client,
             project_id="project-a",
-            zone="us-central1-a",
             firewall=expected,
             attempt=FirewallInsertAttempt("allow", _REQUEST_ID),
             timeout=17,
@@ -615,7 +605,6 @@ def test_definite_permission_failure_is_not_retried_or_shape_reconciled() -> Non
         insert_firewall_reconciled(
             client,
             project_id="project-a",
-            zone="us-central1-a",
             firewall=expected,
             attempt=FirewallInsertAttempt("allow", _REQUEST_ID),
             timeout=17,
@@ -641,7 +630,6 @@ def test_incomplete_or_wrong_operation_identity_is_never_owned(operation: _Opera
         insert_firewall_reconciled(
             client,
             project_id="project-a",
-            zone="us-central1-a",
             firewall=expected,
             attempt=attempt,
             timeout=17,
@@ -657,7 +645,6 @@ def test_matching_firewall_delete_proves_absence_and_mismatch_is_retained() -> N
     result = delete_matching_firewall(
         client,
         project_id="project-a",
-        zone="us-central1-a",
         expected=expected,
         ownership=FirewallOwnership("allow", "101"),
         timeout=11,
@@ -671,7 +658,6 @@ def test_matching_firewall_delete_proves_absence_and_mismatch_is_retained() -> N
     result = delete_matching_firewall(
         collision,
         project_id="project-a",
-        zone="us-central1-a",
         expected=expected,
         ownership=FirewallOwnership("allow", "101"),
         timeout=11,
@@ -694,7 +680,6 @@ def test_definitive_firewall_delete_wait_failure_still_accepts_verified_absence(
     result = delete_matching_firewall(
         client,
         project_id="project-a",
-        zone="us-central1-a",
         expected=expected,
         ownership=FirewallOwnership("allow", "101"),
         timeout=11,
@@ -712,7 +697,6 @@ def test_same_name_and_shape_but_different_resource_id_is_never_deleted() -> Non
     result = delete_matching_firewall(
         client,
         project_id="project-a",
-        zone="us-central1-a",
         expected=expected,
         ownership=FirewallOwnership("allow", "101"),
         timeout=11,
@@ -728,7 +712,6 @@ def test_rule_without_provider_ownership_is_indeterminate_and_never_deleted() ->
     result = delete_matching_firewall(
         client,
         project_id="project-a",
-        zone="us-central1-a",
         expected=expected,
         ownership=None,
         timeout=11,

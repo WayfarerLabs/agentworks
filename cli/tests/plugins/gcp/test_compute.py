@@ -127,6 +127,28 @@ def test_live_e2_micro_shape_accepts_omitted_provider_architecture() -> None:
     assert client.calls == [{"project": "project-a", "zone": "us-central1-a", "machine_type": "e2-micro"}]
 
 
+def test_omitted_maximum_persistent_disks_is_unknown_and_accepted() -> None:
+    machine = compute_v1.MachineType(
+        name="e2-standard-2",
+        guest_cpus=2,
+        memory_mb=8192,
+        architecture="X86_64",
+        accelerators=[],
+    )
+    selected = MachineTypeSelection(2, 8, "e2-standard-2", "x86_64")
+
+    assert compute_v1.MachineType.pb(machine).HasField("maximum_persistent_disks") is False
+    assert (
+        verify_live_machine_type(  # type: ignore[arg-type]
+            _Cache(**{"machine-types": _GetClient(machine)}),
+            RunContext(),
+            _CONFIG,
+            selected,
+        )
+        is machine
+    )
+
+
 @pytest.mark.parametrize(
     "machine",
     [
@@ -166,7 +188,7 @@ def test_live_machine_mismatch_fails_before_mutation(machine: compute_v1.Machine
             accelerators=[compute_v1.Accelerators(guest_accelerator_count=1, guest_accelerator_type="required-type")],
         ),
     ],
-    ids=("no-persistent-disk", "required-accelerator"),
+    ids=("present-zero-persistent-disk", "required-accelerator"),
 )
 def test_known_live_machine_incompatibility_is_actionable_detached_config_error(
     machine: compute_v1.MachineType,

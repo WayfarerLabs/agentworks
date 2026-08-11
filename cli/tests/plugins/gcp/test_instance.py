@@ -230,8 +230,11 @@ def test_residual_definitive_insert_rejection_has_fixed_machine_disk_guidance() 
 
     assert type(caught.value) is GCEOperationError
     assert "caller-authored-type" in str(caught.value)
+    assert "while using selected machine type" in str(caught.value)
+    assert "IAM, quota, and request prerequisites first" in (caught.value.hint or "")
     assert "CPU-only Debian 12" in (caught.value.hint or "")
     assert "pd-balanced" in (caught.value.hint or "")
+    assert (caught.value.hint or "").index("request prerequisites") < (caught.value.hint or "").index("CPU-only")
     assert [name for name, _kwargs in client.calls] == ["insert"]
     assert _SENTINEL not in f"{caught.value!s} {caught.value!r} {vars(caught.value)!r}"
     assert caught.value.__cause__ is None
