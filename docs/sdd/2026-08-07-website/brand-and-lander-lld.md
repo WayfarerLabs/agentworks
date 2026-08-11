@@ -29,16 +29,18 @@ it is zero at zero effective thrust. **Mission time** excludes hidden time. A **
 minimum** is the smallest fuel allowance, at the pinned fuel quantum, that completes one checked-in
 constructive reference schedule. It is not a global mathematical optimum over all possible controls.
 The **refuel ratio** for the one-indexed successfully powered base number `n` is exactly
-`ratio(n)=1+0.5^(n-1)`. The first successfully landed and powered base is `n=1`. The **departure
-reserve** is the exact uncapped model fuel present when an award establishes a leg. It is immutable
-for that leg and supplies only the visual gauge denominator; it is not a tank capacity. A **refuel
-projection** is the model-owned, 300 ms presentation record that starts at the pre-award gauge level
-while the already-committed fuel award remains authoritative. An **installed agent** is the visual
-projection of a retained site's existing `nocStage`/`powered` state into its existing NOC-entry
-path; it is not a second site-state field or world node. **Launch-ready** means the centered
-powered-pad checkpoint is holding the lander at rest before the player's first effective collective
-command. It is represented by `state="launching"` with `launchStarted=false`, not by another mission
-state or a controller-owned flag.
+`ratio(n)=1+0.5^(n-1)`. The first successfully landed and powered base is `n=1`. That mathematical
+sequence approaches `1` from above; section 10.3 pins its exact JavaScript Number projection,
+including the finite-precision value `1` from `n=54` onward. The **departure reserve** is the exact
+uncapped model fuel present when an award establishes a leg. It is immutable for that leg and
+supplies only the visual gauge denominator; it is not a tank capacity. A **refuel projection** is
+the model-owned, 300 ms presentation record that starts at the pre-award gauge level while the
+already-committed fuel award remains authoritative. An **installed agent** is the visual projection
+of a retained site's existing `nocStage`/`powered` state into its existing NOC-entry path; it is not
+a second site-state field or world node. **Launch-ready** means the centered powered-pad checkpoint
+is holding the lander at rest before the player's first effective collective command. It is
+represented by `state="launching"` with `launchStarted=false`, not by another mission state or a
+controller-owned flag.
 
 The semantic 404, breadcrumb home link, and dedicated Lander shell remain independent of the game
 subtree. Both shells render the same game fragment.
@@ -495,8 +497,10 @@ two uniform chords `M L T H Q M L B H Q`. Append the 13 supporting posts in incr
 `M X_i T L X_(i+1) B`; for odd `i`, `M X_i B L X_(i+1) T`. The first diagonal therefore descends
 from the top-left, and successive diagonals alternate across all 12 equal `1.55 m` bays without
 resetting at the platform or NOC boundaries. This is one path with exactly 27 straight member
-segments: two chords, 13 posts, and 12 diagonals. There are no perimeter boxes, crossing X pairs, or
-visual seams between regions.
+segments: two chords, 13 posts, and 12 diagonals. The chords plus the two endpoint posts
+intentionally form one continuous outer perimeter around the complete `18.6 m` structure. There are
+no separate regional perimeter boxes, crossing X pairs, or visual seams at the former platform,
+connector, or NOC boundaries.
 
 Set `fill="none"`, `stroke="#4b4e55"`, `stroke-width="2"`, `stroke-linecap="butt"`, and
 `stroke-linejoin="round"`; CSS cannot supply a fill, background, or sky-colored rectangle. The
@@ -712,7 +716,7 @@ non-restartable error result applies. Normal timing is:
 7. The active platform top is ignored only while `launchCleared=false` and the integrated velocity
    is upward. Once both transformed feet are strictly above `platformTop+0.05 m`, set
    `launchCleared=true` and return `flying` in that same step without resetting pose, fuel, command,
-   clock, or input. Platform sides, underside, scaffold, connector, NOC, mast, and terrain are never
+   clock, or input. Platform sides, underside, the unified truss, NOC, mast, and terrain are never
    ignored.
 
 Reduced motion skips the 3,500 ms service presentation and atomically applies can collection, award,
@@ -963,7 +967,7 @@ crossing proceeds to the safe-envelope test below, preserving ordinary pad landi
 top hit.
 
 Classify the earliest contact, with unchanged equal-time precedence: NOC or mast, non-top platform
-surface or scaffold, terrain, then target platform top. The target top is safe only when both
+surface or unified truss, terrain, then target platform top. The target top is safe only when both
 transformed feet are on its closed `9.6 m` span, neither hull side intersects an end, `vy<=0`, and
 these inclusive limits hold at contact:
 
@@ -1209,15 +1213,13 @@ carried excess and of the stored refuel ratio.
 
 For one-indexed successfully powered base number `n`, define the exact term **refuel ratio** by
 `ratio(n)=1+0.5^(n-1)`. Base `n=1` is the first base the player safely lands on and powers, so the
-exact sequence begins `2, 1.5, 1.25, 1.125, 1.0625, ...` and approaches `1` from above. Compute each
-term directly from the base ordinal with this deterministic O(1) pure function; never advance by
-multiplying or subtracting from the prior ratio:
+exact mathematical sequence begins `2, 1.5, 1.25, 1.125, 1.0625, ...` and approaches `1` from above.
+Runtime computes each term directly from the base ordinal with the exact JavaScript Number
+expression below. It is deterministic O(1); never advance by multiplying or subtracting from the
+prior ratio:
 
 ```js
 export function refuelRatioForBase(baseNumber) {
-  if (!Number.isSafeInteger(baseNumber) || baseNumber < 1) {
-    throw new RangeError("baseNumber must be a positive safe integer");
-  }
   return 1 + 0.5 ** (baseNumber - 1);
 }
 
@@ -1227,6 +1229,13 @@ if (model.refuelRatio !== ratio) invariantError();
 const award = demonstratedMinimum * ratio;
 const nextRatio = refuelRatioForBase(poweredBaseNumber + 1);
 ```
+
+The model's existing progress invariant supplies integer `baseNumber>=1`; the ratio function adds no
+arbitrary-precision representation, epsilon floor, cap, or artificial base-count bound. IEEE-754
+rounding is part of the contract: `ratio(52)=1.0000000000000004`, `ratio(53)=1.0000000000000002`,
+`ratio(54)=1`, and `ratio(100)=1`. The runtime sequence is non-increasing and never below `1`; it
+rounds exactly to `1` beginning at `n=54`, even though the mathematical sequence remains strictly
+above `1` and approaches it asymptotically.
 
 START stores `refuelRatioForBase(1)=2`. On safe contact for base `n`, validate the stored ratio,
 compute `award=demonstratedMinimum*refuelRatio`, add that award to carried excess without rounding
@@ -1716,6 +1725,7 @@ human-reviewed rather than asserted. Every schedule includes an explicit final c
 | Outside-shell keys    | Active mission; target header, breadcrumb, and descendants with Escape, `r`, and flight keys | no prevention, focus/state/action/input/model change; outside keyup is also inert after focusout clears input    |
 | Controls lines        | 320 px and 400%-equivalent layouts; keyboard child then touch child                          | one client rect per line; every relevant `scrollWidth<=clientWidth`; Exit in row 2; no authored-copy assertion   |
 | Refuel ratio          | Base `n=1,2,3,4`; test minimum `8`; carried fuel `7,20,5,4`                                  | ratios `2,1.5,1.25,1.125`; awards `16,12,10,9`; reserves `23,32,15,13`; next ratios direct from `n+1`            |
+| Ratio precision       | Direct Number formula at bases `52,53,54,100`                                                | `1.0000000000000004`, `1.0000000000000002`, `1`, `1`; never below `1`, no bound or arbitrary precision           |
 | Safe inclusive edge   | Target top; `vx=2,vy=-3.2,angle=-15,omega=22`                                                | safe contact                                                                                                     |
 | Unsafe epsilon        | Four contacts, each increasing exactly one boundary magnitude by `1e-9`                      | each is unsafe; mirrored absolute-value signs and positive-`vy` rejection are independently covered              |
 | Swept unsafe equality | Hull only grazes terrain/truss/NOC/mast between step endpoints                               | closed 0.02 m expansion detects it; no visual tunneling                                                          |
@@ -1726,7 +1736,7 @@ human-reviewed rather than asserted. Every schedule includes an explicit final c
 | Catalog quantum       | Every checked-in reference template                                                          | allowance `minimum` matches literal safe contact; `minimum-0.05` matches literal failure                         |
 | Short-tap capture     | Down at `0`, eligible up at `20`; release synchronously emits lost capture                   | token/deadline exist before release; pulse remains through `139.999`, ends once at `140`; later loss is no-op    |
 | Input overflow        | 65 alternating edges before one step at 30, 60, and 120 Hz                                   | queue becomes one next-step physical-state snapshot; all frame schedules produce the same result                 |
-| Long run              | 100 successful deterministic sites                                                           | O(1) direct ratio formula; bounded nodes/edges; reserve equals initial plus awards minus all burn                |
+| Long run              | 100 successful deterministic sites                                                           | ratios are non-increasing and `>=1`; O(1) direct formula; bounded nodes/edges; exact reserve accounting          |
 
 World tests pin complete JSON descriptors and route-proof digests for seeds `1`, `0x12345678`, and
 `0xffffffff`, plus an independently authored static-scene vector. The fixtures begin with these
@@ -1923,8 +1933,11 @@ Refuel-ratio mutations independently reject a first powered-base number other th
 other than `1+0.5^(n-1)`, the former `3` start, the former `.82` recurrence or epsilon floor,
 iteration over prior bases, using the post-increment ordinal for the current award, replacing rather
 than adding to carried fuel, rounding/capping the award or reserve, advancing more than once,
-recomputing checkpoint authority from post-crash state, and any effect on the demonstrated minimum,
-route/failure literals, or route digests.
+recomputing checkpoint authority from post-crash state, arbitrary precision, an artificial
+base-count bound, a runtime value below `1`, failure to round to exact `1` at `n=54`, or any effect
+on the demonstrated minimum, route/failure literals, or route digests. Exact mutation vectors pin
+`n=52,53,54,100` and prove the 100-site sequence is non-increasing and never below `1`; they do not
+require it to remain strictly above `1`.
 
 ## 16. Traceability
 
