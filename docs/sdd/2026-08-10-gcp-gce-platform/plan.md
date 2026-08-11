@@ -305,7 +305,7 @@ the VM template's general `snap` field. This effort ships no AWS CLI resource or
       charter. Retain the pre-existing AWS EC2 platform unchanged.
 - [x] Preserve the reviewed GCP apt-source/package correction and the general install-command author
       guidance. Add no AWS replacement, prose tests, or install-command tests.
-- [ ] Run focused/full gates and both required reviews; resolve every valid finding.
+- [x] Run focused/full gates and both required reviews; resolve every valid finding.
 - [ ] Push the final exact head, post one signed handoff, and use the next draft-to-ready transition
       to request the GCP-only live charter above.
 
