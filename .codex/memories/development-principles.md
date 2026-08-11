@@ -143,17 +143,16 @@ missing docstring, correct the stale doc, fix the comment that lies, add the mis
 word. Keep such fixes small and separable so review can tell the opportunistic cleanup from the
 task's substance, but do not walk past problems just because they are not yours.
 
-Two lines bound this. The first is machinery: "nicer" covers naming, docs, comments, and dictionary
-words, never a change to shared logic or to a contract your effort was not chartered to touch. A
-defect in machinery with consumers beyond your effort gets recorded and routed to its owner rather
-than fixed in passing, however obvious the fix looks; the `agentic-dev-process` skill's section 1a
-says how, and why fixing it opportunistically costs that contract its design pass.
+Two lines bound this. The first is size and risk: a defect big enough to want its own design pass,
+or one whose fix would change a shared contract rather than honor it, gets filed with its root cause
+and call sites instead of fixed in passing. The `agentic-dev-process` skill's section 1a gives the
+three conditions.
 
-The second is ownership, and it is the harder line. "Nicer" covers your own effort's code and docs.
-Another SDD's artifacts, and lead-owned artifacts of your own effort (FRD, HLA, plan, and its
-checkboxes) when you are not the lead, are not yours to tidy no matter how obvious the fix looks;
-the `sdd` skill's ownership rule governs them. Flag what you found to whoever owns it, in the terms
-you would have used to fix it, and leave the file alone.
+The second is ownership. "Nicer" covers your own effort's code and docs. Another SDD's artifacts,
+and lead-owned artifacts of your own effort (FRD, HLA, plan, and its checkboxes) when you are not
+the lead, are not yours to tidy no matter how obvious the fix looks; the `sdd` skill's ownership
+rule governs them. Flag what you found to whoever owns it, in the terms you would have used to fix
+it, and leave the file alone.
 
 ### 10. Ask questions; push back; then commit
 

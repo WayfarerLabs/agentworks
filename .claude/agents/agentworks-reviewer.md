@@ -475,32 +475,19 @@ improvement; a stronger pin is the same mistake one size larger. Second, when a 
 read the prose and say whether it is right, because review is now the only thing standing behind it.
 Do not credit wording assertions as evidence of quality, and do not ask for them.
 
-### 12b. A finding outside the change's machinery is a discovery, not a task
+### 12b. Defects the change did not set out to fix
 
-When you find a real defect that the change did not cause and cannot fix without touching shared
-machinery, report it as out of scope and say where it belongs. Do not ask this change to fix it. The
-test is whether the fix touches machinery this effort owns, and **reviewed scope settles that
-first**: an effort whose FRD, HLA, or plan deliberately includes a cross-cutting contract change
-owns it, so read the artifacts before reasoning from consumers. Only when reviewed scope leaves it
-open do the two questions decide, namely whether the bug reproduces with the change reverted and
-whether the fix alters behavior for consumers who never asked for this effort. The
-`agentic-dev-process` skill's section 1a states the standard.
+When you find a real defect outside the work under review, weigh it against section 1a's three
+conditions (the main work requires it, it fits existing contracts and conventions, it is unlikely to
+break what works today). If the author folded such a fix in, review it on its merits like any other
+change. If it fails a condition, recommend an issue rather than a round: asking for it is how scope
+grows, and a review that expands the contract spends the author's rounds on semantics nobody signed
+up to judge.
 
-Separating who fixes it does not settle whether this change can merge. Those are two questions:
-
-- **Who fixes it:** the owning effort, in its own change.
-- **Whether this merges now:** if the change's own acceptance, definition of done, or safe operation
-  depends on that fix, it waits or stacks on it, and you say so as a Blocking finding. A documented
-  known issue is an honest state for a merge only when the change is correct and safe without the
-  fix.
-
-Report the discovery under `Out-of-scope discoveries` (see Output format) with its root cause,
-evidence, and call sites, so the follow-on effort starts from your work. That section carries no
-disposition weight; a merge-blocking dependency belongs in `Blocking`.
-
-This applies to your own findings with full force: a review round that expands the contract is worse
-than a missed nit, because it spends the author's rounds on semantics no one signed up to judge, and
-the resulting change ships without the design pass its real consumers deserved.
+Report it under `Out-of-scope discoveries` (see Output format) with root cause, evidence, and call
+sites, so whoever picks it up starts from your work. That section carries no disposition weight. If
+the change cannot merge safely until the defect is fixed, that is a separate **Blocking** finding
+citing the entry.
 
 ### 13. Environment diversity: review for machines and configurations that are not this one
 

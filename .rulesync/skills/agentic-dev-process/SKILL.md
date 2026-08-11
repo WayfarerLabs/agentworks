@@ -38,51 +38,26 @@ Before touching anything, decide how big this is, because the size picks the tra
   contract or is hard to undo, lighter for a localized change that follows an existing pattern. If
   still unsure, ask (the `ask-questions` rule).
 
-## 1a. Findings that belong to someone else
+## 1a. Fixes you may fold in
 
-An effort in flight will surface defects outside its own scope, and the strongest pull in this whole
-process is to fix what you just found while the context is loaded. Resist it. Outside of bug fixes
-for the work in question, **modifications to core logic and shared contracts are their own
-efforts**, even when your effort is the thing that found the bug.
+An effort in flight will surface defects outside the work it set out to do. You **may** fold such a
+fix in when all three of these hold:
 
-The test is not "did we find it here." It is: **does the fix touch machinery this effort owns?**
+1. **The main work requires it.** Not "we are in here anyway", but the feature does not work or ship
+   without it.
+2. **It fits existing contracts and conventions.** A fix _within_ a contract qualifies; a change
+   _to_ one does not, however careful your call-site sweep.
+3. **It is unlikely to break anything that works today.** Judge that by what the change invites
+   next, not only by today's callers: a predicate that starts accepting paths invites path inputs
+   nobody has written yet.
 
-Ownership is settled first by **reviewed scope**: what this effort's FRD, HLA, and plan deliberately
-include, as approved. An effort chartered to change a cross-cutting contract owns that change, and
-"it is shared" does not hand approved work to someone else. Read the artifacts before reasoning any
-further.
+"May" carries weight. Filing an issue with the root cause, evidence, and call sites is always a
+legitimate answer, and the better one when the fix is large, wants a design pass, or would swamp the
+diff. Fail any condition and that is the answer: file it, say so plainly in the PR, and move on. A
+documented known issue is an honest state for a merge.
 
-When reviewed scope does not settle it, two questions almost always do:
-
-- **Would this bug reproduce with this effort reverted?** If yes, it is pre-existing and not yours.
-- **Does the fix change behavior for consumers who never asked for this effort?** If yes, it needs
-  its own design pass, because those consumers are not represented in your review.
-
-Shared machinery, for those two questions, means anything with consumers beyond this effort: a
-predicate or contract every plugin declares against, a transport every platform uses, a base class,
-a shared manifest schema, an error taxonomy. A fix landing there that your charter never claimed is
-a discovery, not a task.
-
-One caveat before the mechanics, because it is the half that gets dropped: **separating who fixes it
-does not decide whether your change can merge.** If your own acceptance criteria, definition of
-done, or safe operation depend on that fix, you wait for it or stack on it, and you say so plainly.
-A documented known issue is an honest state for a merge only when your change is correct and safe
-without the fix.
-
-What to do, and it is cheap: file the finding with the root cause, the evidence, and the call-site
-inventory you already have in your head, so the follow-on effort starts where you left off rather
-than from scratch. If the work is already written, move the commits to their own branch and revert
-them here; re-homing costs a rebase, while merging them costs the shared contract its design pass.
-Then say plainly in the PR that the defect is known, tracked, and out of scope.
-
-The cost of getting this wrong is not abstract. A cloud-platform PR that absorbed a shared
-install-predicate fix grew a shell-compatibility matrix, reddened CI on an unrelated host-inventory
-assumption, and spent several review rounds on semantics no reviewer had signed up to judge, while
-the platform work sat finished and waiting.
-
-This applies symmetrically to reviewers. Do not ask an effort to fix a defect outside its machinery;
-asking for it is how the scope grows, and a review round that expands the contract is the failure
-mode section 5's finding stance exists to prevent.
+If your own acceptance or safe operation depends on a fix you cannot fold in, wait for the effort
+that owns it or stack on it, and say so rather than merging around it.
 
 ## 2. Large efforts: spec with SDD
 
@@ -185,19 +160,16 @@ The stance toward any finding, from the reviewer or from automated review (secti
 
 - Push back on findings that are genuinely incorrect; a reviewer is not infallible, and a wrong
   finding followed blindly makes the code worse.
-- Otherwise, err on the side of fixing anything valid **within this effort's scope**, including the
-  minor and the merely-nicer.
-- Iterate until everyone is happy. Do not move on from a step with a live, unaddressed valid
-  in-scope finding hanging over it.
-- A valid finding in machinery this effort does not own is not fixed here: it is recorded and routed
-  per section 1a. That is not moving on with a finding hanging over you, because the finding has an
-  owner and a home. The exception is when your own acceptance or safety depends on that fix, which
-  section 1a treats as a wait-or-stack decision rather than a licence to fix it inline.
+- Otherwise, err on the side of fixing anything valid, including the minor and the merely-nicer.
+- Iterate until everyone is happy. Do not move on from a step with a live, unaddressed valid finding
+  hanging over it.
+- For a finding outside the work itself, section 1a's three conditions decide whether you fold the
+  fix in or file it.
 
 Who applies the fixes follows ownership: findings on **code** loop back to the implementing dev
 subagent (it keeps the context and the authorship, and the review-then-revise loop stays intact),
 while findings on a lead-owned artifact (the plan, an LLD the lead is finalizing) are the lead's to
-apply directly. A finding on machinery outside this effort routes to its owner instead of to either.
+apply directly.
 
 ### Periodically review the process docs as a whole
 
