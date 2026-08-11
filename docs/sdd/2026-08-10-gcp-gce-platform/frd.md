@@ -9,9 +9,9 @@ compatible. This effort also corrects the shared secret-value boundary so struct
 retain their ordinary multiline representation while line-oriented consumers keep enforcing their
 own transport constraints.
 
-The implementation is a new opt-in `gcp` system plugin publishing `vm-platform/gcp-gce` and an
-optional guest-side Google Cloud CLI install command. The plugin name identifies the vendor bundle;
-the capability name identifies Compute Engine rather than reserving all future GCP mechanisms. The
+The implementation is a new opt-in `gcp` system plugin publishing `vm-platform/gcp-gce` and optional
+guest-side Google Cloud CLI apt resources. The plugin name identifies the vendor bundle; the
+capability name identifies Compute Engine rather than reserving all future GCP mechanisms. The
 existing `aws` vendor plugin also gains an optional guest-side AWS CLI install command in the same
 publication correction.
 
@@ -25,21 +25,24 @@ its own capability contract, model, and name.
 
 The shipped `gcp` system plugin is installed but disabled by default. It is a vendor bundle, not a
 one-service architectural boundary: this release contributes one contract-v2 VM platform named
-`gcp-gce` and one bundled `system-install-command` named `gcloud-cli`, while future GCP capability
-implementations may join the same plugin under their own service-specific names. Disabled
-contributions remain present with normal system-plugin provenance and tell the operator to enable
-plugin `gcp` before use.
+`gcp-gce`, one bundled `apt-source` named `google-cloud-cli`, and one bundled `apt-package` named
+`gcloud-cli`, while future GCP capability implementations may join the same plugin under their own
+service-specific names. Disabled contributions remain present with normal system-plugin provenance
+and tell the operator to enable plugin `gcp` before use.
 
-The `gcloud-cli` declarable installs the current Google Cloud CLI in a guest VM only when a template
-references it. GCE provisioning itself remains SDK-driven and does not require `gcloud`; the guest
-installer neither installs nor authenticates the operator host CLI.
+The `gcloud-cli` apt package installs the current Google Cloud CLI in a guest VM only when a
+template references it. It depends on the `google-cloud-cli` apt source, so Agentworks's existing
+declarative apt machinery owns the signed key, repository stanza, and package installation rather
+than an install-command string. GCE provisioning itself remains SDK-driven and does not require
+`gcloud`; the guest package neither installs nor authenticates the operator host CLI.
 
 The existing `aws` vendor plugin contributes one optional `system-install-command` named `aws-cli`.
-It installs the current AWS CLI v2 in a guest VM only when a template references it. EC2
-provisioning remains boto3-driven and does not require `aws`; the installer does not run
-`aws configure`, create a guest credential profile, or alter operator-host authentication. Bundling
-both cloud CLIs follows the established Azure CLI precedent and the operator's explicit request for
-consistent optional guest tooling across shipped cloud-provider plugins.
+Its payload is the one-line package-manager command `sudo snap install aws-cli --classic`, guarded
+by the existing `test_file` completion check for `/snap/bin/aws`; snapd owns automatic refresh. This
+uses AWS's officially supported snap rather than embedding or reimplementing AWS's installer. It
+requires a guest with working snap support. EC2 provisioning remains boto3-driven and does not
+require `aws`; the command does not run `aws configure`, create a guest credential profile, or alter
+operator-host authentication.
 
 ### R2: declared site schema
 
@@ -207,26 +210,26 @@ precisely without replacing a more important primary failure.
 ### R10: operator discovery and documentation
 
 `resource list`, `describe-kind`, schema emission, guide topics, samples, and plugin enablement show
-the new plugin, `gcp-gce` platform, and both `gcloud-cli` and `aws-cli` install commands from their
-authoritative descriptors and manifests. Permanent docs teach both auth modes, the default-network
-behavior, the service-account secret format, provisioning exposure, required IAM/API setup, an exact
-downloaded-key-to-secret workflow without compaction, optional guest CLI use, AWS guest-tooling
-boundaries, and recovery. Shared secret docs teach multiline values as ordinary opaque content and
-locate line-safety enforcement at the consumers that need it. Shell completion remains
-registry-driven; tests prove the new names are discoverable without a bespoke completion branch.
+the new plugin, `gcp-gce` platform, `google-cloud-cli` apt source, `gcloud-cli` apt package, and
+`aws-cli` install command from their authoritative descriptors and manifests. Permanent docs teach
+both auth modes, the default-network behavior, the service-account secret format, provisioning
+exposure, required IAM/API setup, an exact downloaded-key-to-secret workflow without compaction,
+optional guest CLI use, AWS guest-tooling boundaries, and recovery. Shared secret docs teach
+multiline values as ordinary opaque content and locate line-safety enforcement at the consumers that
+need it. Shell completion remains registry-driven; tests prove the new names are discoverable
+without a bespoke completion branch.
 
 ### R11: verification and live acceptance
 
-Offline tests cover registration, multi-contribution plugin publication, `gcloud-cli` and `aws-cli`
-payloads plus disabled/enabled recipe gating, schema discrimination/defaults, secret references,
-auth failure, client caching, size/image selection, request retention, fixed stdin, lifecycle,
-rollback, interrupts, cleanup survivors, exposure hooks, output/log/exception non-reflection, guide
-rendering, startup-script size enforcement, indeterminate firewall inserts, pre-classic policy
-ordering, priority-zero allow/deny conflicts, exact LF/CRLF service-account JSON through the real
-secret resolver, NUL rejection, sink-local line-safety failures for environment, Git credential,
-Proxmox HTTP-header, and Tailscale consumers, and full repository gates. Create and Tailscale rekey
-tests prove an incompatible line-oriented secret fails before any DB, provider, daemon, or
-durable-material mutation.
+Offline tests cover registration, GCP plugin publication, schema discrimination/defaults, secret
+references, auth failure, client caching, size/image selection, request retention, fixed stdin,
+lifecycle, rollback, interrupts, cleanup survivors, exposure hooks, output/log/exception
+non-reflection, guide rendering, startup-script size enforcement, indeterminate firewall inserts,
+pre-classic policy ordering, priority-zero allow/deny conflicts, exact LF/CRLF service-account JSON
+through the real secret resolver, NUL rejection, sink-local line-safety failures for environment,
+Git credential, Proxmox HTTP-header, and Tailscale consumers, and full repository gates. Create and
+Tailscale rekey tests prove an incompatible line-oriented secret fails before any DB, provider,
+daemon, or durable-material mutation.
 
 Provider-shaped operation tests distinguish DONE HTTP 503 failures carrying the exact structured
 `ZONE_RESOURCE_POOL_EXHAUSTED` code, DONE failures carrying an unknown or malformed structured
@@ -254,8 +257,8 @@ gate.
   framework. This correction keeps the existing string-valued resolver and moves only the over-broad
   CR/LF rejection to the line-oriented consumers that require it.
 - A provider-specific Agentworks CLI command family or imperative site configuration. The bundled
-  guest-side `gcloud-cli` and `aws-cli` install commands are ordinary plugin data, not new
-  Agentworks command families.
+  guest-side `gcloud-cli` apt resources and `aws-cli` install command are ordinary plugin data, not
+  new Agentworks command families.
 - Supporting a project without the Compute Engine API, target network, or required IAM permissions
   by mutating around the missing prerequisite.
 - Projects where an organization/folder firewall policy terminal-allows ingress before VPC rules or
@@ -265,14 +268,14 @@ gate.
 
 ## Definition of done
 
-`vm-platform/gcp-gce` and `system-install-command/gcloud-cli` are normal disabled-by-default
-contributions of the extensible vendor plugin `gcp`, and `system-install-command/aws-cli` is an
-equivalent contribution of the existing `aws` vendor plugin; both auth modes and the reviewed schema
-are enforced; create is complete-or-raise with credential-free retained metadata and one fixed-stdin
-join; lifecycle and rollback are provider-shaped and secret-free; neither guest CLI is a
-provisioning or authentication dependency; the exact downloaded multiline service-account JSON is
-accepted without rewriting while line-oriented sinks fail safely; docs, samples, guide, and
-completions agree; offline gates and reviews pass; operator-gated live acceptance leaves zero
-residue; the SDD is locked truthfully.
+`vm-platform/gcp-gce`, `apt-source/google-cloud-cli`, and `apt-package/gcloud-cli` are normal
+disabled-by-default contributions of the extensible vendor plugin `gcp`, and
+`system-install-command/aws-cli` is a one-command snap contribution of the existing `aws` vendor
+plugin; both auth modes and the reviewed schema are enforced; create is complete-or-raise with
+credential-free retained metadata and one fixed-stdin join; lifecycle and rollback are
+provider-shaped and secret-free; neither guest CLI is a provisioning or authentication dependency;
+the exact downloaded multiline service-account JSON is accepted without rewriting while
+line-oriented sinks fail safely; docs, samples, guide, and completions agree; offline gates and
+reviews pass; operator-gated live acceptance leaves zero residue; the SDD is locked truthfully.
 
 -- agw-ns-gcp-platform (effort lead)

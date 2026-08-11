@@ -188,21 +188,19 @@ cannot protect against hostile delete/recreate replacement and is not represente
   publishes a signed apt repository for supported Debian and Ubuntu releases and installs the
   `google-cloud-cli` package. That package provides `gcloud`, `gsutil`, and `bq`; extra components
   such as `kubectl` remain separate packages.
-- The same guide documents `CLOUDSDK_SKIP_PY_COMPILATION=1` for resource-constrained VMs and
-  automated environments to reduce installation time, trading installation speed for minor
-  interactive startup overhead. This effort adopts it because install commands have a 120-second
-  execution bound.
+- Agentworks already models third-party signed repositories and their packages as `apt-source` and
+  `apt-package` resources. Those declarables fit the supported Debian guest without embedding the
+  repository setup as a shell script.
 
 Decisions:
 
-- publish one `gcloud-cli` system install command from the `gcp` plugin, using `test_exec: gcloud`;
+- publish one `google-cloud-cli` apt source and one dependent `gcloud-cli` apt package from the
+  `gcp` plugin;
 - bundle the optional guest CLI for parity with the established Azure plugin surface and because the
   operator explicitly requested consistent cloud-provider guest tooling;
-- install the current apt package from Google's signed repository rather than pinning a stale CLI
-  version or using an interactive user installer;
-- overwrite the exact repository source and reconcile the keyring safely on every incomplete retry,
-  so an interrupted attempt cannot accumulate duplicate source entries or fail on an existing key;
-- keep the command optional and guest-scoped: GCE operations continue to use the Python SDK, and
+- use the existing apt declarables rather than embedding repository, key, or installer logic in a
+  command string;
+- keep the resources optional and guest-scoped: GCE operations continue to use the Python SDK, and
   ambient mode may obtain host ADC through any supported ADC source while optional host recovery
   tooling remains separate from this declarable;
 - do not bundle optional Google Cloud components until a concrete template requires one.
@@ -211,39 +209,23 @@ Decisions:
 
 - AWS's
   [CLI v2 Linux install guide](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
-  publishes current official ZIP archives for 64-bit `x86_64` and `aarch64` Linux systems. The
-  bundled installer accepts explicit install and launcher directories, and `--update` reconciles an
-  existing installation.
-- The same guide publishes detached signatures, the armored AWS CLI Team public key, and full
-  fingerprint `FB5D B77F D5C1 18B8 0511 ADA8 A631 0ACC 4672 475C`. It documents signature
-  verification as optional for a manual install; this unattended VM-admin command makes it mandatory
-  and explicitly elevates only its privileged filesystem steps.
-- The standard layout installs under `/usr/local/aws-cli` and places the `aws` launcher in
-  `/usr/local/bin`. The base guest bootstrap already provides `curl` and `unzip`, so this declarable
-  does not need a separate package-manager repository.
+  identifies the `aws-cli` snap as an officially supported way to install the latest AWS CLI v2,
+  requires classic confinement, and states that snap automatically refreshes it. It is not the
+  appropriate method when an operator needs to pin a minor version.
+- `snap install` rejects an already-installed snap. The established `test_file` field can guard the
+  command with the snap-owned `/snap/bin/aws` launcher, while snapd owns subsequent automatic
+  refresh.
+- The existing install-command resource plus its completion check is sufficient for the literal
+  package-manager invocation. Reimplementing the vendor installer inside its `command` string adds
+  an unowned script and state machine where no product behavior requires one.
 
 Decisions:
 
-- publish one `aws-cli` system install command from the existing `aws` vendor plugin without the
-  ambiguous `test_exec: aws` probe, because AWS CLI v1 and v2 share the `aws` executable name;
-- keep the installer entirely inside that declared YAML resource and leave shared install-command
-  fields, runners, schema, and lifecycle state unchanged;
-- declare no completion predicates and use no command-owned installed-version fast path, so every
-  initialization and reinitialization performs the same verified install or update operation;
-- use the official installer's `--update` path for a complete owned managed layout, its
-  fresh-install path when managed state is absent, and an owned-layout reset plus fresh install when
-  managed state is incomplete; never remove a conflicting unowned launcher;
-- install under the reserved `/usr/local/lib/agentworks/aws-cli` namespace and recognize public-link
-  ownership only from the exact `/usr/local/bin/aws` and `aws_completer` symbolic-link targets into
-  that namespace; exact dangling links are owned, while regular files, directories, and links with
-  any other target are pre-mutation collisions rather than paths the command follows or deletes;
-- select the current official AWS CLI v2 archive by normalized guest architecture and fail clearly
-  on an unsupported architecture;
-- download the matching detached signature, import the reviewed AWS key into a private temporary
-  GnuPG home, require the exact full fingerprint, and verify the archive before extraction;
-- download and extract in a private temporary directory with cleanup on every exit, then use the
-  official installer's explicit directories and distinguish complete, absent, incomplete, and
-  unowned-collision states because same-version `--update` does not repair every partial layout;
+- publish one `aws-cli` system install command from the existing `aws` vendor plugin, containing
+  only `sudo snap install aws-cli --classic` and `test_file: /snap/bin/aws`;
+- embed no shell script, vendor key, download, extraction, filesystem-ownership, cleanup, or
+  version-management logic; the existing completion check guards reruns and snap owns refresh;
+- require working snap support in the guest and leave version pinning to a future explicit need;
 - keep the command optional and guest-scoped: EC2 operations continue to use boto3, and the command
   does not run `aws configure`, create a credential/profile file, or alter operator-host
   credentials;

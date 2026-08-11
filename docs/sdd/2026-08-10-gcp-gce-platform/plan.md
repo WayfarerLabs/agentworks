@@ -3,11 +3,12 @@
 ## Definition of done
 
 The disabled-by-default `gcp` vendor plugin publishes a contract-v2 `gcp-gce` platform and optional
-guest-side `gcloud-cli` install command, while the existing `aws` vendor plugin publishes an
-optional guest-side `aws-cli` install command; both auth modes are secret-source conforming; create
-is complete-or-raise with a credential-free retained request and one fixed-stdin join; neither CLI
-is a provisioning or authentication dependency; lifecycle, rollback, exposure, docs, offline gates,
-and operator-gated live acceptance are complete; the SDD is locked truthfully.
+guest-side `google-cloud-cli` apt source plus `gcloud-cli` apt package, while the existing `aws`
+vendor plugin publishes an optional guest-side `aws-cli` install command; both auth modes are
+secret-source conforming; create is complete-or-raise with a credential-free retained request and
+one fixed-stdin join; neither CLI is a provisioning or authentication dependency; lifecycle,
+rollback, exposure, docs, offline gates, and operator-gated live acceptance are complete; the SDD is
+locked truthfully.
 
 ## Phase 0: contract and schema gates
 
@@ -162,12 +163,13 @@ correction. The final evidence record and SDD lock still follow the passing live
       architecture, shared-CPU, disk-capacity presence, and accelerator fields, and prove the
       instance has no guest service account or OAuth scopes. Then delete it and query the project to
       prove zero instance, disk, firewall, and address residue.
-- [ ] In that bounded acceptance, select both `gcloud-cli` and `aws-cli`; verify both executables
-      are available in the guest, require `aws --version` to begin with `aws-cli/2.`, and verify no
-      authenticated Google account, AWS credential file, or AWS profile; rerun initialization to
-      prove both installers are idempotent; prove they created no guest authentication state; and
-      prove the operator's pre-existing host credential baseline is unchanged. Watch the existing
-      120-second install-command timeout explicitly during the `gcloud-cli` live pass.
+- [ ] In that bounded acceptance, select the `gcloud-cli` apt package and `aws-cli` install command;
+      verify both executables are available in the guest, require `aws --version` to begin with
+      `aws-cli/2.`, and verify no authenticated Google account, AWS credential file, or AWS profile.
+      Rerun initialization and prove apt reconverges cleanly while the AWS `test_file` check skips
+      its install command without a partial result; prove snapd owns AWS CLI automatic refresh;
+      prove neither resource created guest authentication state; and prove the operator's
+      pre-existing host credential baseline is unchanged.
 - [x] Once the offline gates, code reviews, and operator prerequisites are green, post the exact
       head and flip the PR from draft to ready as the explicit request for this bounded live
       acceptance.
@@ -297,5 +299,42 @@ cross-cutting framework contract.
 runner, schema, or shared install-command behavior exists solely for it; managed reinit performs a
 verified AWS CLI update; required CI is green; and the next live retest starts from one reviewed
 exact head with a truthful PR record.
+
+Phase 2a's completed GCP CLI installer/test boxes and Phase 3d's completed AWS installer/test boxes
+remain the immutable record of their reviewed implementations. Operator direction superseded both
+before merge: an install-command is a true one-liner, not a container for a script or installer
+state machine.
+
+### Phase 3e: replace embedded installers with native package resources
+
+- [ ] Replace the AWS CLI manifest payload with the one-line command
+      `sudo snap install aws-cli --classic`, guarded by `test_file: /snap/bin/aws`; snapd owns
+      automatic refresh. Replace the Google Cloud CLI install command with a `google-cloud-cli` apt
+      source and dependent `gcloud-cli` apt package using the existing apt-resource model. Retain no
+      embedded key block, repository script, download, extraction, filesystem-layout, cleanup, or
+      version-management logic.
+- [ ] Delete the bespoke AWS and Google Cloud CLI installer behavior tests and helpers. Add no unit
+      tests for the one-line AWS install command or for authored prose; rely on ordinary resource
+      loading plus review, repository gates, and the bounded live acceptance.
+- [ ] Tighten permanent install-command author documentation: `command` is for one logical shell
+      line, preferably a package-manager or vendor-provided idempotent entry point. The declared
+      resource must be repeat-safe either because the command itself is idempotent or because the
+      existing `test_*` completion fields fully guard reruns. Embedded scripts, heredocs, multi-step
+      installers, state machines, signature pipelines, and cleanup routines do not belong in
+      `command`. Direct authors to `apt`, `apt_packages`, and `snap` first. Preserve the existing
+      admin-user and explicit-`sudo` teaching.
+- [ ] Remove the superseded embedded Google repository script and AWS layout/signature/update
+      teaching from permanent docs and the PR record. Teach the GCP apt-resource selection and the
+      AWS snapd/classic-confinement prerequisite plus automatic-refresh tradeoff; keep provisioning
+      and guest authentication boundaries unchanged.
+- [ ] Run focused/full gates and both required code reviews, resolve every valid finding, post one
+      signed exact-head handoff, and use the next draft-to-ready transition to request the bounded
+      GCP live charter above.
+
+**DoD:** the optional Google Cloud CLI uses ordinary apt resources and the optional AWS CLI uses one
+one-line snap install-command plus its existing completion check; no bespoke installer
+implementation or test suite remains; permanent author guidance makes the one-line boundary
+unmistakable; required CI is green; and the next live retest starts from one reviewed exact head
+with a truthful PR record.
 
 -- agw-ns-gcp-platform (effort lead)
