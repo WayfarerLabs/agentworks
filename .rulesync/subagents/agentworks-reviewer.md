@@ -464,6 +464,19 @@ Look for:
 - New conventions encoded in code without first being agreed in a doc. New conventions should land
   in an ADR or rulesync rule before they spread through the codebase.
 
+### 12a. Tests police behavior, never our own prose
+
+A test that asserts on the wording of prose we author (guide content, CLI messages, docs, skills,
+packaged prompts, disclosures, release notes) is a finding, not a strength. That includes asserting
+a sentence is present, blacklisting forbidden phrasings, normalizing prose to compare it, and
+pinning a body of text verbatim. The `no-prose-policing-tests` rule states the standard and its one
+exception (prose arriving from outside the repo, pinned narrowly at the token the code branches on).
+
+Two review habits follow. First, when a diff adds such a test, ask for its deletion rather than its
+improvement; a stronger pin is the same mistake one size larger. Second, when a diff adds prose,
+read the prose and say whether it is right, because review is now the only thing standing behind it.
+Do not credit wording assertions as evidence of quality, and do not ask for them.
+
 ### 13. Environment diversity: review for machines and configurations that are not this one
 
 Agentworks runs on Windows, macOS, and Linux, on hosts with wildly different tooling installed
