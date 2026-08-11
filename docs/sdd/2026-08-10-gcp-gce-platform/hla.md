@@ -375,16 +375,22 @@ recipe-gate semantics. Its command selects AWS's current official CLI v2 archive
 AWS CLI signing key into a private temporary GnuPG home, verifies its full fingerprint and the
 archive signature, extracts it in that private directory, and installs to `/usr/local/aws-cli` with
 the `aws` launcher in `/usr/local/bin`. The manifest never uses the ambiguous `test_exec: aws`,
-because AWS CLI v1 and v2 share that executable name. It instead declares Agentworks' absolute
-managed v2 executable, `/usr/local/aws-cli/v2/current/bin/aws`, as the runner predicate.
-Reinitialization can therefore skip a completed managed installation without executing the
-relatively heavy CLI on a constrained guest. The command repeats an executable check for that
-managed path, then keeps its own `aws --version` fast path for a valid v2 installation at another
-location; v1 continues through the v2 install path. An incomplete prior installation is reconciled
-with the official installer's explicit `--update`, `--install-dir`, and `--bin-dir` options, and
-temporary artifacts are removed on success or failure. Unsupported architectures, signing-key drift,
-and invalid signatures fail clearly. The installer never runs `aws configure`, writes a
-credentials/profile file, or participates in EC2 lifecycle code, which continues to use boto3.
+because AWS CLI v1 and v2 share that executable name. It declares `/usr/local/bin/aws` as an
+executable-path `test_exec` plus the Agentworks-owned completion marker
+`/usr/local/aws-cli/.agentworks-v2-complete`. The shared install-command contract treats a
+slash-containing `test_exec` as a path checked with `test -x` in both VM and agent runners, while a
+bare name retains the existing PATH lookup. The AWS command requires the marker, public launcher,
+and canonical internal v2 executable before taking its managed fast path. It writes the marker only
+after the verified official installer succeeds, so a missing marker, launcher, internal executable,
+or executable bit enters the update path instead of becoming a false completion. Reinitialization
+can therefore skip a completed managed installation without executing the relatively heavy CLI on a
+constrained guest. The command keeps its own `aws --version` fast path for a valid v2 installation
+at another location; v1 continues through the v2 install path. An incomplete prior installation is
+reconciled with the official installer's explicit `--update`, `--install-dir`, and `--bin-dir`
+options, and temporary artifacts are removed on success or failure. Unsupported architectures,
+signing-key drift, and invalid signatures fail clearly. The installer never runs `aws configure`,
+writes a credentials/profile file, or participates in EC2 lifecycle code, which continues to use
+boto3.
 
 Permanent edits cover the installed-plugin list, VM platform list, command reference, resources
 guide, plugin author contract, vm-platform author contract, capability durable-surface enumeration,

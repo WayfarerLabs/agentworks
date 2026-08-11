@@ -235,11 +235,14 @@ superseded before merge by Phase 3c after live/review evidence exposed their sem
       vCPUs. Keep `e2-small` and `e2-medium` available through the existing site `machine_types`
       override, and teach the exact override shape, deterministic selection rule, guest-visible vCPU
       count, and sustained/burst capacity without a future product promise.
-- [ ] Declare the absolute managed AWS CLI v2 executable as the runner-level `test_exec` so reinit
-      skips it without executing `aws`; repeat that executable check inside the command, retain the
-      command-owned version probe for valid v2 installations elsewhere, and keep the verified update
-      path for v1 or partial installations. Add a real runner regression proving a completed managed
-      install performs no installer transport.
+- [ ] Extend the shared install-command contract so a slash-containing `test_exec` uses `test -x` in
+      VM and agent runners while a bare name retains PATH lookup. Give AWS CLI a public-launcher
+      executable predicate plus an Agentworks-owned completion marker written only after verified
+      install success; require the marker and both public/internal executables in the command's
+      managed fast path. Retain the version probe for valid external v2 and the update path for v1,
+      missing markers, broken launchers, or partial layouts. Add real Bash/Zsh/Dash predicate and
+      initializer-runner regressions proving completed managed reinit performs no installer
+      transport and every incomplete state repairs.
 - [ ] Distinguish omitted required live CPU or memory fields, present non-positive values, and
       present positive declaration mismatches with typed, actionable pre-mutation errors. Add
       separate zero-mutation regressions for CPU and memory across those branches; document that
