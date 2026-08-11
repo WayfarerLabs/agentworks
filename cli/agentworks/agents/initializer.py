@@ -781,12 +781,13 @@ def _build_agent_test_command(
 ) -> str | None:
     """Build a test command that passes when every declared test passes.
 
-    The caller runs this via the agent's ``Transport``. ``test_exec`` checks
-    are wrapped in a login shell so the agent's PATH (including mise shims
-    and ~/.local/bin) is in scope; ``test_file`` / ``test_dir`` use plain
-    POSIX tests against absolute paths in the agent's home. Empty tests are
-    ignored. Returning ``None`` when none remain prevents an empty conjunction
-    from vacuously skipping the install.
+    The caller runs this via the agent's ``Transport``. A bare ``test_exec``
+    name is wrapped in a login shell so the agent's PATH (including mise
+    shims and ~/.local/bin) is in scope. A value containing ``/`` is an
+    executable path and uses a shell-independent ``test -x`` predicate.
+    ``test_file`` / ``test_dir`` use plain POSIX tests against absolute paths
+    in the agent's home. Empty tests are ignored. Returning ``None`` when none
+    remain prevents an empty conjunction from vacuously skipping the install.
     """
     import shlex as _shlex
 
@@ -798,8 +799,11 @@ def _build_agent_test_command(
     test_dir = entry.test_dir
     commands: list[str] = []
     if test_exec:
-        inner = f"command -v {_shlex.quote(test_exec)} > /dev/null 2>&1"
-        commands.append(f"{shell} -lc {_shlex.quote(inner)}")
+        if "/" in test_exec:
+            commands.append(f"test -x {_shlex.quote(test_exec)}")
+        else:
+            inner = f"command -v {_shlex.quote(test_exec)} > /dev/null 2>&1"
+            commands.append(f"{shell} -lc {_shlex.quote(inner)}")
     if test_file:
         path = test_file.replace("~", home, 1) if test_file.startswith("~") else test_file
         commands.append(f"test -f {_shlex.quote(path)}")

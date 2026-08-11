@@ -116,6 +116,14 @@ def test_machine_entry_is_closed_and_exact(change: dict[str, object]) -> None:
         _validate({**_BASE, "machine_types": [entry]})
 
 
+def test_machine_cpu_schema_describes_guest_visible_not_sustained_capacity() -> None:
+    machine_schema = GcpGCEConfig.model_json_schema()["$defs"]["GcpMachineType"]
+
+    assert machine_schema["properties"]["cpus"]["description"] == (
+        "The guest-visible vCPUs, not sustained shared-core CPU capacity."
+    )
+
+
 def test_exact_default_catalog_and_override_projection() -> None:
     default = _validate(dict(_BASE))
     assert machine_catalog(default) is DEFAULT_MACHINE_TYPES

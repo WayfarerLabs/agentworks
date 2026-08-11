@@ -100,10 +100,15 @@ def test_aws_bundle_publishes_cli_disabled_with_verified_v2_payload(tmp_path: Pa
     assert row.origin.variant == "system-plugin"
     assert row.origin.plugin == "aws"
     assert registry.graph.enablement_of("system-install-command", "aws-cli") is Enablement.disabled
-    assert row.test_exec == "/usr/local/aws-cli/v2/current/bin/aws"
-    managed_check = "if test -x /usr/local/aws-cli/v2/current/bin/aws; then"
+    assert row.test_exec == "/usr/local/bin/aws"
+    assert row.test_file == "/usr/local/aws-cli/.agentworks-v2-complete"
+    managed_check = 'if test -f "$completion_marker" && test -x "$public_launcher" && test -x "$managed_binary"; then'
     assert managed_check in row.command
-    assert row.command.index(managed_check) < row.command.index("if command -v aws")
+    assert row.command.index(managed_check) < row.command.index("command -v aws")
+    assert 'sudo install -m 0644 /dev/null "$completion_marker"' in row.command
+    assert row.command.index('sudo "$temp_root/aws/install"') < row.command.index(
+        'sudo install -m 0644 /dev/null "$completion_marker"'
+    )
     assert "aws-cli/2" in row.command
     assert "awscli-exe-linux-x86_64.zip" in row.command
     assert "awscli-exe-linux-aarch64.zip" in row.command
@@ -112,7 +117,7 @@ def test_aws_bundle_publishes_cli_disabled_with_verified_v2_payload(tmp_path: Pa
     assert 'primary && $1 == "fpr"' in row.command
     assert "trap 'rm -rf \"$temp_root\"' EXIT" in row.command
     assert "trap 'exit 130' INT" in row.command
-    assert 'if test -d "$install_dir"; then' in row.command
+    assert 'if test -e "$install_dir" || test -L "$install_dir"; then' in row.command
     assert 'sudo "$temp_root/aws/install"' in row.command
     assert '--install-dir "$install_dir" --bin-dir "$bin_dir" --update' in row.command
     assert "aws configure" not in row.command
@@ -135,7 +140,7 @@ def test_completed_managed_aws_cli_uses_short_runner_predicate_only(tmp_path: Pa
 
     assert paths == []
     [predicate] = target.run.call_args_list
-    assert predicate.args[0] == ("zsh -lic 'command -v /usr/local/aws-cli/v2/current/bin/aws' > /dev/null 2>&1")
+    assert predicate.args[0] == ("test -x /usr/local/bin/aws && test -f /usr/local/aws-cli/.agentworks-v2-complete")
     assert predicate.kwargs == {"check": False, "timeout": 10}
     assert all(call.kwargs.get("timeout") != 120 for call in target.run.call_args_list)
 

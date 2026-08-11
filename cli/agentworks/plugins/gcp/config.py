@@ -48,7 +48,7 @@ class GcpMachineType(AgwModel):
     """One entry in a GCE machine-type selection catalog."""
 
     cpus: PositiveInt
-    """The vCPUs the type provides."""
+    """The guest-visible vCPUs, not sustained shared-core CPU capacity."""
 
     memory: PositiveInt
     """The memory in GiB the type provides."""

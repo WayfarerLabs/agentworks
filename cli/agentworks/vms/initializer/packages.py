@@ -207,14 +207,21 @@ def _build_test_command(
 ) -> str | None:
     """Build a shell command that passes when every declared test passes.
 
-    test_exec uses a login shell (-l) with interactive flag (-i) to ensure
-    all profile/rc files are sourced, matching a real login session.
+    A bare test_exec name uses a login shell (-l) with interactive flag
+    (-i) so all profile/rc files are sourced, matching a real login
+    session. A value containing ``/`` is an executable path and uses a
+    shell-independent ``test -x`` predicate.
     Empty tests are ignored. Returning ``None`` when none remain prevents
     an empty conjunction from vacuously skipping the install.
     """
     commands: list[str] = []
     if entry.test_exec:
-        commands.append(f"{shell} -lic {shlex.quote(f'command -v {shlex.quote(entry.test_exec)}')} > /dev/null 2>&1")
+        if "/" in entry.test_exec:
+            commands.append(f"test -x {shlex.quote(entry.test_exec)}")
+        else:
+            commands.append(
+                f"{shell} -lic {shlex.quote(f'command -v {shlex.quote(entry.test_exec)}')} > /dev/null 2>&1"
+            )
     if entry.test_file:
         path = entry.test_file.replace("~", home, 1) if entry.test_file.startswith("~") else entry.test_file
         commands.append(f"test -f {shlex.quote(path)}")

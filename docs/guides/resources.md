@@ -431,6 +431,28 @@ is added as its own integration with its own config vocabulary. `claude-code` ab
 Claude-specific `model` / `permission_mode` fields) is one worked example; the core assumes no
 particular runtime, and a session runs whatever integration its template selects.
 
+## Install-command completion predicates
+
+Install commands may combine `test_exec`, `test_file`, and `test_dir`; initialization skips the
+command only when every non-empty predicate passes. A bare `test_exec` value such as `my-tool` is
+resolved on `PATH` in the target user's login shell. A value containing `/`, such as
+`/usr/local/bin/my-tool` or `./bin/my-tool`, is an executable path checked directly with `test -x`.
+Path predicates do not depend on login-shell startup files and do not pass for a non-executable
+file. In `test_file` and `test_dir`, a leading `~` resolves to the target user's home.
+
+Use multiple predicates when one artifact alone cannot prove completion. For example:
+
+```yaml
+apiVersion: agentworks/v1
+kind: system-install-command
+metadata:
+  name: my-tool
+spec:
+  command: install-my-tool
+  test_exec: /usr/local/bin/my-tool
+  test_file: /usr/local/lib/my-tool/.install-complete
+```
+
 ## Built-ins and overrides
 
 Built-in resources ship with the app and appear in `agw resource list --origin builtin`. Override

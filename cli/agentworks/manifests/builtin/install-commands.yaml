@@ -10,7 +10,8 @@
 #
 # Commands may be re-run (e.g. during reinit) so they should be
 # idempotent. Any combination of installed checks may be declared:
-#   test_exec: passes if this command is on PATH (uses `command -v`)
+#   test_exec: a value containing / is checked as a path with `test -x`;
+#              a bare name is resolved on PATH in the target login shell
 #   test_file: passes if this file exists (~ resolves to the user's home)
 #   test_dir:  passes if this directory exists (~ resolves to the user's home)
 # Installation is skipped only when every non-empty declared check passes.

@@ -62,9 +62,15 @@ class _InstallCommandEntry(DeclaredResource):
     path: list[str] = Field(default_factory=list)
     """Directories prepended to ``PATH`` for the duration of the command."""
 
-    test_exec: str | None = Field(default=None, examples=["my-tool"])
-    """Check whether this command is already on ``PATH``. When multiple
-    non-empty ``test_*`` fields are set, all must pass to skip the install."""
+    test_exec: str | None = Field(
+        default=None,
+        examples=["my-tool"],
+        description=(
+            "An installed executable predicate. A value containing '/' is a path checked with "
+            "'test -x'; a bare name is resolved on PATH in the target user's login shell. "
+            "When multiple non-empty test_* fields are set, all must pass to skip the install."
+        ),
+    )
 
     test_file: str | None = None
     """Check whether this file already exists. ``~`` resolves to the target
@@ -176,7 +182,9 @@ class _SystemInstallCommandKind:
 
         A vm-template refers to it by name through `system_install_commands`. Declare
         any combination of `test_exec`, `test_file`, and `test_dir`; init skips the
-        command only when every non-empty declared test passes. With no non-empty
+        command only when every non-empty declared test passes. A `test_exec` value
+        containing `/` is an executable path checked directly with `test -x`; a bare
+        name is resolved on PATH in the target user's login shell. With no non-empty
         tests, the command always runs.
         """,
     )
@@ -207,8 +215,10 @@ class _UserInstallCommandKind:
         An admin-template or agent-template refers to it by name through
         `user_install_commands`. Declare any combination of `test_exec`, `test_file`,
         and `test_dir`; init skips the command only when every non-empty declared test
-        passes. With no non-empty tests, it always runs. In path tests, `~` is the
-        target user's home, not the operator's.
+        passes. A `test_exec` value containing `/` is an executable path checked
+        directly with `test -x`; a bare name is resolved on PATH in the target user's
+        login shell. With no non-empty tests, it always runs. In `test_file` and
+        `test_dir`, `~` is the target user's home, not the operator's.
         """,
     )
     model: type[DeclaredResource] = UserInstallCommandEntry
