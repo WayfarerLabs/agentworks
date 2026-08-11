@@ -1,6 +1,6 @@
 # Plan: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander Phase 4J artifact review in progress
+- Status: Interim implementation complete; continuous Lander Phase 4J implementation in progress
 - Date: 2026-08-07
 - Last revised: 2026-08-11
 - FRD: `frd.md`
@@ -674,7 +674,7 @@ review-clean, browser-accepted, and merge-ready.
       behavior, banner and native-action geometry, bottom-rail/terrain separation, installed-agent
       model and path reuse, DOM bounds, focus/accessibility, and mutation-sensitive browser
       evidence.
-- [ ] Obtain an `agentworks-reviewer` approval of the Phase 4J artifact amendment and resolve every
+- [x] Obtain an `agentworks-reviewer` approval of the Phase 4J artifact amendment and resolve every
       valid artifact finding before changing production code.
 - [ ] Delegate implementation to an `agentworks-dev` subagent in an isolated worktree. Update the
       shared fragment, model/controller projection, CSS, validators, focused tests, permanent

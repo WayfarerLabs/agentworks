@@ -1,6 +1,6 @@
 # FRD: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander Phase 4J artifact review in progress
+- Status: Interim implementation complete; continuous Lander Phase 4J implementation in progress
 - Date: 2026-08-07
 - Last revised: 2026-08-11
 - Seeded by: the saga lead, at operator request. This is a standalone effort, deliberately NOT a

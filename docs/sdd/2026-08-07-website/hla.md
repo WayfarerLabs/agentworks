@@ -1,6 +1,6 @@
 # HLA: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander Phase 4J artifact review in progress
+- Status: Interim implementation complete; continuous Lander Phase 4J implementation in progress
 - Date: 2026-08-07
 - Last revised: 2026-08-11
 - FRD: `frd.md`
