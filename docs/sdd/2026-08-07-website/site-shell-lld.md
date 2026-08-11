@@ -66,8 +66,8 @@ always uses the custom-domain URLs at `https://agentworks.build`. Game developme
 
 The Lander metadata contract is exact:
 
-- document title: `Lunar deployment | Agentworks`;
-- `h1`: `Lunar deployment`;
+- document title: `We need to deploy some agents! | Agentworks`;
+- `h1`: `We need to deploy some agents!`;
 - description: `Fly the Agentworks lunar deployment mission and deliver an agent to the NOC.`;
 - canonical URL: `https://agentworks.build/lander/`;
 - Content Security Policy: byte-identical to 404's restrictive policy:
@@ -241,11 +241,12 @@ independently edited placement.
 
 Both game shells load the same `site.css`, `lander.css`, and `lander-game.js`. Each document
 contains only one game subtree, so the controller's stable IDs remain unique without route-specific
-logic. Lander uses the document title `Lunar deployment | Agentworks` and the `h1`
-`Lunar deployment`; 404 retains its established metadata and the `h1` `Page not found`. Each `main`
-uses the shared `.detail-main` inset and a game-specific compact gap. Its `.page-heading` is the
-first child and contains only the reviewed `h1`. The 404 explanatory paragraph follows the heading,
-and neither shell includes an eyebrow, error code, provenance, or other pre-title label.
+logic. Lander uses the document title `We need to deploy some agents! | Agentworks` and the `h1`
+`We need to deploy some agents!`; 404 retains its established metadata and the `h1`
+`Page not found`. Each `main` uses the shared `.detail-main` inset and a game-specific compact gap.
+Its `.page-heading` is the first child and contains only the reviewed `h1`. The 404 explanatory
+paragraph follows the heading, and neither shell includes an eyebrow, error code, provenance, or
+other pre-title label.
 
 ## 8. Accessibility, reflow, and presentation
 

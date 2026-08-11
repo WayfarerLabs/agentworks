@@ -317,7 +317,7 @@ new run records the refined source.
 ## Flight, collision, and sequence
 
 - [x] An upright, slow touchdown with both feet inside the marked zone freezes safely and announces
-      `Touchdown confirmed. Deploying agent.`
+      `Touchdown confirmed. Fuel collected. Deploying agent.`
 - [x] A fast, tilted, rotating, one-foot-outside, surface-short, operations-center, or out-of-bounds
       contact enters the restrained failure state. Nothing flashes, shakes, explodes, moves the
       page, changes the home link, or emits sound.
