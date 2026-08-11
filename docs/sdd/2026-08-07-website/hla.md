@@ -1,6 +1,6 @@
 # HLA: The agentworks.build Website
 
-- Status: Canonical assistance integration complete; production acceptance in progress
+- Status: Canonical assistance integration complete; production acceptance pending
 - Date: 2026-08-07
 - Last revised: 2026-08-11
 - FRD: `frd.md`

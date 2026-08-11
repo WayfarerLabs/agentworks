@@ -1,6 +1,6 @@
 # FRD: The agentworks.build Website
 
-- Status: Canonical assistance integration complete; production acceptance in progress
+- Status: Canonical assistance integration complete; production acceptance pending
 - Date: 2026-08-07
 - Last revised: 2026-08-11
 - Seeded by: the saga lead, at operator request. This is a standalone effort, deliberately NOT a

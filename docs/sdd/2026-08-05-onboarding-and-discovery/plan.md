@@ -414,7 +414,7 @@ installed no-topic agent guide owns source-review and continuing assistance.
 - [x] Permanent installation and security documentation ships with the packages.
 - [x] Packaging, generation, lint, and end-to-end gates pass; step reviewed by `agentworks-reviewer`
       and a fresh-eyes reviewer; valid findings resolved.
-- [ ] Always-green ready-to-merge PR opened and saga-lead review requested.
+- [x] Always-green ready-to-merge PR opened and saga-lead review requested.
 
 Definition of done: R1, R2, R3, R10, R11, R12, R13, R16, AC1, AC2, AC3, AC7, AC8, AC10, AC14, and
 AC15 hold for both native packages and the universal zero-plugin copy/paste path.

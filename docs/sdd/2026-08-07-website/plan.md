@@ -474,67 +474,14 @@ evidence commit, PR-body refresh, and scoped exact-head comment, with no further
 
 Definition of done: R3 and AC2 are implemented as a least-privilege automatic pipeline, and the
 interim artifact is merged and live at the default Pages URL without a routine manual publish step;
-Phase 6 retains the one-time same-run root-base redeployment gate before DNS cutover.
+Phase 9 owns the remaining production acceptance and closeout work.
 
-## Phase 6: interim domain activation and acceptance
+## Phase 6: superseded interim activation
 
-- [ ] Start the interim-acceptance branch from `main`, confirm the implementation commit is deployed
-      at the default Pages URL, and keep the branch limited to evidence and truthful documentation
-      updates while the external activation proceeds.
-- [ ] Re-inventory GoDaddy `A`, `AAAA`, `CNAME`, `MX`, `TXT`, and `CAA` records immediately before
-      cutover; save the non-secret before-state and exact rollback record in the feature evidence,
-      commit it, push it, and open the draft evidence PR before any mutation. If any record's
-      purpose is unclear, stop rather than remove it. Ensure any restrictive CAA policy permits
-      `letsencrypt.org`.
-- [ ] Verify `agentworks.build` at the WayfarerLabs organization level before attaching DNS; retain
-      the generated TXT record and record non-secret evidence.
-- [ ] Reconfirm the deployed default Pages URL, set `agentworks.build` as this repository's custom
-      domain, and enforce HTTPS when GitHub makes the option available.
-- [ ] Use GitHub's `Re-run all jobs` on the already verified implementation merge-push workflow;
-      verify the same `main` SHA built with `site_base=/`, deployed successfully, and serves
-      root-based assets and routes before authorizing any DNS mutation. If the run is no longer
-      available for rerun, stop until a separately reviewed activation path exists.
-- [ ] If the custom-domain setting is attached but the root-base rerun fails or cannot be verified,
-      detach the custom domain, use `Re-run all jobs` on that same latest verified `main` push
-      workflow, prove the same SHA rebuilt with `site_base=/agentworks/`, verify the default project
-      URL, leave DNS unchanged, and stop until the complete activation path can be retried.
-- [ ] With explicit operator approval for the recorded cutover, remove only identified conflicting
-      parking/forwarding records; add the then-current GitHub-documented apex `A` records and `www`
-      CNAME. Do not add a wildcard.
-- [ ] Verify DNS answers, certificate hostname, HTTPS, apex canonical metadata, `www` redirect, and
-      the saved record inventory plus approved delta after propagation.
-- [ ] Verify the production home page has sourced product content, permanent links, the semantic
-      availability notice, and no bootstrap, install instruction, copy affordance, external runtime
-      request, analytics, storage, or unexpanded token.
-- [ ] Verify the secondary home-page security link and stable deep-dive URL, sourced threat,
-      boundary, and limitation content, private reporting path, no-JavaScript behavior, and
-      non-preachy hierarchy.
-- [ ] Verify the production footer rocket on all five pages is the final lower-right footer item,
-      has one `/lander/#lander-game` destination, an independent accessible name, at least a 24 by
-      24 CSS-pixel target, visible focus, and no narrow-width or zoom overlap.
-- [ ] Verify the production `/lander/` metadata/CSP, compact heading, static no-JavaScript scene,
-      original twin-plume mark, hidden preflight, keyboard/vi and touch controls, independent plume
-      response, deployment sequence, exact success status, reset boundaries, lifecycle pause, and
-      reduced-motion presentation.
-- [ ] Verify the production custom 404 compact title, explanatory copy, route-home fallback, and
-      byte-equivalent shared game subtree preserve the same game and no-JavaScript contracts.
-- [ ] Run the deferred production compatibility pass in Firefox and Safari/WebKit, with a spoken
-      screen reader, on physical mobile/touch hardware, and on at least one additional computer or
-      device outside the pre-merge machine. Smoke all five pages, record device/OS/browser evidence,
-      and route defects into the next website work round before final closeout.
-- [ ] Run interim accessibility acceptance: keyboard-only flow, visible focus, landmarks/headings,
-      320 CSS pixel reflow, 400 percent zoom, contrast evidence, reduced motion, and recognizable
-      controls independent of terminal familiarity.
-- [ ] Run clean-context interim acceptance: a newcomer understands what Agentworks is, recognizes
-      that guided onboarding is not yet published, and can choose the repository, package,
-      rationale, or security path without explanation. Record timing and any intervention.
-- [ ] Record dated, non-secret interim acceptance evidence and all load-bearing operating facts in
-      `website/README.md` and this feature directory on the existing evidence branch; mark its draft
-      PR ready, obtain review, and merge it. Do not create `locked.md` or claim AC3/AC4.
-
-Definition of done: R3-R11 and R13-R18 plus AC1, AC2, AC5-AC11, and AC13-AC19's interim conditions
-hold at `https://agentworks.build`; the public site is useful and honest while onboarding remains
-pending.
+The operator's 2026-08-10 integration ruling superseded this unexecuted interim-only phase before it
+began. Phase 2 and Phase 9 retain the durable production browser, accessibility, and device
+acceptance obligations. Availability-notice, no-bootstrap, and unpublished-onboarding checks no
+longer describe a possible shipped state.
 
 ## Phase 7: canonical assistance pickup and contract reconciliation
 
@@ -598,7 +545,8 @@ pipeline, with the temporary notice removed rather than retained as configuratio
       block to an agent in under one minute. Record timing and any unexplained intervention.
 - [ ] Run complete accessibility acceptance: keyboard-only flow, visible focus, landmarks/headings,
       copy status, 320 CSS pixel reflow, 400 percent zoom, contrast evidence, reduced motion, screen
-      reader, and touch behavior.
+      reader, and physical touch behavior. Complete the production compatibility pass in Firefox and
+      Safari/WebKit on at least one additional device outside the pre-merge machine.
 - [ ] Reverify the production `/lander/`, footer rocket, shared Lander/404 game subtree, and custom
       404 contracts and confirm the onboarding change did not disturb them.
 - [ ] Reverify the home/security information architecture, non-preachy security path, sourced
