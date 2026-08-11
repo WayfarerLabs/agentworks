@@ -1,8 +1,8 @@
 # Plan: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander Phase 4I implementation in progress
+- Status: Interim implementation complete; continuous Lander Phase 4I browser acceptance pending
 - Date: 2026-08-07
-- Last revised: 2026-08-10
+- Last revised: 2026-08-11
 - FRD: `frd.md`
 - HLA: `hla.md`
 - Research: `prior-art-research.md`
@@ -624,11 +624,11 @@ and every regenerated route/world fixture are exact, reviewed, and browser-accep
       browser evidence.
 - [x] Obtain an `agentworks-reviewer` approval of the amended LLD and resolve every valid artifact
       finding before changing production or canonical fixture code.
-- [ ] Delegate implementation to an `agentworks-dev` subagent in an isolated worktree. Update the
+- [x] Delegate implementation to an `agentworks-dev` subagent in an isolated worktree. Update the
       shared fragment and page copy, world/model/controller/CSS projection, exact route derivation
       and fixtures, validators, focused tests, permanent README, and browser checklist as one
       coherent change. Preserve one state authority and one accessible status authority.
-- [ ] Prove all nine regenerated constructive routes and all ordered world witnesses after the force
+- [x] Prove all nine regenerated constructive routes and all ordered world witnesses after the force
       and structure changes, including the player-reachable launch prefix, exact two-replay success,
       one-quantum exhaustion, collision/render parity, no award duplication, and bounded
       runtime/DOM.
