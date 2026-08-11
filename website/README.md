@@ -9,7 +9,7 @@ repository and can be published by any static host.
 
 The current release is intentionally useful without guided onboarding. The compact Home page renders
 the repository-sourced identity and states that guided onboarding is not yet published. A generated
-Manifesto presents the complete long-form argument from `docs/why-agentworks.md`, while a separate
+Manifesto presents the complete long-form argument from `docs/manifesto.md`, while a separate
 Security page provides practical depth and a GitHub reporting route. The shared header places the
 GitHub and PyPI destinations once per page. A dedicated Lander page presents the same continuous
 lunar-deployment expedition used as progressive enhancement on the useful 404 fallback. The shared
@@ -167,7 +167,7 @@ The builder reads three permanent repository inputs:
 
 - `README.md` owns the concise product identity rendered on the landing page. Its short design
   summary remains repository documentation, not additional landing-page content.
-- `docs/why-agentworks.md` owns every body heading and block rendered on the Manifesto page.
+- `docs/manifesto.md` owns every body heading and block rendered on the Manifesto page.
 - `SECURITY.md` owns every body heading and block rendered on the Security page, including the
   private vulnerability reporting channel and URL.
 
@@ -191,9 +191,8 @@ Reserved Markdown syntax outside that subset fails the build instead of renderin
 Repository content is escaped before rendering. Missing, unreadable, symlinked, byte-order-marked,
 or invalid UTF-8 input; a missing or duplicate `h1`; malformed heading structure; unsupported
 Markdown; duplicate identifiers in the complete rendered document; an invalid or unexpected link;
-and a GitHub-only reporting violation all fail before output changes. The current Manifesto source
-path is exactly `docs/why-agentworks.md`. When that document is renamed, update the one configured
-path to `docs/manifesto.md` in the same reviewed rename. Do not add probing or a dual-path fallback.
+and a GitHub-only reporting violation all fail before output changes. The Manifesto source path is
+exactly `docs/manifesto.md`. Do not add probing or a dual-path fallback.
 
 The Manifesto maps only these source-relative links:
 
