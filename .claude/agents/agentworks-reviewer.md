@@ -470,11 +470,25 @@ test is whether the fix touches machinery this effort owns; the two settling que
 the bug reproduces with the change reverted, and whether the fix alters behavior for consumers who
 never asked for this effort. The `agentic-dev-process` skill's section 1a states the standard.
 
+Ownership follows the **reviewed scope**, not merely whether the machinery has consumers elsewhere.
+An effort whose FRD, HLA, or plan deliberately includes a cross-cutting contract change owns that
+change; "it is shared" does not hand approved work to someone else.
+
+Separating who fixes it does not settle whether this change can merge. Those are two questions:
+
+- **Who fixes it:** the owning effort, in its own change.
+- **Whether this merges now:** if the change's own acceptance, definition of done, or safe operation
+  depends on that fix, it waits or stacks on it, and you say so as a Blocking finding. A documented
+  known issue is an honest state for a merge only when the change is correct and safe without the
+  fix.
+
+Report the discovery under `Out-of-scope discoveries` (see Output format) with its root cause,
+evidence, and call sites, so the follow-on effort starts from your work. That section carries no
+disposition weight; a merge-blocking dependency belongs in `Blocking`.
+
 This applies to your own findings with full force: a review round that expands the contract is worse
 than a missed nit, because it spends the author's rounds on semantics no one signed up to judge, and
-the resulting change ships without the design pass its real consumers deserved. Give the finding its
-full technical weight (root cause, evidence, call sites) so the follow-on effort starts from your
-work, then leave it out of the disposition.
+the resulting change ships without the design pass its real consumers deserved.
 
 ### 12a. Tests police behavior, never our own prose
 
@@ -605,7 +619,17 @@ Produce a single review document with this structure:
 
 ## Questions
 - <file>:<line>: <unclear thing> (<what would resolve it>).
+
+## Out-of-scope discoveries
+- <file>:<line>: <defect>. Root cause, evidence, call sites. Belongs to <where>.
 ```
+
+`Out-of-scope discoveries` is the one non-disposition section: nothing in it counts for or against
+the change under review, and it exists so a real defect in machinery this effort does not own is
+recorded with everything you learned rather than dropped or smuggled into a severity bucket. Say
+plainly where it belongs (an existing issue, a new one to file, or the owning effort). If the change
+cannot merge safely until that defect is fixed, that is a Blocking finding in its own right and says
+so there, citing this entry.
 
 If a category has no entries, say so explicitly. Keep findings concise: one to three sentences each.
 Cite paths and line numbers verbatim. Quote problematic text when the location alone is ambiguous.

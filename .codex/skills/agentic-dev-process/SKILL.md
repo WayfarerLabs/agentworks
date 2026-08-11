@@ -55,12 +55,19 @@ Two questions settle almost every case:
 - **Does the fix change behavior for consumers who never asked for this effort?** If yes, it needs
   its own design pass, because those consumers are not represented in your review.
 
-What to do instead, and it is cheap: file the finding with the root cause, the evidence, and the
-call-site inventory you already have in your head, so the follow-on effort starts where you left off
-rather than from scratch. If the work is already written, move the commits to their own branch and
-revert them here; re-homing costs a rebase, while merging them costs the shared contract its design
-pass. Then say plainly in the PR that the defect is known, tracked, and out of scope. A documented
-known issue is a normal, honest state for a merge.
+One caveat before the mechanics, because it is the half that gets dropped: **separating who fixes it
+does not decide whether your change can merge.** If your own acceptance criteria, definition of
+done, or safe operation depend on that fix, you wait for it or stack on it, and you say so plainly.
+A documented known issue is an honest state for a merge only when your change is correct and safe
+without the fix. Ownership also follows the **reviewed scope** rather than the mere existence of
+other consumers: an effort whose FRD, HLA, or plan deliberately includes a cross-cutting contract
+change owns that change, and "it is shared" does not hand approved work to someone else.
+
+What to do, and it is cheap: file the finding with the root cause, the evidence, and the call-site
+inventory you already have in your head, so the follow-on effort starts where you left off rather
+than from scratch. If the work is already written, move the commits to their own branch and revert
+them here; re-homing costs a rebase, while merging them costs the shared contract its design pass.
+Then say plainly in the PR that the defect is known, tracked, and out of scope.
 
 The cost of getting this wrong is not abstract. A cloud-platform PR that absorbed a shared
 install-predicate fix grew a shell-compatibility matrix, reddened CI on an unrelated host-inventory
