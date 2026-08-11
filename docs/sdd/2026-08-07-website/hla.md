@@ -313,25 +313,29 @@ follows the lander and only regenerates terrain/site nodes when the rolling wind
 runtime retains a fixed number of nearby chunks and sites, so an arbitrarily long forward expedition
 does not imply unbounded DOM or terrain history.
 
-Each deterministic site replaces a deliberately wide terrain span with one flat shelf carrying a
-materially elevated platform exactly three lander widths long and one solid NOC building beside it.
-Non-site terrain uses wider, irregular samples and stronger bounded elevation changes rather than a
-fine alternating motif. One collider-backed open truss uses continuous top and bottom chords, a
-uniform sequence of alternating triangular braces, and supporting posts across the complete
-platform-to-NOC span. It has no region-specific pad, connector, or NOC brace pattern, so the site
-reads as one elevated engineered structure without a long exposed sky strip, repeated X fields, or a
-decorative opening the lander could appear able to traverse. A safe landing under the pinned,
-modestly relaxed speed and attitude limits consumes that site's one gas can exactly once. The fuel
-award is computed only after the next site exists: a deterministic reference plan starts at the
-post-refuel, post-power platform checkpoint, includes the pinned player-reachable launch prefix,
-uses the same immutable physics profile as play, and demonstrates a safe next landing to establish
-its conservative minimum fuel. The award is that minimum multiplied by the refuel ratio
-`1 + 0.5^(n-1)`, where `n` is the one-indexed number of the base just powered. The sequence begins
-`2, 1.5, 1.25, 1.125` and mathematically approaches one from above in constant time. Its binary
-runtime projection never falls below one and may round to exactly one when the remaining bonus is
-smaller than representable precision. The award is added to the carried reserve without erasing
-unused fuel. Fixed-seed tests pin both the route proof and the smallest successful allowance within
-the LLD's search resolution.
+Each deterministic site retains the same coarse, irregular terrain generator beneath its complete
+footprint; it does not replace a site span with a flat shelf. The world derives a sufficiently high
+level deck from the native terrain envelope rather than flattening the surface. One ordered terrain
+chain remains authoritative through site and chunk boundaries, so rendering and collision cannot
+disagree through duplicate horizontal positions or vertical closing segments. The materially
+elevated platform remains exactly three lander widths long beside one solid NOC building. One
+collider-backed open truss uses continuous top and bottom chords and a uniform sequence of
+alternating triangular braces across the complete platform-to-NOC span. Exactly three visible,
+collider-backed pylons at the structure's left, center, and right descend to the terrain height
+interpolated from that same authoritative chain. The structure has no region-specific pad,
+connector, or NOC brace pattern, so the site reads as one elevated engineered structure without a
+long exposed sky strip, repeated X fields, a false flat foundation, or a decorative opening the
+lander could appear able to traverse. A safe landing under the pinned, modestly relaxed speed and
+attitude limits consumes that site's one gas can exactly once. The fuel award is computed only after
+the next site exists: a deterministic reference plan starts at the post-refuel, post-power platform
+checkpoint, includes the pinned player-reachable launch prefix, uses the same immutable physics
+profile as play, and demonstrates a safe next landing to establish its conservative minimum fuel.
+The award is that minimum multiplied by the refuel ratio `1 + 0.5^(n-1)`, where `n` is the
+one-indexed number of the base just powered. The sequence begins `2, 1.5, 1.25, 1.125` and
+mathematically approaches one from above in constant time. Its binary runtime projection never falls
+below one and may round to exactly one when the remaining bonus is smaller than representable
+precision. The award is added to the carried reserve without erasing unused fuel. Fixed-seed tests
+pin both the route proof and the smallest successful allowance within the LLD's search resolution.
 
 After refueling, the G opening acts as a deployment bay: a small terminal-inspired agent reaches the
 surface and enters the single NOC. A clean rectangular vertical phone-battery-style indicator, with

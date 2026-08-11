@@ -802,13 +802,14 @@ separate Phase 4K acceptance is expected.
       refinement.
 - [x] Amend the FRD, HLA, and this plan without rewriting completed Phase 4K evidence. Require one
       non-wrapping keyboard instruction line followed by one touch instruction line, exact `Retry`
-      action naming with the existing `r` hint, exact powered-pad pose/fuel restoration, and a
-      second bounded landing-envelope relaxation.
+      action naming with the existing `r` hint, exact powered-pad pose/fuel restoration, a second
+      bounded landing-envelope relaxation, and native varied terrain beneath every elevated site.
 - [ ] Delegate and lead-review an exact LLD amendment for instruction markup and responsive layout,
       Retry label/accessibility/focus/state behavior, checkpoint snapshot identity, one continuous
-      alternating-triangle platform-to-NOC truss and honest collider, exact new contact boundaries,
-      the one-indexed `1 + 0.5^(n-1)` refuel ratio, and atomic route/world/geometry derivation and
-      fixture regeneration.
+      alternating-triangle platform-to-NOC truss, exactly three left/center/right terrain-reaching
+      supports and honest colliders, monotonic seam-free terrain projection, exact new contact
+      boundaries, the one-indexed `1 + 0.5^(n-1)` refuel ratio, and atomic route/world/geometry
+      derivation and fixture regeneration.
 - [ ] Obtain an `agentworks-reviewer` approval of the Phase 4L artifact amendment and resolve every
       valid finding before changing production or canonical fixture code.
 - [ ] Delegate implementation to an `agentworks-dev` subagent in an isolated worktree. Update the
@@ -817,17 +818,18 @@ separate Phase 4K acceptance is expected.
 - [ ] Prove keyboard instructions occupy the first rail line and touch instructions the second
       without internal wrapping at the accepted layouts; Retry retains `r`, restores the exact
       checkpoint site/pose/fuel/progress without duplicate award, and returns focus to the scene;
-      the complete pad-to-NOC scaffold has one continuous alternating-triangle rhythm and exact
-      render/collision parity; refuel ratios are exactly `2, 1.5, 1.25, 1.125, ...` by powered-base
-      number and carried excess remains additive; `2.0/3.2/15/22` equality contacts are safe while
-      independent epsilon excesses crash; all nine constructive routes, world witnesses, and
-      one-quantum failures regenerate deterministically.
+      the complete pad-to-NOC scaffold has one continuous alternating-triangle rhythm, three
+      collision-backed supports reach the untouched varied terrain, and terrain rendering has no
+      duplicate-position or vertical-seam artifact; refuel ratios are exactly
+      `2, 1.5, 1.25, 1.125, ...` by powered-base number and carried excess remains additive;
+      `2.0/3.2/15/22` equality contacts are safe while independent epsilon excesses crash; all nine
+      constructive routes, world witnesses, and one-quantum failures regenerate deterministically.
 - [ ] Run focused website suites, deterministic root/project builds, complete repository gates,
       artifact/code/fresh-eyes reviews, and automated Chromium acceptance; resolve every valid
       finding and re-review the immutable integrated head.
 - [ ] Refresh port 8766 from the exact reviewed head and obtain operator Chrome and Edge acceptance
-      of the two-line controls, Retry semantics, exact checkpoint restoration, continuous truss, and
-      landing feel.
+      of the two-line controls, Retry semantics, exact checkpoint restoration, continuous truss,
+      three terrain-reaching supports, seam-free varied terrain beneath sites, and landing feel.
 - [ ] Merge or rebase the latest `main`, update PR #486 and its evidence, mark it ready only after
       operator acceptance, and monitor every required CI and CodeQL check to completion.
 
@@ -842,11 +844,18 @@ more expressive alternating-triangle truss rhythm. The multiplier between demons
 and each can's award is named the refuel ratio and becomes exactly `1 + 0.5^(n-1)` for one-indexed
 powered-base number `n`, starting at `2` and approaching one.
 
+The operator then rejected the remaining flat-site shelf in favor of the native random terrain
+continuing beneath each site. The continuous pad-to-NOC truss stays level, while exactly three
+visible supports at its left, center, and right reach the independently varied surface. This must
+also eliminate the terrain's vertical-line artifacts by keeping one ordered, continuous terrain
+chain through every site and chunk boundary rather than splicing a horizontal replacement into it.
+
 Definition of done: controls have deterministic two-line layout without awkward internal wrapping;
 Retry's name and behavior agree; checkpoint restoration is exact and mutation-protected; the whole
-pad-to-NOC span reads as one honest continuous structure; the refuel ratio and carried-excess award
-are exact; revised contact boundaries and all derived proof artifacts are deterministic; and the
-immutable result is review-clean, browser-accepted, and merge-ready.
+pad-to-NOC span reads as one honest continuous structure supported at left, center, and right over
+uninterrupted varied terrain; terrain projection has no vertical seam; the refuel ratio and
+carried-excess award are exact; revised contact boundaries and all derived proof artifacts are
+deterministic; and the immutable result is review-clean, browser-accepted, and merge-ready.
 
 ## Phase 5: CI and default Pages deployment
 

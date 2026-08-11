@@ -163,20 +163,22 @@ forecloses it, and none of it is in scope now.
   deterministic sequence of sites generated from one fresh in-memory run seed. Each site has one
   materially elevated helicopter-style landing platform exactly three lander widths long beside one
   compact NOC building. One continuous collider-backed exposed truss spans beneath the complete
-  platform-to-NOC structure with a uniform alternating-triangle rhythm and supporting posts rather
-  than separate pad, connector, and NOC fields of X braces; decorative openings must not imply a
-  traversable gap where the collision model is solid. Terrain changes at deliberately wide intervals
-  with stronger, irregular elevation changes between sites rather than a fine repeated sawtooth;
-  every platform and its NOC occupy one flat site shelf. The elevated platform reads as a supported
-  structure without exposing a long sky-colored slot beneath its deck. A safe landing collects that
-  platform's single gas can into the lander's visible fuel reserve, deploys an agent from the G
-  opening, fills a clean rectangular vertical, multicolor phone-battery-style power indicator
-  without a terminal nub, then builds a vertically symmetric network signal through the final three
-  power stages. Completing the sequence exposes the exact visible and announced banner
-  `Agent Deployed!` while the lander waits safely on the pad. The deployed agent remains visibly
-  installed at that NOC while the powered site is retained in the run's rolling world. The player
-  must command the subsequent liftoff; there is no automatic launch and no terminal success after a
-  deployment.
+  platform-to-NOC structure with a uniform alternating-triangle rhythm rather than separate pad,
+  connector, and NOC fields of X braces. Exactly three visible, collider-backed supports descend
+  from that structure to the lunar surface at its left, center, and right; decorative openings must
+  not imply a traversable gap where the collision model is solid. Terrain changes at deliberately
+  wide intervals with stronger, irregular elevation changes rather than a fine repeated sawtooth,
+  and the native deterministic terrain continues beneath every site without being replaced by a flat
+  shelf. The terrain projection is one ordered, continuous polyline with no duplicate-position
+  vertical seams. The elevated platform and NOC read as one supported structure without exposing a
+  long sky-colored slot beneath the deck. A safe landing collects that platform's single gas can
+  into the lander's visible fuel reserve, deploys an agent from the G opening, fills a clean
+  rectangular vertical, multicolor phone-battery-style power indicator without a terminal nub, then
+  builds a vertically symmetric network signal through the final three power stages. Completing the
+  sequence exposes the exact visible and announced banner `Agent Deployed!` while the lander waits
+  safely on the pad. The deployed agent remains visibly installed at that NOC while the powered site
+  is retained in the run's rolling world. The player must command the subsequent liftoff; there is
+  no automatic launch and no terminal success after a deployment.
 - R22. After each safe landing, the next site is deterministically placed beyond the right edge of
   the current view. A visible right-edge arrow blinks while that target remains offscreen and hides
   once the site enters view; under reduced motion it remains a static direction cue. Before issuing
@@ -341,11 +343,14 @@ merged and settled on `main`. The first slice must not build toward them specula
   external references are absent.
 - AC22. For fixed seeds, generated terrain, elevated platforms, single NOCs, gas cans, next-site
   positions, and fuel awards are byte-for-byte repeatable. Representative seeds meet the LLD's
-  minimum terrain-diversity constraints and visibly include coarse rising, falling, and sloped
-  non-platform spans separated by the LLD's wider sample interval. Every retained platform and NOC
-  stands on one flat shelf, while the platform deck remains visibly and physically elevated on one
-  continuous collider-backed exposed truss that attaches the pad to its NOC with a uniform
-  alternating-triangle structural rhythm, without separate brace fields, an uninterrupted
+  minimum terrain-diversity constraints and visibly include coarse rising, falling, and sloped spans
+  separated by the LLD's wider sample interval, including uninterrupted varied terrain below each
+  site. No site replaces that terrain with a horizontal shelf, introduces duplicate vertices at one
+  horizontal coordinate, or renders a vertical seam at a chunk or site boundary. The platform deck
+  remains visibly and physically elevated on one continuous collider-backed exposed truss that
+  attaches the pad to its NOC with a uniform alternating-triangle structural rhythm. Exactly three
+  visible collision-backed supports reach from that structure to the independently interpolated
+  terrain at its left, center, and right, without separate brace fields, an uninterrupted
   sky-colored rectangle beneath it, or a visual opening that contradicts collision. Each award
   equals the next route's deterministic demonstrated minimum multiplied by the refuel ratio
   `1 + 0.5^(n-1)` for one-indexed powered-base number `n`, beginning at `2` and approaching one
