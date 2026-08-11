@@ -15,7 +15,7 @@ PYTHON_TEST_COMMAND = "python3 -m unittest discover -s website/tests -p 'test_*.
 NODE_TEST_COMMAND = (
     "node --test website/tests/lander-world.test.mjs website/tests/lander-model.test.mjs "
     "website/tests/lander-phase4i.test.mjs website/tests/lander-phase4j.test.mjs "
-    "website/tests/lander-phase4k.test.mjs"
+    "website/tests/lander-phase4k.test.mjs website/tests/lander-phase4l.test.mjs"
 )
 
 CI_DETERMINISTIC_BUILD_SCRIPT = '''\
