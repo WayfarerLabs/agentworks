@@ -1,6 +1,6 @@
 # Plan: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander Phase 4K operator acceptance pending
+- Status: Interim implementation complete; continuous Lander Phase 4L refinement in progress
 - Date: 2026-08-07
 - Last revised: 2026-08-11
 - FRD: `frd.md`
@@ -790,6 +790,52 @@ has no action besides persistent rail Exit, failed adds only Restart, shortcut h
 accessible without duplicated legend copy, every input path still initiates manual departure, the
 revised exact envelope and regenerated proof artifacts are deterministic, and the immutable result
 is review-clean, browser-accepted, and merge-ready.
+
+The Phase 4K operator-acceptance and merge rows remain open because the operator reviewed that exact
+preview and requested the cohesive Phase 4L refinement below before accepting the stacked PR. No
+separate Phase 4K acceptance is expected.
+
+## Phase 4L: two-line controls, checkpoint retry, and final landing tolerance
+
+- [x] Inspect the exact controls-rail markup/CSS, checkpoint serialization/restoration, retry focus
+      lifecycle, safe-contact constants, and route-proof authorities before selecting the
+      refinement.
+- [x] Amend the FRD, HLA, and this plan without rewriting completed Phase 4K evidence. Require one
+      non-wrapping keyboard instruction line followed by one touch instruction line, exact `Retry`
+      action naming with the existing `r` hint, exact powered-pad pose/fuel restoration, and a
+      second bounded landing-envelope relaxation.
+- [ ] Delegate and lead-review an exact LLD amendment for instruction markup and responsive layout,
+      Retry label/accessibility/focus/state behavior, checkpoint snapshot identity, exact new
+      contact boundaries, and atomic route derivation/fixture regeneration.
+- [ ] Obtain an `agentworks-reviewer` approval of the Phase 4L artifact amendment and resolve every
+      valid finding before changing production or canonical fixture code.
+- [ ] Delegate implementation to an `agentworks-dev` subagent in an isolated worktree. Update the
+      shared fragment/CSS, model proof constants and literals, validators, focused tests, permanent
+      README, and browser checklist as one coherent change.
+- [ ] Prove keyboard instructions occupy the first rail line and touch instructions the second
+      without internal wrapping at the accepted layouts; Retry retains `r`, restores the exact
+      checkpoint site/pose/fuel/progress without duplicate award, and returns focus to the scene;
+      `2.0/3.2/15/22` equality contacts are safe while independent epsilon excesses crash; all nine
+      constructive routes and one-quantum failures regenerate deterministically.
+- [ ] Run focused website suites, deterministic root/project builds, complete repository gates,
+      artifact/code/fresh-eyes reviews, and automated Chromium acceptance; resolve every valid
+      finding and re-review the immutable integrated head.
+- [ ] Refresh port 8766 from the exact reviewed head and obtain operator Chrome and Edge acceptance
+      of the two-line controls, Retry semantics, exact checkpoint restoration, and landing feel.
+- [ ] Merge or rebase the latest `main`, update PR #486 and its evidence, mark it ready only after
+      operator acceptance, and monitor every required CI and CodeQL check to completion.
+
+Operator evidence (2026-08-11): the operator judged Phase 4K very close and requested three final
+refinements. Keyboard instructions occupy the first rail line and touch instructions the second. The
+crash action is named `Retry`, retaining the `r` hint, because it restores the last powered pad
+rather than restarting the expedition. That restoration must preserve the checkpoint's exact
+centered pose and post-award carried fuel. Safe contact rises one more bounded step to `2.0`
+horizontal, `3.2` descending, `15` degrees tilt, and `22` degrees per second rotation.
+
+Definition of done: controls have deterministic two-line layout without awkward internal wrapping;
+Retry's name and behavior agree; checkpoint restoration is exact and mutation-protected; revised
+contact boundaries and all derived proof artifacts are deterministic; and the immutable result is
+review-clean, browser-accepted, and merge-ready.
 
 ## Phase 5: CI and default Pages deployment
 

@@ -1,6 +1,6 @@
 # FRD: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander Phase 4K operator acceptance pending
+- Status: Interim implementation complete; continuous Lander Phase 4L refinement in progress
 - Date: 2026-08-07
 - Last revised: 2026-08-11
 - Seeded by: the saga lead, at operator request. This is a standalone effort, deliberately NOT a
@@ -72,9 +72,9 @@ forecloses it, and none of it is in scope now.
   has no audio, telemetry, network request, durable storage, or critical content; it pauses physics
   and motion when inactive, can be exited, and honors reduced motion for all nonessential animation.
   World generation, powered sites, checkpoints, fuel, and progress last only for the current
-  in-memory run. After activation, native visible `Exit mission` and crash-state `Restart mission`
-  buttons provide touch and assistive-technology equivalents to Escape and `r`; they remain hidden
-  during hint-free preflight.
+  in-memory run. After activation, native visible `Exit mission` and crash-state `Retry` buttons
+  provide touch and assistive-technology equivalents to Escape and `r`; they remain hidden during
+  hint-free preflight.
 - R10. Before the onboarding effort's canonical bootstrap source lands, an **interim public
   release** may serve the complete site shell, repository-sourced problem and principle content,
   selected brand, permanent links, custom 404, deployment pipeline, and custom domain. It states
@@ -188,9 +188,9 @@ forecloses it, and none of it is in scope now.
   sustained fireball, audio, or page movement. Reduced motion skips fragment travel and exposes the
   final failed state directly. Safe-contact limits remain demanding but modestly more forgiving than
   the initial continuous-expedition tuning, especially for the angular speed produced by an ordinary
-  steering pulse. Restart through either `r` or the native control resumes from the last
-  successfully powered platform with its post-refuel checkpoint; before the first success it
-  restarts the initial approach. Exit or reload starts a fresh run.
+  steering pulse. Retry through either `r` or the native control resumes from the last successfully
+  powered platform with its post-refuel checkpoint; before the first success it restarts the initial
+  approach. Exit or reload starts a fresh run.
 - R24. Once activated, the game chrome uses a compact 1980s-arcade presentation without introducing
   a downloaded font, remote asset, second status authority, canvas, or framework. The left fuel
   reserve is visual-only for sighted players: its bottom-up fill changes from danger red through
@@ -200,7 +200,7 @@ forecloses it, and none of it is in scope now.
   final full gauge atomically. The sole status live region becomes the centered, bordered arcade
   banner for exact `Agent Deployed!` and exact `Crashed!` outcomes. Concise controls move inside the
   scene in a small bottom rail whose reserved band never overlaps terrain. Exit is a persistent
-  bottom-right rail control, while failure adds only Restart beneath `Crashed!`; each control shows
+  bottom-right rail control, while failure adds only Retry beneath `Crashed!`; each control shows
   its keyboard shortcut on a smaller second line and keeps its accessible name, focus behavior, and
   minimum touch target. Launch-ready presents only `Agent Deployed!`: departure uses the same
   keyboard, vi, pointer, and touch thrust controls as flight and has no dedicated Launch action.
@@ -352,16 +352,17 @@ merged and settled on `main`. The first slice must not build toward them specula
   communicated by animation alone.
 - AC24. Every unsafe terrain, pad, or building impact reaches a finite crash sequence with a brief
   flash and deterministic ballistic debris but no smoke, shock wave, sustained fire, sound, page
-  movement, storage, or request. Reduced motion reaches the same final failure atomically. Restart
-  restores the exact last post-refuel, post-power launch-ready platform checkpoint without
-  duplicating its can or fuel; restart before the first deployment restores the initial approach,
-  while Exit and reload create a fresh run. Boundary tests pin the modestly relaxed safe-contact
-  envelope, revised upward just enough to accept near-miss arrivals at `1.8` model units per second
-  horizontal speed, `2.8` model units per second descent, `12` degrees tilt, and `18` degrees per
-  second angular speed. Browser handling proves that collective-plus-turn vectoring stays within the
-  LLD's materially lower axial ceiling, turn-only input does not overcome gravity, neutral
-  collective counters residual rotation through the deterministic assist, and engine-off vehicle
-  motion plus crash debris remain undamped and ballistic.
+  movement, storage, or request. Reduced motion reaches the same final failure atomically. Retry
+  restores the exact last post-refuel, post-power launch-ready platform checkpoint, including its
+  centered pose and carried post-award fuel, without duplicating its can or fuel; retry before the
+  first deployment restores the initial approach, while Exit and reload create a fresh run. Boundary
+  tests pin the modestly relaxed safe-contact envelope, revised upward just enough to accept
+  near-miss arrivals at `2.0` model units per second horizontal speed, `3.2` model units per second
+  descent, `15` degrees tilt, and `22` degrees per second angular speed. Browser handling proves
+  that collective-plus-turn vectoring stays within the LLD's materially lower axial ceiling,
+  turn-only input does not overcome gravity, neutral collective counters residual rotation through
+  the deterministic assist, and engine-off vehicle motion plus crash debris remain undamped and
+  ballistic.
 - AC25. In both `/lander/` and `404.html`, activation reveals one blocky local-system-font arcade
   HUD: no numeric fuel text is visible, one named rounded representation of the exact model reserve
   remains available to assistive technology without live-region behavior, and the same bottom-origin
@@ -373,9 +374,9 @@ merged and settled on `main`. The first slice must not build toward them specula
   represented by self-documenting buttons and shares the scene's bottom rail with an
   always-available bottom-right Exit action whose smaller second line identifies Escape. Terrain
   remains wholly above that rail. Launch-ready contains no action control, while failure adds only
-  Restart beneath the crash banner with `r` on its smaller second line. Those controls and overlays
-  do not overlap at 320 CSS pixels or 400 percent zoom. Normal arcade motion pauses while hidden and
-  is absent under reduced motion. The installed-agent mark persists at each powered retained NOC
+  Retry beneath the crash banner with `r` on its smaller second line. Those controls and overlays do
+  not overlap at 320 CSS pixels or 400 percent zoom. Normal arcade motion pauses while hidden and is
+  absent under reduced motion. The installed-agent mark persists at each powered retained NOC
   without increasing the established 80-descendant world ceiling. Shared-game byte identity, focus
   order, 44-pixel targets, contrast, no-JavaScript recovery, and zero runtime font or cross-origin
   requests remain intact. The world and geometry digests remain unchanged; the physics and derived

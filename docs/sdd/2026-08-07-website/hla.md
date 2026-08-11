@@ -1,6 +1,6 @@
 # HLA: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander Phase 4K operator acceptance pending
+- Status: Interim implementation complete; continuous Lander Phase 4L refinement in progress
 - Date: 2026-08-07
 - Last revised: 2026-08-11
 - FRD: `frd.md`
@@ -255,11 +255,11 @@ The accepted preflight Space event is consumed so it cannot also scroll the page
 focus to the game scene and reveals concise in-scene controls, a programmatically named but visually
 hidden rounded representation of the exact model fuel reserve, one left-side vertical visual gauge,
 status, and a native `Exit mission` button at the bottom-right of the controls rail. A native
-`Restart mission` button is revealed beneath the crash banner and is the only failure-specific
-action. Both buttons show their keyboard equivalents on a smaller second line, invoke the same EXIT
-and RESTART model events as Escape and `r`, preserve the established focus destinations, and make
-the complete lifecycle available to touch and assistive technology. Exit remains available in every
-active state; both controls remain hidden during preflight.
+`Retry` button is revealed beneath the crash banner and is the only failure-specific action. Both
+buttons show their keyboard equivalents on a smaller second line, invoke the same EXIT and RESTART
+model events as Escape and `r`, preserve the established focus destinations, and make the complete
+lifecycle available to touch and assistive technology. Exit remains available in every active state;
+both controls remain hidden during preflight.
 
 While active, Space or Up commands equal thrust; Left or `h` increases the right engine to turn
 left; Right or `l` increases the left engine to turn right. Differential input vectors the combined
@@ -341,10 +341,10 @@ vehicle safely at rest, exposes the exact visible and announced `Agent Deployed!
 existing status live region, and consumes no fuel until the player commands thrust. No Launch button
 or other launch-ready action is rendered: the same keyboard, vi, pointer, and touch collective
 controls used in flight initiate liftoff; once both feet clear the deck, ordinary flight resumes
-with the next site already generated offscreen to the right. Restart returns to this same
-launch-ready checkpoint rather than replaying an award or launch. A right-edge direction cue blinks
-only while that target is outside the viewport; reduced motion keeps the useful arrow static.
-Deployment never enters a terminal success state.
+with the next site already generated offscreen to the right. Retry returns to this same launch-ready
+checkpoint, including its centered pose and carried post-award fuel, rather than replaying an award
+or launch. A right-edge direction cue blinks only while that target is outside the viewport; reduced
+motion keeps the useful arrow static. Deployment never enters a terminal success state.
 
 The fuel projection does not invent a fixed tank capacity for an uncapped reserve. The visually
 hidden non-live text remains the sole accessible rounded presentation of exact model engine-seconds.
@@ -360,21 +360,21 @@ reference without clipping or discarding carried excess.
 Activated game chrome uses one local system-monospace arcade stack, heavy block lettering, crisp
 shadows, and bounded stepped animation; it adds no webfont, asset request, canvas, or semantic-text
 copy. The controls paragraph moves into an opaque bottom rail within the scene shell and omits
-keyboard shortcuts already shown by the rail's persistent Exit control or the conditional Restart
+keyboard shortcuts already shown by the rail's persistent Exit control or the conditional Retry
 control. The world projection keeps every possible terrain surface above that reserved rail rather
 than relying on the rail to hide an overlap. The existing status live region is the only banner
 authority: it presents centered bordered `Agent Deployed!` and `Crashed!` panels. Launch-ready shows
-only its banner; failure adds only Restart beneath its banner; Exit stays at the rail's
-bottom-right. At narrow width and 400 percent zoom, the fuel gauge, centered panel, controls rail,
-and native controls remain within the scene and do not overlap. Reduced motion removes arcade/refuel
-animation; document hiding pauses it with the existing lifecycle. Decoration uses existing elements
-or pseudo-elements only, and persistent installed-agent geometry reuses the per-site NOC entry path
-so the exact 80-descendant world ceiling does not grow.
+only its banner; failure adds only Retry beneath its banner; Exit stays at the rail's bottom-right.
+At narrow width and 400 percent zoom, the fuel gauge, centered panel, controls rail, and native
+controls remain within the scene and do not overlap. Reduced motion removes arcade/refuel animation;
+document hiding pauses it with the existing lifecycle. Decoration uses existing elements or
+pseudo-elements only, and persistent installed-agent geometry reuses the per-site NOC entry path so
+the exact 80-descendant world ceiling does not grow.
 
 Unsafe terrain, platform, or building contact enters a finite crash sequence. Normal motion shows a
 compact propellant flash and deterministic fragments following ballistic paths; it has no smoke,
 atmospheric shock wave, sustained fireball, sound, or page movement. Reduced motion atomically shows
-the final failed state. Restart restores the last post-refuel, post-power launch-ready checkpoint on
+the final failed state. Retry restores the last post-refuel, post-power launch-ready checkpoint on
 its powered pad without duplicating the consumed can or fuel; before any successful site it restores
 the initial approach. Exit and reload discard all world, fuel, checkpoint, and powered-site state.
 The home link remains available in every state.
