@@ -1,6 +1,6 @@
 # Plan: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander Phase 4I browser acceptance pending
+- Status: Interim implementation complete; continuous Lander Phase 4J design in progress
 - Date: 2026-08-07
 - Last revised: 2026-08-11
 - FRD: `frd.md`
@@ -24,7 +24,7 @@ availability notice with the canonical README bootstrap and copy enhancement. It
 the page, fork the content, or create another deployment path. A final closeout PR records complete
 production acceptance, final truthful checkbox flips, and `locked.md`.
 
-`locked.md` never merges before AC1-AC24 and R1-R23 are accepted in production. Every earlier merge
+`locked.md` never merges before AC1-AC25 and R1-R24 are accepted in production. Every earlier merge
 is independently useful and operable: the interim release does not claim onboarding exists, and the
 onboarding release consumes only the eventual canonical contract from `main`. No website code binds
 to the onboarding feature branch.
@@ -659,6 +659,54 @@ force; pad, scaffold, NOC, collision, and static/dynamic projections agree; batt
 signal stages build upward; routes/world witnesses are atomically regenerated; and the result is
 review-clean, browser-accepted, and merge-ready.
 
+## Phase 4J: arcade presentation and persistent deployed agents
+
+- [x] Measure the exact Phase 4I fragment, fuel/service/status projection, scene and terrain bounds,
+      retained-site DOM budget, crash/action lifecycle, reduced-motion behavior, font/CSP policy,
+      and current agent/NOC geometry before selecting an arcade presentation.
+- [x] Amend the FRD, HLA, and this plan without rewriting completed Phase 4I evidence. Require a
+      visual-only multicolor fuel gauge with hidden accessible numeric output, deterministic
+      can-to-gauge refueling, one centered arcade banner authority for success and failure, an
+      in-scene terrain-separated controls rail and state actions, and one persistent installed agent
+      at every powered retained NOC.
+- [ ] Delegate and lead-review an exact LLD amendment that pins markup/source order, the local
+      monospace arcade stack, fuel level/color/refill projection, reduced-motion and hidden-document
+      behavior, banner and native-action geometry, bottom-rail/terrain separation, installed-agent
+      model and path reuse, DOM bounds, focus/accessibility, and mutation-sensitive browser
+      evidence.
+- [ ] Obtain an `agentworks-reviewer` approval of the Phase 4J artifact amendment and resolve every
+      valid artifact finding before changing production code.
+- [ ] Delegate implementation to an `agentworks-dev` subagent in an isolated worktree. Update the
+      shared fragment, model/controller projection, CSS, validators, focused tests, permanent
+      README, and browser checklist as one coherent change. Preserve the sole status and fuel
+      authorities, static/dynamic identity, and Phase 4I physics/route/world fixtures.
+- [ ] Prove deterministic refuel interpolation and transfer, reduced-motion equivalence, installed
+      agent persistence across service/checkpoint/restart/retention, exact success/crash text and
+      action focus, terrain-to-control-rail separation, narrow/zoom non-overlap, hidden-page pause,
+      no font/network/storage additions, and the unchanged world ceiling and route digests.
+- [ ] Run focused website suites, deterministic root/project builds, complete repository gates,
+      artifact/code/fresh-eyes reviews, and automated Chromium acceptance; resolve every valid
+      finding and re-review the immutable integrated head.
+- [ ] Refresh port 8766 from the exact reviewed head and obtain operator Chrome and Edge acceptance
+      of the arcade feel, fuel transfer, success/crash overlays, in-game controls/actions, and
+      persistent agents across at least three deployments.
+- [ ] Merge or rebase the latest `main`, update PR #486 and its evidence, mark it ready only after
+      operator acceptance, and monitor every required CI and CodeQL check to completion.
+
+Operator evidence (2026-08-11): the operator judged Phase 4I substantially improved and requested a
+final cohesive visual round. Fuel becomes a stronger visual instrument without visible amount text,
+with danger-to-ready color and an animated can transfer/refill. `Agent Deployed!` becomes a
+centered, bordered arcade payoff; `Crashed!` receives the same treatment with Restart and Exit below
+it. The small blocky controls legend moves inside the bottom of the scene while terrain remains
+above it. The agent that plugs into a NOC remains visibly installed as the first persistent power-up
+mark.
+
+Definition of done: R24 and AC25 hold without changing Phase 4I physics, collision, routes, world
+generation, privacy, or shared-fragment identity; the arcade HUD communicates without a downloaded
+font or color/motion alone; all refuel, banner, action, control-rail, persistent-agent,
+reduced-motion, DOM, accessibility, and responsive witnesses are review-clean and browser-accepted;
+and PR #486 is merge-ready.
+
 ## Phase 5: CI and default Pages deployment
 
 - [x] Delegate workflow implementation to an `agentworks-dev` subagent with ownership of the Pages
@@ -767,7 +815,7 @@ Phase 6 retains the one-time same-run root-base redeployment gate before DNS cut
       `website/README.md` and this feature directory on the existing evidence branch; mark its draft
       PR ready, obtain review, and merge it. Do not create `locked.md` or claim AC3/AC4.
 
-Definition of done: R3-R11 and R13-R23 plus AC1, AC2, AC5-AC11, and AC13-AC24's interim conditions
+Definition of done: R3-R11 and R13-R24 plus AC1, AC2, AC5-AC11, and AC13-AC25's interim conditions
 hold at `https://agentworks.build`; the public site is useful and honest while onboarding remains
 pending.
 
@@ -815,7 +863,7 @@ with no branch-only dependency or duplicated bootstrap.
       metadata/CSP, byte-equivalent Lander/404 game subtree, and compact 404 title after onboarding
       integration.
 
-Definition of done: R1-R23, AC2-AC3, and AC5-AC24 hold in production through the existing site and
+Definition of done: R1-R24, AC2-AC3, and AC5-AC25 hold in production through the existing site and
 pipeline, with the temporary notice removed rather than retained as configuration.
 
 ## Phase 9: complete acceptance and closeout
@@ -839,7 +887,7 @@ pipeline, with the temporary notice removed rather than retained as configuratio
       run final gates, obtain the required closeout review, and hand the ready PR to the operator
       for merge.
 
-Definition of done: AC1-AC24 hold at `https://agentworks.build`, R1-R23 and C1-C5 are production
+Definition of done: AC1-AC25 hold at `https://agentworks.build`, R1-R24 and C1-C5 are production
 facts, the deployment is operable without this SDD, all plan boxes are truthful, and the effort is
 locked.
 

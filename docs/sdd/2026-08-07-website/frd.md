@@ -1,8 +1,8 @@
 # FRD: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander Phase 4I implementation in progress
+- Status: Interim implementation complete; continuous Lander Phase 4J design in progress
 - Date: 2026-08-07
-- Last revised: 2026-08-10
+- Last revised: 2026-08-11
 - Seeded by: the saga lead, at operator request. This is a standalone effort, deliberately NOT a
   child of the 2026-08-04-next-steps saga (see that saga's `target-state.md` out-of-scope section
   for the recorded relationship). It follows the ordinary SDD process: the effort lead owns the HLA
@@ -172,9 +172,9 @@ forecloses it, and none of it is in scope now.
   rectangular vertical, multicolor phone-battery-style power indicator without a terminal nub, then
   builds a vertically symmetric network signal through the final three power stages. Completing the
   sequence exposes the exact visible and announced banner `Agent Deployed!` while the lander waits
-  safely on the pad. The powered site remains changed while it is retained in the run's rolling
-  world. The player must command the subsequent liftoff; there is no automatic launch and no
-  terminal success after a deployment.
+  safely on the pad. The deployed agent remains visibly installed at that NOC while the powered site
+  is retained in the run's rolling world. The player must command the subsequent liftoff; there is
+  no automatic launch and no terminal success after a deployment.
 - R22. After each safe landing, the next site is deterministically placed beyond the right edge of
   the current view. A visible right-edge arrow blinks while that target remains offscreen and hides
   once the site enters view; under reduced motion it remains a static direction cue. Before issuing
@@ -191,6 +191,18 @@ forecloses it, and none of it is in scope now.
   steering pulse. Restart through either `r` or the native control resumes from the last
   successfully powered platform with its post-refuel checkpoint; before the first success it
   restarts the initial approach. Exit or reload starts a fresh run.
+- R24. Once activated, the game chrome uses a compact 1980s-arcade presentation without introducing
+  a downloaded font, remote asset, second status authority, canvas, or framework. The left fuel
+  reserve is visual-only for sighted players: its bottom-up fill changes from danger red through
+  amber to ready green, while the exact numeric reserve remains available to assistive technology. A
+  successful touchdown shows the collected can traveling toward that gauge while its fill rises over
+  the existing refuel interval; reduced motion exposes the final full gauge atomically. The sole
+  status live region becomes the centered, bordered arcade banner for exact `Agent Deployed!` and
+  exact `Crashed!` outcomes. Concise controls move inside the scene in a small bottom rail whose
+  reserved band never overlaps terrain. On failure, native Restart and Exit controls appear inside
+  the scene beneath `Crashed!`; all native controls keep their accessible names, focus behavior, and
+  minimum touch targets. Arcade decoration and motion never duplicate semantic text, obscure the
+  world, expand the bounded world DOM, or survive under reduced motion.
 
 ## Settled constraints (inherited; do not reopen)
 
@@ -241,15 +253,16 @@ merged and settled on `main`. The first slice must not build toward them specula
   visible plume length reflects the commanded engine thrust; and the native Exit control returns
   either input mode to settled preflight.
 - AC7. A safe upright touchdown on the elevated three-lander-width platform consumes its gas can
-  exactly once, increases the visible and programmatically named numeric reserve without discarding
-  carried excess, and refills a left-side vertical gauge whose scale is explicitly relative to that
-  leg's departure reserve rather than a false fixed tank capacity. It completes agent entry, fills
-  the single-building NOC battery indicator from bottom to top through distinct visible colors,
-  builds the vertically symmetric network signal through its final three stages, and presents one
+  exactly once, increases the programmatically named numeric reserve without discarding carried
+  excess, and refills a left-side vertical gauge whose scale is explicitly relative to that leg's
+  departure reserve rather than a false fixed tank capacity. It completes agent entry, fills the
+  single-building NOC battery indicator from bottom to top through distinct visible colors, builds
+  the vertically symmetric network signal through its final three stages, and presents one
   `Agent Deployed!` banner through the existing status authority. The centered lander remains safely
   at rest with fuel unchanged until the player commands thrust, then returns to ordinary flight once
-  both feet clear the deck. Completing three successive sites proves that deployment is not terminal
-  and that powered sites remain visibly changed while they remain in the rolling view.
+  both feet clear the deck. Completing three successive sites proves that deployment is not
+  terminal, that each agent remains visibly installed at its powered NOC, and that powered sites
+  remain visibly changed while they remain in the rolling view.
 - AC8. Automated and browser acceptance cover state transitions, input mapping, consistent
   fixed-step physics across representative frame schedules, seeded terrain and site generation,
   route-home fallback, hidden-until-start instructions, fuel and checkpoint transitions, reduced
@@ -344,6 +357,20 @@ merged and settled on `main`. The first slice must not build toward them specula
   materially lower axial ceiling, turn-only input does not overcome gravity, neutral collective
   counters residual rotation through the deterministic assist, and engine-off vehicle motion plus
   crash debris remain undamped and ballistic.
+- AC25. In both `/lander/` and `404.html`, activation reveals one blocky local-system-font arcade
+  HUD: no numeric fuel text is visible, the exact named output remains available to assistive
+  technology, and the same bottom-origin gauge independently communicates level by height and a
+  red-to-amber-to-green progression. Normal motion shows one deterministic can-to-gauge transfer and
+  gauge-rise sequence during the pinned refuel interval; reduced motion shows neither animation and
+  lands directly on the same full value. The existing sole live region presents centered, bordered
+  `Agent Deployed!` and `Crashed!` banners, with no pseudo-element or duplicate text authority. The
+  controls legend and state-appropriate native buttons render inside the scene; terrain remains
+  wholly above the legend rail, and failed-state Restart and Exit controls sit below the crash
+  banner without overlap at 320 CSS pixels or 400 percent zoom. Normal arcade motion pauses while
+  hidden and is absent under reduced motion. The installed-agent mark persists at each powered
+  retained NOC without increasing the established 80-descendant world ceiling. Shared-game byte
+  identity, focus order, 44-pixel targets, contrast, no-JavaScript recovery, zero runtime font or
+  cross-origin requests, and all Phase 4I physics/route/world digests remain unchanged.
 
 ## Settled implementation rulings
 

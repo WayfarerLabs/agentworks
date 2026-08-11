@@ -1,8 +1,8 @@
 # HLA: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander Phase 4I implementation in progress
+- Status: Interim implementation complete; continuous Lander Phase 4J design in progress
 - Date: 2026-08-07
-- Last revised: 2026-08-10
+- Last revised: 2026-08-11
 - FRD: `frd.md`
 - Research: `prior-art-research.md`
 - Brand direction: `brand-direction.md`
@@ -252,11 +252,12 @@ its event target is the document body or lander scene, never when focus is on th
 another interactive/editable element. The lander is also an operable, accessibly named start control
 without visible instruction text. Activating it provides the pointer and assistive-technology path.
 The accepted preflight Space event is consumed so it cannot also scroll the page. Starting moves
-focus to the game scene and reveals concise controls, a programmatically named numeric fuel reserve,
-one left-side vertical visual gauge, status, and a native `Exit mission` button. A native
-`Restart mission` button is revealed after a crash. Both remain hidden during preflight. They invoke
-the same EXIT and RESTART model events as Escape and `r`, preserve the established focus
-destinations, and make the complete lifecycle available to touch and assistive technology.
+focus to the game scene and reveals concise in-scene controls, a programmatically named but visually
+hidden numeric fuel reserve, one left-side vertical visual gauge, status, and a native
+`Exit mission` button. A native `Restart mission` button is revealed after a crash. Both remain
+hidden during preflight. They invoke the same EXIT and RESTART model events as Escape and `r`,
+preserve the established focus destinations, and make the complete lifecycle available to touch and
+assistive technology.
 
 While active, Space or Up commands equal thrust; Left or `h` increases the right engine to turn
 left; Right or `l` increases the left engine to turn right. Differential input vectors the combined
@@ -329,7 +330,8 @@ After refueling, the G opening acts as a deployment bay: a small terminal-inspir
 surface and enters the single NOC. A clean rectangular vertical phone-battery-style indicator, with
 no terminal nub, fills from bottom to top in distinct warm-to-cool stages. A vertically symmetric
 network signal then builds through the final three stages above it. State and timing, not color
-alone, communicate progress. The powered appearance remains while the site stays in the rolling
+alone, communicate progress. The agent remains visibly installed in the NOC entry as the first
+durable power-up mark, and the powered appearance remains while the site stays in the rolling
 window. The model then records one immutable checkpoint snapshot containing the vehicle/platform
 pose, post-award fuel, world generator cursor, active and target site identities, retained-site
 can/power states, and mission progress. It enters a launch-ready state that holds the centered
@@ -341,11 +343,28 @@ Restart returns to this same launch-ready checkpoint rather than replaying an aw
 right-edge direction cue blinks only while that target is outside the viewport; reduced motion keeps
 the useful arrow static. Deployment never enters a terminal success state.
 
-The fuel projection does not invent a fixed tank capacity for an uncapped reserve. The numeric
-output remains the accessible authority for exact engine-seconds. A decorative left-side vertical
-bar shows the current reserve as a fraction of the immutable departure reserve for the current leg:
-it is full when an award/checkpoint establishes that leg and drains toward empty as fuel is spent.
-The next award can establish a larger reference without clipping or discarding carried excess.
+The fuel projection does not invent a fixed tank capacity for an uncapped reserve. The visually
+hidden numeric output remains the accessible authority for engine-seconds. A decorative left-side
+vertical bar shows the current reserve as a fraction of the immutable departure reserve for the
+current leg: it is full when an award/checkpoint establishes that leg and drains toward empty as
+fuel is spent. Its fill height and red-to-amber-to-green presentation are independent level signals.
+On touchdown, model sequence time projects the collected can toward the gauge and interpolates the
+displayed fill from the pre-award fraction to full over the existing landed interval; the physics
+reserve and checkpoint award remain one atomic authority. Reduced motion skips both projections and
+shows the final full gauge. The next award can establish a larger reference without clipping or
+discarding carried excess.
+
+Activated game chrome uses one local system-monospace arcade stack, heavy block lettering, crisp
+shadows, and bounded stepped animation; it adds no webfont, asset request, canvas, or semantic-text
+copy. The controls paragraph moves into an opaque bottom rail within the scene shell. The world
+projection keeps every possible terrain surface above that reserved rail rather than relying on the
+rail to hide an overlap. The existing status live region is the only banner authority: it presents
+centered bordered `Agent Deployed!` and `Crashed!` panels, with state-appropriate native Launch,
+Restart, and Exit controls positioned beneath the banner. At narrow width and 400 percent zoom, the
+fuel gauge, centered panel, controls rail, and native controls remain within the scene and do not
+overlap. Reduced motion removes arcade/refuel animation; document hiding pauses it with the existing
+lifecycle. Decoration uses existing elements or pseudo-elements only, and persistent installed-agent
+geometry reuses the per-site NOC entry path so the exact 80-descendant world ceiling does not grow.
 
 Unsafe terrain, platform, or building contact enters a finite crash sequence. Normal motion shows a
 compact propellant flash and deterministic fragments following ballistic paths; it has no smoke,
@@ -521,6 +540,9 @@ recommendation.
   deterministic flight and world vectors, plume-to-thrust mapping, repeated deployment, generated
   route fuel proofs, checkpoint restart, finite crash/exit states, bounded rolling geometry,
   background pause, and reduced-motion equivalents asserted;
+- arcade fuel/refuel projection, installed-agent persistence, centered success/crash banners,
+  in-scene native actions, and the terrain-separated bottom control rail asserted without changing
+  physics, route, world, privacy, or shared-fragment contracts;
 - keyboard-only traversal, visible focus, narrow-width reflow, zoom, reduced motion, and screen
   reader landmarks checked in acceptance;
 - color tokens verified with computed contrast evidence for normal text, large text, components, and
