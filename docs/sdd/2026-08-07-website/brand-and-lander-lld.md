@@ -4,7 +4,7 @@
 <!-- cspell:ignore lerp Minkowski overspeed subinterval unhashed unmarginated -->
 <!-- cspell:ignore substep underframe underframes unitless uint32 quantized quantization -->
 
-- Status: Phase 4I artifact-review corrections ready for review
+- Status: Phase 4I design approved; implementation pending
 - Date: 2026-08-10
 - FRD: `frd.md`, specifically R6-R9 and R15-R23
 - HLA: `hla.md`, specifically D5 and D7

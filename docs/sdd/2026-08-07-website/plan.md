@@ -1,6 +1,6 @@
 # Plan: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander Phase 4I artifact review in progress
+- Status: Interim implementation complete; continuous Lander Phase 4I implementation in progress
 - Date: 2026-08-07
 - Last revised: 2026-08-10
 - FRD: `frd.md`
@@ -622,7 +622,7 @@ and every regenerated route/world fixture are exact, reviewed, and browser-accep
       player-reachable proof prefix, vector-force targets, platform/scaffold collision and
       rendering, battery/signal geometry and timing, route/world regeneration, DOM bounds, and
       browser evidence.
-- [ ] Obtain an `agentworks-reviewer` approval of the amended LLD and resolve every valid artifact
+- [x] Obtain an `agentworks-reviewer` approval of the amended LLD and resolve every valid artifact
       finding before changing production or canonical fixture code.
 - [ ] Delegate implementation to an `agentworks-dev` subagent in an isolated worktree. Update the
       shared fragment and page copy, world/model/controller/CSS projection, exact route derivation
