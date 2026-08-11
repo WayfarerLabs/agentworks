@@ -1175,16 +1175,19 @@ remain byte-identical to Phase 4K. No recipe range or production route/failure l
 The exact regenerated digests are geometry
 `2cc7b145dc516426d911f2f51f47cc374f0154905d8ddff00cc78e141de14195`, physics
 `34a7cb64a3457c4df028031968e7ef00fde56fc445db6af6ab89eb7b737f692e`, world
-`bf175490867abf3894697b9c014c1e1c2bf7abbc54e74b635bb69af67908245e`, and output
-`2f715915c33e7c4a728bd1acfd10a206a206c1cd917c8e0d5687a5d696bb9492`. Geometry changes because the v3
+`c191e4ae97e6c86588a092d531bef1fc8a787bd57bd77405da416fff2c914995`, and output
+`239a33c5185638b34fd6015155af62f5a8f0583dc25c5804af185bcb8df548b9`. Geometry changes because the v3
 fixture now pins deck levels, the `.75 m` truss and native-foot pylons. Physics remains at its Phase
 4L value because neither terrain, site descriptors, nor seed vectors are physics-digest inputs.
 Every one of the 81 world descriptors and descriptor digests changes because native terrain now
 continues beneath both sites, the decks use integer levels, and each site contains a 17-member
 truss/pylon path with one truss and three pylon envelopes. The world and output digests consequently
-change. The refuel-ratio formula, award, checkpoint, Retry, markup, and CSS changes are not
-route-deriver inputs, so they change none of the geometry, physics, route, or world fixture values
-and cause no version bump.
+change. A cold-review correction makes the derived member start match the already-pinned geometry:
+every pylon runs from `platformBottom`, not `trussBottom`, to its native foot. That correction
+changes only the serialized world and output digests; geometry, physics, all route/failure literals,
+36 candidates, 81 worlds, and 162 selected replays remain exact. The refuel-ratio formula, award,
+checkpoint, Retry, markup, and CSS changes are not route-deriver inputs, so they change none of the
+geometry, physics, route, or world fixture values and cause no version bump.
 
 Regenerate the complete geometry and derived fixtures and compare the production route/failure
 literals and digests in one atomic change, even though all selected route literals remain equal.
@@ -1823,9 +1826,9 @@ static/lander-game.js
 
 Phase 4L changes all four `ROUTE_DIGESTS`: geometry
 `2cc7b145dc516426d911f2f51f47cc374f0154905d8ddff00cc78e141de14195`, output
-`2f715915c33e7c4a728bd1acfd10a206a206c1cd917c8e0d5687a5d696bb9492`, physics
+`239a33c5185638b34fd6015155af62f5a8f0583dc25c5804af185bcb8df548b9`, physics
 `34a7cb64a3457c4df028031968e7ef00fde56fc445db6af6ab89eb7b737f692e`, and world
-`bf175490867abf3894697b9c014c1e1c2bf7abbc54e74b635bb69af67908245e`.
+`c191e4ae97e6c86588a092d531bef1fc8a787bd57bd77405da416fff2c914995`.
 
 | Layer                                                                   | Required coverage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
