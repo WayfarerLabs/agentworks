@@ -215,7 +215,7 @@ class _UserInstallCommandKind:
         overview="""
         A user-install-command is the fallback for per-user tooling that cannot use a
         template's `mise_packages` field. Prefer a maintained package-manager or vendor entry
-        point. The command must be one logical shell invocation written as a plain
+        point. The command must be one logical shell invocation written as a single-line
         scalar. Embedded scripts, block scalars, here-documents, multi-step installers, state
         machines, signature pipelines, and cleanup routines do not belong in a manifest.
 

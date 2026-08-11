@@ -106,11 +106,6 @@ suites and strict typing pass.
 - [x] Run focused/full offline gates and both required reviews for the amended publication before
       recording this corrective phase complete.
 
-**DoD:** vendor plugins can grow through the existing capability/manifest composition boundary;
-enabling `gcp` publishes both current GCP contributions, enabling `aws` publishes its existing EC2
-platform and optional CLI, and neither guest CLI becomes a provisioning or authentication
-dependency.
-
 ## Phase 2b: opaque multiline secret correction
 
 - [x] Amend the shared secret-value contract so the env-var source preserves terminal CR/LF and
@@ -220,14 +215,6 @@ forge checks are green; permanent docs match code; the merge-ready PR is truthfu
 - [x] Post the signed exact-head handoff and flip the PR from draft to ready for the next
       operator-gated live acceptance.
 
-**DoD:** small templates have honest low-cost burstable defaults; known-incompatible custom machine
-types fail before mutation, while residual pair incompatibilities fail definitively with useful
-guidance and bounded rollback; capacity classification stays exact; the next live test starts from a
-reviewed, green handoff.
-
-The built-in shared-core default and command-only AWS completion predicate completed above were
-superseded before merge by Phase 3c after live/review evidence exposed their semantic limits.
-
 ### Phase 3c: sustained-default and installer-idempotency correction
 
 - [x] Restore the standard E2 built-in ladder so existing two-vCPU templates retain two sustained
@@ -256,14 +243,6 @@ superseded before merge by Phase 3c after live/review evidence exposed their sem
       Phase 3 live charter above, including proof that AWS CLI reinit skips the completed managed
       install.
 
-**DoD:** standard defaults preserve sustained capacity, shared-core remains an explicit and live
-witnessed opt-in, managed AWS CLI reinit converges without reinstall, permanent teaching matches the
-shipped behavior, and the next ready transition identifies one reviewed exact head.
-
-The shared predicate contract and completion-marker state machine completed above were superseded
-before merge by Phase 3d after review showed that one optional YAML installer did not justify a
-cross-cutting framework contract.
-
 ### Phase 3d: restore the declarative installer boundary
 
 - [x] Revert every Phase 3c shared `test_exec`, VM/agent runner, schema, generic documentation, and
@@ -288,19 +267,6 @@ cross-cutting framework contract.
 - [x] Restore narrow GCP proto-presence exception handling, replace prohibited punctuation in owned
       README lines, refresh the PR's exact counts/state, and keep the unrelated known-hosts issue
       out of scope.
-- [ ] Run focused/full gates plus both required code reviews, resolve every valid finding, post one
-      signed exact-head handoff, and use the next draft-to-ready transition to request the unchanged
-      bounded Phase 3 live charter.
-
-**DoD:** the optional AWS CLI installer is again one self-contained declared YAML resource; no core
-runner, schema, or shared install-command behavior exists solely for it; managed reinit performs a
-verified AWS CLI update; required CI is green; and the next live retest starts from one reviewed
-exact head with a truthful PR record.
-
-Phase 2a's completed GCP CLI installer/test boxes and Phase 3d's completed AWS installer/test boxes
-remain the immutable record of their reviewed implementations. Operator direction superseded both
-before merge: an install-command is a true one-liner, not a container for a script or installer
-state machine.
 
 ### Phase 3e: replace embedded installers with native package resources
 
@@ -325,27 +291,19 @@ state machine.
       AWS snapd/classic-confinement prerequisite plus automatic-refresh tradeoff; keep provisioning
       and guest authentication boundaries unchanged.
 - [x] Run focused/full gates and both required code reviews; resolve every valid finding.
-- [ ] Push the final exact head, post one signed handoff, and use the next draft-to-ready transition
-      to request the bounded GCP live charter above.
 
-**DoD:** the optional Google Cloud CLI uses ordinary apt resources and the optional AWS CLI uses one
-one-line snap install-command plus its existing completion check; no bespoke installer
-implementation or test suite remains; permanent author guidance makes the one-line boundary
-unmistakable; required CI is green; and the next live retest starts from one reviewed exact head
-with a truthful PR record.
-
-The AWS portion of Phase 3e was superseded before merge by operator direction: AWS CLI support was
-never a GCP-platform requirement, and operators already have the VM template's general `snap` field.
-No AWS CLI resource or teaching ships from this effort.
+The checked Phase 2a and Phase 3c-3e AWS CLI work remains immutable history. Operator direction
+superseded it before merge: AWS CLI was never a GCP-platform requirement, and operators already have
+the VM template's general `snap` field. This effort ships no AWS CLI resource or teaching.
 
 ### Phase 3f: remove AWS CLI scope from the GCP effort
 
-- [ ] Delete the AWS CLI manifest and AWS guest-CLI guide, and restore the `aws` plugin plus its
+- [x] Delete the AWS CLI manifest and AWS guest-CLI guide, and restore the `aws` plugin plus its
       tests to the capability-only EC2 shape from current `main`.
-- [ ] Remove every AWS CLI reference added by this effort from permanent docs, samples, plugin
+- [x] Remove every AWS CLI reference added by this effort from permanent docs, samples, plugin
       publication/readiness/provenance tests, SDD target requirements, the PR body, and the live
       charter. Retain the pre-existing AWS EC2 platform unchanged.
-- [ ] Preserve the reviewed GCP apt-source/package correction and the general install-command author
+- [x] Preserve the reviewed GCP apt-source/package correction and the general install-command author
       guidance. Add no AWS replacement, prose tests, or install-command tests.
 - [ ] Run focused/full gates and both required reviews; resolve every valid finding.
 - [ ] Push the final exact head, post one signed handoff, and use the next draft-to-ready transition
