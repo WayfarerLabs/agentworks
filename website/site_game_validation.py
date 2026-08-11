@@ -353,7 +353,7 @@ def validate_game_contract(template: str) -> None:
         scaffold[0].get("d") or ""
     ).count("M") != 17 or "Z" in (scaffold[0].get("d") or "") or not (
         scaffold[0].get("d") or ""
-    ).endswith("M312 460V476.1557689513639M405 460V498.9141328226309M498 460V491.77281586216765"):
+    ).endswith("M312 452.5V476.1557689513639M405 452.5V498.9141328226309M498 452.5V491.77281586216765"):
         raise ValueError("lander-game.html: static open scaffold geometry is invalid")
     battery_contract = (
         '<rect x="452" y="393" width="22" height="40" />',

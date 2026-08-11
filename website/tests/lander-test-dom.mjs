@@ -98,14 +98,24 @@ export function controllerFixture() {
         elements["lander-target-direction"], outcome);
     outcome.append(elements["lander-status"], elements["lander-restart"]);
     rail.append(elements["lander-controls"], elements["lander-exit"]);
+    for (const [className, textContent] of [
+        ["lander-controls-line lander-controls-keyboard", "Space/Up thrust; Left/H or Right/L turn."],
+        ["lander-controls-line lander-controls-touch", "Touch: tap/hold to thrust; drag to turn."],
+    ]) {
+        const line = new FakeElement(elements["lander-controls"]); line.tagName = "span";
+        line.setAttribute("class", className); line.textContent = textContent;
+        elements["lander-controls"].append(line);
+    }
     for (const id of ["lander-start", "lander-exit", "lander-restart"]) elements[id].tagName = "button";
     elements["lander-restart"].setAttribute("aria-keyshortcuts", "r");
     elements["lander-exit"].setAttribute("aria-keyshortcuts", "Escape");
     for (const id of ["lander-exit", "lander-restart"]) {
         const label = new FakeElement(elements[id]); label.tagName = "span";
         label.setAttribute("class", "lander-action-label");
+        label.textContent = id === "lander-restart" ? "Retry" : "Exit mission";
         const hint = new FakeElement(elements[id]); hint.tagName = "span";
         hint.setAttribute("class", "lander-key-hint"); hint.setAttribute("aria-hidden", "true");
+        hint.textContent = id === "lander-restart" ? "r" : "<esc>";
         elements[id].append(label, hint);
         elements[`${id}-label`] = label; elements[`${id}-hint`] = hint;
     }

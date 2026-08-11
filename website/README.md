@@ -51,6 +51,7 @@ node --test website/tests/lander-world.test.mjs
 node --test website/tests/lander-phase4i.test.mjs
 node --test website/tests/lander-phase4j.test.mjs
 node --test website/tests/lander-phase4k.test.mjs
+node --test website/tests/lander-phase4l.test.mjs
 ./scripts/lint-files.sh
 ./scripts/check-locked-sdds.sh
 ./scripts/rulesync-upgen.sh --check

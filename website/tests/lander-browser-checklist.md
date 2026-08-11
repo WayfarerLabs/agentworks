@@ -18,6 +18,13 @@ route proofs, offscreen cue, checkpoint restart, vacuum crash, rolling retention
 and installed-agent payoff require a new browser record. Older checked rows below remain historical
 evidence for their named source only; they do not accept the current game.
 
+The Phase 4L automated Chromium witness exercises the 320-by-640 layout and the 320-by-900 CSS-pixel
+reflow equivalent of a 1280-pixel viewport at 400 percent. It checks the two single-rect,
+non-wrapping controls lines, rail and page overflow, native Retry click and in-shell R activation,
+focus-without-scroll ordering, two consecutive exact checkpoint restores, and the pre-checkpoint
+initial restore. Run `python3 website/tests/test_lander_phase4l_browser.py`. This headless Chromium
+evidence is not a manual Chrome or Edge signoff; the corresponding manual rows remain unchecked.
+
 ## Arcade presentation acceptance
 
 - [ ] At normal and 400-percent-equivalent reflow, verify the game is a 25:16 scene stage followed
@@ -435,7 +442,7 @@ new run records the refined source.
       Lander, and 404 each show one GitHub and one PyPI icon-and-text link in the header and exactly
       three footer destinations: Manifesto, Security, then the icon-only Lander link. No destination
       is duplicated in the body.
-- [x] In Chrome and Edge before merge, verify at 320 CSS pixels, 400 percent zoom, touch landscape,
+- [ ] In Chrome and Edge before merge, verify at 320 CSS pixels, 400 percent zoom, touch landscape,
       and wide desktop that Home, Manifesto, Security, Lander, and 404 have no page overflow,
       clipped text or navigation, overlap, or fixed-height content loss. Record browser versions,
       viewport, date, and result when available, or record the explicit evidence limitation.

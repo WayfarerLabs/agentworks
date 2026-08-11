@@ -64,9 +64,9 @@ const FAILURE_LITERALS = [[8,8.000000000000018,-9.375629389,12.57275481],[8,8.00
 
 export const ROUTE_DIGESTS = Object.freeze({
     geometryDigest: "2cc7b145dc516426d911f2f51f47cc374f0154905d8ddff00cc78e141de14195",
-    outputDigest: "2f715915c33e7c4a728bd1acfd10a206a206c1cd917c8e0d5687a5d696bb9492",
+    outputDigest: "239a33c5185638b34fd6015155af62f5a8f0583dc25c5804af185bcb8df548b9",
     physicsDigest: "34a7cb64a3457c4df028031968e7ef00fde56fc445db6af6ab89eb7b737f692e",
-    worldDigest: "bf175490867abf3894697b9c014c1e1c2bf7abbc54e74b635bb69af67908245e",
+    worldDigest: "c191e4ae97e6c86588a092d531bef1fc8a787bd57bd77405da416fff2c914995",
 });
 
 function freeze(value) {

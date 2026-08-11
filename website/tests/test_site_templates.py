@@ -375,6 +375,7 @@ class TemplateContractTests(RepositoryFixture):
         mutations = (
             template.replace('class="site-scaffold"', 'class="missing-support"', 1),
             template.replace("M312 452.5H498", "M313 452.5H498", 1),
+            template.replace("M312 452.5V476.1557689513639", "M312 460V476.1557689513639", 1),
             template.replace(bar_one, "BATTERY_SWAP", 1).replace(bar_four, bar_one, 1).replace(
                 "BATTERY_SWAP", bar_four, 1,
             ),

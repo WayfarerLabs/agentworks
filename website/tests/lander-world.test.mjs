@@ -77,6 +77,27 @@ test("terrain projects as one unstroked closed fill and one open stroked surface
     assert.equal(terrainVerticesForRange(vertices, -40, 10).at(-1)[0], 10);
 });
 
+test("terrain range clipping is strict for degenerate, boundary, and outside ranges", () => {
+    const vertices = Object.freeze([[0, 2], [40, 4], [64, 4], [100, 3]]
+        .map((point) => Object.freeze(point)));
+    const cases = [
+        [-10, -1, []],
+        [101, 110, []],
+        [70, 30, []],
+        [-10, 0, [[0, 2]]],
+        [100, 110, [[100, 3]]],
+        [40, 40, [[40, 4]]],
+        [50, 50, [[50, 4]]],
+        [30, 70, [[30, 3.5], [40, 4], [64, 4], [70, 3.8333333333333335]]],
+    ];
+    for (const [left, right, expected] of cases) {
+        const clipped = terrainVerticesForRange(vertices, left, right);
+        assert.deepEqual(clipped, expected, `${left}..${right}`);
+        assert.ok(clipped.every((point, index) => index === 0 || clipped[index - 1][0] < point[0]),
+            `${left}..${right} must remain strict in x`);
+    }
+});
+
 test("integer deck tiers terminate exactly through one hundred sites for all witness seeds", async () => {
     const geometry = JSON.parse(await readFile(GEOMETRY_URL, "utf8"));
     assert.deepEqual(DECK_LEVELS, [83, 91, 99]);
@@ -113,8 +134,24 @@ test("site has one twelve-bay Warren truss and three independently footed pylons
         right: structure.buildingRight + 0.1,
         top: site.platformBottom + 0.1,
     });
-    assert.equal(siteScaffoldPath(site).match(/M/g)?.length, 17);
-    assert.doesNotMatch(siteScaffoldPath(site), /Z/);
+    const pylons = members.slice(14);
+    assert.equal(pylons.length, 3);
+    pylons.forEach(({ start, end }, index) => {
+        const pylon = structure.pylons[index];
+        assert.deepEqual(start, [pylon.center, site.platformBottom]);
+        assert.notEqual(start[1], structure.trussBottom,
+            "a pylon must pass through the bottom chord from the deck underside");
+        assert.deepEqual(end, [pylon.center, pylon.foot]);
+        assert.equal(pylon.collider.top, start[1] + 0.1);
+        assert.equal(pylon.collider.bottom, end[1] - 0.1);
+    });
+    const path = siteScaffoldPath(site);
+    assert.equal(path.match(/M/g)?.length, 17);
+    assert.doesNotMatch(path, /Z/);
+    const renderedPylons = [...path.matchAll(/M(-?[\d.]+) (-?[\d.]+)V(-?[\d.]+)/g)].map((match) =>
+        match.slice(1).map(Number));
+    assert.deepEqual(renderedPylons, pylons.map(({ start, end }) =>
+        [Number((start[0] * 10).toFixed(12)), 548 - start[1] * 10, 548 - end[1] * 10]));
 });
 
 test("camera and rolling retention stay bounded", () => {

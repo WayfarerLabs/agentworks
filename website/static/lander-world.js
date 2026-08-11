@@ -109,11 +109,15 @@ export function terrainHeightFromVertices(vertices, x) {
 }
 
 export function terrainVerticesForRange(vertices, left, right) {
-    if (vertices.length === 0 || right < vertices[0][0] || left > vertices.at(-1)[0]) {
+    if (vertices.length === 0 || right < left || right < vertices[0][0] || left > vertices.at(-1)[0]) {
         return freeze([]);
     }
     const clippedLeft = Math.max(left, vertices[0][0]);
     const clippedRight = Math.min(right, vertices.at(-1)[0]);
+    if (clippedLeft === clippedRight) {
+        const point = vertices.find(([x]) => x === clippedLeft);
+        return freeze([[clippedLeft, point?.[1] ?? terrainHeightFromVertices(vertices, clippedLeft)]]);
+    }
     const interior = vertices.filter(([x]) => x > clippedLeft && x < clippedRight);
     return freeze([
         [clippedLeft, terrainHeightFromVertices(vertices, clippedLeft)],
@@ -178,7 +182,7 @@ export function siteScaffoldMembers(site) {
             { start: [left, structure.trussBottom], end: [right, site.platformBottom] });
     }
     for (const pylon of structure.pylons) {
-        members.push({ start: [pylon.center, structure.trussBottom], end: [pylon.center, pylon.foot] });
+        members.push({ start: [pylon.center, site.platformBottom], end: [pylon.center, pylon.foot] });
     }
     return freeze(members.map((member) => ({ cap: "butt", join: "round", ...member })));
 }

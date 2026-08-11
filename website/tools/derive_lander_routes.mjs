@@ -484,7 +484,7 @@ function scaffoldMembers(site) {
         if (bay % 2 === 0) segment(x1, top, x2, bottom);
         else segment(x1, bottom, x2, top);
     }
-    for (const pylon of site.pylons) segment(pylon.x, bottom, pylon.x, pylon.footY);
+    for (const pylon of site.pylons) segment(pylon.x, top, pylon.x, pylon.footY);
     return segments;
 }
 

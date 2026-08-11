@@ -215,8 +215,8 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
     assert.equal(derived.worldWitnesses.length, 81);
     assert.equal(derived.geometryDigest, "2cc7b145dc516426d911f2f51f47cc374f0154905d8ddff00cc78e141de14195");
     assert.equal(derived.physicsDigest, "34a7cb64a3457c4df028031968e7ef00fde56fc445db6af6ab89eb7b737f692e");
-    assert.equal(derived.worldDigest, "bf175490867abf3894697b9c014c1e1c2bf7abbc54e74b635bb69af67908245e");
-    assert.equal(derived.outputDigest, "2f715915c33e7c4a728bd1acfd10a206a206c1cd917c8e0d5687a5d696bb9492");
+    assert.equal(derived.worldDigest, "c191e4ae97e6c86588a092d531bef1fc8a787bd57bd77405da416fff2c914995");
+    assert.equal(derived.outputDigest, "239a33c5185638b34fd6015155af62f5a8f0583dc25c5804af185bcb8df548b9");
     assert.equal(derived.routes.reduce((total, route) => total + route.combinationsEvaluated, 0), 36);
     assert.equal(derived.worldWitnesses.length * 2, 162);
     assert.equal(spawnSync(process.execPath, [tool, "--bogus"]).status, 2);
@@ -232,14 +232,14 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
     assert.equal(digest(derived.worldWitnesses), derived.worldDigest);
     assert.deepEqual([derived.worldWitnesses[0].digest, derived.worldWitnesses[40].digest,
         derived.worldWitnesses.at(-1).digest], [
-        "9cb38cd27895362e8be944788d1dd4f163cbe20c0e13d005196c29a80b130c15",
-        "f7a4a064026512aeebf523d9cd3e034e52e56ae42b2154d99aeb005325c7a48a",
-        "42ad95072535204125cf7fcf56e2075010bd73d4d9aab5b6e44a851af825ac10",
+        "bcb4d8e6cc6cd3254a80da6bda1031a2c834fdc82d67c846126f001c746383fd",
+        "161880ca9701beb013e3fef779fd5f5dbc7960ef0d860015f23d6ae09796bf7d",
+        "a32153e10d3e428e2ec50b4e7618cb0f3361b6e2c1f9793887c5655c93d64576",
     ]);
     assert.ok(derived.worldWitnesses.some(({ descriptor }) => descriptor.vertices.some(([, value]) =>
         value !== Number(value.toFixed(derived.canonicalPoseDecimals)))));
     assert.equal(derived.geometryDigest, "2cc7b145dc516426d911f2f51f47cc374f0154905d8ddff00cc78e141de14195");
-    assert.equal(derived.worldDigest, "bf175490867abf3894697b9c014c1e1c2bf7abbc54e74b635bb69af67908245e");
+    assert.equal(derived.worldDigest, "c191e4ae97e6c86588a092d531bef1fc8a787bd57bd77405da416fff2c914995");
     for (const witness of derived.worldWitnesses) {
         const { descriptor } = witness;
         const template = REFERENCE_TEMPLATES.find((candidate) => candidate.templateId === descriptor.templateId);
@@ -373,6 +373,16 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
     assert.notEqual(shiftedSiteSampleSource, await readFile(tool, "utf8"));
     await writeFile(shiftedSiteSampleTool, shiftedSiteSampleSource, "utf8");
     assert.equal(spawnSync(process.execPath, [shiftedSiteSampleTool, "--geometry", geometry, "--output", output,
+        "--verify", fixture]).status, 1);
+
+    const shortPylonTool = join(directory, "short-pylons.mjs");
+    const shortPylonSource = (await readFile(tool, "utf8")).replace(
+        "segment(pylon.x, top, pylon.x, pylon.footY)",
+        "segment(pylon.x, bottom, pylon.x, pylon.footY)",
+    );
+    assert.notEqual(shortPylonSource, await readFile(tool, "utf8"));
+    await writeFile(shortPylonTool, shortPylonSource, "utf8");
+    assert.equal(spawnSync(process.execPath, [shortPylonTool, "--geometry", geometry, "--output", output,
         "--verify", fixture]).status, 1);
 
     const jitterTool = join(directory, "jittered-replay.mjs");
