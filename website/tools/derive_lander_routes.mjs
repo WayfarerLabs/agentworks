@@ -3,58 +3,70 @@
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 
-const DERIVER_VERSION = "agw-lander-route-deriver/v1";
-const RECIPE_VERSION = "agw-lander-route-recipes/v1";
+const DERIVER_VERSION = "agw-lander-route-deriver/v2";
+const RECIPE_VERSION = "agw-lander-route-recipes/v2";
 const MAX_COMBINATIONS = 2_000_000;
 const STEP_SECONDS = 1 / 120;
 const FUEL_QUANTUM = 0.05;
-const MOTIF = Object.freeze([0, 1.2, -0.8, 1, -0.6, 0]);
+const TERRAIN_SAMPLE_SPACING = 10;
+const PLATFORM_WIDTH = 9.6;
+const PLATFORM_CLEARANCE = 0.8;
+const PLATFORM_THICKNESS = 0.35;
+const MOTIFS = Object.freeze([
+    Object.freeze([0, 2.4, -1.5, 1.8, -1.1, 0]),
+    Object.freeze([0, -2.1, -0.8, 2.2, 1, 0]),
+    Object.freeze([0, 0.9, 2.5, 0.6, -1.9, 0]),
+    Object.freeze([0, -1.4, 1.3, 2.4, -0.5, 0]),
+]);
 const WORLD_SEEDS = Object.freeze([1, 0x12345678, 0xffffffff]);
 const WORLD_TRANSLATIONS = Object.freeze([
     Object.freeze({ originCenter: 36, originTop: 3.5 }),
     Object.freeze({ originCenter: 117, originTop: 5 }),
     Object.freeze({ originCenter: -42, originTop: 6.5 }),
 ]);
-const WORLD_TRIALS = Object.freeze(WORLD_SEEDS.map((seed, index) =>
-    Object.freeze({ seed, ...WORLD_TRANSLATIONS[index] })));
 const WORLD_WITNESS_CASES = Object.freeze(WORLD_SEEDS.flatMap((seed) =>
     WORLD_TRANSLATIONS.map((translation) => Object.freeze({ seed, ...translation }))));
 const CONSTANTS = Object.freeze({
+    ANGULAR_ASSIST_DIFFERENTIAL: 0.12,
+    ANGULAR_ASSIST_FULL_SPEED: 15,
     COLLISION_MARGIN: 0.02,
-    ENGINE_ACCELERATION: 8.4,
+    ENGINE_ACCELERATION: 9,
     FUEL_FLOW: 1,
     FUEL_QUANTUM,
     GRAVITY: 3,
-    MAX_LANDING_ANGLE: 8,
-    MAX_LANDING_ANGULAR_SPEED: 12,
-    MAX_LANDING_DESCENT_SPEED: 2.2,
-    MAX_LANDING_HORIZONTAL_SPEED: 1.4,
+    MAX_LANDING_ANGLE: 10,
+    MAX_LANDING_ANGULAR_SPEED: 15,
+    MAX_LANDING_DESCENT_SPEED: 2.5,
+    MAX_LANDING_HORIZONTAL_SPEED: 1.6,
     MAX_PLAYABLE_Y: 56,
+    MAX_THRUST_VECTOR: 18,
     STEP_SECONDS,
-    TORQUE_ACCELERATION: 70,
+    TORQUE_ACCELERATION: 80,
+    TURN_DIFFERENTIAL: 0.375,
+    TURNING_TOTAL: 1.2,
 });
 const COMMANDS = Object.freeze([
     [0, 0],
     [0.72, 0.72],
-    [0, 0.45],
-    [0.45, 0],
-    [0.72, 1],
-    [1, 0.72],
-    [0.45, 0.45],
-    [1, 1],
+    [0, 0.375],
+    [0.375, 0],
+    [0.4125, 0.7875],
+    [0.7875, 0.4125],
+    [0, 0],
+    [0.72, 0.72],
 ]);
 // Each phase is [reachable command index, inclusive minimum steps, inclusive maximum steps].
 // These reviewed recipes describe a constructive family, not a copied output schedule.
 const RECIPE_PHASE_RANGES = new Map([
-    [78, [[1,90,90],[3,199,201],[2,200,200],[1,20,20],[2,274,274],[3,274,274],[1,44,44],[3,189,189],[2,188,190],[0,360,364],[1,187,187]]],
-    [81, [[1,90,90],[3,201,203],[2,202,202],[1,20,20],[2,262,262],[3,262,262],[1,79,79],[3,165,165],[2,164,166],[0,595,599],[1,191,191],[0,120,120]]],
-    [84, [[1,90,90],[3,188,190],[2,189,189],[1,35,35],[2,272,272],[3,272,272],[1,20,20],[3,195,195],[2,194,196],[0,469,473],[1,161,161],[0,30,30]]],
-    [87, [[1,90,90],[3,204,206],[2,205,205],[1,20,20],[2,290,290],[3,290,290],[1,20,20],[3,204,204],[2,203,205],[1,98,102],[0,455,455]]],
-    [90, [[1,90,90],[3,210,212],[2,211,211],[1,23,23],[2,271,271],[3,271,271],[1,92,92],[3,171,171],[2,170,172],[0,360,364],[1,131,131],[0,94,94]]],
-    [93, [[1,90,90],[3,208,210],[2,209,209],[1,20,20],[2,284,284],[3,284,284],[1,34,34],[3,190,190],[2,189,191],[0,62,66],[1,95,95],[0,93,93]]],
-    [96, [[1,90,90],[3,218,220],[2,219,219],[1,20,20],[2,276,276],[3,276,276],[1,102,102],[3,168,168],[2,167,169],[0,136,140],[1,62,62],[0,357,357]]],
-    [99, [[1,90,90],[3,206,208],[2,207,207],[1,42,42],[2,273,273],[3,273,273],[1,93,93],[3,180,180],[2,179,181],[0,262,266],[1,182,182],[0,202,202]]],
-    [102, [[1,90,90],[3,208,210],[2,209,209],[1,38,38],[2,279,279],[3,279,279],[1,70,70],[3,183,183],[2,182,184],[0,89,93],[1,75,75],[0,261,261]]],
+    [78, [[1,90,90],[3,208,210],[2,206,206],[1,23,23],[2,292,292],[3,291,291],[1,56,56],[3,200,200],[2,200,200],[0,439,441],[1,174,176],[0,156,158]]],
+    [81, [[1,90,90],[3,229,231],[2,231,231],[2,285,285],[3,283,283],[1,127,127],[3,177,177],[2,176,176],[0,533,535],[1,143,145],[0,84,86]]],
+    [84, [[1,90,90],[3,215,217],[2,220,220],[2,281,281],[3,280,280],[1,55,55],[3,204,204],[2,205,205],[0,568,570],[1,166,168],[0,57,59]]],
+    [87, [[1,90,90],[3,219,221],[2,222,222],[2,313,313],[3,315,315],[3,229,229],[2,227,227],[0,73,75],[1,87,89],[0,23,25]]],
+    [90, [[1,90,90],[3,234,236],[2,234,234],[2,292,292],[3,295,295],[1,129,129],[3,169,169],[2,165,165],[0,407,409],[1,130,132],[0,110,112]]],
+    [93, [[1,90,90],[3,223,225],[2,222,222],[2,318,318],[3,320,320],[1,3,3],[3,213,213],[2,212,212],[0,16,18],[1,93,95],[0,79,81]]],
+    [96, [[1,90,90],[3,226,228],[2,228,228],[2,305,305],[3,305,305],[1,36,36],[3,210,210],[2,210,210],[0,101,103],[1,90,92],[0,52,54]]],
+    [99, [[1,90,90],[3,238,240],[2,239,239],[2,293,293],[3,292,292],[1,133,133],[3,171,171],[2,171,171],[0,283,285],[1,103,105],[0,132,134]]],
+    [102, [[1,90,90],[3,235,237],[2,239,239],[2,298,298],[3,297,297],[1,94,94],[3,201,201],[2,201,201],[0,33,35],[1,35,37],[0,15,17]]],
 ]);
 
 function canonical(value) {
@@ -79,6 +91,10 @@ function normalizeDegrees(degrees) {
     return ((((degrees + 180) % 360) + 360) % 360) - 180;
 }
 
+function clamp(value, minimum, maximum) {
+    return Math.min(maximum, Math.max(minimum, value));
+}
+
 function mixUint32(input) {
     let value = Number(input) >>> 0;
     value = Math.imul(value ^ (value >>> 16), 0x7feb352d);
@@ -92,13 +108,28 @@ function sampleUnit(seed, stream, index) {
         Math.imul((Number(index) + 1) >>> 0, 0x85ebca6b)) / 2 ** 32;
 }
 
+function positiveModulo(value, modulus) {
+    return ((value % modulus) + modulus) % modulus;
+}
+
+function motifSelection(seed) {
+    return {
+        direction: sampleUnit(seed, 2, 1) < 0.5 ? 1 : 3,
+        offset: Math.floor(4 * sampleUnit(seed, 2, 0)),
+    };
+}
+
+function motifIndex(seed, chunkIndex) {
+    const selection = motifSelection(seed);
+    return positiveModulo(selection.offset + selection.direction * chunkIndex, 4);
+}
+
 function terrainSample(seed, sampleIndex) {
     const chunk = Math.floor(sampleIndex / 5); const local = sampleIndex - chunk * 5;
-    const boundary = (index) => 2 + 3 * sampleUnit(seed, 1, index >>> 0);
+    const boundary = (index) => 1.5 + 4.5 * sampleUnit(seed, 1, index);
     if (local === 0) return boundary(chunk);
     const base = boundary(chunk) + (boundary(chunk + 1) - boundary(chunk)) * (local / 5);
-    const sign = sampleUnit(seed, 2, chunk >>> 0) >= 0.5 ? 1 : -1;
-    return Math.max(0.75, Math.min(7.5, base + sign * MOTIF[local]));
+    return Math.max(0.5, Math.min(7.5, base + MOTIFS[motifIndex(seed, chunk)][local]));
 }
 
 function interpolateKnots(knots, x) {
@@ -111,11 +142,25 @@ function interpolateKnots(knots, x) {
 }
 
 function step(pose, engines, fuel = Infinity) {
-    const requestedBurn = (engines[0] + engines[1]) * STEP_SECONDS;
-    const scale = requestedBurn > fuel ? fuel / requestedBurn : 1;
-    const left = engines[0] * scale;
-    const right = engines[1] * scale;
-    const radians = (pose.angle * Math.PI) / 180;
+    const totalRequest = engines[0] + engines[1];
+    const manualSteer = clamp((engines[0] - engines[1]) / CONSTANTS.TURN_DIFFERENTIAL, -1, 1);
+    let assistedLeft = engines[0];
+    let assistedRight = engines[1];
+    if (manualSteer === 0 && totalRequest > 0) {
+        const rawAssist = CONSTANTS.ANGULAR_ASSIST_DIFFERENTIAL *
+            clamp(-pose.angularVelocity / CONSTANTS.ANGULAR_ASSIST_FULL_SPEED, -1, 1);
+        const differenceLimit = Math.min(totalRequest, 2 - totalRequest);
+        const assist = clamp(rawAssist, -differenceLimit, differenceLimit);
+        assistedLeft = (totalRequest + assist) / 2;
+        assistedRight = (totalRequest - assist) / 2;
+    }
+    const requestedBurn = (assistedLeft + assistedRight) * STEP_SECONDS;
+    const exhausts = requestedBurn >= fuel;
+    const scale = exhausts && requestedBurn > 0 ? fuel / requestedBurn : 1;
+    const left = assistedLeft * scale;
+    const right = assistedRight * scale;
+    const vectorAngle = left + right > 0 ? CONSTANTS.MAX_THRUST_VECTOR * manualSteer : 0;
+    const radians = ((pose.angle + vectorAngle) * Math.PI) / 180;
     const total = CONSTANTS.ENGINE_ACCELERATION * (left + right);
     const vx = pose.vx + total * Math.sin(radians) * STEP_SECONDS;
     const vy = pose.vy + (total * Math.cos(radians) - CONSTANTS.GRAVITY) * STEP_SECONDS;
@@ -130,7 +175,8 @@ function step(pose, engines, fuel = Infinity) {
             angularVelocity,
         },
         burn: requestedBurn * scale,
-        fuel: Math.max(0, fuel - requestedBurn * scale),
+        engines: { left, right, vectorAngle },
+        fuel: exhausts ? 0 : Math.max(0, fuel - requestedBurn),
     };
 }
 
@@ -220,26 +266,37 @@ function constructWorld(geometry, trial) {
     if (cached.has(trial)) return cached.get(trial);
     const origin = { center: trial.originCenter, top: trial.originTop };
     const target = { center: origin.center + geometry.centerDelta, top: origin.top + geometry.deckDelta };
-    const originRight = origin.center + 4.8; const targetLeft = target.center - 4.8;
-    const targetRight = target.center + 4.8; const vertices = [[originRight, origin.top - 0.8]];
+    const originShelfLeft = origin.center - PLATFORM_WIDTH / 2;
+    const originShelfRight = origin.center + PLATFORM_WIDTH / 2 + 9;
+    const targetShelfLeft = target.center - PLATFORM_WIDTH / 2;
+    const targetShelfRight = target.center + PLATFORM_WIDTH / 2 + 9;
+    const originPadBase = origin.top - PLATFORM_CLEARANCE;
+    const targetPadBase = target.top - PLATFORM_CLEARANCE;
+    const beforeIndex = Math.ceil(originShelfLeft / TERRAIN_SAMPLE_SPACING) - 1;
+    const before = [beforeIndex * TERRAIN_SAMPLE_SPACING, terrainSample(trial.seed, beforeIndex)];
+    const vertices = [before, [originShelfLeft, originPadBase], [originShelfRight, originPadBase]];
     const corridorSamples = [];
-    const first = Math.floor(originRight / 4) + 1; const last = Math.ceil(targetLeft / 4) - 1;
+    const first = Math.floor(originShelfRight / TERRAIN_SAMPLE_SPACING) + 1;
+    const last = Math.ceil(targetShelfLeft / TERRAIN_SAMPLE_SPACING) - 1;
     for (let index = first; index <= last; index += 1) {
-        const x = index * 4; const raw = terrainSample(trial.seed, index);
+        const x = index * TERRAIN_SAMPLE_SPACING; const raw = terrainSample(trial.seed, index);
         const cap = origin.top + interpolateKnots(geometry.clearanceKnots, x - origin.center);
         const reliefUnit = sampleUnit(trial.seed, 4, index >>> 0);
-        const y = raw > cap ? Math.max(0.75, cap - 0.15 * reliefUnit) : raw;
-        corridorSamples.push({ cap, index, raw, reliefUnit, relieved: raw > cap, x, y });
+        const y = raw > cap ? Math.max(0.5, cap - 0.15 * reliefUnit) : raw;
+        corridorSamples.push({ cap, index, motifIndex: motifIndex(trial.seed, Math.floor(index / 5)),
+            raw, reliefUnit, relieved: raw > cap, x, y });
         vertices.push([x, y]);
     }
-    vertices.push([targetLeft, target.top - 0.8], [targetRight, target.top - 0.8]);
-    const resume = Math.floor(targetRight / 4) + 1;
+    vertices.push([targetShelfLeft, targetPadBase], [targetShelfRight, targetPadBase]);
+    const resume = Math.floor(targetShelfRight / TERRAIN_SAMPLE_SPACING) + 1;
     const nativeResumeSamples = [];
-    for (let index = resume; index * 4 <= targetRight + 20; index += 1) {
-        const x = index * 4; const y = terrainSample(trial.seed, index);
-        nativeResumeSamples.push({ index, x, y }); vertices.push([x, y]);
+    for (let index = resume; index * TERRAIN_SAMPLE_SPACING <= targetShelfRight + 50; index += 1) {
+        const x = index * TERRAIN_SAMPLE_SPACING; const y = terrainSample(trial.seed, index);
+        nativeResumeSamples.push({ index, motifIndex: motifIndex(trial.seed, Math.floor(index / 5)), x, y });
+        vertices.push([x, y]);
     }
-    const world = { corridorSamples, geometry, nativeResumeSamples, origin, target, seed: trial.seed, vertices };
+    const world = { before, corridorSamples, geometry, nativeResumeSamples, origin,
+        originShelfLeft, originShelfRight, seed: trial.seed, target, targetShelfLeft, targetShelfRight, vertices };
     cached.set(trial, world); WORLD_CACHE.set(geometry, cached);
     return world;
 }
@@ -255,14 +312,6 @@ function terrainSegments(world) {
     return segments;
 }
 
-function terrainHeight(world, x) {
-    for (const [left, right] of terrainSegments(world)) {
-        if (x < left.x || x > right.x) continue;
-        return left.y + (right.y - left.y) * (x - left.x) / (right.x - left.x);
-    }
-    throw new Error(`Independent terrain does not cover ${x}`);
-}
-
 const SOLID_CACHE = new WeakMap();
 const SITE_SOLID_CACHE = new WeakMap();
 function siteSolids(world) {
@@ -270,16 +319,16 @@ function siteSolids(world) {
     if (cached) return cached;
     const descriptors = [[world.origin.center,world.origin.top,true],[world.target.center,world.target.top,false]]
         .map(([center, top, isOrigin]) => {
-            const left = center - 4.8; const right = center + 4.8; const bottom = top - 0.35;
+            const left = center - PLATFORM_WIDTH / 2; const right = center + PLATFORM_WIDTH / 2;
+            const bottom = top - PLATFORM_THICKNESS;
+            const padBase = top - PLATFORM_CLEARANCE;
             const buildingLeft = right + 2; const roof = top + 7.2;
-            const foundation = Math.min(terrainHeight(world, buildingLeft), terrainHeight(world, buildingLeft + 7));
             return {
                 isOrigin,
                 mast: { bottom: roof, left: buildingLeft + 3.25, right: buildingLeft + 3.75, top: roof + 3.2 },
-                noc: { bottom: foundation, left: buildingLeft, right: buildingLeft + 7, top: roof },
+                noc: { bottom: padBase, left: buildingLeft, right: buildingLeft + 7, top: roof },
                 platform: { bottom, left, right, top },
-                pylons: [left + 1.4, right - 1.4].map((pylon) =>
-                    ({ bottom: top - 0.8, left: pylon - 0.3, right: pylon + 0.3, top: bottom })),
+                riser: { bottom: padBase, left, right, top: bottom },
             };
         });
     SITE_SOLID_CACHE.set(world, descriptors);
@@ -296,9 +345,7 @@ function solidSegments(world, launchCleared) {
         if (site.isOrigin && launchCleared) segments.push([{x:left,y:top},{x:right,y:top}]);
         segments.push([{x:left,y:top},{x:left,y:bottom}], [{x:left,y:bottom},{x:right,y:bottom}],
             [{x:right,y:bottom},{x:right,y:top}]);
-        for (const pylon of site.pylons) {
-            segments.push(...rectangleSegments(pylon.left,pylon.right,pylon.bottom,pylon.top));
-        }
+        segments.push(...rectangleSegments(site.riser.left,site.riser.right,site.riser.bottom,site.riser.top));
         segments.push(...rectangleSegments(site.noc.left,site.noc.right,site.noc.bottom,site.noc.top));
         segments.push(...rectangleSegments(site.mast.left,site.mast.right,site.mast.bottom,site.mast.top));
     }
@@ -307,14 +354,25 @@ function solidSegments(world, launchCleared) {
 
 function worldWitness(geometry, trial) {
     const world = constructWorld(geometry, trial);
+    const targetLeftIndex = world.vertices.findIndex(([x]) => x === world.targetShelfLeft);
+    const targetRightIndex = world.vertices.findIndex(([x]) => x === world.targetShelfRight);
+    const selection = motifSelection(world.seed);
     const descriptor = {
+        capRelief: 0.15,
         blendSegments: {
-            left: [world.vertices[world.vertices.length - world.nativeResumeSamples.length - 3],
-                world.vertices[world.vertices.length - world.nativeResumeSamples.length - 2]],
-            right: [world.vertices[world.vertices.length - world.nativeResumeSamples.length - 1],
-                world.vertices[world.vertices.length - world.nativeResumeSamples.length]],
+            originLeft: [world.vertices[0], world.vertices[1]],
+            targetLeft: [world.vertices[targetLeftIndex - 1], world.vertices[targetLeftIndex]],
+            targetRight: [world.vertices[targetRightIndex], world.vertices[targetRightIndex + 1]],
         },
         corridorSamples: world.corridorSamples,
+        motifSelection: {
+            direction: selection.direction,
+            indexes: Array.from({ length: 4 }, (_, index) => motifIndex(world.seed, index)),
+            offset: selection.offset,
+        },
+        nativeBeforeSamples: [{ index: world.before[0] / TERRAIN_SAMPLE_SPACING,
+            motifIndex: motifIndex(world.seed, Math.floor((world.before[0] / TERRAIN_SAMPLE_SPACING) / 5)),
+            x: world.before[0], y: world.before[1] }],
         nativeResumeSamples: world.nativeResumeSamples,
         origin: world.origin,
         seed: world.seed,
@@ -403,7 +461,7 @@ function replay(fullRuns, geometry, allowance = Infinity, trial = null) {
         }
         runs.push([commandIndex, used]);
     }
-    throw new Error("Recipe ended before target contact or fuel exhaustion");
+    throw new Error(`Recipe ended before target contact or fuel exhaustion at step ${stepIndex} ${JSON.stringify(pose)}`);
 }
 
 function scheduleDigest(runs) {
@@ -454,8 +512,9 @@ function sameVector(left, right) {
 function deriveTemplate(geometry) {
     let combinationsEvaluated = 0;
     let firstFailure = null;
-    const firstFailureByTrial = WORLD_TRIALS.map(() => null);
-    const safeByTrial = WORLD_TRIALS.map(() => 0);
+    let firstMinimumFailure = null;
+    const firstFailureByTrial = WORLD_WITNESS_CASES.map(() => null);
+    const safeByTrial = WORLD_WITNESS_CASES.map(() => 0);
     let translatedSafe = 0;
     const successes = [];
     for (const candidate of recipeCandidates(geometry.centerDelta)) {
@@ -471,7 +530,7 @@ function deriveTemplate(geometry) {
             continue;
         }
         if (canonicalSuccess.classification !== "safe") continue;
-        const trialSuccesses = WORLD_TRIALS.map((trial, index) => {
+        const trialSuccesses = WORLD_WITNESS_CASES.map((trial, index) => {
             try {
                 const result = replay(candidate, geometry, Infinity, trial);
                 if (result.classification === "safe") safeByTrial[index] += 1;
@@ -488,25 +547,31 @@ function deriveTemplate(geometry) {
             try {
                 translatedSafe += 1;
                 const demonstratedMinimum = Math.ceil((canonicalSuccess.burn - 1e-12) / FUEL_QUANTUM) * FUEL_QUANTUM;
-                const trialFailures = WORLD_TRIALS.map((trial) =>
+                const trialFailures = WORLD_WITNESS_CASES.map((trial) =>
                     replay(canonicalSuccess.runs, geometry, demonstratedMinimum - FUEL_QUANTUM, trial));
                 const smallerFailure = replay(canonicalSuccess.runs, geometry, demonstratedMinimum - FUEL_QUANTUM);
-                if ("exhaustionStep" in smallerFailure && trialFailures.every((result) =>
+                const matchingFailures = trialFailures.every((result) =>
                     result.exhaustionStep === smallerFailure.exhaustionStep &&
                     ["x","y","vx","vy","angle","angularVelocity"].every(
                         (key) => Math.abs(result.pose[key] - smallerFailure.pose[key]) <= 1e-9,
-                    ))) {
+                    ));
+                if ("exhaustionStep" in smallerFailure && matchingFailures) {
                     successes.push({ candidate, demonstratedMinimum, smallerFailure, success: canonicalSuccess });
+                } else {
+                    firstMinimumFailure ??= `minimum ${demonstratedMinimum}; non-exhaustion or translation mismatch: ${JSON.stringify(smallerFailure)} ` +
+                        `${JSON.stringify(trialFailures)}`;
                 }
             } catch (error) {
                 firstFailure ??= error.message;
+                firstMinimumFailure ??= error.message;
                 // A candidate outside the safe recipe envelope is not a derived route.
             }
         }
     }
     if (successes.length === 0) {
         throw new Error(`${geometry.templateId} has no safe route in ${RECIPE_VERSION} after ${combinationsEvaluated} combinations ` +
-            `(${safeByTrial.join("/")} per trial, ${translatedSafe} translated): ${JSON.stringify(firstFailureByTrial)}; ${firstFailure}`);
+            `(${safeByTrial.join("/")} per trial, ${translatedSafe} translated): ${JSON.stringify(firstFailureByTrial)}; ` +
+            `candidate=${firstFailure}; minimum=${firstMinimumFailure}`);
     }
     successes.sort(compareDerived);
     const { demonstratedMinimum, smallerFailure, success } = successes[0];
@@ -514,6 +579,7 @@ function deriveTemplate(geometry) {
     void unusedFailureRuns;
     return {
         ...geometry,
+        combinationsEvaluated,
         demonstratedMinimum,
         runs: success.runs,
         scheduleDigest: scheduleDigest(success.runs),
@@ -563,8 +629,9 @@ async function main() {
             deriverVersion: DERIVER_VERSION,
             geometryDigest: digest(geometry),
             physicsDigest: digest({ commands: COMMANDS, constants: CONSTANTS }),
+            recipeVersion: RECIPE_VERSION,
             routes: geometry.templates.map(deriveTemplate),
-            schema: "agw-lander-route-derived/v1",
+            schema: "agw-lander-route-derived/v2",
             worldDigest: digest(worldWitnesses),
             worldWitnesses,
         };

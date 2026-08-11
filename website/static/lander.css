@@ -13,6 +13,7 @@
     --lander-x: 300px;
     --lander-y: 228px;
     --lander-angle: 0deg;
+    --thrust-vector-angle: 0deg;
     --left-plume-scale: 0.08;
     --right-plume-scale: 0.08;
     --left-plume-opacity: 0.25;
@@ -73,9 +74,9 @@
 }
 
 .platform-supports {
-    fill: none;
-    stroke: #4b4e55;
-    stroke-width: 6;
+    fill: #4b4e55;
+    stroke: #292b30;
+    stroke-width: 1;
 }
 
 .gas-can {
@@ -109,14 +110,19 @@
     stroke: none;
 }
 
-.lander-site[data-noc-stage="1"] .battery-bar-1,
-.lander-site[data-noc-stage="2"] .battery-bar-1,
-.lander-site[data-noc-stage="2"] .battery-bar-2,
-.lander-site[data-noc-stage="3"] .battery-bar-1,
-.lander-site[data-noc-stage="3"] .battery-bar-2,
-.lander-site[data-noc-stage="3"] .battery-bar-3,
-.lander-site[data-noc-stage="4"] .battery-bar,
-.lander-site[data-noc-stage="5"] .battery-bar {
+.lander-site:is([data-noc-stage="1"], [data-noc-stage="2"], [data-noc-stage="3"], [data-noc-stage="4"], [data-noc-stage="5"]) .battery-bar-1 {
+    fill: #d94a1e;
+}
+
+.lander-site:is([data-noc-stage="2"], [data-noc-stage="3"], [data-noc-stage="4"], [data-noc-stage="5"]) .battery-bar-2 {
+    fill: #ff7a00;
+}
+
+.lander-site:is([data-noc-stage="3"], [data-noc-stage="4"], [data-noc-stage="5"]) .battery-bar-3 {
+    fill: #ffe09a;
+}
+
+.lander-site:is([data-noc-stage="4"], [data-noc-stage="5"]) .battery-bar-4 {
     fill: #7de2c5;
 }
 
@@ -147,13 +153,15 @@
 
 #mission-left-engine {
     opacity: var(--left-plume-opacity);
-    transform: translate(0, 401px) scale(1, var(--left-plume-scale)) translate(0, -401px);
+    transform: translate(0, 401px) rotate(var(--thrust-vector-angle)) scale(1, var(--left-plume-scale))
+        translate(0, -401px);
     transform-origin: 82px 401px;
 }
 
 #mission-right-engine {
     opacity: var(--right-plume-opacity);
-    transform: translate(0, 401px) scale(1, var(--right-plume-scale)) translate(0, -401px);
+    transform: translate(0, 401px) rotate(var(--thrust-vector-angle)) scale(1, var(--right-plume-scale))
+        translate(0, -401px);
     transform-origin: 158px 401px;
 }
 

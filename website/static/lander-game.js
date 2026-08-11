@@ -18,7 +18,7 @@ import {
     transitionMission,
     updateRetention,
 } from "./lander-model.js";
-import { cameraLeftForPose, mixUint32, terrainPath, targetIsOffscreen } from "./lander-world.js";
+import { cameraLeftForPose, CHUNK_WIDTH, mixUint32, terrainPath, targetIsOffscreen } from "./lander-world.js";
 
 const SVG_NAMESPACE = document.querySelector("#lander-scene")?.namespaceURI;
 const ACTIVE_STATES = new Set(["flying", "landed", "deploying", "powering", "launching", "crashing", "failed", "generation-error"]);
@@ -91,18 +91,28 @@ function positionSite(group, site) {
     const deck = group.querySelector(".landing-platform");
     deck.setAttribute("x", left); deck.setAttribute("y", top); deck.setAttribute("width", right - left); deck.setAttribute("height", bottom - top);
     group.querySelector(".helipad-mark").setAttribute("d", `M${center - 9} ${top + 1.7}v-20m18 20v-20m-18 10h18`);
-    group.querySelector(".platform-supports").setAttribute("d", `M${left + 14} ${bottom}v4.5m${right - left - 28} -4.5v4.5`);
+    const shelf = top + 8;
+    const supports = [`M${left} ${bottom}H${right}V${shelf}H${left}Z`];
+    for (let bay = 0; bay < 6; bay += 1) {
+        supports.push(`M${left + 16 * bay} ${bottom}L${left + 16 * (bay + 1)} ${shelf}`,
+            `M${left + 16 * bay} ${shelf}L${left + 16 * (bay + 1)} ${bottom}`);
+    }
+    group.querySelector(".platform-supports").setAttribute("d", supports.join(""));
     group.querySelector(".gas-can").setAttribute("transform", `translate(${center + 30} ${top - 15})`);
     const buildingLeft = right + 20;
     const roof = top - 72;
-    const foundation = 548 - (site.foundationBottom ?? site.platformTop) * 10;
+    const foundation = 548 - (site.foundationBottom ?? site.platformTop - 0.8) * 10;
     group.querySelector(".noc-building").setAttribute("d", `M${buildingLeft} ${foundation}V${roof}h70V${foundation}Z`);
     group.querySelector(".noc-entry").setAttribute("d", `M${buildingLeft} ${top - 18}h13v18h-13Z`);
     const battery = group.querySelector(".noc-battery");
-    battery.querySelector("rect").setAttribute("x", buildingLeft + 13); battery.querySelector("rect").setAttribute("y", roof + 18);
-    battery.querySelector("rect").setAttribute("width", 40); battery.querySelector("rect").setAttribute("height", 22);
-    battery.querySelector(".battery-terminal").setAttribute("d", `M${buildingLeft + 53} ${roof + 24}h5v10h-5`);
-    for (let index = 1; index <= 4; index += 1) battery.querySelector(`.battery-bar-${index}`).setAttribute("d", `M${buildingLeft + 18 + (index - 1) * 8} ${roof + 23}h5v12h-5Z`);
+    battery.querySelector("rect").setAttribute("x", buildingLeft + 24); battery.querySelector("rect").setAttribute("y", roof + 16);
+    battery.querySelector("rect").setAttribute("width", 22); battery.querySelector("rect").setAttribute("height", 40);
+    battery.querySelector(".battery-terminal").setAttribute("d", `M${buildingLeft + 30} ${roof + 16}v-6h10v6`);
+    const barTops = [46, 38, 30, 22];
+    for (let index = 1; index <= 4; index += 1) {
+        battery.querySelector(`.battery-bar-${index}`).setAttribute("d",
+            `M${buildingLeft + 29} ${roof + barTops[index - 1]}h12v5h-12Z`);
+    }
     group.querySelector(".antenna-mast").setAttribute("d", `M${buildingLeft + 35} ${roof}v-32`);
     group.querySelector(".antenna-head").setAttribute("cx", buildingLeft + 35);
     group.querySelector(".antenna-head").setAttribute("cy", roof - 34);
@@ -126,6 +136,9 @@ export class LanderGameController {
         this.heldKeys = new Set();
         this.pointerInput = ZERO_INPUT;
         this.pointer = null;
+        this.pointerToken = 0;
+        this.completedPointer = null;
+        this.releasedCapture = null;
         this.pulseTimer = null;
         this.frameId = null;
         this.previousFrame = null;
@@ -172,7 +185,9 @@ export class LanderGameController {
         const physical = Object.freeze({ heldCodes: Object.freeze([...this.heldKeys].sort()),
             pointer: this.pointer ? Object.freeze({ active: true, id: this.pointer.id,
                 anchorX: this.pointer.x, currentX: this.pointer.currentX,
-                pulseDeadline: this.pointer.pulseDeadline }) : Object.freeze({ active: false }) });
+                token: this.pointer.token }) : Object.freeze({ active: false }),
+            completedPointerToken: this.completedPointer?.token ?? null,
+            pulseDeadline: this.completedPointer?.deadline ?? null });
         this.clock = enqueueInputEdge(this.clock, { timestamp, ...request, token, physical });
     }
 
@@ -256,13 +271,26 @@ export class LanderGameController {
     }
 
     onPointer(event) {
+        if (event.type === "lostpointercapture") {
+            const released = this.releasedCapture;
+            if (!released || released.id !== event.pointerId) {
+                this.finishPointer(this.pointer?.token ?? this.completedPointer?.token, eventTime(event), true);
+                return;
+            }
+            this.releasedCapture = null;
+            if (this.completedPointer?.token === released.token &&
+                released.releasedAt < this.completedPointer.deadline) return;
+            this.finishPointer(released.token, eventTime(event), true);
+            return;
+        }
         if (event.type === "pointerdown") {
             if (this.model.state !== "flying" || !event.isPrimary || event.button !== 0 || this.pointer) return;
             event.preventDefault();
+            const token = ++this.pointerToken;
             this.pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, currentX: event.clientX,
-                started: eventTime(event), token: event.pointerId, pulseDeadline: null };
+                started: eventTime(event), token };
             this.lander_scene_shell.setPointerCapture(event.pointerId);
-            this.pointerInput = { left: 0.72, right: 0.72 }; this.queueInput(eventTime(event), event.pointerId); return;
+            this.pointerInput = { left: 0.72, right: 0.72 }; this.queueInput(eventTime(event), token); return;
         }
         if (!this.pointer || event.pointerId !== this.pointer.id) return;
         event.preventDefault();
@@ -276,25 +304,45 @@ export class LanderGameController {
             const elapsed = eventTime(event) - pointer.started;
             const distance = Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y);
             if (elapsed <= 180 && distance <= 10 && elapsed < 140) {
-                this.pointer.currentX = event.clientX; this.pointer.pulseDeadline = eventTime(event) + 140 - elapsed;
-                this.pulseTimer = setTimeout(() => this.finishPointer(pointer.token, performance.now()), 140 - elapsed); return;
+                const deadline = pointer.started + 140;
+                this.completedPointer = { token: pointer.token, deadline };
+                this.releasedCapture = { id: pointer.id, token: pointer.token, releasedAt: eventTime(event) };
+                this.pointer = null;
+                this.pointerInput = { left: 0.72, right: 0.72 };
+                this.queueInput(eventTime(event), pointer.token);
+                this.pulseTimer = setTimeout(() => this.finishPointer(pointer.token, deadline, false),
+                    Math.max(0, deadline - eventTime(event)));
+                if (this.lander_scene_shell.hasPointerCapture(pointer.id)) {
+                    this.lander_scene_shell.releasePointerCapture(pointer.id);
+                }
+                return;
             }
         }
-        if (event.type === "lostpointercapture" && this.pointer.pulseDeadline !== null) return;
-        this.finishPointer(this.pointer.token, eventTime(event));
+        this.finishPointer(this.pointer.token, eventTime(event), true);
     }
 
-    finishPointer(token, timestamp) {
+    finishPointer(token, timestamp, prune = false) {
+        if (token === undefined || token === null) return;
         if (this.pulseTimer !== null) { clearTimeout(this.pulseTimer); this.pulseTimer = null; }
-        this.pointer = null; this.pointerInput = ZERO_INPUT;
-        this.clock = removeQueuedInputEdges(this.clock, token);
+        if (this.pointer?.token === token) this.pointer = null;
+        if (this.completedPointer?.token === token) this.completedPointer = null;
+        if (this.releasedCapture?.token === token) this.releasedCapture = null;
+        this.pointerInput = ZERO_INPUT;
+        if (prune) this.clock = removeQueuedInputEdges(this.clock, token);
         if (this.model.state === "flying") this.queueInput(timestamp);
     }
 
     clearAllInput(timestamp) {
         this.heldKeys.clear();
-        if (this.pointer && this.lander_scene_shell.hasPointerCapture(this.pointer.id)) this.lander_scene_shell.releasePointerCapture(this.pointer.id);
-        this.finishPointer(this.pointer?.token, timestamp);
+        const pointer = this.pointer;
+        const token = pointer?.token ?? this.completedPointer?.token;
+        this.pointer = null; this.completedPointer = null; this.releasedCapture = null;
+        if (this.pulseTimer !== null) { clearTimeout(this.pulseTimer); this.pulseTimer = null; }
+        this.pointerInput = ZERO_INPUT;
+        if (token !== undefined) this.clock = removeQueuedInputEdges(this.clock, token);
+        if (pointer && this.lander_scene_shell.hasPointerCapture(pointer.id)) {
+            this.lander_scene_shell.releasePointerCapture(pointer.id);
+        }
         this.clock = clearSimulationInput(this.clock, timestamp);
         this.model = { ...this.model, commanded: { ...ZERO_INPUT } };
     }
@@ -355,7 +403,7 @@ export class LanderGameController {
         for (const index of indexes) {
             let path = existingChunks.get(index);
             if (!path) { path = svg("path", { class: "terrain-chunk", "data-chunk-index": index }); this.terrain_layer.append(path); }
-            const left = index * 20; const right = left + 20;
+            const left = index * CHUNK_WIDTH; const right = left + CHUNK_WIDTH;
             const vertices = this.model.terrainVertices.filter(([x]) => x >= left && x <= right);
             path.setAttribute("d", terrainPath(vertices)); existingChunks.delete(index);
         }
@@ -404,6 +452,7 @@ export class LanderGameController {
         this.root.style.setProperty("--camera-x", `${-cameraLeft * 10}px`);
         this.root.style.setProperty("--lander-x", `${pose.x * 10}px`); this.root.style.setProperty("--lander-y", `${548 - pose.y * 10}px`);
         this.root.style.setProperty("--lander-angle", `${pose.angle}deg`);
+        this.root.style.setProperty("--thrust-vector-angle", `${this.model.commanded.vectorAngle ?? 0}deg`);
         for (const [name, value] of [["left-plume-scale", left.scaleY], ["right-plume-scale", right.scaleY],
             ["left-plume-opacity", left.opacity], ["right-plume-opacity", right.opacity]]) this.root.style.setProperty(`--${name}`, String(value));
         this.reconcileWorld(); this.renderCrash(cameraLeft);

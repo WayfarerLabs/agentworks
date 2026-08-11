@@ -4,6 +4,8 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+    CHUNK_WIDTH,
+    MOTIFS,
     PLATFORM_WIDTH,
     STATIC_WORLD_SEED,
     cameraLeftForPose,
@@ -11,6 +13,8 @@ import {
     createFirstSite,
     instantiateTemplateSite,
     mixUint32,
+    motifIndex,
+    motifSelection,
     normalizeSeed,
     retainedChunkIndexes,
     retainedSiteDescriptors,
@@ -43,10 +47,25 @@ test("seed mixer and sampled terrain match independent fixed vectors", () => {
     assert.equal(mixUint32(1), 1753845952);
     assert.equal(mixUint32(0x12345678), 4125564054);
     assert.equal(mixUint32(0xffffffff), 1734902346);
-    const expected = [3.632365759695, 2.237045118399, 4.041724477103, 2.046403835807, 3.451083194511, 2.655762553215];
-    expected.forEach((value, index) => close(terrainSample(1, index), value, 5e-13));
-    assert.equal(terrainSample(1, 24), 2.736853299895301);
-    assert.equal(terrainSample(0x12345678, 14), 3.1070248072035613);
+    const vectors = [
+        { seed: 1, selection: { direction: 1, offset: 0 }, motifs: [0,1,2,3],
+            heights: [3.948548639542423,6.055567677598447,1.8625867156544702,
+                4.869605753710493,1.6766247917665167,2.4836438298225403], top: 5.286448038277216 },
+        { seed: 0x12345678, selection: { direction: 3, offset: 2 }, motifs: [2,1,0,3],
+            heights: [2.8413594241719693,3.9342738820938394,5.72718834001571,
+                4.02010279793758,1.7130172558594494,3.8059317137813196], top: 4.564073424622881 },
+        { seed: 0xffffffff, selection: { direction: 1, offset: 1 }, motifs: [1,2,3,0],
+            heights: [2.9631244149059057,0.763576190569438,1.9640279662329705,
+                4.864479741896503,3.564931517560035,2.4653832932235673], top: 5.5085339549761265 },
+    ];
+    for (const vector of vectors) {
+        vector.heights.forEach((value, index) => close(terrainSample(vector.seed, index), value));
+        assert.deepEqual(motifSelection(vector.seed), vector.selection);
+        assert.deepEqual(Array.from({ length: 4 }, (_, index) => motifIndex(vector.seed, index)), vector.motifs);
+        close(createFirstSite(vector.seed).platformTop, vector.top);
+    }
+    assert.deepEqual(MOTIFS, [[0,2.4,-1.5,1.8,-1.1,0],[0,-2.1,-0.8,2.2,1,0],
+        [0,0.9,2.5,0.6,-1.9,0],[0,-1.4,1.3,2.4,-0.5,0]]);
     close(sampleUnit(1, 1, 0), 0.5441219198983163);
     close(sampleUnit(1, 4, 7), 0.29075191100127995);
     close(sampleUnit(0x12345678, 3, 99), 0.38062425260432065);
@@ -61,14 +80,16 @@ test("adjacent terrain chunks share boundaries and contain material slopes", () 
             assert.ok(heights.some((height, index) => index > 0 && height - heights[index - 1] >= 0.35));
             assert.ok(heights.some((height, index) => index > 0 && heights[index - 1] - height >= 0.35));
         }
+        assert.equal(new Set(Array.from({ length: 4 }, (_, index) => motifIndex(seed, index - 2))).size, 4);
     }
 });
 
 test("first site is one exact elevated three-lander-width helipad", () => {
     const site = createFirstSite(STATIC_WORLD_SEED);
-    close(site.platformTop, 5.119569691829383);
+    close(site.platformTop, 7.984423104863613);
     assert.equal(site.center, 36);
     close(site.platformRight - site.platformLeft, PLATFORM_WIDTH);
+    close(site.shelfRight, site.platformRight + 9);
     close(PLATFORM_WIDTH, 3 * 3.2);
     assert.equal(site.canCollected, false);
     assert.equal(site.powered, false);
@@ -100,9 +121,9 @@ test("all nine constructive corridors replace the target span and preserve caps"
         const origin = createFirstSite(0x12345678);
         const target = instantiateTemplateSite(0x12345678, 1, origin, template);
         const vertices = corridorVertices(0x12345678, origin, target);
-        assert.deepEqual(vertices[0], [origin.platformRight, origin.platformTop - 0.8]);
+        assert.deepEqual(vertices[0], [origin.shelfRight, origin.platformTop - 0.8]);
         assert.deepEqual(vertices.at(-2), [target.platformLeft, target.platformTop - 0.8]);
-        assert.deepEqual(vertices.at(-1), [target.platformRight, target.platformTop - 0.8]);
+        assert.deepEqual(vertices.at(-1), [target.shelfRight, target.platformTop - 0.8]);
         for (const [, y] of vertices.slice(1, -2)) assert.ok(y <= origin.platformTop - 0.65);
         assert.ok(Object.isFrozen(target));
     }
@@ -114,13 +135,14 @@ test("camera, offscreen cue, and rolling retention remain bounded", async () => 
     for (let id = 1; id < 6; id += 1) sites.push(instantiateTemplateSite(1, id, sites.at(-1), geometry.templates[0]));
     assert.equal(cameraLeftForPose({ x: 34 }), 0);
     assert.equal(cameraLeftForPose({ x: 80 }), 45);
-    assert.equal(retainedChunkIndexes(45).length, 10);
-    assert.ok(retainedChunkIndexes(45).length <= 10);
+    assert.equal(CHUNK_WIDTH, 50);
+    assert.equal(retainedChunkIndexes(25).length, 5);
+    assert.ok(retainedChunkIndexes(45).length <= 5);
     assert.ok(retainedSiteDescriptors(sites, 4, 5).length <= 3);
     assert.equal(targetIsOffscreen(sites[1], 0), true);
     assert.equal(targetIsOffscreen({ platformLeft: 100 }, 0), false);
     const vertices = terrainVerticesForWindow(1, sites.slice(0, 2), -40, 140);
-    assert.ok(vertices.length > 20);
+    assert.ok(vertices.length > 10);
     assert.ok(Object.isFrozen(vertices));
 });
 

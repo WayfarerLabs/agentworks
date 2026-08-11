@@ -72,6 +72,19 @@ The package-free browser, responsive, motion, touch, and assistive-technology ch
 [`tests/lander-browser-checklist.md`](tests/lander-browser-checklist.md). Complete its pending rows
 before a public release.
 
+The Lander uses fixed-step vacuum physics. Space or Up commands collective thrust; Left/H and
+Right/L steer. Steered thrust is deliberately vectored by up to 18 degrees and uses less total
+forward thrust than straight collective. A powered neutral collective redistributes thrust between
+the two engines to arrest rotation without adding drag or changing fuel use. Pointer and touch input
+use the same bounded mixer: press for collective, drag horizontally to steer, and a short tap retains
+a 140 ms pulse. Safe landing limits are inclusive at 1.6 m/s horizontal speed, 2.5 m/s descent,
+10 degrees of tilt, and 15 degrees/s rotation.
+
+Terrain is deterministic per run, sampled every 10 m in 50 m chunks from four visibly different
+motifs. Each platform and NOC share one flat shelf. The 9.6 m deck stands 0.8 m above it on a solid,
+collidable support face; the NOC battery fills four colored bars bottom-to-top before its antenna
+powers. These shapes, fills, and outlines preserve their meaning without relying on color alone.
+
 ## Artifact contract
 
 Generated output is not maintained or edited. The complete output contains exactly:
@@ -101,17 +114,19 @@ Regenerate to a temporary path and verify the reviewed fixture with:
 ```bash
 node website/tools/derive_lander_routes.mjs \
   --geometry website/tests/fixtures/lander-route-geometry-v1.json \
-  --output /tmp/lander-route-derived-v1.json \
-  --verify website/tests/fixtures/lander-route-derived-v1.json
+  --output /tmp/lander-route-derived-v2.json \
+  --verify website/tests/fixtures/lander-route-derived-v2.json
 ```
 
-The deriver uses Node built-ins, versioned finite phase ranges, reachable keyboard commands, and an
-independent copy of the physics. A deliberate route change updates geometry, the reviewed derived
-fixture, and the copied production literals together. Runtime code performs exactly the successful
+The v2 deriver uses Node built-ins, versioned finite phase ranges, reachable keyboard commands, and
+independent copies of the physics, collision geometry, terrain motifs, shelf construction, riser,
+NOC, and mast. Its reviewed output contains all nine routes and 81 ordered world descriptors. A
+deliberate route or world change updates the tool version/ranges, reviewed v2 fixture, copied
+production literals, and all four digests atomically. Runtime code performs exactly the successful
 and one-quantum-smaller proof replays for the directly selected literal. It never imports the tool,
 scans fuel allowances, or plans a route in the browser.
 
-During a run, the model retains at most ten terrain chunks, the active and target sites plus one
+During a run, the model retains at most five terrain chunks, the active and target sites plus one
 previous powered site, one input queue of at most 64 records, and eight crash fragments. Fuel has no
 capacity cap: unused reserve carries forward. Each collected can adds the next route's demonstrated
 minimum multiplied by a ratio that starts at three and decays monotonically toward one. Exit and

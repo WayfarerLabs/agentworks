@@ -8,6 +8,7 @@ import test from "node:test";
 
 import {
     ENGINE_ACCELERATION,
+    MAX_THRUST_VECTOR,
     FAILURE_STATUS,
     FUEL_QUANTUM,
     REFERENCE_TEMPLATES,
@@ -25,8 +26,10 @@ import {
     enqueueInputEdge,
     integratePose,
     mixDigitalInput,
+    mixEngineRequests,
     nextAwardRatio,
     plumeForThrust,
+    pointerEngineRequests,
     proveTemplate,
     removeQueuedInputEdges,
     stepFlight,
@@ -39,6 +42,7 @@ import {
     instantiateTemplateSite,
     siteFoundationBottom,
     terrainSample,
+    terrainVerticesForWindow,
 } from "../static/lander-world.js";
 
 const ROOT = new URL("../", import.meta.url).pathname;
@@ -186,16 +190,48 @@ function descendantCount(element) {
     return element.children.reduce((total, child) => total + 1 + descendantCount(child), 0);
 }
 
-test("8.4 engine physics, fuel exhaustion, input, and plumes match fixed vectors", () => {
-    assert.equal(ENGINE_ACCELERATION, 8.4);
+test("9.0 engine physics, true gimbal, assist, input arbitration, and plumes match fixed vectors", () => {
+    assert.equal(ENGINE_ACCELERATION, 9);
+    assert.equal(MAX_THRUST_VECTOR, 18);
     const pose = { x: 10, y: 30, vx: 0, vy: 0, angle: 0, angularVelocity: 0 };
     const gravity = stepMany(pose, { left: 0, right: 0 }, 30, 120);
     close(gravity.pose.y, 28.4875); close(gravity.pose.vy, -3); close(gravity.fuel, 30);
     const collective = stepMany(pose, { left: 0.72, right: 0.72 }, 30, 120);
-    close(collective.pose.y, 34.5859); close(collective.pose.vy, 9.096); close(collective.fuel, 28.56);
+    close(collective.pose.y, 35.0215); close(collective.pose.vy, 9.96); close(collective.fuel, 28.56);
+    const turn = integratePose(pose, { left: 0, right: 0.375 }, 30);
+    close((turn.pose.vx - pose.vx) / STEP_SECONDS, -1.04293235601545);
+    close((turn.pose.vy - pose.vy) / STEP_SECONDS, 0.209815742496143);
+    close(turn.pose.angularVelocity, -0.25); close(turn.pose.angle, -0.00208333333333);
+    close(turn.thrust.vectorAngle, -18); close(turn.thrust.fuel, 29.996875);
+    const assisted = integratePose({ ...pose, angularVelocity: 15 }, { left: 0.72, right: 0.72 }, 30);
+    close(assisted.thrust.left, 0.66); close(assisted.thrust.right, 0.78);
+    close(assisted.pose.angularVelocity, 14.92); close(assisted.pose.angle, 0.124333333333);
+    const coasting = integratePose({ ...pose, angularVelocity: 15 }, { left: 0, right: 0 }, 30);
+    assert.deepEqual({ left: coasting.thrust.left, right: coasting.thrust.right,
+        vectorAngle: coasting.thrust.vectorAngle }, { left: 0, right: 0, vectorAngle: 0 });
+    close(coasting.pose.angularVelocity, 15); close(coasting.pose.angle, 0.125);
     const exhausted = effectiveThrust({ left: 1, right: 1 }, 0.005);
     close(exhausted.left, 0.3); close(exhausted.right, 0.3); assert.equal(exhausted.fuel, 0);
-    assert.deepEqual(mixDigitalInput({ Space: true, ArrowLeft: true }), { left: 0.72, right: 1 });
+    assert.equal(exhausted.vectorAngle, 0);
+    const digitalRows = [
+        [{}, { left: 0, right: 0 }],
+        [{ Space: true }, { left: 0.72, right: 0.72 }],
+        [{ ArrowLeft: true }, { left: 0, right: 0.375 }],
+        [{ ArrowRight: true }, { left: 0.375, right: 0 }],
+        [{ Space: true, ArrowLeft: true }, { left: 0.4125, right: 0.7875 }],
+        [{ Space: true, ArrowRight: true }, { left: 0.7875, right: 0.4125 }],
+        [{ ArrowLeft: true, ArrowRight: true }, { left: 0, right: 0 }],
+        [{ Space: true, ArrowLeft: true, ArrowRight: true }, { left: 0.72, right: 0.72 }],
+    ];
+    for (const [input, expected] of digitalRows) assert.deepEqual(mixDigitalInput(input), expected);
+    const pointer = pointerEngineRequests(1000, 1000);
+    assert.deepEqual(pointer, { left: 0.7875, right: 0.4125 });
+    assert.deepEqual(pointerEngineRequests(-1000, 1000), { left: 0.4125, right: 0.7875 });
+    assert.deepEqual(pointerEngineRequests(0, 1000), { left: 0.72, right: 0.72 });
+    assert.deepEqual(mixEngineRequests(mixDigitalInput({ Space: true }), pointer), pointer);
+    assert.deepEqual(mixEngineRequests(mixDigitalInput({ ArrowLeft: true }), pointer),
+        { left: 0.4125, right: 0.7875 });
+    assert.ok(pointer.left + pointer.right <= 1.44);
     assert.deepEqual(plumeForThrust(0.5), { scaleY: 0.54, opacity: 0.625 });
 });
 
@@ -245,10 +281,13 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
     const output = join(directory, "routes.json");
     const tool = join(ROOT, "tools/derive_lander_routes.mjs");
     const geometry = join(ROOT, "tests/fixtures/lander-route-geometry-v1.json");
-    const fixture = join(ROOT, "tests/fixtures/lander-route-derived-v1.json");
+    const fixture = join(ROOT, "tests/fixtures/lander-route-derived-v2.json");
     execFileSync(process.execPath, [tool, "--geometry", geometry, "--output", output, "--verify", fixture]);
     assert.equal(await readFile(output, "utf8"), await readFile(fixture, "utf8"));
     const derived = JSON.parse(await readFile(fixture, "utf8"));
+    assert.equal(derived.schema, "agw-lander-route-derived/v2");
+    assert.equal(derived.deriverVersion, "agw-lander-route-deriver/v2");
+    assert.equal(derived.recipeVersion, "agw-lander-route-recipes/v2");
     assert.deepEqual(REFERENCE_TEMPLATES, derived.routes);
     assert.equal(ROUTE_DIGESTS.outputDigest, derived.outputDigest);
     assert.equal(ROUTE_DIGESTS.physicsDigest, derived.physicsDigest);
@@ -261,12 +300,19 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
         [1, 0x12345678, 0xffffffff]);
     assert.deepEqual([...new Set(derived.worldWitnesses.map(({ descriptor }) =>
         `${descriptor.origin.center}:${descriptor.origin.top}`))], ["36:3.5", "117:5", "-42:6.5"]);
+    const expectedWitnessOrder = [1, 0x12345678, 0xffffffff].flatMap((seed) =>
+        [[36, 3.5], [117, 5], [-42, 6.5]].map(([center, top]) => ({ seed, center, top })));
+    for (let templateIndex = 0; templateIndex < 9; templateIndex += 1) {
+        const witnesses = derived.worldWitnesses.slice(templateIndex * 9, templateIndex * 9 + 9);
+        assert.deepEqual(witnesses.map(({ descriptor }) => ({ seed: descriptor.seed,
+            center: descriptor.origin.center, top: descriptor.origin.top })), expectedWitnessOrder);
+    }
     assert.equal(digest(derived.worldWitnesses), derived.worldDigest);
     assert.deepEqual([derived.worldWitnesses[0].digest, derived.worldWitnesses[40].digest,
         derived.worldWitnesses.at(-1).digest], [
-        "f5064b62812de3329b7fcd65fe880bd1098b589db98d55d33e5b2307f05bda57",
-        "f1cdffa74c42cf133bdb3fc264d25227cf8d0df980b9b8a9db8db0f753dfda57",
-        "115173e8c5d9177f1660d5fb917dd89cfcc8d331155eb4e53b77ededf65cca8a",
+        "cea87dac5bab063d0cc916f2f11daccf51cd31cb31851b8d5089e120bfc0c42c",
+        "fc7a867f17c662416f5f2388bdfbade634e4e32039b59264b1c6d9c910e67e81",
+        "46df6e6052a6f972a1a5e852b97f7d610b0998b3701a00bd8c36c8c2b9b198e1",
     ]);
     assert.ok(derived.worldWitnesses.some(({ descriptor }) =>
         descriptor.corridorSamples.some((sample) => sample.relieved)));
@@ -275,42 +321,40 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
         const template = REFERENCE_TEMPLATES.find((candidate) => candidate.templateId === descriptor.templateId);
         const originSite = { id: 0, center: descriptor.origin.center,
             platformLeft: descriptor.origin.center - 4.8, platformRight: descriptor.origin.center + 4.8,
+            shelfRight: descriptor.origin.center + 4.8 + 9,
             platformTop: descriptor.origin.top, platformBottom: descriptor.origin.top - 0.35,
             canCollected: true, powered: true, nocStage: 5 };
         const targetSite = instantiateTemplateSite(descriptor.seed, 1, originSite, template);
         assert.deepEqual({ center: targetSite.center, top: targetSite.platformTop }, descriptor.target);
-        assert.deepEqual(descriptor.vertices.slice(0, -descriptor.nativeResumeSamples.length),
-            corridorVertices(descriptor.seed, originSite, targetSite));
+        assert.deepEqual(terrainVerticesForWindow(descriptor.seed, [originSite, targetSite],
+            descriptor.vertices[0][0], descriptor.vertices.at(-1)[0]), descriptor.vertices);
         assert.equal(digest(descriptor), witness.digest);
         assert.ok(descriptor.corridorSamples.length > 0);
         assert.ok(descriptor.corridorSamples.every((sample) => sample.y === (sample.relieved ?
-            Math.max(0.75, sample.cap - 0.15 * sample.reliefUnit) : sample.raw)));
+            Math.max(0.5, sample.cap - 0.15 * sample.reliefUnit) : sample.raw)));
         for (const sample of descriptor.corridorSamples.concat(descriptor.nativeResumeSamples)) {
             assert.equal(sample.raw ?? sample.y, terrainSample(descriptor.seed, sample.index));
             assert.ok(descriptor.vertices.some(([x, y]) => x === sample.x && y === sample.y));
         }
-        assert.deepEqual(descriptor.blendSegments.left[1],
+        assert.deepEqual(descriptor.blendSegments.targetLeft[1],
             [descriptor.target.center - 4.8, descriptor.target.top - 0.8]);
-        assert.deepEqual(descriptor.blendSegments.right[0],
-            [descriptor.target.center + 4.8, descriptor.target.top - 0.8]);
+        assert.deepEqual(descriptor.blendSegments.targetRight[0],
+            [descriptor.target.center + 4.8 + 9, descriptor.target.top - 0.8]);
         assert.equal(descriptor.sites.length, 2);
         for (const site of descriptor.sites) {
             close(site.platform.right - site.platform.left, 9.6);
-            assert.equal(site.pylons.length, 2);
-            for (const pylon of site.pylons) {
-                close(pylon.bottom, site.platform.top - 0.8);
-                close(pylon.top, site.platform.bottom);
-                close(pylon.right - pylon.left, 0.6);
-            }
+            close(site.riser.bottom, site.platform.top - 0.8);
+            close(site.riser.top, site.platform.bottom);
+            close(site.riser.right - site.riser.left, 9.6);
             close(site.noc.right - site.noc.left, 7);
             close(site.noc.top - site.platform.top, 7.2);
-            close(site.noc.bottom, Math.min(heightFromVertices(descriptor.vertices, site.noc.left),
-                heightFromVertices(descriptor.vertices, site.noc.right)));
+            close(site.noc.bottom, site.platform.top - 0.8);
             close(site.mast.right - site.mast.left, 0.5);
             close(site.mast.top - site.mast.bottom, 3.2);
         }
     }
-    assert.equal(derived.routes[0].runs[1][1], 200, "the selected route is not the first ranged candidate");
+    assert.ok(derived.routes.every((route) => route.combinationsEvaluated === 81));
+    assert.equal(derived.routes[0].runs[1][1], 209, "the selected route is not the first ranged candidate");
     assert.equal(spawnSync(process.execPath, [tool, "--bogus"]).status, 2);
 
     const blockedGeometry = join(directory, "blocked-geometry.json");
@@ -321,14 +365,14 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
         "--verify", fixture]).status, 1);
 
     const changedTool = join(directory, "changed-recipes.mjs");
-    const changedSource = (await readFile(tool, "utf8")).replace("[3,199,201]", "[3,1,1]");
+    const changedSource = (await readFile(tool, "utf8")).replace("[3,208,210]", "[3,1,1]");
     assert.notEqual(changedSource, await readFile(tool, "utf8"));
     await writeFile(changedTool, changedSource, "utf8");
     assert.equal(spawnSync(process.execPath, [changedTool, "--geometry", geometry, "--output", output]).status, 1);
 
     const obstructedWorldTool = join(directory, "obstructed-world.mjs");
     const obstructedWorldSource = (await readFile(tool, "utf8")).replace(
-        "const y = raw > cap ? Math.max(0.75, cap - 0.15 * reliefUnit) : raw;",
+        "const y = raw > cap ? Math.max(0.5, cap - 0.15 * reliefUnit) : raw;",
         "const y = raw + 20;",
     );
     assert.notEqual(obstructedWorldSource, await readFile(tool, "utf8"));
@@ -362,11 +406,18 @@ test("the old route-78 target crossing is rejected by the exact landing envelope
 test("safe target top is inclusive and epsilon excess is unsafe", () => {
     const model = createRun({ seed: 1 });
     const target = model.retainedSites[0];
-    const previous = { x: target.center, y: target.platformTop + 0.25, vx: 1.4, vy: -2.2,
-        angle: -8, angularVelocity: 12 };
+    const previous = { x: target.center, y: target.platformTop + 0.5, vx: 1.6, vy: -2.5,
+        angle: -10, angularVelocity: 15 };
     const next = { ...previous, y: target.platformTop + 0.2 };
     assert.equal(classifySweptContact(model, previous, next).kind, "safe");
-    assert.equal(classifySweptContact(model, { ...previous, vx: 1.400000001 }, { ...next, vx: 1.400000001 }).kind, "unsafe");
+    const limits = [
+        ["vx", 1.6], ["vy", -2.5], ["angle", -10], ["angularVelocity", 15],
+    ];
+    for (const [field, limit] of limits) {
+        const excess = limit + Math.sign(limit) * 1e-9;
+        assert.equal(classifySweptContact(model, { ...previous, [field]: excess },
+            { ...next, [field]: excess }).kind, "unsafe", `${field} beyond the inclusive limit must crash`);
+    }
     const tangent = { x: target.center, y: target.platformTop, vx: 0, vy: 0, angle: 0, angularVelocity: 0 };
     assert.equal(classifySweptContact(model, tangent, { ...tangent, x: tangent.x + 0.01 }).cause, "grazing");
 
@@ -377,7 +428,7 @@ test("safe target top is inclusive and epsilon excess is unsafe", () => {
     }
 });
 
-test("closed unsafe geometry catches slopes, platform equality, pylons, mast, and precedence", () => {
+test("closed unsafe geometry catches slopes, platform equality, solid riser, mast, and precedence", () => {
     const base = createRun({ seed: 1 });
     const site = base.retainedSites[0];
     const slopeModel = { ...base, retainedSites: [], targetSiteId: null, terrainVertices: [[0, 0], [10, 10]] };
@@ -386,9 +437,9 @@ test("closed unsafe geometry catches slopes, platform equality, pylons, mast, an
     const sidePose = { x: site.platformLeft - 1.6 - 0.02, y: site.platformTop - 0.1,
         vx: 0, vy: 0, angle: 0, angularVelocity: 0 };
     assert.equal(classifySweptContact(base, sidePose, sidePose).cause, "platform");
-    const pylonPose = { x: site.platformLeft + 1.4, y: site.platformTop - 0.6,
+    const riserPose = { x: site.center, y: site.platformTop - 0.6,
         vx: 0, vy: 0, angle: 180, angularVelocity: 0 };
-    assert.equal(classifySweptContact(base, pylonPose, pylonPose).cause, "pylon");
+    assert.equal(classifySweptContact(base, riserPose, riserPose).cause, "riser");
     const buildingLeft = site.platformRight + 2;
     const roof = site.platformTop + 7.2;
     const mastPose = { x: buildingLeft + 3.5, y: roof + 0.1,
@@ -457,9 +508,9 @@ test("automatic launch ignores only its rising start top and keeps other collisi
     const active = launching.retainedSites.find((site) => site.id === launching.activeSiteId);
     const side = { ...launching, pose: { ...launching.pose, x: active.platformLeft + 1.6, vy: 1 } };
     assert.equal(stepFlight(side, { left: 0, right: 0 }).failureCause, "platform");
-    const pylon = { ...launching, pose: { ...launching.pose, x: active.platformLeft + 1.4,
+    const riser = { ...launching, pose: { ...launching.pose, x: active.center,
         y: active.platformTop - 0.6, vy: 1, angle: 180 } };
-    assert.equal(stepFlight(pylon, { left: 0, right: 0 }).failureCause, "pylon");
+    assert.equal(stepFlight(riser, { left: 0, right: 0 }).failureCause, "riser");
     const buildingLeft = active.platformRight + 2;
     const noc = { ...launching, pose: { ...launching.pose, x: buildingLeft + 3.5,
         y: active.platformTop + 1, vy: 1 } };
@@ -513,17 +564,16 @@ test("short pointer tap survives automatic lost capture for its full pulse", asy
         clientX: 100, clientY: 50, timeStamp: 0 });
     shell.dispatchEvent({ type: "pointerup", pointerId: 7, isPrimary: true, button: 0,
         clientX: 103, clientY: 52, timeStamp: 50 });
-    assert.equal(shell.hasPointerCapture(7), true);
-    shell.releasePointerCapture(7);
-    assert.equal(controller.pointer.id, 7); assert.equal(controller.pointer.pulseDeadline, 140);
+    assert.equal(shell.hasPointerCapture(7), false);
+    assert.equal(controller.pointer, null); assert.deepEqual(controller.completedPointer, { token: 1, deadline: 140 });
     assert.notEqual(controller.pulseTimer, null);
-    assert.ok(controller.clock.queue.some((edge) => edge.token === 7 && edge.left === 0.72 && edge.right === 0.72));
-    controller.finishPointer(7, 140);
-    assert.equal(controller.pointer, null); assert.equal(controller.pulseTimer, null);
-    assert.deepEqual(controller.clock.queue.at(-1), {
-        timestamp: 140, left: 0, right: 0, token: null,
-        physical: { heldCodes: [], pointer: { active: false } }, sequence: 1,
-    });
+    assert.ok(controller.clock.queue.some((edge) => edge.token === 1 && edge.left === 0.72 && edge.right === 0.72));
+    assert.equal(controller.clock.queue.at(-1).physical.completedPointerToken, 1);
+    controller.finishPointer(1, 140);
+    assert.equal(controller.completedPointer, null); assert.equal(controller.pulseTimer, null);
+    assert.equal(controller.clock.queue.at(-1).timestamp, 140);
+    assert.equal(controller.clock.queue.at(-1).left, 0);
+    assert.equal(controller.clock.queue.at(-1).physical.completedPointerToken, null);
     controller.destroy();
 });
 
@@ -687,7 +737,7 @@ test("worst-case world projection stays within eighty descendants during a crash
     sites.push(instantiateTemplateSite(model.seed, 2, sites[1], REFERENCE_TEMPLATES[1]));
     model = updateRetention({ ...model, pose: { ...model.pose, x: sites[1].center }, retainedSites: sites,
         activeSiteId: 1, targetSiteId: 2 });
-    assert.equal(model.retainedChunks.length, 10); assert.equal(model.retainedSites.length, 3);
+    assert.equal(model.retainedChunks.length, 5); assert.equal(model.retainedSites.length, 3);
     const fragments = Array.from({ length: 8 }, (_, id) => ({ id, x: model.pose.x, y: model.pose.y,
         vx: id / 10, vy: id / 20, angularVelocity: id, color: "#292b30" }));
     model = { ...model, state: "crashing", crash: { pose: model.pose, fragments }, sequenceSeconds: 0.1 };
@@ -700,10 +750,11 @@ test("worst-case world projection stays within eighty descendants during a crash
     world.append(fixture.elements["terrain-layer"], fixture.elements["site-layer"],
         fixture.elements["debris-layer"], missionLander, fixture.elements["mission-agent"]);
     controller.model = model; controller.render();
-    assert.equal(fixture.elements["terrain-layer"].children.length, 10);
+    assert.equal(fixture.elements["terrain-layer"].children.length, 5);
     assert.equal(fixture.elements["site-layer"].children.length, 3);
     assert.equal(fixture.elements["debris-layer"].children.length, 8);
-    assert.equal(descendantCount(world), 80);
+    assert.equal(descendantCount(world), 75);
+    assert.ok(descendantCount(world) <= 80);
     controller.destroy();
 });
 
@@ -722,7 +773,7 @@ test("100-site deterministic mission keeps generation and retention bounded", ()
         maximumGenerationMilliseconds = Math.max(maximumGenerationMilliseconds, performance.now() - started);
         assert.equal(model.state, "launching");
         assert.ok(model.retainedSites.length <= 3);
-        assert.ok(model.retainedChunks.length <= 10);
+        assert.ok(model.retainedChunks.length <= 5);
         assert.ok(model.fuel >= 0);
     }
     assert.equal(model.completedSites, 100);

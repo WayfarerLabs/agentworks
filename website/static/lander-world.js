@@ -1,12 +1,17 @@
 export const STATIC_WORLD_SEED = 0x41475731;
-export const CHUNK_WIDTH = 20;
-export const TERRAIN_SAMPLE_SPACING = 4;
+export const CHUNK_WIDTH = 50;
+export const TERRAIN_SAMPLE_SPACING = 10;
 export const PLATFORM_WIDTH = 9.6;
 export const PLATFORM_THICKNESS = 0.35;
 export const PLATFORM_CLEARANCE = 0.8;
 export const TARGET_DECK_BAND = Object.freeze([1.55, 8.3]);
 
-const MOTIF = Object.freeze([0, 1.2, -0.8, 1, -0.6, 0]);
+export const MOTIFS = Object.freeze([
+    Object.freeze([0, 2.4, -1.5, 1.8, -1.1, 0]),
+    Object.freeze([0, -2.1, -0.8, 2.2, 1, 0]),
+    Object.freeze([0, 0.9, 2.5, 0.6, -1.9, 0]),
+    Object.freeze([0, -1.4, 1.3, 2.4, -0.5, 0]),
+]);
 const TEMPLATE_SLOT_ORDER = Object.freeze([78, 81, 84, 87, 90, 93, 96, 99, 102]);
 
 function clamp(value, minimum, maximum) {
@@ -43,7 +48,23 @@ export function sampleUnit(seed, stream, index) {
 }
 
 function boundaryHeight(seed, boundaryIndex) {
-    return 2 + 3 * sampleUnit(seed, 1, boundaryIndex >>> 0);
+    return 1.5 + 4.5 * sampleUnit(seed, 1, boundaryIndex >>> 0);
+}
+
+export function positiveModulo(value, modulus) {
+    return ((value % modulus) + modulus) % modulus;
+}
+
+export function motifSelection(seed) {
+    return freeze({
+        direction: sampleUnit(seed, 2, 1) < 0.5 ? 1 : 3,
+        offset: Math.floor(4 * sampleUnit(seed, 2, 0)),
+    });
+}
+
+export function motifIndex(seed, chunkIndex) {
+    const selection = motifSelection(seed);
+    return positiveModulo(selection.offset + selection.direction * chunkIndex, 4);
 }
 
 export function terrainSample(seed, sampleIndex) {
@@ -55,8 +76,7 @@ export function terrainSample(seed, sampleIndex) {
     const start = boundaryHeight(seed, chunkIndex);
     const end = boundaryHeight(seed, chunkIndex + 1);
     const base = start + (end - start) * (localIndex / 5);
-    const sign = sampleUnit(seed, 2, chunkIndex >>> 0) >= 0.5 ? 1 : -1;
-    return clamp(base + sign * MOTIF[localIndex], 0.75, 7.5);
+    return clamp(base + MOTIFS[motifIndex(seed, chunkIndex)][localIndex], 0.5, 7.5);
 }
 
 export function terrainHeightAt(seed, x) {
@@ -79,8 +99,8 @@ export function terrainHeightFromVertices(vertices, x) {
 }
 
 export function siteFoundationBottom(vertices, site) {
-    const left = site.platformRight + 2;
-    return Math.min(terrainHeightFromVertices(vertices, left), terrainHeightFromVertices(vertices, left + 7));
+    void vertices;
+    return site.platformTop - PLATFORM_CLEARANCE;
 }
 
 export function nativeTerrainVertices(seed, left, right) {
@@ -111,7 +131,8 @@ export function createFirstSite(seed) {
     const center = 36;
     const platformLeft = center - PLATFORM_WIDTH / 2;
     const platformRight = center + PLATFORM_WIDTH / 2;
-    const platformTop = maximumTerrain(normalized, platformLeft, platformRight) + PLATFORM_CLEARANCE;
+    const shelfRight = platformRight + 9;
+    const platformTop = maximumTerrain(normalized, platformLeft, shelfRight) + PLATFORM_CLEARANCE;
     return freeze({
         id: 0,
         center,
@@ -119,6 +140,7 @@ export function createFirstSite(seed) {
         platformRight,
         platformTop,
         platformBottom: platformTop - PLATFORM_THICKNESS,
+        shelfRight,
         canCollected: false,
         powered: false,
         nocStage: 0,
@@ -175,6 +197,7 @@ export function instantiateTemplateSite(seed, siteIndex, originSite, template) {
         platformRight: center + PLATFORM_WIDTH / 2,
         platformTop,
         platformBottom: platformTop - PLATFORM_THICKNESS,
+        shelfRight: center + PLATFORM_WIDTH / 2 + 9,
         canCollected: false,
         powered: false,
         nocStage: 0,
@@ -186,7 +209,7 @@ export function instantiateTemplateSite(seed, siteIndex, originSite, template) {
 }
 
 export function corridorVertices(seed, originSite, targetSite) {
-    const originRight = originSite.platformRight;
+    const originRight = originSite.shelfRight ?? originSite.platformRight + 9;
     const targetLeft = targetSite.platformLeft;
     const vertices = [[originRight, originSite.platformTop - PLATFORM_CLEARANCE]];
     const firstIndex = Math.floor(originRight / TERRAIN_SAMPLE_SPACING) + 1;
@@ -196,11 +219,11 @@ export function corridorVertices(seed, originSite, targetSite) {
         const raw = terrainSample(seed, index);
         const relativeX = x - originSite.center;
         const cap = originSite.platformTop + interpolateKnots(targetSite.clearanceKnots, relativeX);
-        const y = raw > cap ? Math.max(0.75, cap - 0.15 * sampleUnit(seed, 4, index >>> 0)) : raw;
+        const y = raw > cap ? Math.max(0.5, cap - 0.15 * sampleUnit(seed, 4, index >>> 0)) : raw;
         vertices.push([x, y]);
     }
     vertices.push([targetLeft, targetSite.platformTop - PLATFORM_CLEARANCE]);
-    vertices.push([targetSite.platformRight, targetSite.platformTop - PLATFORM_CLEARANCE]);
+    vertices.push([targetSite.shelfRight ?? targetSite.platformRight + 9, targetSite.platformTop - PLATFORM_CLEARANCE]);
     return vertices;
 }
 
@@ -221,19 +244,22 @@ export function terrainVerticesForWindow(seed, sites, left, right) {
     let vertices = nativeTerrainVertices(seed, left, right);
     const ordered = [...sites].sort((a, b) => a.center - b.center);
     for (const site of ordered) {
-        vertices = vertices.filter(([x]) => x < site.platformLeft || x > site.platformRight);
+        const shelfRight = site.shelfRight ?? site.platformRight + 9;
+        vertices = vertices.filter(([x]) => x < site.platformLeft || x > shelfRight);
         vertices.push(
             [site.platformLeft, site.platformTop - PLATFORM_CLEARANCE],
-            [site.platformRight, site.platformTop - PLATFORM_CLEARANCE],
+            [shelfRight, site.platformTop - PLATFORM_CLEARANCE],
         );
     }
     for (let index = 1; index < ordered.length; index += 1) {
         const origin = ordered[index - 1];
         const target = ordered[index];
         if (target.clearanceKnots) {
-            vertices = vertices.filter(([x]) => x < origin.platformRight || x > target.platformRight);
+            const originShelfRight = origin.shelfRight ?? origin.platformRight + 9;
+            const targetShelfRight = target.shelfRight ?? target.platformRight + 9;
+            vertices = vertices.filter(([x]) => x < originShelfRight || x > targetShelfRight);
             vertices.push(...corridorVertices(seed, origin, target));
-            const resume = Math.floor(target.platformRight / TERRAIN_SAMPLE_SPACING) + 1;
+            const resume = Math.floor(targetShelfRight / TERRAIN_SAMPLE_SPACING) + 1;
             vertices.push([resume * TERRAIN_SAMPLE_SPACING, terrainSample(seed, resume)]);
         }
     }

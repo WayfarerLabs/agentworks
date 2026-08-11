@@ -352,7 +352,9 @@ class StaticDocumentTests(unittest.TestCase):
         self.assertIn("transform-origin: 158px 401px", self.css)
         terrain = next(attributes for _, attributes in self.document.tags if attributes.get("class") == "terrain-chunk")
         self.assertEqual(terrain["data-chunk-index"], "0")
-        self.assertIn("L40 495.556", terrain["d"])
+        self.assertIn("L100 516.334580918774", terrain["d"])
+        self.assertIn("L312 476.1557689513639L498 476.1557689513639", terrain["d"])
+        self.assertIn("rotate(var(--thrust-vector-angle))", self.css)
 
     def test_css_has_only_bounded_keyframes_and_reduced_motion_preserves_live_plumes(
         self,
