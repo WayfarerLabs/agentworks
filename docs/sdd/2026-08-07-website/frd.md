@@ -182,9 +182,10 @@ forecloses it, and none of it is in scope now.
   once the site enters view; under reduced motion it remains a static direction cue. Before issuing
   the departing site's gas can, the game calculates a conservative minimum fuel requirement for a
   demonstrated reference flight to the generated next platform. The can adds that requirement
-  multiplied by a difficulty ratio that starts near three and monotonically approaches one as sites
-  advance. Unused fuel carries forward and is never discarded merely because another site was
-  completed.
+  multiplied by the **refuel ratio** `1 + 0.5^(n-1)`, where `n` is the one-indexed number of the
+  base just powered. The first base therefore uses `2`, followed by `1.5`, `1.25`, `1.125`, and a
+  monotonic approach to one from above. Unused fuel carries forward and is never discarded merely
+  because another site was completed.
 - R23. Unsafe terrain, platform, or building contact produces a brief vacuum-appropriate crash: a
   compact propellant flash and ballistic fragments, with no smoke cloud, atmospheric shock wave,
   sustained fireball, audio, or page movement. Reduced motion skips fragment travel and exposes the
@@ -344,11 +345,11 @@ merged and settled on `main`. The first slice must not build toward them specula
   continuous collider-backed exposed truss that attaches the pad to its NOC with a uniform
   alternating-triangle structural rhythm, without separate brace fields, an uninterrupted
   sky-colored rectangle beneath it, or a visual opening that contradicts collision. Each award
-  equals the next route's deterministic demonstrated minimum multiplied by a monotonic ratio that is
-  approximately three for the first award and approaches one without crossing it. A test-controlled
-  reference flight reaches and safely lands on every representative generated next platform using no
-  more than the calculated minimum; a one-step-smaller tested allowance cannot complete that same
-  reference plan.
+  equals the next route's deterministic demonstrated minimum multiplied by the refuel ratio
+  `1 + 0.5^(n-1)` for one-indexed powered-base number `n`, beginning at `2` and approaching one
+  without crossing it. A test-controlled reference flight reaches and safely lands on every
+  representative generated next platform using no more than the calculated minimum; a
+  one-step-smaller tested allowance cannot complete that same reference plan.
 - AC23. While the next site is right of the viewport, a visible right-pointing cue is present and
   blinks only when motion is allowed and the document is active. It becomes static under reduced
   motion, pauses while hidden, and disappears when the target enters view. Direction is never

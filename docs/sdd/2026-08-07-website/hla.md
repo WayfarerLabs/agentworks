@@ -325,10 +325,11 @@ modestly relaxed speed and attitude limits consumes that site's one gas can exac
 award is computed only after the next site exists: a deterministic reference plan starts at the
 post-refuel, post-power platform checkpoint, includes the pinned player-reachable launch prefix,
 uses the same immutable physics profile as play, and demonstrates a safe next landing to establish
-its conservative minimum fuel. The award is that minimum multiplied by a monotonic ratio beginning
-near three and approaching one. It is added to the carried reserve without erasing unused fuel.
-Fixed-seed tests pin both the route proof and the smallest successful allowance within the LLD's
-search resolution.
+its conservative minimum fuel. The award is that minimum multiplied by the refuel ratio
+`1 + 0.5^(n-1)`, where `n` is the one-indexed number of the base just powered. The sequence begins
+`2, 1.5, 1.25, 1.125` and approaches one from above in constant time. The award is added to the
+carried reserve without erasing unused fuel. Fixed-seed tests pin both the route proof and the
+smallest successful allowance within the LLD's search resolution.
 
 After refueling, the G opening acts as a deployment bay: a small terminal-inspired agent reaches the
 surface and enters the single NOC. A clean rectangular vertical phone-battery-style indicator, with

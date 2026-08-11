@@ -807,7 +807,8 @@ separate Phase 4K acceptance is expected.
 - [ ] Delegate and lead-review an exact LLD amendment for instruction markup and responsive layout,
       Retry label/accessibility/focus/state behavior, checkpoint snapshot identity, one continuous
       alternating-triangle platform-to-NOC truss and honest collider, exact new contact boundaries,
-      and atomic route/world/geometry derivation and fixture regeneration.
+      the one-indexed `1 + 0.5^(n-1)` refuel ratio, and atomic route/world/geometry derivation and
+      fixture regeneration.
 - [ ] Obtain an `agentworks-reviewer` approval of the Phase 4L artifact amendment and resolve every
       valid finding before changing production or canonical fixture code.
 - [ ] Delegate implementation to an `agentworks-dev` subagent in an isolated worktree. Update the
@@ -817,9 +818,10 @@ separate Phase 4K acceptance is expected.
       without internal wrapping at the accepted layouts; Retry retains `r`, restores the exact
       checkpoint site/pose/fuel/progress without duplicate award, and returns focus to the scene;
       the complete pad-to-NOC scaffold has one continuous alternating-triangle rhythm and exact
-      render/collision parity; `2.0/3.2/15/22` equality contacts are safe while independent epsilon
-      excesses crash; all nine constructive routes, world witnesses, and one-quantum failures
-      regenerate deterministically.
+      render/collision parity; refuel ratios are exactly `2, 1.5, 1.25, 1.125, ...` by powered-base
+      number and carried excess remains additive; `2.0/3.2/15/22` equality contacts are safe while
+      independent epsilon excesses crash; all nine constructive routes, world witnesses, and
+      one-quantum failures regenerate deterministically.
 - [ ] Run focused website suites, deterministic root/project builds, complete repository gates,
       artifact/code/fresh-eyes reviews, and automated Chromium acceptance; resolve every valid
       finding and re-review the immutable integrated head.
@@ -836,13 +838,15 @@ rather than restarting the expedition. That restoration must preserve the checkp
 centered pose and post-award carried fuel. Safe contact rises one more bounded step to `2.0`
 horizontal, `3.2` descending, `15` degrees tilt, and `22` degrees per second rotation. The differing
 pad, connector, and NOC X-brace fields become one visually continuous open structure with a uniform,
-more expressive alternating-triangle truss rhythm.
+more expressive alternating-triangle truss rhythm. The multiplier between demonstrated minimum fuel
+and each can's award is named the refuel ratio and becomes exactly `1 + 0.5^(n-1)` for one-indexed
+powered-base number `n`, starting at `2` and approaching one.
 
 Definition of done: controls have deterministic two-line layout without awkward internal wrapping;
 Retry's name and behavior agree; checkpoint restoration is exact and mutation-protected; the whole
-pad-to-NOC span reads as one honest continuous structure; revised contact boundaries and all derived
-proof artifacts are deterministic; and the immutable result is review-clean, browser-accepted, and
-merge-ready.
+pad-to-NOC span reads as one honest continuous structure; the refuel ratio and carried-excess award
+are exact; revised contact boundaries and all derived proof artifacts are deterministic; and the
+immutable result is review-clean, browser-accepted, and merge-ready.
 
 ## Phase 5: CI and default Pages deployment
 
