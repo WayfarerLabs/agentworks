@@ -46,23 +46,28 @@ for the work in question, **modifications to core logic and shared contracts are
 efforts**, even when your effort is the thing that found the bug.
 
 The test is not "did we find it here." It is: **does the fix touch machinery this effort owns?**
-Shared machinery means anything with consumers beyond this effort: a predicate or contract every
-plugin declares against, a transport every platform uses, a base class, a shared manifest schema, an
-error taxonomy. When the fix lands there, the finding is a discovery, not a task.
 
-Two questions settle almost every case:
+Ownership is settled first by **reviewed scope**: what this effort's FRD, HLA, and plan deliberately
+include, as approved. An effort chartered to change a cross-cutting contract owns that change, and
+"it is shared" does not hand approved work to someone else. Read the artifacts before reasoning any
+further.
+
+When reviewed scope does not settle it, two questions almost always do:
 
 - **Would this bug reproduce with this effort reverted?** If yes, it is pre-existing and not yours.
 - **Does the fix change behavior for consumers who never asked for this effort?** If yes, it needs
   its own design pass, because those consumers are not represented in your review.
 
+Shared machinery, for those two questions, means anything with consumers beyond this effort: a
+predicate or contract every plugin declares against, a transport every platform uses, a base class,
+a shared manifest schema, an error taxonomy. A fix landing there that your charter never claimed is
+a discovery, not a task.
+
 One caveat before the mechanics, because it is the half that gets dropped: **separating who fixes it
 does not decide whether your change can merge.** If your own acceptance criteria, definition of
 done, or safe operation depend on that fix, you wait for it or stack on it, and you say so plainly.
 A documented known issue is an honest state for a merge only when your change is correct and safe
-without the fix. Ownership also follows the **reviewed scope** rather than the mere existence of
-other consumers: an effort whose FRD, HLA, or plan deliberately includes a cross-cutting contract
-change owns that change, and "it is shared" does not hand approved work to someone else.
+without the fix.
 
 What to do, and it is cheap: file the finding with the root cause, the evidence, and the call-site
 inventory you already have in your head, so the follow-on effort starts where you left off rather
@@ -180,14 +185,19 @@ The stance toward any finding, from the reviewer or from automated review (secti
 
 - Push back on findings that are genuinely incorrect; a reviewer is not infallible, and a wrong
   finding followed blindly makes the code worse.
-- Otherwise, err on the side of fixing anything valid, including the minor and the merely-nicer.
-- Iterate until everyone is happy. Do not move on from a step with a live, unaddressed valid finding
-  hanging over it.
+- Otherwise, err on the side of fixing anything valid **within this effort's scope**, including the
+  minor and the merely-nicer.
+- Iterate until everyone is happy. Do not move on from a step with a live, unaddressed valid
+  in-scope finding hanging over it.
+- A valid finding in machinery this effort does not own is not fixed here: it is recorded and routed
+  per section 1a. That is not moving on with a finding hanging over you, because the finding has an
+  owner and a home. The exception is when your own acceptance or safety depends on that fix, which
+  section 1a treats as a wait-or-stack decision rather than a licence to fix it inline.
 
 Who applies the fixes follows ownership: findings on **code** loop back to the implementing dev
 subagent (it keeps the context and the authorship, and the review-then-revise loop stays intact),
 while findings on a lead-owned artifact (the plan, an LLD the lead is finalizing) are the lead's to
-apply directly.
+apply directly. A finding on machinery outside this effort routes to its owner instead of to either.
 
 ### Periodically review the process docs as a whole
 
