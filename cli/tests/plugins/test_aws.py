@@ -97,7 +97,6 @@ def test_aws_bundle_publishes_cli_disabled_with_verified_v2_payload(tmp_path: Pa
     assert ".agentworks-v2-complete" not in row.command
     assert "command -v aws" not in row.command
     assert "aws --version" not in row.command
-    assert "test -x" not in row.command
     assert "awscli-exe-linux-x86_64.zip" in row.command
     assert "awscli-exe-linux-aarch64.zip" in row.command
     assert "FB5DB77FD5C118B80511ADA8A6310ACC4672475C" in row.command
@@ -105,9 +104,16 @@ def test_aws_bundle_publishes_cli_disabled_with_verified_v2_payload(tmp_path: Pa
     assert 'primary && $1 == "fpr"' in row.command
     assert "trap 'rm -rf \"$temp_root\"' EXIT" in row.command
     assert "trap 'exit 130' INT" in row.command
-    assert 'if test -e "$install_dir" || test -L "$install_dir"; then' in row.command
+    assert 'install_dir="/usr/local/lib/agentworks/aws-cli"' in row.command
+    assert 'aws_link="$bin_dir/aws"' in row.command
+    assert 'completer_link="$bin_dir/aws_completer"' in row.command
+    assert 'launcher_target_is_exact "$launcher" "$expected_target"' in row.command
+    assert 'install_mode="reinstall"' in row.command
+    assert 'sudo rm -rf -- "$install_dir"' in row.command
+    assert 'sudo rm -f -- "$aws_link" "$completer_link"' in row.command
     assert 'sudo "$temp_root/aws/install"' in row.command
     assert '--install-dir "$install_dir" --bin-dir "$bin_dir" --update' in row.command
+    assert "did not produce the expected managed layout" in row.command
     assert "aws configure" not in row.command
 
 

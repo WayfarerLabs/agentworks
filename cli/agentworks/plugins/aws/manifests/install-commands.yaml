@@ -1,8 +1,9 @@
 # Optional guest tooling. EC2 lifecycle uses boto3 and does not call or
 # authenticate aws. This recipe runs on every init and reinit so the official
-# installer can reconcile the managed installation at /usr/local/aws-cli.
-# Download and signature verification remain unprivileged; only the final
-# system installation explicitly elevates because install commands are not root.
+# installer can reconcile the Agentworks-owned installation under /usr/local/lib.
+# Download and signature verification remain unprivileged. Only reserved-layout
+# repair and the official system installer explicitly elevate because install
+# commands are not root.
 apiVersion: agentworks/v1
 kind: system-install-command
 metadata:
@@ -11,8 +12,53 @@ metadata:
 spec:
   command: |
     set -eu
-    install_dir="/usr/local/aws-cli"
+    install_dir="/usr/local/lib/agentworks/aws-cli"
     bin_dir="/usr/local/bin"
+    aws_link="$bin_dir/aws"
+    completer_link="$bin_dir/aws_completer"
+    aws_target="$install_dir/v2/current/bin/aws"
+    completer_target="$install_dir/v2/current/bin/aws_completer"
+    launcher_target_is_exact() {
+      readlink "$1" | {
+        IFS= read -r actual_target \
+          && test "$actual_target" = "$2" \
+          && ! IFS= read -r extra_target
+      }
+    }
+    inspect_launcher() {
+      launcher="$1"
+      expected_target="$2"
+      if test -L "$launcher"; then
+        if ! launcher_target_is_exact "$launcher" "$expected_target"; then
+          echo "AWS CLI launcher collision at $launcher" >&2
+          return 1
+        fi
+      elif test -e "$launcher"; then
+        echo "AWS CLI launcher collision at $launcher" >&2
+        return 1
+      fi
+    }
+    classify_layout() {
+      inspect_launcher "$aws_link" "$aws_target"
+      inspect_launcher "$completer_link" "$completer_target"
+      aws_link_present=0
+      completer_link_present=0
+      managed_present=0
+      test -L "$aws_link" && aws_link_present=1
+      test -L "$completer_link" && completer_link_present=1
+      if test -e "$install_dir" || test -L "$install_dir"; then managed_present=1; fi
+      install_mode="reinstall"
+      if test -d "$install_dir" && ! test -L "$install_dir" \
+        && test "$aws_link_present" -eq 1 && test "$completer_link_present" -eq 1 \
+        && test -f "$aws_target" && test -x "$aws_target" \
+        && test -f "$completer_target" && test -x "$completer_target"; then
+        install_mode="update"
+      elif test "$managed_present" -eq 0 \
+        && test "$aws_link_present" -eq 0 && test "$completer_link_present" -eq 0; then
+        install_mode="fresh"
+      fi
+    }
+    classify_layout
     case "$(uname -m)" in
       x86_64) archive="awscli-exe-linux-x86_64.zip" ;;
       aarch64) archive="awscli-exe-linux-aarch64.zip" ;;
@@ -68,8 +114,30 @@ spec:
     test "$primary_fingerprint" = "FB5DB77FD5C118B80511ADA8A6310ACC4672475C"
     GNUPGHOME="$gnupg_home" gpg --batch --verify "$signature_path" "$archive_path"
     unzip -q "$archive_path" -d "$temp_root"
-    if test -e "$install_dir" || test -L "$install_dir"; then
+    # Recheck ownership and state immediately before the privileged boundary. A
+    # collision that appeared while the archive was downloading must not be removed,
+    # and the install mode must describe the current layout rather than a stale one.
+    classify_layout
+    if test "$install_mode" = "update"; then
       sudo "$temp_root/aws/install" --install-dir "$install_dir" --bin-dir "$bin_dir" --update
     else
+      if test "$install_mode" = "reinstall"; then
+        sudo rm -rf -- "$install_dir"
+        sudo rm -f -- "$aws_link" "$completer_link"
+      fi
       sudo "$temp_root/aws/install" --install-dir "$install_dir" --bin-dir "$bin_dir"
+    fi
+    layout_complete=1
+    if ! test -d "$install_dir" || test -L "$install_dir"; then layout_complete=0; fi
+    if ! inspect_launcher "$aws_link" "$aws_target" || ! test -L "$aws_link"; then layout_complete=0; fi
+    if ! inspect_launcher "$completer_link" "$completer_target" || ! test -L "$completer_link"; then
+      layout_complete=0
+    fi
+    if ! test -f "$aws_target" || ! test -x "$aws_target" \
+      || ! test -f "$completer_target" || ! test -x "$completer_target"; then
+      layout_complete=0
+    fi
+    if test "$layout_complete" -ne 1; then
+      echo "AWS CLI installer did not produce the expected managed layout" >&2
+      exit 1
     fi

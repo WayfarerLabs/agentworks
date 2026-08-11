@@ -16,7 +16,7 @@ def _command(provider: str) -> str:
 
 
 def _aws_paths(tmp_path: Path) -> tuple[Path, Path]:
-    install_dir = tmp_path / "managed" / "aws-cli"
+    install_dir = tmp_path / "managed" / "lib" / "agentworks" / "aws-cli"
     bin_dir = tmp_path / "managed" / "bin"
     return install_dir, bin_dir
 
@@ -25,9 +25,46 @@ def _aws_command_for_test(tmp_path: Path) -> str:
     install_dir, bin_dir = _aws_paths(tmp_path)
     return (
         _command("aws")
-        .replace('install_dir="/usr/local/aws-cli"', f'install_dir="{install_dir}"')
+        .replace('install_dir="/usr/local/lib/agentworks/aws-cli"', f'install_dir="{install_dir}"')
         .replace('bin_dir="/usr/local/bin"', f'bin_dir="{bin_dir}"')
     )
+
+
+def _aws_layout(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
+    install_dir, bin_dir = _aws_paths(tmp_path)
+    aws_target = install_dir / "v2" / "current" / "bin" / "aws"
+    completer_target = install_dir / "v2" / "current" / "bin" / "aws_completer"
+    return aws_target, completer_target, bin_dir / "aws", bin_dir / "aws_completer"
+
+
+def _executable(path: Path, content: str = "managed\n") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
+    path.chmod(0o755)
+
+
+def _complete_aws_layout(tmp_path: Path) -> None:
+    aws_target, completer_target, aws_link, completer_link = _aws_layout(tmp_path)
+    _executable(aws_target)
+    _executable(completer_target)
+    aws_link.parent.mkdir(parents=True, exist_ok=True)
+    aws_link.symlink_to(aws_target)
+    completer_link.symlink_to(completer_target)
+
+
+def _assert_complete_aws_layout(tmp_path: Path) -> None:
+    install_dir, _ = _aws_paths(tmp_path)
+    aws_target, completer_target, aws_link, completer_link = _aws_layout(tmp_path)
+    assert install_dir.is_dir()
+    assert not install_dir.is_symlink()
+    assert aws_link.is_symlink()
+    assert aws_link.readlink() == aws_target
+    assert completer_link.is_symlink()
+    assert completer_link.readlink() == completer_target
+    assert aws_target.is_file()
+    assert completer_target.is_file()
+    assert os.access(aws_target, os.X_OK)
+    assert os.access(completer_target, os.X_OK)
 
 
 def _tool(bin_dir: Path, name: str, body: str) -> None:
@@ -38,8 +75,10 @@ def _tool(bin_dir: Path, name: str, body: str) -> None:
 
 def _run(command: str, tmp_path: Path, **env: str) -> subprocess.CompletedProcess[str]:
     if "awscli-exe-linux" in command:
-        assert "/usr/local/aws-cli" not in command
+        assert "/usr/local/lib/agentworks/aws-cli" not in command
         assert 'bin_dir="/usr/local/bin"' not in command
+        assert "/usr/local/bin/aws" not in command
+        assert "/usr/local/bin/aws_completer" not in command
     tmp_path.mkdir(exist_ok=True)
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir(exist_ok=True)
@@ -129,7 +168,30 @@ printf '%s\\n' "$*" > "$AGW_TEST_INSTALL_ARGS"
 if [ "$AGW_TEST_INSTALL_STATUS" -ne 0 ]; then
   exit "$AGW_TEST_INSTALL_STATUS"
 fi
-mkdir -p "$AGW_TEST_AWS_INSTALL_DIR" "$AGW_TEST_AWS_BIN_DIR"
+case " $* " in
+  *" --update "*) update=1 ;;
+  *) update=0 ;;
+esac
+if [ "$update" -eq 0 ] && [ "$AGW_TEST_SAME_VERSION_EARLY_EXIT" -eq 1 ] \
+  && [ -d "$AGW_TEST_AWS_INSTALL_DIR/v2/2.99.0" ]; then
+  exit 0
+fi
+aws_target="$AGW_TEST_AWS_INSTALL_DIR/v2/current/bin/aws"
+completer_target="$AGW_TEST_AWS_INSTALL_DIR/v2/current/bin/aws_completer"
+mkdir -p "$(dirname "$aws_target")" "$AGW_TEST_AWS_BIN_DIR"
+printf managed > "$aws_target"
+printf managed > "$completer_target"
+chmod +x "$aws_target" "$completer_target"
+if [ "$AGW_TEST_INSTALL_LAYOUT" != "missing-aws-link" ]; then
+  ln -sfn "$aws_target" "$AGW_TEST_AWS_BIN_DIR/aws"
+fi
+if [ "$AGW_TEST_INSTALL_LAYOUT" != "missing-completer-link" ]; then
+  ln -sfn "$completer_target" "$AGW_TEST_AWS_BIN_DIR/aws_completer"
+fi
+if [ "$AGW_TEST_INSTALL_LAYOUT" = "missing-aws-executable" ]; then rm -f "$aws_target"; fi
+if [ "$AGW_TEST_INSTALL_LAYOUT" = "missing-completer-executable" ]; then rm -f "$completer_target"; fi
+if [ "$AGW_TEST_INSTALL_LAYOUT" = "nonexec-aws" ]; then chmod -x "$aws_target"; fi
+if [ "$AGW_TEST_INSTALL_LAYOUT" = "nonexec-completer" ]; then chmod -x "$completer_target"; fi
 INSTALL
 chmod +x "$destination/aws/install"
 """,
@@ -149,6 +211,8 @@ chmod +x "$destination/aws/install"
         "AGW_TEST_AWS_INSTALL_DIR": str(install_dir),
         "AGW_TEST_AWS_BIN_DIR": str(bin_dir),
         "AGW_TEST_INSTALL_STATUS": "0",
+        "AGW_TEST_INSTALL_LAYOUT": "complete",
+        "AGW_TEST_SAME_VERSION_EARLY_EXIT": "0",
         "AGW_TEST_TEMP_ROOT": str(tmp_path / "private-temp"),
         "AGW_TEST_INSTALL_ARGS": str(tmp_path / "install-args"),
     }
@@ -193,7 +257,7 @@ def test_aws_installer_selects_architecture_and_cleans_private_temp(
     assert sudo_log.splitlines() == [
         f"sudo {tmp_path}/private-temp/aws/install --install-dir {install_dir} --bin-dir {bin_dir}"
     ]
-    assert install_dir.is_dir()
+    _assert_complete_aws_layout(tmp_path)
     assert not (tmp_path / "aws-probe-log").exists()
     assert "sudo test" not in sudo_log
     assert "sudo gpg" not in sudo_log
@@ -215,6 +279,12 @@ def test_aws_installer_repeats_verified_recipe_and_updates_managed_install(tmp_p
     assert second.returncode == 0, second.stderr
     assert "--update" in (tmp_path / "install-args").read_text()
     assert len((tmp_path / "log").read_text().splitlines()) == 4
+    install_dir, bin_dir = _aws_paths(tmp_path)
+    assert (tmp_path / "sudo-log").read_text().splitlines() == [
+        f"sudo {tmp_path}/private-temp/aws/install --install-dir {install_dir} --bin-dir {bin_dir}",
+        f"sudo {tmp_path}/private-temp/aws/install --install-dir {install_dir} --bin-dir {bin_dir} --update",
+    ]
+    _assert_complete_aws_layout(tmp_path)
     assert not (tmp_path / "aws-probe-log").exists()
 
 
@@ -232,17 +302,149 @@ def test_path_aws_versions_never_short_circuit_verified_recipe(tmp_path: Path, v
     assert not (tmp_path / "aws-probe-log").exists()
 
 
-def test_aws_installer_updates_partial_managed_layout(tmp_path: Path) -> None:
-    install_dir, bin_dir = _aws_paths(tmp_path)
-    install_dir.mkdir(parents=True)
-    (install_dir / "partial-download").write_text("incomplete")
+@pytest.mark.parametrize(
+    "state",
+    [
+        "partial-managed-directory",
+        "missing-aws-link",
+        "missing-completer-link",
+        "missing-aws-executable",
+        "missing-completer-executable",
+        "aws-artifact-directory",
+        "completer-artifact-directory",
+        "missing-current-layout",
+        "exact-dangling-links-only",
+    ],
+)
+def test_aws_installer_replaces_incomplete_owned_layout(tmp_path: Path, state: str) -> None:
+    install_dir, _ = _aws_paths(tmp_path)
+    aws_target, completer_target, aws_link, completer_link = _aws_layout(tmp_path)
+    if state == "partial-managed-directory":
+        install_dir.mkdir(parents=True)
+        (install_dir / "partial-download").write_text("incomplete")
+    elif state == "exact-dangling-links-only":
+        aws_link.parent.mkdir(parents=True)
+        aws_link.symlink_to(aws_target)
+        completer_link.symlink_to(completer_target)
+    else:
+        _complete_aws_layout(tmp_path)
+        if state == "missing-aws-link":
+            aws_link.unlink()
+        elif state == "missing-completer-link":
+            completer_link.unlink()
+        elif state == "missing-aws-executable":
+            aws_target.unlink()
+        elif state == "missing-completer-executable":
+            completer_target.unlink()
+        elif state == "aws-artifact-directory":
+            aws_target.unlink()
+            aws_target.mkdir()
+        elif state == "completer-artifact-directory":
+            completer_target.unlink()
+            completer_target.mkdir()
+        else:
+            aws_target.parent.parent.rename(install_dir / "v2" / "saved-current")
 
     result = _run(_aws_command_for_test(tmp_path), tmp_path, AGW_TEST_AWS_VERSION="aws-cli/2.99.0 Python/test")
 
     assert result.returncode == 0, result.stderr
-    assert "--update" in (tmp_path / "install-args").read_text()
+    assert "--update" not in (tmp_path / "install-args").read_text()
     assert not (tmp_path / "aws-probe-log").exists()
-    assert f"--install-dir {install_dir} --bin-dir {bin_dir} --update" in (tmp_path / "sudo-log").read_text()
+    sudo_log = (tmp_path / "sudo-log").read_text()
+    assert f"sudo rm -rf -- {install_dir}" in sudo_log
+    assert f"sudo rm -f -- {aws_link} {completer_link}" in sudo_log
+    _assert_complete_aws_layout(tmp_path)
+
+
+def test_incomplete_layout_is_reset_before_same_version_installer_runs(tmp_path: Path) -> None:
+    install_dir, _ = _aws_paths(tmp_path)
+    aws_target, completer_target, aws_link, completer_link = _aws_layout(tmp_path)
+    version_dir = install_dir / "v2" / "2.99.0"
+    version_dir.mkdir(parents=True)
+    (version_dir / "same-version-marker").write_text("would make the official installer exit early")
+    aws_link.parent.mkdir(parents=True)
+    aws_link.symlink_to(aws_target)
+    completer_link.symlink_to(completer_target)
+
+    result = _run(_aws_command_for_test(tmp_path), tmp_path, AGW_TEST_SAME_VERSION_EARLY_EXIT="1")
+
+    assert result.returncode == 0, result.stderr
+    assert "--update" not in (tmp_path / "install-args").read_text()
+    assert not version_dir.exists()
+    _assert_complete_aws_layout(tmp_path)
+
+
+def test_reserved_managed_symlink_is_replaced_without_touching_its_target(tmp_path: Path) -> None:
+    install_dir, _ = _aws_paths(tmp_path)
+    aws_target, completer_target, aws_link, completer_link = _aws_layout(tmp_path)
+    external = tmp_path / "external-managed-layout"
+    external.mkdir()
+    marker = external / "keep"
+    marker.write_text("external bytes")
+    install_dir.parent.mkdir(parents=True)
+    install_dir.symlink_to(external)
+    aws_link.parent.mkdir(parents=True)
+    aws_link.symlink_to(aws_target)
+    completer_link.symlink_to(completer_target)
+
+    result = _run(_aws_command_for_test(tmp_path), tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert marker.read_text() == "external bytes"
+    _assert_complete_aws_layout(tmp_path)
+
+
+@pytest.mark.parametrize("launcher_name", ["aws", "aws_completer"])
+@pytest.mark.parametrize(
+    "collision_kind",
+    ["regular-file", "directory", "other-symlink", "relative-equivalent-symlink", "target-with-trailing-newline"],
+)
+def test_launcher_collision_fails_before_download_without_mutation(
+    tmp_path: Path, launcher_name: str, collision_kind: str
+) -> None:
+    install_dir, bin_dir = _aws_paths(tmp_path)
+    _complete_aws_layout(tmp_path)
+    marker = install_dir / "ownership-marker"
+    marker.write_text("managed bytes")
+    aws_target, completer_target, _, _ = _aws_layout(tmp_path)
+    collision = bin_dir / launcher_name
+    collision.unlink()
+    collision_target: str | None = None
+    if collision_kind == "regular-file":
+        collision.write_text("collision bytes")
+    elif collision_kind == "directory":
+        collision.mkdir()
+        (collision / "keep").write_text("directory bytes")
+    else:
+        expected = aws_target if launcher_name == "aws" else completer_target
+        collision_target = str(tmp_path / "someone-elses-aws")
+        if collision_kind == "relative-equivalent-symlink":
+            collision_target = os.path.relpath(expected, collision.parent)
+        elif collision_kind == "target-with-trailing-newline":
+            collision_target = f"{expected}\n"
+        collision.symlink_to(collision_target)
+    other = bin_dir / ("aws_completer" if launcher_name == "aws" else "aws")
+    other_target = other.readlink()
+
+    result = _run(_aws_command_for_test(tmp_path), tmp_path)
+
+    assert result.returncode != 0
+    assert f"launcher collision at {collision}" in result.stderr
+    assert marker.read_text() == "managed bytes"
+    assert aws_target.read_text() == "managed\n"
+    assert completer_target.read_text() == "managed\n"
+    assert other.is_symlink()
+    assert other.readlink() == other_target
+    if collision_kind == "regular-file":
+        assert collision.read_text() == "collision bytes"
+    elif collision_kind == "directory":
+        assert (collision / "keep").read_text() == "directory bytes"
+    else:
+        assert os.readlink(collision) == collision_target
+    assert not (tmp_path / "log").exists()
+    assert not (tmp_path / "private-temp").exists()
+    assert not (tmp_path / "install-args").exists()
+    assert not (tmp_path / "sudo-log").exists()
 
 
 def test_provider_installer_commands_have_no_test_path_overrides() -> None:
@@ -253,7 +455,7 @@ def test_provider_installer_commands_have_no_test_path_overrides() -> None:
     assert "AGW_AWS_" not in aws
     assert "/usr/share/keyrings/cloud.google.gpg" in gcloud
     assert "/etc/apt/sources.list.d/google-cloud-sdk.list" in gcloud
-    assert "/usr/local/aws-cli" in aws
+    assert "/usr/local/lib/agentworks/aws-cli" in aws
     assert "/usr/local/bin" in aws
 
 
@@ -263,6 +465,45 @@ def test_failed_aws_installer_cleans_private_temp(tmp_path: Path) -> None:
     assert result.returncode == 41
     assert not (tmp_path / "private-temp").exists()
     assert not (tmp_path / "aws-probe-log").exists()
+
+
+@pytest.mark.parametrize(
+    "layout",
+    [
+        "missing-aws-link",
+        "missing-completer-link",
+        "missing-aws-executable",
+        "missing-completer-executable",
+        "nonexec-aws",
+        "nonexec-completer",
+    ],
+)
+def test_successful_installer_must_produce_complete_managed_layout(tmp_path: Path, layout: str) -> None:
+    result = _run(_aws_command_for_test(tmp_path), tmp_path, AGW_TEST_INSTALL_LAYOUT=layout)
+
+    assert result.returncode != 0
+    assert "did not produce the expected managed layout" in result.stderr
+    assert not (tmp_path / "private-temp").exists()
+
+
+def test_untrusted_archive_does_not_mutate_incomplete_owned_layout(tmp_path: Path) -> None:
+    install_dir, _ = _aws_paths(tmp_path)
+    aws_target, completer_target, aws_link, completer_link = _aws_layout(tmp_path)
+    install_dir.mkdir(parents=True)
+    marker = install_dir / "partial"
+    marker.write_text("unchanged")
+    aws_link.parent.mkdir(parents=True)
+    aws_link.symlink_to(aws_target)
+    completer_link.symlink_to(completer_target)
+
+    result = _run(_aws_command_for_test(tmp_path), tmp_path, AGW_TEST_VERIFY_STATUS="1")
+
+    assert result.returncode != 0
+    assert marker.read_text() == "unchanged"
+    assert aws_link.readlink() == aws_target
+    assert completer_link.readlink() == completer_target
+    assert not (tmp_path / "sudo-log").exists()
+    assert not (tmp_path / "install-args").exists()
 
 
 @pytest.mark.parametrize(
