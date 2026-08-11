@@ -1,6 +1,6 @@
 Please also reference the following rules as needed. The list below is provided in TOON format, and `@` stands for the project root directory.
 
-rules[15]:
+rules[16]:
   - path: @.codex/memories/always-consider-completions.md
   - path: @.codex/memories/always-consider-docs.md
   - path: @.codex/memories/always-consider-sample-config.md
@@ -31,6 +31,9 @@ rules[15]:
     applyTo[1]: **/*
   - path: @.codex/memories/message-signatures.md
     description: Sign every outward-facing message with your session identity
+    applyTo[1]: **/*
+  - path: @.codex/memories/no-prose-policing-tests.md
+    description: Never write unit tests that assert on the wording of prose we author ourselves
     applyTo[1]: **/*
   - path: @.codex/memories/permission-to-fail.md
     description: It is ok to say you don't know or that something isn't working
