@@ -267,22 +267,22 @@ cross-cutting framework contract.
 
 ### Phase 3d: restore the declarative installer boundary
 
-- [ ] Revert every Phase 3c shared `test_exec`, VM/agent runner, schema, generic documentation, and
+- [x] Revert every Phase 3c shared `test_exec`, VM/agent runner, schema, generic documentation, and
       shell-inventory test change. Preserve the preexisting install-command contract exactly and
       remove the AWS completion marker and its lifecycle state.
-- [ ] Keep AWS CLI as one declared YAML resource with no completion predicate or installed-version
+- [x] Keep AWS CLI as one declared YAML resource with no completion predicate or installed-version
       fast path. Retain the signed architecture-specific flow and guest-auth neutrality; run it on
       every init/reinit, updating a complete owned layout, fresh-installing absent state, and
       resetting only incomplete state inside `/usr/local/lib/agentworks/aws-cli` before a fresh
       install. Retain unowned public-launcher collisions before any mutation or network work.
-- [ ] Add plugin-local behavior tests for fresh install, repeated update, v1, v2, partial managed
+- [x] Add plugin-local behavior tests for fresh install, repeated update, v1, v2, partial managed
       layouts, signature failure, unsupported architecture, temporary cleanup, and host-state
       isolation. Include a realistic same-version installer early exit and prove incomplete state is
       reinstalled while complete state is updated rather than freezing an old CLI. Prove regular,
       directory, and unexpected-link collisions remain byte/target-identical with no cleanup,
       download, verification, or installer execution; exact dangling links into the reserved
       Agentworks namespace remain repairable.
-- [ ] Strengthen permanent install-command teaching: every command must be safe and idempotent to
+- [x] Strengthen permanent install-command teaching: every command must be safe and idempotent to
       rerun; `test_exec`, `test_file`, and `test_dir` are optional early-exit optimizations rather
       than the idempotency mechanism; omit them when the command should reconcile or update each
       run.

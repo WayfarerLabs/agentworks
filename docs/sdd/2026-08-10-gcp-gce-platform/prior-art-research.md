@@ -216,7 +216,8 @@ Decisions:
   existing installation.
 - The same guide publishes detached signatures, the armored AWS CLI Team public key, and full
   fingerprint `FB5D B77F D5C1 18B8 0511 ADA8 A631 0ACC 4672 475C`. It documents signature
-  verification as optional for a manual install; this unattended root installer makes it mandatory.
+  verification as optional for a manual install; this unattended VM-admin command makes it mandatory
+  and explicitly elevates only its privileged filesystem steps.
 - The standard layout installs under `/usr/local/aws-cli` and places the `aws` launcher in
   `/usr/local/bin`. The base guest bootstrap already provides `curl` and `unzip`, so this declarable
   does not need a separate package-manager repository.
