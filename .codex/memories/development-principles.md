@@ -73,6 +73,11 @@ If the design promises "these fields always match the level," then the object en
 prose is not a promise; it is a hope. Prose explains _why_ the invariant exists; code enforces
 _that_ it holds. Comments do not count as enforcement.
 
+The invariant is the behavior, never the sentence that describes it. Enforcing "the disclosure
+explains that elevation is separate" by asserting that wording appears in the output tests our
+writing, not our system; enforce the boundary the sentence describes instead, and let review own the
+words. See the `no-prose-policing-tests` rule.
+
 ### 4. Don't overengineer, but don't be afraid to refactor
 
 These failure modes are symmetric, and both come from fear. Speculative generality (the configurable
