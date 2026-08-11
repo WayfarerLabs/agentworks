@@ -1,8 +1,8 @@
 """The opt-in ``aws`` vendor bundle and its EC2 contribution.
 
 The bundle publishes the ``aws-ec2`` VM platform and an optional guest-side
-``aws-cli`` installer. EC2 lifecycle continues to use boto3, never the guest
-CLI. Future AWS implementations retain their own capability contracts and
+``aws-cli`` Snap install command. EC2 lifecycle continues to use boto3, never
+the guest CLI. Future AWS implementations retain their own capability contracts and
 service-specific names instead of introducing a provider-wide abstraction.
 
 ``base`` / ``bootstrap_script`` / ``cloud_init`` / ``ssh_exposure`` stay in the

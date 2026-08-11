@@ -8,15 +8,17 @@
 # system plugin (Phase 11), so this bundle now ships user-install-commands
 # only; `az-cli` publishes present-but-disabled from that plugin's manifests.
 #
-# Commands run at init and may run again during every reinit, so every
-# command must be safe and idempotent on every invocation. Installed checks
-# are optional early-exit optimizations, not the idempotency mechanism:
+# Install commands are one logical shell invocation written as a plain scalar.
+# Prefer apt packages, snaps, and maintained package-manager or vendor entry
+# points. Embedded scripts, block scalars, here-documents, multi-step installers,
+# state machines, signature pipelines, and cleanup routines do not belong here.
+# Commands run at init and may run again during every reinit, so each invocation
+# must be repeat-safe itself or declare completion checks that reliably skip it:
 #   test_exec: passes if this command is on PATH (uses `command -v`)
 #   test_file: passes if this file exists (~ resolves to the user's home)
 #   test_dir:  passes if this directory exists (~ resolves to the user's home)
 # Installation is skipped only when every non-empty declared check passes.
-# With no checks, the command always runs. Omit checks when the command should
-# reconcile or update its managed state on every init and reinit.
+# With no checks, the command always runs.
 # path: directories to add to the user's PATH, needed only when the
 # install command does not update the PATH itself.
 apiVersion: agentworks/v1

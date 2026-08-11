@@ -1,6 +1,7 @@
 # The azure system plugin's bundled install-command: the Azure CLI, a
-# system-install-command (system-wide, run once per VM as root; consumed by VM
-# init). Moved out of manifests/builtin/install-commands.yaml when the azure
+# system-install-command (VM-wide, run as the VM admin; its privileged vendor
+# entry point explicitly uses sudo). Moved out of
+# manifests/builtin/install-commands.yaml when the azure
 # bundle migrated to a system plugin (Phase 11). Published present-but-disabled
 # until an operator opts in with `[plugins] system = ["azure"]`; a vm-template
 # that references it while azure is not enabled is gated with the enable hint,

@@ -39,7 +39,7 @@ kind: vm-template
 metadata:
   name: gcloud-tools
 spec:
-  system_install_commands: [gcloud-cli]
+  apt_packages: [gcloud-cli]
 """
 
 
@@ -87,16 +87,24 @@ def test_gcp_row_is_present_but_disabled_by_default(tmp_path: Path) -> None:
     assert "gcp" in (describe_resource(registry, "vm-platform", "gcp-gce").disabled_reason or "")
 
 
-def test_gcp_bundle_publishes_gcloud_disabled_with_exact_payload(tmp_path: Path) -> None:
+def test_gcp_bundle_publishes_disabled_gcloud_apt_resources(tmp_path: Path) -> None:
     registry = build_registry(_config(tmp_path))
-    row = registry.lookup("system-install-command", "gcloud-cli")
-    assert row.origin.variant == "system-plugin"
-    assert row.origin.plugin == "gcp"
-    assert registry.graph.enablement_of("system-install-command", "gcloud-cli") is Enablement.disabled
-    assert row.test_exec == "gcloud"
-    assert "packages.cloud.google.com/apt/doc/apt-key.gpg" in row.command
-    assert "signed-by=${keyring}" in row.command
-    assert "CLOUDSDK_SKIP_PY_COMPILATION=1 apt-get install -y google-cloud-cli" in row.command
+    source = registry.lookup("apt-source", "google-cloud-cli")
+    package = registry.lookup("apt-package", "gcloud-cli")
+
+    assert (source.origin.variant, source.origin.plugin) == ("system-plugin", "gcp")
+    assert (package.origin.variant, package.origin.plugin) == ("system-plugin", "gcp")
+    assert registry.graph.enablement_of("apt-source", "google-cloud-cli") is Enablement.disabled
+    assert registry.graph.enablement_of("apt-package", "gcloud-cli") is Enablement.disabled
+    assert source.key_url == "https://packages.cloud.google.com/apt/doc/apt-key.gpg"
+    assert source.key_path == "/usr/share/keyrings/cloud.google.gpg"
+    assert source.key_dearmor is True
+    assert source.source == (
+        "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main"
+    )
+    assert source.source_file == "google-cloud-sdk.list"
+    assert package.apt_sources == ["google-cloud-cli"]
+    assert package.apt == ["google-cloud-cli"]
 
 
 def test_gcloud_recipe_is_gated_until_gcp_is_enabled(tmp_path: Path) -> None:
@@ -111,15 +119,15 @@ def test_gcloud_recipe_is_gated_until_gcp_is_enabled(tmp_path: Path) -> None:
 def test_operator_gcloud_override_wins_while_gcp_is_disabled(tmp_path: Path) -> None:
     override = """
 apiVersion: agentworks/v1
-kind: system-install-command
+kind: apt-package
 metadata:
   name: gcloud-cli
 spec:
-  command: echo operator-gcloud
+  apt: [operator-gcloud]
 """
-    row = build_registry(_config(tmp_path, override)).lookup("system-install-command", "gcloud-cli")
+    row = build_registry(_config(tmp_path, override)).lookup("apt-package", "gcloud-cli")
     assert row.origin.variant == "operator-declared"
-    assert row.command == "echo operator-gcloud"
+    assert row.apt == ["operator-gcloud"]
 
 
 def test_disabled_gcp_site_is_not_ready_and_refused_with_enable_hint(tmp_path: Path) -> None:
@@ -147,7 +155,10 @@ def test_gcp_cli_is_discoverable_from_registry_surfaces(tmp_path: Path) -> None:
     registry = build_registry(_config(tmp_path))
     assert "gcloud-cli" not in {row.name for row in list_resources(registry).rows}
     assert "gcloud-cli" in {
-        row.name for row in list_resources(registry, include_disabled=True).rows if row.kind == "system-install-command"
+        row.name for row in list_resources(registry, include_disabled=True).rows if row.kind == "apt-package"
+    }
+    assert "google-cloud-cli" in {
+        row.name for row in list_resources(registry, include_disabled=True).rows if row.kind == "apt-source"
     }
 
 

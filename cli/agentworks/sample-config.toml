@@ -82,8 +82,8 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # (the Proxmox VE VM platform), `azure` (the Azure VM platform, the Azure
 # DevOps git-credential provider, and the `az-cli` install-command), `aws`
 # (the EC2 VM platform and optional guest `aws-cli` install-command), and `gcp`
-# (the Google Compute Engine VM platform and optional guest `gcloud-cli`
-# install-command).
+# (the Google Compute Engine VM platform and optional guest `gcloud-cli` apt
+# package).
 # `agw doctor` shows a System plugins roster with each
 # plugin's state.
 #[plugins]

@@ -5,12 +5,16 @@ states the guarantees and limitations for `vm reinit`, `agent reinit`, and `work
 
 ## Install commands
 
-Every system and user install command must be safe and idempotent on every invocation. Init and
-reinit may both run the command. The optional `test_exec`, `test_file`, and `test_dir` fields are
-early-exit optimizations only; they are not the idempotency mechanism. When at least one check is
-declared, Agentworks skips the command only when every declared check passes. With no checks, the
-command always runs. Omit checks when reconciliation or updating is desired on every init and
-reinit.
+An install-command is one logical shell invocation written as a plain YAML scalar. Prefer the
+template's `apt`, `apt_packages`, `snap`, or `mise_packages` fields, then a maintained
+package-manager or vendor entry point. Embedded scripts, block scalars, here-documents, multi-step
+installers, state machines, signature pipelines, and cleanup routines do not belong in an
+install-command manifest.
+
+Init and reinit may both reach the resource. Its invocation must be repeat-safe itself or declare
+`test_exec`, `test_file`, or `test_dir` completion checks that reliably skip it after success. When
+at least one check is declared, Agentworks skips the command only when every declared check passes.
+With no checks, the command always runs.
 
 ## Re-pointing the bound template
 

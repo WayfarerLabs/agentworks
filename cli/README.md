@@ -88,7 +88,7 @@ agw console delete my-console              # Extra shells are lost but sessions 
 - One of: [Lima](https://lima-vm.io/), Azure CLI (`az`), AWS credentials for EC2, Google Cloud
   credentials for GCE, [Proxmox](https://www.proxmox.com/), or WSL2 (for VM provisioning; Azure,
   AWS, GCP, and Proxmox also need their [system plugin](#system-plugins) enabled). The optional
-  guest `aws-cli` and `gcloud-cli` install commands are not host prerequisites.
+  guest `aws-cli` install command and `gcloud-cli` apt package are not host prerequisites.
 
 ## Global Options
 
@@ -398,11 +398,11 @@ git-credential providers, secret backends) as **system plugins**: separable bund
 installed but off by default. The shipped build installs `azure` (the `azure-vm` VM platform, the
 `azdo` git-credential provider, and the `az-cli` install-command), `proxmox` (the `proxmox` VM
 platform), `aws` (the `aws-ec2` VM platform and optional guest `aws-cli`), `gcp` (the `gcp-gce` VM
-platform and optional guest `gcloud-cli`), `onepassword` (the `onepassword` secret backend),
-`claude` (the `claude-code` harness integration and the `claude` CLI install-command), and `codex`
-(the `codex` harness integration and the `codex` CLI install-command). (This is a different sense of
-"plugin" from [Claude Code Plugins](#claude-code-plugins) below, which installs marketplace plugins
-into Claude Code itself.)
+platform and optional guest `gcloud-cli` apt package), `onepassword` (the `onepassword` secret
+backend), `claude` (the `claude-code` harness integration and the `claude` CLI install-command), and
+`codex` (the `codex` harness integration and the `codex` CLI install-command). (This is a different
+sense of "plugin" from [Claude Code Plugins](#claude-code-plugins) below, which installs marketplace
+plugins into Claude Code itself.)
 
 Opt in by name in `config.toml`:
 
@@ -461,6 +461,14 @@ commands, and user install commands), bundled as YAML manifests under
 `agw resource list --kind apt-package,system-install-command,user-install-command,apt-source` to see
 what is available (or filter to any single kind). Reference these entries by name from VM, admin,
 and agent templates. User-defined entries override built-in entries with the same name.
+
+Prefer template `apt`, `apt_packages`, `snap`, or `mise_packages` fields over a custom install
+command. When an install command is necessary, its `command` is one logical shell invocation written
+as a plain scalar, normally one maintained package-manager or vendor entry point. Do not embed a
+script, block scalar, here-document, multi-step installer, state machine, signature pipeline, or
+cleanup routine. The invocation must be repeat-safe itself or use `test_exec`, `test_file`, or
+`test_dir` as reliable completion checks. System install commands run as the VM admin, not root, and
+explicitly use `sudo` for privileged work.
 
 ## VM Initialization
 

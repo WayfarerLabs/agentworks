@@ -56,7 +56,7 @@ a test without a registry. It becomes valid or rejected only when the installed 
 
 The plugin name is the vendor-level composition boundary, not the name of one service capability.
 For example, `gcp` bundles the independently named `gcp-gce` VM platform and optional `gcloud-cli`
-guest installer, while `aws` bundles `aws-ec2` and optional `aws-cli`. A future vendor capability
+guest apt package, while `aws` bundles `aws-ec2` and optional `aws-cli`. A future vendor capability
 keeps its own existing capability contract, model, and service-specific name, then joins the
 existing vendor plugin. Do not introduce a provider-wide base class or reserve an unconsumed
 abstraction merely because a vendor bundle gains a second contribution.
@@ -325,6 +325,14 @@ reference paths are not gated (such as `secret` or `vm-site`) are rejected at pu
 reserved auto-declared name (a `default` template). They load through the same typed, validated
 loader the built-in manifests use, stamped with the plugin's `system-plugin` origin. A malformed
 bundle is a typed error attributed to the plugin, never a bare import or assertion failure.
+
+Install-command manifests contain one logical shell invocation as a plain scalar. Prefer the
+template's `apt`, `apt_packages`, `snap`, or `mise_packages` surfaces, followed by a maintained
+package-manager or vendor entry point. Do not embed a script, block scalar, here-document,
+multi-step installer, state machine, signature pipeline, or cleanup routine. The invocation must be
+repeat-safe itself or use the existing `test_exec`, `test_file`, or `test_dir` completion fields. A
+system install command still runs as the VM admin, not root, and explicitly invokes `sudo` for any
+privileged step.
 
 ## Reserved fields (inert in v1)
 

@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import shlex
 from textwrap import dedent
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -15,7 +13,6 @@ from agentworks.errors import StateError
 from agentworks.resources.access import ensure_recipe_enabled
 from agentworks.resources.graph import Enablement
 from agentworks.resources.inspect import describe_resource, list_resources
-from agentworks.vms.initializer import _run_install_commands
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -87,54 +84,12 @@ def test_aws_ec2_row_disabled_system_plugin_by_default(tmp_path: Path) -> None:
     assert registry.graph.enablement_of("vm-platform", "aws-ec2") is Enablement.disabled
 
 
-def test_aws_bundle_publishes_cli_disabled_with_verified_v2_payload(tmp_path: Path) -> None:
+def test_aws_bundle_publishes_cli_disabled(tmp_path: Path) -> None:
     registry = build_registry(_config(tmp_path))
     row = registry.lookup("system-install-command", "aws-cli")
     assert row.origin.variant == "system-plugin"
     assert row.origin.plugin == "aws"
     assert registry.graph.enablement_of("system-install-command", "aws-cli") is Enablement.disabled
-    assert (row.test_exec, row.test_file, row.test_dir) == (None, None, None)
-    assert ".agentworks-v2-complete" not in row.command
-    assert "command -v aws" not in row.command
-    assert "aws --version" not in row.command
-    assert "awscli-exe-linux-x86_64.zip" in row.command
-    assert "awscli-exe-linux-aarch64.zip" in row.command
-    assert "FB5DB77FD5C118B80511ADA8A6310ACC4672475C" in row.command
-    assert "gpg --batch --verify" in row.command
-    assert 'primary && $1 == "fpr"' in row.command
-    assert "trap 'rm -rf \"$temp_root\"' EXIT" in row.command
-    assert "trap 'exit 130' INT" in row.command
-    assert 'install_dir="/usr/local/lib/agentworks/aws-cli"' in row.command
-    assert 'aws_link="$bin_dir/aws"' in row.command
-    assert 'completer_link="$bin_dir/aws_completer"' in row.command
-    assert 'launcher_target_is_exact "$launcher" "$expected_target"' in row.command
-    assert 'install_mode="reinstall"' in row.command
-    assert 'sudo rm -rf -- "$install_dir"' in row.command
-    assert 'sudo rm -f -- "$aws_link" "$completer_link"' in row.command
-    assert 'sudo "$temp_root/aws/install"' in row.command
-    assert '--install-dir "$install_dir" --bin-dir "$bin_dir" --update' in row.command
-    assert "aws configure" not in row.command
-
-
-def test_aws_cli_without_predicates_runs_recipe_through_production_initializer(tmp_path: Path) -> None:
-    row = build_registry(_config(tmp_path)).lookup("system-install-command", "aws-cli")
-    target = MagicMock()
-    target.run.return_value = MagicMock(returncode=0)
-    logger = MagicMock()
-
-    paths = _run_install_commands(
-        target,
-        ["aws-cli"],
-        {"aws-cli": row},
-        "zsh",
-        "/home/agentworks",
-        logger,
-    )
-
-    assert paths == []
-    [install] = target.run.call_args_list
-    assert shlex.split(install.args[0]) == ["zsh", "-lc", row.command]
-    assert install.kwargs == {"timeout": 120}
 
 
 def test_aws_cli_recipe_is_gated_until_aws_is_enabled(tmp_path: Path) -> None:

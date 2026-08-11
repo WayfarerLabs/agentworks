@@ -2,7 +2,7 @@
 
 The bundle owns Google-specific composition, while each service implementation
 keeps the existing capability contract it implements. Today that is the
-``gcp-gce`` VM platform plus the optional guest-side ``gcloud-cli`` installer;
+``gcp-gce`` VM platform plus the optional guest-side ``gcloud-cli`` apt package;
 future GCP capabilities join this bundle under their own names rather than
 through a provider-wide abstraction.
 """

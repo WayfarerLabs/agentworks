@@ -433,10 +433,17 @@ particular runtime, and a session runs whatever integration its template selects
 
 ## Install-command reruns and optional checks
 
-Every system and user install command must be safe and idempotent on every invocation. Agentworks
-runs commands during init and may run them again during every reinit. The optional `test_exec`,
-`test_file`, and `test_dir` fields are early-exit optimizations, not the mechanism that makes a
-command idempotent.
+Prefer a VM template's `apt`, `apt_packages`, or `snap` fields for system software and
+`mise_packages` for user tools. Use an install-command only when those package paths do not fit. Its
+`command` must be one logical shell invocation written as a plain YAML scalar. Prefer one maintained
+package-manager or vendor entry point. Embedded scripts, block scalars, here-documents, multi-step
+installers, state machines, signature pipelines, and cleanup routines do not belong in an
+install-command manifest.
+
+Agentworks runs install commands during init and may run them again during every reinit. Each
+invocation must therefore be repeat-safe itself or declare `test_exec`, `test_file`, or `test_dir`
+completion checks that reliably skip it after success. When multiple non-empty checks are declared,
+all must pass before Agentworks skips the command. With no checks, the command always runs.
 
 A `system-install-command` is VM-wide in scope, but Agentworks executes it as the VM admin user, not
 root. The command must explicitly use `sudo` for each step that needs root privileges. A
@@ -444,13 +451,8 @@ root. The command must explicitly use `sudo` for each step that needs root privi
 assume elevation.
 
 `test_exec` resolves a command on `PATH` in the target user's login shell. `test_file` and
-`test_dir` check for an existing path; a leading `~` resolves to the target user's home. When a
-command declares multiple non-empty checks, Agentworks skips it only when every check passes. With
-no checks, the command always runs.
-
-Declare checks only when their success means no work is needed. Omit them when the command should
-reconcile or update managed state on every init and reinit. For example, this command may skip once
-both completion artifacts exist:
+`test_dir` check for an existing path; a leading `~` resolves to the target user's home. Declare a
+check only when its success proves that no work is needed. For example:
 
 ```yaml
 apiVersion: agentworks/v1
@@ -458,9 +460,8 @@ kind: system-install-command
 metadata:
   name: my-tool
 spec:
-  command: install-my-tool-safely
+  command: sudo vendor-tool install my-tool
   test_exec: my-tool
-  test_file: ~/.local/share/my-tool/install-complete
 ```
 
 ## Built-ins and overrides
@@ -539,15 +540,15 @@ use.
 
 **Which plugins you need follows from what your resources reference.** Enable `onepassword` if a
 declared secret source selects the `onepassword` backend; `proxmox` if a `vm-site` uses the
-`proxmox` platform; `gcp` if you use `gcp-gce` or a template installs `gcloud-cli`; `aws` if you use
-`aws-ec2` or a template installs `aws-cli`; `azure` if you use the `azure-vm` platform, the `azdo`
-(Azure DevOps) git-credential provider, or the `az-cli` install-command; and `claude` if a
-`session-template` uses the `claude-code` integration or a template installs the `claude` CLI. Until
-you do, a resource that references one is not-ready (or refused at use) with an "enable plugin
-`<name>`" hint, never a silent failure. The default local path (the `lima` / `wsl2` platforms, the
-`shell` harness integration, the `env-var` / `prompt` secret backends, and the `github`
-git-credential provider) needs no `[plugins]` entry at all. `agw doctor` lists every installed
-plugin and whether it is enabled.
+`proxmox` platform; `gcp` if you use `gcp-gce` or a template installs the `gcloud-cli` apt package;
+`aws` if you use `aws-ec2` or a template installs `aws-cli`; `azure` if you use the `azure-vm`
+platform, the `azdo` (Azure DevOps) git-credential provider, or the `az-cli` install-command; and
+`claude` if a `session-template` uses the `claude-code` integration or a template installs the
+`claude` CLI. Until you do, a resource that references one is not-ready (or refused at use) with an
+"enable plugin `<name>`" hint, never a silent failure. The default local path (the `lima` / `wsl2`
+platforms, the `shell` harness integration, the `env-var` / `prompt` secret backends, and the
+`github` git-credential provider) needs no `[plugins]` entry at all. `agw doctor` lists every
+installed plugin and whether it is enabled.
 
 ## Secrets: configured sources and implementation backends
 

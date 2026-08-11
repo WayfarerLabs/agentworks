@@ -1,0 +1,25 @@
+# Optional guest tooling. GCE lifecycle uses the Python SDK and does not call
+# or authenticate gcloud. The ordinary apt resources own Google's repository
+# and package instead of duplicating package-manager behavior in a shell script.
+apiVersion: agentworks/v1
+kind: apt-source
+metadata:
+  name: google-cloud-cli
+  description: Google Cloud CLI official apt repository
+spec:
+  key_url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+  key_path: /usr/share/keyrings/cloud.google.gpg
+  key_dearmor: true
+  source: "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main"
+  source_file: google-cloud-sdk.list
+---
+apiVersion: agentworks/v1
+kind: apt-package
+metadata:
+  name: gcloud-cli
+  description: Google Cloud CLI
+spec:
+  apt_sources:
+    - google-cloud-cli
+  apt:
+    - google-cloud-cli
