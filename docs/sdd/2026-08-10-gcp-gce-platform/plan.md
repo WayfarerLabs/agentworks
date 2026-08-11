@@ -166,9 +166,9 @@ correction. The final evidence record and SDD lock still follow the passing live
 - [ ] In that bounded acceptance, select the `gcloud-cli` apt package and `aws-cli` install command;
       verify both executables are available in the guest, require `aws --version` to begin with
       `aws-cli/2.`, and verify no authenticated Google account, AWS credential file, or AWS profile.
-      Rerun initialization and prove apt reconverges cleanly while the AWS `test_file` check skips
-      its install command without a partial result; prove snapd owns AWS CLI automatic refresh;
-      prove neither resource created guest authentication state; and prove the operator's
+      Rerun initialization and prove apt converges cleanly again while the AWS `test_file` check
+      skips its install command without a partial result; prove snapd owns AWS CLI automatic
+      refresh; prove neither resource created guest authentication state; and prove the operator's
       pre-existing host credential baseline is unchanged.
 - [x] Once the offline gates, code reviews, and operator prerequisites are green, post the exact
       head and flip the PR from draft to ready as the explicit request for this bounded live
@@ -319,9 +319,9 @@ state machine.
 - [ ] Tighten permanent install-command author documentation: `command` is for one logical shell
       line, preferably a package-manager or vendor-provided idempotent entry point. The declared
       resource must be repeat-safe either because the command itself is idempotent or because the
-      existing `test_*` completion fields fully guard reruns. Embedded scripts, heredocs, multi-step
-      installers, state machines, signature pipelines, and cleanup routines do not belong in
-      `command`. Direct authors to `apt`, `apt_packages`, and `snap` first. Preserve the existing
+      existing `test_*` completion fields fully guard reruns. Embedded scripts, here-documents,
+      multi-step installers, state machines, signature pipelines, and cleanup routines do not belong
+      in `command`. Direct authors to `apt`, `apt_packages`, and `snap` first. Preserve the existing
       admin-user and explicit-`sudo` teaching.
 - [ ] Remove the superseded embedded Google repository script and AWS layout/signature/update
       teaching from permanent docs and the PR record. Teach the GCP apt-resource selection and the

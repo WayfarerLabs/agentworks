@@ -189,8 +189,8 @@ cannot protect against hostile delete/recreate replacement and is not represente
   `google-cloud-cli` package. That package provides `gcloud`, `gsutil`, and `bq`; extra components
   such as `kubectl` remain separate packages.
 - Agentworks already models third-party signed repositories and their packages as `apt-source` and
-  `apt-package` resources. Those declarables fit the supported Debian guest without embedding the
-  repository setup as a shell script.
+  `apt-package` resources. Those declared resources fit the supported Debian guest without embedding
+  the repository setup as a shell script.
 
 Decisions:
 
@@ -198,7 +198,7 @@ Decisions:
   `gcp` plugin;
 - bundle the optional guest CLI for parity with the established Azure plugin surface and because the
   operator explicitly requested consistent cloud-provider guest tooling;
-- use the existing apt declarables rather than embedding repository, key, or installer logic in a
+- use the existing apt resources rather than embedding repository, key, or installer logic in a
   command string;
 - keep the resources optional and guest-scoped: GCE operations continue to use the Python SDK, and
   ambient mode may obtain host ADC through any supported ADC source while optional host recovery
