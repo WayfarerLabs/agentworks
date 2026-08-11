@@ -146,7 +146,7 @@ jobs:
         run: python3 -m unittest discover -s website/tests -p 'test_*.py'
 
       - name: Node website model tests
-        run: node --test website/tests/lander-world.test.mjs website/tests/lander-model.test.mjs website/tests/lander-phase4i.test.mjs website/tests/lander-phase4j.test.mjs
+        run: node --test website/tests/lander-world.test.mjs website/tests/lander-model.test.mjs website/tests/lander-phase4i.test.mjs website/tests/lander-phase4j.test.mjs website/tests/lander-phase4k.test.mjs
 
       - name: Verify deterministic full builds
         run: |

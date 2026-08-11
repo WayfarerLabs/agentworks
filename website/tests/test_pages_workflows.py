@@ -14,7 +14,8 @@ PAGES_PATH = REPO_ROOT / ".github/workflows/pages.yml"
 PYTHON_TEST_COMMAND = "python3 -m unittest discover -s website/tests -p 'test_*.py'"
 NODE_TEST_COMMAND = (
     "node --test website/tests/lander-world.test.mjs website/tests/lander-model.test.mjs "
-    "website/tests/lander-phase4i.test.mjs website/tests/lander-phase4j.test.mjs"
+    "website/tests/lander-phase4i.test.mjs website/tests/lander-phase4j.test.mjs "
+    "website/tests/lander-phase4k.test.mjs"
 )
 
 CI_DETERMINISTIC_BUILD_SCRIPT = '''\
