@@ -7,9 +7,10 @@ merge of the seeding PR onward, along with the HLA, plan, and any LLDs.
 ## Background
 
 The operator ruled on 2026-08-11 that this project does not unit-test the wording of prose it
-authors. The rule landed as `no-prose-policing-tests` (PR #493), together with a sharpening of
-development principle 3 and a reviewer check. That stops the habit going forward. This effort
-removes what the habit already deposited.
+authors. That ruling is being codified as the `no-prose-policing-tests` rule in PR #493, together
+with a sharpening of development principle 3 and a reviewer check; at the time of this seeding that
+PR is open and unmerged. The rule stops the habit going forward. This effort removes what the habit
+already deposited, and R7 makes the ordering explicit.
 
 The ruling came out of PR #480, where a phrase blacklist was bypassed by a word-substituted
 reversal. The tester asked for a structural contract and the saga lead recommended pinning the
@@ -76,8 +77,11 @@ own merits, and its replacement lands in the same PR as the deletion it enables:
    `Repaired N issue(s)` assertions.
 2. Schema validation messages. `agentworks/schema/errors.py` already produces structured problems
    internally; promote that to a supported test seam and assert on
-   `(path, unknown_field, alternatives)`. Keep exactly one golden-render test per shape so the
-   renderer stays covered, and let that be the only place the sentence appears.
+   `(path, unknown_field, alternatives)`. Cover the renderer itself against synthetic fixture
+   content, exercising layout, escaping, and ordering without making any repository-authored
+   sentence contractual: the R5 fixture exception is the model. An earlier revision of this FRD
+   asked for a golden-render test pinning the real message, which was the same habit this effort
+   exists to remove.
 3. Error identity. Roughly fifteen places discriminate sibling failures by message because the
    exception type is shared. Add a stable code or narrow subtypes to `AgentworksError`.
 4. Doctor check identity. `HealthCheck.name` is currently both display text and index key; add a
@@ -107,8 +111,10 @@ reported before and after, and a drop in count is explained rather than celebrat
 
 ### R7. The rule travels with the cleanup
 
-Any PR from this effort assumes `no-prose-policing-tests` is on `main`. If it is not yet, the effort
-lead flags it rather than proceeding, because a purge without the rule regrows the habit.
+No PR from this effort merges before `no-prose-policing-tests` is on `main` (PR #493). If the rule
+is still open when the effort is picked up, the study and design may proceed, but the lead flags the
+ordering rather than merging cleanup ahead of the rule, because a purge without the rule regrows the
+habit.
 
 ## Sequencing
 
