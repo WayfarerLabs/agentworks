@@ -306,7 +306,7 @@ the VM template's general `snap` field. This effort ships no AWS CLI resource or
 - [x] Preserve the reviewed GCP apt-source/package correction and the general install-command author
       guidance. Add no AWS replacement, prose tests, or install-command tests.
 - [x] Run focused/full gates and both required reviews; resolve every valid finding.
-- [ ] Push the final exact head, post one signed handoff, and use the next draft-to-ready transition
+- [x] Push the final exact head, post one signed handoff, and use the next draft-to-ready transition
       to request the GCP-only live charter above.
 
 **DoD:** this PR contains no AWS CLI resource, permanent/operator documentation, sample, test,
