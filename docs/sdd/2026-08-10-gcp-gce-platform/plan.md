@@ -240,7 +240,7 @@ superseded before merge by Phase 3c after live/review evidence exposed their sem
       executable predicate plus an Agentworks-owned completion marker written only after verified
       install success; require the marker and both public/internal executables in the command's
       managed fast path. Before managed repair, invalidate any prior marker; after installer
-      success, require both executable postconditions before recreating it. Retain the version probe
+      success, require both executable checks before recreating it. Retain the version probe
       for valid external v2 and the update path for v1, missing markers, broken launchers, or
       partial layouts. Add real Bash/Zsh/Dash predicate and initializer-runner regressions proving
       completed managed reinit performs no installer transport, every incomplete state repairs,
