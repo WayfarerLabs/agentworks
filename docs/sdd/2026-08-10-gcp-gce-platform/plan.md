@@ -3,10 +3,9 @@
 ## Definition of done
 
 The disabled-by-default `gcp` vendor plugin publishes a contract-v2 `gcp-gce` platform and optional
-guest-side `google-cloud-cli` apt source plus `gcloud-cli` apt package, while the existing `aws`
-vendor plugin publishes an optional guest-side `aws-cli` install command; both auth modes are
+guest-side `google-cloud-cli` apt source plus `gcloud-cli` apt package; both auth modes are
 secret-source conforming; create is complete-or-raise with a credential-free retained request and
-one fixed-stdin join; neither CLI is a provisioning or authentication dependency; lifecycle,
+one fixed-stdin join; the CLI is not a provisioning or authentication dependency; lifecycle,
 rollback, exposure, docs, offline gates, and operator-gated live acceptance are complete; the SDD is
 locked truthfully.
 
@@ -163,13 +162,11 @@ correction. The final evidence record and SDD lock still follow the passing live
       architecture, shared-CPU, disk-capacity presence, and accelerator fields, and prove the
       instance has no guest service account or OAuth scopes. Then delete it and query the project to
       prove zero instance, disk, firewall, and address residue.
-- [ ] In that bounded acceptance, select the `gcloud-cli` apt package and `aws-cli` install command;
-      verify both executables are available in the guest, require `aws --version` to begin with
-      `aws-cli/2.`, and verify no authenticated Google account, AWS credential file, or AWS profile.
-      Rerun initialization and prove apt converges cleanly again while the AWS `test_file` check
-      skips its install command without a partial result; prove snapd owns AWS CLI automatic
-      refresh; prove neither resource created guest authentication state; and prove the operator's
-      pre-existing host credential baseline is unchanged.
+- [ ] In that bounded acceptance, select the `gcloud-cli` apt package; verify `gcloud` is available
+      in the guest with no authenticated Google account. Rerun initialization and prove apt
+      converges cleanly again without a partial result; prove the resources created no guest
+      authentication state; and prove the operator's pre-existing host credential baseline is
+      unchanged.
 - [x] Once the offline gates, code reviews, and operator prerequisites are green, post the exact
       head and flip the PR from draft to ready as the explicit request for this bounded live
       acceptance.
@@ -336,5 +333,26 @@ one-line snap install-command plus its existing completion check; no bespoke ins
 implementation or test suite remains; permanent author guidance makes the one-line boundary
 unmistakable; required CI is green; and the next live retest starts from one reviewed exact head
 with a truthful PR record.
+
+The AWS portion of Phase 3e was superseded before merge by operator direction: AWS CLI support was
+never a GCP-platform requirement, and operators already have the VM template's general `snap` field.
+No AWS CLI resource or teaching ships from this effort.
+
+### Phase 3f: remove AWS CLI scope from the GCP effort
+
+- [ ] Delete the AWS CLI manifest and AWS guest-CLI guide, and restore the `aws` plugin plus its
+      tests to the capability-only EC2 shape from current `main`.
+- [ ] Remove every AWS CLI reference added by this effort from permanent docs, samples, plugin
+      publication/readiness/provenance tests, SDD target requirements, the PR body, and the live
+      charter. Retain the pre-existing AWS EC2 platform unchanged.
+- [ ] Preserve the reviewed GCP apt-source/package correction and the general install-command author
+      guidance. Add no AWS replacement, prose tests, or install-command tests.
+- [ ] Run focused/full gates and both required reviews; resolve every valid finding.
+- [ ] Push the final exact head, post one signed handoff, and use the next draft-to-ready transition
+      to request the GCP-only live charter above.
+
+**DoD:** this PR contains no AWS CLI resource, permanent/operator documentation, sample, test,
+acceptance requirement, or publication change; the pre-existing AWS EC2 platform remains
+capability-only; GCP behavior and general install-command guidance remain coherent and green.
 
 -- agw-ns-gcp-platform (effort lead)

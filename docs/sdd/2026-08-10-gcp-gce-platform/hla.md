@@ -369,21 +369,11 @@ package names the source as a dependency. Existing apt machinery installs Google
 key, writes the Debian repository stanza, and installs `google-cloud-cli`; no install-command or
 embedded script exists. The package is never used by provider lifecycle code.
 
-The existing `aws` plugin anchors its own `manifests/install-commands.yaml` and publishes
-`system-install-command/aws-cli` with the same disabled/enabled, operator-override, and provenance
-semantics. The resource contains the one-line package-manager command
-`sudo snap install aws-cli --classic` and the existing completion check `test_file: /snap/bin/aws`.
-It relies on AWS's officially supported snap and snap's automatic refresh instead of embedding
-download, signature, extraction, layout, cleanup, or update logic. The resource requires working
-snap support in the guest. The AWS command never runs `aws configure`, writes a credentials/profile
-file, or participates in EC2 lifecycle code, which continues to use boto3.
-
 Permanent edits cover the installed-plugin list, VM platform list, command reference, resources
 guide, plugin author contract, vm-platform author contract, capability durable-surface enumeration,
-and GCP/AWS operator teaching. The guides distinguish optional guest installation from host-side ADC
-or AWS credential sources and optional host recovery tooling. Completion code remains unchanged
-because capability and declarable names are discovered from registries; tests pin the relevant names
-on completion-adjacent surfaces.
+and GCP operator teaching. The guides distinguish optional guest installation from host-side ADC and
+optional host recovery tooling. Completion code remains unchanged because capability and declarable
+names are discovered from registries; tests pin the relevant names on completion-adjacent surfaces.
 
 ## Verification structure
 

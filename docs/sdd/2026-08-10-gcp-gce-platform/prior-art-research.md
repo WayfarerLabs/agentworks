@@ -205,33 +205,6 @@ Decisions:
   tooling remains separate from this declarable;
 - do not bundle optional Google Cloud components until a concrete template requires one.
 
-## Optional guest AWS CLI
-
-- AWS's
-  [CLI v2 Linux install guide](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
-  identifies the `aws-cli` snap as an officially supported way to install the latest AWS CLI v2,
-  requires classic confinement, and states that snap automatically refreshes it. It is not the
-  appropriate method when an operator needs to pin a minor version.
-- `snap install` rejects an already-installed snap. The established `test_file` field can guard the
-  command with the snap-owned `/snap/bin/aws` launcher, while snapd owns subsequent automatic
-  refresh.
-- The existing install-command resource plus its completion check is sufficient for the literal
-  package-manager invocation. Reimplementing the vendor installer inside its `command` string adds
-  an unowned script and state machine where no product behavior requires one.
-
-Decisions:
-
-- publish one `aws-cli` system install command from the existing `aws` vendor plugin, containing
-  only `sudo snap install aws-cli --classic` and `test_file: /snap/bin/aws`;
-- embed no shell script, vendor key, download, extraction, filesystem-ownership, cleanup, or
-  version-management logic; the existing completion check guards reruns and snap owns refresh;
-- require working snap support in the guest and leave version pinning to a future explicit need;
-- keep the command optional and guest-scoped: EC2 operations continue to use boto3, and the command
-  does not run `aws configure`, create a credential/profile file, or alter operator-host
-  credentials;
-- treat this as the same established-Azure-parity and explicit-operator-need decision as the GCP
-  CLI, not as a new provider abstraction or a provisioning dependency.
-
 ## Resulting shared seam
 
 Azure/AWS use the shared post-boot stdin join after `cloud-init status --wait`; GCP uses a startup
