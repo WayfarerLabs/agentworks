@@ -12,7 +12,10 @@ CI_PATH = REPO_ROOT / ".github/workflows/ci.yml"
 PAGES_PATH = REPO_ROOT / ".github/workflows/pages.yml"
 
 PYTHON_TEST_COMMAND = "python3 -m unittest discover -s website/tests -p 'test_*.py'"
-NODE_TEST_COMMAND = "node --test website/tests/lander-world.test.mjs website/tests/lander-model.test.mjs"
+NODE_TEST_COMMAND = (
+    "node --test website/tests/lander-world.test.mjs website/tests/lander-model.test.mjs "
+    "website/tests/lander-phase4i.test.mjs"
+)
 
 CI_DETERMINISTIC_BUILD_SCRIPT = '''\
 python3 website/build.py --repo-root . --output "${RUNNER_TEMP}/site-root-a" --site-base /
