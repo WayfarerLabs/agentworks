@@ -97,3 +97,10 @@ genuinely operator-level decisions are escalated with a recommendation, not an o
   repo defects discovered incidentally to the issue tracker rather than the review.
 - Tell the operator the verdict plainly, findings-first, including what the other in-flight efforts
   need to hear about it; cross-effort implications are the lead's to route, not the reviewers'.
+- **The verdict recommends; the operator decides.** Post it with the confidence the evidence earns,
+  and say plainly when you believe something must not merge, but frame it as advice to the operator
+  rather than a gate you are holding over the effort. Do not expect the effort to open a fix round
+  in response, and do not treat a lead-owned PR of your own differently: when a review lands on your
+  artifacts, post your reading, apply `awaiting-direction`, and wait, exactly as any other author
+  does (the `agentic-dev-process` skill's section 7a). Reviewing on a handoff signal remains a
+  standing authorized workflow; acting on what the review says is not.
