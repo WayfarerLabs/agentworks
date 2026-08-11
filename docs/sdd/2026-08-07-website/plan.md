@@ -739,11 +739,11 @@ separate Phase 4J acceptance is expected.
       always-available rail Exit control with an Escape hint, one failure-only Restart control with
       an `r` hint, no dedicated Launch control, no duplicated shortcut prose, and a modest exact
       landing-envelope relaxation.
-- [ ] Delegate and lead-review the exact LLD amendment for DOM/source order, shortcut markup and
+- [x] Delegate and lead-review the exact LLD amendment for DOM/source order, shortcut markup and
       accessible relationships, state/action visibility, focus and pointer isolation, responsive
       rail/overlay geometry, manual launch-ready departure, new landing boundaries, and atomic route
       derivation/fixture regeneration.
-- [ ] Obtain an `agentworks-reviewer` approval of the Phase 4K artifact amendment and resolve every
+- [x] Obtain an `agentworks-reviewer` approval of the Phase 4K artifact amendment and resolve every
       valid artifact finding before changing production or canonical fixture code.
 - [ ] Delegate implementation to an `agentworks-dev` subagent in an isolated worktree. Update the
       shared fragment, CSS, controller/model projection, validators, route fixture and literals,
