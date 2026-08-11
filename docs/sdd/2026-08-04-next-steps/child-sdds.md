@@ -273,22 +273,25 @@ GCP scope extraction (operator ruling, 2026-08-11): PR #479 had absorbed a share
 contract change and an AWS installer rewrite discovered during its live acceptance. The shared
 predicate change left the PR. The ruling generalizes: outside of bug fixes for the work in question,
 core-logic modifications are their own efforts. Its permanent home is in review rather than landed:
-PR #497 (dev-process section 1a plus reviewer check 12b) is open with findings outstanding. Three
+PR #497 (dev-process section 1a plus reviewer check 12b) is open with findings outstanding. Two
 follow-ups were filed rather than absorbed:
 [issue 492](https://github.com/WayfarerLabs/agentworks/issues/492) (SSH known-hosts state escapes an
-isolated `HOME` at eleven call sites, every platform),
-[issue 495](https://github.com/WayfarerLabs/agentworks/issues/495) (doctor TTY color tests fake a
-terminal by patching `isatty` on a stream that capture replaces, so they flake under parallel CI),
-and [issue 496](https://github.com/WayfarerLabs/agentworks/issues/496) (the install-command
-predicate contract plus transactional AWS installer completion, carrying the extracted commits and
-seven open findings, among them the predicate test that asserted CI hosts provide zsh and reddened
-every matrix job). Completed as of this round: the shared runner-predicate change left the PR.
-**Still pending in draft at `3ab7ee98`:** the AWS CLI recipe and its install-command teaching
-remain, and their removal is in flight on the operator's instruction after it emerged that the
-framework already ships declarative `snap` support (`vm_template.snap`), which the saga lead's three
-reviews of that machinery never checked for: craftsmanship verified, existence never priced. The
-replacement needs classic- confinement support in the `snap` template field, itself a
-shared-machinery change and so its own small effort.
+isolated `HOME` at eleven call sites, every platform) and
+[issue 496](https://github.com/WayfarerLabs/agentworks/issues/496) (the install-command predicate
+contract plus transactional AWS installer completion, carrying the extracted commits and seven open
+findings, among them the predicate test that asserted CI hosts provide zsh and reddened every matrix
+job). Completed as of this round: the shared runner-predicate change left the PR. **Still pending in
+draft at `3ab7ee98`:** the AWS CLI recipe and its install-command teaching remain, and their removal
+is in flight on the operator's instruction after it emerged that the framework already ships
+declarative `snap` support (`vm_template.snap`), which the saga lead's three reviews of that
+machinery never checked for: craftsmanship verified, existence never priced. The replacement needs
+classic-confinement support in the `snap` template field, itself a shared-machinery change and so
+its own small effort.
+
+Filed the same day but from a different source, so not a GCP follow-up:
+[issue 495](https://github.com/WayfarerLabs/agentworks/issues/495), a doctor TTY color-test flake
+observed on docs-only PR #494, where the tests fake a terminal by patching `isatty` on a stream that
+capture replaces, so parallel CI decides colorization differently from run to run.
 
 ## Standing process rulings
 
