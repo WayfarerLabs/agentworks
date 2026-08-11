@@ -307,29 +307,29 @@ state machine.
 
 ### Phase 3e: replace embedded installers with native package resources
 
-- [ ] Replace the AWS CLI manifest payload with the one-line command
+- [x] Replace the AWS CLI manifest payload with the one-line command
       `sudo snap install aws-cli --classic`, guarded by `test_file: /snap/bin/aws`; snapd owns
       automatic refresh. Replace the Google Cloud CLI install command with a `google-cloud-cli` apt
       source and dependent `gcloud-cli` apt package using the existing apt-resource model. Retain no
       embedded key block, repository script, download, extraction, filesystem-layout, cleanup, or
       version-management logic.
-- [ ] Delete the bespoke AWS and Google Cloud CLI installer behavior tests and helpers. Add no unit
+- [x] Delete the bespoke AWS and Google Cloud CLI installer behavior tests and helpers. Add no unit
       tests for the one-line AWS install command or for authored prose; rely on ordinary resource
       loading plus review, repository gates, and the bounded live acceptance.
-- [ ] Tighten permanent install-command author documentation: `command` is for one logical shell
+- [x] Tighten permanent install-command author documentation: `command` is for one logical shell
       line, preferably a package-manager or vendor-provided idempotent entry point. The declared
       resource must be repeat-safe either because the command itself is idempotent or because the
       existing `test_*` completion fields fully guard reruns. Embedded scripts, here-documents,
       multi-step installers, state machines, signature pipelines, and cleanup routines do not belong
       in `command`. Direct authors to `apt`, `apt_packages`, and `snap` first. Preserve the existing
       admin-user and explicit-`sudo` teaching.
-- [ ] Remove the superseded embedded Google repository script and AWS layout/signature/update
+- [x] Remove the superseded embedded Google repository script and AWS layout/signature/update
       teaching from permanent docs and the PR record. Teach the GCP apt-resource selection and the
       AWS snapd/classic-confinement prerequisite plus automatic-refresh tradeoff; keep provisioning
       and guest authentication boundaries unchanged.
-- [ ] Run focused/full gates and both required code reviews, resolve every valid finding, post one
-      signed exact-head handoff, and use the next draft-to-ready transition to request the bounded
-      GCP live charter above.
+- [x] Run focused/full gates and both required code reviews; resolve every valid finding.
+- [ ] Push the final exact head, post one signed handoff, and use the next draft-to-ready transition
+      to request the bounded GCP live charter above.
 
 **DoD:** the optional Google Cloud CLI uses ordinary apt resources and the optional AWS CLI uses one
 one-line snap install-command plus its existing completion check; no bespoke installer
