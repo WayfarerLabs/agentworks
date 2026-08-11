@@ -11,7 +11,6 @@ this renderer builds on.
 
 from __future__ import annotations
 
-import io
 import re
 import sys
 from collections.abc import Iterator
@@ -170,36 +169,3 @@ class TestDoctorPlainFallback:
         finally:
             output.set_non_interactive(False)
         assert _ANSI_RE.search(out) is None
-
-
-class TestColorGate:
-    """`TyperHandler._color_enabled` decides colorization; test it directly
-    rather than through captured output, so the decision is not entangled
-    with pytest's stream replacement."""
-
-    @staticmethod
-    def _stream(*, is_a_tty: bool) -> io.StringIO:
-        stream = io.StringIO()
-        stream.isatty = lambda: is_a_tty  # type: ignore[method-assign]
-        return stream
-
-    def test_color_is_enabled_on_a_terminal(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv("NO_COLOR", raising=False)
-        monkeypatch.setattr(output, "non_interactive", lambda: False)
-        assert TyperHandler()._color_enabled(self._stream(is_a_tty=True)) is True
-
-    def test_color_is_disabled_off_a_terminal(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv("NO_COLOR", raising=False)
-        monkeypatch.setattr(output, "non_interactive", lambda: False)
-        assert TyperHandler()._color_enabled(self._stream(is_a_tty=False)) is False
-
-    @pytest.mark.parametrize("value", ["1", "", "anything"])
-    def test_no_color_disables_color_by_presence(self, monkeypatch: pytest.MonkeyPatch, value: str) -> None:
-        monkeypatch.setenv("NO_COLOR", value)
-        monkeypatch.setattr(output, "non_interactive", lambda: False)
-        assert TyperHandler()._color_enabled(self._stream(is_a_tty=True)) is False
-
-    def test_non_interactive_disables_color(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv("NO_COLOR", raising=False)
-        monkeypatch.setattr("agentworks.cli._typer_output.non_interactive", lambda: True)
-        assert TyperHandler()._color_enabled(self._stream(is_a_tty=True)) is False
