@@ -16,6 +16,35 @@ from agentworks.guide import (
 from agentworks.guide.contributions import guide_contributions
 from agentworks.guide.render import render_topic
 
+_RITUAL_RECONFIRMATION_CLAUSES = (
+    "always ask the operator again before every action",
+    "always ask again before every action",
+    "ask the operator again before every action even when it is already covered",
+    "ask again before every action even when it is already covered",
+    "always ask the operator for confirmation before every action",
+    "always ask for operator confirmation before every action",
+    "always ask for confirmation before every action",
+    "always obtain operator confirmation before every action",
+    "always obtain confirmation before every action",
+    "always require operator confirmation before every action",
+    "always require confirmation before every action",
+    "always reconfirm with the operator before every action",
+    "always reconfirm before every action",
+    "reconfirm with the operator before every action even when it is already covered",
+    "reconfirm before every action even when it is already covered",
+    "every action requires operator confirmation",
+    "every action requires confirmation",
+    "each action requires operator confirmation",
+    "each action requires confirmation",
+    "obtain consent for the named boundary",
+    "ask before resolving each named secret",
+    "treat every file read as a separate consent boundary",
+)
+
+
+def _normalized_prose(text: str) -> str:
+    return " ".join("".join(character if character.isalnum() else " " for character in text.casefold()).split())
+
 
 def _topic(slug: str):
     return next(item for item in guide_contributions() if item.topic == slug)
@@ -224,9 +253,8 @@ def test_core_agent_contracts_reject_ritual_reconfirmation_teaching() -> None:
         "concept-secrets",
     ):
         text = contracts[slug]
+        normalized = _normalized_prose(text)
         assert "authorization" in text
         assert "GuideAction" not in text
-        assert "obtain consent for the named boundary" not in text
-        assert "Ask before resolving each named secret" not in text
-        assert "Treat every file read" not in text
-        assert "as a separate consent boundary" not in text
+        for clause in _RITUAL_RECONFIRMATION_CLAUSES:
+            assert clause not in normalized, f"{slug} teaches ritual reconfirmation: {clause!r}"
