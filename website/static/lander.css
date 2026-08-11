@@ -380,6 +380,16 @@
     }
 }
 
+@media (max-width: 30rem) {
+    #lander-game[data-launch-ready="true"] #lander-status {
+        right: 0.5rem;
+        left: 9rem;
+        max-width: none;
+        text-align: center;
+        transform: none;
+    }
+}
+
 @media (prefers-reduced-motion: reduce) {
     *,
     *::before,

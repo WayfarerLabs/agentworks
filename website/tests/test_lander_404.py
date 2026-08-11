@@ -377,6 +377,13 @@ class StaticDocumentTests(unittest.TestCase):
         self.assertIn("grid-row: 1", label_rule)
         self.assertIn("grid-column: 2", value_rule)
         self.assertIn("grid-row: 2", value_rule)
+        narrow = self.css.split('@media (max-width: 30rem) {', 1)[1].split(
+            "@media (prefers-reduced-motion: reduce)", 1
+        )[0]
+        self.assertIn('#lander-game[data-launch-ready="true"] #lander-status', narrow)
+        self.assertIn("right: 0.5rem", narrow)
+        self.assertIn("left: 9rem", narrow)
+        self.assertIn("transform: none", narrow)
         description = " ".join(self.document.text_by_id["lander-scene-description"].split()).lower()
         for word in ("lander", "surface", "helipad", "gas can", "dark", "network operations center"):
             self.assertIn(word, description)
