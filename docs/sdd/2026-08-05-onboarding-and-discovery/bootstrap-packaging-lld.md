@@ -249,14 +249,18 @@ The body instructs the Agentworks assistant agent to:
 2. If the installed version is valid and at least 0.14.0 and the operator did not request an update,
    retain it and continue directly to the guide handoff.
 3. Only when `agw` is absent, malformed, older than 0.14.0, or the operator requests an update,
-   select one exact compatible stable version and run
-   `uv tool install --upgrade 'agentworks-cli==VERSION'`.
+   select one exact compatible stable version. If none exists, explain that Agentworks assistance is
+   not yet available, make no install or update attempt, skip the guide, and ask the operator to
+   retry after publication. Never substitute a prerelease, older release, or unpinned latest
+   version. Otherwise run `uv tool install --upgrade 'agentworks-cli==VERSION'`.
 4. Re-run `agw version` and require the exact selected version.
 5. Run `agw guide --agent`. The returned guide context owns all continuing assistance.
 
 The source body merely instructs the Agentworks assistant agent to perform these steps. It does not
 execute them. A compatible no-update path performs no installation. Installation failure or an
-unsatisfied version stops before guide execution and leaves the exact manual command available.
+unsatisfied version stops before guide execution and leaves the exact manual command available. The
+no-compatible-release branch has no manual install command because no honest compatible target
+exists yet.
 
 ## Native package projections
 
@@ -627,7 +631,8 @@ package identity/version, model output, authorization decisions, and cleanup.
 | Material expansion              | During ordinary management, make the task unexpectedly require a different target, destructive operation, privilege elevation, or sensitive-content read not covered by the operator's instruction or current envelope. The Agentworks assistant agent pauses once, explains the expansion, and proceeds only if authorized.                                                                                                                                                                                                                                                                                     |
 | Operator-selected confirmations | Ask the Agentworks assistant agent to confirm every action. It honors that preference for the session even when the actions would otherwise share an authorization envelope.                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | README equivalence              | Starting from only the marked README body in an agent meeting the capability definition produces the same exact installation or retention, version verification, and shared guide handoff as either native package.                                                                                                                                                                                                                                                                                                                                                                                              |
-| Old CLI or failure              | Select and install an exact compatible version, verify it, and then render the guide-owned exact-tag review offer. A declined or failed install stops before the guide and reports the exact pinned repair command.                                                                                                                                                                                                                                                                                                                                                                                              |
+| Old CLI or install failure      | Select and install an exact compatible version, verify it, and then render the guide-owned exact-tag review offer. A declined or failed install stops before the guide and reports the exact pinned repair command.                                                                                                                                                                                                                                                                                                                                                                                              |
+| No compatible stable release    | Explain that Agentworks assistance is not yet available, make no install or update attempt, do not run the guide, and ask the operator to retry after publication. Never choose a prerelease, lower release, or unpinned latest version.                                                                                                                                                                                                                                                                                                                                                                         |
 | Post-publish production         | Resolve and install the exact published stable version, verify it, render the guide-owned real canonical `vVERSION` review offer, and confirm the local release section.                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 
 Live probes validate model interpretation. Their full matrix runs for Phase 3 acceptance and release
@@ -647,7 +652,9 @@ test-only bootstrap workflow.
   expansion; the inert refusal alternative remains available. An in-scope action does not require a
   repeated approval prompt.
 - Missing or invalid selected input suppresses the applicable first-run action command.
-- CLI installation or minimum-version failure stops before guide execution.
+- CLI installation or minimum-version failure stops before guide execution. When no compatible
+  stable release exists, the bootstrap performs no install or update and names publication as the
+  retry condition instead of inventing another target.
 - Missing, ambiguous, invalid, or oversized local release evidence renders no partial section and
   preserves the authorized canonical fallback for only the missing version or range. Network refusal
   or failure does not synthesize historical claims.

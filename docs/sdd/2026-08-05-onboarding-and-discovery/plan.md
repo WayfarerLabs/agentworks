@@ -369,6 +369,13 @@ installed no-topic agent guide owns source-review and continuing assistance.
       credential. Codex catalogs include the required top-level interface plus per-plugin
       installation policy, authentication policy, and category. Minimum-version failure produces an
       actionable upgrade instruction.
+- [x] Resolve the 2026-08-11 public-release-window and clean-home handoff review round. The operator
+      accepted the normal `main` then release-please publication choreography without a special
+      deployment path. Until an exact compatible stable CLI exists, the public prompt makes no
+      install or update attempt, skips the guide, and names publication as the retry condition. Once
+      installed, a no-topic clean-home `agw guide --agent` renders the complete authored handoff and
+      absent-config guidance with exit 0; selected topics and genuine failures remain nonzero. R12
+      disclosure clauses and every hard-coded focused-review path are pinned by contract tests.
 - [ ] PR #480 contains the complete Phase 3 feature, passes its repo and live feature gates, and
       merges normally to `main` with a conventional `feat:` title. Release-please then regenerates
       the separate 0.14 release PR from that mainline feature, adding the version, changelog,

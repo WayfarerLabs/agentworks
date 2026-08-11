@@ -256,7 +256,10 @@ term whenever either role could be ambiguous.
   continuing assistance. This is a first-class zero-plugin assistance path; the harness plugins (R1)
   say the same thing and remain primarily an advertising and discoverability channel. The prompt
   MUST avoid product-specific harness assumptions beyond the ability to accept the prompt, drive the
-  CLI, and request or use appropriate operator-approved workstation access.
+  CLI, and request or use appropriate operator-approved workstation access. If no compatible stable
+  CLI release exists yet, the prompt MUST explain that Agentworks assistance is not yet available,
+  make no installation or update attempt, skip guide execution, and direct the operator to retry
+  after publication; it MUST NOT substitute a prerelease, older release, or unpinned latest version.
 
 ## Personas and stories
 
@@ -336,8 +339,10 @@ term whenever either role could be ambiguous.
    out-of-scope probe leaves an explicit manual-verification note.
 10. The README's getting-started section leads with the R16 copy-paste block, and following it on a
     clean machine with a capable prompt-driven assistant reaches the top-level `agw guide --agent`
-    context successfully. The Agentworks assistant agent, not the guide command, decides what to
-    propose next.
+    context successfully when a compatible stable release exists. Before the first compatible stable
+    release is published, it stops safely without attempting installation or guide execution and
+    names publication as the condition for retry. The Agentworks assistant agent, not the guide
+    command, decides what to propose next.
 11. `agw guide` with no topic lists every available topic; a kind topic reflects the live instance
     list; disabling an implementation visibly changes its topic's rendering.
 12. Guide topics complete in the shell, including `concept-` prefix discovery, and the completion

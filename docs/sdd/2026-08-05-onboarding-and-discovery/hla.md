@@ -446,7 +446,10 @@ The body contains no source-review offer, startup disclosure, authorization teac
 settings advice, intent map, operation recipe, or release prose. Those are installed guide content.
 The bootstrap may resolve one exact compatible stable version from PyPI and pins the install command
 to `agentworks-cli==VERSION`; when an already compatible installation needs no update, it simply
-runs the guide. Ordinary harness approvals still govern bootstrap commands.
+runs the guide. If no compatible stable version exists, it reports that assistance is not yet
+available, performs no install or update, does not run the guide, and directs the operator to retry
+after publication. It never substitutes a prerelease, older release, or unpinned latest version.
+Ordinary harness approvals still govern bootstrap commands.
 
 A small generator wraps that body in the Claude Code and Codex package layouts. Generated files are
 committed so GitHub installation works without a build step. CI regenerates into a temporary
