@@ -230,8 +230,8 @@ Decisions:
   completion marker in the runner;
 - have the command require that marker plus both public and internal executables, invalidate a prior
   marker before managed repair, and recreate it only after successful verified installation plus
-  executable checks; retain an in-command `aws --version` fast path for a valid v2
-  installation elsewhere, while an existing v1 executable proceeds through the v2 installation;
+  executable checks; retain an in-command `aws --version` fast path for a valid v2 installation
+  elsewhere, while an existing v1 executable proceeds through the v2 installation;
 - select the current official AWS CLI v2 archive by normalized guest architecture and fail clearly
   on an unsupported architecture;
 - download the matching detached signature, import the reviewed AWS key into a private temporary
