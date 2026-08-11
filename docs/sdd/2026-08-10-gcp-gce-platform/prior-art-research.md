@@ -85,8 +85,9 @@ Decisions:
 - select from the declared catalog, then read the live machine type and verify CPU and memory before
   mutation; verify architecture only when the provider populates it, otherwise retain the declared
   catalog value without deriving architecture from the machine-type name;
-- put `e2-small` and `e2-medium` ahead of the standard E2 defaults and teach their shared-core
-  sustained/burst behavior rather than presenting them as full-core equivalents;
+- keep the standard E2 ladder as the built-in default because the catalog's `cpus` field records
+  guest-visible vCPUs and cannot also express sustained shared-core capacity; teach `e2-small` and
+  `e2-medium` as explicit site `machine_types` overrides with their sustained/burst behavior;
 - reject a selected live type before mutation when it populates zero Persistent Disk capacity or
   required accelerators, naming the current CPU-only `pd-balanced` support boundary; accept omitted
   capacity as unknown rather than interpreting its proto scalar default; keep the literal catalog
@@ -223,9 +224,11 @@ Decisions:
 Decisions:
 
 - publish one `aws-cli` system install command from the existing `aws` vendor plugin without the
-  generic `test_exec` probe, because AWS CLI v1 and v2 share the `aws` executable name;
-- put the completed-install fast path inside the command and skip only when `aws --version` reports
-  `aws-cli/2.`; an existing v1 executable proceeds through the v2 installation;
+  ambiguous `test_exec: aws` probe, because AWS CLI v1 and v2 share the `aws` executable name;
+- declare the exact Agentworks-managed v2 binary path as the runner's lightweight `test_exec`,
+  repeat that executable check in the command, and retain an in-command `aws --version` fast path
+  for a valid v2 installation elsewhere; an existing v1 executable proceeds through the v2
+  installation;
 - select the current official AWS CLI v2 archive by normalized guest architecture and fail clearly
   on an unsupported architecture;
 - download the matching detached signature, import the reviewed AWS key into a private temporary

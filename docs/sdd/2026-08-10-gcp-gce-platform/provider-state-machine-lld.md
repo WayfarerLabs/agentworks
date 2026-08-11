@@ -49,8 +49,10 @@ Create may enter mutation only after all of these succeed:
 5. `AFTER_CLASSIC_FIREWALL` network-policy order plus classic VPC priority-zero allow/deny conflict
    inspection;
 6. machine catalog selection plus live CPU/memory, conditional architecture, present-zero
-   `maximum_persistent_disks`, and empty required-accelerator verification; omitted presence-tracked
-   output fields remain unknown rather than inheriting proto scalar defaults;
+   `maximum_persistent_disks`, and empty required-accelerator verification; missing CPU or memory is
+   a typed unknown-shape failure, present non-positive CPU or memory is an invalid-shape failure,
+   and a present positive mismatch is a declaration-mismatch failure, while omitted optional output
+   fields remain unknown rather than inheriting proto scalar defaults;
 7. `debian-cloud` Debian image-family and zonal `pd-balanced` disk-type resolution;
 8. instance, stable firewall-name, and normalized-name collision checks;
 9. credential-free startup request construction.

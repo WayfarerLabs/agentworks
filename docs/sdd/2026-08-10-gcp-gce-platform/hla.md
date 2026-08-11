@@ -87,17 +87,18 @@ where the site operates under either credential mode.
 The field is named `subnet`, not `subnet_id`, because GCE resolves a subnetwork by name within the
 region derived from `zone`; callers do not provide a provider-generated identifier.
 
-The immutable built-in catalog is `(2, 2, e2-small, x86_64)`, `(2, 4, e2-medium, x86_64)`,
-`(2, 8, e2-standard-2, x86_64)`, `(4, 16, e2-standard-4, x86_64)`, `(8, 32, e2-standard-8, x86_64)`,
-`(16, 64, e2-standard-16, x86_64)`, and `(32, 128, e2-standard-32, x86_64)`, with memory in GiB. The
-shared-core entries expose two vCPUs to the guest but sustain an aggregate 0.5 and 1 vCPU
-respectively, with automatic bursting. An override may name Arm types and selects the
-`debian-12-arm64` image family rather than `debian-12`. E2/x86 is the default because its broad zone
-availability makes a portable built-in catalog; T2A/Arm availability is limited to a narrower zone
-set and remains an explicit override. Unsupported size requests and known live incompatibilities
-with the platform's CPU-only, `pd-balanced` boot contract fail before mutation. Residual
-provider-only pair incompatibilities fail definitively during insert with fixed operator guidance
-and bounded rollback.
+The immutable built-in catalog is `(2, 8, e2-standard-2, x86_64)`, `(4, 16, e2-standard-4, x86_64)`,
+`(8, 32, e2-standard-8, x86_64)`, `(16, 64, e2-standard-16, x86_64)`, and
+`(32, 128, e2-standard-32, x86_64)`, with memory in GiB. This standard E2 ladder preserves
+sustained-CPU semantics for existing templates. A site override may opt into `e2-small` or
+`e2-medium`; those types expose two guest vCPUs but sustain an aggregate 0.5 and 1 vCPU respectively
+with automatic bursting, so their catalog `cpus` value describes guest shape rather than sustained
+capacity. An override may also name Arm types and selects the `debian-12-arm64` image family rather
+than `debian-12`. E2/x86 is the default because its broad zone availability makes a portable
+built-in catalog; T2A/Arm availability is limited to a narrower zone set and remains an explicit
+override. Unsupported size requests and known live incompatibilities with the platform's CPU-only,
+`pd-balanced` boot contract fail before mutation. Residual provider-only pair incompatibilities fail
+definitively during insert with fixed operator guidance and bounded rollback.
 
 ## Dependency and credential boundary
 
@@ -178,14 +179,17 @@ The complete-or-raise sequence is:
 
 1. Select the smallest machine type satisfying `ProvisionRequest.cpus` and `memory_gib`, ordered by
    `(cpus, memory, type, arch)` so equal-shape catalogs remain order-independent; resolve the live
-   machine type and verify its CPU and memory match the catalog declaration. If GCE populates the
-   output-only architecture field, it must also match; an omitted value is unknown and leaves the
-   declaration authoritative. Reject a known-incompatible live type whose presence-tracked
-   `maximum_persistent_disks` is populated as zero or which declares required guest accelerators,
-   with guidance naming the selected type and current CPU-only, Balanced Persistent Disk support
-   boundary. An omitted capacity field is unknown and proceeds to insert, just like omitted
-   architecture. These provider fields do not prove complete pair compatibility. Resolve
-   `projects/debian-cloud/global/images/family/debian-12` or
+   machine type and inspect presence before reading its CPU and memory scalars. An absent CPU or
+   memory field is an unknown provider-shape `ConfigError`; a present non-positive value is an
+   invalid provider-shape `ConfigError`; and a present positive value that differs from the catalog
+   declaration is a declaration-mismatch `ConfigError`. Each fails before mutation with fixed
+   guidance. If GCE populates the output-only architecture field, it must also match; an omitted
+   value is unknown and leaves the declaration authoritative. Reject a known-incompatible live type
+   whose presence-tracked `maximum_persistent_disks` is populated as zero or which declares required
+   guest accelerators, with guidance naming the selected type and current CPU-only, Balanced
+   Persistent Disk support boundary. An omitted capacity field is unknown and proceeds to insert,
+   just like omitted architecture. These provider fields do not prove complete pair compatibility.
+   Resolve `projects/debian-cloud/global/images/family/debian-12` or
    `projects/debian-cloud/global/images/family/debian-12-arm64` and the zonal `pd-balanced` disk
    request. Hyperdisk support remains an additive future storage profile rather than an inferred
    machine-name allowlist.
@@ -370,14 +374,17 @@ recipe-gate semantics. Its command selects AWS's current official CLI v2 archive
 `x86_64` or `aarch64` architecture, downloads the matching detached signature, imports the pinned
 AWS CLI signing key into a private temporary GnuPG home, verifies its full fingerprint and the
 archive signature, extracts it in that private directory, and installs to `/usr/local/aws-cli` with
-the `aws` launcher in `/usr/local/bin`. The manifest deliberately omits the generic `test_exec`
-probe because AWS CLI v1 and v2 share that executable name. The command's own completed-install fast
-path parses `aws --version` and skips only an existing v2 installation; v1 continues through the v2
-install path. An incomplete prior installation is reconciled with the official installer's explicit
-`--update`, `--install-dir`, and `--bin-dir` options, and temporary artifacts are removed on success
-or failure. Unsupported architectures, signing-key drift, and invalid signatures fail clearly. The
-installer never runs `aws configure`, writes a credentials/profile file, or participates in EC2
-lifecycle code, which continues to use boto3.
+the `aws` launcher in `/usr/local/bin`. The manifest never uses the ambiguous `test_exec: aws`,
+because AWS CLI v1 and v2 share that executable name. It instead declares Agentworks' absolute
+managed v2 executable, `/usr/local/aws-cli/v2/current/bin/aws`, as the runner predicate.
+Reinitialization can therefore skip a completed managed installation without executing the
+relatively heavy CLI on a constrained guest. The command repeats an executable check for that
+managed path, then keeps its own `aws --version` fast path for a valid v2 installation at another
+location; v1 continues through the v2 install path. An incomplete prior installation is reconciled
+with the official installer's explicit `--update`, `--install-dir`, and `--bin-dir` options, and
+temporary artifacts are removed on success or failure. Unsupported architectures, signing-key drift,
+and invalid signatures fail clearly. The installer never runs `aws configure`, writes a
+credentials/profile file, or participates in EC2 lifecycle code, which continues to use boto3.
 
 Permanent edits cover the installed-plugin list, VM platform list, command reference, resources
 guide, plugin author contract, vm-platform author contract, capability durable-surface enumeration,

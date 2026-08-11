@@ -156,9 +156,12 @@ correction. The final evidence record and SDD lock still follow the passing live
       project/zone/network/auth mode, verify classic-first network-policy order plus the absence of
       conflicting organization/folder terminal rules, set explicit resource/time/cost budgets, and
       obtain operator authorization before any live mutation or credential use.
-- [ ] Run one bounded create/init/Tailscale/lifecycle/delete acceptance, then independently query
-      the realized instance to prove it has no guest service account or OAuth scopes, and query the
-      project after delete to prove zero instance, disk, firewall, and address residue.
+- [ ] Run one bounded create/init/Tailscale/lifecycle acceptance using an explicit `machine_types`
+      override selecting `e2-small` so the opt-in shared-core path is witnessed. While the VM still
+      exists, independently query the realized instance and exact `machineTypes.get` CPU, memory,
+      architecture, shared-CPU, disk-capacity presence, and accelerator fields, and prove the
+      instance has no guest service account or OAuth scopes. Then delete it and query the project to
+      prove zero instance, disk, firewall, and address residue.
 - [ ] In that bounded acceptance, select both `gcloud-cli` and `aws-cli`; verify both executables
       are available in the guest, require `aws --version` to begin with `aws-cli/2.`, and verify no
       authenticated Google account, AWS credential file, or AWS profile; rerun initialization to
@@ -215,12 +218,41 @@ forge checks are green; permanent docs match code; the merge-ready PR is truthfu
 - [x] Add a DONE structured-operation regression proving a longer string containing
       `ZONE_RESOURCE_POOL_EXHAUSTED` remains a generic definitive `GCEOperationError`, then run the
       focused and repository gates plus both required code reviews and resolve every valid finding.
-- [ ] Post the signed exact-head handoff and flip the PR from draft to ready for the next
+- [x] Post the signed exact-head handoff and flip the PR from draft to ready for the next
       operator-gated live acceptance.
 
 **DoD:** small templates have honest low-cost burstable defaults; known-incompatible custom machine
 types fail before mutation, while residual pair incompatibilities fail definitively with useful
 guidance and bounded rollback; capacity classification stays exact; the next live test starts from a
 reviewed, green handoff.
+
+The built-in shared-core default and command-only AWS completion predicate completed above were
+superseded before merge by Phase 3c after live/review evidence exposed their semantic limits.
+
+### Phase 3c: sustained-default and installer-idempotency correction
+
+- [ ] Restore the standard E2 built-in ladder so existing two-vCPU templates retain two sustained
+      vCPUs. Keep `e2-small` and `e2-medium` available through the existing site `machine_types`
+      override, and teach the exact override shape, deterministic selection rule, guest-visible vCPU
+      count, and sustained/burst capacity without a future product promise.
+- [ ] Declare the absolute managed AWS CLI v2 executable as the runner-level `test_exec` so reinit
+      skips it without executing `aws`; repeat that executable check inside the command, retain the
+      command-owned version probe for valid v2 installations elsewhere, and keep the verified update
+      path for v1 or partial installations. Add a real runner regression proving a completed managed
+      install performs no installer transport.
+- [ ] Distinguish omitted required live CPU or memory fields, present non-positive values, and
+      present positive declaration mismatches with typed, actionable pre-mutation errors. Add
+      separate zero-mutation regressions for CPU and memory across those branches; document that
+      omitted optional disk capacity proceeds to insert; align the capacity error description and
+      SDK-shape fallback comment.
+- [ ] Run focused and full gates plus both required code reviews, resolve every valid finding, and
+      refresh the PR's exact-head/current-main/evidence record.
+- [ ] Post the signed exact-head handoff and flip the PR from draft to ready for the single bounded
+      Phase 3 live charter above, including proof that AWS CLI reinit skips the completed managed
+      install.
+
+**DoD:** standard defaults preserve sustained capacity, shared-core remains an explicit and live
+witnessed opt-in, managed AWS CLI reinit converges without reinstall, permanent teaching matches the
+shipped behavior, and the next ready transition identifies one reviewed exact head.
 
 -- agw-ns-gcp-platform (effort lead)
