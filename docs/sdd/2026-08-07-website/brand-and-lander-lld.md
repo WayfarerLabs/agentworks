@@ -62,11 +62,12 @@ lander-game.js  -> lander-model.js -> lander-world.js
        |--------------------------------^  read-only projection and seed helpers
 ```
 
-`lander-game.js` imports the model API plus only the pure `cameraLeftForPose`, `terrainPath`,
-`targetIsOffscreen`, and `mixUint32` helpers directly from `lander-world.js`. `lander-model.js`
-imports pure world construction, retention, seed, and geometry exports. `lander-world.js` imports
-neither production module, reads no DOM, clock, storage, or ambient randomness, and owns no mutable
-singleton. No production module imports upward or sideways outside this DAG.
+`lander-game.js` imports the model API plus only the pure `cameraLeftForPose`, `CHUNK_WIDTH`,
+`mixUint32`, `terrainPath`, `terrainVerticesForRange`, and `targetIsOffscreen` exports directly from
+`lander-world.js`. `lander-model.js` imports pure world construction, retention, seed, and geometry
+exports. `lander-world.js` imports neither production module, reads no DOM, clock, storage, or
+ambient randomness, and owns no mutable singleton. No production module imports upward or sideways
+outside this DAG.
 
 The model is the sole mutable run authority. One run aggregate owns physics, fuel, mission state,
 seed, generator cursor, retained sites, active and target IDs, route proof, checkpoint, and crash
@@ -868,8 +869,8 @@ as `Number(value.toFixed(canonicalPoseDecimals))`. This bounds native `sin`/`cos
 across supported CPU architectures while remaining inside the production replay's existing `1e-9`
 pose tolerance. It never changes a schedule, contact/exhaustion step, burn, safety decision, world
 descriptor, geometry value, or geometry/physics/world digest. Tests collapse sub-precision pose
-jitter, reject a precision change, reproduce the canonical bytes on x64 and ARM64 CI, and prove all
-strict world/geometry values remain untouched.
+jitter, reject a precision change, reproduce the canonical bytes on x64 CI and the ARM64 pre-merge
+host, and prove all strict world/geometry values remain untouched.
 
 The reviewed output is `website/tests/fixtures/lander-route-derived-v2.json`. Phase 4H's four-motif
 bank deliberately regenerates all nine route schedules, demonstrated minima, success vectors,
