@@ -1,7 +1,7 @@
 # HLA: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander final tuning design approved,
-  implementation pending
+- Status: Interim implementation complete; continuous Lander final tuning implementation
+  review-clean, operator Chrome and Edge acceptance pending
 - Date: 2026-08-07
 - Last revised: 2026-08-10
 - FRD: `frd.md`

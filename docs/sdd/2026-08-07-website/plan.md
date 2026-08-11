@@ -1,7 +1,7 @@
 # Plan: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander final tuning design approved,
-  implementation pending
+- Status: Interim implementation complete; continuous Lander final tuning implementation
+  review-clean, operator Chrome and Edge acceptance pending
 - Date: 2026-08-07
 - Last revised: 2026-08-10
 - FRD: `frd.md`
@@ -534,11 +534,11 @@ and honest for a vacuum, and runtime memory/DOM work remains bounded independent
       regeneration, performance bounds, and browser acceptance before implementation.
 - [x] Obtain an `agentworks-reviewer` approval of the amended LLD and resolve every valid artifact
       finding before changing production or fixture code.
-- [ ] Delegate implementation to an `agentworks-dev` subagent in an isolated worktree. Preserve one
+- [x] Delegate implementation to an `agentworks-dev` subagent in an isolated worktree. Preserve one
       world authority and one immutable physics profile; update the model, controller projection,
       shared static scene, CSS, independent derivation tool, canonical route/world fixtures, focused
       tests, permanent documentation, and exact artifact witnesses atomically.
-- [ ] Prove every regenerated constructive route under the changed terrain, platform, force, assist,
+- [x] Prove every regenerated constructive route under the changed terrain, platform, force, assist,
       and landing profile, including collision-aware two-replay success and one-quantum exhaustion.
       Fail the effort rather than introducing runtime search, weakening deterministic bounds, or
       retaining stale route/world literals.
@@ -562,6 +562,25 @@ steering pulse exceeded the angular limit and then coasted unchanged after relea
 measurements justify one coupled geometry, world, input-force, stabilization, and tolerance revision
 rather than isolated CSS or threshold patches. Phase 4G's completed implementation and review
 records remain historical evidence; PR #486 stays draft until every Phase 4H gate is complete.
+
+Implementation evidence (2026-08-10): exact pushed head `da499872` centralizes the named steering
+authorities, regenerates all nine constructive routes and all 81 ordered world descriptors through
+the independent v3 deriver, and passes both exact success and one-quantum exhaustion replays without
+runtime search. The final local gate passed 39 Node tests and 116 website Python tests; the complete
+repository gate passed 7,753 non-integration Python tests, Ruff, formatting, mypy, file lint,
+locked-SDD, Rulesync, deterministic 12-file root and project-path builds, and the module-size
+limits. Independent project and fresh-eyes reviews approved the final implementation with no open
+finding.
+
+Automated browser evidence (2026-08-10): isolated Chromium 151 on exact served runtime `40ba11cd`
+confirmed the solid elevated riser, coarse continuous terrain and exact collision seams, vertical
+four-color battery stages, keyboard and pointer steering vectors, attached gimbaled plumes, precise
+tap deadlines, three successive services, bounded retention and DOM, and the prior lifecycle,
+privacy, reduced-motion, and performance contracts. A final behavior-preserving vector smoke on
+exact runtime `da499872` observed a maximum plume-anchor error of `5.27e-7 px`, the exact `1.44`
+axial ceiling, and no runtime exception. The browser process, profile, debug port, and scratch
+evidence were removed after each run. Human Chrome and Edge handling and visual acceptance remains
+open on the port-8766 preview.
 
 Design-review evidence (2026-08-10): lead review found and removed a mixed keyboard/pointer merge
 that could exceed straight collective thrust. Cold fresh-eyes review then found and closed four
