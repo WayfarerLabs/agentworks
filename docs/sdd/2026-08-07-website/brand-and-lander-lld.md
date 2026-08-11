@@ -242,21 +242,22 @@ number; this one-decimal accessible presentation is intentionally rounded and is
 decimal encoding. Fuel is never announced through status.
 
 On start, the controller hides and disables `#lander-start`, gives `#lander-scene-shell`
-`tabindex="0"`, `role="application"`, `aria-label="Lunar deployment game"`, and
-`aria-describedby="lander-controls lander-fuel lander-target-direction lander-status"`, then focuses
-it with `preventScroll: true`. Exit removes active attributes, restores `tabindex="-1"`, reveals and
-enables Start, hides active chrome, and focuses Start without scrolling. Restart hides its button,
-disables it, focuses the active shell without scrolling, and dispatches the same RESTART event as
-`r`. Neither a crash nor launch readiness moves focus. Launch does not receive programmatic focus
-when it appears. Its native activation focuses the active shell with `preventScroll:true` before
-entering section 11's sole collective-pulse path, so subsequent keyboard input reaches the game and
-the button never becomes hidden while retaining focus. While active, the shell and Exit are always
-tabbable; Launch is the one additional game-action tab stop only while launch-ready, and Restart is
-the one additional game-action tab stop only while failed. Every native action has
-`min-inline-size:44px` and `min-block-size:44px`; its visible text remains its accessible name
-without an overriding ARIA label. Hidden actions remain disabled and outside sequential focus order.
-Initialization recovery, destroy, Exit, contact, failure, and restart restore these exact
-hidden/disabled/focus invariants.
+`tabindex="0"`, `role="application"`, `aria-label="Lunar deployment game"`, and an
+`aria-describedby` list ordered as scene description, controls, fuel, optional target direction,
+then status. Target direction is present only while the exact offscreen predicate is true. The
+controller renders that relationship before focusing the shell with `preventScroll: true`. Exit
+removes active attributes, restores `tabindex="-1"`, reveals and enables Start, hides active chrome,
+and focuses Start without scrolling. Restart hides its button, disables it, focuses the active shell
+without scrolling, and dispatches the same RESTART event as `r`. Neither a crash nor launch
+readiness moves focus. Launch does not receive programmatic focus when it appears. Its native
+activation focuses the active shell with `preventScroll:true` before entering section 11's sole
+collective-pulse path, so subsequent keyboard input reaches the game and the button never becomes
+hidden while retaining focus. While active, the shell and Exit are always tabbable; Launch is the
+one additional game-action tab stop only while launch-ready, and Restart is the one additional
+game-action tab stop only while failed. Every native action has `min-inline-size:44px` and
+`min-block-size:44px`; its visible text remains its accessible name without an overriding ARIA
+label. Hidden actions remain disabled and outside sequential focus order. Initialization recovery,
+destroy, Exit, contact, failure, and restart restore these exact hidden/disabled/focus invariants.
 
 Before activation the SVG is a named image whose description mentions the hovering lander, varied
 lunar surface, elevated platform, gas can, and dark NOC, but no controls. While the shell is an
@@ -1664,13 +1665,13 @@ followed by its state actions, a visible or tabbable wrong-state action, a targe
 pointer capture on the rail or an action, missing composed-path/closest interactive rejection,
 flight prevention/token/capture/enqueue from an action pointerdown, `touch-action:none` anywhere
 except the active stage, non-system or non-monospace fonts, any new font request/directive/CSP
-change, generated outcome text, stale failure copy, a second status/banner, ambiguous or changed
-outcome inset/transform rules, or a 320-pixel/400-percent box overlap. Installed-agent mutations
-reject appearance before stage 1, disappearance from a powered retained/checkpoint-restored site, a
-new installed-state authority, a body path that does not reproduce the exact four radius-one arcs,
-changed terminal/leg subpaths, transform/bounds/paint drift, failure to restore the absent doorway,
-a second NOC-entry or child, any added world descendant, a maximum other than exact 78 or greater
-than 80, and any route/physics/geometry/world/output digest change.
+change, generated outcome text, a second status/banner, ambiguous or changed outcome inset/transform
+rules, or a 320-pixel/400-percent box overlap. Installed-agent mutations reject appearance before
+stage 1, disappearance from a powered retained/checkpoint-restored site, a new installed-state
+authority, a body path that does not reproduce the exact four radius-one arcs, changed terminal/leg
+subpaths, transform/bounds/paint drift, failure to restore the absent doorway, a second NOC-entry or
+child, any added world descendant, a maximum other than exact 78 or greater than 80, and any
+route/physics/geometry/world/output digest change.
 
 Input and physics mutations reject component-wise keyboard/pointer engine merging, mixed-input
 thrust above straight `1.44`, full-steer total other than `.8`, vector angle other than 30 degrees,
