@@ -356,6 +356,18 @@ class TemplateContractTests(RepositoryFixture):
         with self.assertRaisesRegex(ValueError, "root section|scene"):
             site_builder._validate_template("lander-game.html", changed)
 
+    def test_fragment_accessible_name_sources_must_be_structural_and_nonempty(self) -> None:
+        template = (self.root / "website/templates/lander-game.html").read_text(encoding="utf-8")
+        root_label = re.search(r'(<section id="lander-game" aria-label=")([^"]+)(")', template)
+        start_label = re.search(r'(<button id="lander-start"[^>]* aria-label=")([^"]+)(")', template)
+        scene_title = re.search(r'(<title id="lander-scene-title">)([^<]+)(</title>)', template)
+        self.assertTrue(all(match is not None for match in (root_label, start_label, scene_title)))
+        assert root_label is not None and start_label is not None and scene_title is not None
+        for match in (root_label, start_label, scene_title):
+            changed = template.replace(match.group(0), f"{match.group(1)}   {match.group(3)}", 1)
+            with self.subTest(element=match.group(1)), self.assertRaisesRegex(ValueError, "root|Start|text source"):
+                site_builder._validate_template("lander-game.html", changed)
+
     def test_fragment_support_and_battery_geometry_fail_closed(self) -> None:
         template = (self.root / "website/templates/lander-game.html").read_text(encoding="utf-8")
         bar_one = '<path class="battery-bar battery-bar-1" d="M457 426.1557689513639h12v5h-12Z" />'
@@ -451,15 +463,14 @@ class TemplateContractTests(RepositoryFixture):
                     site_builder._validate_template(name, changed)
 
     def test_shell_title_and_canonical_metadata_fail_closed(self) -> None:
-        for name, (title, canonical) in site_builder.TEMPLATE_METADATA.items():
+        for name, (_title, canonical) in site_builder.TEMPLATE_METADATA.items():
             template = (self.root / "website/templates" / name).read_text(encoding="utf-8")
             drifted_canonical = (
                 "https://agentworks.build/security/"
                 if canonical != "https://agentworks.build/security/"
                 else "https://agentworks.build/"
             )
-            title_mutation = (template.replace(f"<title>{title}</title>", "<title>Drifted</title>", 1)
-                              if title is not None else re.sub(r"<title>[^<]+</title>", "<title></title>", template, count=1))
+            title_mutation = re.sub(r"<title>[^<]+</title>", "<title></title>", template, count=1)
             for changed in (
                 title_mutation,
                 template.replace(f'href="{canonical}"', f'href="{drifted_canonical}"', 1),
@@ -499,16 +510,25 @@ class TemplateContractTests(RepositoryFixture):
                 ):
                     site_builder._validate_template(name, changed)
 
-    def test_game_shell_description_and_csp_are_exact_and_shared(self) -> None:
+    def test_game_shell_description_structure_and_csp_are_shared(self) -> None:
         policies = []
         for name in ("lander.html", "404.html"):
             template = (self.root / "website/templates" / name).read_text(encoding="utf-8")
             document = parse(template)
             csp = next(meta["content"] for meta in document.tags("meta") if meta.get("http-equiv"))
+            description = next(meta for meta in document.tags("meta") if meta.get("name") == "description")
             policies.append(csp)
             for changed in (
                 template.replace(csp, "default-src 'self'", 1),
-                template.replace(site_builder.GAME_DESCRIPTIONS[name], "Drifted", 1),
+                template.replace(description["content"], "", 1),
+                template.replace(description["content"], "   ", 1),
+                template.replace('name="description"', 'name="description" data-copy="duplicate"', 1),
+                template.replace(
+                    f'<meta name="description" content="{description["content"]}" />',
+                    f'<meta name="description" content="{description["content"]}" />\n'
+                    f'        <meta name="description" content="{description["content"]}" />',
+                    1,
+                ),
             ):
                 with (
                     self.subTest(name=name),

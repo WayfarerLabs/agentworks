@@ -107,6 +107,37 @@ class ArcadeMarkupTests(unittest.TestCase):
             with self.subTest(index=index), self.assertRaises(ValueError):
                 validate_game_contract(mutation)
 
+    def test_exact_action_rail_shape_rejects_anonymous_wrappers_and_interposed_children(self) -> None:
+        outcome = re.search(r'<div id="lander-outcome" hidden>.*?</div>', self.fragment, re.DOTALL)
+        rail = re.search(r'<div id="lander-controls-rail" hidden>.*?</div>', self.fragment, re.DOTALL)
+        status = re.search(r'<p id="lander-status"[^>]*></p>', self.fragment)
+        controls = re.search(r'<p id="lander-controls">.*?</p>', self.fragment, re.DOTALL)
+        self.assertTrue(all(match is not None for match in (outcome, rail, status, controls)))
+        assert outcome is not None and rail is not None and status is not None and controls is not None
+        restart_label = re.search(r'(<button id="lander-restart"[^>]*>\s*<span>)([^<]+)(</span>)', self.fragment)
+        self.assertIsNotNone(restart_label)
+        assert restart_label is not None
+        mutations = (
+            self.fragment.replace('<div id="lander-scene-stage">', '<div><div id="lander-scene-stage">', 1)
+            .replace('        <div id="lander-controls-rail"', '        </div><div id="lander-controls-rail"', 1),
+            self.fragment.replace(rail.group(0), f'<div>{rail.group(0)}</div>', 1),
+            self.fragment.replace(outcome.group(0), f'<div>{outcome.group(0)}</div>', 1),
+            self.fragment.replace('<div id="lander-outcome" hidden>',
+                                  '<span></span><div id="lander-outcome" hidden>', 1),
+            self.fragment.replace(status.group(0), f'<div>{status.group(0)}</div>', 1),
+            self.fragment.replace(status.group(0), f'{status.group(0)}<span></span>', 1),
+            self.fragment.replace(status.group(0), status.group(0).replace('</p>', '<span></span></p>'), 1),
+            self.fragment.replace(controls.group(0), f'{controls.group(0)}<span></span>', 1),
+            self.fragment.replace(controls.group(0), controls.group(0).replace('</p>', '<span></span></p>'), 1),
+            self.fragment.replace('        <div id="lander-controls-rail"',
+                                  '        <span></span><div id="lander-controls-rail"', 1),
+            self.fragment.replace(restart_label.group(0),
+                                  f'{restart_label.group(1)}   {restart_label.group(3)}', 1),
+        )
+        for index, mutation in enumerate(mutations):
+            with self.subTest(index=index), self.assertRaisesRegex(ValueError, "child|prose|text"):
+                validate_game_contract(mutation)
+
 
 class ArcadeCssTests(unittest.TestCase):
     @classmethod

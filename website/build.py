@@ -34,7 +34,6 @@ from site_content import (  # noqa: E402
     extract_content,
 )
 from site_validation import (  # noqa: E402
-    GAME_DESCRIPTIONS,
     MAIN_ATTRIBUTES,
     REQUIRED_404_REFERENCES,
     SERVICE_ICON_PATHS,
@@ -55,7 +54,6 @@ __all__ = (
     "ContractError",
     "DOCUMENT_CONTRACTS",
     "FULL_MANIFEST",
-    "GAME_DESCRIPTIONS",
     "MAIN_ATTRIBUTES",
     "MANIFESTO_CONTRACT",
     "PYPI_URL",

@@ -57,21 +57,28 @@ class _FragmentParser(HTMLParser):
         super().__init__()
         self.ids: list[str] = []
         self.tags: list[tuple[str, dict[str, str | None]]] = []
-        self.parents: dict[str, str | None] = {}
-        self.tag_parents: list[tuple[str, dict[str, str | None], str | None]] = []
-        self.stack: list[tuple[str, str | None]] = []
+        self.id_indexes: dict[str, int] = {}
+        self.parent_indexes: list[int | None] = []
+        self.children: list[list[int]] = []
+        self.direct_text: list[list[str]] = []
+        self.stack: list[tuple[str, int]] = []
         self.text: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attributes = dict(attrs)
+        index = len(self.tags)
+        parent = self.stack[-1][1] if self.stack else None
         self.tags.append((tag, attributes))
-        parent = next((identifier for _, identifier in reversed(self.stack) if identifier is not None), None)
-        self.tag_parents.append((tag, attributes, parent))
+        self.parent_indexes.append(parent)
+        self.children.append([])
+        self.direct_text.append([])
+        if parent is not None:
+            self.children[parent].append(index)
         identifier = attributes.get("id")
         if identifier is not None:
             self.ids.append(identifier)
-            self.parents[identifier] = parent
-        self.stack.append((tag, identifier))
+            self.id_indexes[identifier] = index
+        self.stack.append((tag, index))
 
     def handle_endtag(self, tag: str) -> None:
         while self.stack:
@@ -81,6 +88,8 @@ class _FragmentParser(HTMLParser):
 
     def handle_data(self, data: str) -> None:
         self.text.append(data)
+        if self.stack:
+            self.direct_text[self.stack[-1][1]].append(data)
 
 
 def _one(parser: _FragmentParser, identifier: str) -> tuple[str, dict[str, str | None]]:
@@ -88,6 +97,15 @@ def _one(parser: _FragmentParser, identifier: str) -> tuple[str, dict[str, str |
     if len(matches) != 1:
         raise ValueError(f"lander-game.html: expected exactly one #{identifier}")
     return matches[0]
+
+
+def _children(parser: _FragmentParser, identifier: str) -> list[tuple[str, dict[str, str | None]]]:
+    index = parser.id_indexes[identifier]
+    return [parser.tags[child] for child in parser.children[index]]
+
+
+def _nonempty(value: str | None) -> bool:
+    return bool(" ".join((value or "").split()))
 
 
 def validate_game_contract(template: str) -> None:
@@ -103,7 +121,13 @@ def validate_game_contract(template: str) -> None:
         missing = sorted(EXPECTED_GAME_IDS - set(parser.ids))
         extra = sorted(set(parser.ids) - EXPECTED_GAME_IDS)
         raise ValueError(f"lander-game.html: game ID contract differs; missing={missing}, extra={extra}")
-    if parser.tags[0] != ("section", {"id": "lander-game", "aria-label": "Lunar deployment scene"}):
+    root_tag, root_attributes = parser.tags[0]
+    if (
+        root_tag != "section"
+        or set(root_attributes) != {"id", "aria-label"}
+        or root_attributes["id"] != "lander-game"
+        or not _nonempty(root_attributes["aria-label"])
+    ):
         raise ValueError("lander-game.html: root section contract is invalid")
     _, scene = _one(parser, "lander-scene")
     if scene != {
@@ -115,13 +139,14 @@ def validate_game_contract(template: str) -> None:
     }:
         raise ValueError("lander-game.html: named static SVG contract is invalid")
     _, start = _one(parser, "lander-start")
-    if start != {
-        "id": "lander-start",
-        "type": "button",
-        "hidden": None,
-        "disabled": None,
-        "aria-label": "Start lunar deployment mission",
-    }:
+    if (
+        set(start) != {"id", "type", "hidden", "disabled", "aria-label"}
+        or start["id"] != "lander-start"
+        or start["type"] != "button"
+        or start["hidden"] is not None
+        or start["disabled"] is not None
+        or not _nonempty(start["aria-label"])
+    ):
         raise ValueError("lander-game.html: static Start must be hidden and disabled")
     tag, fuel_value = _one(parser, "lander-fuel-value")
     if tag != "span" or fuel_value != {
@@ -179,22 +204,32 @@ def validate_game_contract(template: str) -> None:
                         "lander-controls-rail", "lander-controls", "lander-exit")]
     if stage_positions != sorted(stage_positions):
         raise ValueError("lander-game.html: stage, outcome, Restart, and controls rail order is invalid")
-    expected_parents = {
-        "lander-scene-stage": "lander-scene-shell",
-        "lander-outcome": "lander-scene-stage",
-        "lander-status": "lander-outcome",
-        "lander-restart": "lander-outcome",
-        "lander-controls-rail": "lander-scene-shell",
-        "lander-controls": "lander-controls-rail",
-        "lander-exit": "lander-controls-rail",
+    expected_children = {
+        "lander-game": ["lander-scene-shell"],
+        "lander-scene-shell": ["lander-scene-stage", "lander-controls-rail"],
+        "lander-scene-stage": ["lander-scene", "lander-start", "lander-fuel",
+                               "lander-target-direction", "lander-outcome"],
+        "lander-outcome": ["lander-status", "lander-restart"],
+        "lander-controls-rail": ["lander-controls", "lander-exit"],
     }
-    if any(parser.parents.get(identifier) != parent for identifier, parent in expected_parents.items()):
-        raise ValueError("lander-game.html: action and controls parent structure is invalid")
+    for parent, identifiers in expected_children.items():
+        children = _children(parser, parent)
+        if [attributes.get("id") for _, attributes in children] != identifiers:
+            raise ValueError(f"lander-game.html: #{parent} immediate child structure is invalid")
+    if _children(parser, "lander-status") or _children(parser, "lander-controls"):
+        raise ValueError("lander-game.html: status and controls must contain direct prose only")
+    for identifier in ("lander-scene-title", "lander-scene-description", "lander-fuel-label",
+                       "lander-fuel-value", "lander-controls"):
+        index = parser.id_indexes[identifier]
+        if parser.children[index] or not _nonempty("".join(parser.direct_text[index])):
+            raise ValueError(f"lander-game.html: #{identifier} must be a nonempty direct text source")
     for identifier in ("lander-restart", "lander-exit"):
-        children = [attributes for tag, attributes, parent in parser.tag_parents
-                    if tag == "span" and parent == identifier]
-        if children != [{}, {"class": "lander-key-hint", "aria-hidden": "true"}]:
+        children = _children(parser, identifier)
+        if children != [("span", {}), ("span", {"class": "lander-key-hint", "aria-hidden": "true"})]:
             raise ValueError(f"lander-game.html: #{identifier} label and hint structure is invalid")
+        for child in parser.children[parser.id_indexes[identifier]]:
+            if parser.children[child] or not _nonempty("".join(parser.direct_text[child])):
+                raise ValueError(f"lander-game.html: #{identifier} action text sources are invalid")
     for required in (
         'class="terrain-chunk"',
         'data-chunk-index="-1"',

@@ -339,7 +339,7 @@ class StaticDocumentTests(unittest.TestCase):
         self,
     ) -> None:
         self.assertEqual(len(self.document.ids), len(set(self.document.ids)))
-        self.assertEqual(self.element("lander-game")[1]["aria-label"], "Lunar deployment scene")
+        self.assertTrue(" ".join((self.element("lander-game")[1]["aria-label"] or "").split()))
         self.assertTrue(self.element("lander-start")[1]["aria-label"])
         self.assertEqual(self.element("lander-scene-shell")[1]["tabindex"], "-1")
         status = self.element("lander-status")[1]

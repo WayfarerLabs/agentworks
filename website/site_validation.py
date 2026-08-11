@@ -67,7 +67,6 @@ GAME_CSP: Final = (
     "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; "
     "connect-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
 )
-GAME_DESCRIPTIONS: Final = {"lander.html": "Fly the Agentworks lunar deployment mission and deliver an agent to the NOC.", "404.html": "The requested Agentworks page was not found."}  # noqa: E501
 TEMPLATE_DESTINATIONS: Final = {
     "index.html": Path("index.html"),
     "manifesto.html": Path("manifesto/index.html"),
@@ -434,7 +433,7 @@ def _validate_shared_shell(name: str, template: str) -> None:
         [(elements[i].tag, elements[i].attributes) for i in _children(parser, head_index)],
         expected_canonical,
     )
-    if name in GAME_DESCRIPTIONS:
+    if name in GAME_DETAIL_TEMPLATES:
         description_index = _one(
             parser,
             [
@@ -442,7 +441,7 @@ def _validate_shared_shell(name: str, template: str) -> None:
                 for i in _children(parser, head_index)
                 if elements[i].tag == "meta" and elements[i].attributes.get("name") == "description"
             ],
-            f"{name}: one exact description is required",
+            f"{name}: one description is required",
         )
         csp_index = _one(
             parser,
@@ -453,10 +452,12 @@ def _validate_shared_shell(name: str, template: str) -> None:
             ],
             f"{name}: one exact Content Security Policy is required",
         )
-        if elements[description_index].attributes != {
-            "name": "description",
-            "content": GAME_DESCRIPTIONS[name],
-        }:
+        description_attributes = elements[description_index].attributes
+        if (
+            set(description_attributes) != {"name", "content"}
+            or description_attributes["name"] != "description"
+            or not " ".join((description_attributes["content"] or "").split())
+        ):
             raise ValueError(f"{name}: description metadata is invalid")
         if elements[csp_index].attributes != {
             "http-equiv": "Content-Security-Policy",
