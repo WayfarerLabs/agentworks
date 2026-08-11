@@ -219,6 +219,16 @@ Planned children, seeded when their prerequisites land (see `phasing.md`):
   focal-node, kind-filter, direction, depth, and format axes, `describe`'s fate is an open A-or-B
   (remove, or rebuild as the kind-aware card with a per-kind detail hook), `--write` semantics
   unify, and the CLI-hygiene audit bundle rides along; breaking, so it shares the pre-0.14 window
+- Prose-test-purge child (seeded 2026-08-11, PR #494 pending): removes the authored-wording
+  assertions the `no-prose-policing-tests` rule now forbids. A dispatched survey put it at roughly
+  190 to 230 wholly prose-policing test functions plus 620 to 700 carrying one riding-along
+  assertion, about one function in five, concentrated in workspaces, agents, guide, sessions and
+  vms; the widest instance is `pytest.raises(match=)` on authored sentences (362 of 609 sites), not
+  the guide content that prompted the ruling. Its R4 items are small production changes (result
+  records for repair/grant/revoke/console-sync, the schema layer's existing structured problems
+  promoted to a test seam, stable error codes, doctor check IDs) and do not gate 0.14 unless the
+  operator asks. Distinct from the test-consolidation child above: that one trims redundancy, this
+  one removes a category of assertion.
 - Security-architecture doc child: seeds after wave 3 merges; carries the per-platform
   durable-surface inventory (what each provider retains) so provider-boundary reviews check a list
   rather than rediscovering the class incident-by-incident (lesson from wave 3's three-round class
@@ -245,6 +255,29 @@ explicit and unchecked, required before that effort's final closeout. The manife
 rebase obligation (manifesto source path plus Home block re-pins) was discharged by PR #470's merge
 on 2026-08-10, and the continuous-lander stack entry now targets main.
 
+Two operator rulings on the Lander (2026-08-11): its continued expansion is intentional rather than
+creep, so the saga lead's proportionality question is closed rather than dormant; and **the Lander
+and onboarding both gate the final custom-domain cutover**, which makes the Phase 6, 8 and 9
+definitions of done correct as written. The domain-activation runbook names both prerequisites, and
+onboarding's own remaining gate is the live acceptance carried on the regenerated 0.14 release PR,
+so the cutover sits behind that too.
+
+GCP scope extraction (operator ruling, 2026-08-11): PR #479 had absorbed a shared install-predicate
+contract change and an AWS installer rewrite discovered during its live acceptance. Both left the
+PR. The ruling generalizes: outside of bug fixes for the work in question, core-logic modifications
+are their own efforts, now codified by PR #497 (dev-process section 1a plus reviewer check 12b).
+Three follow-ups were filed rather than absorbed:
+[issue 492](https://github.com/WayfarerLabs/agentworks/issues/492) (SSH known-hosts state escapes an
+isolated `HOME` at eleven call sites, every platform),
+[issue 495](https://github.com/WayfarerLabs/agentworks/issues/495) (doctor TTY color tests assert
+host shell inventory and flake under parallel CI), and
+[issue 496](https://github.com/WayfarerLabs/agentworks/issues/496) (the install-command predicate
+contract plus transactional AWS installer completion, carrying the extracted commits and seven open
+findings). The AWS CLI recipe itself is being removed on the operator's instruction after it emerged
+that the framework already ships declarative `snap` support (`vm_template.snap`), which the saga
+lead's three reviews of that machinery never checked for: craftsmanship verified, existence never
+priced.
+
 ## Standing process rulings
 
 Permanent homes landed via PRs #473/#474/#477/#481: the sdd skill's supersession paragraph; the
@@ -263,6 +296,21 @@ poller rule stands as merged in PR #481, and PR #489 closed unmerged.)
   adversarial verification verifies the contract — it never expands it. More than two or three fix
   rounds on one finding is a contract smell: stop and re-price the requirement with the operator
   instead of growing machinery. Reviewers price requirements, not just implementations.
+- **No prose policing (operator, 2026-08-11; permanent home merged as PR #493):** we do not
+  unit-test the wording of prose we author. Asserting a sentence is present, blacklisting forbidden
+  phrasings, normalizing prose to compare it, and pinning a body verbatim are all out; wording is a
+  review concern and behavior is a test concern. The one exception is prose arriving from outside
+  the repository, pinned narrowly at the token the code branches on. Development principle 3 carries
+  a clarifying paragraph so "enforce invariants" is never read as "assert the sentence", and the
+  reviewer asks for deletion rather than a stronger pin. Note for future rounds: a stronger pin is
+  the same mistake one size larger, which the saga lead proposed twice before it stuck.
+- **Findings outside an effort's machinery (operator, 2026-08-11; permanent home in PR #497):**
+  outside of bug fixes for the work in question, core-logic and shared-contract modifications are
+  their own efforts even when another effort found the bug. The test is whether the fix touches
+  machinery this effort owns, settled by asking whether the bug reproduces with the effort reverted
+  and whether the fix changes behavior for consumers who never asked for it. File the finding with
+  root cause and call sites; move already-written commits to their own branch rather than merging
+  them. Reviewers are bound symmetrically: asking for an out-of-scope fix is how scope grows.
 - **Class sweeps (saga lead, 2026-08-10, from wave 3's provider-boundary rounds):** the first
   instance of a contract-violation class triggers enumeration of every implementation of the same
   seam, each verified on its durable surface, before the class is called fixed.
