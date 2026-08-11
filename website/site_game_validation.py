@@ -28,12 +28,15 @@ EXPECTED_GAME_IDS = frozenset(
         "next-site-cue",
         "lander-start",
         "lander-fuel",
+        "lander-fuel-gauge",
+        "lander-fuel-gauge-fill",
         "lander-fuel-label",
         "lander-fuel-value",
         "lander-target-direction",
         "lander-controls",
         "lander-actions",
         "lander-exit",
+        "lander-launch",
         "lander-restart",
         "lander-status",
     }
@@ -112,6 +115,12 @@ def validate_game_contract(template: str) -> None:
     _, restart = _one(parser, "lander-restart")
     if restart != {"id": "lander-restart", "type": "button", "hidden": None, "disabled": None}:
         raise ValueError("lander-game.html: static Restart must be hidden and disabled")
+    _, launch = _one(parser, "lander-launch")
+    if launch != {"id": "lander-launch", "type": "button", "hidden": None, "disabled": None}:
+        raise ValueError("lander-game.html: static Launch must be hidden and disabled")
+    _, gauge = _one(parser, "lander-fuel-gauge")
+    if gauge != {"id": "lander-fuel-gauge", "aria-hidden": "true"}:
+        raise ValueError("lander-game.html: fuel gauge must remain decorative")
     normalized = " ".join(" ".join(parser.text).split())
     controls = (
         "Thrust: Space or Up. Turn: Left/H or Right/L. Tap or hold to thrust; drag to turn. "
@@ -122,6 +131,10 @@ def validate_game_contract(template: str) -> None:
     positions = [template.index(f'id="{identifier}"') for identifier in ("lander-scene-shell", "lander-fuel", "lander-target-direction", "lander-controls", "lander-actions", "lander-status")]
     if positions != sorted(positions):
         raise ValueError("lander-game.html: scene and active chrome order is invalid")
+    action_positions = [template.index(f'id="{identifier}"') for identifier in
+                        ("lander-exit", "lander-launch", "lander-restart")]
+    if action_positions != sorted(action_positions):
+        raise ValueError("lander-game.html: Exit, Launch, and Restart order is invalid")
     for required in (
         'class="terrain-chunk"',
         'data-chunk-index="-1"',
@@ -134,34 +147,47 @@ def validate_game_contract(template: str) -> None:
         'data-power="off"',
         'data-noc-stage="0"',
         'class="landing-platform"',
-        'class="platform-supports"',
+        'class="site-scaffold"',
         'class="gas-can"',
         'class="noc-building"',
         'class="noc-battery"',
-        'class="battery-terminal"',
         'class="battery-bar battery-bar-1"',
         'class="battery-bar battery-bar-2"',
         'class="battery-bar battery-bar-3"',
         'class="battery-bar battery-bar-4"',
         'class="noc-antenna antenna-mast"',
+        'class="noc-antenna antenna-signal antenna-signal-1"',
+        'class="noc-antenna antenna-signal antenna-signal-2"',
+        'class="noc-antenna antenna-signal antenna-signal-3"',
     ):
         if required not in template:
             raise ValueError(f"lander-game.html: missing static world contract {required}")
-    support = [attributes for _, attributes in parser.tags if attributes.get("class") == "platform-supports"]
-    support_prefix = "M312 471.6557689513639H408V476.1557689513639H312Z"
-    if len(support) != 1 or not (support[0].get("d") or "").startswith(support_prefix):
-        raise ValueError("lander-game.html: static platform support geometry is invalid")
+    scaffold = [attributes for _, attributes in parser.tags if attributes.get("class") == "site-scaffold"]
+    scaffold_contract = {"fill": "none", "stroke": "#4b4e55", "stroke-width": "2",
+                         "stroke-linecap": "butt", "stroke-linejoin": "round"}
+    if len(scaffold) != 1 or any(scaffold[0].get(key) != value for key, value in scaffold_contract.items()) or not (
+        scaffold[0].get("d") or ""
+    ).startswith("M312 455.6557689513638H408V476.1557689513639H312Z"):
+        raise ValueError("lander-game.html: static open scaffold geometry is invalid")
     battery_contract = (
-        '<rect x="452" y="412.1557689513639" width="22" height="40" rx="2" />',
-        '<path class="battery-terminal" d="M458 412.1557689513639v-6h10v6" />',
-        '<path class="battery-bar battery-bar-1" d="M457 442.1557689513639h12v5h-12Z" />',
-        '<path class="battery-bar battery-bar-2" d="M457 434.1557689513639h12v5h-12Z" />',
-        '<path class="battery-bar battery-bar-3" d="M457 426.1557689513639h12v5h-12Z" />',
-        '<path class="battery-bar battery-bar-4" d="M457 418.1557689513639h12v5h-12Z" />',
+        '<rect x="452" y="396.1557689513639" width="22" height="40" />',
+        '<path class="battery-bar battery-bar-1" d="M457 426.1557689513639h12v5h-12Z" />',
+        '<path class="battery-bar battery-bar-2" d="M457 418.1557689513639h12v5h-12Z" />',
+        '<path class="battery-bar battery-bar-3" d="M457 410.1557689513639h12v5h-12Z" />',
+        '<path class="battery-bar battery-bar-4" d="M457 402.1557689513639h12v5h-12Z" />',
     )
     battery_positions = [template.find(fragment) for fragment in battery_contract]
     if -1 in battery_positions or battery_positions != sorted(battery_positions):
         raise ValueError("lander-game.html: static battery geometry or order is invalid")
+    if "battery-terminal" in template:
+        raise ValueError("lander-game.html: battery terminal is forbidden")
+    signal_contract = (
+        'd="M455 342.1557689513639Q463 334.1557689513639 471 342.1557689513639"',
+        'd="M448 341.1557689513639Q463 326.1557689513639 478 341.1557689513639"',
+        'd="M440 340.1557689513639Q463 317.1557689513639 486 340.1557689513639"',
+    )
+    if any(fragment not in template for fragment in signal_contract):
+        raise ValueError("lander-game.html: static symmetric antenna signal geometry is invalid")
 
 
 def validate_game_manifest(manifest: frozenset[Path]) -> None:

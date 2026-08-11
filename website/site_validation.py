@@ -60,7 +60,7 @@ TEMPLATE_METADATA: Final = {
     "index.html": ("Agentworks", "https://agentworks.build/"),
     "manifesto.html": ("Agentworks Manifesto", "https://agentworks.build/manifesto/"),
     "security.html": ("Security | Agentworks", "https://agentworks.build/security/"),
-    "lander.html": ("Lunar deployment | Agentworks", "https://agentworks.build/lander/"),
+    "lander.html": ("We need to deploy some agents! | Agentworks", "https://agentworks.build/lander/"),
     "404.html": ("Page not found | Agentworks", "https://agentworks.build/404.html"),
 }
 GAME_CSP: Final = (
@@ -83,7 +83,7 @@ MAIN_ATTRIBUTES: Final = {
     "404.html": {"id": "main-content", "class": "detail-main game-main"},
 }
 DETAIL_PAGE_HEADINGS: Final = {
-    "lander.html": "Lunar deployment",
+    "lander.html": "We need to deploy some agents!",
     "404.html": "Page not found",
 }
 LONG_FORM_TEMPLATES: Final = frozenset({"manifesto.html", "security.html"})
@@ -524,7 +524,7 @@ def _validate_shared_shell(name: str, template: str) -> None:
                 parser,
                 main_children[1],
                 {"id": "not-found-message"},
-                "This route has not been deployed. The lunar surface below is still operational.",
+                "This route is broken! We need to deploy some agents!",
                 f"{name}: not-found message contract is invalid",
             )
         if name in {"lander.html", "404.html"} and any(

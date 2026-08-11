@@ -282,7 +282,7 @@ class GeneratedDocumentTests(RepositoryFixture):
             ),
             "security": ("Security | Agentworks", "https://agentworks.build/security/"),
             "lander": (
-                "Lunar deployment | Agentworks",
+                "We need to deploy some agents! | Agentworks",
                 "https://agentworks.build/lander/",
             ),
             "404": ("Page not found | Agentworks", "https://agentworks.build/404.html"),

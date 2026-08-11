@@ -360,7 +360,13 @@ class StaticDocumentTests(unittest.TestCase):
         self.assertEqual(status["aria-live"], "polite")
         self.assertEqual(status["aria-atomic"], "true")
         self.assertEqual(self.element("lander-exit")[0], "button")
+        launch = self.element("lander-launch")
+        self.assertEqual(launch[0], "button")
+        self.assertIn("hidden", launch[1])
+        self.assertIn("disabled", launch[1])
+        self.assertEqual(" ".join(self.document.text_by_id["lander-launch"].split()), "Launch")
         self.assertEqual(self.element("lander-restart")[0], "button")
+        self.assertEqual(self.element("lander-fuel-gauge")[1]["aria-hidden"], "true")
         description = " ".join(self.document.text_by_id["lander-scene-description"].split()).lower()
         for word in ("lander", "surface", "helipad", "gas can", "dark", "network operations center"):
             self.assertIn(word, description)
@@ -404,11 +410,14 @@ class StaticDocumentTests(unittest.TestCase):
         self.assertIn((312, shelf_y), surfaces[1])
         self.assertIn((498, shelf_y), surfaces[1])
         deck = next(attributes for _, attributes in self.document.tags if attributes.get("class") == "landing-platform")
-        self.assertEqual(float(deck["y"]) + float(deck["height"]), 471.6557689513639)
-        support = next(attributes for _, attributes in self.document.tags if attributes.get("class") == "platform-supports")
-        self.assertTrue(support["d"].startswith("M312 471.6557689513639H408V476.1557689513639"))
+        self.assertEqual(float(deck["y"]) + float(deck["height"]), 455.6557689513638)
+        support = next(attributes for _, attributes in self.document.tags if attributes.get("class") == "site-scaffold")
+        self.assertTrue(support["d"].startswith("M312 455.6557689513638H408V476.1557689513639"))
+        self.assertEqual(support["fill"], "none")
+        self.assertEqual(support["stroke-linecap"], "butt")
+        self.assertEqual(support["stroke-linejoin"], "round")
         noc = next(attributes for _, attributes in self.document.tags if attributes.get("class") == "noc-building")
-        self.assertTrue(noc["d"].startswith(f"M428 {shelf_y}V"))
+        self.assertTrue(noc["d"].startswith("M428 452.1557689513638V"))
         self.assertIn("rotate(var(--thrust-vector-angle))", self.css)
 
     def test_css_has_only_bounded_keyframes_and_reduced_motion_preserves_live_plumes(
@@ -425,7 +434,7 @@ class StaticDocumentTests(unittest.TestCase):
         self.assertNotIn("#mission-right-engine", reduced)
         self.assertNotIn("scale(1, 0.08)", reduced)
         self.assertIn('[data-paused="true"]', self.css)
-        powered_rule = self.css.split('.lander-site[data-power="on"] .antenna-signal {', 1)[1].split("}", 1)[0]
+        powered_rule = self.css.split('.lander-site[data-noc-stage="7"] .antenna-signal-3 {', 1)[1].split("}", 1)[0]
         self.assertIn("opacity: 1", powered_rule)
         self.assertNotIn("animation", powered_rule)
 
@@ -483,6 +492,10 @@ class StaticDocumentTests(unittest.TestCase):
             'this.listen(this.lander_restart, "click", () => this.restart()',
             listeners,
         )
+        self.assertIn(
+            'this.listen(this.lander_launch, "click", (event) => this.launch(event)',
+            listeners,
+        )
         keyboard = self.game.split("onKeyDown(event) {", 1)[1].split("onKeyUp(event) {", 1)[0]
         self.assertIn("this.exit()", keyboard)
         self.assertIn("this.restart()", keyboard)
@@ -495,9 +508,15 @@ class StaticDocumentTests(unittest.TestCase):
         restart = self.game.split("restart() {", 1)[1].split("onKeyDown(event) {", 1)[0]
         self.assertIn("this.lander_restart.hidden = true", restart)
         self.assertIn("this.lander_scene_shell.focus({ preventScroll: true })", restart)
+        launch = self.game.split("launch(event) {", 1)[1].split("onKeyDown(event) {", 1)[0]
+        self.assertIn('this.model.state !== "launching"', launch)
+        self.assertIn("this.lander_scene_shell.focus({ preventScroll: true })", launch)
+        self.assertIn('this.beginCollectivePulse(token, "launch-button", timestamp, timestamp + 140)', launch)
         render = self.game.split("render() {", 1)[1].split("destroy() {", 1)[0]
         self.assertIn('this.model.state === "failed"', render)
         self.assertIn("this.lander_restart.disabled = !failed", render)
+        self.assertIn("this.lander_launch.hidden = !launchReady", render)
+        self.assertIn("this.lander_launch.disabled = !launchReady", render)
 
     def test_fixed_color_contrast_meets_text_and_graphic_thresholds(self) -> None:
         self.assertGreaterEqual(contrast("#292b30", "#f5f2e8"), 4.5)

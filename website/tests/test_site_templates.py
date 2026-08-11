@@ -144,7 +144,7 @@ class TemplateContractTests(RepositoryFixture):
 
     def test_detail_page_headings_reject_provenance_eyebrows(self) -> None:
         headings = {
-            "lander.html": "Lunar deployment",
+            "lander.html": "We need to deploy some agents!",
             "404.html": "Page not found",
         }
         for name, heading in headings.items():
@@ -359,17 +359,17 @@ class TemplateContractTests(RepositoryFixture):
 
     def test_fragment_support_and_battery_geometry_fail_closed(self) -> None:
         template = (self.root / "website/templates/lander-game.html").read_text(encoding="utf-8")
-        bar_one = '<path class="battery-bar battery-bar-1" d="M457 442.1557689513639h12v5h-12Z" />'
-        bar_four = '<path class="battery-bar battery-bar-4" d="M457 418.1557689513639h12v5h-12Z" />'
+        bar_one = '<path class="battery-bar battery-bar-1" d="M457 426.1557689513639h12v5h-12Z" />'
+        bar_four = '<path class="battery-bar battery-bar-4" d="M457 402.1557689513639h12v5h-12Z" />'
         mutations = (
-            template.replace('class="platform-supports"', 'class="missing-support"', 1),
-            template.replace("M312 471.6557689513639H408", "M313 471.6557689513639H408", 1),
+            template.replace('class="site-scaffold"', 'class="missing-support"', 1),
+            template.replace("M312 455.6557689513638H408", "M313 455.6557689513638H408", 1),
             template.replace(bar_one, "BATTERY_SWAP", 1).replace(bar_four, bar_one, 1).replace(
                 "BATTERY_SWAP", bar_four, 1,
             ),
         )
         for changed in mutations:
-            with self.subTest(change=changed[:100]), self.assertRaisesRegex(ValueError, "support|battery"):
+            with self.subTest(change=changed[:100]), self.assertRaisesRegex(ValueError, "scaffold|battery"):
                 site_builder._validate_template("lander-game.html", changed)
 
     def test_fragment_variants_cannot_duplicate_local_route_destinations(self) -> None:

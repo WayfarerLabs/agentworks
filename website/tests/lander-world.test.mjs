@@ -30,7 +30,7 @@ import {
     terrainVerticesForWindow,
 } from "../static/lander-world.js";
 
-const GEOMETRY_URL = new URL("fixtures/lander-route-geometry-v1.json", import.meta.url);
+const GEOMETRY_URL = new URL("fixtures/lander-route-geometry-v2.json", import.meta.url);
 const TEMPLATE_URL = new URL("../templates/lander-game.html", import.meta.url);
 
 function canonical(value) {
@@ -53,13 +53,13 @@ test("seed mixer and sampled terrain match independent fixed vectors", () => {
     const vectors = [
         { seed: 1, selection: { direction: 1, offset: 0 }, motifs: [0,1,2,3],
             heights: [3.948548639542423,6.055567677598447,1.8625867156544702,
-                4.869605753710493,1.6766247917665167,2.4836438298225403], top: 5.286448038277216 },
+                4.869605753710493,1.6766247917665167,2.4836438298225403], top: 6.886448038277216 },
         { seed: 0x12345678, selection: { direction: 3, offset: 2 }, motifs: [2,1,0,3],
             heights: [2.8413594241719693,3.9342738820938394,5.72718834001571,
-                4.02010279793758,1.7130172558594494,3.8059317137813196], top: 4.564073424622881 },
+                4.02010279793758,1.7130172558594494,3.8059317137813196], top: 6.164073424622881 },
         { seed: 0xffffffff, selection: { direction: 1, offset: 1 }, motifs: [1,2,3,0],
             heights: [2.9631244149059057,0.763576190569438,1.9640279662329705,
-                4.864479741896503,3.564931517560035,2.4653832932235673], top: 5.5085339549761265 },
+                4.864479741896503,3.564931517560035,2.4653832932235673], top: 7.1085339549761265 },
     ];
     for (const vector of vectors) {
         vector.heights.forEach((value, index) => close(terrainSample(vector.seed, index), value));
@@ -106,7 +106,7 @@ test("rendered chunk ranges clip crossing shelves to exact collision boundaries"
 
 test("first site is one exact elevated three-lander-width helipad", () => {
     const site = createFirstSite(STATIC_WORLD_SEED);
-    close(site.platformTop, 7.984423104863613);
+    close(site.platformTop, 9.584423104863614);
     assert.equal(site.center, 36);
     close(site.platformRight - site.platformLeft, PLATFORM_WIDTH);
     close(site.shelfRight, site.platformRight + 9);
@@ -119,7 +119,7 @@ test("first site is one exact elevated three-lander-width helipad", () => {
 test("static world exactly renders the retained collision terrain and NOC foundation", async () => {
     const site = createFirstSite(STATIC_WORLD_SEED);
     const vertices = terrainVerticesForWindow(STATIC_WORLD_SEED, [site], -40, 140);
-    const expectedSceneY = 548 - siteFoundationBottom(vertices, site) * 10;
+    const expectedSceneY = 548 - site.platformTop * 10;
     const template = await readFile(TEMPLATE_URL, "utf8");
     const rendered = [...template.matchAll(
         /<path\s+class="terrain-chunk"\s+data-chunk-index="(-?\d+)"\s+d="([^"]+)"/g,
@@ -151,9 +151,9 @@ test("all nine constructive corridors replace the target span and preserve caps"
         const origin = createFirstSite(0x12345678);
         const target = instantiateTemplateSite(0x12345678, 1, origin, template);
         const vertices = corridorVertices(0x12345678, origin, target);
-        assert.deepEqual(vertices[0], [origin.shelfRight, origin.platformTop - 0.8]);
-        assert.deepEqual(vertices.at(-2), [target.platformLeft, target.platformTop - 0.8]);
-        assert.deepEqual(vertices.at(-1), [target.shelfRight, target.platformTop - 0.8]);
+        assert.deepEqual(vertices[0], [origin.shelfRight, origin.platformTop - 2.4]);
+        assert.deepEqual(vertices.at(-2), [target.platformLeft, target.platformTop - 2.4]);
+        assert.deepEqual(vertices.at(-1), [target.shelfRight, target.platformTop - 2.4]);
         for (const [, y] of vertices.slice(1, -2)) assert.ok(y <= origin.platformTop - 0.65);
         assert.ok(Object.isFrozen(target));
     }
@@ -179,11 +179,11 @@ test("camera, offscreen cue, and rolling retention remain bounded", async () => 
 test("geometry fixture is independent, versioned, and has a stable digest", async () => {
     const text = await readFile(GEOMETRY_URL, "utf8");
     const geometry = JSON.parse(text);
-    assert.equal(geometry.schema, "agw-lander-route-geometry/v1");
+    assert.equal(geometry.schema, "agw-lander-route-geometry/v2");
     assert.equal(geometry.templates.length, 9);
     assert.ok(!text.includes("demonstratedMinimum"));
     assert.ok(!text.includes('"runs"'));
     const bytes = JSON.stringify(canonical(geometry));
     assert.equal(createHash("sha256").update(bytes).digest("hex"),
-        "a45465787699a9b737b22bb32e0f40ae50913ce14cc3c6c2aeb9300f287ed8d8");
+        "e91ce3a27c011ef6b2549fdc36fa6e25db5c5da2d274233c9da4fc8adf4a0244");
 });

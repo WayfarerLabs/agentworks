@@ -3,8 +3,15 @@ export const CHUNK_WIDTH = 50;
 export const TERRAIN_SAMPLE_SPACING = 10;
 export const PLATFORM_WIDTH = 9.6;
 export const PLATFORM_THICKNESS = 0.35;
-export const PLATFORM_CLEARANCE = 0.8;
-export const TARGET_DECK_BAND = Object.freeze([1.55, 8.3]);
+export const PLATFORM_CLEARANCE = 2.4;
+export const TARGET_DECK_BAND = Object.freeze([3.15, 9.9]);
+export const SCAFFOLD_MEMBER_WIDTH = 0.2;
+export const SCAFFOLD_MEMBER_HALF = SCAFFOLD_MEMBER_WIDTH / 2;
+export const NOC_CONNECTOR_WIDTH = 2;
+export const NOC_WIDTH = 7;
+export const NOC_ROOF_OFFSET = 7.2;
+export const NOC_MAST_WIDTH = 0.5;
+export const NOC_MAST_HEIGHT = 3.2;
 
 export const MOTIFS = Object.freeze([
     Object.freeze([0, 2.4, -1.5, 1.8, -1.1, 0]),
@@ -115,6 +122,74 @@ export function terrainVerticesForRange(vertices, left, right) {
 export function siteFoundationBottom(vertices, site) {
     void vertices;
     return site.platformTop - PLATFORM_CLEARANCE;
+}
+
+export function siteStructure(site) {
+    const padBase = site.platformTop - PLATFORM_CLEARANCE;
+    const buildingLeft = site.platformRight + NOC_CONNECTOR_WIDTH;
+    const buildingRight = buildingLeft + NOC_WIDTH;
+    const roof = site.platformTop + NOC_ROOF_OFFSET;
+    return freeze({
+        buildingLeft,
+        buildingRight,
+        connector: {
+            bottom: site.platformTop - PLATFORM_THICKNESS - SCAFFOLD_MEMBER_HALF,
+            left: site.platformRight - SCAFFOLD_MEMBER_HALF,
+            right: buildingLeft + SCAFFOLD_MEMBER_HALF,
+            top: site.platformTop + SCAFFOLD_MEMBER_HALF,
+        },
+        mast: {
+            bottom: roof,
+            left: buildingLeft + (NOC_WIDTH - NOC_MAST_WIDTH) / 2,
+            right: buildingLeft + (NOC_WIDTH + NOC_MAST_WIDTH) / 2,
+            top: roof + NOC_MAST_HEIGHT,
+        },
+        noc: { bottom: padBase, left: buildingLeft, right: buildingRight, top: roof },
+        nocUnderframe: {
+            bottom: padBase - SCAFFOLD_MEMBER_HALF,
+            left: buildingLeft - SCAFFOLD_MEMBER_HALF,
+            right: buildingRight + SCAFFOLD_MEMBER_HALF,
+            top: site.platformTop + SCAFFOLD_MEMBER_HALF,
+        },
+        padBase,
+        platformUnderframe: {
+            bottom: padBase - SCAFFOLD_MEMBER_HALF,
+            left: site.platformLeft - SCAFFOLD_MEMBER_HALF,
+            right: site.platformRight + SCAFFOLD_MEMBER_HALF,
+            top: site.platformTop - PLATFORM_THICKNESS + SCAFFOLD_MEMBER_HALF,
+        },
+        roof,
+    });
+}
+
+function scaffoldBay(path, left, right, top, bottom) {
+    path.push(`M${left} ${top}L${right} ${bottom}`, `M${left} ${bottom}L${right} ${top}`);
+}
+
+export function siteScaffoldPath(site) {
+    const structure = siteStructure(site);
+    const projectX = (x) => x * 10;
+    const projectY = (y) => 548 - y * 10;
+    const platformTop = projectY(site.platformTop);
+    const deckBottom = projectY(site.platformBottom);
+    const shelf = projectY(structure.padBase);
+    const platformLeft = projectX(site.platformLeft);
+    const platformRight = projectX(site.platformRight);
+    const nocLeft = projectX(structure.buildingLeft);
+    const nocRight = projectX(structure.buildingRight);
+    const path = [
+        `M${platformLeft} ${deckBottom}H${platformRight}V${shelf}H${platformLeft}Z`,
+        `M${platformRight} ${platformTop}H${nocLeft}V${deckBottom}H${platformRight}Z`,
+        `M${nocLeft} ${platformTop}H${nocRight}V${shelf}H${nocLeft}Z`,
+    ];
+    for (let bay = 0; bay < 6; bay += 1) {
+        scaffoldBay(path, platformLeft + bay * 16, platformLeft + (bay + 1) * 16, deckBottom, shelf);
+    }
+    scaffoldBay(path, platformRight, nocLeft, platformTop, deckBottom);
+    for (let bay = 0; bay < 7; bay += 1) {
+        scaffoldBay(path, nocLeft + bay * 10, nocLeft + (bay + 1) * 10, platformTop, shelf);
+    }
+    return path.join("");
 }
 
 export function nativeTerrainVertices(seed, left, right) {

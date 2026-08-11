@@ -27,11 +27,11 @@ import {
     createSimulationClock,
     effectiveThrust,
     enqueueInputEdge,
+    fuelGaugeLevel,
     integratePose,
     mixDigitalInput,
     mixEngineRequests,
     nextAwardRatio,
-    platformRiserBounds,
     plumeForThrust,
     pointerEngineRequests,
     proveTemplate,
@@ -44,6 +44,8 @@ import {
     STATIC_WORLD_SEED,
     corridorVertices,
     instantiateTemplateSite,
+    siteScaffoldPath,
+    siteStructure,
     siteFoundationBottom,
     terrainSample,
     terrainPath,
@@ -97,6 +99,7 @@ class FakeElement {
         this.listeners = new Map(); this.capturedPointers = new Set();
         const properties = new Map();
         this.style = { setProperty: (name, value) => properties.set(name, value),
+            getPropertyValue: (name) => properties.get(name) ?? "",
             removeProperty: (name) => properties.delete(name), properties };
     }
     addEventListener(type, listener) {
@@ -107,7 +110,7 @@ class FakeElement {
         this.listeners.set(type, (this.listeners.get(type) ?? []).filter((candidate) => candidate !== listener));
     }
     dispatchEvent(event) {
-        event.target ??= this; event.currentTarget = this;
+        event.target ??= this; event.currentTarget = this; this.lastEventTime = event.timeStamp;
         event.composedPath ??= () => [this];
         event.preventDefault ??= () => { event.defaultPrevented = true; };
         for (const listener of [...(this.listeners.get(event.type) ?? [])]) listener(event);
@@ -129,7 +132,7 @@ class FakeElement {
     hasPointerCapture(pointerId) { return this.capturedPointers.has(pointerId); }
     releasePointerCapture(pointerId) {
         if (!this.capturedPointers.delete(pointerId)) return;
-        this.dispatchEvent({ type: "lostpointercapture", pointerId, timeStamp: performance.now() });
+        this.dispatchEvent({ type: "lostpointercapture", pointerId, timeStamp: this.lastEventTime ?? performance.now() });
     }
     getBoundingClientRect() { return { width: 1000 }; }
     get firstElementChild() { return this.children[0] ?? null; }
@@ -156,13 +159,16 @@ class FakeElement {
 function controllerFixture() {
     const root = new FakeElement(); const actions = new FakeElement(root);
     const ids = ["lander-scene-shell", "lander-scene", "lander-start", "lander-fuel", "lander-fuel-value",
-        "lander-target-direction", "lander-controls", "lander-actions", "lander-exit", "lander-restart", "lander-status",
+        "lander-fuel-gauge-fill", "lander-target-direction", "lander-controls", "lander-actions", "lander-exit",
+        "lander-launch", "lander-restart", "lander-status",
         "terrain-layer", "site-layer", "debris-layer", "mission-agent"];
     const elements = Object.fromEntries(ids.map((id) => [id, new FakeElement(root)]));
     elements["lander-actions"] = actions; elements["lander-exit"].parentElement = actions;
+    elements["lander-launch"].parentElement = actions;
     elements["lander-restart"].parentElement = actions;
     elements["lander-start"].hidden = true; elements["lander-start"].disabled = true;
     actions.hidden = true; elements["lander-exit"].disabled = true;
+    elements["lander-launch"].hidden = true; elements["lander-launch"].disabled = true;
     elements["lander-restart"].hidden = true; elements["lander-restart"].disabled = true;
     root.querySelector = (selector) => elements[selector.slice(1)] ?? FakeElement.prototype.querySelector.call(root, selector);
     root.cloneNode = () => controllerFixture().root;
@@ -198,8 +204,8 @@ function descendantCount(element) {
 
 test("9.0 engine physics, true gimbal, assist, input arbitration, and plumes match fixed vectors", () => {
     assert.equal(ENGINE_ACCELERATION, 9);
-    assert.equal(MAX_THRUST_VECTOR, 18);
-    assert.equal(TURNING_TOTAL, 1.2);
+    assert.equal(MAX_THRUST_VECTOR, 30);
+    assert.equal(TURNING_TOTAL, 0.8);
     assert.equal(TURN_DIFFERENTIAL, 0.375);
     const pose = { x: 10, y: 30, vx: 0, vy: 0, angle: 0, angularVelocity: 0 };
     const gravity = stepMany(pose, { left: 0, right: 0 }, 30, 120);
@@ -207,10 +213,10 @@ test("9.0 engine physics, true gimbal, assist, input arbitration, and plumes mat
     const collective = stepMany(pose, { left: 0.72, right: 0.72 }, 30, 120);
     close(collective.pose.y, 35.0215); close(collective.pose.vy, 9.96); close(collective.fuel, 28.56);
     const turn = integratePose(pose, { left: 0, right: 0.375 }, 30);
-    close((turn.pose.vx - pose.vx) / STEP_SECONDS, -1.04293235601545);
-    close((turn.pose.vy - pose.vy) / STEP_SECONDS, 0.209815742496143);
+    close((turn.pose.vx - pose.vx) / STEP_SECONDS, -1.6875);
+    close((turn.pose.vy - pose.vy) / STEP_SECONDS, -0.0771642622275195);
     close(turn.pose.angularVelocity, -0.25); close(turn.pose.angle, -0.00208333333333);
-    close(turn.thrust.vectorAngle, -18); close(turn.thrust.fuel, 29.996875);
+    close(turn.thrust.vectorAngle, -30); close(turn.thrust.fuel, 29.996875);
     const assisted = integratePose({ ...pose, angularVelocity: 15 }, { left: 0.72, right: 0.72 }, 30);
     close(assisted.thrust.left, 0.66); close(assisted.thrust.right, 0.78);
     close(assisted.pose.angularVelocity, 14.92); close(assisted.pose.angle, 0.124333333333);
@@ -226,19 +232,19 @@ test("9.0 engine physics, true gimbal, assist, input arbitration, and plumes mat
         [{ Space: true }, { left: 0.72, right: 0.72 }],
         [{ ArrowLeft: true }, { left: 0, right: 0.375 }],
         [{ ArrowRight: true }, { left: 0.375, right: 0 }],
-        [{ Space: true, ArrowLeft: true }, { left: 0.4125, right: 0.7875 }],
-        [{ Space: true, ArrowRight: true }, { left: 0.7875, right: 0.4125 }],
+        [{ Space: true, ArrowLeft: true }, { left: 0.21250000000000002, right: 0.5875 }],
+        [{ Space: true, ArrowRight: true }, { left: 0.5875, right: 0.21250000000000002 }],
         [{ ArrowLeft: true, ArrowRight: true }, { left: 0, right: 0 }],
         [{ Space: true, ArrowLeft: true, ArrowRight: true }, { left: 0.72, right: 0.72 }],
     ];
     for (const [input, expected] of digitalRows) assert.deepEqual(mixDigitalInput(input), expected);
     const pointer = pointerEngineRequests(1000, 1000);
-    assert.deepEqual(pointer, { left: 0.7875, right: 0.4125 });
-    assert.deepEqual(pointerEngineRequests(-1000, 1000), { left: 0.4125, right: 0.7875 });
+    assert.deepEqual(pointer, { left: 0.5875, right: 0.21250000000000002 });
+    assert.deepEqual(pointerEngineRequests(-1000, 1000), { left: 0.21250000000000002, right: 0.5875 });
     assert.deepEqual(pointerEngineRequests(0, 1000), { left: 0.72, right: 0.72 });
     assert.deepEqual(mixEngineRequests(mixDigitalInput({ Space: true }), pointer), pointer);
     assert.deepEqual(mixEngineRequests(mixDigitalInput({ ArrowLeft: true }), pointer),
-        { left: 0.4125, right: 0.7875 });
+        { left: 0.21250000000000002, right: 0.5875 });
     for (const command of [digitalRows[4][1], digitalRows[5][1], pointer,
         pointerEngineRequests(-1000, 1000)]) {
         close(command.left + command.right, TURNING_TOTAL);
@@ -281,7 +287,7 @@ test("all nine copied route literals pass exactly two defensive replays", () => 
 test("every accepted touchdown margin settles to the same proven centered checkpoint", () => {
     for (const template of REFERENCE_TEMPLATES) {
         const originSite = { id: 0, center: 20, platformLeft: 15.2, platformRight: 24.8,
-            platformTop: 4, platformBottom: 3.65, canCollected: true, powered: true, nocStage: 5 };
+            platformTop: 4, platformBottom: 3.65, canCollected: true, powered: true, nocStage: 7 };
         const targetSite = instantiateTemplateSite(STATIC_WORLD_SEED, 1, originSite, template);
         for (const x of [originSite.platformLeft + 1.621, originSite.center, originSite.platformRight - 1.621]) {
             const contact = { x, y: originSite.platformTop, vx: 0, vy: -1, angle: 0, angularVelocity: 0 };
@@ -299,14 +305,14 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
     const directory = await mkdtemp(join(tmpdir(), "agw-route-test-"));
     const output = join(directory, "routes.json");
     const tool = join(ROOT, "tools/derive_lander_routes.mjs");
-    const geometry = join(ROOT, "tests/fixtures/lander-route-geometry-v1.json");
-    const fixture = join(ROOT, "tests/fixtures/lander-route-derived-v2.json");
+    const geometry = join(ROOT, "tests/fixtures/lander-route-geometry-v2.json");
+    const fixture = join(ROOT, "tests/fixtures/lander-route-derived-v3.json");
     execFileSync(process.execPath, [tool, "--geometry", geometry, "--output", output, "--verify", fixture]);
     assert.equal(await readFile(output, "utf8"), await readFile(fixture, "utf8"));
     const derived = JSON.parse(await readFile(fixture, "utf8"));
-    assert.equal(derived.schema, "agw-lander-route-derived/v2");
-    assert.equal(derived.deriverVersion, "agw-lander-route-deriver/v3");
-    assert.equal(derived.recipeVersion, "agw-lander-route-recipes/v2");
+    assert.equal(derived.schema, "agw-lander-route-derived/v3");
+    assert.equal(derived.deriverVersion, "agw-lander-route-deriver/v4");
+    assert.equal(derived.recipeVersion, "agw-lander-route-recipes/v3");
     assert.equal(derived.canonicalPoseDecimals, 9);
     assert.deepEqual(REFERENCE_TEMPLATES, derived.routes);
     assert.equal(ROUTE_DIGESTS.outputDigest, derived.outputDigest);
@@ -319,9 +325,9 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
     assert.deepEqual([...new Set(derived.worldWitnesses.map(({ descriptor }) => descriptor.seed))],
         [1, 0x12345678, 0xffffffff]);
     assert.deepEqual([...new Set(derived.worldWitnesses.map(({ descriptor }) =>
-        `${descriptor.origin.center}:${descriptor.origin.top}`))], ["36:3.5", "117:5", "-42:6.5"]);
+        `${descriptor.origin.center}:${descriptor.origin.top}`))], ["36:5", "117:6.5", "-42:8"]);
     const expectedWitnessOrder = [1, 0x12345678, 0xffffffff].flatMap((seed) =>
-        [[36, 3.5], [117, 5], [-42, 6.5]].map(([center, top]) => ({ seed, center, top })));
+        [[36, 5], [117, 6.5], [-42, 8]].map(([center, top]) => ({ seed, center, top })));
     for (let templateIndex = 0; templateIndex < 9; templateIndex += 1) {
         const witnesses = derived.worldWitnesses.slice(templateIndex * 9, templateIndex * 9 + 9);
         assert.deepEqual(witnesses.map(({ descriptor }) => ({ seed: descriptor.seed,
@@ -330,16 +336,16 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
     assert.equal(digest(derived.worldWitnesses), derived.worldDigest);
     assert.deepEqual([derived.worldWitnesses[0].digest, derived.worldWitnesses[40].digest,
         derived.worldWitnesses.at(-1).digest], [
-        "cea87dac5bab063d0cc916f2f11daccf51cd31cb31851b8d5089e120bfc0c42c",
-        "fc7a867f17c662416f5f2388bdfbade634e4e32039b59264b1c6d9c910e67e81",
-        "46df6e6052a6f972a1a5e852b97f7d610b0998b3701a00bd8c36c8c2b9b198e1",
+        "54e4d86bd64cff39c99fafd43575ec238c8aa04a4f1bf0980901de64930b6c2c",
+        "932be6fbc5facead8ef196e8795f2a305ab453c37205033b17c5d30e0cc3d3c1",
+        "13bbc35fb3495e19f983e85ccf72fab2b77de94b23eb8098368cb601bf899ada",
     ]);
     assert.ok(derived.worldWitnesses.some(({ descriptor }) =>
         descriptor.corridorSamples.some((sample) => sample.relieved)));
     assert.ok(derived.worldWitnesses.some(({ descriptor }) => descriptor.vertices.some(([, value]) =>
         value !== Number(value.toFixed(derived.canonicalPoseDecimals)))));
-    assert.equal(derived.geometryDigest, "a45465787699a9b737b22bb32e0f40ae50913ce14cc3c6c2aeb9300f287ed8d8");
-    assert.equal(derived.worldDigest, "9ab22205ef9fbdad86112d1d411b2836ce15f24f234029f441cc52167bd69d73");
+    assert.equal(derived.geometryDigest, "e91ce3a27c011ef6b2549fdc36fa6e25db5c5da2d274233c9da4fc8adf4a0244");
+    assert.equal(derived.worldDigest, "535f190fdf7c7300a7667ce2a3e6d5f1395b197b0bd27c2dbb0f69f61310333a");
     for (const witness of derived.worldWitnesses) {
         const { descriptor } = witness;
         const template = REFERENCE_TEMPLATES.find((candidate) => candidate.templateId === descriptor.templateId);
@@ -347,7 +353,7 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
             platformLeft: descriptor.origin.center - 4.8, platformRight: descriptor.origin.center + 4.8,
             shelfRight: descriptor.origin.center + 4.8 + 9,
             platformTop: descriptor.origin.top, platformBottom: descriptor.origin.top - 0.35,
-            canCollected: true, powered: true, nocStage: 5 };
+            canCollected: true, powered: true, nocStage: 7 };
         const targetSite = instantiateTemplateSite(descriptor.seed, 1, originSite, template);
         assert.deepEqual({ center: targetSite.center, top: targetSite.platformTop }, descriptor.target);
         assert.deepEqual(terrainVerticesForWindow(descriptor.seed, [originSite, targetSite],
@@ -361,29 +367,30 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
             assert.ok(descriptor.vertices.some(([x, y]) => x === sample.x && y === sample.y));
         }
         assert.deepEqual(descriptor.blendSegments.targetLeft[1],
-            [descriptor.target.center - 4.8, descriptor.target.top - 0.8]);
+            [descriptor.target.center - 4.8, descriptor.target.top - 2.4]);
         assert.deepEqual(descriptor.blendSegments.targetRight[0],
-            [descriptor.target.center + 4.8 + 9, descriptor.target.top - 0.8]);
+            [descriptor.target.center + 4.8 + 9, descriptor.target.top - 2.4]);
         assert.equal(descriptor.sites.length, 2);
         for (const site of descriptor.sites) {
             close(site.platform.right - site.platform.left, 9.6);
-            close(site.riser.bottom, site.platform.top - 0.8);
-            close(site.riser.top, site.platform.bottom);
-            close(site.riser.right - site.riser.left, 9.6);
+            close(site.platformUnderframe.bottom, site.platform.top - 2.5);
+            close(site.platformUnderframe.top, site.platform.bottom + 0.1);
+            close(site.platformUnderframe.right - site.platformUnderframe.left, 9.8);
+            close(site.connector.right - site.connector.left, 2.2);
             close(site.noc.right - site.noc.left, 7);
             close(site.noc.top - site.platform.top, 7.2);
-            close(site.noc.bottom, site.platform.top - 0.8);
+            close(site.noc.bottom, site.platform.top - 2.4);
             close(site.mast.right - site.mast.left, 0.5);
             close(site.mast.top - site.mast.bottom, 3.2);
         }
     }
-    assert.ok(derived.routes.every((route) => route.combinationsEvaluated === 81));
+    assert.ok(derived.routes.every((route) => route.combinationsEvaluated === 2));
     for (const route of derived.routes) {
         for (const result of [route.success, route.smallerFailure]) {
             for (const value of Object.values(result.pose)) assert.equal(value, Number(value.toFixed(9)));
         }
     }
-    assert.equal(derived.routes[0].runs[1][1], 209, "the selected route is not the first ranged candidate");
+    assert.deepEqual(derived.routes[0].runs.slice(0, 3), [[1, 90], [0, 1], [1, 20]]);
     assert.equal(spawnSync(process.execPath, [tool, "--bogus"]).status, 2);
 
     const blockedGeometry = join(directory, "blocked-geometry.json");
@@ -394,7 +401,7 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
         "--verify", fixture]).status, 1);
 
     const changedTool = join(directory, "changed-recipes.mjs");
-    const changedSource = (await readFile(tool, "utf8")).replace("[3,208,210]", "[3,1,1]");
+    const changedSource = (await readFile(tool, "utf8")).replace("[3,65,65]", "[3,1,1]");
     assert.notEqual(changedSource, await readFile(tool, "utf8"));
     await writeFile(changedTool, changedSource, "utf8");
     assert.equal(spawnSync(process.execPath, [changedTool, "--geometry", geometry, "--output", output]).status, 1);
@@ -444,7 +451,7 @@ test("the old route-78 target crossing is rejected by the exact landing envelope
             angularVelocity: 9.658940314238862e-15 } } };
     assert.throws(() => proveTemplate(unsafe), /Route proof mismatch/);
     const originSite = { id: 0, center: 0, platformLeft: -4.8, platformRight: 4.8,
-        platformTop: 0, platformBottom: -0.35, canCollected: true, powered: true, nocStage: 5 };
+        platformTop: 0, platformBottom: -0.35, canCollected: true, powered: true, nocStage: 7 };
     const targetSite = { id: 1, center: 78, platformLeft: 73.2, platformRight: 82.8,
         platformTop: 0, platformBottom: -0.35, clearanceKnots: current.clearanceKnots };
     assert.throws(() => proveTemplate(current, { seed: 1, originSite, targetSite,
@@ -476,7 +483,7 @@ test("safe target top is inclusive and epsilon excess is unsafe", () => {
     }
 });
 
-test("closed unsafe geometry catches slopes, platform equality, solid riser, mast, and precedence", () => {
+test("closed unsafe geometry catches slopes, platform equality, scaffold, mast, and precedence", () => {
     const base = createRun({ seed: 1 });
     const site = base.retainedSites[0];
     const slopeModel = { ...base, retainedSites: [], targetSiteId: null, terrainVertices: [[0, 0], [10, 10]] };
@@ -487,7 +494,7 @@ test("closed unsafe geometry catches slopes, platform equality, solid riser, mas
     assert.equal(classifySweptContact(base, sidePose, sidePose).cause, "platform");
     const riserPose = { x: site.center, y: site.platformTop - 0.6,
         vx: 0, vy: 0, angle: 180, angularVelocity: 0 };
-    assert.equal(classifySweptContact(base, riserPose, riserPose).cause, "riser");
+    assert.equal(classifySweptContact(base, riserPose, riserPose).cause, "scaffold");
     const buildingLeft = site.platformRight + 2;
     const roof = site.platformTop + 7.2;
     const mastPose = { x: buildingLeft + 3.5, y: roof + 0.1,
@@ -528,7 +535,7 @@ test("accepted touchdown margins award from the centered immutable checkpoint", 
     for (const side of ["left", "right"]) {
         let model = createRun({ seed: 1, reducedMotion: true });
         const target = model.retainedSites[0];
-        const x = side === "left" ? target.platformLeft + 1.621 : target.platformRight - 1.621;
+        const x = side === "left" ? target.platformLeft + 1.721 : target.platformRight - 1.721;
         model = { ...model, pose: { x, y: target.platformTop + 0.001,
             vx: 0, vy: -1, angle: 0, angularVelocity: 0 } };
         model = stepFlight(model, { left: 0, right: 0 });
@@ -550,28 +557,33 @@ test("service powers the NOC, freezes a checkpoint, and launches with actual fue
     assert.ok(Object.isFrozen(model.checkpoint));
     const fuel = model.fuel;
     for (let index = 0; index < 90; index += 1) model = stepFlight(model, { left: 0, right: 0 });
+    assert.equal(model.state, "launching"); assert.equal(model.fuel, fuel);
+    for (let index = 0; index < 90 && model.state === "launching"; index += 1) {
+        model = stepFlight(model, { left: 0.72, right: 0.72 });
+    }
     assert.equal(model.state, "flying");
     assert.ok(model.fuel < fuel);
 });
 
-test("automatic launch ignores only its rising start top and keeps other collisions", () => {
+test("manual launch ignores only its rising start top and keeps other collisions", () => {
     let model = createRun({ seed: 1, reducedMotion: true });
     const target = model.retainedSites[0];
     model = { ...model, pose: { x: target.center, y: target.platformTop + 0.001, vx: 0, vy: -1,
         angle: 0, angularVelocity: 0 } };
     const launching = stepFlight(model, { left: 0, right: 0 });
     assert.equal(launching.state, "launching");
-    assert.equal(stepFlight({ ...launching, fuel: 0 }, { left: 0, right: 0 }).state, "failed");
+    assert.deepEqual(stepFlight({ ...launching, fuel: 0 }, { left: 0, right: 0 }),
+        { ...launching, fuel: 0, commanded: { left: 0, right: 0, vectorAngle: 0 } });
     const active = launching.retainedSites.find((site) => site.id === launching.activeSiteId);
     const side = { ...launching, pose: { ...launching.pose, x: active.platformLeft + 1.6, vy: 1 } };
-    assert.equal(stepFlight(side, { left: 0, right: 0 }).failureCause, "platform");
+    assert.equal(stepFlight({ ...side, launchStarted: true }, { left: 0.72, right: 0.72 }).failureCause, "platform");
     const riser = { ...launching, pose: { ...launching.pose, x: active.center,
         y: active.platformTop - 0.6, vy: 1, angle: 180 } };
-    assert.equal(stepFlight(riser, { left: 0, right: 0 }).failureCause, "riser");
+    assert.equal(stepFlight({ ...riser, launchStarted: true }, { left: 0.72, right: 0.72 }).failureCause, "scaffold");
     const buildingLeft = active.platformRight + 2;
     const noc = { ...launching, pose: { ...launching.pose, x: buildingLeft + 3.5,
         y: active.platformTop + 1, vy: 1 } };
-    assert.equal(stepFlight(noc, { left: 0, right: 0 }).failureCause, "noc");
+    assert.equal(stepFlight({ ...noc, launchStarted: true }, { left: 0.72, right: 0.72 }).failureCause, "noc");
 });
 
 test("destroy restores the pristine static DOM from active and failed controllers", async () => {
@@ -622,17 +634,18 @@ test("short pointer tap survives automatic lost capture for its full pulse", asy
     shell.dispatchEvent({ type: "pointerup", pointerId: 7, isPrimary: true, button: 0,
         clientX: 103, clientY: 52, timeStamp: 50 });
     assert.equal(shell.hasPointerCapture(7), false);
-    assert.equal(controller.pointer, null); assert.deepEqual(controller.completedPointer, { token: 1, deadline: 140 });
+    assert.equal(controller.pointer, null); assert.deepEqual(controller.collectivePulse,
+        { active: true, token: 1, source: "pointer-tap", deadline: 140 });
     assert.notEqual(controller.pulseTimer, null);
     assert.ok(controller.clock.queue.some((edge) => edge.token === 1 && edge.left === 0.72 && edge.right === 0.72));
-    assert.equal(controller.clock.queue.at(-1).physical.completedPointerToken, 1);
-    controller.completePointerPulse(1, 141, 140);
-    assert.deepEqual(controller.completedPointer, { token: 1, deadline: 140 });
-    controller.completePointerPulse(1, 140, 140);
-    assert.equal(controller.completedPointer, null); assert.equal(controller.pulseTimer, null);
+    assert.equal(controller.clock.queue.at(-1).physical.collectivePulse.token, 1);
+    controller.endCollectivePulse(140);
+    assert.deepEqual(controller.collectivePulse,
+        { active: false, token: null, source: null, deadline: null });
+    assert.equal(controller.pulseTimer, null);
     assert.equal(controller.clock.queue.at(-1).timestamp, 140);
     assert.equal(controller.clock.queue.at(-1).left, 0);
-    assert.equal(controller.clock.queue.at(-1).physical.completedPointerToken, null);
+    assert.equal(controller.clock.queue.at(-1).physical.collectivePulse.active, false);
     controller.destroy();
 });
 
@@ -645,31 +658,28 @@ test("a rapid reused pointer supersedes the old pulse and ignores its stale dead
         clientX: 100, clientY: 50, timeStamp: 0 });
     shell.dispatchEvent({ type: "pointerup", pointerId: 7, isPrimary: true, button: 0,
         clientX: 102, clientY: 50, timeStamp: 20 });
-    assert.deepEqual(controller.completedPointer, { token: 1, deadline: 140 });
+    assert.equal(controller.collectivePulse.token, 1);
     const firstTimer = controller.pulseTimer;
     shell.dispatchEvent({ type: "pointerdown", pointerId: 7, isPrimary: true, button: 0,
         clientX: 200, clientY: 50, timeStamp: 60 });
-    assert.equal(controller.completedPointer, null); assert.equal(controller.pulseTimer, null);
+    assert.equal(controller.collectivePulse.active, false); assert.equal(controller.pulseTimer, null);
     assert.equal(controller.pointer.token, 2); assert.notEqual(firstTimer, controller.pulseTimer);
     assert.deepEqual(controller.clock.queue.slice(-2).map(({ timestamp, left, right, token }) =>
         ({ timestamp, left, right, token })), [
-        { timestamp: 60, left: 0, right: 0, token: null },
+        { timestamp: 60, left: 0, right: 0, token: 1 },
         { timestamp: 60, left: 0.72, right: 0.72, token: 2 },
     ]);
-    controller.completePointerPulse(1, 140, 140);
     assert.equal(controller.pointer.token, 2);
     assert.deepEqual(controller.pointerInput, { left: 0.72, right: 0.72 });
     shell.dispatchEvent({ type: "pointerup", pointerId: 7, isPrimary: true, button: 0,
         clientX: 202, clientY: 50, timeStamp: 160 });
-    assert.deepEqual(controller.completedPointer, { token: 2, deadline: 200 });
+    assert.equal(controller.collectivePulse.token, 2);
     assert.notEqual(controller.pulseTimer, null);
-    controller.completePointerPulse(1, 140, 200);
-    assert.deepEqual(controller.completedPointer, { token: 2, deadline: 200 });
-    controller.completePointerPulse(2, 200, 200);
-    assert.equal(controller.completedPointer, null); assert.equal(controller.pulseTimer, null);
+    controller.endCollectivePulse(200);
+    assert.equal(controller.collectivePulse.active, false); assert.equal(controller.pulseTimer, null);
     assert.deepEqual([controller.clock.queue.at(-1).timestamp, controller.clock.queue.at(-1).left,
         controller.clock.queue.at(-1).right], [200, 0, 0]);
-    assert.equal(controller.clock.queue.at(-1).physical.completedPointerToken, null);
+    assert.equal(controller.clock.queue.at(-1).physical.collectivePulse.active, false);
     controller.destroy();
 });
 
@@ -687,14 +697,31 @@ test("an overdue pulse ends at its deadline before a reused pointer starts", asy
         clientX: 200, clientY: 50, timeStamp: 200 });
     assert.deepEqual(controller.clock.queue.slice(-2).map(({ timestamp, left, right, token }) =>
         ({ timestamp, left, right, token })), [
-        { timestamp: 140, left: 0, right: 0, token: null },
+        { timestamp: 140, left: 0, right: 0, token: 1 },
         { timestamp: 200, left: 0.72, right: 0.72, token: 2 },
     ]);
     assert.equal(controller.pointer.token, 2); assert.equal(controller.pulseTimer, null);
     assert.notEqual(delayedTimer, controller.pulseTimer);
-    controller.completePointerPulse(1, 140, 200);
     assert.equal(controller.pointer.token, 2);
     assert.deepEqual(controller.pointerInput, { left: 0.72, right: 0.72 });
+    controller.destroy();
+});
+
+test("a tap released after its minimum completes immediately without leaving thrust active", async () => {
+    const { LanderGameController } = await controllerClasses();
+    const fixture = controllerFixture(); const controller = new LanderGameController(fixture.root);
+    controller.model = createRun({ seed: 1 });
+    const shell = fixture.elements["lander-scene-shell"];
+    shell.dispatchEvent({ type: "pointerdown", pointerId: 7, isPrimary: true, button: 0,
+        clientX: 100, clientY: 50, timeStamp: 0 });
+    shell.dispatchEvent({ type: "pointerup", pointerId: 7, isPrimary: true, button: 0,
+        clientX: 102, clientY: 50, timeStamp: 160 });
+    assert.equal(controller.collectivePulse.active, false); assert.equal(controller.pulseTimer, null);
+    assert.deepEqual(controller.clock.queue.slice(-2).map(({ timestamp, left, right, token }) =>
+        ({ timestamp, left, right, token })), [
+        { timestamp: 160, left: 0.72, right: 0.72, token: 1 },
+        { timestamp: 160, left: 0, right: 0, token: 1 },
+    ]);
     controller.destroy();
 });
 
@@ -719,9 +746,9 @@ test("visibility teardown restores the complete zero command and neutral plume v
     document.hidden = false;
     const fixture = controllerFixture(); const controller = new LanderGameController(fixture.root);
     controller.model = { ...createRun({ seed: 1 }),
-        commanded: { left: 0.4125, right: 0.7875, vectorAngle: -18 } };
+        commanded: { left: 0.2125, right: 0.5875, vectorAngle: -30 } };
     controller.render();
-    assert.equal(controller.root.style.properties.get("--thrust-vector-angle"), "-18deg");
+    assert.equal(controller.root.style.properties.get("--thrust-vector-angle"), "-30deg");
     document.hidden = true;
     controller.onVisibilityChange(); controller.render();
     assert.deepEqual(controller.model.commanded, { left: 0, right: 0, vectorAngle: 0 });
@@ -743,8 +770,10 @@ test("intermediate NOC battery stages project from model to the retained site DO
     assert.equal(advanceMissionSequence(model, 0.6).nocStage, 3);
     assert.equal(advanceMissionSequence(model, 0.8).nocStage, 4);
     assert.equal(advanceMissionSequence(model, 0.999).state, "powering");
-    assert.equal(advanceMissionSequence(model, 1).state, "launching");
-    assert.equal(advanceMissionSequence(model, 1).retainedSites[0].powered, true);
+    assert.equal(advanceMissionSequence(model, 1).nocStage, 5);
+    assert.equal(advanceMissionSequence(model, 1.2).nocStage, 6);
+    assert.equal(advanceMissionSequence(model, 1.4).state, "launching");
+    assert.equal(advanceMissionSequence(model, 1.4).retainedSites[0].powered, true);
     model = updateRetention(advanceMissionSequence(model, 0.41));
     const active = model.retainedSites.find((candidate) => candidate.id === model.activeSiteId);
     assert.equal(model.state, "powering"); assert.equal(model.nocStage, 2); assert.equal(active.nocStage, 2);
@@ -759,15 +788,16 @@ test("intermediate NOC battery stages project from model to the retained site DO
     controller.model = model; controller.render();
     const group = fixture.elements["site-layer"].querySelector(`[data-site-id="${active.id}"]`);
     assert.equal(group.dataset.nocStage, "2");
+    const structure = siteStructure(active);
     assert.equal(group.querySelector(".noc-building").attributes.get("d"),
-        `M${active.platformRight * 10 + 20} ${548 - active.foundationBottom * 10}` +
-        `V${548 - active.platformTop * 10 - 72}h70V${548 - active.foundationBottom * 10}Z`);
+        `M${structure.buildingLeft * 10} ${548 - active.platformTop * 10}` +
+        `V${548 - structure.roof * 10}h70V${548 - active.platformTop * 10}Z`);
     controller.model = updateRetention(advanceMissionSequence(model, 0.2)); controller.render();
     assert.equal(group.dataset.nocStage, "3");
     controller.destroy();
 });
 
-test("static and dynamic support, battery, shelf, and riser geometry stay identical", async () => {
+test("static and dynamic scaffold, battery, signal, and collider geometry stay identical", async () => {
     const model = updateRetention(createRun({ seed: STATIC_WORLD_SEED }));
     const active = model.retainedSites[0];
     const { LanderGameController } = await controllerClasses();
@@ -775,38 +805,35 @@ test("static and dynamic support, battery, shelf, and riser geometry stay identi
     controller.model = model; controller.render();
     const group = fixture.elements["site-layer"].querySelector(`[data-site-id="${active.id}"]`);
     const template = await readFile(join(ROOT, "templates/lander-game.html"), "utf8");
-    const staticSupport = template.match(/class="platform-supports" d="([^"]+)"/);
+    const staticSupport = template.match(/class="site-scaffold"[^>]+d="([^"]+)"/);
     assert.ok(staticSupport);
-    const support = group.querySelector(".platform-supports");
+    const support = group.querySelector(".site-scaffold");
     assert.equal(support.attributes.get("d"), staticSupport[1]);
+    assert.equal(support.attributes.get("d"), siteScaffoldPath(active));
     const left = active.platformLeft * 10; const right = active.platformRight * 10;
     const top = 548 - active.platformTop * 10; const bottom = 548 - active.platformBottom * 10;
-    const shelf = 548 - active.foundationBottom * 10;
-    const riser = platformRiserBounds(active);
-    assert.deepEqual(riser, { left: active.platformLeft, right: active.platformRight,
-        bottom: active.platformTop - 0.8, top: active.platformBottom });
+    const structure = siteStructure(active);
     assert.equal(support.attributes.get("d").match(/^M[^M]+Z/)[0],
-        `M${riser.left * 10} ${548 - riser.top * 10}H${riser.right * 10}` +
-        `V${548 - riser.bottom * 10}H${riser.left * 10}Z`);
-    assert.equal(shelf, 548 - riser.bottom * 10);
+        `M${left} ${bottom}H${right}V${548 - structure.padBase * 10}H${left}Z`);
     const riserPose = { x: active.center, y: active.foundationBottom + 0.2,
         vx: 0, vy: 0, angle: 180, angularVelocity: 0 };
-    assert.equal(classifySweptContact(model, riserPose, riserPose).cause, "riser");
+    assert.equal(classifySweptContact(model, riserPose, riserPose).cause, "scaffold");
 
     const battery = group.querySelector(".noc-battery");
     assert.deepEqual(battery.children.map((node) => node.className ?? null),
-        [null, "battery-terminal", "battery-bar battery-bar-1", "battery-bar battery-bar-2",
+        [null, "battery-bar battery-bar-1", "battery-bar battery-bar-2",
             "battery-bar battery-bar-3", "battery-bar battery-bar-4"]);
-    const buildingLeft = right + 20; const roof = top - 72;
+    const buildingLeft = right + 20; const roof = 548 - structure.roof * 10;
     const rectangle = battery.children[0];
-    assert.deepEqual(["x","y","width","height","rx"].map((name) => rectangle.attributes.get(name)),
-        [buildingLeft + 24, roof + 16, 22, 40, 2].map(String));
-    assert.equal(battery.children[1].attributes.get("d"), `M${buildingLeft + 30} ${roof + 16}v-6h10v6`);
+    assert.deepEqual(["x","y","width","height"].map((name) => rectangle.attributes.get(name)),
+        [buildingLeft + 24, roof + 16, 22, 40].map(String));
+    assert.equal(rectangle.attributes.has("rx"), false);
     const barTops = [46, 38, 30, 22];
     for (let index = 1; index <= 4; index += 1) {
-        assert.equal(battery.children[index + 1].attributes.get("d"),
+        assert.equal(battery.children[index].attributes.get("d"),
             `M${buildingLeft + 29} ${roof + barTops[index - 1]}h12v5h-12Z`);
     }
+    assert.equal(group.children.filter((node) => node.className?.includes("antenna-signal")).length, 3);
     controller.destroy();
 });
 
@@ -940,7 +967,7 @@ test("worst-case world projection stays within eighty descendants during a crash
     assert.equal(fixture.elements["terrain-layer"].children.length, 5);
     assert.equal(fixture.elements["site-layer"].children.length, 3);
     assert.equal(fixture.elements["debris-layer"].children.length, 8);
-    assert.equal(descendantCount(world), 75);
+    assert.equal(descendantCount(world), 78);
     assert.ok(descendantCount(world) <= 80);
     controller.destroy();
 });
@@ -950,7 +977,9 @@ test("100-site deterministic mission keeps generation and retention bounded", ()
     let maximumGenerationMilliseconds = 0;
     for (let completed = 0; completed < 100; completed += 1) {
         if (model.state === "launching") {
-            for (let step = 0; step < 90; step += 1) model = updateRetention(stepFlight(model, { left: 0, right: 0 }));
+            for (let step = 0; step < 90 && model.state === "launching"; step += 1) {
+                model = updateRetention(stepFlight(model, { left: 0.72, right: 0.72 }));
+            }
         }
         const target = model.retainedSites.find((site) => site.id === model.targetSiteId);
         model = { ...model, pose: { x: target.center, y: target.platformTop + 0.001, vx: 0, vy: -1,
