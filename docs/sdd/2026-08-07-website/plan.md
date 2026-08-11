@@ -1,6 +1,6 @@
 # Plan: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander Phase 4K refinement in progress
+- Status: Interim implementation complete; continuous Lander Phase 4K review in progress
 - Date: 2026-08-07
 - Last revised: 2026-08-11
 - FRD: `frd.md`
@@ -745,10 +745,10 @@ separate Phase 4J acceptance is expected.
       derivation/fixture regeneration.
 - [x] Obtain an `agentworks-reviewer` approval of the Phase 4K artifact amendment and resolve every
       valid artifact finding before changing production or canonical fixture code.
-- [ ] Delegate implementation to an `agentworks-dev` subagent in an isolated worktree. Update the
+- [x] Delegate implementation to an `agentworks-dev` subagent in an isolated worktree. Update the
       shared fragment, CSS, controller/model projection, validators, route fixture and literals,
       focused tests, permanent README, and browser checklist as one coherent change.
-- [ ] Prove the exact four landing equalities and independent epsilon failures, all-nine
+- [x] Prove the exact four landing equalities and independent epsilon failures, all-nine
       constructive route derivation and one-quantum exhaustion, manual departure through
       keyboard/vi/pointer/touch, persistent Exit and failure-only Restart behavior, focus recovery,
       no action-to-flight input leakage, 320-pixel and 400-percent layout, shared-game identity, and
