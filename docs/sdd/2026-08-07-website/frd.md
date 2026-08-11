@@ -127,14 +127,14 @@ forecloses it, and none of it is in scope now.
   on each page. These placements supersede the Phase 4A combined exploration panel while preserving
   one link per external, manifesto, security, and Lander destination.
 - R16. The footer's `Agentworks Manifesto` link opens a semantic static page at `/manifesto/`, not
-  the repository document. The page renders the complete `docs/why-agentworks.md` document at build
-  time, including its source `h1`, introduction, problem space, and key principles, without a
-  separately maintained site copy or selected-passage contract. Relative source links are
-  deliberately mapped to their permanent repository destinations. Missing or unreadable input,
-  invalid UTF-8, unsupported Markdown, invalid links, or an invalid whole-document structure fails
-  the build before output replacement. A later repository rename changes the single configured
-  source path to `docs/manifesto.md` in that rename's reviewed change; the website has no fallback,
-  autodetection, or simultaneous support for both paths.
+  the repository document. The page renders the complete `docs/manifesto.md` document at build time,
+  including its source `h1`, introduction, problem space, and key principles, without a separately
+  maintained site copy or selected-passage contract. Relative source links are deliberately mapped
+  to their permanent repository destinations. Missing or unreadable input, invalid UTF-8,
+  unsupported Markdown, invalid links, or an invalid whole-document structure fails the build before
+  output replacement. The reviewed 2026-08-10 repository rename changed the single configured source
+  path from `docs/why-agentworks.md` to `docs/manifesto.md` and removed the former path; the website
+  has no fallback, autodetection, or simultaneous support for both paths.
 - R17. The builder emits only the complete linked site artifact. The earlier `--only 404` partial
   demo mode is retired because the accepted 404 now shares navigation with Home, Manifesto, and
   Security; emitting only `404.html` would make its sole recovery action and footer links dead. Game
@@ -280,11 +280,11 @@ merged and settled on `main`. The first slice must not build toward them specula
   footer, beside the exact Wayfarer Labs ownership text. The footer rocket remains operable and
   named when its image is unavailable. Link purposes, keyboard focus, accessible names, source
   order, narrow-screen wrapping, and 400-percent zoom stay useful with images or CSS unavailable.
-- AC17. `/manifesto/` renders every supported block in `docs/why-agentworks.md`, and `/security/`
-  renders every supported block in root `SECURITY.md`, including each document's sole source `h1`,
-  as semantic headings, paragraphs, and lists. Generated content and mapped links are verified
-  against the complete permanent source, contain no unexpanded source-relative URL, and remain
-  useful without CSS or JavaScript. Ordinary supported prose or heading edits flow through without a
+- AC17. `/manifesto/` renders every supported block in `docs/manifesto.md`, and `/security/` renders
+  every supported block in root `SECURITY.md`, including each document's sole source `h1`, as
+  semantic headings, paragraphs, and lists. Generated content and mapped links are verified against
+  the complete permanent source, contain no unexpanded source-relative URL, and remain useful
+  without CSS or JavaScript. Ordinary supported prose or heading edits flow through without a
   website-code update; malformed document structure, unsupported Markdown, unsafe or unexpected
   links, invalid encoding, and missing input fail closed.
 - AC18. The builder CLI has no focused or partial-output option, its complete artifact contains

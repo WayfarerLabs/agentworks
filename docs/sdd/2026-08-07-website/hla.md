@@ -88,16 +88,16 @@ navigation system.
 
 ### D1A. Long-form pages are complete generated documents
 
-`/manifesto/` renders the complete `docs/why-agentworks.md` document, and `/security/` renders the
+`/manifesto/` renders the complete `docs/manifesto.md` document, and `/security/` renders the
 complete root `SECURITY.md`. The same closed Markdown transform emits every supported source block,
 including the one required source `h1`; the templates do not add, replace, select, reorder, or
 duplicate body headings or prose. Source-relative links are mapped by an explicit allowlist to
 permanent repository URLs. The site owns only metadata, breadcrumb labels, and the connective shell.
 
-The Manifesto source path is exactly `docs/why-agentworks.md` today. When the repository document is
-renamed, that change updates the one configured path to `docs/manifesto.md`. The builder does not
-probe for alternatives or accept both names. This makes the future rename an ordinary reviewed
-source-path change rather than permanent compatibility machinery.
+The Manifesto source path is exactly `docs/manifesto.md`. The reviewed repository-document rename
+updated the one configured path and removed the former name in the same change. The builder does not
+probe for alternatives or accept both names, so the rename added no permanent compatibility
+machinery.
 
 ### D2. Plain web technologies with a narrow build step
 
@@ -141,14 +141,14 @@ The site has three content classes:
   and the README's generated fenced block must be byte-identical. The build fails closed on missing,
   duplicate, malformed, or drifted sources. The website does not own or rewrite this text.
 - **Repository-derived product and security content.** The Manifesto and Security pages each render
-  one complete permanent Markdown document through a closed, escaping transform:
-  `docs/why-agentworks.md` and root `SECURITY.md`, respectively. Each source has exactly one `h1`
-  and owns all of its page's body headings, order, and prose; templates cannot supply alternate
-  claims. Supported content edits flow directly to the generated page without synchronized hashes,
-  heading inventories, expected passages, or heading-path selections in website code. Missing or
-  unreadable inputs, invalid UTF-8, an absent or duplicate `h1`, unsupported Markdown, unsafe links
-  or links outside the reviewed set, and reporting-channel violations fail the build. Links point to
-  permanent repository docs, never to this SDD.
+  one complete permanent Markdown document through a closed, escaping transform: `docs/manifesto.md`
+  and root `SECURITY.md`, respectively. Each source has exactly one `h1` and owns all of its page's
+  body headings, order, and prose; templates cannot supply alternate claims. Supported content edits
+  flow directly to the generated page without synchronized hashes, heading inventories, expected
+  passages, or heading-path selections in website code. Missing or unreadable inputs, invalid UTF-8,
+  an absent or duplicate `h1`, unsupported Markdown, unsafe links or links outside the reviewed set,
+  and reporting-channel violations fail the build. Links point to permanent repository docs, never
+  to this SDD.
 - **Site-owned connective content.** The website owns only presentation-neutral labels and
   instructions such as navigation, link introductions, the operator-approved security-link label,
   the interim onboarding-availability notice and, after integration, "Copy" and copy-status
@@ -445,8 +445,8 @@ turning a two-step delivery need into permanent configuration machinery.
 README.md identity selectors --+--> home page
 interim availability notice ---+
 
-docs/why-agentworks.md complete document --> Manifesto page
-SECURITY.md complete document ------------> security page
+docs/manifesto.md complete document --> Manifesto page
+SECURITY.md complete document -------> security page
 
 shared game fragment + logo/game assets --+-----> Lander page
                                            +-----> 404 page
@@ -473,8 +473,8 @@ fixed here:
 - `.gitignore`: generated site artifact exclusion.
 - repository README and onboarding canonical source: inputs only after onboarding integration, not
   website-owned copies.
-- `docs/why-agentworks.md`: current complete Manifesto source; a later rename updates this one path
-  to `docs/manifesto.md` without fallback.
+- `docs/manifesto.md`: current complete Manifesto source; the reviewed rename removed the former
+  path without adding fallback behavior.
 - `SECURITY.md`: complete Security page and private vulnerability-reporting authority.
 - this feature directory: temporary design, plan, research, and acceptance evidence only.
 

@@ -122,7 +122,7 @@ Problem and principle passages are matched under unique headings by exact expect
 paragraph position, then generated through a closed normalization transform. Unrelated structural
 editing therefore does not break the site build, while actual claim drift still fails closed.
 Site-owned copy is limited to labels and instructions that make no product claim. The page links to
-the permanent, fuller explanation in `docs/why-agentworks.md` on GitHub.
+the permanent, fuller explanation in `docs/manifesto.md` on GitHub.
 
 ### F6. A custom 404 can carry the Easter egg without weakening error recovery
 
@@ -163,7 +163,7 @@ unit so collective and differential thrust remain legible without visual noise.
 ### F8. Security depth and terminal character do not require home-page weight
 
 The repository already separates long-form security reasoning from vulnerability reporting:
-`docs/why-agentworks.md` explains the threat landscape, isolation model, and limitations, while
+`docs/manifesto.md` explains the threat landscape, isolation model, and limitations, while
 `SECURITY.md` owns the private reporting path. Generating a focused security page from those sources
 adds useful depth without duplicating claims or forcing the full argument into the landing-page
 journey. The home page needs only a clear, secondary link.

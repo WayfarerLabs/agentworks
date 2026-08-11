@@ -137,6 +137,9 @@ Operator evidence:
   complete root `SECURITY.md`; neither page selects or duplicates passages in website code. The
   future Why-to-Manifesto rename changes the one Manifesto source path to `docs/manifesto.md`, with
   no fallback or simultaneous support for both names.
+- 2026-08-10: the reviewed repository-document rename lands with `docs/manifesto.md` as the one
+  canonical Manifesto source. Website code, tests, and this architecture contract move in lockstep;
+  the former source path is removed rather than retained as compatibility machinery.
 
 Definition of done: requirements and architecture are review-clean, operator-significant choices are
 settled, and PR #439 truthfully carries the reviewed contract that implementation follows.
@@ -375,10 +378,10 @@ Review evidence: the project reviewer and independent fresh-eyes reviewer approv
 fixed. Focused suites passed 103 Python and 22 Node tests; the full CLI suite passed 6,565 tests;
 exact root and project-base builds remained deterministic ten-file artifacts.
 
-Definition of done: `/manifesto/` is the complete safe HTML rendition of `docs/why-agentworks.md`,
+Definition of done: `/manifesto/` is the complete safe HTML rendition of `docs/manifesto.md`,
 `/security/` is the complete safe HTML rendition of root `SECURITY.md`, the site contains no second
-long-form prose model, and a future source rename requires changing exactly one configured path from
-`docs/why-agentworks.md` to `docs/manifesto.md`.
+long-form prose model, and the reviewed source rename changes exactly one configured path without
+fallback or autodetection.
 
 ## Phase 4E: source-derived long-form navigation
 

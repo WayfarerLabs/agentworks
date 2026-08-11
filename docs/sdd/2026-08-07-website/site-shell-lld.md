@@ -132,10 +132,10 @@ zoom, pointer, and keyboard acceptance verifies computed size, focus visibility,
 
 The builder renders two complete normalized UTF-8 Markdown documents:
 
-| Route         | Current source           |
-| ------------- | ------------------------ |
-| `/manifesto/` | `docs/why-agentworks.md` |
-| `/security/`  | `SECURITY.md`            |
+| Route         | Current source      |
+| ------------- | ------------------- |
+| `/manifesto/` | `docs/manifesto.md` |
+| `/security/`  | `SECURITY.md`       |
 
 Each source owns every body heading and paragraph on its page, including exactly one source `h1`.
 Each template contains one sourced-content token in `main` and supplies no additional body title,
@@ -160,9 +160,9 @@ layout wrapper becomes a two-column grid. The source `h1` and one grouped post-t
 right column while the navigation spans both rows in the left column, so body copy begins beside the
 rail instead of waiting for its height. DOM and keyboard order do not change.
 
-The Manifesto source path is exactly `docs/why-agentworks.md` in this release. A later document
-rename changes that one configuration value to `docs/manifesto.md` in the same reviewed rename.
-There is no dual-path fallback, probing, or autodetection.
+The Manifesto source path is exactly `docs/manifesto.md`. The reviewed repository-document rename
+changed that one configuration value and removed the former path in the same change. There is no
+dual-path fallback, probing, or autodetection.
 
 Source-relative links use this exact allowlist:
 
@@ -177,7 +177,7 @@ absolute URL fails. Tests prove all three mappings and prove no source-relative 
 
 ## 6. Other repository content contracts
 
-The builder reads exactly three permanent content inputs: `README.md`, `docs/why-agentworks.md`, and
+The builder reads exactly three permanent content inputs: `README.md`, `docs/manifesto.md`, and
 `SECURITY.md`. README continues to own the concise selected Home identity. The other two inputs each
 own one complete long-form page. Only Home retains a heading-keypath plus exact-block selection;
 long-form content has no duplicated prose contract in Python or templates.
