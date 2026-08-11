@@ -180,9 +180,12 @@ section#lander-game[aria-label="Lunar deployment scene"]
 ```
 
 The template contains the complete static first terrain window, site 0, lander, gas can, and dark
-NOC inside the listed layers. Enhancement reconciles those same nodes rather than keeping a hidden
-second world. Generated terrain paths use `.terrain-chunk[data-chunk-index]`. Each retained site is
-one `.lander-site[data-site-id][data-can="present|collected"][data-power="off|on"]` containing, in
+NOC inside the listed layers. Its terrain paths cover the complete `0..1000` scene width before
+JavaScript, meet exactly at every chunk boundary, and use the same range-clipping projection as the
+runtime; no open right-half sky or visual/collision gap is permitted. Enhancement reconciles those
+same nodes rather than keeping a hidden second world. Generated terrain paths use
+`.terrain-chunk[data-chunk-index]`. Each retained site is one
+`.lander-site[data-site-id][data-can="present|collected"][data-power="off|on"]` containing, in
 order, `.landing-platform`, `.platform-supports`, `.gas-can`, `.noc-building`, `.noc-battery`, and
 `.noc-antenna`. The existing single `.platform-supports` path contains the filled collision-riser
 face and its stroked support/truss treatment; it adds no wrapper or decorative child. Reconciliation
@@ -419,6 +422,12 @@ camera does not rewrite child coordinates per frame. It begins moving only after
 `x=35`, keeps the reference point at scene `x=350`, and may move backward with the vehicle. Contact,
 service, crash, and checkpoint restoration use their frozen or restored pose, with no monotonic
 furthest-X value and no controller camera cache.
+
+Terrain range projection never drops a segment merely because neither endpoint lies on a retained
+`50 m` chunk boundary. For every requested closed chunk range, a pure helper emits the exact terrain
+height interpolated from the collision vertex chain at both range endpoints plus every interior
+vertex, in order. Adjacent rendered paths therefore end and begin at byte-equal scene coordinates
+even when a shelf or native blend crosses the boundary. Static paths use the same helper output.
 
 The visible interval is `[cameraLeft,cameraLeft+100]`. Retain chunks intersecting the interval plus
 `40 m` on each side, at most five `50 m` chunks. Retain the active checkpoint site, target site, and
@@ -814,7 +823,7 @@ the derivation ordering treats the lower identical command index as canonical.
 
 Keep `website/tools/derive_lander_routes.mjs` permanently. It uses only Node built-ins and must not
 import production or test code; runtime, model, and tests must not import it. Version
-`agw-lander-route-deriver/v2` with recipes `agw-lander-route-recipes/v2` independently implements
+`agw-lander-route-deriver/v3` with recipes `agw-lander-route-recipes/v2` independently implements
 sections 5.2-5.3, 8, 9, and the reachable command table, including the motif-bank traversal, true
 gimbal force, and neutral-collective assist. Its versioned per-template constructive recipes give
 command phase order and finite integer step ranges. Each recipe evaluates at least two and at most
@@ -835,22 +844,32 @@ node website/tools/derive_lander_routes.mjs \
 Unknown/missing flags exit 2; derivation or verification failure exits 1; success exits 0.
 `--geometry` contains schema `agw-lander-route-geometry/v1` and the nine IDs, deltas, and literal
 clearance knots. Output schema `agw-lander-route-derived/v2` contains `deriverVersion`,
-`recipeVersion`, exact per-route `combinationsEvaluated`, `physicsDigest`, `geometryDigest`, the
-ordered route records from section 10.1, `worldWitnesses`, `worldDigest`, and `outputDigest`.
-`worldWitnesses` contains exactly 81 independently reconstructed world descriptors: nine templates
-times three pinned seeds times three translations. Nesting is template outermost in section 10.1
-order, then seed in exact order `[1,0x12345678,0xffffffff]`, then origin translation in exact order
-`[(36,3.5),(117,5),(-42,6.5)]`, where each tuple is `(originCenter,originDeckTop)`. The serialized
-flat array follows that nested order without sorting or regrouping. Each descriptor includes the
-selected motif-bank offset, direction, and relevant per-chunk indexes; `10 m` native/corridor
-samples; cap relief; both shelf replacements and native blends; both platforms and solid risers;
-exact shelf-based NOC foundations/buildings; mast colliders; and its own digest. Canonical JSON
-recursively sorts object keys, preserves array order, uses `JSON.stringify` without whitespace, and
-hashes UTF-8 bytes with lowercase SHA-256. `geometryDigest` hashes the complete geometry object;
-`physicsDigest` hashes an object containing every named numeric constant in sections 8-10, including
-gimbal and assist constants, plus the eight pre-assist command rows; `worldDigest` hashes the
-ordered world descriptors; `outputDigest` hashes the output object with only `outputDigest` omitted.
-The file adds one unhashed trailing LF.
+`recipeVersion`, `canonicalPoseDecimals:9`, exact per-route `combinationsEvaluated`,
+`physicsDigest`, `geometryDigest`, the ordered route records from section 10.1, `worldWitnesses`,
+`worldDigest`, and `outputDigest`. `worldWitnesses` contains exactly 81 independently reconstructed
+world descriptors: nine templates times three pinned seeds times three translations. Nesting is
+template outermost in section 10.1 order, then seed in exact order `[1,0x12345678,0xffffffff]`, then
+origin translation in exact order `[(36,3.5),(117,5),(-42,6.5)]`, where each tuple is
+`(originCenter,originDeckTop)`. The serialized flat array follows that nested order without sorting
+or regrouping. Each descriptor includes the selected motif-bank offset, direction, and relevant
+per-chunk indexes; `10 m` native/corridor samples; cap relief; both shelf replacements and native
+blends; both platforms and solid risers; exact shelf-based NOC foundations/buildings; mast
+colliders; and its own digest. Canonical JSON recursively sorts object keys, preserves array order,
+uses `JSON.stringify` without whitespace, and hashes UTF-8 bytes with lowercase SHA-256.
+`geometryDigest` hashes the complete geometry object; `physicsDigest` hashes an object containing
+every named numeric constant in sections 8-10, including gimbal and assist constants, plus the eight
+pre-assist command rows; `worldDigest` hashes the ordered world descriptors; `outputDigest` hashes
+the output object with only `outputDigest` omitted. The file adds one unhashed trailing LF.
+
+Candidate search, fuel burn, collision classification, route ordering, demonstrated minima, and all
+world/geometry values retain raw JavaScript numbers. Only after the winning route is selected, the
+deriver canonicalizes each numeric component of its selected success and one-quantum-exhaustion pose
+as `Number(value.toFixed(canonicalPoseDecimals))`. This bounds native `sin`/`cos` last-bit variation
+across supported CPU architectures while remaining inside the production replay's existing `1e-9`
+pose tolerance. It never changes a schedule, contact/exhaustion step, burn, safety decision, world
+descriptor, geometry value, or geometry/physics/world digest. Tests collapse sub-precision pose
+jitter, reject a precision change, reproduce the canonical bytes on x64 and ARM64 CI, and prove all
+strict world/geometry values remain untouched.
 
 The reviewed output is `website/tests/fixtures/lander-route-derived-v2.json`. Phase 4H's four-motif
 bank deliberately regenerates all nine route schedules, demonstrated minima, success vectors,
@@ -973,6 +992,13 @@ remaining interval, records a capture-release association `{pointerId,token}`, a
 `releasePointerCapture`. A lost-capture event resolves its token through that association, never by
 matching a reusable `pointerId` alone.
 
+Before accepting another pointer down, the controller atomically completes and cancels any retained
+pulse, clears its completed token/deadline/timer, and enqueues that old pulse's zero edge before the
+new gesture edge. Exactly one pointer and one timer can therefore exist. Every scheduled callback
+captures both token and deadline and becomes a no-op unless both still equal the current completed
+gesture; an old callback can never clear, cancel, or enqueue against a later gesture even when the
+browser reuses its `pointerId`.
+
 The browser may synchronously dispatch `lostpointercapture` from that release. If its released token
 equals the completed token and the deadline remains in the future, the handler clears capture-only
 bookkeeping but deliberately leaves the retained pulse, completed token, deadline, timer, and queued
@@ -1065,8 +1091,9 @@ debris nodes, and enters the same final failed state in the contact task.
 
 ## 14. Deterministic vectors
 
-Numerical physics tests use tolerance `1e-10`; strings, integers, states, seed values, DOM order,
-and serialized world descriptors are exact. Every schedule includes an explicit final callback.
+Numerical physics tests use tolerance `1e-10`; selected canonical route-pose replay uses the pinned
+`1e-9` tolerance from section 10.2. Strings, integers, states, seed values, DOM order, and
+serialized world descriptors are exact. Every schedule includes an explicit final callback.
 
 | Vector                | Input                                                                      | Expected result                                                                                               |
 | --------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
@@ -1141,16 +1168,16 @@ static/lander-model.js
 static/lander-game.js
 ```
 
-| Layer                                                                   | Required coverage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `node --test website/tests/lander-world.test.mjs`                       | Mixer/seeds; exact `10 m` samples and `50 m` shared chunk boundaries; all four motif literals, pinned offset/direction vectors, positive and negative chunk traversal, and four distinct indexes in every four-chunk witness; boundary/motif/clamp diversity; every shelf/corridor pseudocode branch, global index, cap equality, relief, complete target replacement, both native blends and deduplication; site-0 band and zero-delta guarantees; exact geometry digest; static/dynamic shelf, riser, NOC foundation, can, window, retention, offscreen, and immutability                                                  |
-| `node --test website/tests/lander-model.test.mjs`                       | State/events; executable synchronous release/lost-capture short-tap token witness and unrelated-loss teardown; 9.0/80 physics, all digital/pointer rows, mixed-source steer ownership and axial ceiling, true gimbal force/sign, zero-effective vector reset, neutral-collective assist, total/fuel preservation, manual override and undamped coast; carry/scheduler/overflow; closed-margin riser/terrain/NOC equality/tangency, unchanged precedence, exact top safe crossing and grazing failure, inclusive limits and `+1e-9`; v2 catalog/digests, two replays, ratio/checkpoint/generation error/launch/debris/ordinal |
-| Derivation CLI fixture verification                                     | Run section 10.2's command to a temporary output with `--verify website/tests/fixtures/lander-route-derived-v2.json`; exact v2 deriver/recipe/schema; per-template counts in `[2,2,000,000]`; all nine regenerated minima/success/failure literals; all 81 strict world descriptors/digests in exact template, seed `[1,0x12345678,0xffffffff]`, translation `[(36,3.5),(117,5),(-42,6.5)]` nesting; deterministic bytes; finite-exhaustion failure and nonzero mismatch/usage exits; import closure proves independence                                                                                                     |
-| `python -m unittest discover -s website/tests -p 'test_*.py'`           | Exact 12-file artifacts at both bases, excluding tools/fixtures; focused validation helper; exact game-to-model/world, model-to-world, world-to-none module DAG; byte-equivalent static/dynamic shelf/riser and vertical battery subtree; transactional-init structure and hidden/disabled static Start; fuel/actions; local SVG/CSS; forbidden network, storage, audio, canvas, service-worker, navigation, cookie, and uncontrolled randomness                                                                                                                                                                             |
-| Manual Chrome and Edge pre-merge; Firefox and Safari/WebKit post-launch | Start/focus; injected initialization failures restore exact static DOM; Space/arrows/vi/touch, a short tap surviving automatic lost capture through its deadline, simultaneous keyboard/pointer ownership and axial ceiling, pointer vector direction, gimbaled plumes, idle/exhausted vector reset, and visible assist; three sites across four different coarse terrain motifs; no pale pad aperture; flat pad/NOC shelves; bottom-to-top colored power stages; can/arrow/carry/empty fuel; relaxed boundary landings and over-bound crashes; checkpoint/Exit/hidden pause; zero game requests                             |
-| Manual responsive and accessibility acceptance                          | 320 CSS pixels, 400 percent zoom, touch landscape, and wide viewport; no overflow or clipped actions; 44-pixel targets; logical focus; no trap; useful no-CSS/no-JS order; named fuel value; restrained live announcements; solid direction cue; static reduced-motion cue; silent decorative SVG; fixed-token 4.5:1 text and 3:1 necessary-graphic contrast                                                                                                                                                                                                                                                                 |
-| Performance and longevity witness                                       | 100-site deterministic run; no more than five terrain paths, three sites, eight fragments, or 80 world descendants; direct selection/shelf-corridor/exactly-two-replay timing recorded; hidden tab has no frame or mission progress; normal active frame p95 below 4 ms; teardown leaves no listener, timer, capture, frame, enabled dead action, or growing retained history                                                                                                                                                                                                                                                |
-| Permanent documentation and repository gates                            | `website/README.md` teaches the tuned controls/physics and v2 intentional-regeneration workflow; browser checklist pins the visual/input/vacuum witnesses; file lint, locked-SDD, Rulesync drift, diff check, and module-size report pass without linking permanent docs back to this SDD                                                                                                                                                                                                                                                                                                                                    |
+| Layer                                                                   | Required coverage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `node --test website/tests/lander-world.test.mjs`                       | Mixer/seeds; exact `10 m` samples and `50 m` shared chunk boundaries; all four motif literals, pinned offset/direction vectors, positive and negative chunk traversal, and four distinct indexes in every four-chunk witness; boundary/motif/clamp diversity; every shelf/corridor pseudocode branch, global index, cap equality, relief, complete target replacement, both native blends and deduplication; site-0 band and zero-delta guarantees; exact geometry digest; static/dynamic shelf, riser, NOC foundation, can, window, retention, offscreen, and immutability                                                                                                                                                         |
+| `node --test website/tests/lander-model.test.mjs`                       | State/events; executable synchronous release/lost-capture short-tap token witness, rapid/reused-ID supersession, token+deadline callback guard, and unrelated-loss teardown; 9.0/80 physics, all digital/pointer rows, mixed-source steer ownership and axial ceiling, true gimbal force/sign, zero-effective vector reset including hide/discard/contact rendering, neutral-collective assist, total/fuel preservation, manual override and undamped coast; carry/scheduler/overflow; closed-margin riser/terrain/NOC equality/tangency, unchanged precedence, exact top safe crossing and grazing failure, inclusive limits and `+1e-9`; v2 catalog/digests, two replays, ratio/checkpoint/generation error/launch/debris/ordinal |
+| Derivation CLI fixture verification                                     | Run section 10.2's command to a temporary output with `--verify website/tests/fixtures/lander-route-derived-v2.json`; exact v3 deriver, v2 recipe/schema, `canonicalPoseDecimals:9`, pose-jitter collapse and precision mutation; per-template counts in `[2,2,000,000]`; all nine regenerated minima/success/failure literals; all 81 strict world descriptors/digests in exact template, seed `[1,0x12345678,0xffffffff]`, translation `[(36,3.5),(117,5),(-42,6.5)]` nesting; deterministic x64/ARM64 bytes; finite-exhaustion failure and nonzero mismatch/usage exits; import closure proves independence                                                                                                                      |
+| `python -m unittest discover -s website/tests -p 'test_*.py'`           | Exact 12-file artifacts at both bases, excluding tools/fixtures; focused validation helper; exact game-to-model/world, model-to-world, world-to-none module DAG; executable static/dynamic/collision shelf and riser parity; exact vertical battery outline, terminal, bar geometry/order and reversal mutations; complete static viewport terrain and cross-boundary visual/collision continuity; transactional-init structure and hidden/disabled static Start; fuel/actions; local SVG/CSS; forbidden network, storage, audio, canvas, service-worker, navigation, cookie, and uncontrolled randomness                                                                                                                           |
+| Manual Chrome and Edge pre-merge; Firefox and Safari/WebKit post-launch | Start/focus; injected initialization failures restore exact static DOM; Space/arrows/vi/touch, a short tap surviving automatic lost capture through its deadline, simultaneous keyboard/pointer ownership and axial ceiling, pointer vector direction, gimbaled plumes, idle/exhausted vector reset, and visible assist; three sites across four different coarse terrain motifs; no pale pad aperture; flat pad/NOC shelves; bottom-to-top colored power stages; can/arrow/carry/empty fuel; relaxed boundary landings and over-bound crashes; checkpoint/Exit/hidden pause; zero game requests                                                                                                                                    |
+| Manual responsive and accessibility acceptance                          | 320 CSS pixels, 400 percent zoom, touch landscape, and wide viewport; no overflow or clipped actions; 44-pixel targets; logical focus; no trap; useful no-CSS/no-JS order; named fuel value; restrained live announcements; solid direction cue; static reduced-motion cue; silent decorative SVG; fixed-token 4.5:1 text and 3:1 necessary-graphic contrast                                                                                                                                                                                                                                                                                                                                                                        |
+| Performance and longevity witness                                       | 100-site deterministic run; no more than five terrain paths, three sites, eight fragments, or 80 world descendants; direct selection/shelf-corridor/exactly-two-replay timing recorded; hidden tab has no frame or mission progress; normal active frame p95 below 4 ms; teardown leaves no listener, timer, capture, frame, enabled dead action, or growing retained history                                                                                                                                                                                                                                                                                                                                                       |
+| Permanent documentation and repository gates                            | `website/README.md` teaches the tuned controls/physics and v2 intentional-regeneration workflow; browser checklist pins the visual/input/vacuum witnesses; file lint, locked-SDD, Rulesync drift, diff check, and module-size report pass without linking permanent docs back to this SDD                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 
 Mutation tests reject duplicated/moved shared markup, a second scheduler/controller/site authority,
 game checks added to the near-limit validator, artifact count drift, a sixth retained chunk,
@@ -1163,16 +1190,20 @@ pointer override of a nonzero keyboard steer, canceled keyboard steer blocking a
 idle or exhausted nonzero `commanded.vectorAngle`, recording a completed pointer token after capture
 release, clearing its live pulse on the resulting lost-capture event, ignoring unrelated lost
 capture, matching pulse completion by reusable pointer ID instead of token, an unguarded or
-duplicate pulse timeout, route proofs that omit launch, ratio recomputation from `completedSites`,
-any runtime planner/search/fuel scan or third proof replay, a catalog command outside the reachable
-table, passive damping, assist while coasting or steering, assist that changes total thrust/fuel,
-reversed or cosmetic-only gimbal, stale 8.4/70 integration, old landing limits,
-horizontal/reversed/mistimed battery fill, color-only battery meaning, production-derived expected
-fixtures, v1 derived output, partial route/world regeneration, wrong world-witness seed/translation
-nesting, derivation-tool imports, motif selection, corridor, or 81-descriptor digest drift, open or
-unmarginated unsafe collision, margin-expanded target top, partial initialization residue,
-retained-node growth, monotonic-furthest-X camera state, zero normal-motion debris, assist applied
-to fragments, animated-only direction, atmospheric crash effects, or a durable/network surface.
+duplicate pulse timeout, accepting a new gesture without atomically superseding the old pulse,
+incomplete static terrain coverage, a rendered chunk gap across a collision segment, weak or
+source-only riser/battery parity, route-pose canonicalization before safety selection, quantized
+world/geometry values, canonical pose precision drift, route proofs that omit launch, ratio
+recomputation from `completedSites`, any runtime planner/search/fuel scan or third proof replay, a
+catalog command outside the reachable table, passive damping, assist while coasting or steering,
+assist that changes total thrust/fuel, reversed or cosmetic-only gimbal, stale 8.4/70 integration,
+old landing limits, horizontal/reversed/mistimed battery fill, color-only battery meaning,
+production-derived expected fixtures, v1 derived output, partial route/world regeneration, wrong
+world-witness seed/translation nesting, derivation-tool imports, motif selection, corridor, or
+81-descriptor digest drift, open or unmarginated unsafe collision, margin-expanded target top,
+partial initialization residue, retained-node growth, monotonic-furthest-X camera state, zero
+normal-motion debris, assist applied to fragments, animated-only direction, atmospheric crash
+effects, or a durable/network surface.
 
 ## 16. Traceability
 
