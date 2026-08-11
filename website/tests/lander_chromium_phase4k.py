@@ -218,8 +218,12 @@ const snapshot = () => ({
     fuel: controller.model.fuel,
     commanded: structuredClone(controller.model.commanded),
     held: [...controller.heldKeys].sort(),
+    input: structuredClone(controller.clock.input),
     queue: structuredClone(controller.clock.queue),
+    pointer: controller.pointer ? structuredClone(controller.pointer) : null,
+    pointerInput: structuredClone(controller.pointerInput),
     pulse: structuredClone(controller.collectivePulse),
+    releasedCapture: controller.releasedCapture ? structuredClone(controller.releasedCapture) : null,
     focus: document.activeElement?.id ?? "",
     clicks: structuredClone(clicks),
 });
@@ -257,7 +261,7 @@ window.phase4k = {
         const status = document.querySelector("#lander-status");
         const before = {label: label.textContent.trim(), value: value.textContent.trim(),
             status: status.textContent.trim()};
-        controller.model = {...controller.model, fuel: controller.model.fuel - 1};
+        controller.model = {...controller.model, fuel: controller.model.fuel - 0.1};
         controller.render();
         return {before, after: {label: label.textContent.trim(), value: value.textContent.trim(),
             status: status.textContent.trim()}};
@@ -372,6 +376,7 @@ def browser_phase4k_contract(
     server_factory: Callable[..., ThreadingHTTPServer] = ThreadingHTTPServer,
     tempdir_factory: Callable[[], tempfile.TemporaryDirectory[str]] = tempfile.TemporaryDirectory,
     target_factory: Callable[[Path, subprocess.Popen[bytes]], str] = _devtools_target,
+    probe_source_factory: Callable[[], str] = _probe_source,
     chromium_path: str | None = None,
 ) -> dict[str, object]:
     chromium = chromium_path or next(
@@ -392,7 +397,7 @@ def browser_phase4k_contract(
     thread_started = False
     try:
         source = page.read_text(encoding="utf-8")
-        probe_path.write_text(_probe_source(), encoding="utf-8")
+        probe_path.write_text(probe_source_factory(), encoding="utf-8")
         page.write_text(
             source.replace("</body>", '<script type="module" src="/phase4k-browser.js"></script></body>', 1),
             encoding="utf-8",
@@ -455,6 +460,34 @@ def browser_phase4k_contract(
                 passive_actions.append({"action": action, "key": key, "before": before,
                                         "after": connection.evaluate("phase4k.snapshot()")})
         result["passiveActions"] = passive_actions
+
+        connection.evaluate("phase4k.reset('flying'); phase4k.shell.focus(); phase4k.clearEvents()")
+        native_release_before = connection.evaluate("phase4k.snapshot()")
+        dispatch_key(connection, "Space", up=False)
+        native_release_pressed = connection.evaluate("phase4k.snapshot()")
+        dispatch_key(connection, "Space", down=False)
+        result["nativeRelease"] = {
+            "before": native_release_before,
+            "pressed": native_release_pressed,
+            "released": connection.evaluate("phase4k.snapshot()"),
+            "events": connection.evaluate("structuredClone(phase4k.keyEvents)"),
+        }
+
+        connection.evaluate("phase4k.reset('flying'); phase4k.shell.focus(); phase4k.clearEvents()")
+        focusout_before = connection.evaluate("phase4k.snapshot()")
+        dispatch_key(connection, "Space", up=False)
+        focusout_pressed = connection.evaluate("phase4k.snapshot()")
+        connection.evaluate("phase4k.focusTarget('header')")
+        focusout_released = connection.evaluate("phase4k.snapshot()")
+        connection.evaluate("phase4k.clearEvents()")
+        dispatch_key(connection, "Space", down=False)
+        result["focusoutRelease"] = {
+            "before": focusout_before,
+            "pressed": focusout_pressed,
+            "focusout": focusout_released,
+            "afterOutsideKeyup": connection.evaluate("phase4k.snapshot()"),
+            "outsideEvents": connection.evaluate("structuredClone(phase4k.keyEvents)"),
+        }
 
         outside = []
         outside_keys = ("Escape", "KeyR", "Space", "ArrowUp", "ArrowDown", "ArrowLeft",

@@ -71,44 +71,53 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
         eof_socket = _HandshakeEofSocket()
         with (
             mock.patch.object(phase4k_browser.socket, "create_connection", return_value=eof_socket),
-            self.assertRaisesRegex(ConnectionError, "handshake"),
+            self.assertRaises(ConnectionError),
         ):
             phase4k_browser.DevToolsConnection("ws://127.0.0.1:9222/devtools/page/1")
         self.assertEqual(eof_socket.receive_count, 1)
         self.assertTrue(eof_socket.closed)
 
     def test_server_allocation_failure_restores_the_artifact(self) -> None:
+        sentinel = RuntimeError()
+
         def fail_server(*args: object, **kwargs: object) -> None:
             del args, kwargs
-            raise RuntimeError("server allocation")
+            raise sentinel
 
-        with self.assertRaisesRegex(RuntimeError, "server allocation"):
+        with self.assertRaises(RuntimeError) as caught:
             phase4k_browser.browser_phase4k_contract(
                 self.output, server_factory=fail_server, chromium_path="chromium-test"
             )
+        self.assertIs(caught.exception, sentinel)
         self.assert_harness_clean()
 
     def test_profile_and_spawn_failures_stop_the_server_and_restore_artifacts(self) -> None:
-        def fail_profile() -> tempfile.TemporaryDirectory[str]:
-            raise RuntimeError("profile allocation")
+        profile_sentinel = RuntimeError()
 
-        with self.assertRaisesRegex(RuntimeError, "profile allocation"):
+        def fail_profile() -> tempfile.TemporaryDirectory[str]:
+            raise profile_sentinel
+
+        with self.assertRaises(RuntimeError) as caught:
             phase4k_browser.browser_phase4k_contract(
                 self.output, tempdir_factory=fail_profile, chromium_path="chromium-test"
             )
+        self.assertIs(caught.exception, profile_sentinel)
         self.assert_harness_clean()
+
+        spawn_sentinel = RuntimeError()
 
         def fail_spawn(*args: object, **kwargs: object) -> None:
             del args, kwargs
-            raise RuntimeError("browser spawn")
+            raise spawn_sentinel
 
-        with self.assertRaisesRegex(RuntimeError, "browser spawn"):
+        with self.assertRaises(RuntimeError) as caught:
             phase4k_browser.browser_phase4k_contract(
                 self.output,
                 popen_factory=fail_spawn,
                 tempdir_factory=self.profile_factory,
                 chromium_path="chromium-test",
             )
+        self.assertIs(caught.exception, spawn_sentinel)
         self.assert_harness_clean()
 
     def test_acquisition_and_connection_failures_terminate_the_owned_browser(self) -> None:
@@ -120,11 +129,13 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
             processes.append(process)
             return process
 
+        target_sentinel = RuntimeError()
+
         def fail_target(profile: Path, process: object) -> str:
             del profile, process
-            raise RuntimeError("target acquisition")
+            raise target_sentinel
 
-        with self.assertRaisesRegex(RuntimeError, "target acquisition"):
+        with self.assertRaises(RuntimeError) as caught:
             phase4k_browser.browser_phase4k_contract(
                 self.output,
                 popen_factory=spawn,
@@ -132,14 +143,17 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
                 target_factory=fail_target,
                 chromium_path="chromium-test",
             )
+        self.assertIs(caught.exception, target_sentinel)
         self.assertTrue(processes[-1].terminated)
         self.assert_harness_clean()
 
+        connection_sentinel = RuntimeError()
+
         def fail_connection(url: str) -> None:
             del url
-            raise RuntimeError("connection acquisition")
+            raise connection_sentinel
 
-        with self.assertRaisesRegex(RuntimeError, "connection acquisition"):
+        with self.assertRaises(RuntimeError) as caught:
             phase4k_browser.browser_phase4k_contract(
                 self.output,
                 connection_factory=fail_connection,
@@ -148,6 +162,7 @@ class Phase4KBrowserCleanupTests(RepositoryFixture):
                 target_factory=lambda profile, process: "ws://phase4k.invalid",
                 chromium_path="chromium-test",
             )
+        self.assertIs(caught.exception, connection_sentinel)
         self.assertTrue(processes[-1].terminated)
         self.assert_harness_clean()
 

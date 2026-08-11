@@ -5,10 +5,11 @@ import json
 import struct
 import threading
 import zlib
+from decimal import Decimal
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
-from lander_chromium_phase4k import browser_phase4k_contract, normalize_accessible
+from lander_chromium_phase4k import _probe_source, browser_phase4k_contract, normalize_accessible
 from site_test_support import *  # noqa: F403
 
 
@@ -292,6 +293,84 @@ controller.destroy();
 
 
 class ArcadeBrowserTests(RepositoryFixture):
+    def assert_released_input(self, witness: dict[str, object], *, cleared_queue: bool) -> None:
+        zero = {"left": 0, "right": 0, "vectorAngle": 0}
+        self.assertEqual(witness["held"], [])
+        self.assertEqual(witness["commanded"], zero)
+        self.assertEqual(witness["input"], zero)
+        self.assertIsNone(witness["pointer"])
+        self.assertEqual(witness["pointerInput"], zero)
+        self.assertEqual(witness["pulse"], {"active": False, "token": None, "deadline": None})
+        self.assertIsNone(witness["releasedCapture"])
+        queue = witness["queue"]
+        self.assertTrue(queue)
+        if cleared_queue:
+            self.assertTrue(all(edge["left"] == 0 and edge["right"] == 0 for edge in queue))
+            self.assertEqual(len(queue), 1)
+            self.assertEqual(set(queue[0]) - {"timestamp", "sequence"}, {"left", "right"})
+        else:
+            self.assertEqual(queue[-1]["left"], 0)
+            self.assertEqual(queue[-1]["right"], 0)
+
+    def assert_phase4k_release_contract(self, result: dict[str, object]) -> None:
+        native = result["nativeRelease"]
+        self.assertEqual(native["before"]["focus"], "lander-scene-shell")
+        self.assertEqual(native["pressed"]["held"], ["Space"])
+        self.assertTrue(any(edge["left"] > 0 and edge["right"] > 0 for edge in native["pressed"]["queue"]))
+        self.assert_released_input(native["released"], cleared_queue=False)
+        self.assertEqual(native["events"], [
+            {"type": "keydown", "key": " ", "defaultPrevented": True},
+            {"type": "keyup", "key": " ", "defaultPrevented": True},
+        ])
+
+        focusout = result["focusoutRelease"]
+        self.assertEqual(focusout["before"]["focus"], "lander-scene-shell")
+        self.assertEqual(focusout["pressed"]["held"], ["Space"])
+        self.assertTrue(any(edge["left"] > 0 and edge["right"] > 0
+                            for edge in focusout["pressed"]["queue"]))
+        self.assertEqual(focusout["focusout"]["focus"], "phase4k-header-target")
+        self.assert_released_input(focusout["focusout"], cleared_queue=True)
+        for key in ("state", "launchStarted", "pose", "fuel", "clicks"):
+            self.assertEqual(focusout["focusout"][key], focusout["before"][key])
+        self.assertEqual(focusout["afterOutsideKeyup"], focusout["focusout"])
+        self.assertEqual(focusout["outsideEvents"], [
+            {"type": "keyup", "key": " ", "defaultPrevented": False},
+        ])
+
+    def parse_fixed_tenth(self, value: str) -> Decimal:
+        self.assertIsNotNone(re.fullmatch(r"\d+\.\d", value))
+        parsed = Decimal(value)
+        self.assertTrue(parsed.is_finite())
+        self.assertEqual(parsed.as_tuple().exponent, -1)
+        return parsed
+
+    def assert_phase4k_accessibility_contract(self, accessibility: dict[str, object]) -> None:
+        dom = accessibility["dom"]
+        refresh = accessibility["refresh"]
+        self.assertEqual(dom["ids"].index("lander-fuel-value"), dom["ids"].index("lander-fuel-label") + 1)
+        stable_label = dom["label"]
+        stable_status = dom["status"]
+        self.assertEqual(refresh["before"]["label"].encode(), stable_label.encode())
+        self.assertEqual(refresh["after"]["label"].encode(), stable_label.encode())
+        self.assertEqual(refresh["before"]["status"].encode(), stable_status.encode())
+        self.assertEqual(refresh["after"]["status"].encode(), stable_status.encode())
+        self.assertEqual(refresh["before"]["value"], dom["value"])
+        before_value = self.parse_fixed_tenth(refresh["before"]["value"])
+        after_value = self.parse_fixed_tenth(refresh["after"]["value"])
+        self.assertEqual(before_value - after_value, Decimal("0.1"))
+        before_segment = normalize_accessible(f'{stable_label} {refresh["before"]["value"]}')
+        after_segment = normalize_accessible(f'{stable_label} {refresh["after"]["value"]}')
+        before_description = normalize_accessible(accessibility["beforeDescription"])
+        after_description = normalize_accessible(accessibility["afterDescription"])
+        self.assertEqual(before_description.count(before_segment), 1)
+        self.assertEqual(after_description.count(after_segment), 1)
+        self.assertNotIn(before_segment, after_description)
+        self.assertEqual(after_description, before_description.replace(before_segment, after_segment, 1))
+        for action in ("restart", "exit"):
+            copy = dom["actionCopy"][action]
+            self.assertIn(copy["label"], accessibility["buttonNames"])
+            self.assertNotIn(f'{copy["label"]} {copy["hint"]}', accessibility["buttonNames"])
+
     def test_phase4k_native_input_focus_departure_and_accessibility_contracts(self) -> None:
         result = browser_phase4k_contract(self.build())
         self.assertEqual(result["activeTabOrder"], ["lander-exit"])
@@ -307,6 +386,7 @@ class ArcadeBrowserTests(RepositoryFixture):
         for witness in result["passiveActions"]:
             with self.subTest(action=witness["action"], key=witness["key"]):
                 self.assertEqual(witness["after"], witness["before"])
+        self.assert_phase4k_release_contract(result)
 
         outside = result["outside"]
         expected_matrix = {
@@ -333,30 +413,7 @@ class ArcadeBrowserTests(RepositoryFixture):
             self.assertTrue(witness["launchStarted"], witness["authority"])
             self.assertTrue(witness["fuelSpent"], witness["authority"])
 
-        accessibility = result["accessibility"]
-        dom = accessibility["dom"]
-        refresh = accessibility["refresh"]
-        self.assertEqual(dom["ids"].index("lander-fuel-value"), dom["ids"].index("lander-fuel-label") + 1)
-        stable_label = dom["label"]
-        stable_status = dom["status"]
-        self.assertEqual(refresh["before"]["label"], stable_label)
-        self.assertEqual(refresh["after"]["label"], stable_label)
-        self.assertEqual(refresh["before"]["status"], stable_status)
-        self.assertEqual(refresh["after"]["status"], stable_status)
-        self.assertEqual(refresh["before"]["value"], dom["value"])
-        self.assertNotEqual(refresh["before"]["value"], refresh["after"]["value"])
-        before_segment = normalize_accessible(f'{stable_label} {refresh["before"]["value"]}')
-        after_segment = normalize_accessible(f'{stable_label} {refresh["after"]["value"]}')
-        before_description = normalize_accessible(accessibility["beforeDescription"])
-        after_description = normalize_accessible(accessibility["afterDescription"])
-        self.assertEqual(before_description.count(before_segment), 1)
-        self.assertEqual(after_description.count(after_segment), 1)
-        self.assertNotIn(before_segment, after_description)
-        self.assertEqual(after_description, before_description.replace(before_segment, after_segment, 1))
-        for action in ("restart", "exit"):
-            copy = dom["actionCopy"][action]
-            self.assertIn(copy["label"], accessibility["buttonNames"])
-            self.assertNotIn(f'{copy["label"]} {copy["hint"]}', accessibility["buttonNames"])
+        self.assert_phase4k_accessibility_contract(result["accessibility"])
 
     def test_phase4k_browser_departures_require_production_input_listeners(self) -> None:
         output = self.build()
@@ -364,6 +421,8 @@ class ArcadeBrowserTests(RepositoryFixture):
         source = game_path.read_text(encoding="utf-8")
         listeners = (
             'this.listen(document, "keydown", (event) => this.onKeyDown(event));',
+            'this.listen(document, "keyup", (event) => this.onKeyUp(event));',
+            'this.listen(this.lander_scene_shell, "focusout", () => this.clearAllInput(performance.now()));',
             'this.listen(this.lander_scene_stage, type, (event) => this.onPointer(event));',
         )
         for listener in listeners:
@@ -372,9 +431,33 @@ class ArcadeBrowserTests(RepositoryFixture):
                 try:
                     game_path.write_text(source.replace(listener, "", 1), encoding="utf-8")
                     with self.assertRaises(AssertionError):
-                        browser_phase4k_contract(output)
+                        result = browser_phase4k_contract(output)
+                        self.assert_phase4k_release_contract(result)
                 finally:
                     game_path.write_text(source, encoding="utf-8")
+
+    def test_phase4k_accessibility_rejects_nonnumeric_fuel_mutations(self) -> None:
+        output = self.build()
+        probe = _probe_source()
+        setup_anchor = (
+            '        const status = document.querySelector("#lander-status");\n'
+            '        return {ids: shell.getAttribute("aria-describedby").split(" "),'
+        )
+        refresh_anchor = (
+            "        controller.render();\n"
+            "        return {before, after: {label: label.textContent.trim(), value: value.textContent.trim(),"
+        )
+        mutations = (
+            probe.replace(setup_anchor, setup_anchor.replace("        return", "        value.textContent = label.id;\n        return"), 1),
+            probe.replace(refresh_anchor,
+                          refresh_anchor.replace("        return", "        value.textContent = status.id;\n        return"), 1),
+        )
+        for mutation in mutations:
+            with self.subTest(mutation=mutation != probe):
+                self.assertNotEqual(mutation, probe)
+                with self.assertRaises(AssertionError):
+                    result = browser_phase4k_contract(output, probe_source_factory=lambda: mutation)
+                    self.assert_phase4k_accessibility_contract(result["accessibility"])
 
     def test_active_description_resolves_only_visible_conditional_relationships(self) -> None:
         result = browser_description_contract(self.build())

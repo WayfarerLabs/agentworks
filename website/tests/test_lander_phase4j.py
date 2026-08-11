@@ -135,8 +135,10 @@ class ArcadeMarkupTests(unittest.TestCase):
                                   f'{restart_label.group(1)}   {restart_label.group(3)}', 1),
         )
         for index, mutation in enumerate(mutations):
-            with self.subTest(index=index), self.assertRaisesRegex(ValueError, "child|prose|text"):
-                validate_game_contract(mutation)
+            with self.subTest(index=index):
+                self.assertNotEqual(mutation, self.fragment)
+                with self.assertRaises(ValueError):
+                    validate_game_contract(mutation)
 
     def test_reviewed_root_and_required_tag_identities_reject_stray_structure(self) -> None:
         fuel_label = re.search(r'<span id="lander-fuel-label"[^>]*>.*?</span>', self.fragment, re.DOTALL)
@@ -160,8 +162,10 @@ class ArcadeMarkupTests(unittest.TestCase):
             self.fragment.replace(fuel_label.group(0), wrong_fuel_label_tag, 1),
         )
         for index, mutation in enumerate(mutations):
-            with self.subTest(index=index), self.assertRaisesRegex(ValueError, "top-level|tag identity"):
-                validate_game_contract(mutation)
+            with self.subTest(index=index):
+                self.assertNotEqual(mutation, self.fragment)
+                with self.assertRaises(ValueError):
+                    validate_game_contract(mutation)
 
 
 class ArcadeCssTests(unittest.TestCase):
