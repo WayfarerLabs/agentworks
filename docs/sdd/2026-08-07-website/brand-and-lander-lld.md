@@ -1334,14 +1334,45 @@ transferY = startY+(targetY-startY)*p
 
 Write those last two stage-local lengths to `--fuel-transfer-x/y`. The pseudo-can uses
 `left:var(--fuel-transfer-x);top:var(--fuel-transfer-y);transform:translate(-50%,-50%)`, so the
-coordinates denote its center. At `p=0` the original collected can is already hidden and the
-pseudo-element occupies its anchor, so exactly one can is visible. At 300 ms `refuel` clears,
-`data-refueling` becomes false, the pseudo-element disappears at the gauge, and the fill remains
-exactly full. The controller's registered resize handler reruns this projection from both current
-rectangles without changing `p`; its cleanup is in the existing teardown registry. Reduced motion
-never exposes the pseudo-element. A hidden document freezes model progress; resize may reproject the
-same frozen `p`, and the first visible frame recomputes both rectangles without adding hidden
-elapsed time.
+coordinates denote its center. Its exact CSS is:
+
+```css
+#lander-game[data-refueling="true"] #lander-scene-stage::after {
+  content: "";
+  position: absolute;
+  inline-size: 20px;
+  block-size: 22px;
+  left: var(--fuel-transfer-x);
+  top: var(--fuel-transfer-y);
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  image-rendering: pixelated;
+  background:
+    linear-gradient(#d94a1e 0 0) 6px 2px / 6px 2px no-repeat,
+    linear-gradient(#292b30 0 0) 4px 0 / 10px 6px no-repeat,
+    linear-gradient(#d94a1e 0 0) 16px 10px / 2px 4px no-repeat,
+    linear-gradient(#292b30 0 0) 16px 8px / 4px 8px no-repeat,
+    linear-gradient(#d94a1e 0 0) 2px 6px / 12px 14px no-repeat,
+    linear-gradient(#292b30 0 0) 0 4px / 16px 18px no-repeat;
+  background-color: transparent;
+}
+```
+
+Multiple CSS backgrounds paint first-listed on top. The six layers are therefore, in paint order,
+orange handle void/fill over graphite handle, orange inner spout over graphite spout, and orange
+inner body over graphite body. They reproduce the source can's exact `#292b30` graphite and
+`#d94a1e` orange language in a recognizable sharp-cornered silhouette. The empty generated string is
+not text, exposes no accessibility node or name, and `pointer-events:none` makes the projection
+silent to input. No border, mask, filter, image asset, seventh layer, or nontransparent background
+color participates.
+
+At `p=0` the original collected can is already hidden and the pseudo-element occupies its anchor, so
+exactly one can is visible. At 300 ms `refuel` clears, `data-refueling` becomes false, the
+pseudo-element disappears at the gauge, and the fill remains exactly full. The controller's
+registered resize handler reruns this projection from both current rectangles without changing `p`;
+its cleanup is in the existing teardown registry. Reduced motion never exposes the pseudo-element. A
+hidden document freezes model progress; resize may reproject the same frozen `p`, and the first
+visible frame recomputes both rectangles without adding hidden elapsed time.
 
 The existing `#lander-status` remains the sole status, live-region, and banner text authority.
 `data-banner="deployed"` is derived only from exact status `Agent Deployed!` in launch-ready;
@@ -1498,6 +1529,7 @@ serialized world descriptors are exact. Every schedule includes an explicit fina
 | Gauge contrast        | danger/caution/ready against `#20232a`; gauge level zero                                     | ratios `5.068/8.584/8.243`; graphite boundary plus colored inset remain visible with zero-height fill             |
 | Refuel projection     | pre-award level `.25`; normal landed time `0,.15,.299,.3 s`                                  | levels `.25,.625,.9975,1`; one can follows the same linear progress and is absent after `.3`                      |
 | Refuel CSS frame      | stage rect `(100,50,1000,640)`, can scene `(130,433)`, gauge rect `(120,70,16,112)`, `p=.25` | viewport can `(230,483)`, local endpoints `(130,433)` to `(28,76)`, transfer center `(104.5,343.75)`              |
+| Transfer silhouette   | DPR 1, integer CSS-pixel center; computed `::after` plus paired on/off `20 by 22` crops      | six pinned layers/sizes/positions/colors; probes hit every outer/inner part and `(0,0)`/`(19,21)` match baseline  |
 | Reduced refuel        | Same contact with reduced motion                                                             | full model/fuel text/gauge/checkpoint atomically; `refuel=null`, no transfer pseudo-element                       |
 | Launch-ready hold     | 10 seconds zero or steer-only input after power                                              | centered pose, fuel, mission time, zero command, and `Agent Deployed!` remain byte-equal                          |
 | Manual departure      | Launch-ready plus held Space                                                                 | first step burns/integrates; `flying` begins only when both feet exceed deck by `.05 m`                           |
@@ -1575,6 +1607,7 @@ Phase 4J preserves `ROUTE_DIGESTS` exactly: geometry
 | Derivation CLI fixture verification                                     | Run section 10.2's ordinary temporary-output command with `--verify`; exact v4 deriver, v3 recipes, geometry v2/derived v3 schemas, route literals, 81 strict world witnesses, and all four checked digests remain byte-identical. A Phase 4J change to route, physics, geometry, world, fixture, or output bytes is a failure, not a regeneration prompt.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `python -m unittest discover -s website/tests -p 'test_*.py'`           | Exact 12-file artifacts at both bases; one shared fragment; exact static/no-JS scene; exact stage, outcome, fuel, action, and rail parent/source order; one visually hidden ordinary `span#lander-fuel-value`, zero `output` elements, and one aria-hidden gauge; the span has no role/live semantics and is named only by its hidden label; no meter/progress role; one polite atomic status; exact `Agent Deployed!`/`Crashed!`, old failure sentence absent; Launch/Restart/Exit native attributes/order; static `data-agent="absent"`, one existing NOC-entry path, no added world child; local system font declaration and no font/CSP/manifest/request change; production DAG, transactional recovery, privacy, and all prior static/dynamic world parity.                                                                                                                                                                                                                                               |
 | Automated Chromium projection witness                                   | Seeded normal contact samples refuel at model times `0/.15/.299 s`: one pseudo-can starts at the collected can, follows the exact stage-local linear coordinates, and approaches the gauge while fill matches `.fromLevel` interpolation; the pinned nonzero-left/top vector resolves to `(104.5,343.75)`, and resize reprojects current rectangles at unchanged `p`; 300 ms removes it at full. Hiding between samples freezes model time, then resumes without a jump. Reduced motion and a mid-sequence motion change expose no transfer and land atomically at the same model/checkpoint. Pointerdown on descendants of all three native actions produces no capture or pointer-flight edge; the following native click fires once, with only Launch taking the named pulse path. Three deployments prove each retained powered NOC keeps its installed path through launch, crash, two restarts, camera reversal, and eviction, while the simultaneous world count stays exactly 78 and never exceeds 80. |
+| Pseudo-can computed-style and screenshot witness                        | For `getComputedStyle(stage,"::after")`, assert `width=20px`, `height=22px`, `pointer-events=none`, `image-rendering=pixelated`, transparent background color, exactly six gradient images, sizes `6px 2px,10px 6px,2px 4px,4px 8px,12px 14px,16px 18px`, positions `6px 2px,4px 0px,16px 10px,16px 8px,2px 6px,0px 4px`, `no-repeat` six times, and alternating normalized paints `rgb(217,74,30)`/`rgb(41,43,48)` in the pinned top-to-bottom order. At DPR 1 and an integer transfer center, take exact `20 by 22` CSS-pixel crops with refueling on and off: on-crop probes `(5,1)`, `(7,3)`, `(18,9)`, `(16,11)`, `(1,5)`, and `(3,7)` prove the six graphite/orange parts; `(0,0)` and `(19,21)` are byte-equal to the off-crop background, proving transparency. The crop visibly reads as one block can. No golden asset ships.                                                                                                                                                                        |
 | Manual Chrome and Edge pre-merge; Firefox and Safari/WebKit post-launch | Start/focus/recovery; Space/arrows/vi/touch and native actions; three deployments; red/amber/green gauge with no visible numeric text; one can transfer; blocky local-system arcade chrome; exact centered success/crash banners; Launch then Exit and Restart then Exit below the appropriate banner; installed agents at every powered retained NOC; existing handling, structure, battery/signal, arrow/carry, boundary, crash/restart, reduced-motion, hidden-pause, privacy, and zero-request behavior.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Responsive, zoom, focus, and accessibility acceptance                   | At 320 CSS pixels, browser 400 percent zoom, touch landscape, and `60rem`: stage and rail remain normal-flow separated; gauge and exactly positioned centered outcome are in-stage and disjoint; banner/actions do not overlap; every shown button is at least `44 by 44` CSS pixels. Computed style and accessibility-tree witnesses prove the label/value spans are visually clipped, the named fuel value is non-live and rounds only its exact model source, gauge/transfer are silent, and exactly one polite atomic live region announces each exact outcome once; state-specific tab order is shell then Launch/Restart then Exit, focus never lands on hidden actions, Restart/Launch return focus to shell, Exit returns it to Start, `touch-action:none` exists only on the active stage, and no trap or page overflow exists.                                                                                                                                                                       |
 | Performance and longevity witness                                       | 100-site deterministic run; no more than five terrain paths, three sites, eight fragments, 80 world descendants, exactly 78 at the simultaneous maximum, and exactly three native action descendants; fixed stage/outcome/gauge/rail DOM, one pseudo-can, one pulse timer, and no refuel timer; unchanged proof timing and active-frame ceiling; 10-second launch-ready hold and hidden tab leave fuel/projection unchanged; teardown leaves no listener, timer, capture, frame, enabled dead action, pseudo-transfer state, or growing history.                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
@@ -1613,6 +1646,16 @@ nonlinear or CSS-time fill, more than one visible can, a transfer DOM/world node
 coordinate mixing, omitted stage-rectangle offsets, contain letterboxing, a pseudo-can not centered
 on its coordinates, a transfer that survives reduced motion, hidden-time progress, missing resize
 reprojection, or an award/checkpoint change caused by presentation.
+
+Pseudo-can mutations reject dimensions other than exact `20px by 22px`, nonempty generated text,
+`pointer-events` other than `none`, a transform other than the pinned centering transform,
+`image-rendering` other than `pixelated`, a nontransparent background color, or any border, mask,
+filter, image asset, or DOM/accessibility node. Parsed computed style must contain exactly the six
+gradient images in the stated paint order, with byte-equivalent colors and exact per-layer size,
+position, and `no-repeat`; adding, removing, reordering, recoloring, resizing, or moving any layer
+is a failure. The DPR-1 screenshot probes and `20 by 22` crop are mutation-sensitive independently
+of the computed-style assertions, so a declaration that parses correctly but paints the wrong
+silhouette also fails.
 
 Markup/CSS mutations reject chrome outside `#lander-scene-shell`, controls before or over the stage,
 an absent stage/outcome wrapper, action source order other than Launch/Restart/Exit, a banner not
