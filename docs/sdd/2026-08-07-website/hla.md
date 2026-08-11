@@ -459,12 +459,10 @@ source-review, startup-disclosure, or security-posture substitute.
 
 ## Failure and recovery
 
-- **Upstream content unavailable:** the interim release remains publishable without inspecting an
-  onboarding branch. Bootstrap integration waits for the canonical contract on `main`; it never
-  guesses.
-- **Upstream content drift after integration:** build fails before artifact upload and names the
-  missing or mismatched contract. The owner updates the website integration against the merged
-  source; it never substitutes local copy.
+- **Canonical assistance unavailable or drifted:** build fails before artifact upload and names the
+  missing or mismatched contract. There is no interim fallback or branch inspection. The owner
+  updates the website integration against the repository-owned source; it never substitutes local
+  copy.
 - **JavaScript unavailable or game failure:** the dedicated Lander page retains its static named
   scene, while the semantic 404 message and ordinary home link remain available. The game is
   nonessential and never owns navigation or recovery.
