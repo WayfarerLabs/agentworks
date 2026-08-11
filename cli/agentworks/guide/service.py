@@ -325,10 +325,19 @@ def render_guide(
     if load_config_fn is None:
         from agentworks.config import load_config
 
+        absent_default_config = False
+
         def load_config_for_guide() -> Config:
+            nonlocal absent_default_config
+
+            from agentworks.config import CONFIG_PATH
+
+            absent_default_config = not CONFIG_PATH.exists()
             return load_config(raise_errors=True)
 
         load_config_fn = load_config_for_guide
+    else:
+        absent_default_config = False
     if load_registry_fn is None:
         from agentworks.bootstrap import load_guide_registry
 
@@ -505,6 +514,9 @@ def render_guide(
     error_markdown = (
         f"\n\n{framework_heading('Live facts unavailable')}\n\n{_framed_error(system_error)}" if system_error else ""
     )
-    exit_code = 1 if visible_issues or runtime_issues or system_error is not None else 0
+    expected_clean_home_handoff = not requested and absent_default_config and isinstance(system_error, ConfigError)
+    exit_code = (
+        1 if visible_issues or runtime_issues or (system_error is not None and not expected_clean_home_handoff) else 0
+    )
     output = sanitize_terminal_output(markdown.rstrip() + issue_markdown + error_markdown + "\n")
     return GuideResponse(output, exit_code, all_names)

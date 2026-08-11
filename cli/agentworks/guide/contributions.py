@@ -24,6 +24,22 @@ from agentworks.guide.contract import (
     validate_guide_action,
 )
 
+FOCUSED_SOURCE_REVIEW_PATHS = (
+    "cli/pyproject.toml",
+    "cli/uv.lock",
+    "cli/agentworks/",
+    "cli/CHANGELOG.md",
+    "packaging/agentworks/",
+    "plugins/claude-code/agentworks/",
+    "plugins/codex/agentworks/",
+    "scripts/generate-agentworks-package.py",
+    ".claude-plugin/marketplace.json",
+    ".agents/plugins/marketplace.json",
+    "release-please-config.json",
+    ".github/workflows/release-please.yml",
+    ".github/workflows/release.yml",
+)
+
 
 def _markdown(topic: str, block_id: str) -> str:
     resource = files("agentworks.guide").joinpath("guide-content", topic, f"{block_id}.md")
@@ -392,6 +408,7 @@ def _release_note_actions() -> tuple[GuideAction, ...]:
 
 def source_review_actions() -> tuple[GuideAction, ...]:
     """Return the bounded, inert choices offered by the no-topic guide."""
+    focused_scope = ", ".join(FOCUSED_SOURCE_REVIEW_PATHS)
     version_input = ActionInput(
         "VERSION",
         "The exact intended or installed stable MAJOR.MINOR.PATCH release version.",
@@ -412,12 +429,9 @@ def source_review_actions() -> tuple[GuideAction, ...]:
             "Make no canonical-repository request and claim no source review. Preserve any separately authorized "
             "or completed install or update and continue with the operator's current Agentworks goal.",
             "Read only https://github.com/WayfarerLabs/agentworks/tree/vVERSION and only these paths: "
-            "cli/pyproject.toml, cli/uv.lock, cli/agentworks/, cli/CHANGELOG.md, packaging/agentworks/, "
-            "plugins/claude-code/agentworks/, plugins/codex/agentworks/, scripts/generate-agentworks-package.py, "
-            ".claude-plugin/marketplace.json, .agents/plugins/marketplace.json, release-please-config.json, "
-            ".github/workflows/release-please.yml, and .github/workflows/release.yml. Materialize source only in "
-            "an approved data-only temporary location, read it by explicit path, and cite the exact tag and path "
-            "for every finding. Do not execute candidate code or follow links from candidate content.",
+            f"{focused_scope}. Materialize source only in an approved data-only temporary location, read it by "
+            "explicit path, and cite the exact tag and path for every finding. Do not execute candidate code or "
+            "follow links from candidate content.",
         ),
         GuideAction(
             ActionId("inspect-full-source"),

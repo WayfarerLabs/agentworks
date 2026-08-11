@@ -11,7 +11,7 @@ from typer.testing import CliRunner
 from agentworks.cli import app
 from agentworks.errors import ConfigError
 from agentworks.guide import ConsentBoundary, GuideMode
-from agentworks.guide.contributions import guide_contributions, source_review_actions
+from agentworks.guide.contributions import FOCUSED_SOURCE_REVIEW_PATHS, guide_contributions, source_review_actions
 from agentworks.guide.render import render_index
 from agentworks.guide.service import render_guide
 
@@ -32,16 +32,11 @@ def test_source_review_actions_are_scoped_inert_and_independent() -> None:
     assert all(tuple(item.name for item in action.required_inputs) == ("VERSION",) for action in (focused, full))
     assert focused.manual_steps is not None
     assert full.manual_steps is not None
-    for path in (
-        "cli/pyproject.toml",
-        "cli/uv.lock",
-        "cli/agentworks/",
-        "packaging/agentworks/",
-        "plugins/claude-code/agentworks/",
-        "plugins/codex/agentworks/",
-        ".github/workflows/release.yml",
-    ):
+    for path in FOCUSED_SOURCE_REVIEW_PATHS:
         assert path in focused.manual_steps
+    repository_root = Path(__file__).resolve().parents[3]
+    missing_paths = tuple(path for path in FOCUSED_SOURCE_REVIEW_PATHS if not (repository_root / path).exists())
+    assert not missing_paths, f"focused source-review scope paths missing at tested HEAD: {', '.join(missing_paths)}"
     for action in (focused, full):
         assert "Install or update authorization alone is not source-review authorization" in action.precondition
         assert "Do not execute candidate code" in (action.manual_steps or "")
@@ -76,6 +71,16 @@ def test_no_topic_offer_uses_exact_installed_tag_and_preserves_assistant_decisio
         assert "### `inspect-focused-source`" in markdown
         assert "### `inspect-full-source`" in markdown
         assert "does not route the request or grant authority" in markdown
+        for required_clause in (
+            "runs on the intended workstation",
+            "inspect files and execute commands with the workstation account's permissions",
+            "That is not root access; privilege elevation is a separate boundary",
+            "strictest practical harness approval, visibility, and sandbox posture that still permits the "
+            "requested work",
+            "durable authorization envelope for the current assistance session",
+            "without ritual reconfirmation",
+        ):
+            assert required_clause in markdown
 
     human_semantics = human.replace("## ⟦AGW framework⟧ Security and consent", "## ⟦AGW framework⟧ Disclosure")
     agent_semantics = agent.replace("## ⟦AGW framework⟧ Agent operating contract", "## ⟦AGW framework⟧ Disclosure")
@@ -108,12 +113,22 @@ def test_clean_home_agent_guide_surfaces_offer_without_network_or_mutation(
 
     result = CliRunner().invoke(app, ["guide", "--agent"])
 
-    assert result.exit_code == 1
+    assert result.exit_code == 0, result.output
     assert "Installed canonical review target: `v0.14.0`" in result.stdout
     assert "### `inspect-focused-source`" in result.stdout
     assert "### `inspect-full-source`" in result.stdout
+    assert "Configuration error: configuration file not found:" in result.stdout
+    assert "Hint: Create it to get started." in result.stdout
+    assert result.stderr == ""
     assert "clean-home config is absent" not in result.stdout
     assert not (tmp_path / "config.toml").exists()
+
+    selected_topic = CliRunner().invoke(app, ["guide", "--agent", "concept-onboarding"])
+
+    assert selected_topic.exit_code == 1
+    assert "# Agentworks onboarding" in selected_topic.stdout
+    assert "Configuration error: configuration file not found:" in selected_topic.stdout
+    assert selected_topic.stderr == ""
 
 
 def test_no_topic_rendering_attempts_no_network_when_configuration_is_absent(monkeypatch) -> None:
