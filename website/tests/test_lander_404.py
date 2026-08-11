@@ -367,6 +367,16 @@ class StaticDocumentTests(unittest.TestCase):
         self.assertEqual(" ".join(self.document.text_by_id["lander-launch"].split()), "Launch")
         self.assertEqual(self.element("lander-restart")[0], "button")
         self.assertEqual(self.element("lander-fuel-gauge")[1]["aria-hidden"], "true")
+        self.assertEqual(
+            " ".join(self.document.text_by_id["lander-fuel-label"].split()),
+            "Fuel reserve:",
+        )
+        label_rule = self.css.split("#lander-fuel-label {", 1)[1].split("}", 1)[0]
+        value_rule = self.css.split("#lander-fuel-value {", 2)[2].split("}", 1)[0]
+        self.assertIn("grid-column: 2", label_rule)
+        self.assertIn("grid-row: 1", label_rule)
+        self.assertIn("grid-column: 2", value_rule)
+        self.assertIn("grid-row: 2", value_rule)
         description = " ".join(self.document.text_by_id["lander-scene-description"].split()).lower()
         for word in ("lander", "surface", "helipad", "gas can", "dark", "network operations center"):
             self.assertIn(word, description)
