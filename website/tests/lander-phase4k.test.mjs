@@ -18,10 +18,10 @@ import { FakeElement, controllerClasses, controllerFixture } from "./lander-test
 
 const ROOT = new URL("../", import.meta.url);
 const EXPECTED_DIGESTS = Object.freeze({
-    geometryDigest: "e91ce3a27c011ef6b2549fdc36fa6e25db5c5da2d274233c9da4fc8adf4a0244",
-    outputDigest: "0277f45adf904ba8e5d264e906636c7bec64f1aca25b6d20ca4cb35a3c1b7458",
-    physicsDigest: "2e1fc0bf1ed47a8bdb968bd330eba6b7627f07d5b405039f6481274198465ad3",
-    worldDigest: "535f190fdf7c7300a7667ce2a3e6d5f1395b197b0bd27c2dbb0f69f61310333a",
+    geometryDigest: "2cc7b145dc516426d911f2f51f47cc374f0154905d8ddff00cc78e141de14195",
+    outputDigest: "2f715915c33e7c4a728bd1acfd10a206a206c1cd917c8e0d5687a5d696bb9492",
+    physicsDigest: "34a7cb64a3457c4df028031968e7ef00fde56fc445db6af6ab89eb7b737f692e",
+    worldDigest: "bf175490867abf3894697b9c014c1e1c2bf7abbc54e74b635bb69af67908245e",
 });
 
 async function controllerAt(model = createRun({ seed: 1 })) {
@@ -67,7 +67,7 @@ test("Phase 4K pins the exact landing profile, digests, and sole changed route",
         MAX_LANDING_DESCENT_SPEED,
         MAX_LANDING_ANGLE,
         MAX_LANDING_ANGULAR_SPEED,
-    ], [1.8, 2.8, 12, 18]);
+    ], [2, 3.2, 15, 22]);
     assert.deepEqual(ROUTE_DIGESTS, EXPECTED_DIGESTS);
     const route = REFERENCE_TEMPLATES.find(({ templateId }) => templateId === "route-93-flat");
     assert.deepEqual(route.runs.slice(24), [[3, 46], [4, 1], [3, 36], [4, 49]]);

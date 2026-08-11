@@ -42,11 +42,11 @@ evidence for their named source only; they do not accept the current game.
       reconciliation, and checkpoint restart. Exit restores the exact empty doorway and a fresh run
       has no installed glyph. The existing site group gains no descendant.
 - [ ] Confirm the reviewed deployment and crash copy use centered bordered in-stage panels with
-      exactly one polite live status. Restart follows that status and appears only after failure. A
+      exactly one polite live status. Retry follows that status and appears only after failure. A
       persistent Exit follows the controls prose in the final normal-flow rail whenever the shell is
       active. Both native actions remain at least 44 CSS pixels, have visible second-line `r` and
       `<esc>` hints excluded from their accessible names, and expose the matching keyboard
-      shortcuts. Focus returns to the scene after Restart and to Start after Exit.
+      shortcuts. Focus returns to the scene after Retry and to Start after Exit.
 - [ ] Activate every native action by pointer and touch. Its event must not start, steer, capture,
       or pulse flight input; each action fires once through its native click. Repeat with
       interactive and editable descendants placed inside the active stage.
@@ -60,27 +60,30 @@ evidence for their named source only; they do not accept the current game.
       `/404.html`; confirm their `#lander-game` subtrees are byte-equivalent.
 - [ ] Fly and safely service at least three sites across four visibly different coarse terrain
       motifs. Each target has one elevated H platform exactly three lander widths long, one gas can,
-      and one solid NOC on a shared flat shelf. Confirm its attached scaffold is visibly open, with
-      no filled backing face or pale artifact. The can disappears once, fuel increases once, the
-      agent enters, the four battery bars fill red/orange/pale-yellow/mint from bottom to top, the
-      three signal arches power in order, and manual departure returns to player-controlled flight.
+      and one solid NOC. Confirm native terrain remains visible beneath it, with one continuous
+      twelve-bay Warren truss and exactly three terrain-footed pylons, no internal closure stroke,
+      vertical artifact, filled backing face, or pale artifact. The can disappears once, fuel
+      increases once, the agent enters, the four battery bars fill red/orange/pale-yellow/mint from
+      bottom to top, the three signal arches power in order, and manual departure returns to
+      player-controlled flight.
 - [ ] Confirm the next site begins fully offscreen right after service. The solid arrow blinks only
       while that target remains offscreen; it is static with reduced motion and has equivalent
       visually hidden direction text.
 - [ ] Confirm the visual fuel level drains smoothly without repetitive live announcements. Spend
       fuel on thrust, carry excess through multiple sites, and verify empty fuel produces no thrust.
-- [ ] Crash on terrain, a platform end or underside, the scaffold or connector envelope, the NOC,
-      and the mast. Normal motion shows one brief compact flash and exactly eight ballistic
-      fragments for 600 milliseconds, with no smoke, dust, sound, shake, or page movement. Reduced
-      motion reaches the same failed state with no moving debris.
-- [ ] Restart after crashes before and after a powered site. Before the first checkpoint, restart
+- [ ] Crash on terrain, a platform end or underside, the truss or any pylon envelope, the NOC, and
+      the mast. Normal motion shows one brief compact flash and exactly eight ballistic fragments
+      for 600 milliseconds, with no smoke, dust, sound, shake, or page movement. Reduced motion
+      reaches the same failed state with no moving debris.
+- [ ] Retry after crashes before and after a powered site. Before the first checkpoint, Retry
       restores the same seeded initial approach. Afterward, it starts on the last powered pad,
       relaunches using fuel, and never duplicates the can, award, progress, ratio, or power
       sequence. Depart from the launch-ready pad with ordinary keyboard, vi, pointer, and touch
       flight controls; confirm no native Launch action exists.
 - [ ] Fly far enough for the camera and rolling window to move in both directions. At every sampled
-      point, count at most five terrain paths, three site groups, eight debris nodes, and 80
-      children under `#lander-world`; discarded sites do not return as retained history.
+      point, count exactly two terrain paths, at most three site groups, eight debris nodes, and no
+      more than 75 descendants under `#lander-world`; discarded sites do not return as retained
+      history.
 - [ ] Exercise straight, turn-only, and combined keyboard thrust plus pointer/touch at half and full
       drag. Confirm steering visibly gimbals both plumes, reduces forward thrust, never exceeds
       straight collective, and keyboard steer owns direction during simultaneous pointer input.
@@ -89,7 +92,7 @@ evidence for their named source only; they do not accept the current game.
 - [ ] Perform a short primary tap whose browser-generated `lostpointercapture` fires synchronously.
       Confirm thrust remains active through 139.999 ms, ends once at 140 ms, and cancel/blur/hide
       tears it down immediately. Repeat with a reused browser pointer ID.
-- [ ] Land exactly at the inclusive 1.8 m/s horizontal, 2.8 m/s descent, 12 degree tilt, and 18
+- [ ] Land exactly at the inclusive 2.0 m/s horizontal, 3.2 m/s descent, 15 degree tilt, and 22
       degree/s rotation limits; increase each independently and confirm a crash.
 - [ ] Hide and restore the tab during flight, arrow blink, service, launch, and crash. Hidden time
       advances none of them, input and pointer capture clear, and the first visible frame only
@@ -234,11 +237,11 @@ not close those rows or the final production-acceptance record.
 - [ ] After launch, in Safari or another WebKit browser, repeat the same engine pass.
 - [ ] After launch, with a spoken screen reader, verify initial scene naming, hidden preflight
       controls, the application transition, concise control description, polite status changes,
-      native Exit and Restart names/states, and focus destinations. Record screen reader, browser,
-      and versions.
-- [ ] After launch, on physical touch hardware, verify start, tap impulse, hold, drag, Exit,
-      Restart, scroll outside the active scene, and human motion quality. Record device, operating
-      system, browser, and input observations.
+      native Exit and Retry names/states, and focus destinations. Record screen reader, browser, and
+      versions.
+- [ ] After launch, on physical touch hardware, verify start, tap impulse, hold, drag, Exit, Retry,
+      scroll outside the active scene, and human motion quality. Record device, operating system,
+      browser, and input observations.
 - [ ] After launch, on at least one additional computer or device outside the pre-merge machine,
       smoke Home, Manifesto, Security, Lander, and 404 over the public host. Record device,
       operating system, browser, viewport, navigation, layout, and game observations; route defects
@@ -309,8 +312,9 @@ new run records the refined source.
 - [ ] Tab reaches the breadcrumb home crumb, GitHub, PyPI, footer links, and named start button in
       logical document order. No Tab key is intercepted and focus is never trapped.
 - [ ] Activating the start button by keyboard or ordinary click starts without thrust, reveals the
-      single control paragraph and native `Exit mission` button, keeps `Restart mission` hidden,
-      hides the start button, and moves focus to the game without scrolling.
+      exactly two control lines that do not wrap (keyboard then touch) and native `Exit mission`
+      button, keeps `Retry` hidden, hides the start button, and moves focus to the game without
+      scrolling.
 - [x] Pressing unmodified Space on the document body or scene starts, immediately commands thrust,
       and does not scroll. Holding that same physical Space key continues thrust after focus moves;
       releasing it ends thrust.
@@ -324,18 +328,18 @@ new run records the refined source.
 - [ ] Escape and native `Exit mission` on the active shell call the same exit operation: cut thrust,
       hide controls and actions, restore settled preflight, and focus the start button without
       scrolling. Escape on a shell link or outside the shell keeps browser behavior.
-- [ ] After a crash, both R and native `Restart mission` restore the last powered-pad checkpoint,
-      carried fuel, leg-relative gauge, `Agent Deployed!` banner, and shell focus without
-      recollecting the can. Restart is hidden and disabled outside `failed`.
+- [ ] After a crash, both R and native `Retry` restore the last powered-pad checkpoint, carried
+      fuel, leg-relative gauge, `Agent Deployed!` banner, and shell focus without recollecting the
+      can. Retry is hidden and disabled outside `failed`.
 - [ ] In every active state, Exit remains the rail's bottom-right 44 CSS-pixel action and follows
-      the shell in game-subtree tab order. Failed state alone inserts the 44 CSS-pixel Restart
-      between shell and Exit. Their visible second-line hints are excluded from their accessible
-      names, and their shortcut semantics expose `r` and `Escape`.
+      the shell in game-subtree tab order. Failed state alone inserts the 44 CSS-pixel Retry between
+      shell and Exit. Their visible second-line hints are excluded from their accessible names, and
+      their shortcut semantics expose `r` and `Escape`.
 - [ ] During flying, launch-ready, and failed states, focus the header and breadcrumb and target
       each element and a descendant with Escape, R, Space, Up, arrows, H, and L key-down/key-up
       pairs. Every event remains ordinary page input without prevention or game state, action,
       focus, input, pose, or fuel changes.
-- [ ] Focus Exit and Restart and repeat Space, Enter, arrows, H, and L against both the button and
+- [ ] Focus Exit and Retry and repeat Space, Enter, arrows, H, and L against both the button and
       each nested span. Space or Enter invokes exactly one native action; the other keys neither
       activate an action nor create flight input.
 - [ ] During play the scene SVG and all decorative descendants are silent to a screen reader. The
@@ -356,7 +360,7 @@ new run records the refined source.
 - [x] Pointer up, cancellation, lost capture, window blur, shell focus loss, tab hiding, contact,
       failure, Escape, restart, and a simulated frame stall all release capture and leave no stuck
       thrust. Repeat each teardown once to confirm it is harmless when already clear.
-- [ ] Touch activation of native Exit and terminal-state Restart follows the same controller,
+- [ ] Touch activation of native Exit and terminal-state Retry follows the same controller,
       teardown, model-event, and focus lifecycle as Escape and R. Neither action needs a keyboard.
 
 ## Flight, collision, and sequence
@@ -366,7 +370,7 @@ new run records the refined source.
 - [x] A fast, tilted, rotating, one-foot-outside, surface-short, operations-center, or out-of-bounds
       contact enters the restrained failure state. Nothing flashes, shakes, explodes, moves the
       page, changes the home link, or emits sound.
-- [ ] Failure announces the reviewed crash copy in the sole live status, shows only Restart beneath
+- [ ] Failure announces the reviewed crash copy in the sole live status, shows only Retry beneath
       that centered bordered panel, retains Exit in the final controls rail, and accepts both
       recovery paths.
 - [x] After safe touchdown at normal motion, the G bay opens, the terminal-shaped agent descends,
@@ -387,15 +391,16 @@ new run records the refined source.
       departure. Physics remains playable.
 - [x] Turning reduced motion on during the post-touchdown sequence immediately completes the same
       powered success result. Changing it during flight does not alter physics.
-- [x] Restart, Escape, and reload each clear powered state. No mission state survives a new run or
+- [x] Retry, Escape, and reload each clear powered state. No mission state survives a new run or
       reload.
 - [ ] The vertical left gauge starts each leg full, drains relative to that leg's departure reserve,
       fills linearly during the 300-millisecond award transfer, and restores exactly after restart.
       Separate rounded hidden label and value spans form one ordered accessible description segment;
       neither is live or a meter, progress element, or output.
-- [ ] Every static and generated site uses one visibly open scaffold path with no backing rectangle,
-      butt caps, round joins, attached connector and NOC underframe, and no pale artifact. Collision
-      still rejects the complete conservative underframe, connector, NOC, and mast envelopes.
+- [ ] Every static and generated site uses one visibly open path containing two chords, twelve
+      alternating diagonals, and exactly three full-height pylons with butt caps and round joins.
+      The pylon feet independently meet native terrain; collision rejects the exact truss, pylon,
+      NOC, and mast envelopes.
 - [ ] Full steering uses visibly gimbaled 30-degree plumes and lower 0.8 total collective. Turn-only
       axial lift stays below gravity while vacuum coasting retains inertia.
 

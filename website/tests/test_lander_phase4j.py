@@ -35,7 +35,9 @@ class ArcadeMarkupTests(unittest.TestCase):
         self.assertEqual(positions, sorted(positions))
         shell = self.css.split("#lander-scene-shell {", 1)[1].split("}", 1)[0]
         stage = self.css.split("#lander-scene-stage {", 1)[1].split("}", 1)[0]
-        controls = self.css.rsplit("#lander-controls-rail:not([hidden]) {", 1)[1].split("}", 1)[0]
+        controls = next(rule for rule in re.findall(
+            r"#lander-controls-rail:not\(\[hidden\]\) \{([^}]*)\}", self.css
+        ) if "border-block-start" in rule)
         self.assertNotIn("aspect-ratio", shell)
         self.assertIn("flex-direction: column", shell)
         self.assertIn("aspect-ratio: 25 / 16", stage)
@@ -114,7 +116,10 @@ class ArcadeMarkupTests(unittest.TestCase):
         controls = re.search(r'<p id="lander-controls">.*?</p>', self.fragment, re.DOTALL)
         self.assertTrue(all(match is not None for match in (outcome, rail, status, controls)))
         assert outcome is not None and rail is not None and status is not None and controls is not None
-        restart_label = re.search(r'(<button id="lander-restart"[^>]*>\s*<span>)([^<]+)(</span>)', self.fragment)
+        restart_label = re.search(
+            r'(<button id="lander-restart"[^>]*>\s*<span class="lander-action-label">)([^<]+)(</span>)',
+            self.fragment,
+        )
         self.assertIsNotNone(restart_label)
         assert restart_label is not None
         mutations = (

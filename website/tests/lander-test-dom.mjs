@@ -103,6 +103,7 @@ export function controllerFixture() {
     elements["lander-exit"].setAttribute("aria-keyshortcuts", "Escape");
     for (const id of ["lander-exit", "lander-restart"]) {
         const label = new FakeElement(elements[id]); label.tagName = "span";
+        label.setAttribute("class", "lander-action-label");
         const hint = new FakeElement(elements[id]); hint.tagName = "span";
         hint.setAttribute("class", "lander-key-hint"); hint.setAttribute("aria-hidden", "true");
         elements[id].append(label, hint);

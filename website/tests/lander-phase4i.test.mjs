@@ -15,7 +15,7 @@ import {
     stepFlight,
     transitionMission,
 } from "../static/lander-model.js";
-import { siteStructure } from "../static/lander-world.js";
+import { siteScaffoldMembers, siteStructure } from "../static/lander-world.js";
 import { animationHarness, controllerClasses, controllerFixture } from "./lander-test-dom.mjs";
 
 const ROOT = new URL("../", import.meta.url).pathname;
@@ -37,25 +37,10 @@ function linearSegments(path) {
 }
 
 function expectedScaffold(site) {
-    const structure = siteStructure(site); const x = (value) => value * 10; const y = (value) => 548 - value * 10;
-    const platformLeft = x(site.platformLeft); const platformRight = x(site.platformRight);
-    const nocLeft = x(structure.buildingLeft); const nocRight = x(structure.buildingRight);
-    const platformTop = y(site.platformTop); const deckBottom = y(site.platformBottom); const shelf = y(structure.padBase);
-    const segments = []; const line = (x1, y1, x2, y2) => segments.push([x1, y1, x2, y2]);
-    const loop = (left, top, right, bottom) => {
-        line(left, top, right, top); line(right, top, right, bottom);
-        line(right, bottom, left, bottom); line(left, bottom, left, top);
-    };
-    const braces = (left, right, top, bottom) => {
-        line(left, top, right, bottom); line(left, bottom, right, top);
-    };
-    loop(platformLeft, deckBottom, platformRight, shelf);
-    loop(platformRight, platformTop, nocLeft, deckBottom);
-    loop(nocLeft, platformTop, nocRight, shelf);
-    for (let bay = 0; bay < 6; bay += 1) braces(platformLeft + 16 * bay, platformLeft + 16 * (bay + 1), deckBottom, shelf);
-    braces(platformRight, nocLeft, platformTop, deckBottom);
-    for (let bay = 0; bay < 7; bay += 1) braces(nocLeft + 10 * bay, nocLeft + 10 * (bay + 1), platformTop, shelf);
-    return segments;
+    const x = (value) => Number((value * 10).toFixed(12));
+    const y = (value) => 548 - value * 10;
+    return siteScaffoldMembers(site).map(({ start, end }) =>
+        [x(start[0]), y(start[1]), x(end[0]), y(end[1])]);
 }
 
 function withinCollider(segments, collider) {
@@ -246,19 +231,17 @@ test("service timing exposes four vertical battery and three symmetric signal st
     assert.equal(ready.status, SUCCESS_STATUS); assert.equal(ready.retainedSites[0].powered, true);
 });
 
-test("site structure exposes exact conservative scaffold, connector, NOC, and mast envelopes", () => {
+test("site structure exposes exact truss, three pylon, NOC, and mast envelopes", () => {
     const site = createRun({ seed: 1 }).retainedSites[0];
     const structure = siteStructure(site);
-    assert.deepEqual(structure.platformUnderframe, {
-        bottom: site.platformTop - 2.5, left: site.platformLeft - 0.1,
-        right: site.platformRight + 0.1, top: site.platformTop - 0.25,
+    assert.deepEqual(structure.truss, {
+        bottom: site.platformBottom - 0.85, left: site.platformLeft - 0.1,
+        right: structure.buildingRight + 0.1, top: site.platformBottom + 0.1,
     });
-    assert.deepEqual(structure.connector, {
-        bottom: site.platformTop - 0.35 - 0.1, left: site.platformRight - 0.1,
-        right: site.platformRight + 2.1, top: site.platformTop + 0.1,
-    });
-    assert.equal(structure.nocUnderframe.left, site.platformRight + 1.9);
-    assert.equal(structure.nocUnderframe.right, site.platformRight + 9.1);
+    assert.equal(structure.pylons.length, 3);
+    assert.deepEqual(structure.pylons.map(({ center }) => center),
+        [site.platformLeft, site.platformLeft + 9.3, structure.buildingRight]);
+    assert.equal(structure.noc.bottom, site.platformBottom);
     assert.equal(structure.mast.right - structure.mast.left, 0.5);
     assert.ok(Math.abs(structure.mast.top - structure.mast.bottom - 3.2) < 1e-12);
 });
@@ -266,7 +249,7 @@ test("site structure exposes exact conservative scaffold, connector, NOC, and ma
 test("independent static and dynamic site geometry stays inside exact colliders and stage pins", async () => {
     const model = createRun({ seed: 0x41475731 }); const site = model.retainedSites[0];
     const structure = siteStructure(site); const expected = expectedScaffold(site);
-    assert.equal(expected.length, 40);
+    assert.equal(expected.length, 17);
     const template = await readFile(join(ROOT, "templates/lander-game.html"), "utf8");
     const staticTag = template.match(/<path class="site-scaffold"[^>]+>/)?.[0];
     assert.ok(staticTag); assert.match(staticTag, /stroke-width="2"/); assert.match(staticTag, /stroke-linecap="butt"/);
@@ -281,10 +264,9 @@ test("independent static and dynamic site geometry stays inside exact colliders 
     assert.equal(dynamicSupport.attributes.get("stroke-linecap"), "butt");
     assert.equal(dynamicSupport.attributes.get("stroke-linejoin"), "round");
     assert.throws(() => assert.deepEqual(linearSegments(staticPath.replace(/^M312 /, "M313 ")), expected));
-    withinCollider(expected.slice(0, 4).concat(expected.slice(12, 24)), structure.platformUnderframe);
-    withinCollider(expected.slice(4, 8).concat(expected.slice(24, 26)), structure.connector);
-    withinCollider(expected.slice(8, 12).concat(expected.slice(26)), structure.nocUnderframe);
-    for (const [width, height, diagonalSquared] of [[1.4,1.85,5.3825],[1.8,0.15,3.2625],[0.8,2.2,5.48]]) {
+    withinCollider(expected.slice(0, 14), structure.truss);
+    structure.pylons.forEach((pylon, index) => withinCollider([expected[14 + index]], pylon.collider));
+    for (const [width, height, diagonalSquared] of [[1.55,0.75,2.965],[3.1,0.75,10.1725]]) {
         assert.ok(Math.abs(width ** 2 + height ** 2 - diagonalSquared) < 1e-12);
         assert.ok(Math.sqrt(diagonalSquared) < 3.2);
     }

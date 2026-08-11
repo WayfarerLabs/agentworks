@@ -493,7 +493,10 @@ class ArcadeBrowserTests(RepositoryFixture):
                 self.assertEqual([action["id"] for action in result["actions"]],
                                  ["lander-restart", "lander-exit"])
                 exit_rect = result["actions"][1]["rect"]
-                self.assertLessEqual(result["controls"]["right"], exit_rect["left"])
+                if width <= 512:
+                    self.assertLessEqual(result["controls"]["bottom"], exit_rect["top"])
+                else:
+                    self.assertLessEqual(result["controls"]["right"], exit_rect["left"])
                 for action in result["actions"]:
                     self.assertGreaterEqual(action["rect"]["width"], 44)
                     self.assertGreaterEqual(action["rect"]["height"], 44)

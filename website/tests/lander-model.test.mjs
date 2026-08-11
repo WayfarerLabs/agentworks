@@ -33,7 +33,7 @@ import {
     integratePose,
     mixDigitalInput,
     mixEngineRequests,
-    nextAwardRatio,
+    refuelRatioForBase,
     plumeForThrust,
     pointerEngineRequests,
     proveTemplate,
@@ -44,12 +44,13 @@ import {
 } from "../static/lander-model.js";
 import {
     STATIC_WORLD_SEED,
-    corridorVertices,
     instantiateTemplateSite,
+    siteScaffoldMembers,
     siteStructure,
-    siteFoundationBottom,
+    terrainHeightAt,
     terrainSample,
-    terrainPath,
+    terrainFillPath,
+    terrainSurfacePath as terrainPath,
     terrainVerticesForRange,
     terrainVerticesForWindow,
 } from "../static/lander-world.js";
@@ -150,15 +151,11 @@ test("9.0 engine physics, true gimbal, assist, input arbitration, and plumes mat
     assert.deepEqual(plumeForThrust(0.5), { scaleY: 0.54, opacity: 0.625 });
 });
 
-test("award ratio starts at three, strictly decays, and remains above one", () => {
-    let ratio = 3;
-    close(nextAwardRatio(ratio), 2.64);
-    ratio = nextAwardRatio(ratio); close(nextAwardRatio(ratio), 2.3448);
-    for (let index = 0; index < 1000; index += 1) {
-        const next = nextAwardRatio(ratio);
-        assert.ok(next <= ratio); assert.ok(next > 1); ratio = next;
-    }
-    assert.equal(ratio, 1 + Number.EPSILON);
+test("one-indexed refuel ratio is direct, exact, and stable through base one hundred", () => {
+    assert.deepEqual([1, 2, 3, 52, 53, 54, 100].map(refuelRatioForBase),
+        [2, 1.5, 1.25, 1 + 2 ** -51, 1 + 2 ** -52, 1, 1]);
+    assert.throws(() => refuelRatioForBase(0), /positive integer/);
+    assert.throws(() => refuelRatioForBase(1.5), /positive integer/);
 });
 
 test("all nine compact route literals begin at the reachable launch edge and pass defensive replays", () => {
@@ -178,8 +175,10 @@ test("all nine compact route literals begin at the reachable launch edge and pas
 
 test("every accepted touchdown margin settles to the same proven centered checkpoint", () => {
     for (const template of REFERENCE_TEMPLATES) {
-        const originSite = { id: 0, center: 20, platformLeft: 15.2, platformRight: 24.8,
-            platformTop: 4, platformBottom: 3.65, canCollected: true, powered: true, nocStage: 7 };
+        const originLevel = template.deckDelta === 1.6 ? 83 : template.deckDelta === 0.8 ? 91 : 99;
+        const originSite = { id: 0, seed: STATIC_WORLD_SEED, deckLevel: originLevel, center: 20,
+            platformLeft: 15.2, platformRight: 24.8, platformTop: originLevel / 10,
+            platformBottom: originLevel / 10 - 0.35, canCollected: true, powered: true, nocStage: 7 };
         const targetSite = instantiateTemplateSite(STATIC_WORLD_SEED, 1, originSite, template);
         for (const x of [originSite.platformLeft + 1.621, originSite.center, originSite.platformRight - 1.621]) {
             const contact = { x, y: originSite.platformTop, vx: 0, vy: -1, angle: 0, angularVelocity: 0 };
@@ -197,7 +196,7 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
     const directory = await mkdtemp(join(tmpdir(), "agw-route-test-"));
     const output = join(directory, "routes.json");
     const tool = join(ROOT, "tools/derive_lander_routes.mjs");
-    const geometry = join(ROOT, "tests/fixtures/lander-route-geometry-v2.json");
+    const geometry = join(ROOT, "tests/fixtures/lander-route-geometry-v3.json");
     const fixture = join(ROOT, "tests/fixtures/lander-route-derived-v3.json");
     execFileSync(process.execPath, [tool, "--geometry", geometry, "--output", output, "--verify", fixture]);
     assert.equal(await readFile(output, "utf8"), await readFile(fixture, "utf8"));
@@ -214,64 +213,71 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
     const { outputDigest, ...unsignedDerived } = derived;
     assert.equal(digest(unsignedDerived), outputDigest);
     assert.equal(derived.worldWitnesses.length, 81);
+    assert.equal(derived.geometryDigest, "2cc7b145dc516426d911f2f51f47cc374f0154905d8ddff00cc78e141de14195");
+    assert.equal(derived.physicsDigest, "34a7cb64a3457c4df028031968e7ef00fde56fc445db6af6ab89eb7b737f692e");
+    assert.equal(derived.worldDigest, "bf175490867abf3894697b9c014c1e1c2bf7abbc54e74b635bb69af67908245e");
+    assert.equal(derived.outputDigest, "2f715915c33e7c4a728bd1acfd10a206a206c1cd917c8e0d5687a5d696bb9492");
+    assert.equal(derived.routes.reduce((total, route) => total + route.combinationsEvaluated, 0), 36);
+    assert.equal(derived.worldWitnesses.length * 2, 162);
+    assert.equal(spawnSync(process.execPath, [tool, "--bogus"]).status, 2);
     assert.deepEqual([...new Set(derived.worldWitnesses.map(({ descriptor }) => descriptor.seed))],
-        [1, 0x12345678, 0xffffffff]);
-    assert.deepEqual([...new Set(derived.worldWitnesses.map(({ descriptor }) =>
-        `${descriptor.origin.center}:${descriptor.origin.top}`))], ["36:5", "117:6.5", "-42:8"]);
-    const expectedWitnessOrder = [1, 0x12345678, 0xffffffff].flatMap((seed) =>
-        [[36, 5], [117, 6.5], [-42, 8]].map(([center, top]) => ({ seed, center, top })));
+        [11, 39, 41]);
+    const expectedWitnessOrder = [11, 39, 41].flatMap((seed) =>
+        [36, 117, -42].map((center) => ({ seed, center })));
     for (let templateIndex = 0; templateIndex < 9; templateIndex += 1) {
         const witnesses = derived.worldWitnesses.slice(templateIndex * 9, templateIndex * 9 + 9);
         assert.deepEqual(witnesses.map(({ descriptor }) => ({ seed: descriptor.seed,
-            center: descriptor.origin.center, top: descriptor.origin.top })), expectedWitnessOrder);
+            center: descriptor.origin.center })), expectedWitnessOrder);
     }
     assert.equal(digest(derived.worldWitnesses), derived.worldDigest);
     assert.deepEqual([derived.worldWitnesses[0].digest, derived.worldWitnesses[40].digest,
         derived.worldWitnesses.at(-1).digest], [
-        "54e4d86bd64cff39c99fafd43575ec238c8aa04a4f1bf0980901de64930b6c2c",
-        "932be6fbc5facead8ef196e8795f2a305ab453c37205033b17c5d30e0cc3d3c1",
-        "13bbc35fb3495e19f983e85ccf72fab2b77de94b23eb8098368cb601bf899ada",
+        "9cb38cd27895362e8be944788d1dd4f163cbe20c0e13d005196c29a80b130c15",
+        "f7a4a064026512aeebf523d9cd3e034e52e56ae42b2154d99aeb005325c7a48a",
+        "42ad95072535204125cf7fcf56e2075010bd73d4d9aab5b6e44a851af825ac10",
     ]);
-    assert.ok(derived.worldWitnesses.some(({ descriptor }) =>
-        descriptor.corridorSamples.some((sample) => sample.relieved)));
     assert.ok(derived.worldWitnesses.some(({ descriptor }) => descriptor.vertices.some(([, value]) =>
         value !== Number(value.toFixed(derived.canonicalPoseDecimals)))));
-    assert.equal(derived.geometryDigest, "e91ce3a27c011ef6b2549fdc36fa6e25db5c5da2d274233c9da4fc8adf4a0244");
-    assert.equal(derived.worldDigest, "535f190fdf7c7300a7667ce2a3e6d5f1395b197b0bd27c2dbb0f69f61310333a");
+    assert.equal(derived.geometryDigest, "2cc7b145dc516426d911f2f51f47cc374f0154905d8ddff00cc78e141de14195");
+    assert.equal(derived.worldDigest, "bf175490867abf3894697b9c014c1e1c2bf7abbc54e74b635bb69af67908245e");
     for (const witness of derived.worldWitnesses) {
         const { descriptor } = witness;
         const template = REFERENCE_TEMPLATES.find((candidate) => candidate.templateId === descriptor.templateId);
-        const originSite = { id: 0, center: descriptor.origin.center,
+        const originSite = { id: 0, seed: descriptor.seed, deckLevel: descriptor.origin.deckLevel,
+            center: descriptor.origin.center,
             platformLeft: descriptor.origin.center - 4.8, platformRight: descriptor.origin.center + 4.8,
-            shelfRight: descriptor.origin.center + 4.8 + 9,
             platformTop: descriptor.origin.top, platformBottom: descriptor.origin.top - 0.35,
             canCollected: true, powered: true, nocStage: 7 };
         const targetSite = instantiateTemplateSite(descriptor.seed, 1, originSite, template);
-        assert.deepEqual({ center: targetSite.center, top: targetSite.platformTop }, descriptor.target);
+        assert.deepEqual({ center: targetSite.center, deckLevel: targetSite.deckLevel,
+            minimumDeckTop: descriptor.target.minimumDeckTop, top: targetSite.platformTop }, descriptor.target);
         assert.deepEqual(terrainVerticesForWindow(descriptor.seed, [originSite, targetSite],
             descriptor.vertices[0][0], descriptor.vertices.at(-1)[0]), descriptor.vertices);
         assert.equal(digest(descriptor), witness.digest);
         assert.ok(descriptor.corridorSamples.length > 0);
         assert.ok(descriptor.corridorSamples.every((sample) => sample.y === (sample.relieved ?
             Math.max(0.5, sample.cap - 0.15 * sample.reliefUnit) : sample.raw)));
-        for (const sample of descriptor.corridorSamples.concat(descriptor.nativeResumeSamples)) {
+        for (const sample of descriptor.corridorSamples) {
             assert.equal(sample.raw ?? sample.y, terrainSample(descriptor.seed, sample.index));
             assert.ok(descriptor.vertices.some(([x, y]) => x === sample.x && y === sample.y));
         }
-        assert.deepEqual(descriptor.blendSegments.targetLeft[1],
-            [descriptor.target.center - 4.8, descriptor.target.top - 2.4]);
-        assert.deepEqual(descriptor.blendSegments.targetRight[0],
-            [descriptor.target.center + 4.8 + 9, descriptor.target.top - 2.4]);
+        for (const samples of descriptor.insertedSiteSamples) {
+            for (const [x, y] of samples) assert.equal(y, terrainHeightAt(descriptor.seed, x));
+        }
         assert.equal(descriptor.sites.length, 2);
         for (const site of descriptor.sites) {
             close(site.platform.right - site.platform.left, 9.6);
-            close(site.platformUnderframe.bottom, site.platform.top - 2.5);
-            close(site.platformUnderframe.top, site.platform.bottom + 0.1);
-            close(site.platformUnderframe.right - site.platformUnderframe.left, 9.8);
-            close(site.connector.right - site.connector.left, 2.2);
+            close(site.truss.bottom, site.platform.bottom - 0.85);
+            close(site.truss.top, site.platform.bottom + 0.1);
+            close(site.truss.right - site.truss.left, 18.8);
+            assert.equal(site.pylons.length, 3);
+            assert.equal(site.scaffoldMembers.length, 17);
+            assert.deepEqual(siteScaffoldMembers({ seed: descriptor.seed,
+                platformLeft: site.platform.left, platformRight: site.platform.right,
+                platformTop: site.platform.top, platformBottom: site.platform.bottom }), site.scaffoldMembers);
             close(site.noc.right - site.noc.left, 7);
             close(site.noc.top - site.platform.top, 7.2);
-            close(site.noc.bottom, site.platform.top - 2.4);
+            close(site.noc.bottom, site.platform.bottom);
             close(site.mast.right - site.mast.left, 0.5);
             close(site.mast.top - site.mast.bottom, 3.2);
         }
@@ -317,7 +323,9 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
     assert.match(rerunWeakPrefix.stderr, /first request must exceed the launch threshold/);
 
     const fixedOnlyTool = join(directory, "fixed-only.mjs");
-    const fixedOnlySource = (await readFile(tool, "utf8")).replaceAll("left + 1", "left").replaceAll("right + 1", "right");
+    const fixedOnlySource = (await readFile(tool, "utf8"))
+        .replace("[3, left, left + 1]", "[3, left, left]")
+        .replace("[3, right, right + 1]", "[3, right, right]");
     await writeFile(fixedOnlyTool, fixedOnlySource, "utf8");
     const fixedOnly = spawnSync(process.execPath, [fixedOnlyTool, "--geometry", geometry, "--output", output], { encoding: "utf8" });
     assert.equal(fixedOnly.status, 1); assert.match(fixedOnly.stderr, /two independently ranged phases|finite recipe budget/);
@@ -357,11 +365,14 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
     await writeFile(obstructedWorldTool, obstructedWorldSource, "utf8");
     assert.equal(spawnSync(process.execPath, [obstructedWorldTool, "--geometry", geometry, "--output", output]).status, 1);
 
-    const subtleReliefTool = join(directory, "subtle-relief-world.mjs");
-    const subtleReliefSource = (await readFile(tool, "utf8")).replace("cap - 0.15 * reliefUnit", "cap - 0.14 * reliefUnit");
-    assert.notEqual(subtleReliefSource, await readFile(tool, "utf8"));
-    await writeFile(subtleReliefTool, subtleReliefSource, "utf8");
-    assert.equal(spawnSync(process.execPath, [subtleReliefTool, "--geometry", geometry, "--output", output,
+    const shiftedSiteSampleTool = join(directory, "shifted-site-sample.mjs");
+    const shiftedSiteSampleSource = (await readFile(tool, "utf8")).replace(
+        "[left, left + 9.3, left + 9.6, left + 11.6, left + 18.6]",
+        "[left, left + 9.3, left + 9.6, left + 11.6, left + 18.5]",
+    );
+    assert.notEqual(shiftedSiteSampleSource, await readFile(tool, "utf8"));
+    await writeFile(shiftedSiteSampleTool, shiftedSiteSampleSource, "utf8");
+    assert.equal(spawnSync(process.execPath, [shiftedSiteSampleTool, "--geometry", geometry, "--output", output,
         "--verify", fixture]).status, 1);
 
     const jitterTool = join(directory, "jittered-replay.mjs");
@@ -411,19 +422,19 @@ test("production route proof rejects a weak or inexact launch prefix before coll
 test("safe target top is inclusive and epsilon excess is unsafe", () => {
     const model = createRun({ seed: 1 });
     const target = model.retainedSites[0];
-    const previous = { x: target.center, y: target.platformTop + 0.5, vx: 1.8, vy: -2.8,
-        angle: -12, angularVelocity: 18 };
+    const previous = { x: target.center, y: target.platformTop + 0.5, vx: 2, vy: -3.2,
+        angle: -15, angularVelocity: 22 };
     const next = { ...previous, y: target.platformTop + 0.2 };
     assert.equal(classifySweptContact(model, previous, next).kind, "safe");
     const limits = [
-        ["vx", 1.8], ["vy", -2.8], ["angle", -12], ["angularVelocity", 18],
+        ["vx", 2], ["vy", -3.2], ["angle", -15], ["angularVelocity", 22],
     ];
     for (const [field, limit] of limits) {
         const excess = limit + Math.sign(limit) * 1e-9;
         assert.equal(classifySweptContact(model, { ...previous, [field]: excess },
             { ...next, [field]: excess }).kind, "unsafe", `${field} beyond the inclusive limit must crash`);
     }
-    for (const [field, value] of [["vx", -1.8], ["angle", 12], ["angularVelocity", -18]]) {
+    for (const [field, value] of [["vx", -2], ["angle", 15], ["angularVelocity", -22]]) {
         assert.equal(classifySweptContact(model, { ...previous, [field]: value },
             { ...next, [field]: value }).kind, "safe", `${field} mirrors through absolute value`);
     }
@@ -450,7 +461,7 @@ test("closed unsafe geometry catches slopes, platform equality, scaffold, mast, 
     assert.equal(classifySweptContact(base, sidePose, sidePose).cause, "platform");
     const riserPose = { x: site.center, y: site.platformTop - 0.6,
         vx: 0, vy: 0, angle: 180, angularVelocity: 0 };
-    assert.equal(classifySweptContact(base, riserPose, riserPose).cause, "scaffold");
+    assert.equal(classifySweptContact(base, riserPose, riserPose).cause, "truss");
     const buildingLeft = site.platformRight + 2;
     const roof = site.platformTop + 7.2;
     const mastPose = { x: buildingLeft + 3.5, y: roof + 0.1,
@@ -482,7 +493,7 @@ test("safe landing creates next target, adds uncapped award, and begins service"
     assert.equal(landed.retainedSites.length, 2);
     assert.equal(landed.retainedSites[0].canCollected, true);
     assert.ok(landed.fuel > 100);
-    close(landed.awardRatio, 2.64);
+    close(landed.refuelRatio, 1.5);
     assert.equal(landed.targetSiteId, 1);
     assert.ok(landed.targetRouteProof);
 });
@@ -535,7 +546,7 @@ test("manual launch ignores only its rising start top and keeps other collisions
     assert.equal(stepFlight({ ...side, launchStarted: true }, { left: 0.72, right: 0.72 }).failureCause, "platform");
     const riser = { ...launching, pose: { ...launching.pose, x: active.center,
         y: active.platformTop - 0.6, vy: 1, angle: 180 } };
-    assert.equal(stepFlight({ ...riser, launchStarted: true }, { left: 0.72, right: 0.72 }).failureCause, "scaffold");
+    assert.equal(stepFlight({ ...riser, launchStarted: true }, { left: 0.72, right: 0.72 }).failureCause, "truss");
     const buildingLeft = active.platformRight + 2;
     const noc = { ...launching, pose: { ...launching.pose, x: buildingLeft + 3.5,
         y: active.platformTop + 1, vy: 1 } };
@@ -734,9 +745,9 @@ test("intermediate NOC battery stages project from model to the retained site DO
     model = updateRetention(advanceMissionSequence(model, 0.41));
     const active = model.retainedSites.find((candidate) => candidate.id === model.activeSiteId);
     assert.equal(model.state, "powering"); assert.equal(model.nocStage, 2); assert.equal(active.nocStage, 2);
-    close(active.foundationBottom, siteFoundationBottom(model.terrainVertices, active));
+    close(siteStructure(active).noc.bottom, active.platformBottom);
     const buildingLeft = active.platformRight + 2;
-    const foundationPose = { x: buildingLeft + 1.6, y: active.foundationBottom + 0.2,
+    const foundationPose = { x: buildingLeft + 1.6, y: active.platformBottom + 0.2,
         vx: 0, vy: 0, angle: 0, angularVelocity: 0 };
     assert.equal(classifySweptContact(model, foundationPose, foundationPose).cause, "noc");
 
@@ -747,8 +758,8 @@ test("intermediate NOC battery stages project from model to the retained site DO
     assert.equal(group.dataset.nocStage, "2");
     const structure = siteStructure(active);
     assert.equal(group.querySelector(".noc-building").attributes.get("d"),
-        `M${structure.buildingLeft * 10} ${548 - active.platformTop * 10}` +
-        `V${548 - structure.roof * 10}h70V${548 - active.platformTop * 10}Z`);
+        `M${structure.buildingLeft * 10} ${548 - active.platformBottom * 10}` +
+        `V${548 - structure.roof * 10}h70V${548 - active.platformBottom * 10}Z`);
     controller.model = updateRetention(advanceMissionSequence(model, 0.2)); controller.render();
     assert.equal(group.dataset.nocStage, "3");
     controller.destroy();
@@ -769,11 +780,11 @@ test("static and dynamic scaffold, battery, signal, and collider geometry stay i
     const left = active.platformLeft * 10; const right = active.platformRight * 10;
     const top = 548 - active.platformTop * 10; const bottom = 548 - active.platformBottom * 10;
     const structure = siteStructure(active);
-    assert.equal(support.attributes.get("d").match(/^M[^M]+Z/)[0],
-        `M${left} ${bottom}H${right}V${548 - structure.padBase * 10}H${left}Z`);
-    const riserPose = { x: active.center, y: active.foundationBottom + 0.2,
+    assert.equal(support.attributes.get("d").match(/M/g)?.length, 17);
+    assert.doesNotMatch(support.attributes.get("d"), /Z/);
+    const riserPose = { x: active.platformLeft, y: active.platformBottom - 0.4,
         vx: 0, vy: 0, angle: 180, angularVelocity: 0 };
-    assert.equal(classifySweptContact(model, riserPose, riserPose).cause, "scaffold");
+    assert.equal(classifySweptContact(model, riserPose, riserPose).cause, "truss");
 
     const battery = group.querySelector(".noc-battery");
     assert.deepEqual(battery.children.map((node) => node.className ?? null),
@@ -814,18 +825,20 @@ test("reduced motion crashes atomically with zero debris", () => {
 });
 
 test("checkpoint restart restores post-award fuel without duplicating progress", () => {
+    const initial = createRun({ seed: 1, reducedMotion: true });
+    const initialRetry = transitionMission({ ...initial, state: "failed", fuel: 0, pose: { ...initial.pose, x: 9 },
+        crashOrdinal: 3 }, "RESTART");
+    assert.deepEqual({ ...initialRetry, crashOrdinal: initial.crashOrdinal }, initial);
     let model = createRun({ seed: 1, reducedMotion: true });
     const target = model.retainedSites[0];
     model = { ...model, pose: { x: target.center, y: target.platformTop + 0.001, vx: 0, vy: -1,
         angle: 0, angularVelocity: 0 } };
     model = stepFlight(model, { left: 0, right: 0 });
-    const expected = { fuel: model.checkpoint.fuel, completed: model.completedSites, ratio: model.awardRatio };
+    const expected = structuredClone(model.checkpoint);
     model = { ...model, state: "failed", fuel: 0 };
     const restarted = transitionMission(model, "RESTART");
     assert.equal(restarted.state, "launching");
-    assert.equal(restarted.fuel, expected.fuel);
-    assert.equal(restarted.completedSites, expected.completed);
-    assert.equal(restarted.awardRatio, expected.ratio);
+    for (const [field, value] of Object.entries(expected)) assert.deepEqual(restarted[field], value, field);
     assert.equal(restarted.retainedSites[0].canCollected, true);
 });
 
@@ -885,8 +898,8 @@ test("retention and DOM reconciliation change only at bounded window keys", asyn
         retentionKey: "crossing-shelf" };
     controller.render();
     assert.deepEqual(fixture.elements["terrain-layer"].children.map((node) => node.attributes.get("d")), [
-        terrainPath(terrainVerticesForRange(crossing, 0, 50)),
-        terrainPath(terrainVerticesForRange(crossing, 50, 100)),
+        terrainFillPath(terrainVerticesForRange(crossing, 0, 100)),
+        terrainPath(terrainVerticesForRange(crossing, 0, 100)),
     ]);
     controller.model = changed; controller.render();
     assert.notEqual(controller.worldWindowKey, key);
@@ -903,8 +916,13 @@ test("retention and DOM reconciliation change only at bounded window keys", asyn
 test("worst-case world projection stays within eighty descendants during a crash", async () => {
     let model = createRun({ seed: 1 });
     const sites = [model.retainedSites[0]];
-    sites.push(instantiateTemplateSite(model.seed, 1, sites[0], REFERENCE_TEMPLATES[0]));
-    sites.push(instantiateTemplateSite(model.seed, 2, sites[1], REFERENCE_TEMPLATES[1]));
+    for (let id = 1; id < 3; id += 1) {
+        const template = REFERENCE_TEMPLATES.find((candidate) => {
+            try { instantiateTemplateSite(model.seed, id, sites.at(-1), candidate); return true; }
+            catch { return false; }
+        });
+        sites.push(instantiateTemplateSite(model.seed, id, sites.at(-1), template));
+    }
     model = updateRetention({ ...model, pose: { ...model.pose, x: sites[1].center }, retainedSites: sites,
         activeSiteId: 1, targetSiteId: 2 });
     assert.equal(model.retainedChunks.length, 5); assert.equal(model.retainedSites.length, 3);
@@ -920,10 +938,10 @@ test("worst-case world projection stays within eighty descendants during a crash
     world.append(fixture.elements["terrain-layer"], fixture.elements["site-layer"],
         fixture.elements["debris-layer"], missionLander, fixture.elements["mission-agent"]);
     controller.model = model; controller.render();
-    assert.equal(fixture.elements["terrain-layer"].children.length, 5);
+    assert.equal(fixture.elements["terrain-layer"].children.length, 2);
     assert.equal(fixture.elements["site-layer"].children.length, 3);
     assert.equal(fixture.elements["debris-layer"].children.length, 8);
-    assert.equal(descendantCount(world), 78);
+    assert.equal(descendantCount(world), 75);
     assert.ok(descendantCount(world) <= 80);
     controller.destroy();
 });
@@ -949,6 +967,6 @@ test("100-site deterministic mission keeps generation and retention bounded", ()
         assert.ok(model.fuel >= 0);
     }
     assert.equal(model.completedSites, 100);
-    assert.ok(model.awardRatio > 1);
+    assert.ok(model.refuelRatio >= 1);
     assert.ok(maximumGenerationMilliseconds < 50);
 });

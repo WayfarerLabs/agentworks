@@ -81,16 +81,19 @@ Right/L steer. Steered thrust is deliberately vectored by up to 30 degrees and u
 forward thrust than straight collective. A powered neutral collective redistributes thrust between
 the two engines to arrest rotation without adding drag or changing fuel use. Pointer and touch input
 use the same bounded mixer: press for collective, drag horizontally to steer, and a short tap
-retains a 140 ms pulse. Safe landing limits are inclusive at 1.8 m/s horizontal speed, 2.8 m/s
-descent, 12 degrees of tilt, and 18 degrees/s rotation.
+retains a 140 ms pulse. Safe landing limits are inclusive at 2.0 m/s horizontal speed, 3.2 m/s
+descent, 15 degrees of tilt, and 22 degrees/s rotation.
 
-Terrain is deterministic per run, sampled every 10 m in 50 m chunks from four visibly different
-motifs. Each platform and NOC share one flat shelf. The 9.6 m deck stands 2.4 m above it. One open,
-narrow-member lattice connects the deck, NOC, and shelf without a filled backing face. Conservative
-closed colliders cover the complete stroked scaffold and connector envelopes because none of their
-clear apertures can admit the rigid lander. The NOC battery fills four colored bars bottom-to-top,
-then three symmetric signal arches power outward. These shapes, fills, and outlines preserve their
-meaning without relying on color alone.
+Terrain is deterministic per run, sampled every 10 m from four visibly different motifs, and remains
+native beneath every site. One strict-X terrain authority projects as one closed fill without a
+stroke and one open stroked surface, so retained-window boundaries cannot add internal closure
+strokes. Each 9.6 m deck uses the first clearing integer tier from 8.3, 9.1, or 9.9 m. A continuous
+18.6 m, 0.75 m-deep twelve-bay Warren truss reaches from the deck's left edge through the NOC's
+right edge. Three 0.2 m pylons independently reach native terrain at the left, center, and right
+support points. Exact closed colliders cover the truss and each pylon; the NOC begins at the deck
+underside. The NOC battery fills four colored bars bottom-to-top, then three symmetric signal arches
+power outward. These shapes, fills, and outlines preserve their meaning without relying on color
+alone.
 
 ## Artifact contract
 
@@ -115,20 +118,20 @@ This is the builder's only output shape. The manifest is explicit in `build.py`;
 recursively copies source directories or permits a generated local link outside the manifest.
 
 The game keeps its route catalog reviewable and independent from runtime generation. Geometry lives
-in `tests/fixtures/lander-route-geometry-v2.json`; it contains no schedule or fuel result.
+in `tests/fixtures/lander-route-geometry-v3.json`; it contains no schedule or fuel result.
 Regenerate to a temporary path and verify the reviewed fixture with:
 
 ```bash
 node website/tools/derive_lander_routes.mjs \
-  --geometry website/tests/fixtures/lander-route-geometry-v2.json \
+  --geometry website/tests/fixtures/lander-route-geometry-v3.json \
   --output /tmp/lander-route-derived-v3.json \
   --verify website/tests/fixtures/lander-route-derived-v3.json
 ```
 
-The v4 deriver uses the v2 geometry schema and v3 recipe family, Node built-ins, versioned finite
+The v4 deriver uses the v3 geometry schema and v3 recipe family, Node built-ins, versioned finite
 compact phase ranges, reachable keyboard commands, and independent copies of the physics, collision
-geometry, terrain motifs, shelf construction, scaffold, connector, NOC, and mast. Each template
-begins with the exact player-reachable `[1,90]` request and evaluates four candidates from two
+geometry, native terrain, strict-X projection, truss, pylons, NOC, and mast. Each template begins
+with the exact player-reachable `[1,90]` request and evaluates four candidates from two
 independently variable pre-contact ranges, for 36 total and well below the 256-per-template and
 2,304-total bounds. The comparator selects among materially distinct safe outcomes; no selected
 schedule is embedded phase-for-phase as its own verifier. Its reviewed output contains all nine
@@ -142,12 +145,14 @@ copied production literals, and all four digests atomically. Runtime code perfor
 successful and one-quantum-smaller proof replays for the directly selected literal. It never imports
 the tool, scans fuel allowances, or plans a route in the browser.
 
-During a run, the model retains at most five terrain chunks, the active and target sites plus one
-previous powered site, one input queue of at most 64 records, and eight crash fragments. Fuel has no
-capacity cap: unused reserve carries forward. Each collected can adds the next route's demonstrated
-minimum multiplied by a ratio that starts at three and decays monotonically toward one. Exit and
-reload discard the in-memory run; crash restart restores the last powered pad without recollecting
-fuel or advancing progress.
+During a run, the model retains at most five terrain chunk indexes while the DOM always uses exactly
+two terrain paths, the active and target sites plus one previous powered site, one input queue of at
+most 64 records, and eight crash fragments. The worst-case world projection has exactly 75
+descendants. Fuel has no capacity cap: unused reserve carries forward. At one-indexed powered base
+`n`, each collected can adds the next route's demonstrated minimum multiplied by the direct
+constant-time ratio `1 + 0.5 ** (n - 1)`. Runtime number precision reaches exactly 1 at base 54 and
+remains 1 through base 100. Exit and reload discard the in-memory run; crash Retry restores the last
+powered pad without recollecting fuel or advancing progress.
 
 The left vertical gauge is visual-only. Its bottom-up height and bright danger-red, caution-amber,
 or ready-green indicator independently project fuel against the exact reserve at the start of the
@@ -160,17 +165,18 @@ transfer. Hiding the document freezes model time, while resize and the first vis
 the same progress again from current stage and gauge rectangles.
 
 The sole status live region presents centered bordered `Agent Deployed!` and `Crashed!` arcade
-panels. A failure-only native Restart follows the status inside that outcome; a persistent native
-Exit follows the concise control sentence in the normal-flow rail after the complete 25:16 scene
-stage. Both controls stay at least 44 CSS pixels in each dimension. Their visible second-line
-keyboard hints are excluded from their accessible names, while `aria-keyshortcuts` exposes `r` and
-`Escape`. Restart returns focus to the scene and Exit returns it to Start. The rail cannot cover
-terrain or overlays, and its instructions describe flight controls without duplicating departure
-commands. Pointer flight handlers belong only to the stage, reject interactive or editable composed
-paths before preventing or capturing, and disable touch gestures only during active flight or
-departure. Keyboard flight handling first requires the event path to contain the active shell,
-handles in-shell Exit or failed-run restart, then rejects interactive or editable paths before
-accepting physical flight keys; outside-shell keys have no game effect.
+panels. A failure-only native Retry follows the status inside that outcome; a persistent native Exit
+follows the concise control sentence in the normal-flow rail after the complete 25:16 scene stage.
+Both controls stay at least 44 CSS pixels in each dimension. Their visible second-line keyboard
+hints are excluded from their accessible names, while `aria-keyshortcuts` exposes `r` and `Escape`.
+Retry returns focus to the scene and Exit returns it to Start. The control prose is exactly two
+block lines that do not wrap (keyboard, then touch); at narrow widths Exit reflows beneath them. The
+rail cannot cover terrain or overlays, and its instructions describe flight controls without
+duplicating departure commands. Pointer flight handlers belong only to the stage, reject interactive
+or editable composed paths before preventing or capturing, and disable touch gestures only during
+active flight or departure. Keyboard flight handling first requires the event path to contain the
+active shell, handles in-shell Exit or failed-run Retry, then rejects interactive or editable paths
+before accepting physical flight keys; outside-shell keys have no game effect.
 
 At the first NOC power stage, the existing doorway path becomes the installed-agent glyph without
 adding a site node or mutable world field. It stays installed whenever that retained site is

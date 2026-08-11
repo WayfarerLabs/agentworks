@@ -376,36 +376,31 @@ class StaticDocumentTests(unittest.TestCase):
         self.assertIn("#lander-start:focus-visible", self.css)
         self.assertIn("transform-origin: 82px 401px", self.css)
         self.assertIn("transform-origin: 158px 401px", self.css)
-        terrain = sorted(
-            (attributes for _, attributes in self.document.tags if attributes.get("class") == "terrain-chunk"),
-            key=lambda attributes: int(attributes["data-chunk-index"]),
-        )
-        self.assertEqual([int(attributes["data-chunk-index"]) for attributes in terrain], [-1, 0, 1, 2])
-        surfaces: list[list[tuple[float, float]]] = []
-        for attributes in terrain:
-            points = [
-                (float(x), float(y))
-                for x, y in re.findall(r"[ML](-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?)", attributes["d"])
-            ]
-            surfaces.append([point for point in points if point[1] != 648])
-        self.assertEqual([(surface[0][0], surface[-1][0]) for surface in surfaces],
-                         [(-400, 0), (0, 500), (500, 1000), (1000, 1400)])
-        for left, right in zip(surfaces, surfaces[1:]):
-            self.assertEqual(left[-1], right[0])
-        self.assertLessEqual(surfaces[0][0][0], 0)
-        self.assertGreaterEqual(surfaces[-1][-1][0], 1000)
-        shelf_y = 476.1557689513639
-        self.assertIn((312, shelf_y), surfaces[1])
-        self.assertIn((498, shelf_y), surfaces[1])
+        terrain = [attributes for _, attributes in self.document.tags
+                   if attributes.get("class") in {"terrain-fill", "terrain-surface"}]
+        self.assertEqual([attributes["class"] for attributes in terrain], ["terrain-fill", "terrain-surface"])
+        self.assertEqual(terrain[0]["stroke"], "none")
+        self.assertTrue(terrain[0]["d"].endswith("Z"))
+        self.assertEqual(terrain[1]["fill"], "none")
+        self.assertNotRegex(terrain[1]["d"], r"[VZ]")
+        surface = [(float(x), float(y)) for x, y in
+                   re.findall(r"[ML](-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?)", terrain[1]["d"])]
+        self.assertEqual((surface[0][0], surface[-1][0]), (0, 1000))
+        self.assertIn((312, 476.1557689513639), surface)
+        self.assertIn((405, 498.9141328226309), surface)
+        self.assertIn((498, 491.77281586216765), surface)
         deck = next(attributes for _, attributes in self.document.tags if attributes.get("class") == "landing-platform")
-        self.assertEqual(float(deck["y"]) + float(deck["height"]), 455.6557689513638)
+        self.assertEqual(float(deck["y"]), 449)
+        self.assertEqual(float(deck["y"]) + float(deck["height"]), 452.5)
         support = next(attributes for _, attributes in self.document.tags if attributes.get("class") == "site-scaffold")
-        self.assertTrue(support["d"].startswith("M312 455.6557689513638H408V476.1557689513639"))
+        self.assertTrue(support["d"].startswith("M312 452.5H498M312 460H498"))
+        self.assertEqual(support["d"].count("M"), 17)
+        self.assertNotIn("Z", support["d"])
         self.assertEqual(support["fill"], "none")
         self.assertEqual(support["stroke-linecap"], "butt")
         self.assertEqual(support["stroke-linejoin"], "round")
         noc = next(attributes for _, attributes in self.document.tags if attributes.get("class") == "noc-building")
-        self.assertTrue(noc["d"].startswith("M428 452.1557689513638V"))
+        self.assertTrue(noc["d"].startswith("M428 452.5V"))
         self.assertIn("rotate(var(--thrust-vector-angle))", self.css)
 
     def test_css_has_only_bounded_keyframes_and_reduced_motion_preserves_live_plumes(
