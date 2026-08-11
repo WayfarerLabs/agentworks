@@ -1,7 +1,6 @@
 # FRD: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander Phase 4J operator acceptance in
-  progress
+- Status: Interim implementation complete; continuous Lander Phase 4K refinement in progress
 - Date: 2026-08-07
 - Last revised: 2026-08-11
 - Seeded by: the saga lead, at operator request. This is a standalone effort, deliberately NOT a
@@ -200,11 +199,13 @@ forecloses it, and none of it is in scope now.
   that gauge while its fill rises over the existing refuel interval; reduced motion exposes the
   final full gauge atomically. The sole status live region becomes the centered, bordered arcade
   banner for exact `Agent Deployed!` and exact `Crashed!` outcomes. Concise controls move inside the
-  scene in a small bottom rail whose reserved band never overlaps terrain. On failure, native
-  Restart and Exit controls appear inside the scene beneath `Crashed!`; all native controls keep
-  their accessible names, focus behavior, and minimum touch targets. Arcade decoration and motion
-  never duplicate semantic text, obscure the world, expand the bounded world DOM, or survive under
-  reduced motion.
+  scene in a small bottom rail whose reserved band never overlaps terrain. Exit is a persistent
+  bottom-right rail control, while failure adds only Restart beneath `Crashed!`; each control shows
+  its keyboard shortcut on a smaller second line and keeps its accessible name, focus behavior, and
+  minimum touch target. Launch-ready presents only `Agent Deployed!`: departure uses the same
+  keyboard, vi, pointer, and touch thrust controls as flight and has no dedicated Launch action.
+  Arcade decoration and motion never duplicate semantic text, obscure the world, expand the bounded
+  world DOM, or survive under reduced motion.
 
 ## Settled constraints (inherited; do not reopen)
 
@@ -355,10 +356,12 @@ merged and settled on `main`. The first slice must not build toward them specula
   restores the exact last post-refuel, post-power launch-ready platform checkpoint without
   duplicating its can or fuel; restart before the first deployment restores the initial approach,
   while Exit and reload create a fresh run. Boundary tests pin the modestly relaxed safe-contact
-  envelope. Browser handling proves that collective-plus-turn vectoring stays within the LLD's
-  materially lower axial ceiling, turn-only input does not overcome gravity, neutral collective
-  counters residual rotation through the deterministic assist, and engine-off vehicle motion plus
-  crash debris remain undamped and ballistic.
+  envelope, revised upward just enough to accept near-miss arrivals at `1.8` model units per second
+  horizontal speed, `2.8` model units per second descent, `12` degrees tilt, and `18` degrees per
+  second angular speed. Browser handling proves that collective-plus-turn vectoring stays within the
+  LLD's materially lower axial ceiling, turn-only input does not overcome gravity, neutral
+  collective counters residual rotation through the deterministic assist, and engine-off vehicle
+  motion plus crash debris remain undamped and ballistic.
 - AC25. In both `/lander/` and `404.html`, activation reveals one blocky local-system-font arcade
   HUD: no numeric fuel text is visible, one named rounded representation of the exact model reserve
   remains available to assistive technology without live-region behavior, and the same bottom-origin
@@ -366,14 +369,17 @@ merged and settled on `main`. The first slice must not build toward them specula
   motion shows one deterministic can-to-gauge transfer and gauge-rise sequence during the pinned
   refuel interval; reduced motion shows neither animation and lands directly on the same full value.
   The existing sole live region presents centered, bordered `Agent Deployed!` and `Crashed!`
-  banners, with no pseudo-element or duplicate text authority. The controls legend and
-  state-appropriate native buttons render inside the scene; terrain remains wholly above the legend
-  rail, and failed-state Restart and Exit controls sit below the crash banner without overlap at 320
-  CSS pixels or 400 percent zoom. Normal arcade motion pauses while hidden and is absent under
-  reduced motion. The installed-agent mark persists at each powered retained NOC without increasing
-  the established 80-descendant world ceiling. Shared-game byte identity, focus order, 44-pixel
-  targets, contrast, no-JavaScript recovery, zero runtime font or cross-origin requests, and all
-  Phase 4I physics/route/world digests remain unchanged.
+  banners, with no pseudo-element or duplicate text authority. The controls legend omits shortcuts
+  represented by self-documenting buttons and shares the scene's bottom rail with an
+  always-available bottom-right Exit action whose smaller second line identifies Escape. Terrain
+  remains wholly above that rail. Launch-ready contains no action control, while failure adds only
+  Restart beneath the crash banner with `r` on its smaller second line. Those controls and overlays
+  do not overlap at 320 CSS pixels or 400 percent zoom. Normal arcade motion pauses while hidden and
+  is absent under reduced motion. The installed-agent mark persists at each powered retained NOC
+  without increasing the established 80-descendant world ceiling. Shared-game byte identity, focus
+  order, 44-pixel targets, contrast, no-JavaScript recovery, and zero runtime font or cross-origin
+  requests remain intact. The world and geometry digests remain unchanged; the physics and derived
+  output digests regenerate atomically from the revised safe-contact envelope.
 
 ## Settled implementation rulings
 

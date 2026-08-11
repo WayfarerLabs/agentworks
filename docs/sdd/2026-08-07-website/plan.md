@@ -1,7 +1,6 @@
 # Plan: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander Phase 4J operator acceptance in
-  progress
+- Status: Interim implementation complete; continuous Lander Phase 4K refinement in progress
 - Date: 2026-08-07
 - Last revised: 2026-08-11
 - FRD: `frd.md`
@@ -726,6 +725,55 @@ generation, privacy, or shared-fragment identity; the arcade HUD communicates wi
 font or color/motion alone; all refuel, banner, action, control-rail, persistent-agent,
 reduced-motion, DOM, accessibility, and responsive witnesses are review-clean and browser-accepted;
 and PR #486 is merge-ready.
+
+The Phase 4J operator-acceptance and merge rows remain open because the operator reviewed that exact
+preview and requested the cohesive Phase 4K refinement below before accepting the stacked PR. No
+separate Phase 4J acceptance is expected.
+
+## Phase 4K: self-documenting action rail and forgiving touchdown
+
+- [x] Measure the exact Phase 4J action markup, controller projection, input and focus lifecycle,
+      bottom controls rail, narrow layout, safe-contact constants, route fixture, and permanent
+      browser evidence before choosing the refinement.
+- [x] Amend the FRD, HLA, and this plan without rewriting completed Phase 4J evidence. Require one
+      always-available rail Exit control with an Escape hint, one failure-only Restart control with
+      an `r` hint, no dedicated Launch control, no duplicated shortcut prose, and a modest exact
+      landing-envelope relaxation.
+- [ ] Delegate and lead-review the exact LLD amendment for DOM/source order, shortcut markup and
+      accessible relationships, state/action visibility, focus and pointer isolation, responsive
+      rail/overlay geometry, manual launch-ready departure, new landing boundaries, and atomic route
+      derivation/fixture regeneration.
+- [ ] Obtain an `agentworks-reviewer` approval of the Phase 4K artifact amendment and resolve every
+      valid artifact finding before changing production or canonical fixture code.
+- [ ] Delegate implementation to an `agentworks-dev` subagent in an isolated worktree. Update the
+      shared fragment, CSS, controller/model projection, validators, route fixture and literals,
+      focused tests, permanent README, and browser checklist as one coherent change.
+- [ ] Prove the exact four landing equalities and independent epsilon failures, all-nine
+      constructive route derivation and one-quantum exhaustion, manual departure through
+      keyboard/vi/pointer/touch, persistent Exit and failure-only Restart behavior, focus recovery,
+      no action-to-flight input leakage, 320-pixel and 400-percent layout, shared-game identity, and
+      unchanged world/DOM/privacy bounds.
+- [ ] Run focused website suites, deterministic root/project builds, complete repository gates,
+      artifact/code/fresh-eyes reviews, and automated Chromium acceptance; resolve every valid
+      finding and re-review the immutable integrated head.
+- [ ] Refresh port 8766 from the exact reviewed head and obtain operator Chrome and Edge acceptance
+      of the self-documenting buttons, action placement, manual takeoff, and more forgiving landing.
+- [ ] Merge or rebase the latest `main`, update PR #486 and its evidence, mark it ready only after
+      operator acceptance, and monitor every required CI and CodeQL check to completion.
+
+Operator evidence (2026-08-11): after judging Phase 4J's arcade presentation substantially improved,
+the operator requested one final control cleanup. Exit becomes a persistent bottom-right rail button
+with a smaller Escape line; the controls legend therefore stops repeating Escape. Restart alone
+appears beneath `Crashed!`, with a smaller `r` line, and the legend stops repeating `r`. The
+dedicated Launch button is removed so `Agent Deployed!` stands alone and the player departs with
+ordinary game controls. The safe-contact limits rise modestly to `1.8` horizontal, `2.8` descending,
+`12` degrees tilt, and `18` degrees per second rotation.
+
+Definition of done: R23-R24 and AC24-AC25 describe one unambiguous action hierarchy; launch-ready
+has no action besides persistent rail Exit, failed adds only Restart, shortcut hints are visible and
+accessible without duplicated legend copy, every input path still initiates manual departure, the
+revised exact envelope and regenerated proof artifacts are deterministic, and the immutable result
+is review-clean, browser-accepted, and merge-ready.
 
 ## Phase 5: CI and default Pages deployment
 
