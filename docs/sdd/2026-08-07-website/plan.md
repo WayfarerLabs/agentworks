@@ -1,6 +1,7 @@
 # Plan: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander Phase 4J implementation in progress
+- Status: Interim implementation complete; continuous Lander Phase 4J review and acceptance in
+  progress
 - Date: 2026-08-07
 - Last revised: 2026-08-11
 - FRD: `frd.md`
@@ -676,11 +677,11 @@ review-clean, browser-accepted, and merge-ready.
       evidence.
 - [x] Obtain an `agentworks-reviewer` approval of the Phase 4J artifact amendment and resolve every
       valid artifact finding before changing production code.
-- [ ] Delegate implementation to an `agentworks-dev` subagent in an isolated worktree. Update the
+- [x] Delegate implementation to an `agentworks-dev` subagent in an isolated worktree. Update the
       shared fragment, model/controller projection, CSS, validators, focused tests, permanent
       README, and browser checklist as one coherent change. Preserve the sole status and fuel
       authorities, static/dynamic identity, and Phase 4I physics/route/world fixtures.
-- [ ] Prove deterministic refuel interpolation and transfer, reduced-motion equivalence, installed
+- [x] Prove deterministic refuel interpolation and transfer, reduced-motion equivalence, installed
       agent persistence across service/checkpoint/restart/retention, exact success/crash text and
       action focus, terrain-to-control-rail separation, narrow/zoom non-overlap, hidden-page pause,
       no font/network/storage additions, and the unchanged world ceiling and route digests.
@@ -700,6 +701,15 @@ centered, bordered arcade payoff; `Crashed!` receives the same treatment with Re
 it. The small blocky controls legend moves inside the bottom of the scene while terrain remains
 above it. The agent that plugs into a NOC remains visibly installed as the first persistent power-up
 mark.
+
+Implementation evidence (2026-08-11): integrated commit `765452fa` adds the shared arcade stage,
+visual fuel/refuel projection, outcome and native actions, internal controls rail, and
+installed-agent projection without changing the route, physics, world, or geometry digests. The
+delegated exact-head gates passed 61 Node tests, 127 Python website tests, 7,754 non-integration
+repository tests, strict typing and formatting, derivation verification, deterministic twelve-file
+root/project builds, the world descendant budget, locked-SDD, Rulesync, and file lint. Commit
+`8f999dee` adds the Phase 4J Node suite to both CI and Pages. Independent review and browser
+acceptance remain intentionally open.
 
 Definition of done: R24 and AC25 hold without changing Phase 4I physics, collision, routes, world
 generation, privacy, or shared-fragment identity; the arcade HUD communicates without a downloaded
