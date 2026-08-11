@@ -252,7 +252,7 @@ superseded before merge by Phase 3c after live/review evidence exposed their sem
       omitted optional disk capacity proceeds to insert; align the capacity error description and
       SDK-shape fallback comment.
 - [x] Run focused and full gates plus both required code reviews and resolve every valid finding.
-- [ ] Refresh the PR's exact-head/current-main/evidence record.
+- [x] Refresh the PR's exact-head/current-main/evidence record.
 - [ ] Post the signed exact-head handoff and flip the PR from draft to ready for the single bounded
       Phase 3 live charter above, including proof that AWS CLI reinit skips the completed managed
       install.
