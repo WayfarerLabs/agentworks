@@ -1,7 +1,7 @@
 # Child SDDs
 
 - Status: Active ledger
-- Last updated: 2026-08-10
+- Last updated: 2026-08-11
 
 This is the saga's tracking document, the analog of an ordinary SDD's `plan.md`. Completed
 checkboxes are immutable records, per the standard rule. The saga SDD locks when every entry here is
@@ -257,26 +257,38 @@ on 2026-08-10, and the continuous-lander stack entry now targets main.
 
 Two operator rulings on the Lander (2026-08-11): its continued expansion is intentional rather than
 creep, so the saga lead's proportionality question is closed rather than dormant; and **the Lander
-and onboarding both gate the final custom-domain cutover**, which makes the Phase 6, 8 and 9
-definitions of done correct as written. The domain-activation runbook names both prerequisites, and
-onboarding's own remaining gate is the live acceptance carried on the regenerated 0.14 release PR,
-so the cutover sits behind that too.
+and onboarding both gate the final custom-domain cutover**.
+
+That second ruling **changes** the website contract rather than ratifying it, and the change is owed
+by the website effort, whose artifacts these are. As written, the website plan's Phase 6 activates
+the interim domain with onboarding still pending, and `website/README.md`, FRD R10, and HLA D9 all
+permit that pre-onboarding cutover. Those definitions of done, the runbook, and the README now need
+to state both prerequisites; the saga lead has flagged it on PR #486 rather than editing another
+effort's artifacts. Onboarding's own remaining gate is the live acceptance carried on the
+regenerated 0.14 release PR, so the cutover sits behind that too. No saga coupling follows:
+`target-state.md` stays as written, because the website is out of saga scope and this gate binds two
+adjacent efforts to each other rather than to the saga lock.
 
 GCP scope extraction (operator ruling, 2026-08-11): PR #479 had absorbed a shared install-predicate
-contract change and an AWS installer rewrite discovered during its live acceptance. Both left the
-PR. The ruling generalizes: outside of bug fixes for the work in question, core-logic modifications
-are their own efforts, now codified by PR #497 (dev-process section 1a plus reviewer check 12b).
-Three follow-ups were filed rather than absorbed:
+contract change and an AWS installer rewrite discovered during its live acceptance. The shared
+predicate change left the PR. The ruling generalizes: outside of bug fixes for the work in question,
+core-logic modifications are their own efforts. Its permanent home is in review rather than landed:
+PR #497 (dev-process section 1a plus reviewer check 12b) is open with findings outstanding. Three
+follow-ups were filed rather than absorbed:
 [issue 492](https://github.com/WayfarerLabs/agentworks/issues/492) (SSH known-hosts state escapes an
 isolated `HOME` at eleven call sites, every platform),
-[issue 495](https://github.com/WayfarerLabs/agentworks/issues/495) (doctor TTY color tests assert
-host shell inventory and flake under parallel CI), and
-[issue 496](https://github.com/WayfarerLabs/agentworks/issues/496) (the install-command predicate
-contract plus transactional AWS installer completion, carrying the extracted commits and seven open
-findings). The AWS CLI recipe itself is being removed on the operator's instruction after it emerged
-that the framework already ships declarative `snap` support (`vm_template.snap`), which the saga
-lead's three reviews of that machinery never checked for: craftsmanship verified, existence never
-priced.
+[issue 495](https://github.com/WayfarerLabs/agentworks/issues/495) (doctor TTY color tests fake a
+terminal by patching `isatty` on a stream that capture replaces, so they flake under parallel CI),
+and [issue 496](https://github.com/WayfarerLabs/agentworks/issues/496) (the install-command
+predicate contract plus transactional AWS installer completion, carrying the extracted commits and
+seven open findings, among them the predicate test that asserted CI hosts provide zsh and reddened
+every matrix job). Completed as of this round: the shared runner-predicate change left the PR.
+**Still pending in draft at `3ab7ee98`:** the AWS CLI recipe and its install-command teaching
+remain, and their removal is in flight on the operator's instruction after it emerged that the
+framework already ships declarative `snap` support (`vm_template.snap`), which the saga lead's three
+reviews of that machinery never checked for: craftsmanship verified, existence never priced. The
+replacement needs classic- confinement support in the `snap` template field, itself a
+shared-machinery change and so its own small effort.
 
 ## Standing process rulings
 
@@ -304,13 +316,14 @@ poller rule stands as merged in PR #481, and PR #489 closed unmerged.)
   a clarifying paragraph so "enforce invariants" is never read as "assert the sentence", and the
   reviewer asks for deletion rather than a stronger pin. Note for future rounds: a stronger pin is
   the same mistake one size larger, which the saga lead proposed twice before it stuck.
-- **Findings outside an effort's machinery (operator, 2026-08-11; permanent home in PR #497):**
-  outside of bug fixes for the work in question, core-logic and shared-contract modifications are
-  their own efforts even when another effort found the bug. The test is whether the fix touches
-  machinery this effort owns, settled by asking whether the bug reproduces with the effort reverted
-  and whether the fix changes behavior for consumers who never asked for it. File the finding with
-  root cause and call sites; move already-written commits to their own branch rather than merging
-  them. Reviewers are bound symmetrically: asking for an out-of-scope fix is how scope grows.
+- **Findings outside an effort's machinery (operator, 2026-08-11; permanent home PENDING in PR #497,
+  open with findings outstanding):** outside of bug fixes for the work in question, core-logic and
+  shared-contract modifications are their own efforts even when another effort found the bug. The
+  test is whether the fix touches machinery this effort owns, settled by asking whether the bug
+  reproduces with the effort reverted and whether the fix changes behavior for consumers who never
+  asked for it. File the finding with root cause and call sites; move already-written commits to
+  their own branch rather than merging them. Reviewers are bound symmetrically: asking for an
+  out-of-scope fix is how scope grows.
 - **Class sweeps (saga lead, 2026-08-10, from wave 3's provider-boundary rounds):** the first
   instance of a contract-violation class triggers enumeration of every implementation of the same
   seam, each verified on its durable surface, before the class is called fixed.
