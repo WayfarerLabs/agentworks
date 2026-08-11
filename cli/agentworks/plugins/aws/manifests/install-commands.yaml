@@ -1,6 +1,6 @@
 # Optional guest tooling. EC2 lifecycle uses boto3 and does not call or
-# authenticate aws. `test_exec` is deliberately absent: AWS CLI v1 and v2
-# share the same executable name, so the command performs its own v2 probe.
+# authenticate aws. The runner checks Agentworks' absolute managed v2 binary;
+# the command also accepts an externally installed v2 discovered on PATH.
 # Download and signature verification remain unprivileged; only the final
 # system installation explicitly elevates because install commands are not root.
 apiVersion: agentworks/v1
@@ -9,10 +9,14 @@ metadata:
   name: aws-cli
   description: AWS CLI v2
 spec:
+  test_exec: /usr/local/aws-cli/v2/current/bin/aws
   command: |
     set -eu
     install_dir="/usr/local/aws-cli"
     bin_dir="/usr/local/bin"
+    if test -x /usr/local/aws-cli/v2/current/bin/aws; then
+      exit 0
+    fi
     if command -v aws >/dev/null 2>&1 && aws --version 2>&1 | grep -q '^aws-cli/2\.'; then
       exit 0
     fi

@@ -32,7 +32,7 @@ class GCEOperationError(GCEError):
 
 
 class GCECapacityError(GCEOperationError):
-    """A completed Compute Engine operation failed for zonal capacity."""
+    """A completed Compute Engine operation failed for provider capacity."""
 
 
 class GCEIndeterminateOperationError(GCEError):

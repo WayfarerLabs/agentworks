@@ -120,8 +120,6 @@ def test_exact_default_catalog_and_override_projection() -> None:
     default = _validate(dict(_BASE))
     assert machine_catalog(default) is DEFAULT_MACHINE_TYPES
     assert (
-        MachineTypeSelection(2, 2, "e2-small", "x86_64"),
-        MachineTypeSelection(2, 4, "e2-medium", "x86_64"),
         MachineTypeSelection(2, 8, "e2-standard-2", "x86_64"),
         MachineTypeSelection(4, 16, "e2-standard-4", "x86_64"),
         MachineTypeSelection(8, 32, "e2-standard-8", "x86_64"),
@@ -140,23 +138,22 @@ def test_exact_default_catalog_and_override_projection() -> None:
     assert machine_catalog(override) == (MachineTypeSelection(4, 16, "t2a-standard-4", "arm64"),)
 
 
-@pytest.mark.parametrize(
-    ("cpus", "memory_gib", "expected"),
-    [
-        (1, 1, "e2-small"),
-        (2, 2, "e2-small"),
-        (2, 3, "e2-medium"),
-        (2, 4, "e2-medium"),
-        (2, 5, "e2-standard-2"),
-        (2, 8, "e2-standard-2"),
-    ],
-)
-def test_default_catalog_pins_shared_core_and_standard_thresholds(
+@pytest.mark.parametrize(("cpus", "memory_gib"), [(1, 1), (2, 2), (2, 4), (2, 8)])
+def test_default_catalog_starts_with_sustained_standard_two_vcpu(
     cpus: int,
     memory_gib: int,
-    expected: str,
 ) -> None:
-    assert select_machine_type(DEFAULT_MACHINE_TYPES, cpus=cpus, memory_gib=memory_gib).type == expected
+    assert select_machine_type(DEFAULT_MACHINE_TYPES, cpus=cpus, memory_gib=memory_gib).type == "e2-standard-2"
+
+
+def test_explicit_shared_core_override_selects_deterministically() -> None:
+    shared_core = (
+        MachineTypeSelection(2, 4, "e2-medium", "x86_64"),
+        MachineTypeSelection(2, 2, "e2-small", "x86_64"),
+    )
+
+    assert select_machine_type(shared_core, cpus=1, memory_gib=1).type == "e2-small"
+    assert select_machine_type(tuple(reversed(shared_core)), cpus=2, memory_gib=3).type == "e2-medium"
 
 
 def test_selection_is_order_independent_and_satisfies_both_axes() -> None:

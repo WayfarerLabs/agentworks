@@ -200,11 +200,15 @@ class GCEPlatform(VMPlatform):
         operator to inspect the named resource before retrying. Provider
         diagnostics and credential material are never rendered.
 
-        The built-in catalog starts with burstable `e2-small` and `e2-medium`.
-        Both expose two guest vCPUs but sustain aggregate 0.5 and 1 vCPU;
-        choose `e2-standard-2` for sustained two-vCPU work. Known machine
-        incompatibilities fail before mutation. Residual definitive insert
-        rejection names the selected machine and `pd-balanced` boundary.
+        The built-in catalog starts with `e2-standard-2`, preserving two
+        sustained vCPUs for an ordinary two-vCPU request. Shared-core
+        `e2-small` and `e2-medium` remain available through a site
+        `machine_types` override. Both expose two guest vCPUs but sustain
+        aggregate 0.5 and 1 vCPU with automatic bursting. Catalog selection is
+        order-independent and satisfies CPU plus memory before applying stable
+        type and architecture tie-breakers. Known machine incompatibilities
+        fail before mutation. Residual definitive insert rejection names the
+        selected machine and `pd-balanced` boundary.
 
         Ships as the opt-in `gcp` system plugin. Enable it explicitly before a
         `gcp-gce` vm-site becomes ready.

@@ -150,20 +150,81 @@ def test_omitted_maximum_persistent_disks_is_unknown_and_accepted() -> None:
 
 
 @pytest.mark.parametrize(
-    "machine",
+    ("machine", "message"),
     [
-        compute_v1.MachineType(guest_cpus=8, memory_mb=16384, maximum_persistent_disks=128),
-        compute_v1.MachineType(guest_cpus=4, memory_mb=8192, maximum_persistent_disks=128),
-        compute_v1.MachineType(
-            guest_cpus=4,
-            memory_mb=16384,
-            architecture="X86_64",
-            maximum_persistent_disks=128,
+        (
+            compute_v1.MachineType(memory_mb=16384, maximum_persistent_disks=128),
+            "unknown provider shape.*guest_cpus.*absent",
+        ),
+        (
+            compute_v1.MachineType(guest_cpus=0, memory_mb=16384, maximum_persistent_disks=128),
+            "invalid provider shape.*guest_cpus.*not positive",
+        ),
+        (
+            compute_v1.MachineType(guest_cpus=8, memory_mb=16384, maximum_persistent_disks=128),
+            "does not match",
+        ),
+        (
+            compute_v1.MachineType(guest_cpus=4, maximum_persistent_disks=128),
+            "unknown provider shape.*memory_mb.*absent",
+        ),
+        (
+            compute_v1.MachineType(guest_cpus=4, memory_mb=0, maximum_persistent_disks=128),
+            "invalid provider shape.*memory_mb.*not positive",
+        ),
+        (
+            compute_v1.MachineType(guest_cpus=4, memory_mb=8192, maximum_persistent_disks=128),
+            "does not match",
         ),
     ],
-    ids=("cpus", "memory", "architecture"),
+    ids=(
+        "cpu-absent",
+        "cpu-non-positive",
+        "cpu-declaration-mismatch",
+        "memory-absent",
+        "memory-non-positive",
+        "memory-declaration-mismatch",
+    ),
 )
-def test_live_machine_mismatch_fails_before_mutation(machine: compute_v1.MachineType) -> None:
+def test_required_live_machine_fields_fail_by_provider_shape_branch(
+    machine: compute_v1.MachineType,
+    message: str,
+) -> None:
+    cache = _Cache(**{"machine-types": _GetClient(machine)})
+    selected = MachineTypeSelection(4, 16, "t2a-standard-4", "arm64")
+    with pytest.raises(ConfigError, match=message) as caught:
+        verify_live_machine_type(cache, RunContext(), _CONFIG, selected)  # type: ignore[arg-type]
+
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+
+
+def test_unrecognized_sdk_shape_treats_required_scalar_as_absent() -> None:
+    machine = SimpleNamespace(
+        guest_cpus=4,
+        memory_mb=16384,
+        architecture="ARM64",
+        maximum_persistent_disks=128,
+        accelerators=[],
+    )
+    selected = MachineTypeSelection(4, 16, "t2a-standard-4", "arm64")
+
+    with pytest.raises(ConfigError, match="unknown provider shape.*guest_cpus.*absent"):
+        verify_live_machine_type(  # type: ignore[arg-type]
+            _Cache(**{"machine-types": _GetClient(machine)}),
+            RunContext(),
+            _CONFIG,
+            selected,
+        )
+
+
+def test_live_machine_architecture_mismatch_fails_before_mutation() -> None:
+    machine = compute_v1.MachineType(
+        guest_cpus=4,
+        memory_mb=16384,
+        architecture="X86_64",
+        maximum_persistent_disks=128,
+    )
     cache = _Cache(**{"machine-types": _GetClient(machine)})
     selected = MachineTypeSelection(4, 16, "t2a-standard-4", "arm64")
     with pytest.raises(ConfigError, match="does not match"):

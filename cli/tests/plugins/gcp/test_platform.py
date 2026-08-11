@@ -390,9 +390,11 @@ def test_rendered_gcp_guide_teaches_safe_selected_zone_capacity_recovery() -> No
     assert "A global capacity\nfailure says only to retry later" in rendered
     assert "inspect the named resource before retrying" in rendered
     assert "Provider\ndiagnostics and credential material are never rendered" in rendered
-    assert "burstable `e2-small` and `e2-medium`" in rendered
-    assert "sustain aggregate 0.5 and 1 vCPU" in rendered
-    assert "choose `e2-standard-2` for sustained two-vCPU work" in rendered
+    assert "built-in catalog starts with `e2-standard-2`" in rendered
+    assert "preserving two\nsustained vCPUs" in rendered
+    assert "`e2-small` and `e2-medium` remain available" in rendered
+    assert "sustain\naggregate 0.5 and 1 vCPU with automatic bursting" in rendered
+    assert "order-independent and satisfies CPU plus memory" in rendered
     assert "`pd-balanced` boundary" in rendered
     assert "ZONE_RESOURCE_POOL_EXHAUSTED" not in rendered
     assert _TAILSCALE_SENTINEL not in rendered
@@ -721,6 +723,78 @@ def test_known_machine_incompatibility_stays_pre_mutation(
     cache.clients["machine-types"] = SimpleNamespace(get=lambda **_kwargs: machine)
 
     with pytest.raises(ConfigError, match="e2-standard-2"):
+        platform.create(_request(), _ctx())
+
+    assert cache.firewalls.insert_requests == []
+    assert cache.instances.insert_requests == []
+
+
+@pytest.mark.parametrize(
+    ("machine", "message"),
+    [
+        (
+            compute_v1.MachineType(memory_mb=8192, architecture="x86_64", maximum_persistent_disks=128),
+            "unknown provider shape.*guest_cpus",
+        ),
+        (
+            compute_v1.MachineType(
+                guest_cpus=0,
+                memory_mb=8192,
+                architecture="x86_64",
+                maximum_persistent_disks=128,
+            ),
+            "invalid provider shape.*guest_cpus",
+        ),
+        (
+            compute_v1.MachineType(
+                guest_cpus=4,
+                memory_mb=8192,
+                architecture="x86_64",
+                maximum_persistent_disks=128,
+            ),
+            "does not match",
+        ),
+        (
+            compute_v1.MachineType(guest_cpus=2, architecture="x86_64", maximum_persistent_disks=128),
+            "unknown provider shape.*memory_mb",
+        ),
+        (
+            compute_v1.MachineType(
+                guest_cpus=2,
+                memory_mb=0,
+                architecture="x86_64",
+                maximum_persistent_disks=128,
+            ),
+            "invalid provider shape.*memory_mb",
+        ),
+        (
+            compute_v1.MachineType(
+                guest_cpus=2,
+                memory_mb=16384,
+                architecture="x86_64",
+                maximum_persistent_disks=128,
+            ),
+            "does not match",
+        ),
+    ],
+    ids=(
+        "cpu-absent",
+        "cpu-non-positive",
+        "cpu-declaration-mismatch",
+        "memory-absent",
+        "memory-non-positive",
+        "memory-declaration-mismatch",
+    ),
+)
+def test_required_machine_shape_failure_has_zero_provider_mutations(
+    monkeypatch: pytest.MonkeyPatch,
+    machine: compute_v1.MachineType,
+    message: str,
+) -> None:
+    platform, cache = _platform(monkeypatch, _Transport())
+    cache.clients["machine-types"] = SimpleNamespace(get=lambda **_kwargs: machine)
+
+    with pytest.raises(ConfigError, match=message):
         platform.create(_request(), _ctx())
 
     assert cache.firewalls.insert_requests == []

@@ -119,8 +119,18 @@ def verify_live_machine_type(
             hint="select a machine type that exists in the vm-site zone",
         )
 
-    live_cpus = int(machine.guest_cpus)
-    live_memory_mib = int(machine.memory_mb)
+    live_cpus = _required_positive_machine_field(
+        machine,
+        field_name="guest_cpus",
+        field_label="guest CPU count",
+        machine_type=selected.type,
+    )
+    live_memory_mib = _required_positive_machine_field(
+        machine,
+        field_name="memory_mb",
+        field_label="memory size",
+        machine_type=selected.type,
+    )
     live_arch = str(machine.architecture).lower()
     architecture_mismatch = bool(live_arch) and live_arch != selected.arch
     if live_cpus != selected.cpus or live_memory_mib != selected.memory_gib * 1024 or architecture_mismatch:
@@ -144,16 +154,56 @@ def verify_live_machine_type(
 
 
 def _proto_field_is_present(message: Any, field_name: str) -> bool:
-    """Check scalar presence on either a proto-plus wrapper or protobuf."""
-    proto_plus_converter = getattr(type(message), "pb", None)
-    protobuf = proto_plus_converter(message) if callable(proto_plus_converter) else message
+    """Check scalar presence, treating an unrecognized SDK shape as absent.
+
+    Proto-plus normally exposes its underlying protobuf through ``pb``. If a
+    future SDK shape cannot be converted or does not expose presence for the
+    named field, callers receive ``False`` instead of consuming a protobuf
+    scalar default. Required fields then fail as unknown provider shape, while
+    optional output fields remain unknown.
+    """
+    try:
+        proto_plus_converter = getattr(type(message), "pb", None)
+        protobuf = proto_plus_converter(message) if callable(proto_plus_converter) else message
+    except Exception:
+        return False
     has_field = getattr(protobuf, "HasField", None)
     if not callable(has_field):
         return False
     try:
         return bool(has_field(field_name))
-    except ValueError:
+    except Exception:
         return False
+
+
+def _required_positive_machine_field(
+    machine: Any,
+    *,
+    field_name: str,
+    field_label: str,
+    machine_type: str,
+) -> int:
+    """Read one presence-tracked required positive machine-shape scalar."""
+    if not _proto_field_is_present(machine, field_name):
+        raise ConfigError(
+            f"GCE machine type '{machine_type}' has an unknown provider shape: "
+            f"required {field_label} field '{field_name}' is absent",
+            hint=(
+                "select a supported machine type or retry after checking the Google Compute SDK; "
+                "gcp-gce requires present positive guest CPU and memory fields before provisioning"
+            ),
+        )
+    try:
+        value = int(getattr(machine, field_name))
+    except (TypeError, ValueError):
+        value = 0
+    if value <= 0:
+        raise ConfigError(
+            f"GCE machine type '{machine_type}' has an invalid provider shape: "
+            f"required {field_label} field '{field_name}' is not positive",
+            hint="select a machine type whose live guest CPU and memory fields are both positive",
+        )
+    return value
 
 
 def resolve_debian_image(

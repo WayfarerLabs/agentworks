@@ -120,24 +120,52 @@ line ending, is accepted without compaction, base64 encoding, or rewriting.
 
 ## Choose machine capacity
 
-The built-in catalog starts with `e2-small` (2 GiB) and `e2-medium` (4 GiB), followed by the E2
-standard ladder. Both shared-core types expose two vCPUs to the guest, but their aggregate sustained
-CPU is 0.5 vCPU and 1 vCPU respectively, with automatic bursting. Use `e2-standard-2` (8 GiB) when
-the workload needs sustained two-vCPU capacity rather than short bursts.
+The built-in catalog is the E2 standard ladder starting at `e2-standard-2` (2 vCPUs, 8 GiB), so an
+ordinary two-vCPU template receives two sustained vCPUs. To opt into lower-cost shared-core types,
+replace the site's catalog with an explicit override such as:
 
-Before mutation, Agentworks verifies the selected live machine's declared CPU, memory, optional
+```yaml
+apiVersion: agentworks/v1
+kind: vm-site
+metadata:
+  name: gcp-shared-core
+spec:
+  platform:
+    name: gcp-gce
+    project_id: agentworks-dev
+    zone: us-central1-a
+    machine_types:
+      - cpus: 2
+        memory: 2
+        type: e2-small
+        arch: x86_64
+      - cpus: 2
+        memory: 4
+        type: e2-medium
+        arch: x86_64
+```
+
+The `cpus` values describe the two vCPUs visible to the guest. They do not describe sustained
+capacity: `e2-small` sustains 0.5 aggregate vCPU and `e2-medium` sustains 1 aggregate vCPU, both
+with automatic bursting. An override replaces the built-in catalog, so include every type the site
+may select. Selection is independent of declaration order. Agentworks chooses the smallest entry
+that satisfies both requested CPU and memory, then uses provider type and architecture as stable
+tie-breakers for equal shapes.
+
+Before mutation, Agentworks requires the live machine's guest CPU and memory fields to be present
+and positive, then verifies that they match the declaration. Missing fields, non-positive fields,
+and positive declaration mismatches are distinct configuration errors. It also verifies optional
 architecture, Persistent Disk capacity, and required accelerators. A machine with no Persistent Disk
 capacity explicitly reported by the provider, or a required guest accelerator, is outside the
 current CPU-only Debian 12 and `pd-balanced` boot-disk boundary and fails as a configuration error.
-An omitted capacity field remains unknown. This check uses provider fields, not the machine-type
-name.
+An omitted disk-capacity field remains unknown and proceeds to `instances.insert`. This check uses
+provider fields, not the machine-type name.
 
 Compute Engine has no read-only validator for every machine-type and boot-disk pair. A remaining
 definitive `instances.insert` rejection therefore names the selected machine type and asks you to
 verify IAM, quota, and request prerequisites first, then its CPU-only Debian 12 and `pd-balanced`
 compatibility, while Agentworks performs bounded rollback. It never renders the provider's message,
-code, or object. Future Hyperdisk support will be an additive storage profile; Agentworks does not
-infer it from a machine-series name.
+code, or object.
 
 ## Create and operate a VM
 

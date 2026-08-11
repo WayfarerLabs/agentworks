@@ -16,7 +16,14 @@ def _command(provider: str) -> str:
 
 
 def _aws_command_with_test_install_dir(install_dir: Path) -> str:
-    return _command("aws").replace('install_dir="/usr/local/aws-cli"', f'install_dir="{install_dir}"')
+    return (
+        _command("aws")
+        .replace('install_dir="/usr/local/aws-cli"', f'install_dir="{install_dir}"')
+        .replace(
+            "test -x /usr/local/aws-cli/v2/current/bin/aws",
+            f"test -x {install_dir}/v2/current/bin/aws",
+        )
+    )
 
 
 def _tool(bin_dir: Path, name: str, body: str) -> None:
@@ -181,6 +188,20 @@ def test_aws_installer_updates_an_existing_explicit_installation(tmp_path: Path)
     ]
 
 
+def test_aws_installer_skips_managed_executable_before_path_probe(tmp_path: Path) -> None:
+    install_dir = tmp_path / "managed" / "aws-cli"
+    managed_binary = install_dir / "v2" / "current" / "bin" / "aws"
+    managed_binary.parent.mkdir(parents=True)
+    managed_binary.write_text("#!/bin/sh\nexit 99\n")
+    managed_binary.chmod(0o755)
+
+    result = _run(_aws_command_with_test_install_dir(install_dir), tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert not (tmp_path / "log").exists()
+    assert not (tmp_path / "install-args").exists()
+
+
 def test_provider_installer_commands_have_no_test_path_overrides() -> None:
     gcloud = _command("gcp")
     aws = _command("aws")
@@ -193,10 +214,11 @@ def test_provider_installer_commands_have_no_test_path_overrides() -> None:
     assert "/usr/local/bin" in aws
 
 
-def test_aws_installer_upgrades_v1_but_skips_existing_v2(tmp_path: Path) -> None:
+def test_aws_installer_upgrades_path_v1_but_skips_external_path_v2(tmp_path: Path) -> None:
     original = _command("aws")
     v1 = _run(original, tmp_path, AGW_TEST_AWS_VERSION="aws-cli/1.32.0 Python/test")
     assert v1.returncode == 0, v1.stderr
+    assert (tmp_path / "install-args").exists()
 
     result = _run(original, tmp_path / "v2", AGW_TEST_AWS_VERSION="aws-cli/2.1.0 Python/test")
     assert result.returncode == 0, result.stderr

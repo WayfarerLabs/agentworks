@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from textwrap import dedent
 from typing import TYPE_CHECKING
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -21,6 +22,7 @@ from agentworks.errors import StateError
 from agentworks.resources.access import ensure_recipe_enabled
 from agentworks.resources.graph import Enablement
 from agentworks.resources.inspect import describe_resource, list_resources
+from agentworks.vms.initializer import _run_install_commands
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -98,7 +100,10 @@ def test_aws_bundle_publishes_cli_disabled_with_verified_v2_payload(tmp_path: Pa
     assert row.origin.variant == "system-plugin"
     assert row.origin.plugin == "aws"
     assert registry.graph.enablement_of("system-install-command", "aws-cli") is Enablement.disabled
-    assert row.test_exec is None
+    assert row.test_exec == "/usr/local/aws-cli/v2/current/bin/aws"
+    managed_check = "if test -x /usr/local/aws-cli/v2/current/bin/aws; then"
+    assert managed_check in row.command
+    assert row.command.index(managed_check) < row.command.index("if command -v aws")
     assert "aws-cli/2" in row.command
     assert "awscli-exe-linux-x86_64.zip" in row.command
     assert "awscli-exe-linux-aarch64.zip" in row.command
@@ -111,6 +116,28 @@ def test_aws_bundle_publishes_cli_disabled_with_verified_v2_payload(tmp_path: Pa
     assert 'sudo "$temp_root/aws/install"' in row.command
     assert '--install-dir "$install_dir" --bin-dir "$bin_dir" --update' in row.command
     assert "aws configure" not in row.command
+
+
+def test_completed_managed_aws_cli_uses_short_runner_predicate_only(tmp_path: Path) -> None:
+    row = build_registry(_config(tmp_path)).lookup("system-install-command", "aws-cli")
+    target = MagicMock()
+    target.run.return_value = MagicMock(returncode=0)
+    logger = MagicMock()
+
+    paths = _run_install_commands(
+        target,
+        ["aws-cli"],
+        {"aws-cli": row},
+        "zsh",
+        "/home/agentworks",
+        logger,
+    )
+
+    assert paths == []
+    [predicate] = target.run.call_args_list
+    assert predicate.args[0] == ("zsh -lic 'command -v /usr/local/aws-cli/v2/current/bin/aws' > /dev/null 2>&1")
+    assert predicate.kwargs == {"check": False, "timeout": 10}
+    assert all(call.kwargs.get("timeout") != 120 for call in target.run.call_args_list)
 
 
 def test_aws_cli_recipe_is_gated_until_aws_is_enabled(tmp_path: Path) -> None:
