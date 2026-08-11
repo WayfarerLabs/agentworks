@@ -3,9 +3,12 @@
 Two first-class Registry kinds live here next to the code that loads them:
 
 - ``system-install-command`` (``SystemInstallCommandEntry``): a
-  system-level (root) install command run during VM init.
+  VM-wide install command run as the VM admin during VM init.
 - ``user-install-command`` (``UserInstallCommandEntry``): a per-user
   install command run during admin/agent init.
+
+System scope does not imply root execution. A system install command must
+explicitly use ``sudo`` for each step that needs root privileges.
 
 Both are ``declarable`` kinds under the ``error`` miss policy: a typo'd
 reference (an unknown command named by a vm-template, admin-template, or
@@ -44,11 +47,11 @@ if TYPE_CHECKING:
 class _InstallCommandEntry(DeclaredResource):
     """The spec both install-command kinds declare.
 
-    The two kinds differ in WHO runs the command (root at VM init, the
-    agent or admin user at user init) and in nothing else, so the fields
-    are authored once. Each kind is a named subclass rather than an alias,
-    because the Registry keys rows by type and the two are separate kinds
-    with separate miss policies.
+    The two kinds differ in WHO runs the command (the VM admin at VM init,
+    the agent or admin user at user init) and in nothing else, so the
+    fields are authored once. Each kind is a named subclass rather than an
+    alias, because the Registry keys rows by type and the two are separate
+    kinds with separate miss policies.
     """
 
     # The example is what a generated sample writes on the one line an
@@ -88,7 +91,7 @@ class _InstallCommandEntry(DeclaredResource):
 
 
 class SystemInstallCommandEntry(_InstallCommandEntry):
-    """A system-level (root) install command run during VM init."""
+    """A VM-wide install command run as the VM admin during VM init."""
 
 
 class UserInstallCommandEntry(_InstallCommandEntry):
@@ -168,14 +171,15 @@ class _SystemInstallCommandKind:
     """Implementation of ``ResourceKind`` for ``"system-install-command"``."""
 
     kind: str = "system-install-command"
-    description: str = "System-level (root) install commands for VM init"
+    description: str = "VM-wide install commands run as the VM admin during VM init"
     prose: TopicProse = TopicProse(
         title="System install commands",
         overview="""
         A system-install-command installs system-wide tooling that apt cannot: a vendor
         install script, a binary release, anything that ends up outside a package. It
-        runs as root during `agw vm create` and again on every `agw vm reinit`. The
-        command must be safe and idempotent on every run.
+        runs as the VM admin user, not root, during `agw vm create` and again on every
+        `agw vm reinit`. Commands that need root privileges must explicitly use `sudo`
+        for those steps. The command must be safe and idempotent on every run.
 
         A vm-template refers to it by name through `system_install_commands`. Declare
         any combination of `test_exec`, `test_file`, and `test_dir` as optional

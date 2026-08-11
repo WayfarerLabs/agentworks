@@ -438,6 +438,11 @@ runs commands during init and may run them again during every reinit. The option
 `test_file`, and `test_dir` fields are early-exit optimizations, not the mechanism that makes a
 command idempotent.
 
+A `system-install-command` is VM-wide in scope, but Agentworks executes it as the VM admin user, not
+root. The command must explicitly use `sudo` for each step that needs root privileges. A
+`user-install-command` runs as the admin or agent user whose template selects it and should not
+assume elevation.
+
 `test_exec` resolves a command on `PATH` in the target user's login shell. `test_file` and
 `test_dir` check for an existing path; a leading `~` resolves to the target user's home. When a
 command declares multiple non-empty checks, Agentworks skips it only when every check passes. With
