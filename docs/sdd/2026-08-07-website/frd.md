@@ -1,7 +1,6 @@
 # FRD: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander final tuning implementation
-  review-clean, operator Chrome and Edge acceptance pending
+- Status: Interim implementation complete; continuous Lander Phase 4I design in progress
 - Date: 2026-08-07
 - Last revised: 2026-08-10
 - Seeded by: the saga lead, at operator request. This is a standalone effort, deliberately NOT a
@@ -62,12 +61,13 @@ forecloses it, and none of it is in scope now.
   initial tuning target is approximately twice the original per-engine translational authority
   (nominally `8.4` rather than `4.2` in model units), so a player can brake materially later without
   changing the fixed-step clock or simply doubling gravity. Differential input also vectors the
-  combined thrust toward the commanded turn while reducing its axial component, so steering does not
-  add more lift than straight collective thrust. A light, deterministic flight-control assist
-  counters residual rotation through visibly differential, fuel-consuming main-engine thrust when
-  collective remains engaged; engine-off coasting and ballistic crash fragments remain undamped in
-  vacuum. The LLD may pin nearby browser-tested authority, vector, and assist values when handling
-  evidence justifies them.
+  combined thrust toward the commanded turn while materially reducing its axial component. Full
+  steering with collective produces no more than approximately half of straight collective's axial
+  thrust, and turn-only input does not overcome gravity. A light, deterministic flight-control
+  assist counters residual rotation through visibly differential, fuel-consuming main-engine thrust
+  when collective remains engaged; engine-off coasting and ballistic crash fragments remain undamped
+  in vacuum. The LLD may pin nearby browser-tested authority, vector, and assist values when
+  handling evidence justifies them.
 - R9. The 404 content and route home and the dedicated Lander page work without JavaScript. The game
   has no audio, telemetry, network request, durable storage, or critical content; it pauses physics
   and motion when inactive, can be exited, and honors reduced motion for all nonessential animation.
@@ -143,8 +143,11 @@ forecloses it, and none of it is in scope now.
   validator exception may permit an emitted local link to resolve outside the selected manifest.
 - R18. Manifesto, Security, Lander, and 404 start with their `h1` after only the shared compact
   detail-page inset. They show no eyebrow, error-code, repository-provenance, or other pre-title
-  label. The 404 retains its useful explanatory copy below the title; removing the redundant `404`
-  label does not weaken document metadata, breadcrumb state, HTTP fallback behavior, or recovery.
+  label. The dedicated Lander page uses the exact visible `h1` `We need to deploy some agents!`. The
+  404 retains `Page not found` and the exact explanatory copy
+  `This route is broken! We need to deploy some agents!` below the title; removing the redundant
+  `404` label does not weaken document metadata, breadcrumb state, HTTP fallback behavior, or
+  recovery.
 - R19. Manifesto and Security automatically expose an `On this page` navigation generated from every
   source `h2` and `h3`, preserving heading order and nesting without a separately maintained
   inventory. On narrow or zoomed layouts it appears inline immediately after the source `h1`. When
@@ -158,16 +161,20 @@ forecloses it, and none of it is in scope now.
 - R21. The game is one continuous, forward-moving lunar expedition rather than a terminal level. It
   presents visibly rising, falling, and sloped lunar-lander terrain between sites and a
   deterministic sequence of sites generated from one fresh in-memory run seed. Each site has one
-  slightly elevated helicopter-style landing platform exactly three lander widths long beside one
-  compact NOC building. Terrain changes at deliberately wide intervals with stronger, irregular
-  elevation changes between sites rather than a fine repeated sawtooth; every platform and its NOC
-  occupy one flat site shelf. The elevated platform reads as a supported structure without exposing
-  a long sky-colored slot beneath its deck. A safe landing collects that platform's single gas can
-  into the lander's visible fuel reserve, deploys an agent from the G opening, fills a vertical,
-  multicolor phone-battery-style power indicator upward toward the NOC antenna, and activates that
-  antenna as the final payoff. The powered site remains changed while it is retained in the run's
-  rolling world. A short launch sequence then returns control to flight; there is no terminal
-  success after a deployment.
+  materially elevated helicopter-style landing platform exactly three lander widths long beside one
+  compact NOC building. Exposed collider-backed trusses and scaffolding visibly connect the platform
+  and NOC into one supported structure; decorative openings must not imply a traversable gap where
+  the collision model is solid. Terrain changes at deliberately wide intervals with stronger,
+  irregular elevation changes between sites rather than a fine repeated sawtooth; every platform and
+  its NOC occupy one flat site shelf. The elevated platform reads as a supported structure without
+  exposing a long sky-colored slot beneath its deck. A safe landing collects that platform's single
+  gas can into the lander's visible fuel reserve, deploys an agent from the G opening, fills a clean
+  rectangular vertical, multicolor phone-battery-style power indicator without a terminal nub, then
+  builds a vertically symmetric network signal through the final three power stages. Completing the
+  sequence exposes the exact visible and announced banner `Agent Deployed!` while the lander waits
+  safely on the pad. The powered site remains changed while it is retained in the run's rolling
+  world. The player must command the subsequent liftoff; there is no automatic launch and no
+  terminal success after a deployment.
 - R22. After each safe landing, the next site is deterministically placed beyond the right edge of
   the current view. A visible right-edge arrow blinks while that target remains offscreen and hides
   once the site enters view; under reduced motion it remains a static direction cue. Before issuing
@@ -230,14 +237,19 @@ merged and settled on `main`. The first slice must not build toward them specula
 - AC6. Space starts the game from the initial state on either 404 or `/lander/` when focus is not
   inside another control. Starting moves focus to the game scene. Arrow and vi controls produce the
   specified collective and differential thrust; tap, hold, and horizontal drag provide equivalent
-  touch control; visible plume length reflects the commanded engine thrust; and the native Exit
-  control returns either input mode to settled preflight.
+  touch control; the same collective controls initiate player-commanded liftoff from a powered pad;
+  visible plume length reflects the commanded engine thrust; and the native Exit control returns
+  either input mode to settled preflight.
 - AC7. A safe upright touchdown on the elevated three-lander-width platform consumes its gas can
-  exactly once, increases the visible and programmatically named fuel reserve without discarding
-  carried excess, completes agent entry, fills the single-building NOC battery indicator from bottom
-  to top through distinct visible colors toward the antenna, activates that antenna, and returns the
-  same lander to controllable flight. Completing three successive sites proves that deployment is
-  not terminal and that powered sites remain visibly changed while they remain in the rolling view.
+  exactly once, increases the visible and programmatically named numeric reserve without discarding
+  carried excess, and refills a left-side vertical gauge whose scale is explicitly relative to that
+  leg's departure reserve rather than a false fixed tank capacity. It completes agent entry, fills
+  the single-building NOC battery indicator from bottom to top through distinct visible colors,
+  builds the vertically symmetric network signal through its final three stages, and presents one
+  `Agent Deployed!` banner through the existing status authority. The centered lander remains safely
+  at rest with fuel unchanged until the player commands thrust, then returns to ordinary flight once
+  both feet clear the deck. Completing three successive sites proves that deployment is not terminal
+  and that powered sites remain visibly changed while they remain in the rolling view.
 - AC8. Automated and browser acceptance cover state transitions, input mapping, consistent
   fixed-step physics across representative frame schedules, seeded terrain and site generation,
   route-home fallback, hidden-until-start instructions, fuel and checkpoint transitions, reduced
@@ -311,12 +323,13 @@ merged and settled on `main`. The first slice must not build toward them specula
   minimum terrain-diversity constraints and visibly include coarse rising, falling, and sloped
   non-platform spans separated by the LLD's wider sample interval. Every retained platform and NOC
   stands on one flat shelf, while the platform deck remains visibly and physically elevated on its
-  supports without an uninterrupted sky-colored rectangle beneath it. Each award equals the next
-  route's deterministic demonstrated minimum multiplied by a monotonic ratio that is approximately
-  three for the first award and approaches one without crossing it. A test-controlled reference
-  flight reaches and safely lands on every representative generated next platform using no more than
-  the calculated minimum; a one-step-smaller tested allowance cannot complete that same reference
-  plan.
+  collider-backed exposed trusses and scaffolding that attach the pad to its NOC, without an
+  uninterrupted sky-colored rectangle beneath it or a visual opening that contradicts collision.
+  Each award equals the next route's deterministic demonstrated minimum multiplied by a monotonic
+  ratio that is approximately three for the first award and approaches one without crossing it. A
+  test-controlled reference flight reaches and safely lands on every representative generated next
+  platform using no more than the calculated minimum; a one-step-smaller tested allowance cannot
+  complete that same reference plan.
 - AC23. While the next site is right of the viewport, a visible right-pointing cue is present and
   blinks only when motion is allowed and the document is active. It becomes static under reduced
   motion, pauses while hidden, and disappears when the target enters view. Direction is never
@@ -324,12 +337,13 @@ merged and settled on `main`. The first slice must not build toward them specula
 - AC24. Every unsafe terrain, pad, or building impact reaches a finite crash sequence with a brief
   flash and deterministic ballistic debris but no smoke, shock wave, sustained fire, sound, page
   movement, storage, or request. Reduced motion reaches the same final failure atomically. Restart
-  restores the exact last post-refuel platform checkpoint without duplicating its can or fuel;
-  restart before the first deployment restores the initial approach, while Exit and reload create a
-  fresh run. Boundary tests pin the modestly relaxed safe-contact envelope. Browser handling proves
-  that collective-plus-turn vectoring does not exceed straight collective's axial thrust, neutral
-  collective counters residual rotation through the deterministic assist, and engine-off vehicle
-  motion plus crash debris remain undamped and ballistic.
+  restores the exact last post-refuel, post-power launch-ready platform checkpoint without
+  duplicating its can or fuel; restart before the first deployment restores the initial approach,
+  while Exit and reload create a fresh run. Boundary tests pin the modestly relaxed safe-contact
+  envelope. Browser handling proves that collective-plus-turn vectoring stays within the LLD's
+  materially lower axial ceiling, turn-only input does not overcome gravity, neutral collective
+  counters residual rotation through the deterministic assist, and engine-off vehicle motion plus
+  crash debris remain undamped and ballistic.
 
 ## Settled implementation rulings
 

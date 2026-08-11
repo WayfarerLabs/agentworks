@@ -604,6 +604,61 @@ axial lift above straight collective; neutral collective visibly counters residu
 engine-off coasting and vacuum crash debris remain ballistic; the modestly relaxed landing envelope
 and every regenerated route/world fixture are exact, reviewed, and browser-accepted.
 
+## Phase 4I: deployment payoff, manual departure, and site structure
+
+- [x] Measure the exact Phase 4H runtime before design changes: identify the uncapped fuel
+      authority, current status/live-region projection, automatic launch transaction and checkpoint
+      semantics, axial force under both steering modes, current platform clearance/collision
+      envelope, retained DOM budget, and every route/fixture dependency that a force or geometry
+      change invalidates.
+- [x] Amend the FRD, HLA, and this plan without rewriting completed Phase 4H evidence. Require a
+      leg-relative left-side vertical fuel gauge beside the exact numeric reserve, one accessible
+      `Agent Deployed!` banner, player-commanded departure from a safely held powered pad,
+      materially lower steering axial thrust, and one visibly elevated pad/NOC scaffold structure.
+      Pin the exact new Lander and 404 copy plus the clean battery and symmetric network-signal
+      direction.
+- [ ] Delegate and lead-review an exact LLD amendment that pins gauge semantics and geometry,
+      deployment banner ownership, launch-ready state/input/restart behavior, fuel preservation,
+      player-reachable proof prefix, vector-force targets, platform/scaffold collision and
+      rendering, battery/signal geometry and timing, route/world regeneration, DOM bounds, and
+      browser evidence.
+- [ ] Obtain an `agentworks-reviewer` approval of the amended LLD and resolve every valid artifact
+      finding before changing production or canonical fixture code.
+- [ ] Delegate implementation to an `agentworks-dev` subagent in an isolated worktree. Update the
+      shared fragment and page copy, world/model/controller/CSS projection, exact route derivation
+      and fixtures, validators, focused tests, permanent README, and browser checklist as one
+      coherent change. Preserve one state authority and one accessible status authority.
+- [ ] Prove all nine regenerated constructive routes and all ordered world witnesses after the force
+      and structure changes, including the player-reachable launch prefix, exact two-replay success,
+      one-quantum exhaustion, collision/render parity, no award duplication, and bounded
+      runtime/DOM.
+- [ ] Run focused website suites, deterministic root/project builds, complete repository gates, and
+      cold project/fresh-eyes reviews; resolve every valid finding through the implementing
+      subagent.
+- [ ] Refresh the port-8766 preview from the exact reviewed commit and exercise current Chrome and
+      Edge across at least three deployments, the gauge and banner, manual wait/takeoff/restart,
+      keyboard/vi/pointer/touch steering feel, scaffold appearance/collision, all battery/signal
+      stages, reduced motion, lifecycle/privacy, and long-run performance.
+- [ ] Merge or rebase the latest `main`, update PR #486's evidence and review comments, mark it
+      ready only after operator acceptance, and monitor all required CI and CodeQL checks to
+      completion.
+
+Operator evidence (2026-08-10): after using the Phase 4H preview, the operator accepted its
+substantial improvement and requested one cohesive payoff and structure round. The game must show a
+left-side vertical fuel gauge, announce `Agent Deployed!`, wait for the player to depart a powered
+pad, vector steering much more strongly away from forward lift, and present the pad and NOC as one
+elevated trussed/scaffolded structure. The dedicated page heading becomes
+`We need to deploy some agents!`; the 404 explanation becomes
+`This route is broken! We need to deploy some agents!`. The battery loses its terminal nub, and a
+vertically symmetric network signal provides the final three power stages.
+
+Definition of done: fuel remains numerically exact and uncapped while its leg-relative gauge is
+honest; each successful deployment produces one accessible payoff banner and a stationary,
+fuel-preserving launch-ready checkpoint until the player thrusts; steering has materially less axial
+force; pad, scaffold, NOC, collision, and static/dynamic projections agree; battery and symmetric
+signal stages build upward; routes/world witnesses are atomically regenerated; and the result is
+review-clean, browser-accepted, and merge-ready.
+
 ## Phase 5: CI and default Pages deployment
 
 - [x] Delegate workflow implementation to an `agentworks-dev` subagent with ownership of the Pages
