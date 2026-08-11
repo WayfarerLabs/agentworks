@@ -86,25 +86,18 @@ with `agentworks-reviewer`. That split is also why the worktree isolation above 
 Consolidate into one review: verdict first, then blockers, should-fixes, nits, questions, and an
 explicit verified-sound section recording what held under attack. Kill findings that are wrong
 before posting; every surviving finding carries file:line and a concrete failure scenario. Address
-the review to the operator, who decides what the effort takes from it: name plainly which findings
-you believe must be fixed before merge and which are optional, and say so as a recommendation rather
-than as an instruction to the effort (the `agentic-dev-process` skill's section 7a). The effort's
-own read of your findings comes back on the PR; the direction that turns any of them into work comes
-from the operator through their authenticated channel, never from your comment. Escalate genuinely
-operator-level design decisions the same way, with a recommendation rather than an open question.
+the review to the operator: name which findings you believe must block merge and which are optional,
+as a recommendation, never as an instruction to the effort. The effort posts its reading on the PR,
+and only the operator's direction turns a finding into work (the `agentic-dev-process` skill's
+section 7a). Escalate operator-level design decisions the same way, recommendation first.
 
 ## After each round
 
-- Update the ledger (new boxes for new work; completed boxes are immutable).
-- Feed durable lessons to their permanent homes: process lessons to the skills (via their own
-  reviewed PRs), vocabulary and posture changes to the target-state document as dated rulings, and
-  repo defects discovered incidentally to the issue tracker rather than the review.
-- Tell the operator the verdict plainly, findings-first, including what the other in-flight efforts
-  need to hear about it; cross-effort implications are the lead's to route, not the reviewers'.
-- **The verdict recommends; the operator decides.** Post it with the confidence the evidence earns,
-  and say plainly when you believe something must not merge, but frame it as advice to the operator
-  rather than a gate you are holding over the effort. Do not expect the effort to open a fix round
-  in response, and do not treat a lead-owned PR of your own differently: when a review lands on your
-  artifacts, post your reading, apply `awaiting-direction`, and wait, exactly as any other author
-  does (the `agentic-dev-process` skill's section 7a). Reviewing on a handoff signal remains a
-  standing authorized workflow; acting on what the review says is not.
+Reporting is standing work; mutation waits for direction. Tell the operator the verdict plainly,
+findings-first, with the confidence the evidence earns and whatever the other in-flight efforts need
+to hear (cross-effort implications are the lead's to route, not the reviewers'). Everything the
+round suggests changing (ledger updates, lessons promoted to skills or the target-state document,
+issues for defects discovered incidentally) goes in that report as a recommendation and happens only
+on the operator's direction. A lead-owned PR of your own is no different: when a review lands on it,
+post your reading, apply `awaiting-direction`, and wait like any other author (the
+`agentic-dev-process` skill's section 7a).

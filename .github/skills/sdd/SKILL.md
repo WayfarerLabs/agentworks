@@ -420,11 +420,11 @@ assume one can), merge SDD artifacts ahead of the implementation. Instances of t
 child's seeding PR; the reviewed pre-implementation artifacts (once the draft review converges,
 promote and merge rather than letting the artifacts ride the feature branch to the end; for a saga
 child, the effort lead explicitly requests that draft review from the saga lead, whose ready-flip
-watch covers merge-intent PRs, and the operator's direction on that review is what sanctions
-promotion: a converged review recommends promotion, it does not authorize it); and material
-in-flight DESIGN revisions, which keep flowing to `main` promptly as small PRs rather than
-accumulating. After an early artifact merge, implementation simply continues on the same branch (or
-a fresh one) and opens its own PR; the branching flow above is otherwise unchanged.
+watch covers merge-intent PRs, and a converged review recommends promotion; the operator's direction
+is what sanctions it); and material in-flight DESIGN revisions, which keep flowing to `main`
+promptly as small PRs rather than accumulating. After an early artifact merge, implementation simply
+continues on the same branch (or a fresh one) and opens its own PR; the branching flow above is
+otherwise unchanged.
 
 Two things never merge ahead of their work. Checkbox flips are completion claims, not design: a
 checked box merges with or after the work that makes it true (an early-merged box would be an
