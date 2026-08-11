@@ -417,14 +417,14 @@ against your FRD, HLA, or plan can only see what has landed on `main`, and "read
 is not a coordination mechanism (branches rebase, drift, and can vanish, and nothing notifies a
 sibling when they do). So when another effort could build against your design (under an active saga,
 assume one can), merge SDD artifacts ahead of the implementation. Instances of the pattern: a saga
-child's seeding PR; the reviewed pre-implementation artifacts (once the draft review converges,
-promote and merge rather than letting the artifacts ride the feature branch to the end; for a saga
-child, the effort lead explicitly requests that draft review from the saga lead, whose ready-flip
-watch covers merge-intent PRs, and a converged review recommends promotion; the operator's direction
-is what sanctions it); and material in-flight DESIGN revisions, which keep flowing to `main`
-promptly as small PRs rather than accumulating. After an early artifact merge, implementation simply
-continues on the same branch (or a fresh one) and opens its own PR; the branching flow above is
-otherwise unchanged.
+child's seeding PR; the reviewed pre-implementation artifacts (once the draft review converges and
+the operator directs promotion, promote and merge rather than letting the artifacts ride the feature
+branch to the end; a converged review recommends, it does not sanction; for a saga child, the effort
+lead explicitly requests that draft review from the saga lead, whose ready-flip watch covers
+merge-intent PRs); and material in-flight DESIGN revisions, which keep flowing to `main` promptly as
+small PRs rather than accumulating. After an early artifact merge, implementation simply continues
+on the same branch (or a fresh one) and opens its own PR; the branching flow above is otherwise
+unchanged.
 
 Two things never merge ahead of their work. Checkbox flips are completion claims, not design: a
 checked box merges with or after the work that makes it true (an early-merged box would be an

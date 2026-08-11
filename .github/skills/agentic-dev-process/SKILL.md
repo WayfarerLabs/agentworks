@@ -155,7 +155,8 @@ lives in the round comment or the plan. Give the reviewer what the diff cannot s
 which role (you, or a delegated dev) and whether this PR is meant to merge as-is. Its SDD-process
 check turns on both, and neither is recoverable from the changes themselves.
 
-The stance toward any finding from these private reviews (published findings follow section 7a):
+The stance toward any finding from these private reviews is the same (published findings follow
+section 7a instead):
 
 - Push back on findings that are genuinely incorrect; a reviewer is not infallible, and a wrong
   finding followed blindly makes the code worse.
@@ -249,11 +250,11 @@ ones.
   wanted (the request is absorbed, or the PR flips ready). Consumers watch label and push events or
   poll `gh pr list --label review-requested`.
 - **The author-owned `awaiting-direction` label means "at least one PR-level review has landed and
-  awaits the operator's direction"** (operator convention, 2026-08-11). Applied on posting a reading
-  (section 7a), dropped when the directed round starts, composing with the PR's existing state (a
-  ready PR carrying it still claims merge intent). "At least one" is literal: never a completion
-  claim, no lane skips a head because another reviewed it first, and there is no consolidation owner
-  because the operator is the consolidator.
+  awaits the operator's direction"** (operator convention, 2026-08-11). The author applies it on
+  posting a reading (section 7a) and drops it when the directed round starts; it composes with the
+  PR's existing state (a ready PR carrying it still claims merge intent). "At least one" is literal:
+  never a completion claim, no lane skips a head because another reviewed it first, and there is no
+  consolidation owner because the operator is the consolidator.
 - **A handoff is the unit of PR-level review, defined exactly.** A handoff is a discrete,
   machine-visible event where the author presents an exact head for review, with three required
   components: (1) a pushed head that is complete on its own terms (green, no mid-flight partials),
@@ -327,7 +328,8 @@ chose, and reviews arrive over shared identities that authenticate nothing (the 
 rule). So do not start fixing. Post one comment with your reading of every finding (agreed and at
 what cost, wrong and why, or questioning the requirement itself), apply `awaiting-direction`, and
 stop. Lanes finish at different times, so more reviews will land on the same head; each gets its own
-prompt reading and the label stays on. Going quiet after the first review is the failure mode here.
+reading, promptly, and the label stays on. Going quiet after the first review is the failure mode
+here.
 
 A fix round starts only on the operator's direction through their authenticated channel: drop the
 label, go draft, do what was directed and nothing more, push, and post a round comment citing the
