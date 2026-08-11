@@ -184,8 +184,10 @@ forecloses it, and none of it is in scope now.
   demonstrated reference flight to the generated next platform. The can adds that requirement
   multiplied by the **refuel ratio** `1 + 0.5^(n-1)`, where `n` is the one-indexed number of the
   base just powered. The first base therefore uses `2`, followed by `1.5`, `1.25`, `1.125`, and a
-  monotonic approach to one from above. Unused fuel carries forward and is never discarded merely
-  because another site was completed.
+  mathematically monotonic approach to one from above. The runtime's binary-number projection never
+  falls below one and may round to exactly one once the remaining bonus is below representable
+  precision. Unused fuel carries forward and is never discarded merely because another site was
+  completed.
 - R23. Unsafe terrain, platform, or building contact produces a brief vacuum-appropriate crash: a
   compact propellant flash and ballistic fragments, with no smoke cloud, atmospheric shock wave,
   sustained fireball, audio, or page movement. Reduced motion skips fragment travel and exposes the
@@ -383,8 +385,9 @@ merged and settled on `main`. The first slice must not build toward them specula
   absent under reduced motion. The installed-agent mark persists at each powered retained NOC
   without increasing the established 80-descendant world ceiling. Shared-game byte identity, focus
   order, 44-pixel targets, contrast, no-JavaScript recovery, and zero runtime font or cross-origin
-  requests remain intact. The world and geometry digests remain unchanged; the physics and derived
-  output digests regenerate atomically from the revised safe-contact envelope.
+  requests remain intact. Phase 4L regenerates the geometry and world digests atomically for the
+  continuous truss and regenerates the physics and derived output digests for that geometry plus the
+  revised safe-contact envelope.
 
 ## Settled implementation rulings
 
