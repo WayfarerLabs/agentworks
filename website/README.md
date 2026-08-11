@@ -122,10 +122,13 @@ node website/tools/derive_lander_routes.mjs \
 The v2 deriver uses Node built-ins, versioned finite phase ranges, reachable keyboard commands, and
 independent copies of the physics, collision geometry, terrain motifs, shelf construction, riser,
 NOC, and mast. Its reviewed output contains all nine routes and 81 ordered world descriptors. A
-deliberate route or world change updates the tool version/ranges, reviewed v2 fixture, copied
-production literals, and all four digests atomically. Runtime code performs exactly the successful
-and one-quantum-smaller proof replays for the directly selected literal. It never imports the tool,
-scans fuel allowances, or plans a route in the browser.
+successful route is classified using the raw replay. Only its reviewed success and exhaustion pose
+components are serialized to nine decimal places, keeping native trigonometric last-bit variation
+out of the canonical fixture while remaining inside the runtime proof tolerance. World descriptors
+retain their exact unrounded values. A deliberate route or world change updates the tool
+version/ranges, reviewed v2 fixture, copied production literals, and all four digests atomically.
+Runtime code performs exactly the successful and one-quantum-smaller proof replays for the directly
+selected literal. It never imports the tool, scans fuel allowances, or plans a route in the browser.
 
 During a run, the model retains at most five terrain chunks, the active and target sites plus one
 previous powered site, one input queue of at most 64 records, and eight crash fragments. Fuel has no

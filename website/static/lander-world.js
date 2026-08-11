@@ -98,6 +98,20 @@ export function terrainHeightFromVertices(vertices, x) {
     throw new RangeError(`Terrain vertices do not cover ${x}`);
 }
 
+export function terrainVerticesForRange(vertices, left, right) {
+    if (vertices.length === 0 || right < vertices[0][0] || left > vertices.at(-1)[0]) {
+        return freeze([]);
+    }
+    const clippedLeft = Math.max(left, vertices[0][0]);
+    const clippedRight = Math.min(right, vertices.at(-1)[0]);
+    const interior = vertices.filter(([x]) => x > clippedLeft && x < clippedRight);
+    return freeze([
+        [clippedLeft, terrainHeightFromVertices(vertices, clippedLeft)],
+        ...interior.map((point) => [...point]),
+        [clippedRight, terrainHeightFromVertices(vertices, clippedRight)],
+    ]);
+}
+
 export function siteFoundationBottom(vertices, site) {
     void vertices;
     return site.platformTop - PLATFORM_CLEARANCE;

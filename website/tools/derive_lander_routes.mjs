@@ -3,8 +3,9 @@
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 
-const DERIVER_VERSION = "agw-lander-route-deriver/v2";
+const DERIVER_VERSION = "agw-lander-route-deriver/v3";
 const RECIPE_VERSION = "agw-lander-route-recipes/v2";
+const REPLAY_POSE_DECIMAL_PLACES = 9;
 const MAX_COMBINATIONS = 2_000_000;
 const STEP_SECONDS = 1 / 120;
 const FUEL_QUANTUM = 0.05;
@@ -85,6 +86,16 @@ function canonicalBytes(value) {
 
 function digest(value) {
     return createHash("sha256").update(canonicalBytes(value), "utf8").digest("hex");
+}
+
+function canonicalReplayNumber(value) {
+    if (!Number.isFinite(value)) throw new TypeError("Replay poses must contain finite numbers");
+    return Number(value.toFixed(REPLAY_POSE_DECIMAL_PLACES));
+}
+
+function canonicalReplayPose(pose) {
+    return Object.fromEntries(["x", "y", "vx", "vy", "angle", "angularVelocity"]
+        .map((key) => [key, canonicalReplayNumber(pose[key])]));
 }
 
 function normalizeDegrees(degrees) {
@@ -583,12 +594,12 @@ function deriveTemplate(geometry) {
         demonstratedMinimum,
         runs: success.runs,
         scheduleDigest: scheduleDigest(success.runs),
-        smallerFailure: failureVector,
+        smallerFailure: { ...failureVector, pose: canonicalReplayPose(failureVector.pose) },
         success: {
             burn: success.burn,
             classification: success.classification,
             contactStep: success.contactStep,
-            pose: success.pose,
+            pose: canonicalReplayPose(success.pose),
         },
     };
 }
@@ -626,6 +637,7 @@ async function main() {
         const worldWitnesses = geometry.templates.flatMap((template) =>
             WORLD_WITNESS_CASES.map((trial) => worldWitness(template, trial)));
         const output = {
+            canonicalPoseDecimals: REPLAY_POSE_DECIMAL_PLACES,
             deriverVersion: DERIVER_VERSION,
             geometryDigest: digest(geometry),
             physicsDigest: digest({ commands: COMMANDS, constants: CONSTANTS }),

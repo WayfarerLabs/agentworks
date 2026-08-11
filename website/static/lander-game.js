@@ -18,12 +18,13 @@ import {
     transitionMission,
     updateRetention,
 } from "./lander-model.js";
-import { cameraLeftForPose, CHUNK_WIDTH, mixUint32, terrainPath, targetIsOffscreen } from "./lander-world.js";
+import { cameraLeftForPose, CHUNK_WIDTH, mixUint32, terrainPath,
+    terrainVerticesForRange, targetIsOffscreen } from "./lander-world.js";
 
 const SVG_NAMESPACE = document.querySelector("#lander-scene")?.namespaceURI;
 const ACTIVE_STATES = new Set(["flying", "landed", "deploying", "powering", "launching", "crashing", "failed", "generation-error"]);
 const FLIGHT_CODES = new Set(["Space", "ArrowUp", "ArrowLeft", "ArrowRight", "KeyH", "KeyL"]);
-const ZERO_INPUT = Object.freeze({ left: 0, right: 0 });
+const ZERO_INPUT = Object.freeze({ left: 0, right: 0, vectorAngle: 0 });
 
 function svg(name, attributes = {}) {
     if (!SVG_NAMESPACE) throw new Error("SVG namespace is unavailable");
@@ -286,11 +287,15 @@ export class LanderGameController {
         if (event.type === "pointerdown") {
             if (this.model.state !== "flying" || !event.isPrimary || event.button !== 0 || this.pointer) return;
             event.preventDefault();
+            const timestamp = eventTime(event);
+            if (this.completedPointer) {
+                this.completePointerPulse(this.completedPointer.token, this.completedPointer.deadline, timestamp);
+            }
             const token = ++this.pointerToken;
             this.pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, currentX: event.clientX,
-                started: eventTime(event), token };
+                started: timestamp, token };
             this.lander_scene_shell.setPointerCapture(event.pointerId);
-            this.pointerInput = { left: 0.72, right: 0.72 }; this.queueInput(eventTime(event), token); return;
+            this.pointerInput = { left: 0.72, right: 0.72 }; this.queueInput(timestamp, token); return;
         }
         if (!this.pointer || event.pointerId !== this.pointer.id) return;
         event.preventDefault();
@@ -310,7 +315,7 @@ export class LanderGameController {
                 this.pointer = null;
                 this.pointerInput = { left: 0.72, right: 0.72 };
                 this.queueInput(eventTime(event), pointer.token);
-                this.pulseTimer = setTimeout(() => this.finishPointer(pointer.token, deadline, false),
+                this.pulseTimer = setTimeout(() => this.completePointerPulse(pointer.token, deadline, deadline),
                     Math.max(0, deadline - eventTime(event)));
                 if (this.lander_scene_shell.hasPointerCapture(pointer.id)) {
                     this.lander_scene_shell.releasePointerCapture(pointer.id);
@@ -323,6 +328,8 @@ export class LanderGameController {
 
     finishPointer(token, timestamp, prune = false) {
         if (token === undefined || token === null) return;
+        if (this.pointer?.token !== token && this.completedPointer?.token !== token &&
+            this.releasedCapture?.token !== token) return;
         if (this.pulseTimer !== null) { clearTimeout(this.pulseTimer); this.pulseTimer = null; }
         if (this.pointer?.token === token) this.pointer = null;
         if (this.completedPointer?.token === token) this.completedPointer = null;
@@ -330,6 +337,11 @@ export class LanderGameController {
         this.pointerInput = ZERO_INPUT;
         if (prune) this.clock = removeQueuedInputEdges(this.clock, token);
         if (this.model.state === "flying") this.queueInput(timestamp);
+    }
+
+    completePointerPulse(token, deadline, timestamp) {
+        if (this.completedPointer?.token !== token || this.completedPointer.deadline !== deadline) return;
+        this.finishPointer(token, timestamp);
     }
 
     clearAllInput(timestamp) {
@@ -404,7 +416,7 @@ export class LanderGameController {
             let path = existingChunks.get(index);
             if (!path) { path = svg("path", { class: "terrain-chunk", "data-chunk-index": index }); this.terrain_layer.append(path); }
             const left = index * CHUNK_WIDTH; const right = left + CHUNK_WIDTH;
-            const vertices = this.model.terrainVertices.filter(([x]) => x >= left && x <= right);
+            const vertices = terrainVerticesForRange(this.model.terrainVertices, left, right);
             path.setAttribute("d", terrainPath(vertices)); existingChunks.delete(index);
         }
         for (const node of existingChunks.values()) node.remove();

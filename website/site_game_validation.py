@@ -124,20 +124,44 @@ def validate_game_contract(template: str) -> None:
         raise ValueError("lander-game.html: scene and active chrome order is invalid")
     for required in (
         'class="terrain-chunk"',
+        'data-chunk-index="-1"',
         'data-chunk-index="0"',
+        'data-chunk-index="1"',
+        'data-chunk-index="2"',
         'class="lander-site"',
         'data-site-id="0"',
         'data-can="present"',
         'data-power="off"',
         'data-noc-stage="0"',
         'class="landing-platform"',
+        'class="platform-supports"',
         'class="gas-can"',
         'class="noc-building"',
         'class="noc-battery"',
+        'class="battery-terminal"',
+        'class="battery-bar battery-bar-1"',
+        'class="battery-bar battery-bar-2"',
+        'class="battery-bar battery-bar-3"',
+        'class="battery-bar battery-bar-4"',
         'class="noc-antenna antenna-mast"',
     ):
         if required not in template:
             raise ValueError(f"lander-game.html: missing static world contract {required}")
+    support = [attributes for _, attributes in parser.tags if attributes.get("class") == "platform-supports"]
+    support_prefix = "M312 471.6557689513639H408V476.1557689513639H312Z"
+    if len(support) != 1 or not (support[0].get("d") or "").startswith(support_prefix):
+        raise ValueError("lander-game.html: static platform support geometry is invalid")
+    battery_contract = (
+        '<rect x="452" y="412.1557689513639" width="22" height="40" rx="2" />',
+        '<path class="battery-terminal" d="M458 412.1557689513639v-6h10v6" />',
+        '<path class="battery-bar battery-bar-1" d="M457 442.1557689513639h12v5h-12Z" />',
+        '<path class="battery-bar battery-bar-2" d="M457 434.1557689513639h12v5h-12Z" />',
+        '<path class="battery-bar battery-bar-3" d="M457 426.1557689513639h12v5h-12Z" />',
+        '<path class="battery-bar battery-bar-4" d="M457 418.1557689513639h12v5h-12Z" />',
+    )
+    battery_positions = [template.find(fragment) for fragment in battery_contract]
+    if -1 in battery_positions or battery_positions != sorted(battery_positions):
+        raise ValueError("lander-game.html: static battery geometry or order is invalid")
 
 
 def validate_game_manifest(manifest: frozenset[Path]) -> None:

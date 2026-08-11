@@ -350,10 +350,33 @@ class StaticDocumentTests(unittest.TestCase):
         self.assertIn("#lander-start:focus-visible", self.css)
         self.assertIn("transform-origin: 82px 401px", self.css)
         self.assertIn("transform-origin: 158px 401px", self.css)
-        terrain = next(attributes for _, attributes in self.document.tags if attributes.get("class") == "terrain-chunk")
-        self.assertEqual(terrain["data-chunk-index"], "0")
-        self.assertIn("L100 516.334580918774", terrain["d"])
-        self.assertIn("L312 476.1557689513639L498 476.1557689513639", terrain["d"])
+        terrain = sorted(
+            (attributes for _, attributes in self.document.tags if attributes.get("class") == "terrain-chunk"),
+            key=lambda attributes: int(attributes["data-chunk-index"]),
+        )
+        self.assertEqual([int(attributes["data-chunk-index"]) for attributes in terrain], [-1, 0, 1, 2])
+        surfaces: list[list[tuple[float, float]]] = []
+        for attributes in terrain:
+            points = [
+                (float(x), float(y))
+                for x, y in re.findall(r"[ML](-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?)", attributes["d"])
+            ]
+            surfaces.append([point for point in points if point[1] != 648])
+        self.assertEqual([(surface[0][0], surface[-1][0]) for surface in surfaces],
+                         [(-400, 0), (0, 500), (500, 1000), (1000, 1400)])
+        for left, right in zip(surfaces, surfaces[1:]):
+            self.assertEqual(left[-1], right[0])
+        self.assertLessEqual(surfaces[0][0][0], 0)
+        self.assertGreaterEqual(surfaces[-1][-1][0], 1000)
+        shelf_y = 476.1557689513639
+        self.assertIn((312, shelf_y), surfaces[1])
+        self.assertIn((498, shelf_y), surfaces[1])
+        deck = next(attributes for _, attributes in self.document.tags if attributes.get("class") == "landing-platform")
+        self.assertEqual(float(deck["y"]) + float(deck["height"]), 471.6557689513639)
+        support = next(attributes for _, attributes in self.document.tags if attributes.get("class") == "platform-supports")
+        self.assertTrue(support["d"].startswith("M312 471.6557689513639H408V476.1557689513639"))
+        noc = next(attributes for _, attributes in self.document.tags if attributes.get("class") == "noc-building")
+        self.assertTrue(noc["d"].startswith(f"M428 {shelf_y}V"))
         self.assertIn("rotate(var(--thrust-vector-angle))", self.css)
 
     def test_css_has_only_bounded_keyframes_and_reduced_motion_preserves_live_plumes(
@@ -377,6 +400,7 @@ class StaticDocumentTests(unittest.TestCase):
     def test_input_clear_restores_zero_command_and_renders(self) -> None:
         clear_input = self.game.split("clearAllInput(timestamp) {", 1)[1].split("\n    }", 1)[0]
         self.assertIn("commanded: { ...ZERO_INPUT }", clear_input)
+        self.assertIn("vectorAngle: 0", self.game)
         self.assertIn("clearSimulationInput", clear_input)
 
     def test_native_actions_share_keyboard_controller_operations_and_focus_lifecycle(

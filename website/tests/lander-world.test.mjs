@@ -23,7 +23,10 @@ import {
     siteFoundationBottom,
     targetIsOffscreen,
     templatePreference,
+    terrainHeightFromVertices,
+    terrainPath,
     terrainSample,
+    terrainVerticesForRange,
     terrainVerticesForWindow,
 } from "../static/lander-world.js";
 
@@ -84,6 +87,23 @@ test("adjacent terrain chunks share boundaries and contain material slopes", () 
     }
 });
 
+test("rendered chunk ranges clip crossing shelves to exact collision boundaries", () => {
+    const collisionTerrain = Object.freeze([
+        Object.freeze([0, 2]), Object.freeze([40, 4]), Object.freeze([64, 4]),
+        Object.freeze([100, 3]), Object.freeze([140, 6]), Object.freeze([162, 6]),
+        Object.freeze([200, 2]),
+    ]);
+    for (const boundary of [50, 150]) {
+        const left = terrainVerticesForRange(collisionTerrain, boundary - 50, boundary);
+        const right = terrainVerticesForRange(collisionTerrain, boundary, boundary + 50);
+        assert.deepEqual(left.at(-1), right[0]);
+        assert.equal(left.at(-1)[0], boundary);
+        assert.equal(left.at(-1)[1], terrainHeightFromVertices(collisionTerrain, boundary));
+        assert.ok(terrainPath(left).includes(`L${boundary * 10} `));
+        assert.ok(terrainPath(right).startsWith(`M${boundary * 10} `));
+    }
+});
+
 test("first site is one exact elevated three-lander-width helipad", () => {
     const site = createFirstSite(STATIC_WORLD_SEED);
     close(site.platformTop, 7.984423104863613);
@@ -96,11 +116,21 @@ test("first site is one exact elevated three-lander-width helipad", () => {
     assert.ok(Object.isFrozen(site));
 });
 
-test("static NOC foundation renders from the same retained collision terrain", async () => {
+test("static world exactly renders the retained collision terrain and NOC foundation", async () => {
     const site = createFirstSite(STATIC_WORLD_SEED);
     const vertices = terrainVerticesForWindow(STATIC_WORLD_SEED, [site], -40, 140);
     const expectedSceneY = 548 - siteFoundationBottom(vertices, site) * 10;
     const template = await readFile(TEMPLATE_URL, "utf8");
+    const rendered = [...template.matchAll(
+        /<path\s+class="terrain-chunk"\s+data-chunk-index="(-?\d+)"\s+d="([^"]+)"/g,
+    )].map((match) => ({ index: Number(match[1]), path: match[2] }));
+    assert.deepEqual(rendered, retainedChunkIndexes(0).map((index) => {
+        const left = index * CHUNK_WIDTH;
+        const chunk = terrainVerticesForRange(vertices, left, left + CHUNK_WIDTH);
+        return { index, path: terrainPath(chunk) };
+    }));
+    assert.equal(rendered[0].path.startsWith("M-400 "), true);
+    assert.equal(rendered.at(-1).path.includes("L1400 648L1000 648Z"), true);
     const match = template.match(/<path class="noc-building" d="M428 ([0-9.]+)V/);
     assert.ok(match);
     close(Number(match[1]), expectedSceneY, 0.001);
