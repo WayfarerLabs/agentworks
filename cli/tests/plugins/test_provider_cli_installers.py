@@ -9,6 +9,9 @@ from pathlib import Path
 import pytest
 import yaml
 
+from agentworks.install_commands import SystemInstallCommandEntry
+from agentworks.vms.initializer.packages import _build_test_command
+
 
 def _command(provider: str) -> str:
     manifest = Path(__file__).parents[2] / "agentworks" / "plugins" / provider / "manifests" / "install-commands.yaml"
@@ -129,14 +132,38 @@ for argument in "$@"; do destination="$argument"; done
 mkdir -p "$destination/aws"
 cat > "$destination/aws/install" <<'INSTALL'
 #!/bin/sh
+set -eu
 printf '%s\\n' "$*" > "$AGW_TEST_INSTALL_ARGS"
 if [ "$AGW_TEST_INSTALL_STATUS" -ne 0 ]; then
   exit "$AGW_TEST_INSTALL_STATUS"
 fi
 mkdir -p "$(dirname "$AGW_TEST_AWS_INTERNAL_BINARY")" "$AGW_TEST_AWS_BIN_DIR"
-printf '#!/bin/sh\\nexit 0\\n' > "$AGW_TEST_AWS_INTERNAL_BINARY"
-chmod +x "$AGW_TEST_AWS_INTERNAL_BINARY"
-ln -sf "$AGW_TEST_AWS_INTERNAL_BINARY" "$AGW_TEST_AWS_BIN_DIR/aws"
+case "$AGW_TEST_AWS_INTERNAL_STATE" in
+  executable)
+    printf '#!/bin/sh\\nexit 0\\n' > "$AGW_TEST_AWS_INTERNAL_BINARY"
+    chmod +x "$AGW_TEST_AWS_INTERNAL_BINARY"
+    ;;
+  missing) rm -f "$AGW_TEST_AWS_INTERNAL_BINARY" ;;
+  non-executable)
+    printf '#!/bin/sh\\nexit 0\\n' > "$AGW_TEST_AWS_INTERNAL_BINARY"
+    chmod 0644 "$AGW_TEST_AWS_INTERNAL_BINARY"
+    ;;
+esac
+case "$AGW_TEST_AWS_PUBLIC_STATE" in
+  symlink) ln -sf "$AGW_TEST_AWS_INTERNAL_BINARY" "$AGW_TEST_AWS_BIN_DIR/aws" ;;
+  executable)
+    printf '#!/bin/sh\\nexit 0\\n' > "$AGW_TEST_AWS_BIN_DIR/aws"
+    chmod +x "$AGW_TEST_AWS_BIN_DIR/aws"
+    ;;
+  missing) rm -f "$AGW_TEST_AWS_BIN_DIR/aws" ;;
+  non-executable)
+    printf '#!/bin/sh\\nexit 0\\n' > "$AGW_TEST_AWS_BIN_DIR/aws"
+    chmod 0644 "$AGW_TEST_AWS_BIN_DIR/aws"
+    ;;
+esac
+if [ "$AGW_TEST_INSTALL_STATUS_AFTER_WRITE" -ne 0 ]; then
+  exit "$AGW_TEST_INSTALL_STATUS_AFTER_WRITE"
+fi
 INSTALL
 chmod +x "$destination/aws/install"
 """,
@@ -157,6 +184,9 @@ chmod +x "$destination/aws/install"
         "AGW_TEST_AWS_BIN_DIR": str(bin_dir),
         "AGW_TEST_AWS_INTERNAL_BINARY": str(internal_binary),
         "AGW_TEST_INSTALL_STATUS": "0",
+        "AGW_TEST_INSTALL_STATUS_AFTER_WRITE": "0",
+        "AGW_TEST_AWS_INTERNAL_STATE": "executable",
+        "AGW_TEST_AWS_PUBLIC_STATE": "symlink",
         "AGW_TEST_TEMP_ROOT": str(tmp_path / "private-temp"),
         "AGW_TEST_INSTALL_ARGS": str(tmp_path / "install-args"),
     }
@@ -224,7 +254,7 @@ def _complete_managed_layout(tmp_path: Path) -> None:
     (bin_dir / "aws").symlink_to(internal)
 
 
-def test_aws_installer_skips_only_complete_managed_layout(tmp_path: Path) -> None:
+def test_aws_installer_skips_structurally_complete_layout_without_executing_cli(tmp_path: Path) -> None:
     _complete_managed_layout(tmp_path)
 
     result = _run(_aws_command_for_test(tmp_path), tmp_path, AGW_TEST_AWS_VERSION="aws-cli/1.32.0 Python/test")
@@ -233,6 +263,73 @@ def test_aws_installer_skips_only_complete_managed_layout(tmp_path: Path) -> Non
     assert not (tmp_path / "aws-probe-log").exists()
     assert not (tmp_path / "log").exists()
     assert not (tmp_path / "install-args").exists()
+
+
+def _aws_runner_predicate(tmp_path: Path) -> str:
+    _install_dir, bin_dir, marker, _internal = _aws_paths(tmp_path)
+    entry = SystemInstallCommandEntry(
+        name="aws-cli",
+        command="install-aws-cli",
+        test_exec=str(bin_dir / "aws"),
+        test_file=str(marker),
+    )
+    predicate = _build_test_command(entry, "zsh", "/home/agentworks")
+    assert predicate is not None
+    return predicate
+
+
+def test_failed_managed_update_invalidates_stale_marker_after_restoring_artifacts(tmp_path: Path) -> None:
+    _complete_managed_layout(tmp_path)
+    _install_dir, bin_dir, marker, internal = _aws_paths(tmp_path)
+    assert marker.is_file()
+    internal.chmod(0o644)
+
+    result = _run(
+        _aws_command_for_test(tmp_path),
+        tmp_path,
+        AGW_TEST_INSTALL_STATUS_AFTER_WRITE="41",
+    )
+
+    assert result.returncode == 41
+    assert "--update" in (tmp_path / "install-args").read_text()
+    assert (bin_dir / "aws").stat().st_mode & 0o111
+    assert internal.stat().st_mode & 0o111
+    assert not marker.exists()
+    next_predicate = subprocess.run(
+        ["bash", "-c", _aws_runner_predicate(tmp_path)],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert next_predicate.returncode != 0
+
+
+@pytest.mark.parametrize(
+    ("public_state", "internal_state"),
+    [
+        ("missing", "executable"),
+        ("non-executable", "executable"),
+        ("executable", "missing"),
+        ("executable", "non-executable"),
+    ],
+)
+def test_zero_exit_installer_requires_both_executable_artifacts(
+    tmp_path: Path,
+    public_state: str,
+    internal_state: str,
+) -> None:
+    _install_dir, _bin_dir, marker, _internal = _aws_paths(tmp_path)
+
+    result = _run(
+        _aws_command_for_test(tmp_path),
+        tmp_path,
+        AGW_TEST_AWS_PUBLIC_STATE=public_state,
+        AGW_TEST_AWS_INTERNAL_STATE=internal_state,
+    )
+
+    assert result.returncode == 1
+    assert "did not produce both managed executables" in result.stderr
+    assert not marker.exists()
 
 
 @pytest.mark.parametrize(

@@ -22,8 +22,11 @@ spec:
     if test -f "$completion_marker" && test -x "$public_launcher" && test -x "$managed_binary"; then
       exit 0
     fi
-    if ! test -e "$install_dir" && ! test -L "$install_dir" && \
-      command -v aws >/dev/null 2>&1 && aws --version 2>&1 | grep -q '^aws-cli/2\.'; then
+    managed_update=0
+    if test -e "$install_dir" || test -L "$install_dir"; then
+      sudo rm -f -- "$completion_marker"
+      managed_update=1
+    elif command -v aws >/dev/null 2>&1 && aws --version 2>&1 | grep -q '^aws-cli/2\.'; then
       exit 0
     fi
     case "$(uname -m)" in
@@ -81,9 +84,13 @@ spec:
     test "$primary_fingerprint" = "FB5DB77FD5C118B80511ADA8A6310ACC4672475C"
     GNUPGHOME="$gnupg_home" gpg --batch --verify "$signature_path" "$archive_path"
     unzip -q "$archive_path" -d "$temp_root"
-    if test -e "$install_dir" || test -L "$install_dir"; then
+    if test "$managed_update" -eq 1; then
       sudo "$temp_root/aws/install" --install-dir "$install_dir" --bin-dir "$bin_dir" --update
     else
       sudo "$temp_root/aws/install" --install-dir "$install_dir" --bin-dir "$bin_dir"
+    fi
+    if ! test -x "$public_launcher" || ! test -x "$managed_binary"; then
+      echo "AWS CLI v2 installer did not produce both managed executables" >&2
+      exit 1
     fi
     sudo install -m 0644 /dev/null "$completion_marker"

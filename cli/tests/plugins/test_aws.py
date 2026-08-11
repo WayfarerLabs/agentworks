@@ -103,11 +103,18 @@ def test_aws_bundle_publishes_cli_disabled_with_verified_v2_payload(tmp_path: Pa
     assert row.test_exec == "/usr/local/bin/aws"
     assert row.test_file == "/usr/local/aws-cli/.agentworks-v2-complete"
     managed_check = 'if test -f "$completion_marker" && test -x "$public_launcher" && test -x "$managed_binary"; then'
+    marker_removal = 'sudo rm -f -- "$completion_marker"'
+    postcondition = 'if ! test -x "$public_launcher" || ! test -x "$managed_binary"; then'
+    marker_write = 'sudo install -m 0644 /dev/null "$completion_marker"'
     assert managed_check in row.command
-    assert row.command.index(managed_check) < row.command.index("command -v aws")
-    assert 'sudo install -m 0644 /dev/null "$completion_marker"' in row.command
-    assert row.command.index('sudo "$temp_root/aws/install"') < row.command.index(
-        'sudo install -m 0644 /dev/null "$completion_marker"'
+    assert marker_removal in row.command
+    assert postcondition in row.command
+    assert marker_write in row.command
+    assert row.command.index(managed_check) < row.command.index(marker_removal) < row.command.index("command -v aws")
+    assert (
+        row.command.index('sudo "$temp_root/aws/install"')
+        < row.command.index(postcondition)
+        < row.command.index(marker_write)
     )
     assert "aws-cli/2" in row.command
     assert "awscli-exe-linux-x86_64.zip" in row.command
@@ -118,6 +125,7 @@ def test_aws_bundle_publishes_cli_disabled_with_verified_v2_payload(tmp_path: Pa
     assert "trap 'rm -rf \"$temp_root\"' EXIT" in row.command
     assert "trap 'exit 130' INT" in row.command
     assert 'if test -e "$install_dir" || test -L "$install_dir"; then' in row.command
+    assert 'if test "$managed_update" -eq 1; then' in row.command
     assert 'sudo "$temp_root/aws/install"' in row.command
     assert '--install-dir "$install_dir" --bin-dir "$bin_dir" --update' in row.command
     assert "aws configure" not in row.command
