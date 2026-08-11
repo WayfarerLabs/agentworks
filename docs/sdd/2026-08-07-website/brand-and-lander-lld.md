@@ -1,6 +1,7 @@
 # LLD: AGW Brand and Continuous Lunar Deployment Lander
 
-<!-- cspell:ignore arcade Cascadia Consolas focusout imul keyup Menlo pointerdown pointerup PRNG -->
+<!-- cspell:ignore arcade Cascadia Consolas focusout IDREF IDREFs imul keyup Menlo -->
+<!-- cspell:ignore pointerdown pointerup PRNG -->
 <!-- cspell:ignore letterboxing refuel reproject reprojection reprojects repower Segoe -->
 <!-- cspell:ignore lerp Minkowski overspeed subinterval unhashed unmarginated -->
 <!-- cspell:ignore substep underframe underframes unitless uint32 quantized quantization -->
@@ -184,7 +185,7 @@ section#lander-game[aria-label="Lunar deployment scene"]
         span#lander-fuel-gauge[aria-hidden="true"]
           span#lander-fuel-gauge-fill
         span#lander-fuel-label.visually-hidden "Fuel reserve:"
-        span#lander-fuel-value.visually-hidden[aria-labelledby="lander-fuel-label"]
+        span#lander-fuel-value.visually-hidden
       span#lander-target-direction.visually-hidden[hidden] "Next site is to the right."
       div#lander-outcome[hidden]
         p#lander-status[role="status"][aria-live="polite"][aria-atomic="true"]
@@ -247,14 +248,17 @@ the panel visually rather than hiding it. `data-banner="deployed"`, `"crashed"`,
 project only launch-ready, failed, and generation-error respectively. Only `failed` reveals and
 enables Restart beneath the crash status. Exit remains visible and enabled at the bottom-right of
 the controls rail for every active state. The resulting game-subtree tab order is shell, Exit in
-every active non-failed state and shell, Restart, Exit while failed. The ordinary
-`span#lander-fuel-value`, named by the adjacent visually hidden label, remains the only accessible
-fuel value. Both spans use the established `.visually-hidden` class, while the adjacent gauge and
-fill are `aria-hidden` and cannot become a second meter, progress element, live region, or named
-control. The fuel span has no `role`, `aria-live`, or implicit live semantics. The controller sets
-its `textContent` to `fuel.toFixed(1)` only when that displayed tenth changes. Model fuel remains
-the exact unrounded number; this one-decimal accessible presentation is intentionally rounded and is
-not an exact decimal encoding. Fuel is never announced through status.
+every active non-failed state and shell, Restart, Exit while failed. The adjacent ordinary
+`span#lander-fuel-label` and `span#lander-fuel-value` are the only accessible fuel-description
+sources. Both use the established `.visually-hidden` class and neither has `aria-labelledby`,
+`aria-describedby`, `aria-label`, `role`, `aria-live`, or implicit live semantics. The shell's
+ordered `aria-describedby` IDREFs name the label and then the value separately, so the computed
+accessible description contributes both the label text and changing numeric text instead of
+substituting the label for the value. The adjacent gauge and fill are `aria-hidden` and cannot
+become a second meter, progress element, live region, or named control. The controller sets only the
+value span's `textContent` to `fuel.toFixed(1)` when that displayed tenth changes. Model fuel
+remains the exact unrounded number; this one-decimal accessible presentation is intentionally
+rounded and is not an exact decimal encoding. Fuel is never announced through status.
 
 The controller owns this exact projection; `shown` means the element and every ancestor are not
 hidden, and `enabled` applies only to native buttons:
@@ -271,25 +275,26 @@ hidden, and `enabled` applies only to native buttons:
 On start, the controller hides and disables `#lander-start`, gives `#lander-scene-shell`
 `tabindex="0"`, `role="application"`, `aria-label="Lunar deployment game"`, and an
 `aria-describedby` list ordered exactly as
-`lander-scene-description lander-controls lander-fuel-value`, optional `lander-target-direction`,
-then `lander-status`. It references the prose node, never `lander-controls-rail`. Target direction
-is present only while the exact offscreen predicate is true. The controller renders that
-relationship before focusing the shell with `preventScroll: true`. Exit removes active attributes,
-restores `tabindex="-1"`, disables Exit, hides the controls rail and other active chrome, reveals
-and enables Start, and focuses Start without scrolling. Restart hides its button, disables it,
-focuses the active shell without scrolling, and dispatches the same RESTART event as `r`. Neither a
-crash nor launch readiness moves focus. While active, the shell and Exit are always tabbable;
-Restart is the one additional game-action tab stop only while failed. Every native action has
-`min-inline-size:44px` and `min-block-size:44px`; its visible text remains its accessible name
-without an overriding ARIA label. Hidden Restart remains disabled and outside sequential focus
+`lander-scene-description lander-controls lander-fuel-label lander-fuel-value`, optional
+`lander-target-direction`, then `lander-status`. It references the controls prose node, never
+`lander-controls-rail`. Target direction is present only while the exact offscreen predicate is
+true. The controller renders that relationship before focusing the shell with `preventScroll: true`.
+Exit removes active attributes, restores `tabindex="-1"`, disables Exit, hides the controls rail and
+other active chrome, reveals and enables Start, and focuses Start without scrolling. Restart hides
+its button, disables it, focuses the active shell without scrolling, and dispatches the same RESTART
+event as `r`. Neither a crash nor launch readiness moves focus. While active, the shell and Exit are
+always tabbable; Restart is the one additional game-action tab stop only while failed. Every native
+action has `min-inline-size:44px` and `min-block-size:44px`; its visible text remains its accessible
+name without an overriding ARIA label. Hidden Restart remains disabled and outside sequential focus
 order. Initialization recovery, destroy, Exit, contact, failure, and restart restore these exact
 hidden/disabled/focus invariants.
 
 Before activation the SVG is a named image whose description mentions the hovering lander, varied
 lunar surface, elevated platform, gas can, and dark NOC, but no controls. While the shell is an
-application, the SVG is `aria-hidden`; the live status conveys outcomes and the named non-live fuel
-span exposes reserve on demand. With JavaScript unavailable, Start and all active chrome remain
-hidden while the named static scene, page heading, 404 explanation, and breadcrumb remain useful.
+application, the SVG is `aria-hidden`; the live status conveys outcomes and the two non-live fuel
+description sources expose reserve on demand. With JavaScript unavailable, Start and all active
+chrome remain hidden while the named static scene, page heading, 404 explanation, and breadcrumb
+remain useful.
 
 The dedicated page's document title is exactly `We need to deploy some agents! | Agentworks`, and
 its visible `h1` is exactly `We need to deploy some agents!`. The 404 retains `Page not found`; its
@@ -297,6 +302,12 @@ following explanatory paragraph is exactly `This route is broken! We need to dep
 The shared scene and active-game accessible names remain `Lunar deployment scene` and
 `Lunar deployment game`, because they name the activity rather than repeat either page title. These
 shell copy changes do not fork the shared fragment, breadcrumb recovery, or no-JavaScript behavior.
+These title, heading, explanation, controls, status, and action-label strings remain implementation
+and human-review authority. Implementation deletes existing automated equality, substring,
+presence/absence, and blacklist assertions over repository-authored prose. Tests retain structural,
+state, role, IDREF, accessible-name-source, and live-region assertions; when a real accessibility
+tree witness needs label text, it reads and normalizes the current DOM text instead of embedding an
+expected phrase.
 
 The transparent start target covers the full preflight lander with at least 44 CSS pixels in each
 dimension. At zero angle the complete asset occupies scene `x=[285.92,314.08]` and
@@ -1185,12 +1196,31 @@ non-repeated, unmodified Space targeted at body, game, shell, or scene. Exclude 
 form controls, editable elements, and descendants. The accepted key starts and seeds held Space at
 the same timestamp. Native Start activation starts without thrust.
 
-`flying` and `launching` accept flight keys on the active shell path. Launch-ready mixing still
-applies section 7.2's collective threshold, so steer-only keys remain queued physical state without
-moving or burning the restrained lander. Consume repeats but enqueue only first edges. Track aliases
-by physical code. Release accepted keys even after focus moves. Escape exits any active state only
-on the shell path. Unmodified `r` and native Restart work only in `failed`. Window blur, shell
-focusout, hide, exit, restart, contact, and destroy clear held input.
+The active keydown handler arbitrates in this exact order: global unmodified Escape exits any active
+state; unmodified `r` dispatches RESTART only in `failed`; then interactive/editable rejection runs;
+only then may `flying` or `launching` accept a physical flight key. Define `INTERACTIVE_KEY_TARGET`
+as the exact selector
+`a[href],button,input,select,textarea,summary,[contenteditable]:not([contenteditable="false"]),`
+`[role="button"],[role="link"],[role="checkbox"],[role="radio"],[role="switch"],[role="menuitem"],`
+`[role="option"],[role="slider"],[role="spinbutton"],[role="textbox"],`
+`[tabindex]:not([tabindex="-1"]):not(#lander-scene-shell)`. `isInteractiveKeyEvent(event)` inspects
+`event.composedPath()` when it is callable and nonempty, otherwise `[event.target]`, and returns
+true when any Element in that path has a non-null `closest(INTERACTIVE_KEY_TARGET)`. This catches
+Exit, Restart, and either button's nested label or hint span, plus every other interactive/editable
+descendant that could appear later. For any keydown rejected by this predicate, return before
+`preventDefault()`, repeat consumption, held-key mutation, input-token allocation, queue mutation,
+pulse/thrust mutation, focus movement, or model dispatch. Space and Enter therefore retain only the
+focused native button's browser activation; arrows and `h`/`l` retain their ordinary control
+behavior and do nothing to the mission.
+
+After that guard, `flying` and `launching` accept flight keys on the non-interactive active shell
+path. Launch-ready mixing still applies section 7.2's collective threshold, so steer-only keys
+remain queued physical state without moving or burning the restrained lander. Consume repeats but
+enqueue only first edges and track aliases by physical code. Record which physical keydown events
+were accepted. Keyup enqueues a release only for a matching previously accepted physical key, even
+after focus moves; a keydown rejected on an interactive path is never recorded, so its later keyup
+returns before `preventDefault()` and every input mutation. Window blur, shell focusout, hide, exit,
+restart, contact, and destroy clear held input.
 
 There is no native Launch action or special departure handler. Launch-ready departure uses the
 ordinary active-game input paths: Space, Up, Space or Up combined with H/L or Left/Right, a captured
@@ -1204,10 +1234,10 @@ action-order authority, CSS selectors, and browser/unit fixtures. It is not reta
 disabled, detached, or synthesized. No `launch-button` source remains in the queue, pulse snapshot,
 or tests; `launching` remains the model state name for the restrained launch-ready lifecycle only.
 
-Pointer listeners and capture move from `#lander-scene-shell` to `#lander-scene-stage`, so the new
-normal-flow rail can never start, sustain, or cancel flight input. This changes only the browser
-event boundary, not pointer mixing or model input. Define `INTERACTIVE_POINTER_TARGET` as the exact
-selector
+Pointer listeners and capture remain on the existing `#lander-scene-stage` boundary, so the new
+normal-flow rail can never start, sustain, or cancel flight input. Phase 4K preserves that browser
+event boundary and changes neither pointer mixing nor model input. Define
+`INTERACTIVE_POINTER_TARGET` as the exact selector
 `a[href],button,input,select,textarea,summary,[contenteditable]:not([contenteditable="false"])` and
 `isInteractivePointerEvent(event)` as
 `event.composedPath().some(node => node instanceof Element && node.closest(INTERACTIVE_POINTER_TARGET))`.
@@ -1571,50 +1601,52 @@ debris nodes, and enters the same final failed state in the contact task.
 ## 14. Deterministic vectors
 
 Numerical physics tests use tolerance `1e-10`; selected canonical route-pose replay uses the pinned
-`1e-9` tolerance from section 10.2. Strings, integers, states, seed values, DOM order, and
-serialized world descriptors are exact. Every schedule includes an explicit final callback.
+`1e-9` tolerance from section 10.2. Machine-owned identifiers and enum strings, integers, states,
+seed values, DOM order, and serialized world descriptors are exact; section 4's authored prose is
+human-reviewed rather than asserted. Every schedule includes an explicit final callback.
 
-| Vector                | Input                                                                                        | Expected result                                                                                                  |
-| --------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Gravity, 120 steps    | `(10,30,0,0)`, zero angle/engines, fuel 30                                                   | `x=10`, `y=28.4875`, `vx=0`, `vy=-3`, fuel `30`                                                                  |
-| Collective, 120 steps | Same pose, engines `(0.72,0.72)`                                                             | `y=35.0215`, `vy=9.96`, angle/x unchanged, fuel `28.56`                                                          |
-| Turn-only vector      | One step from same pose, raw engines `(0,0.375)`, `s=-1`                                     | `ax=-1.6875`, `ay=-0.07716426222751949`, `omega=-0.25`, angle `-0.00208333333333`, fuel `29.996875`              |
-| Combined turn vector  | One step from same pose, raw engines `(0.2125,0.5875)`, `s=-1`                               | `ax=-3.6`, `ay=3.235382907247959`, `omega=-0.25`, angle `-0.00208333333333`, fuel `29.993333333333332`           |
-| Angular assist        | One step, angle `0`, omega `15`, raw engines `(0.72,0.72)`                                   | engines `(0.66,0.78)`, `s=0`, omega `14.92`, angle `0.124333333333`, fuel `29.988`; total thrust unchanged       |
-| Vacuum coast          | One step, angle `0`, omega `15`, zero engines                                                | omega remains `15`, angle `0.125`, `vy=-0.025`; no translational or angular damping                              |
-| Exhaustion            | Fuel `0.005`, one step, engines `(1,1)`                                                      | Effective engines `(0.3,0.3)`, fuel exactly `0`                                                                  |
-| Pointer vectors       | Rightward normalized drag `m=0,0.5,1`                                                        | `(.72,.72)`, `(.65375,.46625)`, `(.5875,.2125)`; leftward values mirror exactly                                  |
-| Mixed input ceiling   | Keyboard collective plus pointer full right                                                  | pointer owns `s=1`; engines `(.5875,.2125)`, total `.8`, never component-combined                                |
-| Keyboard steer owner  | Keyboard left plus pointer full right                                                        | keyboard owns `s=-1`; engines `(.2125,.5875)`, total `.8`                                                        |
-| Canceled steer owner  | Both keyboard steers plus pointer half right                                                 | keyboard cancels; pointer owns `s=.5`; engines `(.65375,.46625)`, total `1.12`                                   |
-| Empty-fuel direction  | Fuel `0`, raw engines `(.5875,.2125)`, retained physics `s=1`                                | effective engines `(0,0)` and stored/rendered `commanded.vectorAngle=0`                                          |
-| Plumes                | `u=0,0.5,1`                                                                                  | scales `0.08,0.54,1`; opacities `0.25,0.625,1`                                                                   |
-| First site            | Any normalized seed                                                                          | ID `0`, center `36`, width `9.6`, shelf `[31.2,49.8]`, top=`shelf-span native maximum+2.4`, NOC bottom=shelf     |
-| Structure parity      | Static and dynamic site with platform top `p`                                                | shelf `p-2.4`; exact `.2 m` butt/round open members; same path; all pixels inside nominal envelopes + `.1 m`     |
-| Member stroke bound   | One diagonal endpoint and one 90-degree outer-loop vertex; width `.2 m`                      | butt longitudinal extension `0`; round-join radius `.1`; pixel bound `+/- .1`; aperture squares unchanged        |
-| Gauge                 | `fuel=37.5`, `legDepartureFuel=50`, then checkpoint restore                                  | level `.75`, level `ready`; restore reproduces both values and never caps fuel                                   |
-| Gauge contrast        | danger/caution/ready against `#20232a`; gauge level zero                                     | ratios `5.068/8.584/8.243`; graphite boundary plus colored inset remain visible with zero-height fill            |
-| Refuel projection     | pre-award level `.25`; normal landed time `0,.15,.299,.3 s`                                  | levels `.25,.625,.9975,1`; one can follows the same linear progress and is absent after `.3`                     |
-| Refuel CSS frame      | stage rect `(100,50,1000,640)`, can scene `(130,433)`, gauge rect `(120,70,16,112)`, `p=.25` | viewport can `(230,483)`, local endpoints `(130,433)` to `(28,76)`, transfer center `(104.5,343.75)`             |
-| Transfer silhouette   | DPR 1, integer CSS-pixel center; computed `::after` plus paired on/off `20 by 22` crops      | six pinned layers/sizes/positions/colors; probes hit every outer/inner part and `(0,0)`/`(19,21)` match baseline |
-| Reduced refuel        | Same contact with reduced motion                                                             | full model/fuel text/gauge/checkpoint atomically; `refuel=null`, no transfer pseudo-element                      |
-| Launch-ready hold     | 10 seconds zero or steer-only input after power                                              | centered pose, fuel, mission time, zero command, and status remain unchanged                                     |
-| Manual departure      | Launch-ready plus Space/Up, either plus vi/arrow steer, pointer/touch hold, or eligible tap  | every qualifying path uses the ordinary mixer; first step burns/integrates; `flying` starts only after `.05 m`   |
-| NOC stages            | Power sequence at `0,.2,.4,.6,.8,1,1.2,1.4 s`                                                | stages `0..7`: installed agent at stage 1, four bars, then three arches; banner only at final stage              |
-| Installed retention   | Powered sites retained through next leg, crash, and two checkpoint restores                  | each existing NOC-entry path stays installed; exact world count remains 78 and no can/power state duplicates     |
-| Outcome/action rail   | Launch-ready, then failed                                                                    | banner-only deployed state; crashed status plus Restart; Exit stays bottom-right in the active rail              |
-| Interactive pointer   | `pointerdown` targets Restart descendant and Exit descendant, then native click              | Restart guard has no stage flight effect; Exit cannot reach stage; each native click runs exactly once           |
-| Ratio                 | Start at `3`; apply `nextAwardRatio` successively                                            | `3`, `2.64`, `2.3448`, then strict decrease to constant `1+Number.EPSILON`; O(1) per call                        |
-| Safe inclusive edge   | Target top; `vx=1.8,vy=-2.8,angle=-12,omega=18`                                              | safe contact                                                                                                     |
-| Unsafe epsilon        | Four contacts, each increasing exactly one boundary magnitude by `1e-9`                      | each is unsafe; mirrored absolute-value signs and positive-`vy` rejection are independently covered              |
-| Swept unsafe equality | Hull only grazes terrain/scaffold/connector/mast between step endpoints                      | closed 0.02 m expansion detects it; no visual tunneling                                                          |
-| Target-top separation | Safe descent over deck center; then a separate exact tangential graze                        | descent uses true top crossing and can be safe; unresolved graze is unsafe                                       |
-| Frame equivalence     | Initial approach, no input, callbacks to 1,000 ms at 30, 60, and 120Hz                       | 120 steps; `x=30.8`, `y=30.0875`, `vx=0.8`, `vy=-3.4`, fuel `30`                                                 |
-| Checkpoint replay     | Award, manual launch, crash, RESTART twice                                                   | identical ready fuel/departure reserve/site flags/ratio; no can, award, ratio, or progress duplication           |
-| Catalog quantum       | Every checked-in reference template                                                          | allowance `minimum` matches literal safe contact; `minimum-0.05` matches literal failure                         |
-| Short-tap capture     | Down at `0`, eligible up at `20`; release synchronously emits lost capture                   | token/deadline exist before release; pulse remains through `139.999`, ends once at `140`; later loss is no-op    |
-| Input overflow        | 65 alternating edges before one step at 30, 60, and 120 Hz                                   | queue becomes one next-step physical-state snapshot; all frame schedules produce the same result                 |
-| Long run              | 100 successful deterministic sites                                                           | fixed work per ratio advance; bounded nodes/edges; reserve equals initial plus awards minus all burn             |
+| Vector                | Input                                                                                         | Expected result                                                                                                  |
+| --------------------- | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Gravity, 120 steps    | `(10,30,0,0)`, zero angle/engines, fuel 30                                                    | `x=10`, `y=28.4875`, `vx=0`, `vy=-3`, fuel `30`                                                                  |
+| Collective, 120 steps | Same pose, engines `(0.72,0.72)`                                                              | `y=35.0215`, `vy=9.96`, angle/x unchanged, fuel `28.56`                                                          |
+| Turn-only vector      | One step from same pose, raw engines `(0,0.375)`, `s=-1`                                      | `ax=-1.6875`, `ay=-0.07716426222751949`, `omega=-0.25`, angle `-0.00208333333333`, fuel `29.996875`              |
+| Combined turn vector  | One step from same pose, raw engines `(0.2125,0.5875)`, `s=-1`                                | `ax=-3.6`, `ay=3.235382907247959`, `omega=-0.25`, angle `-0.00208333333333`, fuel `29.993333333333332`           |
+| Angular assist        | One step, angle `0`, omega `15`, raw engines `(0.72,0.72)`                                    | engines `(0.66,0.78)`, `s=0`, omega `14.92`, angle `0.124333333333`, fuel `29.988`; total thrust unchanged       |
+| Vacuum coast          | One step, angle `0`, omega `15`, zero engines                                                 | omega remains `15`, angle `0.125`, `vy=-0.025`; no translational or angular damping                              |
+| Exhaustion            | Fuel `0.005`, one step, engines `(1,1)`                                                       | Effective engines `(0.3,0.3)`, fuel exactly `0`                                                                  |
+| Pointer vectors       | Rightward normalized drag `m=0,0.5,1`                                                         | `(.72,.72)`, `(.65375,.46625)`, `(.5875,.2125)`; leftward values mirror exactly                                  |
+| Mixed input ceiling   | Keyboard collective plus pointer full right                                                   | pointer owns `s=1`; engines `(.5875,.2125)`, total `.8`, never component-combined                                |
+| Keyboard steer owner  | Keyboard left plus pointer full right                                                         | keyboard owns `s=-1`; engines `(.2125,.5875)`, total `.8`                                                        |
+| Canceled steer owner  | Both keyboard steers plus pointer half right                                                  | keyboard cancels; pointer owns `s=.5`; engines `(.65375,.46625)`, total `1.12`                                   |
+| Empty-fuel direction  | Fuel `0`, raw engines `(.5875,.2125)`, retained physics `s=1`                                 | effective engines `(0,0)` and stored/rendered `commanded.vectorAngle=0`                                          |
+| Plumes                | `u=0,0.5,1`                                                                                   | scales `0.08,0.54,1`; opacities `0.25,0.625,1`                                                                   |
+| First site            | Any normalized seed                                                                           | ID `0`, center `36`, width `9.6`, shelf `[31.2,49.8]`, top=`shelf-span native maximum+2.4`, NOC bottom=shelf     |
+| Structure parity      | Static and dynamic site with platform top `p`                                                 | shelf `p-2.4`; exact `.2 m` butt/round open members; same path; all pixels inside nominal envelopes + `.1 m`     |
+| Member stroke bound   | One diagonal endpoint and one 90-degree outer-loop vertex; width `.2 m`                       | butt longitudinal extension `0`; round-join radius `.1`; pixel bound `+/- .1`; aperture squares unchanged        |
+| Gauge                 | `fuel=37.5`, `legDepartureFuel=50`, then checkpoint restore                                   | level `.75`, level `ready`; restore reproduces both values and never caps fuel                                   |
+| Gauge contrast        | danger/caution/ready against `#20232a`; gauge level zero                                      | ratios `5.068/8.584/8.243`; graphite boundary plus colored inset remain visible with zero-height fill            |
+| Refuel projection     | pre-award level `.25`; normal landed time `0,.15,.299,.3 s`                                   | levels `.25,.625,.9975,1`; one can follows the same linear progress and is absent after `.3`                     |
+| Refuel CSS frame      | stage rect `(100,50,1000,640)`, can scene `(130,433)`, gauge rect `(120,70,16,112)`, `p=.25`  | viewport can `(230,483)`, local endpoints `(130,433)` to `(28,76)`, transfer center `(104.5,343.75)`             |
+| Transfer silhouette   | DPR 1, integer CSS-pixel center; computed `::after` plus paired on/off `20 by 22` crops       | six pinned layers/sizes/positions/colors; probes hit every outer/inner part and `(0,0)`/`(19,21)` match baseline |
+| Reduced refuel        | Same contact with reduced motion                                                              | full model/fuel text/gauge/checkpoint atomically; `refuel=null`, no transfer pseudo-element                      |
+| Launch-ready hold     | 10 seconds zero or steer-only input after power                                               | centered pose, fuel, mission time, zero command, and status remain unchanged                                     |
+| Manual departure      | Launch-ready plus Space/Up, either plus vi/arrow steer, pointer/touch hold, or eligible tap   | every qualifying path uses the ordinary mixer; first step burns/integrates; `flying` starts only after `.05 m`   |
+| NOC stages            | Power sequence at `0,.2,.4,.6,.8,1,1.2,1.4 s`                                                 | stages `0..7`: installed agent at stage 1, four bars, then three arches; banner only at final stage              |
+| Installed retention   | Powered sites retained through next leg, crash, and two checkpoint restores                   | each existing NOC-entry path stays installed; exact world count remains 78 and no can/power state duplicates     |
+| Outcome/action rail   | Launch-ready, then failed                                                                     | banner-only deployed state; crashed status plus Restart; Exit stays bottom-right in the active rail              |
+| Interactive pointer   | `pointerdown` targets Restart descendant and Exit descendant, then native click               | Restart guard has no stage flight effect; Exit cannot reach stage; each native click runs exactly once           |
+| Interactive keyboard  | Focus Exit/Restart; target each button or nested span with Space, Enter, arrows, `h`, and `l` | no flight prevention/held edge/queue/thrust; Space/Enter run one native action; arrows/`h`/`l` run no action     |
+| Ratio                 | Start at `3`; apply `nextAwardRatio` successively                                             | `3`, `2.64`, `2.3448`, then strict decrease to constant `1+Number.EPSILON`; O(1) per call                        |
+| Safe inclusive edge   | Target top; `vx=1.8,vy=-2.8,angle=-12,omega=18`                                               | safe contact                                                                                                     |
+| Unsafe epsilon        | Four contacts, each increasing exactly one boundary magnitude by `1e-9`                       | each is unsafe; mirrored absolute-value signs and positive-`vy` rejection are independently covered              |
+| Swept unsafe equality | Hull only grazes terrain/scaffold/connector/mast between step endpoints                       | closed 0.02 m expansion detects it; no visual tunneling                                                          |
+| Target-top separation | Safe descent over deck center; then a separate exact tangential graze                         | descent uses true top crossing and can be safe; unresolved graze is unsafe                                       |
+| Frame equivalence     | Initial approach, no input, callbacks to 1,000 ms at 30, 60, and 120Hz                        | 120 steps; `x=30.8`, `y=30.0875`, `vx=0.8`, `vy=-3.4`, fuel `30`                                                 |
+| Checkpoint replay     | Award, manual launch, crash, RESTART twice                                                    | identical ready fuel/departure reserve/site flags/ratio; no can, award, ratio, or progress duplication           |
+| Catalog quantum       | Every checked-in reference template                                                           | allowance `minimum` matches literal safe contact; `minimum-0.05` matches literal failure                         |
+| Short-tap capture     | Down at `0`, eligible up at `20`; release synchronously emits lost capture                    | token/deadline exist before release; pulse remains through `139.999`, ends once at `140`; later loss is no-op    |
+| Input overflow        | 65 alternating edges before one step at 30, 60, and 120 Hz                                    | queue becomes one next-step physical-state snapshot; all frame schedules produce the same result                 |
+| Long run              | 100 successful deterministic sites                                                            | fixed work per ratio advance; bounded nodes/edges; reserve equals initial plus awards minus all burn             |
 
 World tests pin complete JSON descriptors and route-proof digests for seeds `1`, `0x12345678`, and
 `0xffffffff`, plus an independently authored static-scene vector. The fixtures begin with these
@@ -1666,19 +1698,20 @@ Phase 4K changes only the physics and output `ROUTE_DIGESTS`: geometry
 `2e1fc0bf1ed47a8bdb968bd330eba6b7627f07d5b405039f6481274198465ad3`, and world
 `535f190fdf7c7300a7667ce2a3e6d5f1395b197b0bd27c2dbb0f69f61310333a`.
 
-| Layer                                                                   | Required coverage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `node --test website/tests/lander-world.test.mjs`                       | Existing mixer/seeds, terrain, shelves, geometry, scaffold/collider, retention, offscreen, and immutability vectors stay exact. Geometry and world digests remain `e91ce3a27c011ef6b2549fdc36fa6e25db5c5da2d274233c9da4fc8adf4a0244` and `535f190fdf7c7300a7667ce2a3e6d5f1395b197b0bd27c2dbb0f69f61310333a`; no world descriptor or node changes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `node --test website/tests/lander-model.test.mjs`                       | All-nine route success replays and all-nine one-quantum exhaustion replays; exact changed physics/output digests and `route-93-flat` literals; inclusive combined landing boundary plus four independent `+1e-9` failures, mirrored absolute-value signs, and upward-`vy` rejection; launch-ready hold and ordinary keyboard/vi/pointer/touch departure; hidden/reduced lifecycle; checkpoint/restart; overflow snapshot without pulse source; no assertion on authored prose wording.                                                                                                                                                                                                                                                                                                                                                  |
-| `node --test website/tests/lander-phase4k.test.mjs`                     | Exact state projection, focus/tab order, action identity and hints, manual departure paths, listener teardown, interactive descendants, fake DOM without Launch authority, 320-pixel geometry contracts, shared fragment behavior, and mutation witnesses. Tests pin structure/state/accessibility relationships, never authored prose.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| Derivation CLI fixture verification                                     | Regenerate to a temporary output with the exact v4 deriver, v3 recipes, geometry v2/derived v3 schemas; review the canonical delta, update atomically, then run ordinary `--verify`. All 162 selected replays pass. Only `route-93-flat`, physics digest, and output digest differ; geometry fixture/digest and all 81 world witnesses/descriptors/digests remain byte-identical.                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `python -m unittest discover -s website/tests -p 'test_*.py'`           | Exact 12-file artifacts at both bases; one shared fragment; preflight/no-JS hidden and disabled actions; exact stage/outcome/Restart/rail/controls/Exit parent and source order; no Launch ID or residue; `aria-describedby` names controls prose, not rail; native action structure, names, shortcut ARIA, and hidden hints without authored-copy assertions; DOM, validator, privacy, production DAG, transactional recovery, and static/dynamic parity.                                                                                                                                                                                                                                                                                                                                                                              |
-| Automated Chromium projection witness                                   | Existing refuel, hidden/reduced, and installed-agent lifecycle remains exact. Launch-ready banner has no overlay action; ordinary Space/Up, vi/arrow combinations, pointer/touch hold, and tap depart on their first qualifying step. Restart-descendant down is rejected before prevention/token/capture/queue; Exit-descendant down cannot reach the stage; each native click fires once. Three deployments retain installed agents through crash, two restarts, camera reversal, and eviction at exactly 78 world descendants.                                                                                                                                                                                                                                                                                                       |
-| Pseudo-can computed-style and screenshot witness                        | For `getComputedStyle(stage,"::after")`, assert `width=20px`, `height=22px`, `pointer-events=none`, `image-rendering=pixelated`, transparent background color, exactly six gradient images, sizes `6px 2px,10px 6px,2px 4px,4px 8px,12px 14px,16px 18px`, positions `6px 2px,4px 0px,16px 10px,16px 8px,2px 6px,0px 4px`, `no-repeat` six times, and alternating normalized paints `rgb(217,74,30)`/`rgb(41,43,48)` in the pinned top-to-bottom order. At DPR 1 and an integer transfer center, take exact `20 by 22` CSS-pixel crops with refueling on and off: on-crop probes `(5,1)`, `(7,3)`, `(18,9)`, `(16,11)`, `(1,5)`, and `(3,7)` prove the six graphite/orange parts; `(0,0)` and `(19,21)` are byte-equal to the off-crop background, proving transparency. The crop visibly reads as one block can. No golden asset ships. |
-| Manual Chrome and Edge pre-merge; Firefox and Safari/WebKit post-launch | Start/focus/recovery; all manual departure paths; three deployments; gauge/transfer; banner-only success; crash with only Restart beneath it; persistent bottom-right Exit rail; visible second-line `r` and `<esc>` hints; installed-agent retention; boundary, crash/restart, reduced-motion, hidden-pause, privacy, and zero-request behavior.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| Responsive, zoom, focus, and accessibility acceptance                   | At 320 CSS pixels, 400-percent zoom, touch landscape, and `60rem`: stage and rail remain normal-flow separated; gauge/outcome, crash/Restart, and controls/Exit do not overlap; no horizontal scroll; buttons are at least `44 by 44`. Accessibility-tree witnesses prove prose-only `aria-describedby`, hint exclusion from accessible names, exact `aria-keyshortcuts`, one live region, and state tab order shell then Exit or shell then Restart then Exit. Focus never lands on hidden controls; Restart returns to shell, Exit to Start; no trap.                                                                                                                                                                                                                                                                                 |
-| Performance and longevity witness                                       | 100-site deterministic run; no more than five terrain paths, three sites, eight fragments, 80 world descendants, exactly 78 at maximum, and exactly two native action descendants; fixed stage/outcome/gauge/rail DOM, one pseudo-can, one pulse timer, no refuel timer; one-quantum proof timing and active-frame ceiling unchanged; launch-ready and hidden holds freeze correctly; teardown leaves no listener, timer, capture, frame, enabled dead action, pseudo-transfer state, or growing history.                                                                                                                                                                                                                                                                                                                               |
-| Permanent documentation and repository gates                            | `website/README.md` and browser checklist teach the changed actions, ordinary departure, tolerances, rail, accessibility, shared-fragment/no-JS behavior, and derivation workflow in lockstep. Focused suites, deterministic root/project builds, complete gates, file lint, locked-SDD, Rulesync drift, module-size report, and an exact intended-file diff pass. Permanent docs do not link to this SDD.                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Layer                                                                   | Required coverage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `node --test website/tests/lander-world.test.mjs`                       | Existing mixer/seeds, terrain, shelves, geometry, scaffold/collider, retention, offscreen, and immutability vectors stay exact. Geometry and world digests remain `e91ce3a27c011ef6b2549fdc36fa6e25db5c5da2d274233c9da4fc8adf4a0244` and `535f190fdf7c7300a7667ce2a3e6d5f1395b197b0bd27c2dbb0f69f61310333a`; no world descriptor or node changes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `node --test website/tests/lander-model.test.mjs`                       | All-nine route success replays and all-nine one-quantum exhaustion replays; exact changed physics/output digests and `route-93-flat` literals; inclusive combined landing boundary plus four independent `+1e-9` failures, mirrored absolute-value signs, and upward-`vy` rejection; launch-ready hold and ordinary keyboard/vi/pointer/touch departure; hidden/reduced lifecycle; checkpoint/restart; overflow snapshot without pulse source; no assertion on authored prose wording.                                                                                                                                                                                                                                                                                                                                                          |
+| `node --test website/tests/lander-phase4k.test.mjs`                     | Exact state projection, focus/tab order, action identity and hints, manual departure paths, listener teardown, interactive descendants, fake DOM without Launch authority, 320-pixel geometry contracts, shared fragment behavior, and mutation witnesses. Focus each button and exercise composed paths targeting the button and each nested span with Space, Enter, every arrow, `h`, and `l` keydown/keyup pairs: assert neither game event prevents default, mutates held keys, allocates a token, queues an edge, pulses thrust, moves focus, or dispatches a model event. Then simulate browser-native default: Space and Enter run exactly one Exit/Restart action; arrows/`h`/`l` run none. Tests pin structure/state/accessibility relationships, never authored prose.                                                                |
+| Derivation CLI fixture verification                                     | Regenerate to a temporary output with the exact v4 deriver, v3 recipes, geometry v2/derived v3 schemas; review the canonical delta, update atomically, then run ordinary `--verify`. All 162 selected replays pass. Only `route-93-flat`, physics digest, and output digest differ; geometry fixture/digest and all 81 world witnesses/descriptors/digests remain byte-identical.                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `python -m unittest discover -s website/tests -p 'test_*.py'`           | Exact 12-file artifacts at both bases; one shared fragment; preflight/no-JS hidden and disabled actions; exact stage/outcome/Restart/rail/controls/Exit parent and source order; no Launch ID or residue. Static accessibility pins separate `lander-fuel-label` then `lander-fuel-value` shell description IDREFs, no fuel `aria-labelledby`, controls prose rather than rail, native action structure, shortcut ARIA, and hidden hints. Delete existing exact, substring, absence/blacklist, or fixture assertions over authored title, heading, 404 explanation, controls, status, and action-label prose; structural and accessible-name-source checks remain. DOM, validator, privacy, production DAG, transactional recovery, and static/dynamic parity stay exact.                                                                       |
+| Automated Chromium projection witness                                   | Existing refuel, hidden/reduced, and installed-agent lifecycle remains exact. Launch-ready banner has no overlay action; ordinary Space/Up, vi/arrow combinations, pointer/touch hold, and tap depart on their first qualifying step. Restart-descendant pointer down is rejected before prevention/token/capture/queue; Exit-descendant pointer down cannot reach the stage. With Exit or Restart focused and their button/label/hint composed paths exercised, Space/Enter preserve native default and activate exactly once, while arrows/`h`/`l` produce no click; all leave flight input, pulse, pose, and fuel untouched. Three deployments retain installed agents through crash, two restarts, camera reversal, and eviction at exactly 78 world descendants.                                                                           |
+| Pseudo-can computed-style and screenshot witness                        | For `getComputedStyle(stage,"::after")`, assert `width=20px`, `height=22px`, `pointer-events=none`, `image-rendering=pixelated`, transparent background color, exactly six gradient images, sizes `6px 2px,10px 6px,2px 4px,4px 8px,12px 14px,16px 18px`, positions `6px 2px,4px 0px,16px 10px,16px 8px,2px 6px,0px 4px`, `no-repeat` six times, and alternating normalized paints `rgb(217,74,30)`/`rgb(41,43,48)` in the pinned top-to-bottom order. At DPR 1 and an integer transfer center, take exact `20 by 22` CSS-pixel crops with refueling on and off: on-crop probes `(5,1)`, `(7,3)`, `(18,9)`, `(16,11)`, `(1,5)`, and `(3,7)` prove the six graphite/orange parts; `(0,0)` and `(19,21)` are byte-equal to the off-crop background, proving transparency. The crop visibly reads as one block can. No golden asset ships.         |
+| Human-authored copy review                                              | A reviewer compares the document title, headings, 404 explanation, controls, outcome/status, action labels, and visible shortcut hints with sections 4 and 13. This is deliberately human evidence; automated suites do not encode authored phrases, substrings, or blacklists.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Manual Chrome and Edge pre-merge; Firefox and Safari/WebKit post-launch | Start/focus/recovery; all manual departure paths; three deployments; gauge/transfer; banner-only success; crash with only Restart beneath it; persistent bottom-right Exit rail; visible second-line `r` and `<esc>` hints; installed-agent retention; boundary, crash/restart, reduced-motion, hidden-pause, privacy, and zero-request behavior. Focus Exit and Restart in turn: Space and Enter perform exactly one native action without a thrust frame; arrows and `h`/`l` neither move/burn nor activate the button; Escape still exits globally and failed-state `r` still restarts exactly once.                                                                                                                                                                                                                                         |
+| Responsive, zoom, focus, and accessibility acceptance                   | At 320 CSS pixels, 400-percent zoom, touch landscape, and `60rem`: stage and rail remain normal-flow separated; gauge/outcome, crash/Restart, and controls/Exit do not overlap; no horizontal scroll; buttons are at least `44 by 44`. A real browser accessibility-tree witness normalizes the live DOM label/value text, proves the shell description contains that ordered combined segment exactly once, burns fuel across one displayed tenth without changing label/status, and proves the recomputed description contains the new segment and not the former one; it embeds no authored label phrase. Other witnesses prove controls-prose IDREF, hint exclusion from accessible names, shortcut ARIA, one live region, and tab order shell then Exit or shell then Restart then Exit. Restart returns to shell, Exit to Start; no trap. |
+| Performance and longevity witness                                       | 100-site deterministic run; no more than five terrain paths, three sites, eight fragments, 80 world descendants, exactly 78 at maximum, and exactly two native action descendants; fixed stage/outcome/gauge/rail DOM, one pseudo-can, one pulse timer, no refuel timer; one-quantum proof timing and active-frame ceiling unchanged; launch-ready and hidden holds freeze correctly; teardown leaves no listener, timer, capture, frame, enabled dead action, pseudo-transfer state, or growing history.                                                                                                                                                                                                                                                                                                                                       |
+| Permanent documentation and repository gates                            | `website/README.md` and browser checklist teach the changed actions, ordinary departure, tolerances, rail, accessibility, shared-fragment/no-JS behavior, and derivation workflow in lockstep. Focused suites, deterministic root/project builds, complete gates, file lint, locked-SDD, Rulesync drift, module-size report, and an exact intended-file diff pass. Permanent docs do not link to this SDD.                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 Mutation tests reject duplicated/moved shared markup, a second scheduler/controller/site authority,
 game checks added to the near-limit validator, artifact count drift, a sixth retained chunk,
@@ -1705,16 +1738,19 @@ expectation, CSS selector, `launch-button` pulse source, or detached/hidden subs
 
 Phase 4J presentation mutations specifically reject fuel label/value without `.visually-hidden`,
 `aria-hidden` on either, a visible numeric amount, an element other than the one ordinary
-`span#lander-fuel-value`, any `output` element, role/live semantics on the fuel span, a controller
-write other than `textContent=fuel.toFixed(1)`, any semantic or named gauge, stale `data-fuel-band`,
-a level name or threshold outside `danger<=.2<caution<=.5<ready`, a level color other than the three
-pinned bright tokens, a contrast ratio below `3:1` against `#20232a`, a non-graphite outer boundary,
-or a missing colored inset at zero fill. They reject a refuel duration other than 300 ms, a
-controller-owned refuel timer/state, interpolation from post-award rather than pre-award level, a
-nonlinear or CSS-time fill, more than one visible can, a transfer DOM/world node, viewport/local
-coordinate mixing, omitted stage-rectangle offsets, contain letterboxing, a pseudo-can not centered
-on its coordinates, a transfer that survives reduced motion, hidden-time progress, missing resize
-reprojection, or an award/checkpoint change caused by presentation.
+`span#lander-fuel-value`, any `output` element, role/live semantics on either fuel span,
+`aria-labelledby`/`aria-describedby`/`aria-label` on either, omission or reversal of the shell's
+separate label/value IDREFs, an accessibility-tree description that loses or duplicates either
+current DOM-derived segment, a controller write other than `textContent=fuel.toFixed(1)`, any
+semantic or named gauge, stale `data-fuel-band`, a level name or threshold outside
+`danger<=.2<caution<=.5<ready`, a level color other than the three pinned bright tokens, a contrast
+ratio below `3:1` against `#20232a`, a non-graphite outer boundary, or a missing colored inset at
+zero fill. They reject a refuel duration other than 300 ms, a controller-owned refuel timer/state,
+interpolation from post-award rather than pre-award level, a nonlinear or CSS-time fill, more than
+one visible can, a transfer DOM/world node, viewport/local coordinate mixing, omitted
+stage-rectangle offsets, contain letterboxing, a pseudo-can not centered on its coordinates, a
+transfer that survives reduced motion, hidden-time progress, missing resize reprojection, or an
+award/checkpoint change caused by presentation.
 
 Pseudo-can mutations reject dimensions other than exact `20px by 22px`, nonempty generated text,
 `pointer-events` other than `none`, a transform other than the pinned centering transform,
@@ -1752,28 +1788,34 @@ capture, clearing its live pulse on synchronous lost capture, ignoring unrelated
 reusable-pointer-ID matching, an unguarded/duplicate pulse timeout, or accepting a new gesture
 without atomically superseding the old pulse. They also reject a second pulse timer, token
 namespace, or mixer path; any pulse source in overflow snapshots; any native action that synthesizes
-thrust; a button pointerdown that prevents default, captures, allocates a token, or queues a
-pointer-flight edge; a native click that fires twice after that rejected down; Exit reaching a stage
-handler; and ordinary keyboard/vi/pointer/touch departure that discards or changes the first
-qualifying fixed step. They retain no passive damping, assist while coasting or steering, assist
-that changes total thrust/fuel, reversed/cosmetic-only gimbal, stale 8.4/70 integration, or
-safe-contact limits other than exact `1.8/2.8/12/18`.
+thrust; interactive-key rejection before global Escape or failed-state `r`; a target-only keyboard
+guard that misses a nested composed-path label/hint; or an interactive Space, Enter, arrow, `h`, or
+`l` keydown that prevents default, consumes a repeat, changes held-key/token/queue/pulse/thrust
+state, moves focus, or dispatches the model. They reject recording or later releasing an
+interactive-path keydown, dropping a release merely because an accepted key's focus later moved,
+duplicate native Exit/Restart activation from Space or Enter, or native activation from
+arrows/`h`/`l`. They also reject a button pointerdown that prevents default, captures, allocates a
+token, or queues a pointer-flight edge; a native click that fires twice after that rejected down;
+Exit reaching a stage handler; and ordinary keyboard/vi/pointer/touch departure that discards or
+changes the first qualifying fixed step. They retain no passive damping, assist while coasting or
+steering, assist that changes total thrust/fuel, reversed/cosmetic-only gimbal, stale 8.4/70
+integration, or safe-contact limits other than exact `1.8/2.8/12/18`.
 
 Presentation and proof mutations reject incomplete static terrain, a rendered gap across collision
 geometry, weak or source-only scaffold/battery/signal parity, a battery `rx`, terminal path, nub, or
 pseudo-element, fewer/more than four bars and three signal paths, an asymmetric signal path,
-horizontal/reversed/mistimed stages, color-only meaning, stale Lander title/`h1` or 404 copy,
-route-pose canonicalization before selection, quantized world/geometry values, canonical pose
-precision drift, a reference schedule without `[1,90]`, ratio recomputation from `completedSites`,
-runtime planning/search/fuel scan or a third runtime proof replay, an unreachable catalog command,
-production-derived fixtures, a geometry schema other than required v2, a route-derived schema v2 or
-earlier, a per-template recipe count outside `[2,256]`, early-success enumeration, more than 2,304
-ordinary candidates or missing selected verification replays, partial route/world regeneration,
-wrong world-witness nesting, derivation-tool imports, or motif/corridor/81-descriptor digest drift.
-Closed unsafe collision, unexpanded target-top handling, transactional initialization, fixed
-retention, reversible camera motion, normal crash debris, ballistic fragments, non-animated
-direction meaning, vacuum presentation, lifecycle cleanup, privacy, and zero-runtime-network
-constraints remain mutation-protected.
+horizontal/reversed/mistimed stages, color-only meaning, route-pose canonicalization before
+selection, quantized world/geometry values, canonical pose precision drift, a reference schedule
+without `[1,90]`, ratio recomputation from `completedSites`, runtime planning/search/fuel scan or a
+third runtime proof replay, an unreachable catalog command, production-derived fixtures, a geometry
+schema other than required v2, a route-derived schema v2 or earlier, a per-template recipe count
+outside `[2,256]`, early-success enumeration, more than 2,304 ordinary candidates or missing
+selected verification replays, partial route/world regeneration, wrong world-witness nesting,
+derivation-tool imports, or motif/corridor/81-descriptor digest drift. Closed unsafe collision,
+unexpanded target-top handling, transactional initialization, fixed retention, reversible camera
+motion, normal crash debris, ballistic fragments, non-animated direction meaning, vacuum
+presentation, lifecycle cleanup, privacy, and zero-runtime-network constraints remain
+mutation-protected.
 
 ## 16. Traceability
 
