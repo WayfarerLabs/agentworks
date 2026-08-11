@@ -1,5 +1,7 @@
 # Lunar Deployment Browser Checklist
 
+<!-- cspell:ignore underframe -->
+
 The full-site demo uses the same builder and game sources:
 
 ```bash
@@ -22,19 +24,19 @@ they do not accept the current game.
       `/404.html`; confirm their `#lander-game` subtrees are byte-equivalent.
 - [ ] Fly and safely service at least three sites across four visibly different coarse terrain
       motifs. Each target has one elevated H platform exactly three lander widths long, one gas can,
-      and one solid NOC on a shared flat shelf. Confirm the solid support face has no pale aperture.
-      The can disappears once, fuel increases once, the agent enters, the vertical battery fills
-      red/orange/pale-yellow/mint from bottom to top, the antenna powers at 1,000 ms, and
-      actual-fuel launch returns to player-controlled flight.
+      and one solid NOC on a shared flat shelf. Confirm its attached scaffold is visibly open, with
+      no filled backing face or pale artifact. The can disappears once, fuel increases once, the
+      agent enters, the four battery bars fill red/orange/pale-yellow/mint from bottom to top, the
+      three signal arches power in order, and manual launch returns to player-controlled flight.
 - [ ] Confirm the next site begins fully offscreen right after service. The solid arrow blinks only
       while that target remains offscreen; it is static with reduced motion and has equivalent
       visually hidden direction text.
 - [ ] Confirm visible fuel changes by tenths without repetitive live announcements. Spend fuel on
       thrust, carry excess through multiple sites, and verify empty fuel produces no thrust.
-- [ ] Crash on terrain, a platform end or underside, the solid riser, the NOC, and the mast. Normal
-      motion shows one brief compact flash and exactly eight ballistic fragments for 600
-      milliseconds, with no smoke, dust, sound, shake, or page movement. Reduced motion reaches the
-      same failed state with no moving debris.
+- [ ] Crash on terrain, a platform end or underside, the scaffold or connector envelope, the NOC,
+      and the mast. Normal motion shows one brief compact flash and exactly eight ballistic
+      fragments for 600 milliseconds, with no smoke, dust, sound, shake, or page movement. Reduced
+      motion reaches the same failed state with no moving debris.
 - [ ] Restart after crashes before and after a powered site. Before the first checkpoint, restart
       restores the same seeded initial approach. Afterward, it starts on the last powered pad,
       relaunches using fuel, and never duplicates the can, award, progress, ratio, or power
@@ -250,10 +252,10 @@ new run records the refined source.
 
 ## Static recovery and initial presentation
 
-- [ ] With JavaScript disabled, `/lander/` shows one `Lunar deployment` heading and the complete
-      static scene. `/404.html` shows one `Page not found` heading, explanatory text, a working
-      linked `Agentworks` breadcrumb home crumb, and the same scene. There is no error-code eyebrow
-      or body-level home link.
+- [ ] With JavaScript disabled, `/lander/` shows one `We need to deploy some agents!` heading and
+      the complete static scene. `/404.html` shows one `Page not found` heading, explanatory text, a
+      working linked `Agentworks` breadcrumb home crumb, and the same scene. There is no error-code
+      eyebrow or body-level home link.
 - [x] With JavaScript disabled, no start target or control instructions are exposed visually or to
       the accessibility tree. The document has header, main, and footer landmarks in that order.
 - [x] With JavaScript enabled and normal motion, each reload gives one subtle three-pulse plume cue
@@ -285,9 +287,12 @@ new run records the refined source.
 - [ ] Escape and native `Exit mission` on the active shell call the same exit operation: cut thrust,
       hide controls and actions, restore settled preflight, and focus the start button without
       scrolling. Escape on a shell link or outside the shell keeps browser behavior.
-- [ ] After success or failure, both R and native `Restart mission` start the same fresh run with
-      full fuel, a dark operations center, a closed bay, no agent, and shell focus. Restart is
-      hidden and disabled in every non-terminal state.
+- [ ] After a crash, both R and native `Restart mission` restore the last powered-pad checkpoint,
+      carried fuel, leg-relative gauge, `Agent Deployed!` banner, and shell focus without
+      recollecting the can. Restart is hidden and disabled outside `failed`.
+- [ ] In launch-ready state, the native `Launch` action is a 44 CSS-pixel target and the only
+      additional action tab stop. Activation focuses the scene before the action hides, produces one
+      140 ms equal-thrust pulse, and never exposes Launch and Restart together.
 - [ ] During play the scene SVG and all decorative descendants are silent to a screen reader. The
       shell is announced as `Lunar deployment game`, controls are described once, and status changes
       are polite and restrained.
@@ -300,8 +305,9 @@ new run records the refined source.
       thrust. A second pointer and non-primary mouse buttons are ignored.
 - [x] Holding sustains thrust. Horizontal drag right lengthens the left plume and turns right; drag
       left lengthens the right plume and turns left. Vertical travel does not affect commands.
-- [x] A tap released within 180 milliseconds and 10 CSS pixels produces at least a 140-millisecond
-      equal-thrust pulse. Another down is ignored until that pulse ends.
+- [ ] A tap released within 180 milliseconds and 10 CSS pixels produces one tokenized
+      140-millisecond equal-thrust pulse. A new pointer atomically supersedes it; stale capture loss
+      or timeout cannot clear the newer gesture.
 - [x] Pointer up, cancellation, lost capture, window blur, shell focus loss, tab hiding, contact,
       failure, Escape, restart, and a simulated frame stall all release capture and leave no stuck
       thrust. Repeat each teardown once to confirm it is harmless when already clear.
@@ -319,17 +325,30 @@ new run records the refined source.
       accepts both recovery paths.
 - [x] After safe touchdown at normal motion, the G bay opens, the terminal-shaped agent descends,
       crosses the surface, and enters the west operations-center door.
-- [x] Power proceeds monotonically through west window, server bars and status lights, east window,
-      and two antenna arcs. The powered appearance remains through departure and success.
-- [x] The lander departs with equal plumes, is clipped above the scene, and produces exactly one
-      final live-region update: `Agent deployed. Mission continues.`
-- [x] With reduced motion enabled before touchdown, safe contact immediately shows the fully powered
-      operations center and final status with no bay, agent route, sequential power, or departure
-      motion. Physics remains playable.
+- [ ] Power proceeds vertically through four sharp-cornered battery bars at 200 ms intervals, then
+      through three bilaterally symmetric signal arches at 1,000, 1,200, and 1,400 ms. There is no
+      battery terminal, nub, rounded battery corner, or duplicate payoff.
+- [ ] At power completion, the sole live status says exactly `Agent Deployed!`; the matching banner
+      is centered over the scene. The lander, mission clock, pose, and fuel then remain unchanged
+      indefinitely until effective player thrust.
+- [ ] Space, Up, held pointer or touch, short tap, and native Launch all depart from the same
+      launch-ready checkpoint. Turn-only input remains restrained; the first effective collective
+      burns and integrates in that same fixed step, and early release receives ordinary gravity.
+- [ ] With reduced motion enabled before touchdown, safe contact atomically shows all four battery
+      bars, three signal arches, powered NOC, checkpoint, gauge, and banner without automatic
+      departure. Physics remains playable.
 - [x] Turning reduced motion on during the post-touchdown sequence immediately completes the same
       powered success result. Changing it during flight does not alter physics.
 - [x] Restart, Escape, and reload each clear powered state. No mission state survives a new run or
       reload.
+- [ ] The vertical left gauge starts each leg full, drains relative to that leg's departure reserve,
+      returns to full with the exact post-award carry, and restores exactly after restart. The
+      rounded `Fuel reserve` output is the only named fuel value.
+- [ ] Every static and generated site uses one visibly open scaffold path with no backing rectangle,
+      butt caps, round joins, attached connector and NOC underframe, and no pale artifact. Collision
+      still rejects the complete conservative underframe, connector, NOC, and mast envelopes.
+- [ ] Full steering uses visibly gimbaled 30-degree plumes and lower 0.8 total collective. Turn-only
+      axial lift stays below gravity while vacuum coasting retains inertia.
 
 ## Lifecycle and request audit
 

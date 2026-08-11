@@ -48,6 +48,7 @@ Run the automated suites and repository checks:
 python3 -m unittest discover -s website/tests -p 'test_*.py'
 node --test website/tests/lander-model.test.mjs
 node --test website/tests/lander-world.test.mjs
+node --test website/tests/lander-phase4i.test.mjs
 ./scripts/lint-files.sh
 ./scripts/check-locked-sdds.sh
 ./scripts/rulesync-upgen.sh --check
@@ -73,7 +74,7 @@ The package-free browser, responsive, motion, touch, and assistive-technology ch
 before a public release.
 
 The Lander uses fixed-step vacuum physics. Space or Up commands collective thrust; Left/H and
-Right/L steer. Steered thrust is deliberately vectored by up to 18 degrees and uses less total
+Right/L steer. Steered thrust is deliberately vectored by up to 30 degrees and uses less total
 forward thrust than straight collective. A powered neutral collective redistributes thrust between
 the two engines to arrest rotation without adding drag or changing fuel use. Pointer and touch input
 use the same bounded mixer: press for collective, drag horizontally to steer, and a short tap
@@ -81,10 +82,12 @@ retains a 140 ms pulse. Safe landing limits are inclusive at 1.6 m/s horizontal 
 descent, 10 degrees of tilt, and 15 degrees/s rotation.
 
 Terrain is deterministic per run, sampled every 10 m in 50 m chunks from four visibly different
-motifs. Each platform and NOC share one flat shelf. The 9.6 m deck stands 0.8 m above it on a solid
-support face that collides with the spacecraft; the NOC battery fills four colored bars
-bottom-to-top before its antenna powers. These shapes, fills, and outlines preserve their meaning
-without relying on color alone.
+motifs. Each platform and NOC share one flat shelf. The 9.6 m deck stands 2.4 m above it. One open,
+narrow-member lattice connects the deck, NOC, and shelf without a filled backing face. Conservative
+closed colliders cover the complete stroked scaffold and connector envelopes because none of their
+clear apertures can admit the rigid lander. The NOC battery fills four colored bars bottom-to-top,
+then three symmetric signal arches power outward. These shapes, fills, and outlines preserve their
+meaning without relying on color alone.
 
 ## Artifact contract
 
@@ -109,34 +112,41 @@ This is the builder's only output shape. The manifest is explicit in `build.py`;
 recursively copies source directories or permits a generated local link outside the manifest.
 
 The game keeps its route catalog reviewable and independent from runtime generation. Geometry lives
-in `tests/fixtures/lander-route-geometry-v1.json`; it contains no schedule or fuel result.
+in `tests/fixtures/lander-route-geometry-v2.json`; it contains no schedule or fuel result.
 Regenerate to a temporary path and verify the reviewed fixture with:
 
 ```bash
 node website/tools/derive_lander_routes.mjs \
-  --geometry website/tests/fixtures/lander-route-geometry-v1.json \
-  --output /tmp/lander-route-derived-v2.json \
-  --verify website/tests/fixtures/lander-route-derived-v2.json
+  --geometry website/tests/fixtures/lander-route-geometry-v2.json \
+  --output /tmp/lander-route-derived-v3.json \
+  --verify website/tests/fixtures/lander-route-derived-v3.json
 ```
 
-The v3 deriver uses the v2 schema and recipe family, Node built-ins, versioned finite phase ranges,
-reachable keyboard commands, and independent copies of the physics, collision geometry, terrain
-motifs, shelf construction, riser, NOC, and mast. Its reviewed output contains all nine routes and
-81 ordered world descriptors. A successful route is classified using the raw replay. Only its
-reviewed success and exhaustion pose components are serialized to nine decimal places, keeping
-native trigonometric last-bit variation out of the canonical fixture while remaining inside the
-runtime proof tolerance. World descriptors retain their exact unrounded values. A deliberate route
-or world change updates the tool version/ranges, reviewed v2 fixture, copied production literals,
-and all four digests atomically. Runtime code performs exactly the successful and
-one-quantum-smaller proof replays for the directly selected literal. It never imports the tool,
-scans fuel allowances, or plans a route in the browser.
+The v4 deriver uses the v2 geometry schema and v3 recipe family, Node built-ins, versioned finite
+phase ranges, reachable keyboard commands, and independent copies of the physics, collision
+geometry, terrain motifs, shelf construction, scaffold, connector, NOC, and mast. Each template
+evaluates two explicit candidates, for 18 total and well below the 256-per-template and 2,304-total
+bounds. Its reviewed output contains all nine routes and 81 ordered world descriptors. Verification
+also replays each selected success and one-quantum failure across all nine worlds, for 162 selected
+replays. A successful route is classified using the raw replay. Only its reviewed success and
+exhaustion pose components are serialized to nine decimal places, keeping native trigonometric
+last-bit variation out of the canonical fixture while remaining inside the runtime proof tolerance.
+World descriptors retain their exact unrounded values. A deliberate route or world change updates
+the tool version/ranges, reviewed v2 fixture, copied production literals, and all four digests
+atomically. Runtime code performs exactly the successful and one-quantum-smaller proof replays for
+the directly selected literal. It never imports the tool, scans fuel allowances, or plans a route in
+the browser.
 
 During a run, the model retains at most five terrain chunks, the active and target sites plus one
 previous powered site, one input queue of at most 64 records, and eight crash fragments. Fuel has no
 capacity cap: unused reserve carries forward. Each collected can adds the next route's demonstrated
 minimum multiplied by a ratio that starts at three and decays monotonically toward one. Exit and
 reload discard the in-memory run; crash restart restores the last powered pad without recollecting
-fuel or advancing progress.
+fuel or advancing progress. The vertical gauge measures fuel against the exact reserve at the start
+of the current leg; the adjacent rounded number remains the only accessible fuel value. After the
+four battery and three signal stages complete, `Agent Deployed!` is the sole status and the lander
+waits on the pad without spending fuel. Depart with Space, Up, pointer or touch thrust, or the
+native Launch button.
 
 All three CLI paths are required. The output must be outside the repository. The site base is an
 ASCII, slash-bounded same-origin path such as `/` or `/agentworks/`; absolute URLs, dot segments,
