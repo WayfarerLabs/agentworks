@@ -336,11 +336,12 @@ Classification requires the already-returned operation's cached
 `operation.status == compute_v1.Operation.Status.DONE`; it must not call `operation.done()` or make
 another provider refresh after the bounded `result()` wait. It then reads only
 `operation.error.errors[*].code`; it never stringifies the provider message, details, error object,
-or caught exception. That exact code maps to `GCECapacityError` with the caller-supplied zone and
-retry-later-or-select-another-zone guidance. A DONE operation with an unknown code, missing entries,
-or malformed structured shape maps to generic definitive `GCEOperationError`. A timeout or transport
-failure with no DONE structured outcome maps to `GCEIndeterminateOperationError` and
-inspect-before-retry guidance.
+or caught exception. That exact code maps to `GCECapacityError`; a zonal caller supplies the zone
+and receives retry-later-or-select-another-zone guidance, while a global caller supplies no zone and
+receives retry-later guidance without false attribution. A DONE operation with an unknown code,
+missing entries, or malformed structured shape maps to generic definitive `GCEOperationError`. A
+timeout or transport failure with no DONE structured outcome maps to
+`GCEIndeterminateOperationError` and inspect-before-retry guidance.
 
 Instance and firewall insert callers reconcile only `GCEIndeterminateOperationError`; matching live
 state may establish success for that outcome. They immediately propagate definitive

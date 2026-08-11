@@ -229,11 +229,12 @@ Provider-shaped operation tests distinguish DONE HTTP 503 failures carrying the 
 `ZONE_RESOURCE_POOL_EXHAUSTED` code, DONE failures carrying an unknown or malformed structured
 shape, longer strings containing the capacity token, and timeout/non-DONE waits. They prove exact
 equality is required for capacity classification, only the last case is indeterminate, definitive
-failures cannot reconcile to insert success, capacity guidance names the zone without reflecting
-provider text, and every resulting exception graph is detached and secret-free. Rollback tests
-interrupt an ordinary-failure cleanup only after at least one owned resource is removed, then prove
-the second idempotent pass converges with the first interrupt object's identity or, on a second
-interrupt, reports exact retained provider identities and manual recovery actions.
+failures cannot reconcile to insert success, zonal capacity guidance names the zone while global
+guidance does not, no path reflects provider text, and every resulting exception graph is detached
+and secret-free. Rollback tests interrupt an ordinary-failure cleanup only after at least one owned
+resource is removed, then prove the second idempotent pass converges with the first interrupt
+object's identity or, on a second interrupt, reports exact retained provider identities and manual
+recovery actions.
 
 One operator-approved live acceptance run creates and initializes a bounded VM, verifies Tailscale
 reachability and platform lifecycle, queries the realized instance to prove that no guest service
