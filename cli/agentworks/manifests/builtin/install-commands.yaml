@@ -8,7 +8,8 @@
 # system plugin (Phase 11), so this bundle now ships user-install-commands
 # only; `az-cli` publishes present-but-disabled from that plugin's manifests.
 #
-# Install commands are one logical shell invocation written as a plain scalar.
+# Install commands are one logical shell invocation written as a single-line
+# YAML scalar, either plain or quoted.
 # Prefer apt packages, snaps, and maintained package-manager or vendor entry
 # points. Embedded scripts, block scalars, here-documents, multi-step installers,
 # state machines, signature pipelines, and cleanup routines do not belong here.
