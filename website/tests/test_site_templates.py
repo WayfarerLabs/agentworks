@@ -353,7 +353,7 @@ class TemplateContractTests(RepositoryFixture):
         self.assertIsNotNone(scene)
         assert scene is not None
         changed = template.replace(scene.group(0), "", 1) + scene.group(0)
-        with self.assertRaisesRegex(ValueError, "root section|scene"):
+        with self.assertRaises(ValueError):
             site_builder._validate_template("lander-game.html", changed)
 
     def test_fragment_accessible_name_sources_must_be_structural_and_nonempty(self) -> None:

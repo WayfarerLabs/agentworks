@@ -138,6 +138,31 @@ class ArcadeMarkupTests(unittest.TestCase):
             with self.subTest(index=index), self.assertRaisesRegex(ValueError, "child|prose|text"):
                 validate_game_contract(mutation)
 
+    def test_reviewed_root_and_required_tag_identities_reject_stray_structure(self) -> None:
+        fuel_label = re.search(r'<span id="lander-fuel-label"[^>]*>.*?</span>', self.fragment, re.DOTALL)
+        self.assertIsNotNone(fuel_label)
+        assert fuel_label is not None
+        wrong_fuel_label_tag = fuel_label.group(0).replace("<span", "<em", 1).replace("</span>", "</em>", 1)
+        mutations = (
+            f"<div></div>{self.fragment}",
+            f"{self.fragment}<span></span>",
+            f"stray{self.fragment}",
+            f"</div>{self.fragment}",
+            self.fragment.replace('<div id="lander-scene-shell"', '<section id="lander-scene-shell"', 1)
+            .replace('    </div>\n</section>', '    </section>\n</section>', 1),
+            self.fragment.replace('<p id="lander-status"', '<div id="lander-status"', 1)
+            .replace('</p>\n                <button id="lander-restart"',
+                     '</div>\n                <button id="lander-restart"', 1),
+            self.fragment.replace('<button id="lander-restart"', '<a id="lander-restart"', 1)
+            .replace('</button>\n            </div>', '</a>\n            </div>', 1),
+            self.fragment.replace('<div id="lander-controls-rail"', '<section id="lander-controls-rail"', 1)
+            .replace('        </div>\n    </div>', '        </section>\n    </div>', 1),
+            self.fragment.replace(fuel_label.group(0), wrong_fuel_label_tag, 1),
+        )
+        for index, mutation in enumerate(mutations):
+            with self.subTest(index=index), self.assertRaisesRegex(ValueError, "top-level|tag identity"):
+                validate_game_contract(mutation)
+
 
 class ArcadeCssTests(unittest.TestCase):
     @classmethod

@@ -1,150 +1,20 @@
 # ruff: noqa: F405
 
-import base64
-import hashlib
 import html
 import json
-import socket
 import struct
 import threading
-import time
-import urllib.parse
-import urllib.request
 import zlib
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
+from lander_chromium_phase4k import browser_phase4k_contract, normalize_accessible
 from site_test_support import *  # noqa: F403
 
 
 class QuietHandler(SimpleHTTPRequestHandler):
     def log_message(self, format: str, *args: object) -> None:
         pass
-
-
-class DevToolsConnection:
-    def __init__(self, url: str) -> None:
-        parsed = urllib.parse.urlsplit(url)
-        self.socket = socket.create_connection((parsed.hostname or "127.0.0.1", parsed.port or 80), timeout=10)
-        key = base64.b64encode(os.urandom(16)).decode("ascii")
-        target = parsed.path + (f"?{parsed.query}" if parsed.query else "")
-        request = (
-            f"GET {target} HTTP/1.1\r\n"
-            f"Host: {parsed.netloc}\r\n"
-            "Upgrade: websocket\r\nConnection: Upgrade\r\n"
-            f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n"
-            "Origin: http://127.0.0.1\r\n\r\n"
-        )
-        self.socket.sendall(request.encode("ascii"))
-        response = bytearray()
-        while b"\r\n\r\n" not in response:
-            response.extend(self.socket.recv(4096))
-        expected = base64.b64encode(hashlib.sha1(f"{key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11".encode()).digest())
-        if b" 101 " not in response.split(b"\r\n", 1)[0] or expected not in response:
-            self.socket.close()
-            raise AssertionError(f"Chromium rejected DevTools WebSocket: {response[:500]!r}")
-        self.identifier = 0
-
-    def close(self) -> None:
-        try:
-            self._send(b"", opcode=8)
-        finally:
-            self.socket.close()
-
-    def _read_exact(self, length: int) -> bytes:
-        chunks = bytearray()
-        while len(chunks) < length:
-            block = self.socket.recv(length - len(chunks))
-            if not block:
-                raise ConnectionError("Chromium closed the DevTools WebSocket")
-            chunks.extend(block)
-        return bytes(chunks)
-
-    def _send(self, payload: bytes, opcode: int = 1) -> None:
-        mask = os.urandom(4)
-        length = len(payload)
-        header = bytearray((0x80 | opcode, 0x80 | (length if length < 126 else 126 if length <= 0xFFFF else 127)))
-        if length >= 126:
-            header.extend(struct.pack(">H" if length <= 0xFFFF else ">Q", length))
-        header.extend(mask)
-        header.extend(value ^ mask[index % 4] for index, value in enumerate(payload))
-        self.socket.sendall(header)
-
-    def _receive(self) -> dict[str, object]:
-        payload = bytearray()
-        while True:
-            first, second = self._read_exact(2)
-            final = bool(first & 0x80)
-            opcode = first & 0x0F
-            length = second & 0x7F
-            if length == 126:
-                length = struct.unpack(">H", self._read_exact(2))[0]
-            elif length == 127:
-                length = struct.unpack(">Q", self._read_exact(8))[0]
-            mask = self._read_exact(4) if second & 0x80 else b""
-            frame = self._read_exact(length)
-            if mask:
-                frame = bytes(value ^ mask[index % 4] for index, value in enumerate(frame))
-            if opcode == 8:
-                raise ConnectionError("Chromium closed the DevTools WebSocket")
-            if opcode == 9:
-                self._send(frame, opcode=10)
-                continue
-            if opcode in {0, 1}:
-                payload.extend(frame)
-                if final:
-                    return json.loads(payload)
-
-    def call(self, method: str, params: dict[str, object] | None = None) -> dict[str, object]:
-        self.identifier += 1
-        identifier = self.identifier
-        message = {"id": identifier, "method": method, "params": params or {}}
-        self._send(json.dumps(message, separators=(",", ":")).encode())
-        while True:
-            response = self._receive()
-            if response.get("id") != identifier:
-                continue
-            if "error" in response:
-                raise AssertionError(f"DevTools {method} failed: {response['error']}")
-            return response.get("result", {})
-
-    def evaluate(self, expression: str) -> object:
-        result = self.call("Runtime.evaluate", {
-            "expression": expression,
-            "awaitPromise": True,
-            "returnByValue": True,
-        })
-        if "exceptionDetails" in result:
-            raise AssertionError(f"Chromium evaluation failed: {result['exceptionDetails']}")
-        return result["result"].get("value")
-
-
-KEY_DATA = {
-    "Tab": ("Tab", "Tab", 9),
-    "Space": (" ", "Space", 32),
-    "Enter": ("Enter", "Enter", 13),
-    "Escape": ("Escape", "Escape", 27),
-    "ArrowUp": ("ArrowUp", "ArrowUp", 38),
-    "ArrowLeft": ("ArrowLeft", "ArrowLeft", 37),
-    "ArrowRight": ("ArrowRight", "ArrowRight", 39),
-    "KeyH": ("h", "KeyH", 72),
-    "KeyL": ("l", "KeyL", 76),
-    "KeyR": ("r", "KeyR", 82),
-}
-
-
-def dispatch_key(connection: DevToolsConnection, code: str, *, down: bool = True, up: bool = True) -> None:
-    key, physical_code, virtual = KEY_DATA[code]
-    parameters = {"key": key, "code": physical_code, "windowsVirtualKeyCode": virtual,
-                  "nativeVirtualKeyCode": virtual, "modifiers": 0}
-    if down:
-        connection.call("Input.dispatchKeyEvent", {"type": "rawKeyDown", **parameters})
-        if code == "Enter":
-            connection.call("Input.dispatchKeyEvent", {
-                "type": "char", "text": "\r", "unmodifiedText": "\r", **parameters,
-            })
-    if up:
-        connection.call("Input.dispatchKeyEvent", {"type": "keyUp", **parameters})
 
 
 def png_pixel(path: Path, x: int, y: int) -> tuple[int, int, int]:
@@ -421,286 +291,6 @@ controller.destroy();
     return json.loads(html.unescape(match.group(1)))
 
 
-def _phase4k_probe_source() -> str:
-    return r'''
-import { landerGameController as controller } from "/static/lander-game.js";
-import { createRun, createSimulationClock } from "/static/lander-model.js";
-
-const shell = document.querySelector("#lander-scene-shell");
-const stage = document.querySelector("#lander-scene-stage");
-const restart = document.querySelector("#lander-restart");
-const exit = document.querySelector("#lander-exit");
-const outside = document.querySelector("header a");
-const clicks = {restart: 0, exit: 0};
-const keyEvents = [];
-restart.addEventListener("click", () => { clicks.restart += 1; });
-exit.addEventListener("click", () => { clicks.exit += 1; });
-for (const type of ["keydown", "keyup"]) {
-    document.addEventListener(type, (event) => {
-        keyEvents.push({type, key: event.key, defaultPrevented: event.defaultPrevented});
-    });
-}
-
-const pause = () => {
-    controller.paused = true;
-    if (controller.frameId !== null) cancelAnimationFrame(controller.frameId);
-    controller.frameId = null;
-};
-
-const reset = (state = "flying") => {
-    if (controller.model.state !== "preflight") controller.exit();
-    const now = performance.now();
-    controller.start(false, now);
-    pause();
-    controller.clearAllInput(now);
-    controller.model = {...createRun({seed: 1}), state,
-        launchStarted: state === "launching" ? false : controller.model.launchStarted};
-    controller.clock = createSimulationClock(now);
-    controller.previousFrame = now;
-    controller.render();
-    return now;
-};
-
-const snapshot = () => ({
-    state: controller.model.state,
-    pose: structuredClone(controller.model.pose),
-    fuel: controller.model.fuel,
-    held: [...controller.heldKeys].sort(),
-    queue: structuredClone(controller.clock.queue),
-    pulse: structuredClone(controller.collectivePulse),
-    focus: document.activeElement?.id ?? "",
-    clicks: structuredClone(clicks),
-});
-
-const keyboardEvent = (target, timestamp, key, code) => ({
-    target, key, code, timeStamp: timestamp, repeat: false,
-    ctrlKey: false, altKey: false, metaKey: false, shiftKey: false,
-    composedPath: () => [target, shell, document, window],
-    preventDefault() {},
-});
-
-const pointerEvent = (timestamp, pointerType) => ({
-    type: "pointerdown", target: stage, pointerId: pointerType === "touch" ? 12 : 11,
-    pointerType, isPrimary: true, button: 0, clientX: 500, clientY: 320,
-    timeStamp: timestamp, composedPath: () => [stage, shell, document, window],
-    preventDefault() {},
-});
-
-const departure = (authority) => {
-    const now = reset("launching");
-    controller.model = {...controller.model, status: "sentinel", launchStarted: false};
-    controller.clock = createSimulationClock(now);
-    controller.previousFrame = now;
-    const beforeFuel = controller.model.fuel;
-    if (authority === "space") {
-        controller.onKeyDown(keyboardEvent(shell, now, " ", "Space"));
-    } else if (authority === "up-vi") {
-        controller.onKeyDown(keyboardEvent(shell, now, "ArrowUp", "ArrowUp"));
-        controller.onKeyDown(keyboardEvent(shell, now, "h", "KeyH"));
-    } else {
-        const originalCapture = stage.setPointerCapture;
-        Object.defineProperty(stage, "setPointerCapture", {configurable: true, value() {}});
-        try { controller.onPointer(pointerEvent(now, authority)); }
-        finally { Object.defineProperty(stage, "setPointerCapture", {configurable: true, value: originalCapture}); }
-    }
-    controller.frame(now + 1000 / 120);
-    return {authority, launchStarted: controller.model.launchStarted,
-        state: controller.model.state, statusCleared: controller.model.status === "",
-        fuelSpent: controller.model.fuel < beforeFuel};
-};
-
-window.phase4k = {
-    controller, shell, restart, exit, outside, clicks, keyEvents, pause, reset, snapshot, departure,
-    focus(id) { document.querySelector(`#${id}`).focus(); return document.activeElement.id; },
-    focusOutside() { outside.focus(); return document.activeElement === outside; },
-    clearEvents() { keyEvents.length = 0; },
-    actionCopy() {
-        const copy = (button) => ({label: button.firstElementChild.textContent.trim(),
-            hint: button.lastElementChild.textContent.trim()});
-        return {restart: copy(restart), exit: copy(exit)};
-    },
-    accessibilitySetup() {
-        reset("failed");
-        const label = document.querySelector("#lander-fuel-label");
-        const value = document.querySelector("#lander-fuel-value");
-        return {ids: shell.getAttribute("aria-describedby").split(" "), label: label.textContent.trim(),
-            value: value.textContent.trim(), actionCopy: this.actionCopy()};
-    },
-    refreshFuel() {
-        const value = document.querySelector("#lander-fuel-value");
-        const before = value.textContent.trim();
-        controller.model = {...controller.model, fuel: controller.model.fuel - 1};
-        controller.render();
-        return {before, value: value.textContent.trim(), label:
-            document.querySelector("#lander-fuel-label").textContent.trim()};
-    },
-};
-document.documentElement.dataset.phase4kReady = "true";
-'''
-
-
-def _normalize_accessible(value: str) -> str:
-    return " ".join(value.split())
-
-
-def _application_node(tree: dict[str, object]) -> dict[str, object]:
-    nodes = tree["nodes"]
-    return next(node for node in nodes if node.get("role", {}).get("value") == "application")
-
-
-def _button_names(tree: dict[str, object]) -> list[str]:
-    return [str(node.get("name", {}).get("value", "")) for node in tree["nodes"]
-            if node.get("role", {}).get("value") == "button"]
-
-
-def browser_phase4k_contract(output: Path) -> dict[str, object]:
-    chromium = next(
-        (candidate for name in ("google-chrome", "chromium", "chromium-browser")
-         if (candidate := shutil.which(name))),
-        None,
-    )
-    if chromium is None:
-        raise AssertionError("Chromium or Google Chrome is required for Phase 4K browser contracts")
-    page = output / "lander/index.html"
-    source = page.read_text(encoding="utf-8")
-    probe_path = output / "phase4k-browser.js"
-    probe_path.write_text(_phase4k_probe_source(), encoding="utf-8")
-    page.write_text(source.replace("</body>", '<script type="module" src="/phase4k-browser.js"></script></body>', 1),
-                    encoding="utf-8")
-    server = ThreadingHTTPServer(("127.0.0.1", 0), partial(QuietHandler, directory=str(output)))
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    profile = tempfile.TemporaryDirectory()
-    process = subprocess.Popen((
-        chromium,
-        "--headless",
-        "--disable-gpu",
-        "--no-sandbox",
-        "--no-first-run",
-        "--no-default-browser-check",
-        "--remote-allow-origins=*",
-        "--remote-debugging-port=0",
-        f"--user-data-dir={profile.name}",
-        "about:blank",
-    ), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env={**os.environ, "HOME": profile.name})
-    connection = None
-    try:
-        port_path = Path(profile.name) / "DevToolsActivePort"
-        for _ in range(200):
-            if port_path.exists():
-                break
-            if process.poll() is not None:
-                raise AssertionError("Chromium exited before opening its DevTools endpoint")
-            time.sleep(0.025)
-        else:
-            raise AssertionError("Chromium did not publish its DevTools endpoint")
-        port = int(port_path.read_text(encoding="utf-8").splitlines()[0])
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=10) as response:
-            targets = json.load(response)
-        target = next(item for item in targets if item["type"] == "page")
-        connection = DevToolsConnection(target["webSocketDebuggerUrl"])
-        connection.call("Runtime.enable")
-        connection.call("Page.enable")
-        connection.call("Accessibility.enable")
-        url = f"http://127.0.0.1:{server.server_address[1]}/lander/"
-        connection.call("Page.navigate", {"url": url})
-        for _ in range(200):
-            if connection.evaluate("document.documentElement.dataset.phase4kReady === 'true'"):
-                break
-            time.sleep(0.025)
-        else:
-            raise AssertionError("Phase 4K browser probe did not initialize")
-
-        result: dict[str, object] = {}
-        connection.evaluate("phase4k.reset('flying'); phase4k.shell.focus()")
-        dispatch_key(connection, "Tab")
-        result["activeTabOrder"] = [connection.evaluate("document.activeElement.id")]
-        connection.evaluate("phase4k.reset('failed'); phase4k.shell.focus()")
-        dispatch_key(connection, "Tab")
-        first_failed = connection.evaluate("document.activeElement.id")
-        dispatch_key(connection, "Tab")
-        result["failedTabOrder"] = [first_failed, connection.evaluate("document.activeElement.id")]
-
-        activations = []
-        for action, state in (("exit", "flying"), ("restart", "failed")):
-            for key in ("Space", "Enter"):
-                connection.evaluate(
-                    f"phase4k.reset('{state}'); phase4k.clicks.{action} = 0; phase4k.{action}.focus()"
-                )
-                dispatch_key(connection, key)
-                activations.append(connection.evaluate(
-                    f"({{action:'{action}',key:'{key}',clicks:phase4k.clicks.{action},"
-                    "state:phase4k.controller.model.state,held:[...phase4k.controller.heldKeys],"
-                    "thrustEdges:phase4k.controller.clock.queue.some((edge) => edge.left + edge.right > 0),"
-                    "commanded:structuredClone(phase4k.controller.model.commanded)})"
-                ))
-        result["activations"] = activations
-
-        passive_actions = []
-        for action, state in (("exit", "flying"), ("restart", "failed")):
-            for key in ("ArrowUp", "ArrowLeft", "ArrowRight", "KeyH", "KeyL"):
-                connection.evaluate(
-                    f"phase4k.reset('{state}'); phase4k.clicks.{action} = 0; phase4k.{action}.focus()"
-                )
-                before = connection.evaluate("phase4k.snapshot()")
-                dispatch_key(connection, key)
-                after = connection.evaluate("phase4k.snapshot()")
-                passive_actions.append({"action": action, "key": key, "before": before, "after": after})
-        result["passiveActions"] = passive_actions
-
-        connection.evaluate("phase4k.reset('flying'); phase4k.focusOutside(); phase4k.clearEvents()")
-        outside_before = connection.evaluate("phase4k.snapshot()")
-        for key in ("Escape", "KeyR", "Space", "ArrowUp", "ArrowLeft", "KeyH", "KeyL"):
-            dispatch_key(connection, key)
-        result["outside"] = {"before": outside_before, "after": connection.evaluate("phase4k.snapshot()"),
-                             "events": connection.evaluate("structuredClone(phase4k.keyEvents)")}
-
-        connection.evaluate("phase4k.reset('flying'); phase4k.shell.focus(); phase4k.clearEvents()")
-        dispatch_key(connection, "Space", up=False)
-        connection.evaluate("phase4k.focusOutside()")
-        transition_before = connection.evaluate("phase4k.snapshot()")
-        connection.evaluate("phase4k.clearEvents()")
-        dispatch_key(connection, "Space", down=False)
-        result["outsideRelease"] = {"before": transition_before, "after": connection.evaluate("phase4k.snapshot()"),
-                                    "events": connection.evaluate("structuredClone(phase4k.keyEvents)")}
-
-        result["departures"] = connection.evaluate(
-            "['space','up-vi','mouse','touch'].map((authority) => phase4k.departure(authority))"
-        )
-
-        accessibility = connection.evaluate("phase4k.accessibilitySetup()")
-        first_tree = connection.call("Accessibility.getFullAXTree")
-        refresh = connection.evaluate("phase4k.refreshFuel()")
-        second_tree = connection.call("Accessibility.getFullAXTree")
-        result["accessibility"] = {
-            "dom": accessibility,
-            "refresh": refresh,
-            "beforeDescription": _application_node(first_tree).get("description", {}).get("value", ""),
-            "afterDescription": _application_node(second_tree).get("description", {}).get("value", ""),
-            "buttonNames": _button_names(second_tree),
-        }
-        return result
-    finally:
-        if connection is not None:
-            try:
-                connection.close()
-            except (ConnectionError, OSError):
-                pass
-        if process.poll() is None:
-            process.terminate()
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
-        page.write_text(source, encoding="utf-8")
-        probe_path.unlink(missing_ok=True)
-        profile.cleanup()
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
-
-
 class ArcadeBrowserTests(RepositoryFixture):
     def test_phase4k_native_input_focus_departure_and_accessibility_contracts(self) -> None:
         result = browser_phase4k_contract(self.build())
@@ -719,37 +309,72 @@ class ArcadeBrowserTests(RepositoryFixture):
                 self.assertEqual(witness["after"], witness["before"])
 
         outside = result["outside"]
-        self.assertEqual(outside["after"], outside["before"])
-        self.assertEqual(len(outside["events"]), 14)
-        self.assertTrue(all(not event["defaultPrevented"] for event in outside["events"]))
-        outside_release = result["outsideRelease"]
-        self.assertEqual(outside_release["before"]["held"], [])
-        self.assertEqual(outside_release["after"], outside_release["before"])
-        self.assertEqual(outside_release["events"], [{"type": "keyup", "key": " ", "defaultPrevented": False}])
+        expected_matrix = {
+            (state, target, key)
+            for state in ("flying", "launching", "failed")
+            for target in ("header", "breadcrumb")
+            for key in ("Escape", "KeyR", "Space", "ArrowUp", "ArrowDown", "ArrowLeft",
+                        "ArrowRight", "KeyH", "KeyL")
+        }
+        self.assertEqual({(item["state"], item["target"], item["key"]) for item in outside},
+                         expected_matrix)
+        for witness in outside:
+            with self.subTest(state=witness["state"], target=witness["target"], key=witness["key"]):
+                self.assertEqual(witness["before"]["focus"], f'phase4k-{witness["target"]}-target')
+                self.assertEqual(witness["after"], witness["before"])
+                self.assertEqual(len(witness["events"]), 2)
+                self.assertTrue(all(not event["defaultPrevented"] for event in witness["events"]))
 
         self.assertEqual([witness["authority"] for witness in result["departures"]],
-                         ["space", "up-vi", "mouse", "touch"])
+                         ["keyboard-hold", "keyboard-tap", "vi-hold", "vi-tap",
+                          "mouse-hold", "mouse-tap",
+                          "touch-hold", "touch-tap"])
         for witness in result["departures"]:
             self.assertTrue(witness["launchStarted"], witness["authority"])
-            self.assertTrue(witness["statusCleared"], witness["authority"])
             self.assertTrue(witness["fuelSpent"], witness["authority"])
 
         accessibility = result["accessibility"]
         dom = accessibility["dom"]
         refresh = accessibility["refresh"]
         self.assertEqual(dom["ids"].index("lander-fuel-value"), dom["ids"].index("lander-fuel-label") + 1)
-        before_segment = _normalize_accessible(f'{dom["label"]} {dom["value"]}')
-        after_segment = _normalize_accessible(f'{refresh["label"]} {refresh["value"]}')
-        before_description = _normalize_accessible(accessibility["beforeDescription"])
-        after_description = _normalize_accessible(accessibility["afterDescription"])
-        self.assertNotEqual(refresh["before"], refresh["value"])
+        stable_label = dom["label"]
+        stable_status = dom["status"]
+        self.assertEqual(refresh["before"]["label"], stable_label)
+        self.assertEqual(refresh["after"]["label"], stable_label)
+        self.assertEqual(refresh["before"]["status"], stable_status)
+        self.assertEqual(refresh["after"]["status"], stable_status)
+        self.assertEqual(refresh["before"]["value"], dom["value"])
+        self.assertNotEqual(refresh["before"]["value"], refresh["after"]["value"])
+        before_segment = normalize_accessible(f'{stable_label} {refresh["before"]["value"]}')
+        after_segment = normalize_accessible(f'{stable_label} {refresh["after"]["value"]}')
+        before_description = normalize_accessible(accessibility["beforeDescription"])
+        after_description = normalize_accessible(accessibility["afterDescription"])
         self.assertEqual(before_description.count(before_segment), 1)
         self.assertEqual(after_description.count(after_segment), 1)
         self.assertNotIn(before_segment, after_description)
+        self.assertEqual(after_description, before_description.replace(before_segment, after_segment, 1))
         for action in ("restart", "exit"):
             copy = dom["actionCopy"][action]
             self.assertIn(copy["label"], accessibility["buttonNames"])
             self.assertNotIn(f'{copy["label"]} {copy["hint"]}', accessibility["buttonNames"])
+
+    def test_phase4k_browser_departures_require_production_input_listeners(self) -> None:
+        output = self.build()
+        game_path = output / "static/lander-game.js"
+        source = game_path.read_text(encoding="utf-8")
+        listeners = (
+            'this.listen(document, "keydown", (event) => this.onKeyDown(event));',
+            'this.listen(this.lander_scene_stage, type, (event) => this.onPointer(event));',
+        )
+        for listener in listeners:
+            with self.subTest(listener=listener):
+                self.assertIn(listener, source)
+                try:
+                    game_path.write_text(source.replace(listener, "", 1), encoding="utf-8")
+                    with self.assertRaises(AssertionError):
+                        browser_phase4k_contract(output)
+                finally:
+                    game_path.write_text(source, encoding="utf-8")
 
     def test_active_description_resolves_only_visible_conditional_relationships(self) -> None:
         result = browser_description_contract(self.build())

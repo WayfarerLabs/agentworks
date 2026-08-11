@@ -63,6 +63,8 @@ class _FragmentParser(HTMLParser):
         self.direct_text: list[list[str]] = []
         self.stack: list[tuple[str, int]] = []
         self.text: list[str] = []
+        self.top_level_text: list[str] = []
+        self.malformed = False
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attributes = dict(attrs)
@@ -81,6 +83,8 @@ class _FragmentParser(HTMLParser):
         self.stack.append((tag, index))
 
     def handle_endtag(self, tag: str) -> None:
+        if not self.stack or self.stack[-1][0] != tag:
+            self.malformed = True
         while self.stack:
             open_tag, _ = self.stack.pop()
             if open_tag == tag:
@@ -90,6 +94,8 @@ class _FragmentParser(HTMLParser):
         self.text.append(data)
         if self.stack:
             self.direct_text[self.stack[-1][1]].append(data)
+        else:
+            self.top_level_text.append(data)
 
 
 def _one(parser: _FragmentParser, identifier: str) -> tuple[str, dict[str, str | None]]:
@@ -110,17 +116,54 @@ def _nonempty(value: str | None) -> bool:
 
 def validate_game_contract(template: str) -> None:
     """Validate the complete static, no-JavaScript game recovery subtree."""
-    stripped = template.strip()
-    if not stripped.startswith('<section id="lander-game"') or not stripped.endswith("</section>"):
-        raise ValueError("lander-game.html: root section must contain the complete scene")
     parser = _FragmentParser()
     parser.feed(template)
+    top_level = [index for index, parent in enumerate(parser.parent_indexes) if parent is None]
+    if top_level != [0] or parser.stack or parser.malformed or _nonempty("".join(parser.top_level_text)):
+        raise ValueError("lander-game.html: reviewed root must be the sole well-formed top-level element")
     if len(parser.ids) != len(set(parser.ids)):
         raise ValueError("lander-game.html: IDs must be unique")
     if frozenset(parser.ids) != EXPECTED_GAME_IDS:
         missing = sorted(EXPECTED_GAME_IDS - set(parser.ids))
         extra = sorted(set(parser.ids) - EXPECTED_GAME_IDS)
         raise ValueError(f"lander-game.html: game ID contract differs; missing={missing}, extra={extra}")
+    expected_tags = {
+        "lander-game": "section",
+        "lander-scene-shell": "div",
+        "lander-scene-stage": "div",
+        "lander-scene": "svg",
+        "lander-scene-title": "title",
+        "lander-scene-description": "desc",
+        "scene-sky": "rect",
+        "scene-stars": "path",
+        "lander-world": "g",
+        "terrain-layer": "g",
+        "site-layer": "g",
+        "debris-layer": "g",
+        "mission-lander": "g",
+        "mission-left-engine": "use",
+        "mission-right-engine": "use",
+        "mission-mark": "use",
+        "mission-bay-lip": "path",
+        "mission-agent": "g",
+        "crash-flash": "g",
+        "next-site-cue": "g",
+        "lander-start": "button",
+        "lander-fuel": "p",
+        "lander-fuel-gauge": "span",
+        "lander-fuel-gauge-fill": "span",
+        "lander-fuel-label": "span",
+        "lander-fuel-value": "span",
+        "lander-target-direction": "span",
+        "lander-outcome": "div",
+        "lander-status": "p",
+        "lander-restart": "button",
+        "lander-controls-rail": "div",
+        "lander-controls": "p",
+        "lander-exit": "button",
+    }
+    if any(parser.tags[parser.id_indexes[identifier]][0] != tag for identifier, tag in expected_tags.items()):
+        raise ValueError("lander-game.html: required game element tag identity is invalid")
     root_tag, root_attributes = parser.tags[0]
     if (
         root_tag != "section"
@@ -214,7 +257,11 @@ def validate_game_contract(template: str) -> None:
     }
     for parent, identifiers in expected_children.items():
         children = _children(parser, parent)
-        if [attributes.get("id") for _, attributes in children] != identifiers:
+        parent_index = parser.id_indexes[parent]
+        if (
+            [attributes.get("id") for _, attributes in children] != identifiers
+            or any(parser.parent_indexes[parser.id_indexes[identifier]] != parent_index for identifier in identifiers)
+        ):
             raise ValueError(f"lander-game.html: #{parent} immediate child structure is invalid")
     if _children(parser, "lander-status") or _children(parser, "lander-controls"):
         raise ValueError("lander-game.html: status and controls must contain direct prose only")
