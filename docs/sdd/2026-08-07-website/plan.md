@@ -1,6 +1,6 @@
 # Plan: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander Phase 4K review in progress
+- Status: Interim implementation complete; continuous Lander Phase 4K operator acceptance pending
 - Date: 2026-08-07
 - Last revised: 2026-08-11
 - FRD: `frd.md`
@@ -753,7 +753,7 @@ separate Phase 4J acceptance is expected.
       keyboard/vi/pointer/touch, persistent Exit and failure-only Restart behavior, focus recovery,
       no action-to-flight input leakage, 320-pixel and 400-percent layout, shared-game identity, and
       unchanged world/DOM/privacy bounds.
-- [ ] Run focused website suites, deterministic root/project builds, complete repository gates,
+- [x] Run focused website suites, deterministic root/project builds, complete repository gates,
       artifact/code/fresh-eyes reviews, and automated Chromium acceptance; resolve every valid
       finding and re-review the immutable integrated head.
 - [ ] Refresh port 8766 from the exact reviewed head and obtain operator Chrome and Edge acceptance
@@ -768,6 +768,22 @@ appears beneath `Crashed!`, with a smaller `r` line, and the legend stops repeat
 dedicated Launch button is removed so `Agent Deployed!` stands alone and the player departs with
 ordinary game controls. The safe-contact limits rise modestly to `1.8` horizontal, `2.8` descending,
 `12` degrees tilt, and `18` degrees per second rotation.
+
+Implementation evidence (2026-08-11): integrated commit `f70315c2` deletes the Launch authority,
+makes Exit the persistent rail action, makes Restart failure-only, scopes physical keys to the
+active non-interactive game path, exposes separate fuel label/value descriptions, and regenerates
+the landing proof under the exact `1.8/2.8/12/18` envelope. Geometry and world digests remain
+unchanged; physics/output digests change as designed, and only the comparator-selected route-93
+terminal runs change. Commit `2bd99b7d` adds the Phase 4K Node suite to both workflows.
+
+Review evidence (2026-08-11): code and fresh-eyes reviewers approved exact head `39f1dd8d` after
+validator and browser-witness hardening. Final gates pass 69 Node tests, 140 Python website tests,
+7,754 non-integration repository tests, strict typing and lint, deterministic twelve-file root and
+project builds, locked-SDD, and Rulesync. Chromium exercises real keyboard, vi, mouse, and touch
+departure; native action focus and single activation; the complete outside-shell key matrix; exact
+numeric accessibility refresh; listener-removal mutations; responsive layout; hidden/reduced motion;
+shared Lander/404 behavior; and acquisition-failure cleanup. Human Chrome and Edge acceptance
+remains intentionally open.
 
 Definition of done: R23-R24 and AC24-AC25 describe one unambiguous action hierarchy; launch-ready
 has no action besides persistent rail Exit, failed adds only Restart, shortcut hints are visible and
