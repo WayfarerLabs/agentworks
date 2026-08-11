@@ -1,6 +1,6 @@
 # FRD: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander Phase 4J review and acceptance in
+- Status: Interim implementation complete; continuous Lander Phase 4J operator acceptance in
   progress
 - Date: 2026-08-07
 - Last revised: 2026-08-11

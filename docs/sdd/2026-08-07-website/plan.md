@@ -1,6 +1,6 @@
 # Plan: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander Phase 4J review and acceptance in
+- Status: Interim implementation complete; continuous Lander Phase 4J operator acceptance in
   progress
 - Date: 2026-08-07
 - Last revised: 2026-08-11
@@ -685,7 +685,7 @@ review-clean, browser-accepted, and merge-ready.
       agent persistence across service/checkpoint/restart/retention, structural success/crash state
       and action focus, terrain-to-control-rail separation, narrow/zoom non-overlap, hidden-page
       pause, no font/network/storage additions, and the unchanged world ceiling and route digests.
-- [ ] Run focused website suites, deterministic root/project builds, complete repository gates,
+- [x] Run focused website suites, deterministic root/project builds, complete repository gates,
       artifact/code/fresh-eyes reviews, and automated Chromium acceptance; resolve every valid
       finding and re-review the immutable integrated head.
 - [ ] Refresh port 8766 from the exact reviewed head and obtain operator Chrome and Edge acceptance
@@ -708,8 +708,18 @@ installed-agent projection without changing the route, physics, world, or geomet
 delegated exact-head gates passed 61 Node tests, 127 Python website tests, 7,754 non-integration
 repository tests, strict typing and formatting, derivation verification, deterministic twelve-file
 root/project builds, the world descendant budget, locked-SDD, Rulesync, and file lint. Commit
-`8f999dee` adds the Phase 4J Node suite to both CI and Pages. Independent review and browser
-acceptance remain intentionally open.
+`8f999dee` adds the Phase 4J Node suite to both CI and Pages.
+
+Review evidence (2026-08-11): code and fresh-eyes reviewers approved exact head `ed6d5f93` with no
+open findings after `b6ae2318` made the direction description predicate exact, removed authored
+status wording from banner state, and replaced Phase 4J prose pins with structural witnesses. The
+broader isolated Chromium run passed 23 of 23 measured checks on the immediately preceding
+integrated production head; exact-head Chromium then covered the corrected raw and resolved
+accessibility relationship, while later commits changed documentation only. Automated evidence
+includes three service cycles, exact refuel samples and resize projection, a real hidden-tab freeze,
+normal and reduced-motion outcomes, installed-agent retention, native action isolation, 320-pixel
+layout, a worst measured world count of 77 below 80, same-origin-only requests, empty storage, and
+clean teardown. Human Chrome and Edge acceptance remains intentionally open.
 
 Definition of done: R24 and AC25 hold without changing Phase 4I physics, collision, routes, world
 generation, privacy, or shared-fragment identity; the arcade HUD communicates without a downloaded
