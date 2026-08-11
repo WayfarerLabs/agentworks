@@ -376,6 +376,11 @@ installed no-topic agent guide owns source-review and continuing assistance.
       installed, a no-topic clean-home `agw guide --agent` renders the complete authored handoff and
       absent-config guidance with exit 0; selected topics and genuine failures remain nonzero. R12
       disclosure clauses and every hard-coded focused-review path are pinned by contract tests.
+- [x] Apply the operator's 2026-08-11 test-simplicity correction. Remove the phrase blacklist and
+      sentence-by-sentence R12 assertions added during review: authored assistance content is
+      written correctly and remains ordinary review-owned prose, not a frozen unit-test vocabulary.
+      Retain executable and structural coverage for clean-home exit behavior, source-review path
+      existence, action records, generation parity, and authorization boundaries.
 - [ ] PR #480 contains the complete Phase 3 feature, passes its repo and live feature gates, and
       merges normally to `main` with a conventional `feat:` title. Release-please then regenerates
       the separate 0.14 release PR from that mainline feature, adding the version, changelog,
