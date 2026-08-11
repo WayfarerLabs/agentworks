@@ -48,7 +48,8 @@ Create may enter mutation only after all of these succeed:
 4. operator IPv4 SSH-prefix resolution;
 5. `AFTER_CLASSIC_FIREWALL` network-policy order plus classic VPC priority-zero allow/deny conflict
    inspection;
-6. machine catalog selection plus live CPU/memory and conditional architecture verification;
+6. machine catalog selection plus live CPU/memory, conditional architecture, nonzero
+   `maximum_persistent_disks`, and empty required-accelerator verification;
 7. `debian-cloud` Debian image-family and zonal `pd-balanced` disk-type resolution;
 8. instance, stable firewall-name, and normalized-name collision checks;
 9. credential-free startup request construction.
@@ -57,6 +58,12 @@ Runup performs its authenticated subset before the manager inserts a pending dat
 runup failure has neither row nor GCP cleanup. Create repeats the request-specific/live checks after
 the pending row exists but before its first GCP mutation. A create-side P0 failure therefore has no
 provider cleanup; the existing manager exception path removes the pending row.
+
+The live machine fields reject known incompatibilities but do not prove the complete
+machine/`pd-balanced` pair. GCE exposes no read-only pair validator. A residual definitive instance
+insert rejection therefore retains `GCEOperationError`, adds fixed guidance naming the selected
+machine type and `pd-balanced` support boundary, and follows ordinary bounded rollback without
+rendering or retaining provider text.
 
 ## Create transitions
 
@@ -144,6 +151,10 @@ second provider refresh after the bounded `result()` wait. It reads only
 exception objects. Delete and rollback are postcondition-driven exceptions to the insert matrix:
 after any wait failure they inspect provider state, accept only verified absence, retain survivors
 or mismatches, and preserve the deny when an instance may remain.
+
+Capacity classification uses strict code equality. A malformed value or superstring such as
+`PREFIX_ZONE_RESOURCE_POOL_EXHAUSTED` is an ordinary definitive `GCEOperationError`, never a
+`GCECapacityError`.
 
 A deny/allow insert error or timeout is likewise a possible rule. Every insert carries a unique
 request UUID. A pre-response indeterminate call retries the same request once with the same UUID;

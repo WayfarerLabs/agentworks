@@ -63,6 +63,16 @@ Decisions:
 - [`MachineType.architecture`](https://docs.cloud.google.com/python/docs/reference/compute/latest/google.cloud.compute_v1.types.MachineType)
   is an output-only proto field alongside guest CPU and memory fields. Live GCE responses may omit
   it, which the Python model exposes as an empty string.
+- Google's [E2 machine-type table](https://docs.cloud.google.com/compute/docs/general-purpose-machines#e2_machine_types)
+  reports that `e2-small` and `e2-medium` expose two guest vCPUs and 2 GiB and 4 GiB respectively,
+  while sustaining an aggregate 0.5 and 1 vCPU with automatic bursting. E2 is available across all
+  regions and zones and supports `pd-balanced`.
+- The [Persistent Disk compatibility table](https://docs.cloud.google.com/compute/docs/disks/persistent-disks#machine_series_support)
+  shows that some current series, including N4, do not support Persistent Disk. The live
+  [`MachineType` resource](https://docs.cloud.google.com/compute/docs/reference/rest/v1/machineTypes)
+  exposes `maximumPersistentDisks` and required guest accelerators, which identify known
+  incompatibilities without a brittle machine-name allowlist. Neither that resource nor the zonal
+  `DiskType` resource validates a complete machine/disk pair before `instances.insert`.
 
 Decisions:
 
@@ -71,6 +81,15 @@ Decisions:
 - select from the declared catalog, then read the live machine type and verify CPU and memory before
   mutation; verify architecture only when the provider populates it, otherwise retain the declared
   catalog value without deriving architecture from the machine-type name;
+- put `e2-small` and `e2-medium` ahead of the standard E2 defaults and teach their shared-core
+  sustained/burst behavior rather than presenting them as full-core equivalents;
+- reject a selected live type before mutation when it reports no Persistent Disk capacity or
+  required accelerators, naming the current CPU-only `pd-balanced` support boundary; keep the
+  literal catalog extensible and add Hyperdisk through a future explicit storage profile rather
+  than series-name inference;
+- treat those fields as known-incompatibility filters, not complete pair proof; give every residual
+  definitive instance-insert rejection a fixed, provider-text-free hint to verify the selected
+  machine type's CPU-only Debian 12 and `pd-balanced` compatibility before retrying;
 - map `x86_64` to `debian-12` and `arm64` to `debian-12-arm64`.
 - resolve both families from the public `debian-cloud` image project, never the target project.
 

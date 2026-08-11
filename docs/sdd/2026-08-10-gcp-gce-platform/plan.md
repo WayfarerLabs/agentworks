@@ -193,10 +193,32 @@ correction. The final evidence record and SDD lock still follow the passing live
 - [x] Run focused GCP rollback/operation/platform tests, Ruff, strict mypy, file lint, locked-SDD,
       Rulesync, full non-integration tests, and both required code reviews; resolve every valid
       finding.
-- [ ] Merge current main, post a signed exact-head disposition, and flip the PR from draft to ready
-      for the next operator-gated live acceptance.
+The exact-head disposition and ready handoff originally planned here moved to Phase 3b because the
+catalog/support-boundary correction must precede the next live acceptance.
 
 **DoD:** offline and authorized live evidence prove the shipped behavior and cleanup; reviews and
 forge checks are green; permanent docs match code; the merge-ready PR is truthfully locked.
+
+### Phase 3b: catalog and machine-compatibility correction
+
+- [ ] Add `e2-small` and `e2-medium` ahead of the standard E2 built-in ladder, with deterministic
+      size-selection tests and permanent teaching that they expose two guest vCPUs but sustain an
+      aggregate 0.5 and 1 vCPU respectively with automatic bursting.
+- [ ] Reject known live incompatibilities with the CPU-only, Balanced Persistent Disk contract
+      before mutation using provider fields rather than a machine-name allowlist. Reject zero
+      Persistent Disk capacity or required guest accelerators with a typed, actionable, secret-free
+      configuration error that names the selected machine type and supported boundary. Because GCE
+      has no read-only complete machine/disk-pair validator, add fixed machine/`pd-balanced`
+      guidance to residual definitive instance-insert failures and retain bounded rollback.
+- [ ] Add a DONE structured-operation regression proving a strict superstring of
+      `ZONE_RESOURCE_POOL_EXHAUSTED` remains a generic definitive `GCEOperationError`, then run the
+      focused and repository gates plus both required code reviews and resolve every valid finding.
+- [ ] Post the signed exact-head handoff and flip the PR from draft to ready for the next
+      operator-gated live acceptance.
+
+**DoD:** small templates have honest low-cost burstable defaults; known-incompatible custom machine
+types fail before mutation, while residual pair incompatibilities fail definitively with useful
+guidance and bounded rollback; capacity classification stays exact; the next live test starts from
+a reviewed, green handoff.
 
 -- agw-ns-gcp-platform (effort lead)

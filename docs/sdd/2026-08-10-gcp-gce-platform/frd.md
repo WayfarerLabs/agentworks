@@ -56,9 +56,12 @@ service-account arm, omitted or explicit-null `secret` selects the well-known
 `gcp-service-account-key` secret name; a blank name is invalid.
 
 Each machine-type entry declares positive `cpus` and `memory`, a non-empty Compute Engine `type`,
-and `arch` of `x86_64` or `arm64`. The built-in catalog is an x86 E2 standard ladder. Selection is
+and `arch` of `x86_64` or `arm64`. The built-in catalog starts with the x86 E2 shared-core
+`e2-small` and `e2-medium` sizes, then continues through the E2 standard ladder. Selection is
 order-independent and chooses the smallest entry satisfying both requested axes, using provider type
-and architecture as deterministic tie-breakers when CPU and memory are equal.
+and architecture as deterministic tie-breakers when CPU and memory are equal. Shared-core entries
+declare the two vCPUs exposed to the guest; their documented sustained aggregate CPU is lower and
+must be taught as burstable capacity.
 
 ### R3: authentication modes
 
@@ -162,8 +165,13 @@ owned firewall names, never credentials or a cached public IP.
 Create uses the smallest selected machine type, then verifies its provider-reported CPU and memory
 before choosing the matching Debian 12 image. When GCE populates its optional output architecture,
 that value must also match the declaration; omission is unknown and leaves the declared catalog
-authoritative. Create uses a balanced persistent boot disk sized from the VM template and explicitly
-marked `auto_delete`, instance-metadata SSH keys with project keys blocked, and deterministic
+authoritative. A live type reporting zero Persistent Disk capacity or required accelerators fails
+with actionable configuration guidance before the first provider mutation. GCE exposes no
+read-only complete machine/disk-pair validator, so a residual incompatibility rejected by
+`instances.insert` fails definitively with fixed, actionable machine/`pd-balanced` guidance and
+runs the normal bounded rollback. Create uses a balanced persistent boot disk sized from the VM
+template and explicitly marked `auto_delete`, instance-metadata SSH keys with project keys blocked,
+and deterministic
 GCE-valid instance, tag, and firewall names. Exact bounded SHA-256-based derivations make every
 retained identity collision-safe for underscores, leading digits, case, invalid runs, suffix
 reservation, and truncation. Start/stop guard on live state to enforce idempotency, and public IP
@@ -218,7 +226,8 @@ durable-material mutation.
 
 Provider-shaped operation tests distinguish DONE HTTP 503 failures carrying the exact structured
 `ZONE_RESOURCE_POOL_EXHAUSTED` code, DONE failures carrying an unknown or malformed structured
-shape, and timeout/non-DONE waits. They prove only the last case is indeterminate, definitive
+shape, strict superstrings of the capacity token, and timeout/non-DONE waits. They prove exact
+equality is required for capacity classification, only the last case is indeterminate, definitive
 failures cannot reconcile to insert success, capacity guidance names the zone without reflecting
 provider text, and every resulting exception graph is detached and secret-free. Rollback tests
 interrupt an ordinary-failure cleanup only after at least one owned resource is removed, then prove
