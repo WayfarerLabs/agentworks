@@ -235,7 +235,7 @@ superseded before merge by Phase 3c after live/review evidence exposed their sem
       vCPUs. Keep `e2-small` and `e2-medium` available through the existing site `machine_types`
       override, and teach the exact override shape, deterministic selection rule, guest-visible vCPU
       count, and sustained/burst capacity without a future product promise.
-- [ ] Extend the shared install-command contract so a slash-containing `test_exec` uses `test -x` in
+- [x] Extend the shared install-command contract so a slash-containing `test_exec` uses `test -x` in
       VM and agent runners while a bare name retains PATH lookup. Give AWS CLI a public-launcher
       executable predicate plus an Agentworks-owned completion marker written only after verified
       install success; require the marker and both public/internal executables in the command's
@@ -251,8 +251,8 @@ superseded before merge by Phase 3c after live/review evidence exposed their sem
       separate zero-mutation regressions for CPU and memory across those branches; document that
       omitted optional disk capacity proceeds to insert; align the capacity error description and
       SDK-shape fallback comment.
-- [ ] Run focused and full gates plus both required code reviews, resolve every valid finding, and
-      refresh the PR's exact-head/current-main/evidence record.
+- [x] Run focused and full gates plus both required code reviews and resolve every valid finding.
+- [ ] Refresh the PR's exact-head/current-main/evidence record.
 - [ ] Post the signed exact-head handoff and flip the PR from draft to ready for the single bounded
       Phase 3 live charter above, including proof that AWS CLI reinit skips the completed managed
       install.
