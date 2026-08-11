@@ -427,8 +427,8 @@ coordinates, let `P=548-platformTop*10`, `L=platformLeft*10`, `R=platformRight*1
 `M L B H R V S H L Z`, `M R P H N V B H R Z`, and `M N P H Q V S H N Z`. Append both diagonals to
 each of six exact `16`-unit platform bays between `B` and `S`, to the one `20`-unit connector bay
 between `P` and `B`, and to each of seven exact `10`-unit NOC bays between `P` and `S`. Set
-`fill="none"`, `stroke="#4b4e55"`, `stroke-width="2"`, `stroke-linecap="square"`, and
-`stroke-linejoin="miter"`; CSS cannot supply a fill, background, or sky-colored rectangle. The
+`fill="none"`, `stroke="#4b4e55"`, `stroke-width="2"`, `stroke-linecap="butt"`, and
+`stroke-linejoin="round"`; CSS cannot supply a fill, background, or sky-colored rectangle. The
 members are therefore exactly `0.2 m` thick and contrast `7.440:1` against sky and `5.517:1` against
 terrain.
 
@@ -436,8 +436,12 @@ Let `MEMBER_HALF=0.1 m`. The exact platform-underframe collider is
 `[platformLeft-.1,platformRight+.1] x [padBase-.1,platformTop-.25]`; the connector collider is
 `[platformRight-.1,platformRight+2.1] x [platformTop-.45,platformTop+.1]`; and the NOC-underframe
 collider is `[platformRight+1.9,platformRight+9.1] x [padBase-.1,platformTop+.1]`. These are the
-axis-aligned outer envelopes of the square-capped, miter-joined `0.2 m` stroke, including brace
-caps, so collision covers every visible member pixel instead of stopping at its centerline. Their
+axis-aligned outer envelopes of the butt-capped, round-joined `0.2 m` stroke. Each diagonal's butt
+cap ends exactly at its outer-loop centerline and overlaps the loop's half-width stroke, so the
+members visibly meet without projecting beyond their endpoints. Each closed outer loop remains
+visually closed, and every round join is contained by its exact `MEMBER_HALF` radius. Every rendered
+member pixel therefore stays inside the `+/-0.1 m` axis-aligned expansion instead of protruding to
+`sqrt(.1^2+.1^2)`, approximately `0.141421 m`. The colliders cover that complete expansion. Their
 overlaps with the solid deck, terrain, and NOC shell are intentional closed unions, not extra
 traversable seams.
 
@@ -445,15 +449,17 @@ After subtracting one member width from both dimensions, every clear platform, c
 bay aperture is contained by the exact envelopes `1.4 by 1.85 m`, `1.8 by 0.15 m`, and
 `0.8 by 2.2 m`. Their exact diagonal squares are `5.3825`, `3.2625`, and `5.48 m^2`, versus
 `3.2^2=10.24 m^2`; equivalently, their diagonal lengths are `sqrt(5.3825)`, `sqrt(3.2625)`, and
-`sqrt(5.48) m`, all strictly below the rigid hull's exact `3.2 m` width. The crossing diagonals only
-subdivide those envelopes further. The conservative closed outer collider is therefore honest: no
-complete lander can enter an opening that it rejects, while sky remains visibly open between actual
-members. Static markup and dynamic rendering use the byte-equivalent path/member attributes; model
-polygons, independent world witnesses, and fixtures use the same three outer envelopes. Tests
-reconstruct path segments and stroked aperture envelopes from the shared site constants
-independently rather than trusting class names or snapshots. A centered `H` and deck outline
-preserve the elevated helicopter-pad reading, and no pale or white rectangle can appear below the
-platform when play starts.
+`sqrt(5.48) m`, all strictly below the rigid hull's exact `3.2 m` width. Butt caps do not extend a
+diagonal past its endpoint, round joins do not move the straight boundary members' inner edges, and
+the crossing diagonals only subdivide those envelopes further; the clear-envelope bounds and
+diagonal squares are therefore unchanged. The conservative closed outer collider is therefore
+honest: no complete lander can enter an opening that it rejects, while sky remains visibly open
+between actual members. Static markup and dynamic rendering use the byte-equivalent path/member
+attributes; model polygons, independent world witnesses, and fixtures use the same three outer
+envelopes. Tests reconstruct path segments, butt caps, round joins, complete stroked-pixel bounds,
+and clear aperture envelopes from the shared site constants independently rather than trusting class
+names or snapshots. A centered `H` and deck outline preserve the elevated helicopter-pad reading,
+and no pale or white rectangle can appear below the platform when play starts.
 
 One gas can sits `3.0 m` right of platform center and does not collide. One NOC begins `2.0 m` right
 of the platform edge. Its collision bottom is exactly the shared shelf `padBase`, never a native or
@@ -820,7 +826,9 @@ The scaffold broad-phase polygons conservatively cover the exact outer envelopes
 pretending each narrow member is a separate passable collider. Section 5.3's member-width and
 aperture-diagonal proof is the required honesty condition for that conservative treatment. Tests
 independently reconstruct every rendered member segment, clear aperture envelope, and closed outer
-collision polygon and reject any aperture diagonal at or above the rigid hull width.
+collision polygon; apply the exact butt-cap/round-join stroke geometry; reject any rendered point
+outside the `+/-MEMBER_HALF` collider expansion; and reject any aperture diagonal at or above the
+rigid hull width.
 
 At every interval endpoint, test the hull against each unsafe feature's closed Euclidean Minkowski
 expansion by `COLLISION_MARGIN`, implemented as closed polygon/segment distance `<=` the margin.
@@ -960,28 +968,28 @@ and remains the required local/CI workflow, not a special release-only regenerat
 `--geometry` contains schema `agw-lander-route-geometry/v2`, the nine IDs, deltas, and literal
 clearance knots, plus one `siteGeometry` object with the exact platform width, thickness, `2.4 m`
 clearance, target band, `2.0 m` connector, `7.0 m` NOC width, `7.2 m` roof offset, `0.5 by 3.2 m`
-mast, `0.2 m` member width, platform/connector/NOC brace counts and bay dimensions, exact clear
-aperture envelopes, and their conservative collision envelopes from section 5.3. Output schema
-`agw-lander-route-derived/v3` contains `deriverVersion`, `recipeVersion`, `canonicalPoseDecimals:9`,
-exact per-route `combinationsEvaluated`, `physicsDigest`, `geometryDigest`, the ordered route
-records from section 10.1, `worldWitnesses`, `worldDigest`, and `outputDigest`. `worldWitnesses`
-contains exactly 81 independently reconstructed world descriptors: nine templates times three pinned
-seeds times three translations. Nesting is template outermost in section 10.1 order, then seed in
-exact order `[1,0x12345678,0xffffffff]`, then origin translation in exact order
-`[(36,5),(117,6.5),(-42,8)]`, where each tuple is `(originCenter,originDeckTop)`. The serialized
-flat array follows that nested order without sorting or regrouping. These three deck tops keep every
-`+/-1.6 m` template target inside the new band and every shelf at or above `1.0 m`; a translation
-that produces below-shelf geometry is invalid. Each descriptor includes the selected motif-bank
-offset, direction, and relevant per-chunk indexes; `10 m` native/corridor samples; cap relief; both
-shelf replacements and native blends; both platform decks; every scaffold member segment and clear
-aperture envelope; platform, connector, and NOC conservative collision envelopes; NOC bodies,
-complete NOC collision envelopes, and mast colliders; and its own digest. Canonical JSON recursively
-sorts object keys, preserves array order, uses `JSON.stringify` without whitespace, and hashes UTF-8
-bytes with lowercase SHA-256. `geometryDigest` hashes the complete geometry object; `physicsDigest`
-hashes an object containing every named numeric constant in sections 8-10, including gimbal and
-assist constants, plus the eight pre-assist command rows; `worldDigest` hashes the ordered world
-descriptors; `outputDigest` hashes the output object with only `outputDigest` omitted. The file adds
-one unhashed trailing LF.
+mast, `0.2 m` member width, butt cap, round join, platform/connector/NOC brace counts and bay
+dimensions, exact clear aperture envelopes, and their conservative collision envelopes from section
+5.3. Output schema `agw-lander-route-derived/v3` contains `deriverVersion`, `recipeVersion`,
+`canonicalPoseDecimals:9`, exact per-route `combinationsEvaluated`, `physicsDigest`,
+`geometryDigest`, the ordered route records from section 10.1, `worldWitnesses`, `worldDigest`, and
+`outputDigest`. `worldWitnesses` contains exactly 81 independently reconstructed world descriptors:
+nine templates times three pinned seeds times three translations. Nesting is template outermost in
+section 10.1 order, then seed in exact order `[1,0x12345678,0xffffffff]`, then origin translation in
+exact order `[(36,5),(117,6.5),(-42,8)]`, where each tuple is `(originCenter,originDeckTop)`. The
+serialized flat array follows that nested order without sorting or regrouping. These three deck tops
+keep every `+/-1.6 m` template target inside the new band and every shelf at or above `1.0 m`; a
+translation that produces below-shelf geometry is invalid. Each descriptor includes the selected
+motif-bank offset, direction, and relevant per-chunk indexes; `10 m` native/corridor samples; cap
+relief; both shelf replacements and native blends; both platform decks; every scaffold member
+segment with cap and join semantics and each clear aperture envelope; platform, connector, and NOC
+conservative collision envelopes; NOC bodies, complete NOC collision envelopes, and mast colliders;
+and its own digest. Canonical JSON recursively sorts object keys, preserves array order, uses
+`JSON.stringify` without whitespace, and hashes UTF-8 bytes with lowercase SHA-256. `geometryDigest`
+hashes the complete geometry object; `physicsDigest` hashes an object containing every named numeric
+constant in sections 8-10, including gimbal and assist constants, plus the eight pre-assist command
+rows; `worldDigest` hashes the ordered world descriptors; `outputDigest` hashes the output object
+with only `outputDigest` omitted. The file adds one unhashed trailing LF.
 
 Candidate search, fuel burn, collision classification, route ordering, demonstrated minima, and all
 world/geometry values retain raw JavaScript numbers. Only after the winning route is selected, the
@@ -1304,7 +1312,8 @@ serialized world descriptors are exact. Every schedule includes an explicit fina
 | Empty-fuel direction  | Fuel `0`, raw engines `(.5875,.2125)`, retained physics `s=1`              | effective engines `(0,0)` and stored/rendered `commanded.vectorAngle=0`                                        |
 | Plumes                | `u=0,0.5,1`                                                                | scales `0.08,0.54,1`; opacities `0.25,0.625,1`                                                                 |
 | First site            | Any normalized seed                                                        | ID `0`, center `36`, width `9.6`, shelf `[31.2,49.8]`, top=`shelf-span native maximum+2.4`, NOC bottom=shelf   |
-| Structure parity      | Static and dynamic site with platform top `p`                              | shelf `p-2.4`; exact `.2 m` open members/apertures; byte-equal path; colliders are nominal envelopes + `.1 m`  |
+| Structure parity      | Static and dynamic site with platform top `p`                              | shelf `p-2.4`; exact `.2 m` butt/round open members; same path; all pixels inside nominal envelopes + `.1 m`   |
+| Member stroke bound   | One diagonal endpoint and one 90-degree outer-loop vertex; width `.2 m`    | butt longitudinal extension `0`; round-join radius `.1`; pixel bound `+/- .1`; aperture squares unchanged      |
 | Gauge                 | `fuel=37.5`, `legDepartureFuel=50`, then checkpoint restore                | level `.75`, band `high`; restore reproduces both values and never caps fuel                                   |
 | Launch-ready hold     | 10 seconds zero or steer-only input after power                            | centered pose, fuel, mission time, zero command, and `Agent Deployed!` remain byte-equal                       |
 | Manual departure      | Launch-ready plus held Space                                               | first step burns/integrates; `flying` begins only when both feet exceed deck by `.05 m`                        |
@@ -1366,28 +1375,31 @@ static/lander-model.js
 static/lander-game.js
 ```
 
-| Layer                                                                   | Required coverage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `node --test website/tests/lander-world.test.mjs`                       | Mixer/seeds; exact `10 m` samples and `50 m` shared chunk boundaries; four-motif traversal and diversity; every shelf/corridor branch; `2.4 m` site clearance and `[3.15,9.9]` band; complete target replacement and native blends; exact v2 geometry digest; static/dynamic platform, `.2 m` member segments, clear-aperture envelopes/diagonals, three conservative colliders, NOC body/envelope, mast, can, window, retention, offscreen, and immutability                                                                                                             |
-| `node --test website/tests/lander-model.test.mjs`                       | State/events; launch-ready zero/steer-only hold, same-step keyboard/pointer/native-pulse release, early-release gravity/crash, both-feet transition, reduced-motion wait, exact banner, checkpoint restore; fuel/gauge/carry; 9.0/80 physics and exact vectors; input rows, assist/coast, generic pulse snapshot/overflow; closed-margin scaffold/connector/terrain/NOC equality; v3 catalog/digests, two runtime replays, ratio/error/crash/ordinal, pointer-token and launch-button token/source witnesses                                                              |
-| Derivation CLI fixture verification                                     | Run section 10.2's ordinary command to a temporary output with `--verify website/tests/fixtures/lander-route-derived-v3.json`; exact v4 deriver, v3 recipes, required geometry v2/derived v3 schemas, `canonicalPoseDecimals:9`, pose-jitter/precision mutations; exact per-route counts in `[2,256]`, no more than 2,304 candidates plus 162 selected replays; all nine minima/success/failure literals and 81 strict world/member/collider descriptors/digests; deterministic x64/ARM64 bytes; finite-exhaustion and mismatch/usage exits; import independence          |
-| `python -m unittest discover -s website/tests -p 'test_*.py'`           | Exact 12-file artifacts at both bases; exact title/`h1`/404 copy; focused validation helper and production DAG; static/dynamic open-member path plus conservative-collider parity, `fill="none"`, no backing rectangle; gauge subtree; exact three-button actions subtree and Launch hidden/disabled projection; one status/banner; generic pulse authority with no direct model launch; battery/signal stages; static viewport; transactional initialization; forbidden network, storage, audio, canvas, service worker, navigation, cookie, and uncontrolled randomness |
-| Manual Chrome and Edge pre-merge; Firefox and Safari/WebKit post-launch | Start/focus/recovery; Space/arrows/vi/touch, short tap, native Launch, mixed-source ownership; lower steering lift and 30-degree plumes; three deployments; visibly open attached trusses with no start-time pale rectangle or false traversable aperture; gauge and rounded reserve; battery/signal stages; one deployment payoff; indefinite wait, self-commanded and native-button takeoff, early release, crash/restart-ready; arrow/carry/empty fuel; boundary landings; Exit/hidden pause; zero requests                                                            |
-| Manual responsive and accessibility acceptance                          | 320 CSS pixels, 400 percent zoom, touch landscape, and wide viewport; gauge/banner/actions do not obscure scene; numeric reserve is sole named fuel value and one polite deployment announcement; Launch is a native 44-pixel target, appears only ready, works with keyboard/touch/AT activation, focuses the scene before hiding, and never overlaps Restart in tab order; logical focus, no trap, useful no-CSS/no-JS order, restrained announcements, solid/static cues, silent decorative SVG, and fixed-token contrast                                              |
-| Performance and longevity witness                                       | 100-site deterministic run; no more than five terrain paths, three sites, eight fragments, 80 world descendants, exactly 78 at simultaneous Phase 4I maximum, and exactly three fixed action descendants; fixed gauge/banner/Launch DOM and one pulse timer; direct selection/shelf-corridor/two-runtime-replay timing; launch-ready 10-second hold unchanged; hidden tab no progress; active frame p95 below 4 ms; bounded ordinary derivation evidence recorded; teardown leaves no listener, timer, capture, frame, enabled dead action, or growing history            |
-| Permanent documentation and repository gates                            | `website/README.md` teaches manual/native departure, leg-relative gauge, tuned vectors, open lattice versus conservative colliders, power stages, and practical bounded v3 regeneration/verification; browser checklist pins copy, gauge/banner, Launch focus/tab/lifecycle, wait/restart, signal, scaffold/no-artifact, input, vacuum, and compatibility witnesses; file lint, locked-SDD, Rulesync drift, diff check, and module-size report pass without linking permanent docs back to this SDD                                                                       |
+| Layer                                                                   | Required coverage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `node --test website/tests/lander-world.test.mjs`                       | Mixer/seeds; exact `10 m` samples and `50 m` shared chunk boundaries; four-motif traversal and diversity; every shelf/corridor branch; `2.4 m` site clearance and `[3.15,9.9]` band; complete target replacement and native blends; exact v2 geometry digest; static/dynamic platform, `.2 m` butt-cap/round-join member geometry, complete stroked bounds inside three `+.1 m` colliders, unchanged clear-aperture diagonals, NOC body/envelope, mast, can, window, retention, offscreen, and immutability                                                                                                    |
+| `node --test website/tests/lander-model.test.mjs`                       | State/events; launch-ready zero/steer-only hold, same-step keyboard/pointer/native-pulse release, early-release gravity/crash, both-feet transition, reduced-motion wait, exact banner, checkpoint restore; fuel/gauge/carry; 9.0/80 physics and exact vectors; input rows, assist/coast, generic pulse snapshot/overflow; closed-margin scaffold/connector/terrain/NOC equality; v3 catalog/digests, two runtime replays, ratio/error/crash/ordinal, pointer-token and launch-button token/source witnesses                                                                                                   |
+| Derivation CLI fixture verification                                     | Run section 10.2's ordinary command to a temporary output with `--verify website/tests/fixtures/lander-route-derived-v3.json`; exact v4 deriver, v3 recipes, required geometry v2/derived v3 schemas, `canonicalPoseDecimals:9`, pose-jitter/precision mutations; exact per-route counts in `[2,256]`, no more than 2,304 candidates plus 162 selected replays; all nine minima/success/failure literals and 81 strict world/member/collider descriptors/digests; deterministic x64/ARM64 bytes; finite-exhaustion and mismatch/usage exits; import independence                                               |
+| `python -m unittest discover -s website/tests -p 'test_*.py'`           | Exact 12-file artifacts at both bases; exact title/`h1`/404 copy; focused validation helper and production DAG; static/dynamic open-member path plus conservative-collider parity, exact `fill="none"`/butt-cap/round-join attributes, no backing rectangle; gauge subtree; exact three-button actions subtree and Launch hidden/disabled projection; one status/banner; generic pulse authority with no direct model launch; battery/signal stages; static viewport; transactional initialization; forbidden network, storage, audio, canvas, service worker, navigation, cookie, and uncontrolled randomness |
+| Manual Chrome and Edge pre-merge; Firefox and Safari/WebKit post-launch | Start/focus/recovery; Space/arrows/vi/touch, short tap, native Launch, mixed-source ownership; lower steering lift and 30-degree plumes; three deployments; visibly open attached trusses with no start-time pale rectangle or false traversable aperture; gauge and rounded reserve; battery/signal stages; one deployment payoff; indefinite wait, self-commanded and native-button takeoff, early release, crash/restart-ready; arrow/carry/empty fuel; boundary landings; Exit/hidden pause; zero requests                                                                                                 |
+| Manual responsive and accessibility acceptance                          | 320 CSS pixels, 400 percent zoom, touch landscape, and wide viewport; gauge/banner/actions do not obscure scene; numeric reserve is sole named fuel value and one polite deployment announcement; Launch is a native 44-pixel target, appears only ready, works with keyboard/touch/AT activation, focuses the scene before hiding, and never overlaps Restart in tab order; logical focus, no trap, useful no-CSS/no-JS order, restrained announcements, solid/static cues, silent decorative SVG, and fixed-token contrast                                                                                   |
+| Performance and longevity witness                                       | 100-site deterministic run; no more than five terrain paths, three sites, eight fragments, 80 world descendants, exactly 78 at simultaneous Phase 4I maximum, and exactly three fixed action descendants; fixed gauge/banner/Launch DOM and one pulse timer; direct selection/shelf-corridor/two-runtime-replay timing; launch-ready 10-second hold unchanged; hidden tab no progress; active frame p95 below 4 ms; bounded ordinary derivation evidence recorded; teardown leaves no listener, timer, capture, frame, enabled dead action, or growing history                                                 |
+| Permanent documentation and repository gates                            | `website/README.md` teaches manual/native departure, leg-relative gauge, tuned vectors, open lattice versus conservative colliders, power stages, and practical bounded v3 regeneration/verification; browser checklist pins copy, gauge/banner, Launch focus/tab/lifecycle, wait/restart, signal, scaffold/no-artifact, input, vacuum, and compatibility witnesses; file lint, locked-SDD, Rulesync drift, diff check, and module-size report pass without linking permanent docs back to this SDD                                                                                                            |
 
 Mutation tests reject duplicated/moved shared markup, a second scheduler/controller/site authority,
 game checks added to the near-limit validator, artifact count drift, a sixth retained chunk,
 pad-width/clearance/target-band drift, a filled scaffold face, backing rectangle, sky-colored
-artifact, scaffold fill other than `none`, member width/color/segment drift, a missing underframe or
-connector collider, a clear-aperture diagonal at least `3.2 m`, disagreement between member geometry
-and its conservative outer collider, an extra scaffold wrapper, a production import outside the
-exact DAG, `10 m`/`50 m`/boundary/motif-bank/selector/clamp drift, a single or repeated terrain
-motif, a shelf ending before or after `platformRight+9`, native-derived NOC bottom, hidden shelf
-easing, fuel caps, rounded model fuel, a gauge based on invented capacity or current award instead
-of `legDepartureFuel`, an accessible duplicate meter, gauge level outside `[0,1]`, can recollection,
-or proof dependence on carried fuel. They reject a second banner/live region, generated
+artifact, scaffold fill other than `none`, member width/color/segment drift, a missing cap attribute
+or cap other than `butt` (including square and round caps that extend past endpoints), a missing
+join attribute or join other than `round` (including miter), a rendered stroke point outside the
+exact `+/-0.1 m` expansion, a missing underframe or connector collider, a clear-aperture diagonal at
+least `3.2 m`, disagreement between member geometry and its conservative outer collider, an extra
+scaffold wrapper, a production import outside the exact DAG,
+`10 m`/`50 m`/boundary/motif-bank/selector/clamp drift, a single or repeated terrain motif, a shelf
+ending before or after `platformRight+9`, native-derived NOC bottom, hidden shelf easing, fuel caps,
+rounded model fuel, a gauge based on invented capacity or current award instead of
+`legDepartureFuel`, an accessible duplicate meter, gauge level outside `[0,1]`, can recollection, or
+proof dependence on carried fuel. They reject a second banner/live region, generated
 `Agent Deployed!` copy, automatic launch, gravity or fuel burn while launch-ready, steer-only
 release of the pad hold, discarding the first collective step, a time-based launch exit, transition
 before both feet clear, restart into an already started launch, duplicated can/fuel/
