@@ -41,7 +41,8 @@ def _tty(monkeypatch: pytest.MonkeyPatch) -> None:
     patch time, while ``_color_enabled`` reads ``sys.stdout`` when the line
     is emitted; pytest's capture replaces that object, so the two can
     disagree and the color silently vanishes (issue #495). The gate's own
-    logic is covered directly in TestColorGate below.
+    logic is covered by TestColorGate in tests/test_typer_output.py, which
+    owns this layer.
     """
     monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.setattr(TyperHandler, "_color_enabled", lambda self, stream: True)
