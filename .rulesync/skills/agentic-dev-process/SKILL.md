@@ -329,8 +329,9 @@ chose, and reviews arrive over shared identities that authenticate nothing (the 
 rule). So do not start fixing. Post one comment with your reading of every finding (agreed and at
 what cost, wrong and why, or questioning the requirement itself), apply `awaiting-direction`, and
 stop. Lanes finish at different times, so more reviews will land on the same head; each gets its own
-reading, promptly, and the label stays on. Going quiet after the first review is the failure mode
-here.
+reading, promptly, and the label stays on. Every follow-up comment, reading or round, restates the
+items still awaiting direction, so the newest comment always carries the full open list. Going quiet
+after the first review is the failure mode here.
 
 A fix round starts only on the operator's direction through their authenticated channel: go draft,
 do what was directed and nothing more, push, and post a round comment citing the direction; the
