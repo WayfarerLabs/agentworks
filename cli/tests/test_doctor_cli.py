@@ -11,6 +11,7 @@ this renderer builds on.
 
 from __future__ import annotations
 
+import io
 import re
 import sys
 from collections.abc import Iterator
@@ -33,11 +34,22 @@ def _plain(s: str) -> str:
 
 
 def _tty(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make stdout report as a color-allowed terminal. Mirrors the sibling
-    helper in test_typer_output.py: clearing NO_COLOR keeps the on-TTY
-    tests hermetic (they must pass even when a dev/CI has NO_COLOR set)."""
+    """Turn the color gate on, so these tests exercise the palette rather
+    than the gate. Mirrors the sibling helper in test_typer_output.py.
+
+    We state the condition instead of simulating a terminal. Patching
+    ``sys.stdout.isatty`` binds to whichever object ``sys.stdout`` names at
+    patch time, while ``_color_enabled`` reads ``sys.stdout`` when the line
+    is emitted; pytest's capture replaces that object, so the two can
+    disagree and the color silently vanishes (issue #495). The gate's own
+    logic is covered directly in TestColorGate below.
+    """
     monkeypatch.delenv("NO_COLOR", raising=False)
-    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(TyperHandler, "_color_enabled", lambda self, stream: True)
+    # The echo implementation strips ANSI when it decides the destination
+    # is not a terminal, so the handler's gate is only half the condition.
+    # Patch the module typer.echo actually resolves (typer vendors click).
+    monkeypatch.setattr(sys.modules[typer.echo.__module__], "resolve_color_default", lambda color=None: True)
 
 
 def _fake_report() -> HealthReport:
@@ -158,3 +170,36 @@ class TestDoctorPlainFallback:
         finally:
             output.set_non_interactive(False)
         assert _ANSI_RE.search(out) is None
+
+
+class TestColorGate:
+    """`TyperHandler._color_enabled` decides colorization; test it directly
+    rather than through captured output, so the decision is not entangled
+    with pytest's stream replacement."""
+
+    @staticmethod
+    def _stream(*, is_a_tty: bool) -> io.StringIO:
+        stream = io.StringIO()
+        stream.isatty = lambda: is_a_tty  # type: ignore[method-assign]
+        return stream
+
+    def test_color_is_enabled_on_a_terminal(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.setattr(output, "non_interactive", lambda: False)
+        assert TyperHandler()._color_enabled(self._stream(is_a_tty=True)) is True
+
+    def test_color_is_disabled_off_a_terminal(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.setattr(output, "non_interactive", lambda: False)
+        assert TyperHandler()._color_enabled(self._stream(is_a_tty=False)) is False
+
+    @pytest.mark.parametrize("value", ["1", "", "anything"])
+    def test_no_color_disables_color_by_presence(self, monkeypatch: pytest.MonkeyPatch, value: str) -> None:
+        monkeypatch.setenv("NO_COLOR", value)
+        monkeypatch.setattr(output, "non_interactive", lambda: False)
+        assert TyperHandler()._color_enabled(self._stream(is_a_tty=True)) is False
+
+    def test_non_interactive_disables_color(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.setattr("agentworks.cli._typer_output.non_interactive", lambda: True)
+        assert TyperHandler()._color_enabled(self._stream(is_a_tty=True)) is False

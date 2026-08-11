@@ -37,10 +37,20 @@ def _plain(s: str) -> str:
 
 
 def _tty(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make both captured streams report as terminals with color allowed."""
+    """Turn the color gate on so these tests exercise the palette.
+
+    Stating the condition rather than faking a terminal: patching
+    ``isatty`` binds to whichever object ``sys.stdout`` names at patch
+    time, while the gate reads the stream at emit time and pytest's
+    capture replaces it, so the two can disagree (issue #495). The gate's
+    own logic is covered in test_doctor_cli.py's TestColorGate.
+    """
     monkeypatch.delenv("NO_COLOR", raising=False)
-    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
+    monkeypatch.setattr(TyperHandler, "_color_enabled", lambda self, stream: True)
+    # The echo implementation strips ANSI when it decides the destination
+    # is not a terminal, so the handler's gate is only half the condition.
+    # Patch the module typer.echo actually resolves (typer vendors click).
+    monkeypatch.setattr(sys.modules[typer.echo.__module__], "resolve_color_default", lambda color=None: True)
 
 
 # --- Color on a TTY: each colorable role carries its palette entry --------
