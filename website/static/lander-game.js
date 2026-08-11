@@ -1,4 +1,5 @@
 import {
+    agentInstalled,
     advanceCue,
     advanceMissionSequence,
     advanceSimulation,
@@ -27,6 +28,11 @@ const SVG_NAMESPACE = document.querySelector("#lander-scene")?.namespaceURI;
 const ACTIVE_STATES = new Set(["flying", "landed", "deploying", "powering", "launching", "crashing", "failed", "generation-error"]);
 const FLIGHT_CODES = new Set(["Space", "ArrowUp", "ArrowLeft", "ArrowRight", "KeyH", "KeyL"]);
 const ZERO_INPUT = Object.freeze({ left: 0, right: 0, vectorAngle: 0 });
+const INTERACTIVE_POINTER_TARGET =
+    'a[href],button,input,select,textarea,summary,[contenteditable]:not([contenteditable="false"])';
+const INSTALLED_AGENT_PATH = "M -4 -9 H 4 A 1 1 0 0 1 5 -8 V 1 A 1 1 0 0 1 4 2 " +
+    "H -4 A 1 1 0 0 1 -5 1 V -8 A 1 1 0 0 1 -4 -9 Z " +
+    "M -3 2 V 9 M 3 2 V 9 M -2 -5 L 0 -3 L -2 -1 M 1 -1 H 3";
 
 function svg(name, attributes = {}) {
     if (!SVG_NAMESPACE) throw new Error("SVG namespace is unavailable");
@@ -51,7 +57,12 @@ function physicalControl(event) {
 }
 
 function isEditable(target) {
-    return target instanceof Element && Boolean(target.closest("a, button, input, select, textarea, [contenteditable='true']"));
+    return target instanceof Element && Boolean(target.closest(INTERACTIVE_POINTER_TARGET));
+}
+
+export function isInteractivePointerEvent(event) {
+    return event.composedPath().some((node) =>
+        node instanceof Element && Boolean(node.closest(INTERACTIVE_POINTER_TARGET)));
 }
 
 function freshSeed() {
@@ -85,15 +96,28 @@ function createSiteGroup(site) {
     return group;
 }
 
+function projectSiteState(group, site, buildingLeft = siteStructure(site).buildingLeft * 10,
+    top = 548 - site.platformTop * 10) {
+    group.dataset.can = site.canCollected ? "collected" : "present";
+    group.dataset.power = site.powered ? "on" : "off";
+    group.dataset.agent = agentInstalled(site) ? "installed" : "absent";
+    group.dataset.nocStage = String(site.nocStage ?? (site.powered ? 7 : 0));
+    const entry = group.querySelector(".noc-entry");
+    if (agentInstalled(site)) {
+        entry.setAttribute("d", INSTALLED_AGENT_PATH);
+        entry.setAttribute("transform", `translate(${buildingLeft + 6.5} ${top - 9}) scale(0.75)`);
+    } else {
+        entry.setAttribute("d", `M ${buildingLeft} ${top - 18} H ${buildingLeft + 13} V ${top} H ${buildingLeft} Z`);
+        entry.removeAttribute("transform");
+    }
+}
+
 function positionSite(group, site) {
     const left = site.platformLeft * 10;
     const right = site.platformRight * 10;
     const top = 548 - site.platformTop * 10;
     const bottom = 548 - site.platformBottom * 10;
     const center = site.center * 10;
-    group.dataset.can = site.canCollected ? "collected" : "present";
-    group.dataset.power = site.powered ? "on" : "off";
-    group.dataset.nocStage = String(site.nocStage ?? (site.powered ? 7 : 0));
     const deck = group.querySelector(".landing-platform");
     deck.setAttribute("x", left); deck.setAttribute("y", top); deck.setAttribute("width", right - left); deck.setAttribute("height", bottom - top);
     group.querySelector(".helipad-mark").setAttribute("d", `M${center - 9} ${top + 1.7}v-20m18 20v-20m-18 10h18`);
@@ -103,7 +127,7 @@ function positionSite(group, site) {
     const buildingLeft = structure.buildingLeft * 10;
     const roof = 548 - structure.roof * 10;
     group.querySelector(".noc-building").setAttribute("d", `M${buildingLeft} ${top}V${roof}h70V${top}Z`);
-    group.querySelector(".noc-entry").setAttribute("d", `M${buildingLeft} ${top - 18}h13v18h-13Z`);
+    projectSiteState(group, site, buildingLeft, top);
     const battery = group.querySelector(".noc-battery");
     battery.querySelector("rect").setAttribute("x", buildingLeft + 24); battery.querySelector("rect").setAttribute("y", roof + 16);
     battery.querySelector("rect").setAttribute("width", 22); battery.querySelector("rect").setAttribute("height", 40);
@@ -128,8 +152,9 @@ export class LanderGameController {
         this.root = root;
         this.pristine = snapshot;
         for (const id of ["lander-scene-shell", "lander-scene", "lander-start", "lander-fuel", "lander-fuel-value",
-            "lander-fuel-gauge-fill", "lander-target-direction", "lander-controls", "lander-actions", "lander-exit",
-            "lander-launch", "lander-restart", "lander-status",
+            "lander-fuel-gauge", "lander-fuel-gauge-fill", "lander-target-direction", "lander-controls",
+            "lander-scene-stage", "lander-outcome", "lander-actions", "lander-exit", "lander-launch",
+            "lander-restart", "lander-status",
             "terrain-layer", "site-layer", "debris-layer", "mission-agent"]) {
             const name = id.replaceAll("-", "_");
             this[name] = root.querySelector(`#${id}`);
@@ -178,10 +203,11 @@ export class LanderGameController {
         this.listen(window, "blur", () => this.clearAllInput(performance.now()));
         this.listen(this.lander_scene_shell, "focusout", () => this.clearAllInput(performance.now()));
         for (const type of ["pointerdown", "pointermove", "pointerup", "pointercancel", "lostpointercapture"]) {
-            this.listen(this.lander_scene_shell, type, (event) => this.onPointer(event));
+            this.listen(this.lander_scene_stage, type, (event) => this.onPointer(event));
         }
         this.listen(document, "visibilitychange", () => this.onVisibilityChange());
         this.listen(this.motion, "change", (event) => this.onMotionChange(event));
+        this.listen(window, "resize", () => this.renderRefuel(cameraLeftForPose(this.model.pose)));
     }
 
     queueInput(timestamp, token = null) {
@@ -212,7 +238,7 @@ export class LanderGameController {
         this.heldKeys.clear();
         if (holdSpace) { this.heldKeys.add("Space"); this.queueInput(timestamp); }
         this.lander_start.hidden = true; this.lander_start.disabled = true;
-        this.lander_fuel.hidden = false; this.lander_controls.hidden = false; this.lander_actions.hidden = false;
+        this.lander_fuel.hidden = false; this.lander_controls.hidden = false; this.lander_outcome.hidden = false;
         this.lander_exit.disabled = false;
         this.lander_scene_shell.tabIndex = 0;
         this.lander_scene_shell.setAttribute("role", "application");
@@ -232,7 +258,7 @@ export class LanderGameController {
         for (const attribute of ["role", "aria-label", "aria-describedby"]) this.lander_scene_shell.removeAttribute(attribute);
         this.lander_scene.removeAttribute("aria-hidden");
         this.lander_fuel.hidden = true; this.lander_target_direction.hidden = true; this.lander_controls.hidden = true;
-        this.lander_actions.hidden = true; this.lander_exit.disabled = true;
+        this.lander_outcome.hidden = true; this.lander_exit.disabled = true;
         this.lander_launch.hidden = true; this.lander_launch.disabled = true;
         this.lander_restart.hidden = true; this.lander_restart.disabled = true;
         this.lander_start.hidden = false; this.lander_start.disabled = false;
@@ -293,6 +319,7 @@ export class LanderGameController {
     }
 
     onPointer(event) {
+        if (isInteractivePointerEvent(event)) return;
         if (event.type === "lostpointercapture") {
             const released = this.releasedCapture;
             if (!released || released.pointerId !== event.pointerId) {
@@ -313,7 +340,7 @@ export class LanderGameController {
             const token = ++this.pointerToken;
             this.pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, currentX: event.clientX,
                 started: timestamp, token };
-            this.lander_scene_shell.setPointerCapture(event.pointerId);
+            this.lander_scene_stage.setPointerCapture(event.pointerId);
             this.pointerInput = { left: 0.72, right: 0.72 }; this.queueInput(timestamp, token); return;
         }
         if (!this.pointer || event.pointerId !== this.pointer.id) return;
@@ -332,8 +359,8 @@ export class LanderGameController {
                 this.releasedCapture = { pointerId: pointer.id, token: pointer.token };
                 this.pointer = null; this.pointerInput = ZERO_INPUT;
                 this.beginCollectivePulse(pointer.token, "pointer-tap", eventTime(event), deadline);
-                if (this.lander_scene_shell.hasPointerCapture(pointer.id)) {
-                    this.lander_scene_shell.releasePointerCapture(pointer.id);
+                if (this.lander_scene_stage.hasPointerCapture(pointer.id)) {
+                    this.lander_scene_stage.releasePointerCapture(pointer.id);
                 }
                 return;
             }
@@ -384,8 +411,8 @@ export class LanderGameController {
         this.pointerInput = ZERO_INPUT;
         if (token !== undefined) this.clock = removeQueuedInputEdges(this.clock, token);
         this.collectivePulse = { active: false, token: null, source: null, deadline: null };
-        if (pointer && this.lander_scene_shell.hasPointerCapture(pointer.id)) {
-            this.lander_scene_shell.releasePointerCapture(pointer.id);
+        if (pointer && this.lander_scene_stage.hasPointerCapture(pointer.id)) {
+            this.lander_scene_stage.releasePointerCapture(pointer.id);
         }
         this.clock = quiesce ? { ...this.clock, timestamp, queue: [], input: { ...ZERO_INPUT }, accumulator: 0 } :
             clearSimulationInput(this.clock, timestamp);
@@ -442,9 +469,7 @@ export class LanderGameController {
             for (const site of this.model.retainedSites) {
                 const group = this.site_layer.querySelector(`[data-site-id="${site.id}"]`);
                 if (group) {
-                    group.dataset.can = site.canCollected ? "collected" : "present";
-                    group.dataset.power = site.powered ? "on" : "off";
-                    group.dataset.nocStage = String(site.nocStage ?? (site.powered ? 7 : 0));
+                    projectSiteState(group, site);
                 }
             }
             return;
@@ -494,6 +519,28 @@ export class LanderGameController {
         this.root.style.setProperty("--crash-progress", String(Math.min(1, time / 0.14)));
     }
 
+    renderRefuel(cameraLeft) {
+        const refuel = this.model.refuel;
+        const active = refuel && this.model.retainedSites?.find((site) => site.id === refuel.siteId);
+        const enabled = Boolean(refuel && active && !this.motion.matches);
+        this.root.dataset.refueling = String(enabled);
+        this.root.style.setProperty("--refuel-progress", String(refuel?.progress ?? 0));
+        if (!enabled) return;
+        const stageRect = this.lander_scene_stage.getBoundingClientRect();
+        const gaugeRect = this.lander_fuel_gauge.getBoundingClientRect();
+        const scaleX = stageRect.width / 1000;
+        const scaleY = stageRect.height / 640;
+        const sceneCanX = (active.center + 3) * 10 - cameraLeft * 10;
+        const sceneCanY = 548 - (active.platformTop + 1.5) * 10;
+        const startX = stageRect.left + sceneCanX * scaleX - stageRect.left;
+        const startY = stageRect.top + sceneCanY * scaleY - stageRect.top;
+        const targetX = gaugeRect.left + gaugeRect.width / 2 - stageRect.left;
+        const targetY = gaugeRect.top + gaugeRect.height / 2 - stageRect.top;
+        const progress = refuel.progress;
+        this.root.style.setProperty("--fuel-transfer-x", `${startX + (targetX - startX) * progress}px`);
+        this.root.style.setProperty("--fuel-transfer-y", `${startY + (targetY - startY) * progress}px`);
+    }
+
     render() {
         const pose = this.model.pose;
         const cameraLeft = cameraLeftForPose(pose);
@@ -519,19 +566,26 @@ export class LanderGameController {
         this.root.dataset.targetOffscreen = String(offscreen);
         this.lander_target_direction.hidden = !offscreen;
         const fuel = this.model.state === "preflight" ? "0.0" : this.model.fuel.toFixed(1);
-        if (this.lander_fuel_value.value !== fuel) this.lander_fuel_value.value = fuel;
+        if (this.lander_fuel_value.textContent !== fuel) this.lander_fuel_value.textContent = fuel;
         const gauge = fuelGaugeLevel(this.model);
         const gaugeText = String(gauge);
         if (this.root.style.getPropertyValue("--fuel-gauge-level") !== gaugeText) {
             this.root.style.setProperty("--fuel-gauge-level", gaugeText);
         }
-        this.root.dataset.fuelBand = gauge > 0.5 ? "high" : gauge > 0.2 ? "medium" : gauge > 0 ? "low" : "empty";
+        const fuelLevel = gauge > 0.5 ? "ready" : gauge > 0.2 ? "caution" : "danger";
+        const fuelColor = { danger: "#ff5a36", caution: "#ffb000", ready: "#2ed49b" }[fuelLevel];
+        this.root.dataset.fuelLevel = fuelLevel;
+        this.root.style.setProperty("--fuel-level-color", fuelColor);
+        this.renderRefuel(cameraLeft);
         if (this.lander_status.textContent !== this.model.status) this.lander_status.textContent = this.model.status;
         const launchReady = this.model.state === "launching" && !this.model.launchStarted;
         this.root.dataset.launchReady = String(launchReady);
         this.lander_launch.hidden = !launchReady; this.lander_launch.disabled = !launchReady;
         const failed = this.model.state === "failed";
         this.lander_restart.hidden = !failed; this.lander_restart.disabled = !failed;
+        this.root.dataset.banner = launchReady && this.model.status === "Agent Deployed!" ? "deployed" :
+            failed && this.model.status === "Crashed!" ? "crashed" :
+                this.model.state === "generation-error" ? "error" : "none";
     }
 
     destroy() {

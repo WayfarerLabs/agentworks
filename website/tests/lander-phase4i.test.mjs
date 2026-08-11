@@ -183,7 +183,7 @@ test("controller tears down the held keyboard and captured pointer at atomic lau
         assert.deepEqual(controller.clock.input, { left: 0, right: 0, vectorAngle: 0 });
         assert.equal(controller.clock.queue.length, 0); assert.equal(controller.frameId, null); assert.equal(animation.pending, 0);
         assert.equal(controller.heldKeys.size, 0); assert.equal(controller.pointer, null);
-        assert.equal(controller.lander_scene_shell.hasPointerCapture(7), false);
+        assert.equal(controller.lander_scene_stage.hasPointerCapture(7), false);
         if (authority === "keyboard") controller.onKeyUp(keyEvent(controller, "keyup", "Space", timestamp + 60));
         else {
             controller.onPointer(pointerEvent(controller, "pointermove", 7, timestamp + 60));

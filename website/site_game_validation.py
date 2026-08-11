@@ -9,6 +9,7 @@ EXPECTED_GAME_IDS = frozenset(
     {
         "lander-game",
         "lander-scene-shell",
+        "lander-scene-stage",
         "lander-scene",
         "lander-scene-title",
         "lander-scene-description",
@@ -33,6 +34,7 @@ EXPECTED_GAME_IDS = frozenset(
         "lander-fuel-label",
         "lander-fuel-value",
         "lander-target-direction",
+        "lander-outcome",
         "lander-controls",
         "lander-actions",
         "lander-exit",
@@ -109,9 +111,16 @@ def validate_game_contract(template: str) -> None:
         "aria-label": "Start lunar deployment mission",
     }:
         raise ValueError("lander-game.html: static Start must be hidden and disabled")
-    _, output = _one(parser, "lander-fuel-value")
-    if output != {"id": "lander-fuel-value", "aria-labelledby": "lander-fuel-label"}:
-        raise ValueError("lander-game.html: fuel output naming contract is invalid")
+    tag, fuel_value = _one(parser, "lander-fuel-value")
+    if tag != "span" or fuel_value != {
+        "id": "lander-fuel-value",
+        "class": "visually-hidden",
+        "aria-labelledby": "lander-fuel-label",
+    }:
+        raise ValueError("lander-game.html: hidden fuel value naming contract is invalid")
+    tag, fuel_label = _one(parser, "lander-fuel-label")
+    if tag != "span" or fuel_label != {"id": "lander-fuel-label", "class": "visually-hidden"}:
+        raise ValueError("lander-game.html: hidden fuel label contract is invalid")
     _, restart = _one(parser, "lander-restart")
     if restart != {"id": "lander-restart", "type": "button", "hidden": None, "disabled": None}:
         raise ValueError("lander-game.html: static Restart must be hidden and disabled")
@@ -121,6 +130,21 @@ def validate_game_contract(template: str) -> None:
     _, gauge = _one(parser, "lander-fuel-gauge")
     if gauge != {"id": "lander-fuel-gauge", "aria-hidden": "true"}:
         raise ValueError("lander-game.html: fuel gauge must remain decorative")
+    _, outcome = _one(parser, "lander-outcome")
+    if outcome != {"id": "lander-outcome", "hidden": None}:
+        raise ValueError("lander-game.html: static outcome must be hidden")
+    _, status = _one(parser, "lander-status")
+    if status != {
+        "id": "lander-status",
+        "role": "status",
+        "aria-live": "polite",
+        "aria-atomic": "true",
+    }:
+        raise ValueError("lander-game.html: sole status live region contract is invalid")
+    if sum(attributes.get("aria-live") is not None for _, attributes in parser.tags) != 1:
+        raise ValueError("lander-game.html: exactly one live region is required")
+    if any(tag in {"meter", "output", "progress"} for tag, _ in parser.tags):
+        raise ValueError("lander-game.html: duplicate semantic fuel authorities are forbidden")
     normalized = " ".join(" ".join(parser.text).split())
     controls = (
         "Thrust: Space or Up. Turn: Left/H or Right/L. Tap or hold to thrust; drag to turn. "
@@ -128,13 +152,15 @@ def validate_game_contract(template: str) -> None:
     )
     if controls not in normalized:
         raise ValueError("lander-game.html: control text contract is invalid")
-    positions = [template.index(f'id="{identifier}"') for identifier in ("lander-scene-shell", "lander-fuel", "lander-target-direction", "lander-controls", "lander-actions", "lander-status")]
-    if positions != sorted(positions):
-        raise ValueError("lander-game.html: scene and active chrome order is invalid")
+    stage_positions = [template.index(f'id="{identifier}"') for identifier in
+                       ("lander-scene-stage", "lander-scene", "lander-start", "lander-fuel",
+                        "lander-target-direction", "lander-outcome", "lander-status", "lander-actions")]
+    if stage_positions != sorted(stage_positions) or template.index('id="lander-controls"') < stage_positions[-1]:
+        raise ValueError("lander-game.html: stage, outcome, action, and rail order is invalid")
     action_positions = [template.index(f'id="{identifier}"') for identifier in
-                        ("lander-exit", "lander-launch", "lander-restart")]
+                        ("lander-launch", "lander-restart", "lander-exit")]
     if action_positions != sorted(action_positions):
-        raise ValueError("lander-game.html: Exit, Launch, and Restart order is invalid")
+        raise ValueError("lander-game.html: Launch, Restart, and Exit order is invalid")
     for required in (
         'class="terrain-chunk"',
         'data-chunk-index="-1"',
@@ -145,6 +171,7 @@ def validate_game_contract(template: str) -> None:
         'data-site-id="0"',
         'data-can="present"',
         'data-power="off"',
+        'data-agent="absent"',
         'data-noc-stage="0"',
         'class="landing-platform"',
         'class="site-scaffold"',

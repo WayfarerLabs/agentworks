@@ -350,7 +350,7 @@ class TemplateContractTests(RepositoryFixture):
 
     def test_fragment_scene_svg_cannot_move_outside_its_reviewed_section(self) -> None:
         template = (self.root / "website/templates/lander-game.html").read_text(encoding="utf-8")
-        scene = re.search(r"\n        <svg\n.*?\n        </svg>", template, re.DOTALL)
+        scene = re.search(r"\n            <svg\n.*?\n            </svg>", template, re.DOTALL)
         self.assertIsNotNone(scene)
         assert scene is not None
         changed = template.replace(scene.group(0), "", 1) + scene.group(0)

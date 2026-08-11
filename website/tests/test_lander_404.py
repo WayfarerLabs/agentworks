@@ -333,7 +333,8 @@ class StaticDocumentTests(unittest.TestCase):
     ) -> None:
         self.assertIn("hidden", self.element("lander-start")[1])
         self.assertIn("hidden", self.element("lander-controls")[1])
-        self.assertIn("hidden", self.element("lander-actions")[1])
+        self.assertIn("hidden", self.element("lander-outcome")[1])
+        self.assertNotIn("hidden", self.element("lander-actions")[1])
         self.assertIn("hidden", self.element("lander-restart")[1])
         self.assertNotIn("hidden", self.element("lander-scene")[1])
         home = next(attributes for tag, attributes in self.document.tags if attributes.get("href") == "{{SITE_BASE}}")
@@ -367,23 +368,16 @@ class StaticDocumentTests(unittest.TestCase):
         self.assertEqual(" ".join(self.document.text_by_id["lander-launch"].split()), "Launch")
         self.assertEqual(self.element("lander-restart")[0], "button")
         self.assertEqual(self.element("lander-fuel-gauge")[1]["aria-hidden"], "true")
+        self.assertEqual(self.element("lander-fuel-value")[0], "span")
+        self.assertEqual(self.element("lander-fuel-label")[1]["class"], "visually-hidden")
+        self.assertEqual(self.element("lander-fuel-value")[1]["class"], "visually-hidden")
+        self.assertNotIn("role", self.element("lander-fuel-value")[1])
+        self.assertNotIn("aria-live", self.element("lander-fuel-value")[1])
+        self.assertNotIn("output", [tag for tag, _ in self.document.tags])
         self.assertEqual(
             " ".join(self.document.text_by_id["lander-fuel-label"].split()),
             "Fuel reserve:",
         )
-        label_rule = self.css.split("#lander-fuel-label {", 1)[1].split("}", 1)[0]
-        value_rule = self.css.split("#lander-fuel-value {", 2)[2].split("}", 1)[0]
-        self.assertIn("grid-column: 2", label_rule)
-        self.assertIn("grid-row: 1", label_rule)
-        self.assertIn("grid-column: 2", value_rule)
-        self.assertIn("grid-row: 2", value_rule)
-        narrow = self.css.split('@media (max-width: 30rem) {', 1)[1].split(
-            "@media (prefers-reduced-motion: reduce)", 1
-        )[0]
-        self.assertIn('#lander-game[data-launch-ready="true"] #lander-status', narrow)
-        self.assertIn("right: 0.5rem", narrow)
-        self.assertIn("left: 9rem", narrow)
-        self.assertIn("transform: none", narrow)
         description = " ".join(self.document.text_by_id["lander-scene-description"].split()).lower()
         for word in ("lander", "surface", "helipad", "gas can", "dark", "network operations center"):
             self.assertIn(word, description)
@@ -397,7 +391,10 @@ class StaticDocumentTests(unittest.TestCase):
         self.assertIn("aspect-ratio: 25 / 16", self.css)
         self.assertIn("width: min(100%, 60rem)", self.css)
         shell_rule = self.css.split("#lander-scene-shell {", 1)[1].split("}", 1)[0]
+        stage_rule = self.css.split("#lander-scene-stage {", 1)[1].split("}", 1)[0]
         self.assertNotRegex(shell_rule, r"min-width\s*:")
+        self.assertNotIn("aspect-ratio", shell_rule)
+        self.assertIn("aspect-ratio: 25 / 16", stage_rule)
         self.assertIn("top: 31.7625%", self.css)
         self.assertIn("left: 30%", self.css)
         self.assertIn("width: max(44px, 2.816%)", self.css)
@@ -521,10 +518,10 @@ class StaticDocumentTests(unittest.TestCase):
         self.assertIn("this.exit()", keyboard)
         self.assertIn("this.restart()", keyboard)
         start = self.game.split("start(holdSpace, timestamp) {", 1)[1].split("exit() {", 1)[0]
-        self.assertIn("this.lander_actions.hidden = false", start)
+        self.assertIn("this.lander_outcome.hidden = false", start)
         self.assertIn("this.lander_exit.disabled = false", start)
         exit_method = self.game.split("exit() {", 1)[1].split("restart() {", 1)[0]
-        self.assertIn("this.lander_actions.hidden = true", exit_method)
+        self.assertIn("this.lander_outcome.hidden = true", exit_method)
         self.assertIn("this.lander_start.focus({ preventScroll: true })", exit_method)
         restart = self.game.split("restart() {", 1)[1].split("onKeyDown(event) {", 1)[0]
         self.assertIn("this.lander_restart.hidden = true", restart)

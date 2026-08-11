@@ -3,6 +3,7 @@ export class FakeElement {
         this.parentElement = parentElement; this.hidden = false; this.disabled = false; this.tabIndex = -1;
         this.textContent = ""; this.value = "0.0"; this.dataset = {}; this.attributes = new Map(); this.children = [];
         this.setCount = 0; this.listeners = new Map(); this.capturedPointers = new Set();
+        this.rect = { left: 0, top: 0, width: 1000, height: 640 };
         const properties = new Map();
         this.style = { setProperty: (name, value) => properties.set(name, value),
             getPropertyValue: (name) => properties.get(name) ?? "",
@@ -30,6 +31,15 @@ export class FakeElement {
         }
     }
     removeAttribute(name) { this.attributes.delete(name); }
+    closest(selector) {
+        for (let current = this; current; current = current.parentElement) {
+            if (current.tagName === "button" && selector.includes("button")) return current;
+            if (current.tagName === "a" && current.attributes.has("href") && selector.includes("a[href]")) return current;
+            if (current.attributes.has("contenteditable") &&
+                current.attributes.get("contenteditable") !== "false" && selector.includes("[contenteditable]")) return current;
+        }
+        return null;
+    }
     append(...nodes) { for (const node of nodes) { node.parentElement = this; this.children.push(node); } }
     replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
     replaceWith(node) { this.replacement = node; }
@@ -43,7 +53,7 @@ export class FakeElement {
         if (!this.capturedPointers.delete(pointerId)) return;
         this.dispatchEvent({ type: "lostpointercapture", pointerId, timeStamp: this.lastEventTime ?? performance.now() });
     }
-    getBoundingClientRect() { return { width: 1000 }; }
+    getBoundingClientRect() { return { ...this.rect }; }
     get firstElementChild() { return this.children[0] ?? null; }
     get lastElementChild() { return this.children.at(-1) ?? null; }
     querySelector(selector) {
@@ -66,17 +76,23 @@ export class FakeElement {
 }
 
 export function controllerFixture() {
-    const root = new FakeElement(); const actions = new FakeElement(root);
+    const root = new FakeElement(); const outcome = new FakeElement(root); const actions = new FakeElement(outcome);
     const ids = ["lander-scene-shell", "lander-scene", "lander-start", "lander-fuel", "lander-fuel-value",
-        "lander-fuel-gauge-fill", "lander-target-direction", "lander-controls", "lander-actions", "lander-exit",
-        "lander-launch", "lander-restart", "lander-status", "terrain-layer", "site-layer", "debris-layer", "mission-agent"];
+        "lander-fuel-gauge", "lander-fuel-gauge-fill", "lander-target-direction", "lander-controls",
+        "lander-scene-stage", "lander-outcome", "lander-actions", "lander-exit", "lander-launch",
+        "lander-restart", "lander-status", "terrain-layer", "site-layer", "debris-layer", "mission-agent"];
     const elements = Object.fromEntries(ids.map((id) => [id, new FakeElement(root)]));
-    elements["lander-actions"] = actions; elements["lander-exit"].parentElement = actions;
+    elements["lander-outcome"] = outcome; elements["lander-actions"] = actions;
+    for (const id of ["lander-exit", "lander-launch", "lander-restart"]) {
+        elements[id].parentElement = actions; elements[id].tagName = "button";
+    }
+    actions.append(elements["lander-launch"], elements["lander-restart"], elements["lander-exit"]);
     elements["lander-launch"].parentElement = actions; elements["lander-restart"].parentElement = actions;
     elements["lander-start"].hidden = true; elements["lander-start"].disabled = true;
-    actions.hidden = true; elements["lander-exit"].disabled = true;
+    outcome.hidden = true; elements["lander-exit"].disabled = true;
     elements["lander-launch"].hidden = true; elements["lander-launch"].disabled = true;
     elements["lander-restart"].hidden = true; elements["lander-restart"].disabled = true;
+    elements["lander-fuel-gauge"].rect = { left: 12, top: 12, width: 16, height: 112 };
     root.querySelector = (selector) => elements[selector.slice(1)] ?? FakeElement.prototype.querySelector.call(root, selector);
     root.cloneNode = () => controllerFixture().root; root.elements = elements;
     return { root, elements };

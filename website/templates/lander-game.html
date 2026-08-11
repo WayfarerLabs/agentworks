@@ -1,12 +1,13 @@
 <section id="lander-game" aria-label="Lunar deployment scene">
     <div id="lander-scene-shell" tabindex="-1">
-        <svg
-            id="lander-scene"
-            viewBox="0 0 1000 640"
-            preserveAspectRatio="xMidYMid meet"
-            role="img"
-            aria-labelledby="lander-scene-title lander-scene-description"
-        >
+        <div id="lander-scene-stage">
+            <svg
+                id="lander-scene"
+                viewBox="0 0 1000 640"
+                preserveAspectRatio="xMidYMid meet"
+                role="img"
+                aria-labelledby="lander-scene-title lander-scene-description"
+            >
             <title id="lander-scene-title">Lunar deployment scene</title>
             <desc id="lander-scene-description">
                 An AGW lander hovers above a varied lunar surface, an elevated helipad with a gas can, and a dark
@@ -38,7 +39,7 @@
                     />
                 </g>
                 <g id="site-layer">
-                    <g class="lander-site" data-site-id="0" data-can="present" data-power="off" data-noc-stage="0">
+                    <g class="lander-site" data-site-id="0" data-can="present" data-power="off" data-agent="absent" data-noc-stage="0">
                         <rect class="landing-platform" x="312" y="452.1557689513638" width="96" height="3.5" />
                         <path class="helipad-mark" d="M351 453.8557689513638v-20m18 20v-20m-18 10h18" />
                         <path class="site-scaffold" fill="none" stroke="#4b4e55" stroke-width="2" stroke-linecap="butt" stroke-linejoin="round" d="M312 455.6557689513638H408V476.1557689513639H312ZM408 452.1557689513638H428V455.6557689513638H408ZM428 452.1557689513638H498V476.1557689513639H428ZM312 455.6557689513638L328 476.1557689513639M312 476.1557689513639L328 455.6557689513638M328 455.6557689513638L344 476.1557689513639M328 476.1557689513639L344 455.6557689513638M344 455.6557689513638L360 476.1557689513639M344 476.1557689513639L360 455.6557689513638M360 455.6557689513638L376 476.1557689513639M360 476.1557689513639L376 455.6557689513638M376 455.6557689513638L392 476.1557689513639M376 476.1557689513639L392 455.6557689513638M392 455.6557689513638L408 476.1557689513639M392 476.1557689513639L408 455.6557689513638M408 452.1557689513638L428 455.6557689513638M408 455.6557689513638L428 452.1557689513638M428 452.1557689513638L438 476.1557689513639M428 476.1557689513639L438 452.1557689513638M438 452.1557689513638L448 476.1557689513639M438 476.1557689513639L448 452.1557689513638M448 452.1557689513638L458 476.1557689513639M448 476.1557689513639L458 452.1557689513638M458 452.1557689513638L468 476.1557689513639M458 476.1557689513639L468 452.1557689513638M468 452.1557689513638L478 476.1557689513639M468 476.1557689513639L478 452.1557689513638M478 452.1557689513638L488 476.1557689513639M478 476.1557689513639L488 452.1557689513638M488 452.1557689513638L498 476.1557689513639M488 476.1557689513639L498 452.1557689513638" />
@@ -48,7 +49,7 @@
                             d="M-7 0h14v15H-7Zm4-5h7v5h-7Zm10 7h4v8H7"
                         />
                         <path class="noc-building" d="M428 452.1557689513638V380.1557689513639h70V452.1557689513638Z" />
-                        <path class="noc-building noc-entry" d="M428 434.1557689513638h13v18h-13Z" />
+                        <path class="noc-building noc-entry" d="M 428 434.1557689513638 H 441 V 452.1557689513638 H 428 Z" />
                         <g class="noc-battery">
                             <rect x="452" y="396.1557689513639" width="22" height="40" />
                             <path class="battery-bar battery-bar-1" d="M457 426.1557689513639h12v5h-12Z" />
@@ -79,23 +80,26 @@
             <g id="next-site-cue" aria-hidden="true" transform="translate(932 280)">
                 <path d="M0 14h24V4l20 18-20 18V30H0Z" />
             </g>
-        </svg>
-        <button id="lander-start" type="button" hidden disabled aria-label="Start lunar deployment mission"></button>
+            </svg>
+            <button id="lander-start" type="button" hidden disabled aria-label="Start lunar deployment mission"></button>
+            <p id="lander-fuel" hidden>
+                <span id="lander-fuel-gauge" aria-hidden="true"><span id="lander-fuel-gauge-fill"></span></span>
+                <span id="lander-fuel-label" class="visually-hidden">Fuel reserve:</span>
+                <span id="lander-fuel-value" class="visually-hidden" aria-labelledby="lander-fuel-label">0.0</span>
+            </p>
+            <span id="lander-target-direction" class="visually-hidden" hidden>Next site is to the right.</span>
+            <div id="lander-outcome" hidden>
+                <p id="lander-status" role="status" aria-live="polite" aria-atomic="true"></p>
+                <div id="lander-actions">
+                    <button id="lander-launch" type="button" hidden disabled>Launch</button>
+                    <button id="lander-restart" type="button" hidden disabled>Restart mission</button>
+                    <button id="lander-exit" type="button">Exit mission</button>
+                </div>
+            </div>
+        </div>
+        <p id="lander-controls" hidden>
+            Thrust: Space or Up. Turn: Left/H or Right/L. Tap or hold to thrust; drag to turn. R restarts after a
+            crash. Escape exits.
+        </p>
     </div>
-    <p id="lander-fuel" hidden>
-        <span id="lander-fuel-gauge" aria-hidden="true"><span id="lander-fuel-gauge-fill"></span></span>
-        <span id="lander-fuel-label">Fuel reserve:</span>
-        <output id="lander-fuel-value" aria-labelledby="lander-fuel-label">0.0</output>
-    </p>
-    <span id="lander-target-direction" class="visually-hidden" hidden>Next site is to the right.</span>
-    <p id="lander-controls" hidden>
-        Thrust: Space or Up. Turn: Left/H or Right/L. Tap or hold to thrust; drag to turn. R restarts after a crash.
-        Escape exits.
-    </p>
-    <div id="lander-actions" hidden>
-        <button id="lander-exit" type="button">Exit mission</button>
-        <button id="lander-launch" type="button" hidden disabled>Launch</button>
-        <button id="lander-restart" type="button" hidden disabled>Restart mission</button>
-    </div>
-    <p id="lander-status" role="status" aria-live="polite" aria-atomic="true"></p>
 </section>

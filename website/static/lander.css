@@ -11,6 +11,13 @@
 #lander-game {
     position: relative;
     --fuel-gauge-level: 0;
+    --fuel-danger-color: #ff5a36;
+    --fuel-caution-color: #ffb000;
+    --fuel-ready-color: #2ed49b;
+    --fuel-level-color: var(--fuel-ready-color);
+    --refuel-progress: 0;
+    --fuel-transfer-x: 0px;
+    --fuel-transfer-y: 0px;
     --camera-x: 0px;
     --lander-x: 300px;
     --lander-y: 228px;
@@ -29,8 +36,14 @@
 }
 
 #lander-scene-shell {
-    position: relative;
+    display: flex;
+    flex-direction: column;
     width: min(100%, 60rem);
+    overflow: hidden;
+}
+
+#lander-scene-stage {
+    position: relative;
     aspect-ratio: 25 / 16;
     overflow: hidden;
 }
@@ -101,6 +114,20 @@
 
 .noc-entry {
     fill: #3b3f47;
+}
+
+.lander-site[data-agent="absent"] .noc-entry {
+    fill: #3b3f47;
+    stroke: #4b4e55;
+    stroke-width: 2;
+}
+
+.lander-site[data-agent="installed"] .noc-entry {
+    fill: #2ed49b;
+    stroke: #f5f2e8;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
 }
 
 .noc-battery {
@@ -233,7 +260,7 @@
     animation: agw-target-cue 0.9s step-end infinite;
 }
 
-#lander-game:is([data-mission-state="flying"], [data-mission-state="launching"]) #lander-scene-shell {
+#lander-game:is([data-mission-state="flying"], [data-mission-state="launching"]) #lander-scene-stage {
     touch-action: none;
     user-select: none;
 }
@@ -264,11 +291,24 @@
     display: none !important;
 }
 
-#lander-controls,
-#lander-status {
-    max-width: 72ch;
-    min-height: 1.5em;
-    line-height: 1.5;
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+#lander-fuel:not([hidden]),
+#lander-outcome:not([hidden]),
+#lander-controls:not([hidden]) {
+    font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", "Liberation Mono", Menlo, Monaco, Consolas,
+        monospace;
+    font-weight: 700;
+    letter-spacing: 0.025em;
 }
 
 #lander-fuel-value {
@@ -280,83 +320,143 @@
     z-index: 2;
     top: clamp(0.5rem, 2vw, 1rem);
     left: clamp(0.5rem, 2vw, 1rem);
-    display: grid;
-    grid-template-columns: 0.75rem auto;
-    grid-template-rows: auto auto;
-    gap: 0 0.5rem;
+    display: block;
     margin: 0;
-    line-height: 1.5;
     pointer-events: none;
 }
 
 #lander-fuel-gauge {
-    grid-column: 1;
-    grid-row: 1 / 3;
-    width: 0.75rem;
+    display: block;
+    box-sizing: border-box;
+    width: 1rem;
     height: 7rem;
     overflow: hidden;
-    border: 2px solid #292b30;
-    background: #f5f2e8;
-}
-
-#lander-fuel-label {
-    grid-column: 2;
-    grid-row: 1;
-}
-
-#lander-fuel-value {
-    grid-column: 2;
-    grid-row: 2;
+    border: 3px solid #292b30;
+    background: #20232a;
+    box-shadow: inset 0 0 0 3px var(--fuel-level-color), 3px 3px 0 #292b30;
 }
 
 #lander-fuel-gauge-fill {
     display: block;
     width: 100%;
     height: 100%;
-    background: #7de2c5;
+    background: var(--fuel-level-color);
     transform: scaleY(var(--fuel-gauge-level));
     transform-origin: bottom center;
 }
 
-#lander-game[data-fuel-band="medium"] #lander-fuel-gauge-fill { background: #ffe09a; }
-#lander-game[data-fuel-band="low"] #lander-fuel-gauge-fill { background: #d94a1e; }
-#lander-game[data-fuel-band="empty"] #lander-fuel-gauge-fill { background: transparent; }
+#lander-game[data-refueling="true"] #lander-scene-stage::after {
+    position: absolute;
+    top: var(--fuel-transfer-y);
+    left: var(--fuel-transfer-x);
+    inline-size: 20px;
+    block-size: 22px;
+    background:
+        linear-gradient(#d94a1e 0 0) 6px 2px / 6px 2px no-repeat,
+        linear-gradient(#292b30 0 0) 4px 0 / 10px 6px no-repeat,
+        linear-gradient(#d94a1e 0 0) 16px 10px / 2px 4px no-repeat,
+        linear-gradient(#292b30 0 0) 16px 8px / 4px 8px no-repeat,
+        linear-gradient(#d94a1e 0 0) 2px 6px / 12px 14px no-repeat,
+        linear-gradient(#292b30 0 0) 0 4px / 16px 18px no-repeat;
+    background-color: transparent;
+    content: "";
+    image-rendering: pixelated;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+}
 
-#lander-game[data-launch-ready="true"] #lander-status {
+#lander-outcome:not([hidden]) {
     position: absolute;
     z-index: 2;
-    top: clamp(0.5rem, 2vw, 1rem);
-    left: 50%;
-    max-width: calc(100% - 8rem);
+    inset-block-start: clamp(0.5rem, 2vw, 1rem);
+    inset-inline-end: clamp(0.5rem, 2vw, 1rem);
+    inset-inline-start: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    inline-size: auto;
+    pointer-events: none;
+    transform: none;
+}
+
+#lander-game:not([data-banner="none"]) #lander-outcome {
+    inset-inline-end: auto;
+    inset-inline-start: 50%;
+    inline-size: min(32rem, calc(100% - 6rem));
+    transform: translateX(-50%);
+}
+
+#lander-status {
     margin: 0;
-    padding: 0.35rem 0.65rem;
-    border: 2px solid #d94a1e;
+    line-height: 1.25;
+    text-align: center;
+}
+
+#lander-game[data-banner="none"] #lander-status {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+#lander-game:not([data-banner="none"]) #lander-status {
+    box-sizing: border-box;
+    max-inline-size: 100%;
+    padding: 0.45rem 0.75rem;
+    border: 3px solid #292b30;
     background: #f5f2e8;
     color: #292b30;
-    pointer-events: none;
-    transform: translateX(-50%);
+}
+
+#lander-game[data-banner="deployed"] #lander-status {
+    box-shadow: inset 0 -3px 0 #2ed49b, 3px 3px 0 #292b30;
+}
+
+#lander-game[data-banner="crashed"] #lander-status {
+    box-shadow: inset 0 -3px 0 #ff5a36, 3px 3px 0 #292b30;
+}
+
+#lander-game[data-banner="error"] #lander-status {
+    box-shadow: 3px 3px 0 #292b30;
 }
 
 #lander-actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.75rem;
+    justify-content: center;
+    gap: 0.5rem;
+    margin-block-start: 0.5rem;
 }
 
 #lander-actions button {
-    min-width: 44px;
-    min-height: 44px;
+    min-inline-size: 44px;
+    min-block-size: 44px;
     padding: 0.5rem 0.75rem;
-    border: 1px solid #4b4e55;
-    background: #ebe7dc;
+    border: 3px solid #292b30;
+    border-radius: 0;
+    background: #f5f2e8;
+    box-shadow: 3px 3px 0 #292b30;
     color: #292b30;
     font: inherit;
     cursor: pointer;
+    pointer-events: auto;
 }
 
-#lander-launch {
-    min-inline-size: 44px;
+#lander-controls:not([hidden]) {
+    box-sizing: border-box;
+    width: 100%;
     min-block-size: 44px;
+    margin: 0;
+    padding: clamp(0.4rem, 1.5vw, 0.65rem) clamp(0.6rem, 2vw, 1rem);
+    border-block-start: 4px solid #292b30;
+    background: #20232a;
+    color: #f5f2e8;
+    font-size: clamp(0.625rem, 1.8vw, 0.8125rem);
+    line-height: 1.25;
 }
 
 #lander-game[data-paused="true"] * {
@@ -377,16 +477,6 @@
 @keyframes agw-target-cue {
     50% {
         opacity: 0.35;
-    }
-}
-
-@media (max-width: 30rem) {
-    #lander-game[data-launch-ready="true"] #lander-status {
-        right: 0.5rem;
-        left: 9rem;
-        max-width: none;
-        text-align: center;
-        transform: none;
     }
 }
 

@@ -543,7 +543,7 @@ test("destroy restores the pristine static DOM from active and failed controller
         const controller = new LanderGameController(fixture.root);
         const elements = fixture.elements;
         elements["lander-scene-shell"].setAttribute("role", "application");
-        elements["lander-actions"].hidden = false; elements["lander-exit"].disabled = false;
+        elements["lander-outcome"].hidden = false; elements["lander-exit"].disabled = false;
         elements["lander-status"].textContent = terminal ? FAILURE_STATUS : "Mission underway.";
         if (terminal) { elements["lander-restart"].hidden = false; elements["lander-restart"].disabled = false; }
         fixture.root.style.setProperty("--lander-x", "999px");
@@ -554,7 +554,7 @@ test("destroy restores the pristine static DOM from active and failed controller
         assert.ok(restored); assert.equal(restored.style.properties.size, 0);
         assert.equal(restored.elements["lander-start"].hidden, true);
         assert.equal(restored.elements["lander-start"].disabled, true);
-        assert.equal(restored.elements["lander-actions"].hidden, true);
+        assert.equal(restored.elements["lander-outcome"].hidden, true);
         assert.equal(restored.elements["lander-exit"].disabled, true);
         assert.equal(restored.elements["lander-restart"].hidden, true);
         assert.equal(restored.elements["lander-restart"].disabled, true);
@@ -578,12 +578,12 @@ test("short pointer tap survives automatic lost capture for its full pulse", asy
     const { LanderGameController } = await controllerClasses();
     const fixture = controllerFixture(); const controller = new LanderGameController(fixture.root);
     controller.model = createRun({ seed: 1 });
-    const shell = fixture.elements["lander-scene-shell"];
-    shell.dispatchEvent({ type: "pointerdown", pointerId: 7, isPrimary: true, button: 0,
+    const stage = fixture.elements["lander-scene-stage"];
+    stage.dispatchEvent({ type: "pointerdown", pointerId: 7, isPrimary: true, button: 0,
         clientX: 100, clientY: 50, timeStamp: 0 });
-    shell.dispatchEvent({ type: "pointerup", pointerId: 7, isPrimary: true, button: 0,
+    stage.dispatchEvent({ type: "pointerup", pointerId: 7, isPrimary: true, button: 0,
         clientX: 103, clientY: 52, timeStamp: 50 });
-    assert.equal(shell.hasPointerCapture(7), false);
+    assert.equal(stage.hasPointerCapture(7), false);
     assert.equal(controller.pointer, null); assert.deepEqual(controller.collectivePulse,
         { active: true, token: 1, source: "pointer-tap", deadline: 140 });
     assert.notEqual(controller.pulseTimer, null);
@@ -603,14 +603,14 @@ test("a rapid reused pointer supersedes the old pulse and ignores its stale dead
     const { LanderGameController } = await controllerClasses();
     const fixture = controllerFixture(); const controller = new LanderGameController(fixture.root);
     controller.model = createRun({ seed: 1 });
-    const shell = fixture.elements["lander-scene-shell"];
-    shell.dispatchEvent({ type: "pointerdown", pointerId: 7, isPrimary: true, button: 0,
+    const stage = fixture.elements["lander-scene-stage"];
+    stage.dispatchEvent({ type: "pointerdown", pointerId: 7, isPrimary: true, button: 0,
         clientX: 100, clientY: 50, timeStamp: 0 });
-    shell.dispatchEvent({ type: "pointerup", pointerId: 7, isPrimary: true, button: 0,
+    stage.dispatchEvent({ type: "pointerup", pointerId: 7, isPrimary: true, button: 0,
         clientX: 102, clientY: 50, timeStamp: 20 });
     assert.equal(controller.collectivePulse.token, 1);
     const firstTimer = controller.pulseTimer;
-    shell.dispatchEvent({ type: "pointerdown", pointerId: 7, isPrimary: true, button: 0,
+    stage.dispatchEvent({ type: "pointerdown", pointerId: 7, isPrimary: true, button: 0,
         clientX: 200, clientY: 50, timeStamp: 60 });
     assert.equal(controller.collectivePulse.active, false); assert.equal(controller.pulseTimer, null);
     assert.equal(controller.pointer.token, 2); assert.notEqual(firstTimer, controller.pulseTimer);
@@ -621,7 +621,7 @@ test("a rapid reused pointer supersedes the old pulse and ignores its stale dead
     ]);
     assert.equal(controller.pointer.token, 2);
     assert.deepEqual(controller.pointerInput, { left: 0.72, right: 0.72 });
-    shell.dispatchEvent({ type: "pointerup", pointerId: 7, isPrimary: true, button: 0,
+    stage.dispatchEvent({ type: "pointerup", pointerId: 7, isPrimary: true, button: 0,
         clientX: 202, clientY: 50, timeStamp: 160 });
     assert.equal(controller.collectivePulse.token, 2);
     assert.notEqual(controller.pulseTimer, null);
@@ -637,13 +637,13 @@ test("an overdue pulse ends at its deadline before a reused pointer starts", asy
     const { LanderGameController } = await controllerClasses();
     const fixture = controllerFixture(); const controller = new LanderGameController(fixture.root);
     controller.model = createRun({ seed: 1 });
-    const shell = fixture.elements["lander-scene-shell"];
-    shell.dispatchEvent({ type: "pointerdown", pointerId: 7, isPrimary: true, button: 0,
+    const stage = fixture.elements["lander-scene-stage"];
+    stage.dispatchEvent({ type: "pointerdown", pointerId: 7, isPrimary: true, button: 0,
         clientX: 100, clientY: 50, timeStamp: 0 });
-    shell.dispatchEvent({ type: "pointerup", pointerId: 7, isPrimary: true, button: 0,
+    stage.dispatchEvent({ type: "pointerup", pointerId: 7, isPrimary: true, button: 0,
         clientX: 102, clientY: 50, timeStamp: 20 });
     const delayedTimer = controller.pulseTimer;
-    shell.dispatchEvent({ type: "pointerdown", pointerId: 7, isPrimary: true, button: 0,
+    stage.dispatchEvent({ type: "pointerdown", pointerId: 7, isPrimary: true, button: 0,
         clientX: 200, clientY: 50, timeStamp: 200 });
     assert.deepEqual(controller.clock.queue.slice(-2).map(({ timestamp, left, right, token }) =>
         ({ timestamp, left, right, token })), [
@@ -661,10 +661,10 @@ test("a tap released after its minimum completes immediately without leaving thr
     const { LanderGameController } = await controllerClasses();
     const fixture = controllerFixture(); const controller = new LanderGameController(fixture.root);
     controller.model = createRun({ seed: 1 });
-    const shell = fixture.elements["lander-scene-shell"];
-    shell.dispatchEvent({ type: "pointerdown", pointerId: 7, isPrimary: true, button: 0,
+    const stage = fixture.elements["lander-scene-stage"];
+    stage.dispatchEvent({ type: "pointerdown", pointerId: 7, isPrimary: true, button: 0,
         clientX: 100, clientY: 50, timeStamp: 0 });
-    shell.dispatchEvent({ type: "pointerup", pointerId: 7, isPrimary: true, button: 0,
+    stage.dispatchEvent({ type: "pointerup", pointerId: 7, isPrimary: true, button: 0,
         clientX: 102, clientY: 50, timeStamp: 160 });
     assert.equal(controller.collectivePulse.active, false); assert.equal(controller.pulseTimer, null);
     assert.deepEqual(controller.clock.queue.slice(-2).map(({ timestamp, left, right, token }) =>

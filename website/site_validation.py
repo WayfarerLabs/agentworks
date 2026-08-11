@@ -127,7 +127,7 @@ TEMPLATE_REQUIRED_LITERALS: Final = {
         f'href="{SITE_BASE_TOKEN}assets/agw-rocket.svg#agw-mark"',
         f'href="{SITE_BASE_TOKEN}assets/agw-rocket.svg#agw-engine-left"',
         f'href="{SITE_BASE_TOKEN}assets/agw-rocket.svg#agw-engine-right"',
-        'id="lander-actions" hidden',
+        'id="lander-outcome" hidden',
         'id="lander-exit" type="button">Exit mission</button>',
         'id="lander-restart" type="button" hidden disabled>Restart mission</button>',
     },
@@ -779,83 +779,6 @@ def _validate_game_shell_placement(name: str, parser: _TemplatePlacementParser) 
         or ancestors[-1][1] != MAIN_ATTRIBUTES[name]
     ):
         raise ValueError(f"{name}: shared Lander fragment must be an exact direct main placement")
-
-
-def _validate_lander_fragment(template: str) -> None:
-    parser = _ShellParser()
-    parser.feed(template)
-    elements = parser.elements
-    roots = [index for index, element in enumerate(elements) if element.parent is None]
-    section = _one(parser, roots, "lander-game.html: exactly one root section is required")
-    if elements[section].tag != "section" or elements[section].attributes != {
-        "id": "lander-game",
-        "aria-label": "Lunar deployment scene",
-    }:
-        raise ValueError("lander-game.html: root section contract is invalid")
-    section_children = _children(parser, section)
-    if [elements[index].tag for index in section_children] != ["div", "p", "div", "p"]:
-        raise ValueError("lander-game.html: scene, controls, actions, and status must occur in order")
-    shell, controls, actions, status = section_children
-    if elements[shell].attributes != {"id": "lander-scene-shell", "tabindex": "-1"}:
-        raise ValueError("lander-game.html: scene shell contract is invalid")
-    shell_children = _children(parser, shell)
-    if [elements[index].tag for index in shell_children] != ["svg", "button"]:
-        raise ValueError("lander-game.html: scene must precede its start button")
-    scene, start = shell_children
-    if elements[scene].attributes != {
-        "id": "lander-scene",
-        "viewbox": "0 0 1000 640",
-        "preserveaspectratio": "xMidYMid meet",
-        "role": "img",
-        "aria-labelledby": "lander-scene-title lander-scene-description",
-    }:
-        raise ValueError("lander-game.html: scene SVG attributes are invalid")
-    if elements[start].attributes != {
-        "id": "lander-start",
-        "type": "button",
-        "hidden": None,
-        "aria-label": "Start lunar deployment mission",
-    }:
-        raise ValueError("lander-game.html: start control contract is invalid")
-    if (
-        elements[controls].attributes != {"id": "lander-controls", "hidden": None}
-        or _children(parser, controls)
-        or _normalized_text(elements[controls].text)
-        != "Thrust: Space or Up. Turn: Left/H or Right/L. Escape exits. R restarts after success or failure."
-    ):
-        raise ValueError("lander-game.html: control text contract is invalid")
-    if elements[actions].attributes != {"id": "lander-actions", "hidden": None}:
-        raise ValueError("lander-game.html: action region contract is invalid")
-    action_children = _children(parser, actions)
-    if [elements[index].tag for index in action_children] != ["button", "button"]:
-        raise ValueError("lander-game.html: Exit and Restart actions must occur in order")
-    if (
-        elements[action_children[0]].attributes != {"id": "lander-exit", "type": "button"}
-        or _children(parser, action_children[0])
-        or _normalized_text(elements[action_children[0]].text) != "Exit mission"
-    ):
-        raise ValueError("lander-game.html: Exit action contract is invalid")
-    if (
-        elements[action_children[1]].attributes
-        != {
-            "id": "lander-restart",
-            "type": "button",
-            "hidden": None,
-        }
-        or _children(parser, action_children[1])
-        or _normalized_text(elements[action_children[1]].text) != "Restart mission"
-    ):
-        raise ValueError("lander-game.html: Restart action contract is invalid")
-    if elements[status].attributes != {
-        "id": "lander-status",
-        "role": "status",
-        "aria-live": "polite",
-        "aria-atomic": "true",
-    }:
-        raise ValueError("lander-game.html: status contract is invalid")
-    ids = [str(element.attributes["id"]) for element in elements if element.attributes.get("id")]
-    if len(ids) != len(set(ids)):
-        raise ValueError("lander-game.html: IDs must be unique")
 
 
 def _validate_template(name: str, template: str) -> None:

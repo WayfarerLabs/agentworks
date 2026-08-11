@@ -14,9 +14,43 @@ fallback in the complete built site. Record each execution so a future reader ca
 verified behavior from an expectation that has not been run.
 
 The continuous expedition materially replaces Phase 4C's one-shot mission. Its terrain, sites, fuel,
-route proofs, offscreen cue, checkpoint restart, vacuum crash, and rolling retention require a new
-browser record. Older checked rows below remain historical evidence for their named source only;
-they do not accept the current game.
+route proofs, offscreen cue, checkpoint restart, vacuum crash, rolling retention, arcade fuel gauge,
+and installed-agent payoff require a new browser record. Older checked rows below remain historical
+evidence for their named source only; they do not accept the current game.
+
+## Arcade presentation acceptance
+
+- [ ] At normal and 400-percent-equivalent reflow, verify the game is a 25:16 scene stage followed
+      by a separate normal-flow controls rail. Terrain, fuel, outcomes, and actions stay inside the
+      stage; controls stay below it. Nothing overlaps or creates horizontal page overflow at 320 CSS
+      pixels.
+- [ ] Confirm the left fuel gauge has a graphite boundary, dark track, and one bright bottom-origin
+      level. Its color changes independently from its height: orange-red at or below 20 percent,
+      amber above 20 through 50 percent, and mint above 50 percent. No numeric fuel value is
+      visible. Inspect accessibility output and confirm exactly one hidden `Fuel reserve` value and
+      no meter, progress, or output role.
+- [ ] Service a site with normal motion. The fuel award commits once, then one 20 by 22 pixel
+      graphite-and-orange can moves in a straight line from the site's screen position to the gauge
+      over exactly 300 milliseconds while the gauge fills linearly. Resize during transfer and
+      confirm the can is projected again without restarting, jumping progress, or changing fuel.
+- [ ] Repeat service with reduced motion enabled before contact, and enable reduced motion during
+      transfer. Both paths complete atomically with no moving can and the same fuel, checkpoint,
+      power, and installed-agent result. Hide and restore the tab during transfer and confirm hidden
+      time advances neither the can nor the gauge.
+- [ ] After service begins, confirm the entering agent becomes one installed glyph inside the NOC
+      doorway and remains visible through every NOC power stage, departure, rolling-window
+      reconciliation, and checkpoint restart. Exit restores the exact empty doorway and a fresh run
+      has no installed glyph. The existing site group gains no descendant.
+- [ ] Confirm `Agent Deployed!` and `Crashed!` use centered bordered in-stage panels with exactly
+      one polite live status. Launch, Restart, and Exit remain native 44-pixel actions in that
+      source order; only the state-appropriate actions are enabled and visible. Focus returns to the
+      scene after Launch/Restart and to Start after Exit.
+- [ ] Activate every native action by pointer and touch. Its event must not start, steer, capture,
+      or pulse flight input; each action fires once through its native click. Repeat with
+      interactive and editable descendants placed inside the active stage.
+- [ ] With the network panel open, confirm the arcade presentation loads no font, image, or other
+      asset and makes no request after the existing same-origin document, stylesheet, modules, and
+      SVG loads. The visible arcade text uses the local system monospace stack.
 
 ## Continuous expedition acceptance
 
@@ -31,8 +65,8 @@ they do not accept the current game.
 - [ ] Confirm the next site begins fully offscreen right after service. The solid arrow blinks only
       while that target remains offscreen; it is static with reduced motion and has equivalent
       visually hidden direction text.
-- [ ] Confirm visible fuel changes by tenths without repetitive live announcements. Spend fuel on
-      thrust, carry excess through multiple sites, and verify empty fuel produces no thrust.
+- [ ] Confirm the visual fuel level drains smoothly without repetitive live announcements. Spend
+      fuel on thrust, carry excess through multiple sites, and verify empty fuel produces no thrust.
 - [ ] Crash on terrain, a platform end or underside, the scaffold or connector envelope, the NOC,
       and the mast. Normal motion shows one brief compact flash and exactly eight ballistic
       fragments for 600 milliseconds, with no smoke, dust, sound, shake, or page movement. Reduced
@@ -321,8 +355,8 @@ new run records the refined source.
 - [x] A fast, tilted, rotating, one-foot-outside, surface-short, operations-center, or out-of-bounds
       contact enters the restrained failure state. Nothing flashes, shakes, explodes, moves the
       page, changes the home link, or emits sound.
-- [x] Failure announces exactly `Landing unsuccessful. Press R to restart or Escape to exit.` and
-      accepts both recovery paths.
+- [ ] Failure announces exactly `Crashed!` in the sole live status, shows Restart then Exit in the
+      centered bordered panel, and accepts both recovery paths.
 - [x] After safe touchdown at normal motion, the G bay opens, the terminal-shaped agent descends,
       crosses the surface, and enters the west operations-center door.
 - [ ] Power proceeds vertically through four sharp-cornered battery bars at 200 ms intervals, then
@@ -343,8 +377,8 @@ new run records the refined source.
 - [x] Restart, Escape, and reload each clear powered state. No mission state survives a new run or
       reload.
 - [ ] The vertical left gauge starts each leg full, drains relative to that leg's departure reserve,
-      returns to full with the exact post-award carry, and restores exactly after restart. The
-      rounded `Fuel reserve` output is the only named fuel value.
+      fills linearly during the 300-millisecond award transfer, and restores exactly after restart.
+      The rounded hidden `Fuel reserve` span is the only named fuel value and is not live.
 - [ ] Every static and generated site uses one visibly open scaffold path with no backing rectangle,
       butt caps, round joins, attached connector and NOC underframe, and no pale artifact. Collision
       still rejects the complete conservative underframe, connector, NOC, and mast envelopes.
@@ -370,8 +404,8 @@ new run records the refined source.
       breadcrumb, or start target smaller than the pinned full-silhouette bounds.
 - [x] At 400 percent zoom, all detail headings, 404 content, home navigation, native actions, focus
       outlines, scene, and status remain reachable without two-dimensional page scrolling.
-- [x] In touch landscape, the scene fits its container, the active shell alone suppresses touch
-      actions, and browser navigation and zoom remain available outside it.
+- [ ] In touch landscape, the scene fits its container, the active stage alone suppresses touch
+      actions, and the controls rail plus browser navigation and zoom remain available outside it.
 - [x] On a wide viewport, the scene remains capped at 60 rem with a 25:16 ratio; terrain never
       covers the landing zone, operations center, focus outline, controls, or status.
 

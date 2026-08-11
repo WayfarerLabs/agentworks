@@ -474,8 +474,8 @@ class GeneratedDocumentTests(RepositoryFixture):
         for name in ("lander", "404"):
             document = self.documents[name]
             self.assertEqual(document.ids.count("lander-game"), 1)
-            actions = next(tag for tag in document.tags("div") if tag.get("id") == "lander-actions")
-            self.assertIn("hidden", actions)
+            outcome = next(tag for tag in document.tags("div") if tag.get("id") == "lander-outcome")
+            self.assertIn("hidden", outcome)
             self.assertEqual(len(document.tags("script")), 1)
         for name in ("home", "manifesto", "security"):
             self.assertFalse(self.documents[name].tags("script"))

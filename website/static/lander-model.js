@@ -35,7 +35,7 @@ export const MAX_LANDING_ANGLE = 10;
 export const MAX_LANDING_ANGULAR_SPEED = 15;
 export const COLLISION_MARGIN = 0.02;
 
-export const FAILURE_STATUS = "Landing unsuccessful. Press R to restart or Escape to exit.";
+export const FAILURE_STATUS = "Crashed!";
 export const GENERATION_ERROR_STATUS = "Mission generation failed. Use Exit mission to start a new run.";
 export const SUCCESS_STATUS = "Agent Deployed!";
 
@@ -171,7 +171,13 @@ export function pointerEngineRequests(displacement, sceneWidth) {
 }
 
 export function fuelGaugeLevel(model) {
-    return model.legDepartureFuel > 0 ? clamp(model.fuel / model.legDepartureFuel, 0, 1) : 0;
+    const ordinary = model.legDepartureFuel > 0 ? clamp(model.fuel / model.legDepartureFuel, 0, 1) : 0;
+    if (!model.refuel) return ordinary;
+    return model.refuel.fromLevel + (1 - model.refuel.fromLevel) * model.refuel.progress;
+}
+
+export function agentInstalled(site) {
+    return Boolean(site.powered || (site.nocStage ?? 0) >= 1);
 }
 
 export function effectiveThrust(requested, fuel, seconds = STEP_SECONDS, angularVelocity = 0) {
@@ -241,7 +247,7 @@ export function checkpointPoseForContact(site, contactPose) {
 
 export function createPreflightModel() {
     return { state: "preflight", pose: initialPose(), fuel: 0, legDepartureFuel: 0,
-        commanded: { ...ZERO }, status: "", launchStarted: false, launchCleared: false };
+        commanded: { ...ZERO }, refuel: null, status: "", launchStarted: false, launchCleared: false };
 }
 
 export function createRun({ seed, reducedMotion = false } = {}) {
@@ -252,7 +258,7 @@ export function createRun({ seed, reducedMotion = false } = {}) {
         awardRatio: 3, pose: initialPose(), commanded: { ...ZERO }, fuel: 30, legDepartureFuel: 30,
         generatorCursor: 1, retainedChunks: retainedChunkIndexes(0), retainedSites: [firstSite],
         activeSiteId: null, targetSiteId: 0, targetRouteProof: null, touchdownPose: null,
-        sequenceSeconds: 0, agent: null, nocStage: 0, checkpoint: null, failureCause: null,
+        sequenceSeconds: 0, refuel: null, agent: null, nocStage: 0, checkpoint: null, failureCause: null,
         crashOrdinal: 0, crash: null, status: "Mission underway.", launchStarted: false, launchCleared: false,
     });
 }
@@ -620,7 +626,8 @@ export function proveTemplate(template, suppliedContext = null) {
 }
 
 function generationError(model) {
-    return { ...model, state: "generation-error", commanded: { ...ZERO }, status: GENERATION_ERROR_STATUS };
+    return { ...model, state: "generation-error", commanded: { ...ZERO }, refuel: null,
+        status: GENERATION_ERROR_STATUS };
 }
 
 function provisionalProofContext(model, originSite, targetSite, contactPose) {
@@ -642,6 +649,7 @@ function prepareService(model, contactPose) {
         const proof = proveTemplate(template, provisionalProofContext(model, serviced, nextSite, contactPose));
         const award = proof.demonstratedMinimum * model.awardRatio;
         const sites = model.retainedSites.filter((site) => site.id !== contacted.id).concat(serviced, nextSite).sort((a, b) => a.id - b.id);
+        const fromLevel = model.legDepartureFuel > 0 ? clamp(model.fuel / model.legDepartureFuel, 0, 1) : 0;
         const legDepartureFuel = model.fuel + award;
         return {
             ...model, state: "landed", pose: checkpointPoseForContact(contacted, contactPose), commanded: { ...ZERO },
@@ -649,6 +657,7 @@ function prepareService(model, contactPose) {
             awardRatio: nextAwardRatio(model.awardRatio), generatorCursor: model.generatorCursor + 1,
             activeSiteId: contacted.id, targetSiteId: nextSite.id, targetRouteProof: proof,
             retainedSites: sites, touchdownPose: checkpointPoseForContact(contacted, contactPose), sequenceSeconds: 0,
+            refuel: model.reducedMotion ? null : freeze({ siteId: contacted.id, fromLevel, progress: 0 }),
             nocStage: 0, agent: null, status: "Touchdown confirmed. Fuel collected. Deploying agent.",
         };
     } catch (error) {
@@ -673,10 +682,11 @@ function beginCrash(model, cause, pose) {
     const ordinal = model.crashOrdinal + 1;
     if (model.reducedMotion) {
         return { ...model, state: "failed", pose, commanded: { ...ZERO }, failureCause: cause,
-            crashOrdinal: ordinal, crash: null, status: FAILURE_STATUS };
+            crashOrdinal: ordinal, crash: null, refuel: null, status: FAILURE_STATUS };
     }
     return { ...model, state: "crashing", pose, commanded: { ...ZERO }, failureCause: cause,
-        crashOrdinal: ordinal, sequenceSeconds: 0, crash: freeze({ pose, fragments: crashFragments(model, pose, ordinal) }), status: "" };
+        crashOrdinal: ordinal, sequenceSeconds: 0, refuel: null,
+        crash: freeze({ pose, fragments: crashFragments(model, pose, ordinal) }), status: "" };
 }
 
 export function stepFlight(model, requested, options = {}) {
@@ -732,7 +742,8 @@ function restoreCheckpoint(model) {
     if (!model.checkpoint) return { ...createRun({ seed: model.seed, reducedMotion: model.reducedMotion }), crashOrdinal: model.crashOrdinal };
     const checkpoint = structuredClone(model.checkpoint);
     return { ...model, ...checkpoint, state: "launching", commanded: { ...ZERO }, sequenceSeconds: 0,
-        failureCause: null, crash: null, status: SUCCESS_STATUS, launchStarted: false, launchCleared: false };
+        refuel: null, failureCause: null, crash: null, status: SUCCESS_STATUS,
+        launchStarted: false, launchCleared: false };
 }
 
 export function transitionMission(model, event, options = {}) {
@@ -745,19 +756,26 @@ export function transitionMission(model, event, options = {}) {
 export function advanceMissionSequence(model, seconds, reducedMotion = model.reducedMotion) {
     if (model.state === "crashing") {
         const elapsed = model.sequenceSeconds + seconds;
-        return elapsed >= 0.6 ? { ...model, state: "failed", sequenceSeconds: 0, crash: null, status: FAILURE_STATUS }
+        return elapsed >= 0.6 ? { ...model, state: "failed", sequenceSeconds: 0, crash: null,
+            refuel: null, status: FAILURE_STATUS }
             : { ...model, sequenceSeconds: elapsed };
     }
     if (reducedMotion && ["landed", "deploying", "powering"].includes(model.state)) {
         const active = siteById(model, model.activeSiteId);
         const sites = model.retainedSites.map((site) => site.id === active.id ? { ...site, powered: true, nocStage: 7 } : site);
         const powered = { ...model, state: "launching", retainedSites: sites, nocStage: 7,
-            agent: null, sequenceSeconds: 0, status: SUCCESS_STATUS, launchStarted: false, launchCleared: false };
+            agent: null, refuel: null, sequenceSeconds: 0, status: SUCCESS_STATUS,
+            launchStarted: false, launchCleared: false };
         return { ...powered, checkpoint: freezeCheckpoint(powered) };
     }
     let elapsed = model.sequenceSeconds + seconds;
-    if (model.state === "landed" && elapsed >= 0.3) {
-        return { ...model, state: "deploying", sequenceSeconds: elapsed - 0.3, agent: { progress: 0 } };
+    if (model.state === "landed") {
+        if (elapsed < 0.3) {
+            return { ...model, sequenceSeconds: elapsed,
+                refuel: model.refuel ? freeze({ ...model.refuel, progress: clamp(elapsed / 0.3, 0, 1) }) : null };
+        }
+        return { ...model, state: "deploying", sequenceSeconds: elapsed - 0.3,
+            refuel: null, agent: { progress: 0 } };
     }
     if (model.state === "deploying") {
         const progress = clamp(elapsed / 1.8, 0, 1);
@@ -772,7 +790,8 @@ export function advanceMissionSequence(model, seconds, reducedMotion = model.red
         }
         const sites = model.retainedSites.map((site) => site.id === model.activeSiteId ? { ...site, powered: true, nocStage: 7 } : site);
         const powered = { ...model, state: "launching", retainedSites: sites, nocStage: 7,
-            sequenceSeconds: 0, status: SUCCESS_STATUS, launchStarted: false, launchCleared: false };
+            refuel: null, sequenceSeconds: 0, status: SUCCESS_STATUS,
+            launchStarted: false, launchCleared: false };
         return { ...powered, checkpoint: freezeCheckpoint(powered) };
     }
     return { ...model, sequenceSeconds: elapsed };

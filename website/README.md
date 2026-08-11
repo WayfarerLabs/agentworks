@@ -1,6 +1,6 @@
 # Agentworks Website
 
-<!-- cspell:ignore sdds -->
+<!-- cspell:ignore refuel reprojection sdds -->
 
 This directory owns the static source for `agentworks.build`. A standard-library Python builder
 combines semantic templates, local CSS and JavaScript, the AGW rocket asset, and selected passages
@@ -49,15 +49,17 @@ python3 -m unittest discover -s website/tests -p 'test_*.py'
 node --test website/tests/lander-model.test.mjs
 node --test website/tests/lander-world.test.mjs
 node --test website/tests/lander-phase4i.test.mjs
+node --test website/tests/lander-phase4j.test.mjs
 ./scripts/lint-files.sh
 ./scripts/check-locked-sdds.sh
 ./scripts/rulesync-upgen.sh --check
 ```
 
 The Python website suite requires `chromium`, `chromium-browser`, or `google-chrome` on `PATH`. Its
-responsive geometry test launches that browser in headless mode and fails, rather than skips, when
-none is available. PR CI and the Pages build therefore prove the wide left-rail and narrow inline
-layouts.
+responsive geometry tests launch that browser in headless mode and fail, rather than skip, when none
+is available. PR CI and the Pages build therefore prove the long-form layouts plus the Lander's
+narrow arcade HUD, stage-to-controls separation, native-action targets, pseudo-can paint, local font
+stack, touch scope, and zero cross-origin request contract.
 
 Pull requests and pushes to `main` run these website contracts in the `Website` job of
 `.github/workflows/ci.yml`; `ci-success` requires that job. The `Deploy website to Pages` workflow
@@ -144,11 +146,32 @@ previous powered site, one input queue of at most 64 records, and eight crash fr
 capacity cap: unused reserve carries forward. Each collected can adds the next route's demonstrated
 minimum multiplied by a ratio that starts at three and decays monotonically toward one. Exit and
 reload discard the in-memory run; crash restart restores the last powered pad without recollecting
-fuel or advancing progress. The vertical gauge measures fuel against the exact reserve at the start
-of the current leg; the adjacent rounded number remains the only accessible fuel value. After the
-four battery and three signal stages complete, `Agent Deployed!` is the sole status and the lander
-waits on the pad without spending fuel. Depart with Space, Up, pointer or touch thrust, or the
-native Launch button.
+fuel or advancing progress.
+
+The left vertical gauge is visual-only. Its bottom-up height and bright danger-red, caution-amber,
+or ready-green indicator independently project fuel against the exact reserve at the start of the
+current leg. A visually hidden, ordinary, non-live span named `Fuel reserve` is the sole accessible
+rounded value; exact model fuel remains unrounded and uncapped. Normal motion projects the collected
+can toward the gauge and raises the fill linearly over the model-owned 300 ms refuel interval.
+Reduced motion, or enabling reduced motion mid-refuel, exposes the same committed fuel and
+checkpoint atomically without a transfer. Hiding the document freezes model time, while resize and
+the first visible frame project the same progress again from current stage and gauge rectangles.
+
+The sole status live region presents centered bordered `Agent Deployed!` and `Crashed!` arcade
+panels. Launch then Exit appear below the deployment result; Restart then Exit appear below the
+crash result; generation errors retain Exit alone. The persistent native controls stay at least 44
+CSS pixels in each dimension and return focus through the same model lifecycle as keyboard input.
+The concise control sentence occupies a normal-flow dark rail after the complete 25:16 scene stage,
+so it cannot cover terrain or overlays. Pointer flight handlers belong only to the stage, reject
+interactive or editable composed paths before preventing or capturing, and disable touch gestures
+only during active flight or launch.
+
+At the first NOC power stage, the existing doorway path becomes the installed-agent glyph without
+adding a site node or mutable world field. It stays installed whenever that retained site is
+powered, including later legs, crash, checkpoint restoration, and restart. After all four battery
+and three signal stages complete, `Agent Deployed!` remains visible while the lander waits on the
+pad without spending fuel. Depart with Space, Up, pointer or touch thrust, or the native Launch
+button.
 
 All three CLI paths are required. The output must be outside the repository. The site base is an
 ASCII, slash-bounded same-origin path such as `/` or `/agentworks/`; absolute URLs, dot segments,
