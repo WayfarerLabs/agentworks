@@ -5,11 +5,11 @@ states the guarantees and limitations for `vm reinit`, `agent reinit`, and `work
 
 ## Install commands
 
-An install-command is one logical shell invocation written as a plain YAML scalar. Prefer the
-template's `apt`, `apt_packages`, `snap`, or `mise_packages` fields, then a maintained
-package-manager or vendor entry point. Embedded scripts, block scalars, here-documents, multi-step
-installers, state machines, signature pipelines, and cleanup routines do not belong in an
-install-command manifest.
+An install-command is one logical shell invocation written as a single-line YAML scalar, either
+plain or quoted. Prefer the template's `apt`, `apt_packages`, `snap`, or `mise_packages` fields,
+then a maintained package-manager or vendor entry point. Embedded scripts, block scalars,
+here-documents, multi-step installers, state machines, signature pipelines, and cleanup routines do
+not belong in an install-command manifest.
 
 Init and reinit may both reach the resource. Its invocation must be repeat-safe itself or declare
 `test_exec`, `test_file`, or `test_dir` completion checks that reliably skip it after success. When
@@ -59,13 +59,13 @@ failures produce warnings and a `partial` status.
 
 These add things on reinit but do not remove them when removed from config:
 
-| Step                    | Notes                                                                                                  |
-| ----------------------- | ------------------------------------------------------------------------------------------------------ |
-| Apt packages            | Never removed. Transitive deps not cleaned up. Too risky for reinit.                                   |
-| Snap packages           | Never removed.                                                                                         |
-| System install commands | Not uninstalled when removed from config. Commands must be idempotent; optional checks may skip a run. |
-| User install commands   | Same as system install commands.                                                                       |
-| Mise packages           | When `mise_prune_on_reinit = false`, stale tool versions are not removed.                              |
+| Step                    | Notes                                                                                                                                          |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Apt packages            | Never removed. Transitive deps not cleaned up. Too risky for reinit.                                                                           |
+| Snap packages           | Never removed.                                                                                                                                 |
+| System install commands | Not uninstalled when removed from config. Commands must be repeat-safe intrinsically or use reliable completion checks to skip completed work. |
+| User install commands   | Same as system install commands.                                                                                                               |
+| Mise packages           | When `mise_prune_on_reinit = false`, stale tool versions are not removed.                                                                      |
 
 ### Other
 

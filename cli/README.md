@@ -464,11 +464,11 @@ and agent templates. User-defined entries override built-in entries with the sam
 
 Prefer template `apt`, `apt_packages`, `snap`, or `mise_packages` fields over a custom install
 command. When an install command is necessary, its `command` is one logical shell invocation written
-as a plain scalar, normally one maintained package-manager or vendor entry point. Do not embed a
-script, block scalar, here-document, multi-step installer, state machine, signature pipeline, or
-cleanup routine. The invocation must be repeat-safe itself or use `test_exec`, `test_file`, or
-`test_dir` as reliable completion checks. System install commands run as the VM admin, not root, and
-explicitly use `sudo` for privileged work.
+as a single-line YAML scalar, either plain or quoted, normally one maintained package-manager or
+vendor entry point. Do not embed a script, block scalar, here-document, multi-step installer, state
+machine, signature pipeline, or cleanup routine. The invocation must be repeat-safe itself or use
+`test_exec`, `test_file`, or `test_dir` as reliable completion checks. System install commands run
+as the VM admin, not root, and explicitly use `sudo` for privileged work.
 
 ## VM Initialization
 

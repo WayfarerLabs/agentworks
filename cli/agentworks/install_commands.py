@@ -9,7 +9,7 @@ Two first-class Registry kinds live here next to the code that loads them:
 
 System scope does not imply root execution. A system install command must
 explicitly use ``sudo`` for each step that needs root privileges.
-Install commands are one logical shell invocation, written as a plain scalar.
+Install commands are one logical shell invocation, written as a single-line scalar.
 Package-manager and maintained vendor entry points belong here; embedded
 scripts and multi-step installer machinery do not.
 
@@ -61,7 +61,7 @@ class _InstallCommandEntry(DeclaredResource):
     # operator MUST fill in here: one maintained entry point, not an embedded
     # installer implementation.
     command: str = Field(examples=["tool-manager install my-tool"])
-    """One logical shell invocation, authored as a plain scalar. It must be
+    """One logical shell invocation, authored as a single-line scalar. It must be
     repeat-safe itself or paired with completion checks that reliably skip it
     after success because init and reinit may invoke the resource again."""
 
@@ -179,7 +179,7 @@ class _SystemInstallCommandKind:
         A system-install-command is the fallback for VM-wide tooling that cannot use a
         template's `apt_packages` or `snap` fields. Prefer those fields first, then a
         maintained package-manager or vendor entry point. The command must be one
-        logical shell invocation written as a plain scalar. Embedded scripts, block
+        logical shell invocation written as a single-line scalar. Embedded scripts, block
         scalars, here-documents, multi-step installers, state machines, signature pipelines,
         and cleanup routines do not belong in a manifest.
 

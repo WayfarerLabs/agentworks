@@ -435,10 +435,10 @@ particular runtime, and a session runs whatever integration its template selects
 
 Prefer a VM template's `apt`, `apt_packages`, or `snap` fields for system software and
 `mise_packages` for user tools. Use an install-command only when those package paths do not fit. Its
-`command` must be one logical shell invocation written as a plain YAML scalar. Prefer one maintained
-package-manager or vendor entry point. Embedded scripts, block scalars, here-documents, multi-step
-installers, state machines, signature pipelines, and cleanup routines do not belong in an
-install-command manifest.
+`command` must be one logical shell invocation written as a single-line YAML scalar, either plain or
+quoted. Prefer one maintained package-manager or vendor entry point. Embedded scripts, block
+scalars, here-documents, multi-step installers, state machines, signature pipelines, and cleanup
+routines do not belong in an install-command manifest.
 
 Agentworks runs install commands during init and may run them again during every reinit. Each
 invocation must therefore be repeat-safe itself or declare `test_exec`, `test_file`, or `test_dir`

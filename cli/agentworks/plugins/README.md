@@ -326,13 +326,13 @@ reserved auto-declared name (a `default` template). They load through the same t
 loader the built-in manifests use, stamped with the plugin's `system-plugin` origin. A malformed
 bundle is a typed error attributed to the plugin, never a bare import or assertion failure.
 
-Install-command manifests contain one logical shell invocation as a plain scalar. Prefer the
-template's `apt`, `apt_packages`, `snap`, or `mise_packages` surfaces, followed by a maintained
-package-manager or vendor entry point. Do not embed a script, block scalar, here-document,
-multi-step installer, state machine, signature pipeline, or cleanup routine. The invocation must be
-repeat-safe itself or use the existing `test_exec`, `test_file`, or `test_dir` completion fields. A
-system install command still runs as the VM admin, not root, and explicitly invokes `sudo` for any
-privileged step.
+Install-command manifests contain one logical shell invocation as a single-line YAML scalar, either
+plain or quoted. Prefer the template's `apt`, `apt_packages`, `snap`, or `mise_packages` surfaces,
+followed by a maintained package-manager or vendor entry point. Do not embed a script, block scalar,
+here-document, multi-step installer, state machine, signature pipeline, or cleanup routine. The
+invocation must be repeat-safe itself or use the existing `test_exec`, `test_file`, or `test_dir`
+completion fields. A system install command still runs as the VM admin, not root, and explicitly
+invokes `sudo` for any privileged step.
 
 ## Reserved fields (inert in v1)
 
