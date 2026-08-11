@@ -286,7 +286,7 @@ cross-cutting framework contract.
       rerun; `test_exec`, `test_file`, and `test_dir` are optional early-exit optimizations rather
       than the idempotency mechanism; omit them when the command should reconcile or update each
       run.
-- [ ] Restore narrow GCP proto-presence exception handling, replace prohibited punctuation in owned
+- [x] Restore narrow GCP proto-presence exception handling, replace prohibited punctuation in owned
       README lines, refresh the PR's exact counts/state, and keep the unrelated known-hosts issue
       out of scope.
 - [ ] Run focused/full gates plus both required code reviews, resolve every valid finding, post one
