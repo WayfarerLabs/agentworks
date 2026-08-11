@@ -69,8 +69,13 @@
     transform: translate(var(--camera-x), 0);
 }
 
-.terrain-chunk {
+.terrain-fill {
     fill: #d7d2c4;
+    stroke: none;
+}
+
+.terrain-surface {
+    fill: none;
     stroke: #4b4e55;
     stroke-linejoin: round;
     stroke-width: 2;
@@ -472,9 +477,23 @@
     margin: 0;
 }
 
+.lander-controls-line {
+    display: block;
+    overflow: visible;
+    white-space: nowrap;
+}
+
 #lander-exit {
     align-self: end;
     justify-self: end;
+}
+
+@media (max-width: 32rem) {
+    #lander-controls-rail:not([hidden]) {
+        grid-template-columns: minmax(0, 1fr);
+        row-gap: 0.4rem;
+        padding-inline: 0.4rem;
+    }
 }
 
 #lander-game[data-paused="true"] * {

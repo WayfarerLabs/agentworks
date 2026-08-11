@@ -4,9 +4,12 @@ export const TERRAIN_SAMPLE_SPACING = 10;
 export const PLATFORM_WIDTH = 9.6;
 export const PLATFORM_THICKNESS = 0.35;
 export const PLATFORM_CLEARANCE = 2.4;
-export const TARGET_DECK_BAND = Object.freeze([3.15, 9.9]);
+export const DECK_LEVELS = Object.freeze([83, 91, 99]);
 export const SCAFFOLD_MEMBER_WIDTH = 0.2;
 export const SCAFFOLD_MEMBER_HALF = SCAFFOLD_MEMBER_WIDTH / 2;
+export const TRUSS_BAY_COUNT = 12;
+export const TRUSS_BAY_HEIGHT = 0.75;
+export const TRUSS_BAY_WIDTH = 1.55;
 export const NOC_CONNECTOR_WIDTH = 2;
 export const NOC_WIDTH = 7;
 export const NOC_ROOF_OFFSET = 7.2;
@@ -119,77 +122,77 @@ export function terrainVerticesForRange(vertices, left, right) {
     ]);
 }
 
-export function siteFoundationBottom(vertices, site) {
-    void vertices;
-    return site.platformTop - PLATFORM_CLEARANCE;
-}
-
 export function siteStructure(site) {
-    const padBase = site.platformTop - PLATFORM_CLEARANCE;
     const buildingLeft = site.platformRight + NOC_CONNECTOR_WIDTH;
     const buildingRight = buildingLeft + NOC_WIDTH;
     const roof = site.platformTop + NOC_ROOF_OFFSET;
+    const trussBottom = site.platformBottom - TRUSS_BAY_HEIGHT;
+    const pylonXs = [site.platformLeft, site.platformLeft + 9.3, buildingRight];
+    const pylons = pylonXs.map((x) => {
+        const foot = terrainHeightAt(site.seed, x);
+        return {
+            center: x,
+            foot,
+            collider: {
+                bottom: foot - SCAFFOLD_MEMBER_HALF,
+                left: x - SCAFFOLD_MEMBER_HALF,
+                right: x + SCAFFOLD_MEMBER_HALF,
+                top: site.platformBottom + SCAFFOLD_MEMBER_HALF,
+            },
+        };
+    });
     return freeze({
         buildingLeft,
         buildingRight,
-        connector: {
-            bottom: site.platformTop - PLATFORM_THICKNESS - SCAFFOLD_MEMBER_HALF,
-            left: site.platformRight - SCAFFOLD_MEMBER_HALF,
-            right: buildingLeft + SCAFFOLD_MEMBER_HALF,
-            top: site.platformTop + SCAFFOLD_MEMBER_HALF,
-        },
         mast: {
             bottom: roof,
             left: buildingLeft + (NOC_WIDTH - NOC_MAST_WIDTH) / 2,
             right: buildingLeft + (NOC_WIDTH + NOC_MAST_WIDTH) / 2,
             top: roof + NOC_MAST_HEIGHT,
         },
-        noc: { bottom: padBase, left: buildingLeft, right: buildingRight, top: roof },
-        nocUnderframe: {
-            bottom: padBase - SCAFFOLD_MEMBER_HALF,
-            left: buildingLeft - SCAFFOLD_MEMBER_HALF,
-            right: buildingRight + SCAFFOLD_MEMBER_HALF,
-            top: site.platformTop + SCAFFOLD_MEMBER_HALF,
-        },
-        padBase,
-        platformUnderframe: {
-            bottom: padBase - SCAFFOLD_MEMBER_HALF,
-            left: site.platformLeft - SCAFFOLD_MEMBER_HALF,
-            right: site.platformRight + SCAFFOLD_MEMBER_HALF,
-            top: site.platformTop - PLATFORM_THICKNESS + SCAFFOLD_MEMBER_HALF,
-        },
+        noc: { bottom: site.platformBottom, left: buildingLeft, right: buildingRight, top: roof },
+        pylons,
         roof,
+        truss: {
+            bottom: trussBottom - SCAFFOLD_MEMBER_HALF,
+            left: site.platformLeft - SCAFFOLD_MEMBER_HALF,
+            right: buildingRight + SCAFFOLD_MEMBER_HALF,
+            top: site.platformBottom + SCAFFOLD_MEMBER_HALF,
+        },
+        trussBottom,
     });
 }
 
-function scaffoldBay(path, left, right, top, bottom) {
-    path.push(`M${left} ${top}L${right} ${bottom}`, `M${left} ${bottom}L${right} ${top}`);
+export function siteScaffoldMembers(site) {
+    const structure = siteStructure(site);
+    const bayWidth = (structure.buildingRight - site.platformLeft) / TRUSS_BAY_COUNT;
+    const members = [
+        { start: [site.platformLeft, site.platformBottom], end: [structure.buildingRight, site.platformBottom] },
+        { start: [site.platformLeft, structure.trussBottom], end: [structure.buildingRight, structure.trussBottom] },
+    ];
+    for (let bay = 0; bay < TRUSS_BAY_COUNT; bay += 1) {
+        const left = site.platformLeft + bayWidth * bay;
+        const right = left + bayWidth;
+        members.push(bay % 2 === 0 ?
+            { start: [left, site.platformBottom], end: [right, structure.trussBottom] } :
+            { start: [left, structure.trussBottom], end: [right, site.platformBottom] });
+    }
+    for (const pylon of structure.pylons) {
+        members.push({ start: [pylon.center, structure.trussBottom], end: [pylon.center, pylon.foot] });
+    }
+    return freeze(members.map((member) => ({ cap: "butt", join: "round", ...member })));
 }
 
 export function siteScaffoldPath(site) {
-    const structure = siteStructure(site);
-    const projectX = (x) => x * 10;
+    const projectX = (x) => Number((x * 10).toFixed(12));
     const projectY = (y) => 548 - y * 10;
-    const platformTop = projectY(site.platformTop);
-    const deckBottom = projectY(site.platformBottom);
-    const shelf = projectY(structure.padBase);
-    const platformLeft = projectX(site.platformLeft);
-    const platformRight = projectX(site.platformRight);
-    const nocLeft = projectX(structure.buildingLeft);
-    const nocRight = projectX(structure.buildingRight);
-    const path = [
-        `M${platformLeft} ${deckBottom}H${platformRight}V${shelf}H${platformLeft}Z`,
-        `M${platformRight} ${platformTop}H${nocLeft}V${deckBottom}H${platformRight}Z`,
-        `M${nocLeft} ${platformTop}H${nocRight}V${shelf}H${nocLeft}Z`,
-    ];
-    for (let bay = 0; bay < 6; bay += 1) {
-        scaffoldBay(path, platformLeft + bay * 16, platformLeft + (bay + 1) * 16, deckBottom, shelf);
-    }
-    scaffoldBay(path, platformRight, nocLeft, platformTop, deckBottom);
-    for (let bay = 0; bay < 7; bay += 1) {
-        scaffoldBay(path, nocLeft + bay * 10, nocLeft + (bay + 1) * 10, platformTop, shelf);
-    }
-    return path.join("");
+    return siteScaffoldMembers(site).map(({ start, end }, index) => {
+        const [startX, startY] = start;
+        const [endX, endY] = end;
+        if (index < 2) return `M${projectX(startX)} ${projectY(startY)}H${projectX(endX)}`;
+        if (index >= 14) return `M${projectX(startX)} ${projectY(startY)}V${projectY(endY)}`;
+        return `M${projectX(startX)} ${projectY(startY)}L${projectX(endX)} ${projectY(endY)}`;
+    }).join("");
 }
 
 export function nativeTerrainVertices(seed, left, right) {
@@ -215,21 +218,29 @@ function maximumTerrain(seed, left, right) {
     return Math.max(...nativeTerrainVertices(seed, left, right).map((point) => point[1]));
 }
 
+function minimumDeckLevel(seed, center) {
+    const platformLeft = center - PLATFORM_WIDTH / 2;
+    const buildingRight = center + PLATFORM_WIDTH / 2 + NOC_CONNECTOR_WIDTH + NOC_WIDTH;
+    const minimumTop = maximumTerrain(seed, platformLeft, buildingRight) + PLATFORM_CLEARANCE;
+    return DECK_LEVELS.find((level) => level / 10 >= minimumTop);
+}
+
 export function createFirstSite(seed) {
     const normalized = normalizeSeed(seed);
     const center = 36;
     const platformLeft = center - PLATFORM_WIDTH / 2;
     const platformRight = center + PLATFORM_WIDTH / 2;
-    const shelfRight = platformRight + 9;
-    const platformTop = maximumTerrain(normalized, platformLeft, shelfRight) + PLATFORM_CLEARANCE;
+    const deckLevel = minimumDeckLevel(normalized, center);
+    const platformTop = deckLevel / 10;
     return freeze({
         id: 0,
+        seed: normalized,
         center,
+        deckLevel,
         platformLeft,
         platformRight,
         platformTop,
         platformBottom: platformTop - PLATFORM_THICKNESS,
-        shelfRight,
         canCollected: false,
         powered: false,
         nocStage: 0,
@@ -253,8 +264,9 @@ export function selectTemplate(seed, siteIndex, originSite, templates) {
         if (!template) {
             throw new Error(`Missing route template for ${distance} metres`);
         }
-        const top = originSite.platformTop + template.deckDelta;
-        if (top >= TARGET_DECK_BAND[0] && top <= TARGET_DECK_BAND[1]) {
+        const targetLevel = originSite.deckLevel + Math.round(template.deckDelta * 10);
+        const targetCenter = originSite.center + template.centerDelta;
+        if (DECK_LEVELS.includes(targetLevel) && targetLevel >= minimumDeckLevel(seed, targetCenter)) {
             return template;
         }
     }
@@ -278,29 +290,33 @@ function interpolateKnots(knots, x) {
 
 export function instantiateTemplateSite(seed, siteIndex, originSite, template) {
     const center = originSite.center + template.centerDelta;
-    const platformTop = originSite.platformTop + template.deckDelta;
+    const deckLevel = originSite.deckLevel + Math.round(template.deckDelta * 10);
+    const platformTop = deckLevel / 10;
+    if (!DECK_LEVELS.includes(deckLevel) || deckLevel < minimumDeckLevel(seed, center)) {
+        throw new RangeError(`Route template ${template.templateId} does not clear native terrain`);
+    }
     return freeze({
         id: siteIndex,
+        seed: normalizeSeed(seed),
         center,
+        deckLevel,
         platformLeft: center - PLATFORM_WIDTH / 2,
         platformRight: center + PLATFORM_WIDTH / 2,
         platformTop,
         platformBottom: platformTop - PLATFORM_THICKNESS,
-        shelfRight: center + PLATFORM_WIDTH / 2 + 9,
         canCollected: false,
         powered: false,
         nocStage: 0,
         templateId: template.templateId,
         originSiteId: originSite.id,
         clearanceKnots: template.clearanceKnots.map((point) => [...point]),
-        seed: normalizeSeed(seed),
     });
 }
 
 export function corridorVertices(seed, originSite, targetSite) {
-    const originRight = originSite.shelfRight ?? originSite.platformRight + 9;
+    const originRight = originSite.platformRight + NOC_CONNECTOR_WIDTH + NOC_WIDTH;
     const targetLeft = targetSite.platformLeft;
-    const vertices = [[originRight, originSite.platformTop - PLATFORM_CLEARANCE]];
+    const vertices = [];
     const firstIndex = Math.floor(originRight / TERRAIN_SAMPLE_SPACING) + 1;
     const lastIndex = Math.ceil(targetLeft / TERRAIN_SAMPLE_SPACING) - 1;
     for (let index = firstIndex; index <= lastIndex; index += 1) {
@@ -311,48 +327,35 @@ export function corridorVertices(seed, originSite, targetSite) {
         const y = raw > cap ? Math.max(0.5, cap - 0.15 * sampleUnit(seed, 4, index >>> 0)) : raw;
         vertices.push([x, y]);
     }
-    vertices.push([targetLeft, targetSite.platformTop - PLATFORM_CLEARANCE]);
-    vertices.push([targetSite.shelfRight ?? targetSite.platformRight + 9, targetSite.platformTop - PLATFORM_CLEARANCE]);
     return vertices;
 }
 
-function deduplicateVertices(vertices) {
-    const result = [];
-    for (const point of vertices) {
-        const previous = result.at(-1);
-        if (previous && previous[0] === point[0]) {
-            previous[1] = Math.min(previous[1], point[1]);
-        } else {
-            result.push([...point]);
-        }
-    }
-    return result;
-}
-
 export function terrainVerticesForWindow(seed, sites, left, right) {
-    let vertices = nativeTerrainVertices(seed, left, right);
     const ordered = [...sites].sort((a, b) => a.center - b.center);
+    const points = new Set(nativeTerrainVertices(seed, left, right).map(([x]) => x));
     for (const site of ordered) {
-        const shelfRight = site.shelfRight ?? site.platformRight + 9;
-        vertices = vertices.filter(([x]) => x < site.platformLeft || x > shelfRight);
-        vertices.push(
-            [site.platformLeft, site.platformTop - PLATFORM_CLEARANCE],
-            [shelfRight, site.platformTop - PLATFORM_CLEARANCE],
-        );
+        [site.platformLeft, site.platformLeft + 9.3, site.platformLeft + 9.6,
+            site.platformLeft + 11.6, site.platformLeft + 18.6].forEach((x) => {
+            if (x >= left && x <= right) points.add(x);
+        });
     }
+    const corridors = [];
     for (let index = 1; index < ordered.length; index += 1) {
-        const origin = ordered[index - 1];
-        const target = ordered[index];
-        if (target.clearanceKnots) {
-            const originShelfRight = origin.shelfRight ?? origin.platformRight + 9;
-            const targetShelfRight = target.shelfRight ?? target.platformRight + 9;
-            vertices = vertices.filter(([x]) => x < originShelfRight || x > targetShelfRight);
-            vertices.push(...corridorVertices(seed, origin, target));
-            const resume = Math.floor(targetShelfRight / TERRAIN_SAMPLE_SPACING) + 1;
-            vertices.push([resume * TERRAIN_SAMPLE_SPACING, terrainSample(seed, resume)]);
+        if (ordered[index].clearanceKnots) {
+            const origin = ordered[index - 1];
+            const target = ordered[index];
+            corridors.push({ origin, target, byX: new Map(corridorVertices(seed, origin, target)) });
         }
     }
-    return freeze(deduplicateVertices(vertices.filter(([x]) => x >= left && x <= right).sort((a, b) => a[0] - b[0])));
+    const vertices = [...points].sort((a, b) => a - b).map((x) => {
+        const corridor = corridors.find(({ origin, target }) =>
+            x > origin.platformRight + NOC_CONNECTOR_WIDTH + NOC_WIDTH && x < target.platformLeft);
+        return [x, corridor?.byX.get(x) ?? terrainHeightAt(seed, x)];
+    });
+    if (vertices.some((point, index) => index > 0 && vertices[index - 1][0] >= point[0])) {
+        throw new Error("Terrain vertices must have strictly increasing X coordinates");
+    }
+    return freeze(vertices);
 }
 
 export function retainedChunkIndexes(cameraLeft) {
@@ -385,10 +388,17 @@ export function targetIsOffscreen(targetSite, cameraLeft) {
     return Boolean(targetSite && targetSite.platformLeft > cameraLeft + 100);
 }
 
-export function terrainPath(vertices) {
+export function terrainSurfacePath(vertices) {
     if (vertices.length === 0) {
         return "";
     }
     const points = vertices.map(([x, y]) => `${x * 10} ${548 - y * 10}`).join("L");
-    return `M${points}L${vertices.at(-1)[0] * 10} 648L${vertices[0][0] * 10} 648Z`;
+    return `M${points}`;
+}
+
+export function terrainFillPath(vertices) {
+    if (vertices.length === 0) {
+        return "";
+    }
+    return `${terrainSurfacePath(vertices)}L${vertices.at(-1)[0] * 10} 648L${vertices[0][0] * 10} 648Z`;
 }

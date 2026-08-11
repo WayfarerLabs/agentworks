@@ -9,7 +9,6 @@ import {
     retainedSiteDescriptors,
     sampleUnit,
     selectTemplate,
-    siteFoundationBottom,
     siteStructure,
     STATIC_WORLD_SEED,
     terrainVerticesForWindow,
@@ -29,10 +28,10 @@ export const MAX_THRUST_VECTOR = 30;
 export const ANGULAR_ASSIST_DIFFERENTIAL = 0.12;
 export const ANGULAR_ASSIST_FULL_SPEED = 15;
 export const MAX_PLAYABLE_Y = 56;
-export const MAX_LANDING_HORIZONTAL_SPEED = 1.8;
-export const MAX_LANDING_DESCENT_SPEED = 2.8;
-export const MAX_LANDING_ANGLE = 12;
-export const MAX_LANDING_ANGULAR_SPEED = 18;
+export const MAX_LANDING_HORIZONTAL_SPEED = 2;
+export const MAX_LANDING_DESCENT_SPEED = 3.2;
+export const MAX_LANDING_ANGLE = 15;
+export const MAX_LANDING_ANGULAR_SPEED = 22;
 export const COLLISION_MARGIN = 0.02;
 
 export const FAILURE_STATUS = "Crashed!";
@@ -64,10 +63,10 @@ const ROUTES = [
 const FAILURE_LITERALS = [[8,8.000000000000018,-9.375629389,12.57275481],[8,8.000000000000005,-10.064366902,11.509402336],[8.1,8.100000000000009,-1.363740541,6.748522861],[8.1,8.099999999999998,-8.991046857,5.59523011],[8.049999999999999,8.050000000000013,-9.636744041,9.438286699],[8.1,8.100000000000005,-9.783560214,6.322201732],[8.2,8.199999999999989,-7.642799015,7.142035851],[8.15,8.150000000000002,-9.486448987,5.720897721],[8.15,8.150000000000016,-6.377854246,-8.305060918]];
 
 export const ROUTE_DIGESTS = Object.freeze({
-    geometryDigest: "e91ce3a27c011ef6b2549fdc36fa6e25db5c5da2d274233c9da4fc8adf4a0244",
-    outputDigest: "0277f45adf904ba8e5d264e906636c7bec64f1aca25b6d20ca4cb35a3c1b7458",
-    physicsDigest: "2e1fc0bf1ed47a8bdb968bd330eba6b7627f07d5b405039f6481274198465ad3",
-    worldDigest: "535f190fdf7c7300a7667ce2a3e6d5f1395b197b0bd27c2dbb0f69f61310333a",
+    geometryDigest: "2cc7b145dc516426d911f2f51f47cc374f0154905d8ddff00cc78e141de14195",
+    outputDigest: "2f715915c33e7c4a728bd1acfd10a206a206c1cd917c8e0d5687a5d696bb9492",
+    physicsDigest: "34a7cb64a3457c4df028031968e7ef00fde56fc445db6af6ab89eb7b737f692e",
+    worldDigest: "bf175490867abf3894697b9c014c1e1c2bf7abbc54e74b635bb69af67908245e",
 });
 
 function freeze(value) {
@@ -224,11 +223,11 @@ export function integratePose(pose, requested, fuel, seconds = STEP_SECONDS) {
     };
 }
 
-export function nextAwardRatio(current) {
-    const floor = 1 + Number.EPSILON;
-    if (current <= floor) return floor;
-    const raw = 1 + (current - 1) * 0.82;
-    return Math.max(floor, Math.min(raw, current - Number.EPSILON));
+export function refuelRatioForBase(baseNumber) {
+    if (!Number.isInteger(baseNumber) || baseNumber < 1) {
+        throw new RangeError("Powered base number must be a positive integer");
+    }
+    return 1 + 0.5 ** (baseNumber - 1);
 }
 
 function initialPose() {
@@ -255,7 +254,8 @@ export function createRun({ seed, reducedMotion = false } = {}) {
     const firstSite = createFirstSite(runSeed);
     return updateRetention({
         state: "flying", seed: runSeed, reducedMotion, missionSeconds: 0, completedSites: 0,
-        awardRatio: 3, pose: initialPose(), commanded: { ...ZERO }, fuel: 30, legDepartureFuel: 30,
+        refuelRatio: refuelRatioForBase(1), pose: initialPose(), commanded: { ...ZERO }, fuel: 30,
+        legDepartureFuel: 30,
         generatorCursor: 1, retainedChunks: retainedChunkIndexes(0), retainedSites: [firstSite],
         activeSiteId: null, targetSiteId: 0, targetRouteProof: null, touchdownPose: null,
         sequenceSeconds: 0, refuel: null, agent: null, nocStage: 0, checkpoint: null, failureCause: null,
@@ -390,15 +390,12 @@ function unsafeFeatures(model, pose, target, ignoredTopSiteId = null) {
                 polygon: rectangle(site.platformLeft, site.platformRight, site.platformBottom, site.platformTop) });
         }
         const structure = siteStructure(site);
-        features.push({ cause: "scaffold", priority: 2, polygon: rectangle(
-            structure.platformUnderframe.left, structure.platformUnderframe.right,
-            structure.platformUnderframe.bottom, structure.platformUnderframe.top) });
-        features.push({ cause: "connector", priority: 2, polygon: rectangle(
-            structure.connector.left, structure.connector.right,
-            structure.connector.bottom, structure.connector.top) });
-        features.push({ cause: "noc", priority: 1, polygon: rectangle(
-            structure.nocUnderframe.left, structure.nocUnderframe.right,
-            structure.nocUnderframe.bottom, structure.nocUnderframe.top) });
+        features.push({ cause: "truss", priority: 2, polygon: rectangle(
+            structure.truss.left, structure.truss.right, structure.truss.bottom, structure.truss.top) });
+        for (const pylon of structure.pylons) {
+            features.push({ cause: "pylon", priority: 2, polygon: rectangle(
+                pylon.collider.left, pylon.collider.right, pylon.collider.bottom, pylon.collider.top) });
+        }
         features.push({ cause: "noc", priority: 1,
             polygon: rectangle(structure.noc.left, structure.noc.right, structure.noc.bottom, structure.noc.top) });
         features.push({ cause: "mast", priority: 1,
@@ -550,8 +547,11 @@ export function classifySweptContact(model, previous, next, options = {}) {
 
 function routeContext(template, supplied = null) {
     if (supplied) return supplied;
-    const originSite = freeze({ id: 0, center: 0, platformLeft: -4.8, platformRight: 4.8,
-        platformTop: 0, platformBottom: -0.35, canCollected: true, powered: true, nocStage: 7 });
+    const originLevel = template.deckDelta === 1.6 ? 83 : template.deckDelta === 0.8 ? 91 : 99;
+    const originTop = originLevel / 10;
+    const originSite = freeze({ id: 0, seed: STATIC_WORLD_SEED, center: 0, deckLevel: originLevel,
+        platformLeft: -4.8, platformRight: 4.8, platformTop: originTop, platformBottom: originTop - 0.35,
+        canCollected: true, powered: true, nocStage: 7 });
     return { seed: STATIC_WORLD_SEED, originSite,
         targetSite: instantiateTemplateSite(STATIC_WORLD_SEED, 1, originSite, template) };
 }
@@ -571,8 +571,7 @@ function replayTemplate(template, fuel, suppliedContext = null) {
     const rawSites = [originSite, targetSite];
     const terrainVertices = context.terrainVertices ?? terrainVerticesForWindow(context.seed, rawSites,
         originSite.center - 20, targetSite.center + 20);
-    const retainedSites = rawSites.map((site) => ({ ...site,
-        foundationBottom: siteFoundationBottom(terrainVertices, site) }));
+    const retainedSites = rawSites;
     const collisionModel = {
         seed: context.seed, retainedSites, targetSiteId: targetSite.id,
         terrainVertices,
@@ -635,7 +634,7 @@ function provisionalProofContext(model, originSite, targetSite, contactPose) {
     const retainedSites = model.retainedSites.filter((site) => site.id !== originSite.id)
         .concat(poweredOrigin, targetSite).sort((left, right) => left.id - right.id);
     return freeze({ seed: model.seed, completedSites: model.completedSites + 1,
-        awardRatio: nextAwardRatio(model.awardRatio), generatorCursor: model.generatorCursor + 1,
+        refuelRatio: refuelRatioForBase(model.completedSites + 2), generatorCursor: model.generatorCursor + 1,
         pose: checkpointPoseForContact(originSite, contactPose), fuel: null, activeSiteId: originSite.id,
         targetSiteId: targetSite.id, retainedSites, originSite: poweredOrigin, targetSite });
 }
@@ -643,18 +642,21 @@ function provisionalProofContext(model, originSite, targetSite, contactPose) {
 function prepareService(model, contactPose) {
     const contacted = siteById(model, model.targetSiteId);
     try {
+        const poweredBaseNumber = model.completedSites + 1;
+        const ratio = refuelRatioForBase(poweredBaseNumber);
+        if (model.refuelRatio !== ratio) throw new Error("Stored refuel ratio does not match mission progress");
         const template = selectTemplate(model.seed, model.generatorCursor, contacted, REFERENCE_TEMPLATES);
         const nextSite = instantiateTemplateSite(model.seed, model.generatorCursor, contacted, template);
         const serviced = { ...contacted, canCollected: true };
         const proof = proveTemplate(template, provisionalProofContext(model, serviced, nextSite, contactPose));
-        const award = proof.demonstratedMinimum * model.awardRatio;
+        const award = proof.demonstratedMinimum * ratio;
         const sites = model.retainedSites.filter((site) => site.id !== contacted.id).concat(serviced, nextSite).sort((a, b) => a.id - b.id);
         const fromLevel = model.legDepartureFuel > 0 ? clamp(model.fuel / model.legDepartureFuel, 0, 1) : 0;
         const legDepartureFuel = model.fuel + award;
         return {
             ...model, state: "landed", pose: checkpointPoseForContact(contacted, contactPose), commanded: { ...ZERO },
             fuel: legDepartureFuel, legDepartureFuel, completedSites: model.completedSites + 1,
-            awardRatio: nextAwardRatio(model.awardRatio), generatorCursor: model.generatorCursor + 1,
+            refuelRatio: refuelRatioForBase(poweredBaseNumber + 1), generatorCursor: model.generatorCursor + 1,
             activeSiteId: contacted.id, targetSiteId: nextSite.id, targetRouteProof: proof,
             retainedSites: sites, touchdownPose: checkpointPoseForContact(contacted, contactPose), sequenceSeconds: 0,
             refuel: model.reducedMotion ? null : freeze({ siteId: contacted.id, fromLevel, progress: 0 }),
@@ -731,7 +733,10 @@ export function stepFlight(model, requested, options = {}) {
 }
 
 function freezeCheckpoint(model) {
-    return freeze({ seed: model.seed, completedSites: model.completedSites, awardRatio: model.awardRatio,
+    if (model.refuelRatio !== refuelRatioForBase(model.completedSites + 1)) {
+        throw new Error("Checkpoint refuel ratio does not match mission progress");
+    }
+    return freeze({ seed: model.seed, completedSites: model.completedSites, refuelRatio: model.refuelRatio,
         generatorCursor: model.generatorCursor, pose: { ...model.touchdownPose }, fuel: model.fuel,
         legDepartureFuel: model.legDepartureFuel,
         activeSiteId: model.activeSiteId, targetSiteId: model.targetSiteId, targetRouteProof: model.targetRouteProof,
@@ -741,6 +746,9 @@ function freezeCheckpoint(model) {
 function restoreCheckpoint(model) {
     if (!model.checkpoint) return { ...createRun({ seed: model.seed, reducedMotion: model.reducedMotion }), crashOrdinal: model.crashOrdinal };
     const checkpoint = structuredClone(model.checkpoint);
+    if (checkpoint.refuelRatio !== refuelRatioForBase(checkpoint.completedSites + 1)) {
+        throw new Error("Checkpoint refuel ratio does not match mission progress");
+    }
     return { ...model, ...checkpoint, state: "launching", commanded: { ...ZERO }, sequenceSeconds: 0,
         refuel: null, failureCause: null, crash: null, status: SUCCESS_STATUS,
         launchStarted: false, launchCleared: false };
@@ -808,9 +816,7 @@ export function updateRetention(model) {
         ...sites.map((site) => site.center + CHUNK_WIDTH));
     const terrainVertices = retentionKey === model.retentionKey && model.terrainVertices ? model.terrainVertices :
         terrainVerticesForWindow(model.seed, sites, terrainLeft, terrainRight);
-    const sitesWithFoundations = sites.map((site) => Object.freeze({ ...site,
-        foundationBottom: siteFoundationBottom(terrainVertices, site) }));
-    return { ...model, retainedChunks: chunks, retainedSites: sitesWithFoundations, retentionKey, terrainVertices };
+    return { ...model, retainedChunks: chunks, retainedSites: sites, retentionKey, terrainVertices };
 }
 
 export function createCueState(reducedMotion = false) {

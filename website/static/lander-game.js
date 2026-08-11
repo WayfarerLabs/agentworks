@@ -21,8 +21,8 @@ import {
     transitionMission,
     updateRetention,
 } from "./lander-model.js";
-import { cameraLeftForPose, CHUNK_WIDTH, mixUint32, siteScaffoldPath, siteStructure, terrainPath,
-    terrainVerticesForRange, targetIsOffscreen } from "./lander-world.js";
+import { cameraLeftForPose, CHUNK_WIDTH, mixUint32, siteScaffoldPath, siteStructure, terrainFillPath,
+    terrainSurfacePath, terrainVerticesForRange, targetIsOffscreen } from "./lander-world.js";
 
 const SVG_NAMESPACE = document.querySelector("#lander-scene")?.namespaceURI;
 const ACTIVE_STATES = new Set(["flying", "landed", "deploying", "powering", "launching", "crashing", "failed", "generation-error"]);
@@ -151,7 +151,9 @@ function positionSite(group, site) {
     const structure = siteStructure(site);
     const buildingLeft = structure.buildingLeft * 10;
     const roof = 548 - structure.roof * 10;
-    group.querySelector(".noc-building").setAttribute("d", `M${buildingLeft} ${top}V${roof}h70V${top}Z`);
+    const buildingBottom = 548 - structure.noc.bottom * 10;
+    group.querySelector(".noc-building").setAttribute("d",
+        `M${buildingLeft} ${buildingBottom}V${roof}h70V${buildingBottom}Z`);
     projectSiteState(group, site, buildingLeft, top);
     const battery = group.querySelector(".noc-battery");
     battery.querySelector("rect").setAttribute("x", buildingLeft + 24); battery.querySelector("rect").setAttribute("y", roof + 16);
@@ -494,15 +496,18 @@ export class LanderGameController {
             return;
         }
         const indexes = this.model.retainedChunks;
-        const existingChunks = new Map([...this.terrain_layer.children].map((node) => [Number(node.dataset.chunkIndex), node]));
-        for (const index of indexes) {
-            let path = existingChunks.get(index);
-            if (!path) { path = svg("path", { class: "terrain-chunk", "data-chunk-index": index }); this.terrain_layer.append(path); }
-            const left = index * CHUNK_WIDTH; const right = left + CHUNK_WIDTH;
-            const vertices = terrainVerticesForRange(this.model.terrainVertices, left, right);
-            path.setAttribute("d", terrainPath(vertices)); existingChunks.delete(index);
+        const left = indexes[0] * CHUNK_WIDTH;
+        const right = (indexes.at(-1) + 1) * CHUNK_WIDTH;
+        const vertices = terrainVerticesForRange(this.model.terrainVertices, left, right);
+        let fill = this.terrain_layer.querySelector(".terrain-fill");
+        let surface = this.terrain_layer.querySelector(".terrain-surface");
+        if (!fill) { fill = svg("path", { class: "terrain-fill" }); this.terrain_layer.append(fill); }
+        if (!surface) { surface = svg("path", { class: "terrain-surface" }); this.terrain_layer.append(surface); }
+        fill.setAttribute("d", terrainFillPath(vertices));
+        surface.setAttribute("d", terrainSurfacePath(vertices));
+        for (const node of [...this.terrain_layer.children]) {
+            if (node !== fill && node !== surface) node.remove();
         }
-        for (const node of existingChunks.values()) node.remove();
         const existingSites = new Map([...this.site_layer.children].map((node) => [Number(node.dataset.siteId), node]));
         for (const site of this.model.retainedSites) {
             let group = existingSites.get(site.id);

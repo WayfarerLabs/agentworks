@@ -1,0 +1,122 @@
+{
+  "schema": "agw-lander-route-geometry/v3",
+  "siteGeometry": {
+    "member": { "cap": "butt", "join": "round", "width": 0.2 },
+    "noc": { "mastHeight": 3.2, "mastWidth": 0.5, "roofOffset": 7.2, "width": 7 },
+    "platform": { "clearance": 2.4, "deckTiers": [8.3, 9.1, 9.9], "thickness": 0.35, "width": 9.6 },
+    "pylons": {
+      "collisionExpansion": 0.1,
+      "count": 3,
+      "foot": "native-terrain-interpolation",
+      "positions": [0, 9.3, 18.6],
+      "top": "platform-bottom",
+      "width": 0.2
+    },
+    "truss": {
+      "alternation": "top-left-to-bottom-right-first",
+      "bayCount": 12,
+      "bayHeight": 0.75,
+      "bayWidth": 1.55,
+      "chordCount": 2,
+      "collisionEnvelope": { "bottom": -1.2, "left": -4.9, "right": 13.9, "top": -0.25 },
+      "clearApertures": {
+        "half": { "count": 4, "diagonalSquared": 2.965, "height": 0.75, "width": 1.55 },
+        "full": { "count": 10, "diagonalSquared": 10.1725, "height": 0.75, "width": 3.1 }
+      },
+      "diagonalsPerBay": 1,
+      "span": 18.6
+    }
+  },
+  "templates": [
+    {
+      "clearanceKnots": [
+        [4.8, -0.65],
+        [39, -0.65],
+        [73.2, -0.65]
+      ],
+      "centerDelta": 78,
+      "deckDelta": 0,
+      "templateId": "route-78-flat"
+    },
+    {
+      "clearanceKnots": [
+        [4.8, -0.65],
+        [40.5, -0.65],
+        [76.2, -0.65]
+      ],
+      "centerDelta": 81,
+      "deckDelta": 1.6,
+      "templateId": "route-81-rise"
+    },
+    {
+      "clearanceKnots": [
+        [4.8, -0.65],
+        [42, -0.65],
+        [79.2, -0.65]
+      ],
+      "centerDelta": 84,
+      "deckDelta": -0.8,
+      "templateId": "route-84-fall"
+    },
+    {
+      "clearanceKnots": [
+        [4.8, -0.65],
+        [43.5, -0.65],
+        [82.2, -0.65]
+      ],
+      "centerDelta": 87,
+      "deckDelta": 0.8,
+      "templateId": "route-87-rise"
+    },
+    {
+      "clearanceKnots": [
+        [4.8, -0.65],
+        [45, -0.65],
+        [85.2, -0.65]
+      ],
+      "centerDelta": 90,
+      "deckDelta": -1.6,
+      "templateId": "route-90-fall"
+    },
+    {
+      "clearanceKnots": [
+        [4.8, -0.65],
+        [46.5, -0.65],
+        [88.2, -0.65]
+      ],
+      "centerDelta": 93,
+      "deckDelta": 0,
+      "templateId": "route-93-flat"
+    },
+    {
+      "clearanceKnots": [
+        [4.8, -0.65],
+        [48, -0.65],
+        [91.2, -0.65]
+      ],
+      "centerDelta": 96,
+      "deckDelta": -0.8,
+      "templateId": "route-96-fall"
+    },
+    {
+      "clearanceKnots": [
+        [4.8, -0.65],
+        [49.5, -0.65],
+        [94.2, -0.65]
+      ],
+      "centerDelta": 99,
+      "deckDelta": 0.8,
+      "templateId": "route-99-rise"
+    },
+    {
+      "clearanceKnots": [
+        [4.8, -0.65],
+        [51, -0.65],
+        [97.2, -0.65]
+      ],
+      "centerDelta": 102,
+      "deckDelta": 0,
+      "templateId": "route-102-flat"
+    }
+  ]
+}
