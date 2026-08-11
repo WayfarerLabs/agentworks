@@ -1,6 +1,6 @@
 # HLA: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander Phase 4J design in progress
+- Status: Interim implementation complete; continuous Lander Phase 4J artifact review in progress
 - Date: 2026-08-07
 - Last revised: 2026-08-11
 - FRD: `frd.md`
@@ -253,11 +253,11 @@ another interactive/editable element. The lander is also an operable, accessibly
 without visible instruction text. Activating it provides the pointer and assistive-technology path.
 The accepted preflight Space event is consumed so it cannot also scroll the page. Starting moves
 focus to the game scene and reveals concise in-scene controls, a programmatically named but visually
-hidden numeric fuel reserve, one left-side vertical visual gauge, status, and a native
-`Exit mission` button. A native `Restart mission` button is revealed after a crash. Both remain
-hidden during preflight. They invoke the same EXIT and RESTART model events as Escape and `r`,
-preserve the established focus destinations, and make the complete lifecycle available to touch and
-assistive technology.
+hidden rounded representation of the exact model fuel reserve, one left-side vertical visual gauge,
+status, and a native `Exit mission` button. A native `Restart mission` button is revealed after a
+crash. Both remain hidden during preflight. They invoke the same EXIT and RESTART model events as
+Escape and `r`, preserve the established focus destinations, and make the complete lifecycle
+available to touch and assistive technology.
 
 While active, Space or Up commands equal thrust; Left or `h` increases the right engine to turn
 left; Right or `l` increases the left engine to turn right. Differential input vectors the combined
@@ -344,15 +344,15 @@ right-edge direction cue blinks only while that target is outside the viewport; 
 the useful arrow static. Deployment never enters a terminal success state.
 
 The fuel projection does not invent a fixed tank capacity for an uncapped reserve. The visually
-hidden numeric output remains the accessible authority for engine-seconds. A decorative left-side
-vertical bar shows the current reserve as a fraction of the immutable departure reserve for the
-current leg: it is full when an award/checkpoint establishes that leg and drains toward empty as
-fuel is spent. Its fill height and red-to-amber-to-green presentation are independent level signals.
-On touchdown, model sequence time projects the collected can toward the gauge and interpolates the
-displayed fill from the pre-award fraction to full over the existing landed interval; the physics
-reserve and checkpoint award remain one atomic authority. Reduced motion skips both projections and
-shows the final full gauge. The next award can establish a larger reference without clipping or
-discarding carried excess.
+hidden non-live text remains the sole accessible rounded presentation of exact model engine-seconds.
+A decorative left-side vertical bar shows the current reserve as a fraction of the immutable
+departure reserve for the current leg: it is full when an award/checkpoint establishes that leg and
+drains toward empty as fuel is spent. Its fill height and red-to-amber-to-green presentation are
+independent level signals. On touchdown, model sequence time projects the collected can toward the
+gauge and interpolates the displayed fill from the pre-award fraction to full over the existing
+landed interval; the physics reserve and checkpoint award remain one atomic authority. Reduced
+motion skips both projections and shows the final full gauge. The next award can establish a larger
+reference without clipping or discarding carried excess.
 
 Activated game chrome uses one local system-monospace arcade stack, heavy block lettering, crisp
 shadows, and bounded stepped animation; it adds no webfont, asset request, canvas, or semantic-text

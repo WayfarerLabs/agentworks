@@ -1,6 +1,6 @@
 # Plan: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander Phase 4J design in progress
+- Status: Interim implementation complete; continuous Lander Phase 4J artifact review in progress
 - Date: 2026-08-07
 - Last revised: 2026-08-11
 - FRD: `frd.md`
@@ -669,7 +669,7 @@ review-clean, browser-accepted, and merge-ready.
       can-to-gauge refueling, one centered arcade banner authority for success and failure, an
       in-scene terrain-separated controls rail and state actions, and one persistent installed agent
       at every powered retained NOC.
-- [ ] Delegate and lead-review an exact LLD amendment that pins markup/source order, the local
+- [x] Delegate and lead-review an exact LLD amendment that pins markup/source order, the local
       monospace arcade stack, fuel level/color/refill projection, reduced-motion and hidden-document
       behavior, banner and native-action geometry, bottom-rail/terrain separation, installed-agent
       model and path reuse, DOM bounds, focus/accessibility, and mutation-sensitive browser

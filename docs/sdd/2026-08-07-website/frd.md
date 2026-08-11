@@ -1,6 +1,6 @@
 # FRD: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander Phase 4J design in progress
+- Status: Interim implementation complete; continuous Lander Phase 4J artifact review in progress
 - Date: 2026-08-07
 - Last revised: 2026-08-11
 - Seeded by: the saga lead, at operator request. This is a standalone effort, deliberately NOT a
@@ -194,15 +194,16 @@ forecloses it, and none of it is in scope now.
 - R24. Once activated, the game chrome uses a compact 1980s-arcade presentation without introducing
   a downloaded font, remote asset, second status authority, canvas, or framework. The left fuel
   reserve is visual-only for sighted players: its bottom-up fill changes from danger red through
-  amber to ready green, while the exact numeric reserve remains available to assistive technology. A
-  successful touchdown shows the collected can traveling toward that gauge while its fill rises over
-  the existing refuel interval; reduced motion exposes the final full gauge atomically. The sole
-  status live region becomes the centered, bordered arcade banner for exact `Agent Deployed!` and
-  exact `Crashed!` outcomes. Concise controls move inside the scene in a small bottom rail whose
-  reserved band never overlaps terrain. On failure, native Restart and Exit controls appear inside
-  the scene beneath `Crashed!`; all native controls keep their accessible names, focus behavior, and
-  minimum touch targets. Arcade decoration and motion never duplicate semantic text, obscure the
-  world, expand the bounded world DOM, or survive under reduced motion.
+  amber to ready green, while a named rounded representation of the exact model reserve remains
+  available to assistive technology. A successful touchdown shows the collected can traveling toward
+  that gauge while its fill rises over the existing refuel interval; reduced motion exposes the
+  final full gauge atomically. The sole status live region becomes the centered, bordered arcade
+  banner for exact `Agent Deployed!` and exact `Crashed!` outcomes. Concise controls move inside the
+  scene in a small bottom rail whose reserved band never overlaps terrain. On failure, native
+  Restart and Exit controls appear inside the scene beneath `Crashed!`; all native controls keep
+  their accessible names, focus behavior, and minimum touch targets. Arcade decoration and motion
+  never duplicate semantic text, obscure the world, expand the bounded world DOM, or survive under
+  reduced motion.
 
 ## Settled constraints (inherited; do not reopen)
 
@@ -358,19 +359,20 @@ merged and settled on `main`. The first slice must not build toward them specula
   counters residual rotation through the deterministic assist, and engine-off vehicle motion plus
   crash debris remain undamped and ballistic.
 - AC25. In both `/lander/` and `404.html`, activation reveals one blocky local-system-font arcade
-  HUD: no numeric fuel text is visible, the exact named output remains available to assistive
-  technology, and the same bottom-origin gauge independently communicates level by height and a
-  red-to-amber-to-green progression. Normal motion shows one deterministic can-to-gauge transfer and
-  gauge-rise sequence during the pinned refuel interval; reduced motion shows neither animation and
-  lands directly on the same full value. The existing sole live region presents centered, bordered
-  `Agent Deployed!` and `Crashed!` banners, with no pseudo-element or duplicate text authority. The
-  controls legend and state-appropriate native buttons render inside the scene; terrain remains
-  wholly above the legend rail, and failed-state Restart and Exit controls sit below the crash
-  banner without overlap at 320 CSS pixels or 400 percent zoom. Normal arcade motion pauses while
-  hidden and is absent under reduced motion. The installed-agent mark persists at each powered
-  retained NOC without increasing the established 80-descendant world ceiling. Shared-game byte
-  identity, focus order, 44-pixel targets, contrast, no-JavaScript recovery, zero runtime font or
-  cross-origin requests, and all Phase 4I physics/route/world digests remain unchanged.
+  HUD: no numeric fuel text is visible, one named rounded representation of the exact model reserve
+  remains available to assistive technology without live-region behavior, and the same bottom-origin
+  gauge independently communicates level by height and a red-to-amber-to-green progression. Normal
+  motion shows one deterministic can-to-gauge transfer and gauge-rise sequence during the pinned
+  refuel interval; reduced motion shows neither animation and lands directly on the same full value.
+  The existing sole live region presents centered, bordered `Agent Deployed!` and `Crashed!`
+  banners, with no pseudo-element or duplicate text authority. The controls legend and
+  state-appropriate native buttons render inside the scene; terrain remains wholly above the legend
+  rail, and failed-state Restart and Exit controls sit below the crash banner without overlap at 320
+  CSS pixels or 400 percent zoom. Normal arcade motion pauses while hidden and is absent under
+  reduced motion. The installed-agent mark persists at each powered retained NOC without increasing
+  the established 80-descendant world ceiling. Shared-game byte identity, focus order, 44-pixel
+  targets, contrast, no-JavaScript recovery, zero runtime font or cross-origin requests, and all
+  Phase 4I physics/route/world digests remain unchanged.
 
 ## Settled implementation rulings
 
