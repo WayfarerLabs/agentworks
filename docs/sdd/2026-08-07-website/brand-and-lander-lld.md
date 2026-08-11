@@ -177,7 +177,7 @@ section#lander-game[aria-label="Lunar deployment scene"]
   p#lander-fuel[hidden]
     span#lander-fuel-gauge[aria-hidden="true"]
       span#lander-fuel-gauge-fill
-    span#lander-fuel-label "Fuel reserve"
+    span#lander-fuel-label "Fuel reserve:"
     output#lander-fuel-value[aria-labelledby="lander-fuel-label"]
   span#lander-target-direction.visually-hidden[hidden] "Next site is to the right."
   p#lander-controls[hidden]
@@ -1238,11 +1238,14 @@ native mission actions.
 The existing `#lander-status` is the sole status and deployment-payoff authority. Only while
 `data-launch-ready="true"`, it is visually projected as a centered scene banner with a two-pixel
 deep-orange border, sky background, graphite text, `position:absolute`,
-`top:clamp(0.5rem,2vw,1rem)`, `left:50%`, and `transform:translateX(-50%)`. It has `z-index:2`,
-`pointer-events:none`, and the exact content `Agent Deployed!`. It remains the same `role="status"`,
-polite atomic live region and is announced once when the model changes to that text. No second
-banner, alert, generated-content string, or controller-only success state exists. First effective
-departure clears the status and the launch-ready selector together.
+`top:clamp(0.5rem,2vw,1rem)`, `left:50%`, and `transform:translateX(-50%)`. At viewport widths of
+`30rem` or less, it instead uses `left:9rem`, `right:0.5rem`, and no transform so the complete
+left-hand fuel overlay and banner remain disjoint. It has `z-index:2`, `pointer-events:none`, and
+the exact content `Agent Deployed!`. It remains the same `role="status"`, polite atomic live region
+and is announced once when the model changes to that text. No second banner, alert,
+generated-content string, or controller-only success state exists. First effective departure clears
+the status and the launch-ready selector together. Computed-box witnesses at 320 CSS pixels and the
+400-percent-zoom equivalent require zero overlap and keep both overlays inside the scene.
 
 Agent travel, battery stage, launch readiness, and crash are model-time projections, not CSS
 completion events. The battery is one sharp-cornered vertical `22 by 40` scene-unit rectangle

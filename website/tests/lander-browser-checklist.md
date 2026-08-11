@@ -329,8 +329,9 @@ new run records the refined source.
       through three bilaterally symmetric signal arches at 1,000, 1,200, and 1,400 ms. There is no
       battery terminal, nub, rounded battery corner, or duplicate payoff.
 - [ ] At power completion, the sole live status says exactly `Agent Deployed!`; the matching banner
-      is centered over the scene. The lander, mission clock, pose, and fuel then remain unchanged
-      indefinitely until effective player thrust.
+      is centered over the scene when space permits and moves to the top-right at 30 rem or narrower
+      without overlapping the complete left fuel overlay. The lander, mission clock, pose, and fuel
+      then remain unchanged indefinitely until effective player thrust.
 - [ ] Space, Up, held pointer or touch, short tap, and native Launch all depart from the same
       launch-ready checkpoint. Turn-only input remains restrained; the first effective collective
       burns and integrates in that same fixed step, and early release receives ordinary gravity.
