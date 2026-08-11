@@ -253,12 +253,43 @@ superseded before merge by Phase 3c after live/review evidence exposed their sem
       SDK-shape fallback comment.
 - [x] Run focused and full gates plus both required code reviews and resolve every valid finding.
 - [x] Refresh the PR's exact-head/current-main/evidence record.
-- [ ] Post the signed exact-head handoff and flip the PR from draft to ready for the single bounded
+- [x] Post the signed exact-head handoff and flip the PR from draft to ready for the single bounded
       Phase 3 live charter above, including proof that AWS CLI reinit skips the completed managed
       install.
 
 **DoD:** standard defaults preserve sustained capacity, shared-core remains an explicit and live
 witnessed opt-in, managed AWS CLI reinit converges without reinstall, permanent teaching matches the
 shipped behavior, and the next ready transition identifies one reviewed exact head.
+
+The shared predicate contract and completion-marker state machine completed above were superseded
+before merge by Phase 3d after review showed that one optional YAML installer did not justify a
+cross-cutting framework contract.
+
+### Phase 3d: restore the declarative installer boundary
+
+- [ ] Revert every Phase 3c shared `test_exec`, VM/agent runner, schema, generic documentation, and
+      shell-inventory test change. Preserve the preexisting install-command contract exactly and
+      remove the AWS completion marker and its lifecycle state.
+- [ ] Keep AWS CLI as one declared YAML resource with no completion predicate or installed-version
+      fast path. Retain the signed architecture-specific flow and guest-auth neutrality; run it on
+      every init/reinit, selecting fresh install or the official `--update` path from managed state.
+- [ ] Add plugin-local behavior tests for fresh install, repeated update, v1, v2, partial managed
+      layouts, signature failure, unsupported architecture, temporary cleanup, and host-state
+      isolation. Prove repeat execution performs verified update rather than freezing an old CLI.
+- [ ] Strengthen permanent install-command teaching: every command must be safe and idempotent to
+      rerun; `test_exec`, `test_file`, and `test_dir` are optional early-exit optimizations rather
+      than the idempotency mechanism; omit them when the command should reconcile or update each
+      run.
+- [ ] Restore narrow GCP proto-presence exception handling, replace prohibited punctuation in owned
+      README lines, refresh the PR's exact counts/state, and keep the unrelated known-hosts issue
+      out of scope.
+- [ ] Run focused/full gates plus both required code reviews, resolve every valid finding, post one
+      signed exact-head handoff, and use the next draft-to-ready transition to request the unchanged
+      bounded Phase 3 live charter.
+
+**DoD:** the optional AWS CLI installer is again one self-contained declared YAML resource; no core
+runner, schema, or shared install-command behavior exists solely for it; managed reinit performs a
+verified AWS CLI update; required CI is green; and the next live retest starts from one reviewed
+exact head with a truthful PR record.
 
 -- agw-ns-gcp-platform (effort lead)

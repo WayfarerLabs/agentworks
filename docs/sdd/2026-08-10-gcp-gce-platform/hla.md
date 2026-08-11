@@ -374,27 +374,17 @@ recipe-gate semantics. Its command selects AWS's current official CLI v2 archive
 `x86_64` or `aarch64` architecture, downloads the matching detached signature, imports the pinned
 AWS CLI signing key into a private temporary GnuPG home, verifies its full fingerprint and the
 archive signature, extracts it in that private directory, and installs to `/usr/local/aws-cli` with
-the `aws` launcher in `/usr/local/bin`. The manifest never uses the ambiguous `test_exec: aws`,
-because AWS CLI v1 and v2 share that executable name. It declares `/usr/local/bin/aws` as an
-executable-path `test_exec` plus the Agentworks-owned completion marker
-`/usr/local/aws-cli/.agentworks-v2-complete`. The shared install-command contract treats a
-slash-containing `test_exec` as a path checked with `test -x` in both VM and agent runners, while a
-bare name retains the existing PATH lookup. The AWS command requires the marker, public launcher,
-and canonical internal v2 executable before taking its managed fast path. Before any managed repair,
-it removes a prior marker so a failed update cannot leave stale success state. After the verified
-official installer exits successfully, the command requires both public and internal executables to
-pass `test -x` before recreating the marker. A missing marker, launcher, internal executable, or
-executable bit therefore enters the update path; installer failure or malformed success leaves the
-marker absent. Reinitialization can skip a completed managed installation without executing the
-relatively heavy CLI on a constrained guest. The structural predicate records the last successful
-verified install plus the required executable paths; it does not hash or execute the CLI to detect
-arbitrary later content modification. The command keeps its own `aws --version` fast path for a
-valid v2 installation at another location; v1 continues through the v2 install path. An incomplete
-prior installation is reconciled with the official installer's explicit `--update`, `--install-dir`,
-and `--bin-dir` options, and temporary artifacts are removed on success or failure. Unsupported
-architectures, signing-key drift, and invalid signatures fail clearly. The installer never runs
-`aws configure`, writes a credentials/profile file, or participates in EC2 lifecycle code, which
-continues to use boto3.
+the `aws` launcher in `/usr/local/bin`. The installer remains entirely one declared YAML resource;
+it does not add or reinterpret shared install-command fields, runner behavior, schema, or lifecycle
+state. It declares no `test_exec`, `test_file`, or `test_dir`, and its command has no
+installed-state fast path. Initialization and reinitialization therefore run the same verified
+recipe every time. The command uses the official installer's explicit `--update` option when
+`/usr/local/aws-cli` already exists and performs a fresh install otherwise. This is the resource's
+idempotent operation: repeat runs reconcile the managed installation and refresh AWS CLI v2 instead
+of treating an older working version as permanently complete. Temporary artifacts are removed on
+success or failure. Unsupported architectures, signing-key drift, and invalid signatures fail
+clearly. The installer never runs `aws configure`, writes a credentials/profile file, or
+participates in EC2 lifecycle code, which continues to use boto3.
 
 Permanent edits cover the installed-plugin list, VM platform list, command reference, resources
 guide, plugin author contract, vm-platform author contract, capability durable-surface enumeration,
@@ -408,8 +398,9 @@ on completion-adjacent surfaces.
 Offline fakes retain the final typed Compute request and record operations. Tests cover:
 
 - plugin disabled/enabled registration, multi-contribution publication, `gcloud-cli` and `aws-cli`
-  recipe gating, operator override, exact manifest payloads, AWS CLI v1/v2 fast-path distinction,
-  signing-key/signature rejection, and contract-v2 conformance;
+  recipe gating, operator override, exact manifest payloads, AWS CLI fresh install, repeated managed
+  update, v1/v2 non-short-circuiting, partial-layout reconciliation, signing-key/signature
+  rejection, and contract-v2 conformance;
 - exact schema, omission-only outer-auth default, in-arm secret null/default, `SecretRef`,
   schema/sample/guide projection;
 - ambient and service-account construction, exact internal and terminal LF/CRLF downloaded JSON
