@@ -229,14 +229,20 @@ Decisions:
   fields, runners, schema, and lifecycle state unchanged;
 - declare no completion predicates and use no command-owned installed-version fast path, so every
   initialization and reinitialization performs the same verified install or update operation;
-- use the official installer's `--update` path whenever the managed install directory exists and its
-  fresh-install path otherwise, refreshing older managed versions instead of freezing them;
+- use the official installer's `--update` path for a complete owned managed layout, its
+  fresh-install path when managed state is absent, and an owned-layout reset plus fresh install when
+  managed state is incomplete; never remove a conflicting unowned launcher;
+- install under the reserved `/usr/local/lib/agentworks/aws-cli` namespace and recognize public-link
+  ownership only from the exact `/usr/local/bin/aws` and `aws_completer` symbolic-link targets into
+  that namespace; exact dangling links are owned, while regular files, directories, and links with
+  any other target are pre-mutation collisions rather than paths the command follows or deletes;
 - select the current official AWS CLI v2 archive by normalized guest architecture and fail clearly
   on an unsupported architecture;
 - download the matching detached signature, import the reviewed AWS key into a private temporary
   GnuPG home, require the exact full fingerprint, and verify the archive before extraction;
 - download and extract in a private temporary directory with cleanup on every exit, then use the
-  official installer's explicit directories and `--update` path to reconcile interrupted installs;
+  official installer's explicit directories and distinguish complete, absent, incomplete, and
+  unowned-collision states because same-version `--update` does not repair every partial layout;
 - keep the command optional and guest-scoped: EC2 operations continue to use boto3, and the command
   does not run `aws configure`, create a credential/profile file, or alter operator-host
   credentials;

@@ -373,18 +373,31 @@ The existing `aws` plugin anchors its own `manifests/install-commands.yaml` and 
 recipe-gate semantics. Its command selects AWS's current official CLI v2 archive for the guest's
 `x86_64` or `aarch64` architecture, downloads the matching detached signature, imports the pinned
 AWS CLI signing key into a private temporary GnuPG home, verifies its full fingerprint and the
-archive signature, extracts it in that private directory, and installs to `/usr/local/aws-cli` with
-the `aws` launcher in `/usr/local/bin`. The installer remains entirely one declared YAML resource;
-it does not add or reinterpret shared install-command fields, runner behavior, schema, or lifecycle
-state. It declares no `test_exec`, `test_file`, or `test_dir`, and its command has no
-installed-state fast path. Initialization and reinitialization therefore run the same verified
-recipe every time. The command uses the official installer's explicit `--update` option when
-`/usr/local/aws-cli` already exists and performs a fresh install otherwise. This is the resource's
-idempotent operation: repeat runs reconcile the managed installation and refresh AWS CLI v2 instead
-of treating an older working version as permanently complete. Temporary artifacts are removed on
-success or failure. Unsupported architectures, signing-key drift, and invalid signatures fail
-clearly. The installer never runs `aws configure`, writes a credentials/profile file, or
-participates in EC2 lifecycle code, which continues to use boto3.
+archive signature, extracts it in that private directory, and installs to the Agentworks-owned
+`/usr/local/lib/agentworks/aws-cli` namespace with public `aws` and `aws_completer` launchers in
+`/usr/local/bin`. The installer remains entirely one declared YAML resource; it does not add or
+reinterpret shared install-command fields, runner behavior, schema, or lifecycle state. It declares
+no `test_exec`, `test_file`, or `test_dir`, and its command has no installed-state fast path.
+Initialization and reinitialization therefore run the same verified recipe every time. Before
+mutation, the command classifies the two official launcher names `/usr/local/bin/aws` and
+`/usr/local/bin/aws_completer` without following arbitrary links. A launcher is owned only when it
+is a symbolic link whose stored target is exactly the corresponding
+`/usr/local/lib/agentworks/aws-cli/v2/current/bin/...` path. Exact links remain owned when dangling
+because their target is inside the reserved Agentworks namespace. A regular file, directory, or link
+with any other target is an unowned collision; the command fails before cleanup, download, or
+installer execution and leaves both entries and the managed directory unchanged. A complete owned
+layout requires the managed directory, both exact launcher links, and both canonical current
+executables. It uses the official installer's `--update` path. Fully absent managed state and
+launcher entries use a fresh install. Any other state consisting only of the reserved managed
+directory and exact owned links is incomplete: the command removes only that directory and those
+links, then performs a fresh install. This avoids the official installer's same-version `--update`
+early exit leaving an interrupted layout broken without deleting operator-owned paths. These are the
+resource's idempotent operations: repeat runs refresh a complete managed installation and reinstall
+a recognized incomplete one instead of treating an older or partial version as permanently complete.
+Temporary artifacts are removed on success or failure. Unsupported architectures, signing-key drift,
+unowned path collisions, and invalid signatures fail clearly. The installer never runs
+`aws configure`, writes a credentials/profile file, or participates in EC2 lifecycle code, which
+continues to use boto3.
 
 Permanent edits cover the installed-plugin list, VM platform list, command reference, resources
 guide, plugin author contract, vm-platform author contract, capability durable-surface enumeration,
