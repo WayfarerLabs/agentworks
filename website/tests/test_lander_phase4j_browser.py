@@ -71,7 +71,14 @@ def png_pixel(path: Path, x: int, y: int) -> tuple[int, int, int]:
     return tuple(rows[y][start : start + 3])
 
 
-def browser_arcade_contract(output: Path, width: int, screenshot: bool = False) -> dict[str, object]:
+def browser_arcade_contract(
+    output: Path,
+    width: int,
+    screenshot: bool = False,
+    *,
+    paused: bool = False,
+    reduced_motion: bool = False,
+) -> dict[str, object]:
     chromium = next(
         (candidate for name in ("google-chrome", "chromium", "chromium-browser")
          if (candidate := shutil.which(name))),
@@ -93,6 +100,7 @@ const gauge = document.querySelector("#lander-fuel-gauge");
 const outcome = document.querySelector("#lander-outcome");
 const status = document.querySelector("#lander-status");
 const restart = document.querySelector("#lander-restart");
+const params = new URLSearchParams(location.search);
 fuel.hidden = false;
 rail.hidden = false;
 outcome.hidden = false;
@@ -100,7 +108,8 @@ restart.hidden = false;
 restart.disabled = false;
 status.textContent = "x";
 game.dataset.banner = "crashed";
-game.dataset.refueling = new URLSearchParams(location.search).get("refuel") !== "off" ? "true" : "false";
+game.dataset.refueling = params.get("refuel") !== "off" ? "true" : "false";
+game.dataset.paused = params.get("paused") === "true" ? "true" : "false";
 game.dataset.fuelLevel = "empty";
 game.style.setProperty("--fuel-level-color", "#ff5a36");
 game.style.setProperty("--fuel-gauge-level", "0");
@@ -125,6 +134,7 @@ const result = {
     emptyGauge: {animationName: gaugeStyle.animationName, animationDuration: gaugeStyle.animationDuration,
         animationTimingFunction: gaugeStyle.animationTimingFunction,
         animationIterationCount: gaugeStyle.animationIterationCount,
+        animationPlayState: gaugeStyle.animationPlayState,
         borderColor: gaugeStyle.borderColor, backgroundColor: gaugeStyle.backgroundColor},
     fontFamily: getComputedStyle(status).fontFamily,
     hiddenFuel: [fuelLabel, fuelValue].map((element) => ({rect: rect(element),
@@ -151,19 +161,23 @@ document.querySelector("#phase4j-result").textContent = JSON.stringify(result);
     profile = tempfile.TemporaryDirectory()
     screenshot_paths: list[Path] = []
     try:
+        command = [
+            chromium,
+            "--headless",
+            "--disable-gpu",
+            "--no-sandbox",
+            "--hide-scrollbars",
+            f"--user-data-dir={profile.name}",
+            f"--window-size={width},1000",
+            "--virtual-time-budget=1000",
+            "--dump-dom",
+        ]
+        if reduced_motion:
+            command.append("--force-prefers-reduced-motion=reduce")
+        query = "?paused=true" if paused else ""
+        command.append(f"http://127.0.0.1:{server.server_address[1]}/lander/{query}")
         completed = subprocess.run(
-            (
-                chromium,
-                "--headless",
-                "--disable-gpu",
-                "--no-sandbox",
-                "--hide-scrollbars",
-                f"--user-data-dir={profile.name}",
-                f"--window-size={width},1000",
-                "--virtual-time-budget=1000",
-                "--dump-dom",
-                f"http://127.0.0.1:{server.server_address[1]}/lander/",
-            ),
+            command,
             check=True,
             capture_output=True,
             text=True,
@@ -515,6 +529,7 @@ class ArcadeBrowserTests(RepositoryFixture):
             "animationDuration": "0.7s",
             "animationTimingFunction": "steps(1)",
             "animationIterationCount": "infinite",
+            "animationPlayState": "running",
             "borderColor": "rgb(255, 90, 54)",
             "backgroundColor": "rgb(255, 90, 54)",
         })
@@ -545,6 +560,16 @@ class ArcadeBrowserTests(RepositoryFixture):
             self.assertEqual(hidden["visibility"], "visible")
         self.assertTrue(all(resource["initiatorType"] != "font" for resource in result["resources"]))
         self.assertTrue(all(resource["name"].startswith("http://127.0.0.1:") for resource in result["resources"]))
+
+    def test_empty_gauge_pauses_and_reduced_motion_keeps_a_static_red_warning(self) -> None:
+        output = self.build()
+        paused = browser_arcade_contract(output, 960, paused=True)["emptyGauge"]
+        self.assertEqual(paused["animationName"], "agw-fuel-empty-blink")
+        self.assertEqual(paused["animationPlayState"], "paused")
+        reduced = browser_arcade_contract(output, 960, reduced_motion=True)["emptyGauge"]
+        self.assertEqual(reduced["animationName"], "none")
+        self.assertEqual(reduced["borderColor"], "rgb(255, 90, 54)")
+        self.assertEqual(reduced["backgroundColor"], "rgb(255, 90, 54)")
 
 
 if __name__ == "__main__":

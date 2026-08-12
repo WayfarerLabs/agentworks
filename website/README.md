@@ -314,6 +314,8 @@ the publishing workflow first runs from a merged `main` commit.
 The default project URL may host the useful interim release while onboarding is pending. Do not
 attach `agentworks.build` or change DNS until both the continuous Lander and the canonical
 onboarding integration have passed their recorded acceptance gates on the deployed `main` artifact.
+For the current onboarding effort, its remaining gate is the live acceptance carried by the
+regenerated 0.14 release PR; an implementation merge by itself does not authorize cutover.
 
 1. Set GitHub Pages to use GitHub Actions as its publishing source.
 2. Protect the `github-pages` environment so only the default branch can deploy.

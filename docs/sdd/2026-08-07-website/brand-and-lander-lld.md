@@ -1594,15 +1594,17 @@ Pure `fuelGaugeLevel(model)` first computes the ordinary authoritative level as
 `model.refuel` exists, it instead returns
 `model.refuel.fromLevel+(1-model.refuel.fromLevel)*model.refuel.progress`; otherwise it returns the
 ordinary level. The controller assigns that result to `--fuel-gauge-level` and the exact progress to
-`--refuel-progress`. `empty` is exactly `level===0`, `danger` is `0<level<=0.2`, `caution` is
-`0.2<level<=0.5`, and `ready` is `0.5<level<=1`. The controller writes exactly one of those values
-to `data-fuel-level`; `empty` and `danger` map to the same exact red `--fuel-level-color`, while the
-other bands retain their exact colors. Fill height uses `scaleY(level)`. Independently, the same
-level color remains visible as the track's three-pixel inset indicator even when height is zero. At
-`empty`, the outer border and background also become danger red, the inset becomes dark graphite,
-and the whole track runs `agw-fuel-empty-blink 700ms steps(1,end) infinite`. Nonempty bands retain
-the graphite outer boundary, so component boundary, level color, and bottom-up amount remain three
-distinct visual signals; none is an accessible semantic meter.
+`--refuel-progress`. `empty` is exactly `model.fuel===0`; for positive authoritative fuel, `danger`
+is `0<=level<=0.2`, `caution` is `0.2<level<=0.5`, and `ready` is `0.5<level<=1`. Thus an atomic
+positive award with a still-zero refuel presentation is danger, not empty. The controller writes
+exactly one of those values to `data-fuel-level`; `empty` and `danger` map to the same exact red
+`--fuel-level-color`, while the other bands retain their exact colors. Fill height uses
+`scaleY(level)`. Independently, the same level color remains visible as the track's three-pixel
+inset indicator even when height is zero. At `empty`, the outer border and background also become
+danger red, the inset becomes dark graphite, and the whole track runs
+`agw-fuel-empty-blink 700ms steps(1,end) infinite`. Nonempty bands retain the graphite outer
+boundary, so component boundary, level color, and bottom-up amount remain three distinct visual
+signals; none is an accessible semantic meter.
 
 When visible, `#lander-fuel` is a pointer-transparent block positioned inside `#lander-scene-stage`
 at `left:clamp(0.5rem,2vw,1rem)` and `top:clamp(0.5rem,2vw,1rem)`. The track is exactly `1rem` wide

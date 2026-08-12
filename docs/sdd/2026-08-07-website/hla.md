@@ -17,11 +17,12 @@ unavailable or ambiguous.
 
 Delivery has two honest stages over the same URLs and architecture. The interim release publishes
 the complete Home, Manifesto, Security, Lander, and 404 shells, repository-derived product/security
-passages, stable links, selected brand, one shared Lander/404 game, pipeline, and domain while
-canonical onboarding is unavailable. It contains a small semantic availability notice and no
-bootstrap-shaped substitute. After onboarding Phase 3 lands on `main`, a second release replaces
-that notice with the canonical bootstrap and its copy enhancement. This is a delivery sequence, not
-a runtime mode or parallel site.
+passages, stable links, selected brand, one shared Lander/404 game, and pipeline while canonical
+onboarding is unavailable. It contains a small semantic availability notice and no bootstrap-shaped
+substitute, and it remains at the default GitHub Pages project URL. After onboarding Phase 3 lands
+on `main`, a second release replaces that notice with the canonical bootstrap and its copy
+enhancement. The custom domain remains deferred until both that integration and the continuous
+Lander pass acceptance. This is a delivery sequence, not a runtime mode or parallel site.
 
 The content pages use HTML and CSS for their full experience. A small local script progressively
 enhances the shared static scene on Lander and 404 into the same nonessential game. The later
@@ -455,7 +456,9 @@ onboarding integration later uses the same merge-to-`main` path; it neither adds
 project nor changes the deployment architecture. This exercises the delivery system and custom 404
 before the upstream content dependency is ready while keeping every deployed artifact reproducible
 from its source commit. Custom-domain activation remains deferred until both the continuous Lander
-and canonical onboarding integration have passed their recorded acceptance gates.
+and canonical onboarding integration have passed their recorded acceptance gates. For the current
+onboarding effort, that second gate includes the live acceptance carried by its regenerated 0.14
+release PR; implementation completion alone does not unlock cutover.
 
 ### D9. DNS and domain setup are explicit one-time operations
 

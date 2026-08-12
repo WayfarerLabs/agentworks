@@ -1027,7 +1027,9 @@ custom-domain, onboarding, and lock boxes remain unchecked.
 
 This phase is numbered here to preserve the established plan, but it cannot begin until Phase 8 is
 complete. Both the continuous Lander and canonical onboarding integration must be accepted on the
-deployed `main` artifact before any repository custom-domain setting or DNS mutation.
+deployed `main` artifact before any repository custom-domain setting or DNS mutation. For the
+current onboarding effort, completion includes the live acceptance carried by the regenerated 0.14
+release PR, not only its implementation merge.
 
 - [ ] Start the activation-evidence branch from `main`; confirm the accepted continuous Lander and
       canonical onboarding integration are both deployed at the default Pages URL; keep the branch

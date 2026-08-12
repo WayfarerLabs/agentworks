@@ -161,6 +161,14 @@ test("fuel height and exact empty, danger, caution, and ready colors are indepen
         assert.equal(root.dataset.fuelLevel, name);
         assert.equal(root.style.getPropertyValue("--fuel-level-color"), color);
     }
+    controller.model = {
+        ...run,
+        fuel: 8,
+        refuel: { siteId: 1, fromLevel: 0, progress: 0 },
+    };
+    controller.render();
+    assert.equal(root.style.getPropertyValue("--fuel-gauge-level"), "0");
+    assert.equal(root.dataset.fuelLevel, "danger");
     controller.destroy();
 });
 
