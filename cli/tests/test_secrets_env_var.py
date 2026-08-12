@@ -40,10 +40,20 @@ def _resolve(decl: SecretDecl) -> tuple[dict[str, str], ResolutionOutcome]:
     return batch.complete_or_raise(), batch.outcomes[0]
 
 
-def test_default_convention_reads_env_and_strips_trailing_crlf(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("AW_SECRET_GITHUB_TOKEN", "ghp_xxx\r\n")
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param("line-one\nline-two\n", id="lf-with-terminal-newline"),
+        pytest.param("line-one\r\nline-two\r\n", id="crlf-with-terminal-newline"),
+    ],
+)
+def test_default_convention_preserves_exact_multiline_value(
+    monkeypatch: pytest.MonkeyPatch,
+    value: str,
+) -> None:
+    monkeypatch.setenv("AW_SECRET_GITHUB_TOKEN", value)
     values, outcome = _resolve(SecretDecl(name="github-token", description="GitHub PAT"))
-    assert values == {"github-token": "ghp_xxx"}
+    assert values == {"github-token": value}
     assert outcome.category is ResolutionCategory.RESOLVED
     assert outcome.identifier == "AW_SECRET_GITHUB_TOKEN"
 

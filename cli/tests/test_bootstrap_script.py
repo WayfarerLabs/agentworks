@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import pytest
+
 from agentworks.capabilities.vm_platform.bootstrap_script import (
     REBOOT_SENTINEL_PATH,
     generate_bootstrap_script,
     parse_bootstrap_output,
 )
+from agentworks.errors import ValidationError
 
 
 def test_generate_bootstrap_script_all_steps() -> None:
@@ -60,6 +63,21 @@ def test_generate_bootstrap_script_can_omit_join_from_retained_payload() -> None
     assert "Tailscale join deferred to platform" in script
     assert "tailscale up --auth-key" in script
     assert sentinel not in script
+
+
+def test_generate_bootstrap_script_rejects_line_unsafe_tailscale_key() -> None:
+    auth_key = "prefix\nsuffix"
+    with pytest.raises(ValidationError) as caught:
+        generate_bootstrap_script(
+            admin_username="testuser",
+            ssh_public_key="ssh-ed25519 AAAA testkey",
+            provisioning_packages=["curl", "git"],
+            tailscale_auth_key=auth_key,
+            hostname="lima--myvm",
+            swap=4,
+        )
+
+    assert auth_key not in repr((caught.value.args, vars(caught.value)))
 
 
 def test_generate_bootstrap_script_masks_sve_gated_on_apple() -> None:

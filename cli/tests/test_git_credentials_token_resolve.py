@@ -37,10 +37,13 @@ def _resolve_tokens(config: object, registry: object, names: list[str]) -> dict[
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
     resolver.resolve()
-    return {
+    tokens = {
         node.provider.owner_name: ScopedSecrets(resolver.values, node.secret_refs()).get(node.provider.secret_name)
         for node in nodes
     }
+    from agentworks.git_credentials import validate_git_tokens
+
+    return validate_git_tokens({node.provider.owner_name: node.provider for node in nodes}, tokens)
 
 
 def _write_cfg(
@@ -101,6 +104,37 @@ def test_collect_git_tokens_resolves_custom_secret_name(
     registry = build_registry(config)
     tokens = _resolve_tokens(config, registry, ["github"])
     assert tokens["github"] == "ghp_custom"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param("ghp_line-one\nline-two\n", id="lf"),
+        pytest.param("ghp_line-one\r\nline-two\r\n", id="crlf"),
+    ],
+)
+def test_collect_git_tokens_rejects_multiline_after_real_operation_resolve(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    value: str,
+) -> None:
+    from agentworks.bootstrap import build_registry
+    from agentworks.errors import ValidationError
+
+    cfg = _write_cfg(
+        tmp_path,
+        settings='[secret_config]\nbackends = ["env-var"]\n',
+        manifests=[ManifestDoc("git-credential", "github", {"provider": {"name": "github"}})],
+    )
+    config = load_config(cfg, warn_issues=False)
+    monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GITHUB", value)
+
+    with pytest.raises(ValidationError) as caught:
+        _resolve_tokens(config, build_registry(config), ["github"])
+
+    assert value not in repr((caught.value.args, vars(caught.value)))
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
 def test_collect_git_tokens_batches_multiple_credentials(

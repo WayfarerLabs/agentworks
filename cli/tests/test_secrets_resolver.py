@@ -13,10 +13,13 @@ import pytest
 
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
-from agentworks.errors import StateError
+from agentworks.env import EnvEntry
+from agentworks.errors import StateError, ValidationError
+from agentworks.secrets import SecretTarget
 from agentworks.secrets.policy import InteractionPolicy
 from agentworks.secrets.resolve import ResolutionBatch
 from agentworks.secrets.resolver import Resolver
+from tests.conftest import ManifestDoc, write_manifests
 
 
 @pytest.fixture
@@ -25,12 +28,14 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     key.write_text("private")
     (tmp_path / "id_ed25519.pub").write_text("public")
 
-    def _make(extra: str = ""):
+    def _make(extra: str = "", *, manifests: list[ManifestDoc] | None = None):
         path = tmp_path / "config.toml"
         path.write_text(
             f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n'
             '[secret_config]\nbackends = ["env-var"]\n' + extra
         )
+        if manifests:
+            write_manifests(tmp_path, *manifests)
         config = load_config(path, warn_issues=False, warn_deprecations=False)
         return config, build_registry(config)
 
@@ -65,6 +70,55 @@ def test_resolve_is_one_pass_and_idempotent(env, monkeypatch: pytest.MonkeyPatch
     resolver.resolve()  # idempotent while the set is unchanged
     assert len(calls) == 1
     assert resolver.get("some-token") == "v1"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param("pretty\nvalue\n", id="lf-with-terminal-newline"),
+        pytest.param("pretty\r\nvalue\r\n", id="crlf-with-terminal-newline"),
+    ],
+)
+def test_operation_resolver_preserves_env_var_multiline_value(
+    env,
+    monkeypatch: pytest.MonkeyPatch,
+    value: str,
+) -> None:
+    config, registry = env()
+    monkeypatch.setenv("AW_SECRET_STRUCTURED", value)
+    resolver = Resolver(config, registry, interaction=InteractionPolicy.REFUSE)
+    resolver.register_name("structured")
+
+    resolver.resolve()
+
+    assert resolver.get("structured") == value
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param("environment-sentinel\nsecond\n", id="lf-with-terminal-newline"),
+        pytest.param("environment-sentinel\r\nsecond\r\n", id="crlf-with-terminal-newline"),
+    ],
+)
+def test_operation_resolver_rejects_multiline_environment_target_after_delivery(
+    env,
+    monkeypatch: pytest.MonkeyPatch,
+    value: str,
+) -> None:
+    config, registry = env(manifests=[ManifestDoc("secret", "structured", description="environment input")])
+    monkeypatch.setenv("AW_SECRET_STRUCTURED", value)
+    resolver = Resolver(config, registry, interaction=InteractionPolicy.REFUSE)
+    resolver.register_targets([SecretTarget(vm={"STRUCTURED": EnvEntry({"secret": "structured"})})])
+
+    with pytest.raises(ValidationError) as caught:
+        resolver.resolve()
+
+    assert not resolver.resolved
+    assert "cannot be used for environment injection" in str(caught.value)
+    assert "environment-sentinel" not in repr((caught.value.args, vars(caught.value)))
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
 def test_empty_set_resolves_without_touching_backends(env, monkeypatch: pytest.MonkeyPatch) -> None:

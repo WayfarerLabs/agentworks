@@ -85,9 +85,10 @@ agw console delete my-console              # Extra shells are lost but sessions 
 - Python 3.12+ (uv will install one for you if needed)
 - [uv](https://docs.astral.sh/uv/) or [pipx](https://pipx.pypa.io/) for installation
 - [Tailscale](https://tailscale.com/) installed and connected (for VM workspaces)
-- One of: [Lima](https://lima-vm.io/), Azure CLI (`az`), AWS credentials for EC2,
-  [Proxmox](https://www.proxmox.com/), or WSL2 (for VM provisioning; Azure, AWS, and Proxmox also
-  need their [system plugin](#system-plugins) enabled)
+- One of: [Lima](https://lima-vm.io/), Azure CLI (`az`), AWS credentials for EC2, Google Cloud
+  credentials for GCE, [Proxmox](https://www.proxmox.com/), or WSL2 (for VM provisioning; Azure,
+  AWS, GCP, and Proxmox also need their [system plugin](#system-plugins) enabled). The optional
+  guest `gcloud-cli` apt package is not a host prerequisite.
 
 ## Global Options
 
@@ -124,16 +125,16 @@ Pressing Ctrl-C during a long-running operation triggers best-effort cleanup. Wh
 can roll back (e.g. `vm create` during the provisioning phase, `workspace create`, `agent create`,
 `session create`) it undoes the partial DB / on-VM state and prints `Cancelling X... rolling back.`.
 On every platform the `vm create` provisioning-phase rollback also deletes the partially created
-backend state: Azure the cloud resource set (VM, NIC, public IP, NSG, vnet, disk), which can take a
-minute or two; Proxmox the partially cloned VM (cancelling a still-running clone task first); Lima
-the instance (local, or on the site's placement host for an ssh-placed site); WSL2 the distro plus
-its install directory. A second Ctrl-C abandons that cleanup, printing what to remove manually: the
-resource group and name prefix, the node and VMID, or the exact removal command
-(`limactl delete --force <name>`, run on the placement host for an ssh-placed site, or
-`wsl --unregister <name>` plus deleting the install directory it names). Where rollback isn't
-possible (`vm reinit`, `agent reinit`, the init phase of `vm create`) it prints a recovery hint: the
-next command to run (`vm reinit`, `vm delete --force`, ...). Every cancellation exits with the
-conventional SIGINT exit code (130).
+backend state: Azure the cloud resource set (VM, NIC, public IP, NSG, vnet, disk), GCE the
+provider-ID-owned instance and allow/deny rules, which can take a minute or two; Proxmox the
+partially cloned VM (cancelling a still-running clone task first); Lima the instance (local, or on
+the site's placement host for an ssh-placed site); WSL2 the distro plus its install directory. A
+second Ctrl-C abandons that cleanup, printing what to remove manually: the resource group and name
+prefix, the node and VMID, or the exact removal command (`limactl delete --force <name>`, run on the
+placement host for an ssh-placed site, or `wsl --unregister <name>` plus deleting the install
+directory it names). Where rollback isn't possible (`vm reinit`, `agent reinit`, the init phase of
+`vm create`) it prints a recovery hint: the next command to run (`vm reinit`, `vm delete --force`,
+...). Every cancellation exits with the conventional SIGINT exit code (130).
 
 ## Commands
 
@@ -231,16 +232,21 @@ simple default stays behavior-identical without a manifest:
 - `env-var` -- reads from the operator's process env. Default convention is
   `AW_SECRET_<UPPER_SNAKE_CASE>`, overridable per secret via the secret's `backend_mappings`
   (`env-var: CUSTOM_NAME`).
-- `prompt` -- interactive prompt; you are never asked for the same secret twice in one command, and
-  all prompting happens before the command starts changing anything.
+- `prompt`: interactive prompt; you are never asked for the same secret twice in one command.
+  Plan-wide prompting happens before the command starts changing anything. Conditional Tailscale
+  repair is deliberately lazy: healthy and already-connected paths never ask for a repair key, and a
+  stopped VM may start before late key delivery. The delivered key is validated before any
+  rejoin-specific mutation, transport, installation, or daemon action.
 
-**Resolve before any mutation:** a command resolves all the secrets its plan needs up front, before
-it starts changing anything. Preflight first performs a pure applicability screen: a declaration
-with no ready, permitted source that would even attempt it fails with a hint
-(`agw secret describe <name>` shows how each source maps it), before any prompt and before any VM is
-started. Actual presence, authentication, transport, and provider failures remain the typed
-resolution boundary's job. The set of secrets is computed from the command's static filters
-(positional targets, `--vm`, `--workspace`, `--agent`, etc.) -- dynamic predicates like
+**Resolve before plan mutation:** a command resolves all the secrets its static plan needs up front,
+before it starts changing anything. The conditional Tailscale repair exception stays lazy so healthy
+paths do not prompt: a stopped VM may start before Agentworks discovers that repair is required,
+then the late key is validated before all rejoin-specific work. Preflight first performs a pure
+applicability screen: a declaration with no ready, permitted source that would even attempt it fails
+with a hint (`agw secret describe <name>` shows how each source maps it), before any prompt and
+before any VM is started. Actual presence, authentication, transport, and provider failures remain
+the typed resolution boundary's job. The set of secrets is computed from the command's static
+filters (positional targets, `--vm`, `--workspace`, `--agent`, etc.); dynamic predicates like
 `--all-stopped` apply later, so the prompted set may over-approximate. Non-interactive mode (no TTY
 or `--non-interactive`) surfaces missing secrets as `SecretUnavailableError` with a per-secret hint
 naming which sources were tried. Commands that join existing shells (`session attach`,
@@ -248,7 +254,7 @@ naming which sources were tried. Commands that join existing shells (`session at
 secrets.
 
 **Miss semantics:** what "not found" means depends on the selected backend. Conventional sources
-(`env-var`, `prompt`) treat a missing value as a soft miss and fall through to the next source -- a
+(`env-var`, `prompt`) treat a missing value as a soft miss and fall through to the next source. A
 `GITHUB_TOKEN` env var that isn't set is just-not-set, not a config error. Persistent-store clients
 treat an explicit mapping that does not resolve as a typed hard mapping failure, and the chain halts
 for that secret so a wrong `op://` URI cannot be masked by a prompt.
@@ -391,17 +397,18 @@ Agentworks ships some vendor- and tool-specific capabilities (VM platforms, harn
 git-credential providers, secret backends) as **system plugins**: separable bundles that are
 installed but off by default. The shipped build installs `azure` (the `azure-vm` VM platform, the
 `azdo` git-credential provider, and the `az-cli` install-command), `proxmox` (the `proxmox` VM
-platform), `aws` (the `aws-ec2` VM platform), `onepassword` (the `onepassword` secret backend),
-`claude` (the `claude-code` harness integration and the `claude` CLI install-command), and `codex`
-(the `codex` harness integration and the `codex` CLI install-command). (This is a different sense of
-"plugin" from [Claude Code Plugins](#claude-code-plugins) below, which installs marketplace plugins
-into Claude Code itself.)
+platform), `aws` (the `aws-ec2` VM platform), `gcp` (the `gcp-gce` VM platform and optional guest
+`gcloud-cli` apt package), `onepassword` (the `onepassword` secret backend), `claude` (the
+`claude-code` harness integration and the `claude` CLI install-command), and `codex` (the `codex`
+harness integration and the `codex` CLI install-command). (This is a different sense of "plugin"
+from [Claude Code Plugins](#claude-code-plugins) below, which installs marketplace plugins into
+Claude Code itself.)
 
 Opt in by name in `config.toml`:
 
 ```toml
 [plugins]
-system = ["azure", "aws", "proxmox", "onepassword", "claude", "codex"]   # only the ones you use
+system = ["azure", "aws", "gcp", "proxmox", "onepassword", "claude", "codex"] # only those you use
 ```
 
 A resource that references a not-enabled plugin's contribution (an `azure-vm` vm-site, a
@@ -418,7 +425,9 @@ group listing every installed plugin, its description, and whether it is enabled
 
 See [docs/guides/resources.md](../docs/guides/resources.md#system-plugins) for the full model
 (origins, the disabled-resource semantics, config-error deferral) and the upgrade note for configs
-that relied on Azure, Proxmox, 1Password, or Claude Code before they became opt-in.
+that relied on Azure, Proxmox, 1Password, or Claude Code before they became opt-in. Google Compute
+Engine setup, firewall prerequisites, whole-document JSON-secret setup, and provider-ID-safe
+recovery are covered in [Using Google Compute Engine](../docs/guides/gcp.md).
 
 ### Mise (Polyglot Tool Manager)
 
@@ -451,6 +460,14 @@ commands, and user install commands), bundled as YAML manifests under
 `agw resource list --kind apt-package,system-install-command,user-install-command,apt-source` to see
 what is available (or filter to any single kind). Reference these entries by name from VM, admin,
 and agent templates. User-defined entries override built-in entries with the same name.
+
+Prefer template `apt`, `apt_packages`, `snap`, or `mise_packages` fields over a custom install
+command. When an install command is necessary, its `command` is one logical shell invocation written
+as a single-line YAML scalar, either plain or quoted, normally one maintained package-manager or
+vendor entry point. Do not embed a script, block scalar, here-document, multi-step installer, state
+machine, signature pipeline, or cleanup routine. The invocation must be repeat-safe itself or use
+`test_exec`, `test_file`, or `test_dir` as reliable completion checks. System install commands run
+as the VM admin, not root, and explicitly use `sudo` for privileged work.
 
 ## VM Initialization
 

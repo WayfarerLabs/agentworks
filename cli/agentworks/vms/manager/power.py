@@ -377,7 +377,16 @@ def rekey_vm(
             interaction=interaction,
         )
         resolver.resolve()
-    ts_auth_key = resolver.get(rekey_vm_tmpl.tailscale_auth_key)
+    from agentworks.secrets.line_safety import (
+        LineOrientedSecretUse,
+        require_line_safe_secret,
+    )
+
+    ts_auth_key = require_line_safe_secret(
+        resolver.get(rekey_vm_tmpl.tailscale_auth_key),
+        use=LineOrientedSecretUse.TAILSCALE,
+        secret_name=rekey_vm_tmpl.tailscale_auth_key,
+    )
 
     # The running check is an op (a backend status read), so it sits
     # past the boundary: on proxmox it needs the API token, delivered

@@ -316,6 +316,73 @@ def test_secret_revealed_with_flag(
     assert api.rendered_value == "from-operator-env"
 
 
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param("sentinel-lf\nforged-row\n", id="lf"),
+        pytest.param("sentinel-crlf\r\nforged-row\r\n", id="crlf"),
+    ],
+)
+def test_secret_reveal_rejects_multiline_before_rendering(
+    db: Database,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,
+    value: str,
+) -> None:
+    monkeypatch.setenv("AW_SECRET_SHARED_TOKEN", value)
+    cfg = _write_config(
+        tmp_path,
+        settings='[secret_config]\nbackends = ["env-var"]\n',
+        admin=ManifestDoc(
+            "admin-template", "default", {"shell": "zsh", "env": {"API_KEY": {"secret": "shared-token"}}}
+        ),
+        manifests=[ManifestDoc("secret", "shared-token", description="shared API token")],
+    )
+    config = load_config(cfg, warn_issues=False)
+    _seed_db(db)
+
+    rows = show_env(db, config, vm_name="vm-1", reveal_secrets=True, interaction=InteractionPolicy.REFUSE)
+
+    api = next(row for row in rows if row.key == "API_KEY")
+    assert api.rendered_value.startswith("<error: secret 'shared-token' cannot be used")
+    assert value not in repr(rows)
+    assert value not in repr(captured_output.lines)
+
+
+def test_secret_reveal_guard_rejects_nul_before_building_render_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from agentworks.env import EnvEntry
+    from agentworks.env.show import _reveal_values
+    from agentworks.secrets import SecretDecl
+
+    value = "sentinel-prefix\0sentinel-suffix"
+    monkeypatch.setattr(
+        "agentworks.resources.access.secret_decls",
+        lambda _registry: {"shared-token": SecretDecl(name="shared-token", description="")},
+    )
+    monkeypatch.setattr("agentworks.secrets.resolve.active_sources", lambda *_args: ())
+    monkeypatch.setattr(
+        "agentworks.secrets.resolve.resolve_partial_for_reveal",
+        lambda *_args, **_kwargs: SimpleNamespace(values={"shared-token": value}, outcomes=()),
+    )
+
+    values, errors = _reveal_values(
+        object(),  # type: ignore[arg-type]
+        object(),  # type: ignore[arg-type]
+        {"API_KEY": EnvEntry({"secret": "shared-token"})},
+        reveal=True,
+        interaction=InteractionPolicy.REFUSE,
+    )
+
+    assert values == {}
+    assert errors == {"shared-token": "secret 'shared-token' cannot be used for environment reveal"}
+    assert value not in repr((values, errors))
+
+
 # ---------------------------------------------------------------------------
 # Identity overlay
 # ---------------------------------------------------------------------------

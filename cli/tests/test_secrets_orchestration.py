@@ -22,6 +22,7 @@ import pytest
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.env import EnvEntry
+from agentworks.errors import ValidationError
 from agentworks.secrets import (
     SecretDecl,
     SecretTarget,
@@ -336,6 +337,44 @@ def test_resolve_for_command_returns_resolved_values(
     target = SecretTarget(vm={"K": EnvEntry({"secret": "api-key"})})
     resolved = resolve_for_command([target], config, build_registry(config), interaction=InteractionPolicy.REFUSE)
     assert resolved == {"api-key": "from-env"}
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param("standalone-sentinel\nsecond\n", id="lf-with-terminal-newline"),
+        pytest.param("standalone-sentinel\r\nsecond\r\n", id="crlf-with-terminal-newline"),
+    ],
+)
+def test_resolve_for_command_rejects_multiline_environment_target_after_delivery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    value: str,
+) -> None:
+    monkeypatch.setenv("AW_SECRET_API_KEY", value)
+    cfg = _write_config(
+        tmp_path,
+        settings="""
+        [secret_config]
+        backends = ["env-var"]
+        """,
+        manifests=[ManifestDoc("secret", "api-key", description="api")],
+    )
+    config = load_config(cfg, warn_issues=False)
+    target = SecretTarget(vm={"API_KEY": EnvEntry({"secret": "api-key"})})
+
+    with pytest.raises(ValidationError) as caught:
+        resolve_for_command(
+            [target],
+            config,
+            build_registry(config),
+            interaction=InteractionPolicy.REFUSE,
+        )
+
+    assert "cannot be used for environment injection" in str(caught.value)
+    assert "standalone-sentinel" not in repr((caught.value.args, vars(caught.value)))
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
 def test_resolved_values_are_plain_data(

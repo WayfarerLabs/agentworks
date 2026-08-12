@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 from agentworks.db import VMStatus
-from agentworks.errors import StateError
+from agentworks.errors import StateError, ValidationError
 from agentworks.orchestration.activation import activation_gate, ensure_active
 from agentworks.secrets.policy import InteractionPolicy
 from agentworks.vms import manager as vm_manager
@@ -63,6 +63,9 @@ def _patch_actual_gate_ensure_sequence(
         calls["rejoin"] += 1
         events.append("rejoin")
         _raise_at("rejoin")
+        database = cast("Database", args[0])
+        name = cast("str", args[1])
+        database.update_vm_tailscale(name, "100.64.0.10")
 
     def _final_wait(*args: object, **kwargs: object) -> bool:
         calls["final-wait"] += 1
@@ -252,6 +255,60 @@ def test_auto_resume_rejoin_orders_probe_reader_ensure_inside_hold(
     ]
     assert values == {"tailscale-auth-key": "ts-key"}
     assert calls == {"verify": 1, "native": 1, "rejoin": 1, "final-wait": 1, "sync": 1}
+
+
+def test_auto_resume_multiline_repair_key_preserves_host_after_real_probe(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: object,
+) -> None:
+    import agentworks.transports as transports
+
+    auth_key = "tskey-node-sentinel\r\ninjected\r\n"
+    vm = _seed(db)
+    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: False)
+    platform = _GatePlatform(status=VMStatus.STOPPED)
+    node, _ = _node(db, platform, vm)
+    monkeypatch.setattr(node, "repair_secret_refs", lambda: ("tailscale-auth-key",))
+    monkeypatch.setattr(
+        transports,
+        "transport",
+        lambda *args, **kwargs: platform.events.append("probe-transport") or object(),
+    )
+    monkeypatch.setattr(
+        transports,
+        "wait_for_reconnect",
+        lambda *args, **kwargs: platform.events.append("repair-required") or False,
+    )
+    monkeypatch.setattr(
+        vm_manager,
+        "verify_tailscale_available",
+        lambda: pytest.fail("line-unsafe late key reached Tailscale availability work"),
+    )
+
+    def _resolve(name: str) -> str:
+        assert name == "tailscale-auth-key"
+        platform.events.append("late-resolve")
+        return auth_key
+
+    with pytest.raises(ValidationError) as caught:
+        ensure_active(node, _resolve)
+
+    assert platform.events == [
+        "status",
+        "start",
+        "hold-open",
+        "probe-transport",
+        "repair-required",
+        "late-resolve",
+        "hold-close",
+    ]
+    refreshed = db.get_vm("gvm")
+    assert refreshed is not None
+    assert refreshed.tailscale_host == "100.64.0.9"
+    assert "tskey-node-sentinel" not in repr((caught.value.args, vars(caught.value)))
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
 @pytest.mark.parametrize("failure_type", [RuntimeError, KeyboardInterrupt])

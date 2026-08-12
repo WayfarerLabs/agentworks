@@ -7,6 +7,10 @@ publishes a new kind: it contributes implementations of the four existing capabi
 declarable resources bundled as YAML manifests. A plugin is an **origin** (`system-plugin`), the
 fourth alongside `operator-declared`, `built-in`, and `auto-declared`.
 
+The shipped index currently installs `onepassword`, `claude`, `proxmox`, `azure`, `codex`, `aws`,
+and `gcp`; all are disabled until named in `[plugins].system`. The index remains authoritative, and
+`agw doctor` renders it directly.
+
 This document is for authoring a system plugin. For the operator-facing model (how origins and the
 enablement axis read on the surfaces) see `docs/guides/resources.md`; for the decision record see
 `docs/adrs/0021-system-plugins.md`.
@@ -47,6 +51,15 @@ Fields:
 
 The descriptor depends on nothing in the capability or registry machinery, so it is constructible in
 a test without a registry. It becomes valid or rejected only when the installed index registers it.
+
+### Vendor bundles grow by composition
+
+The plugin name is the vendor-level composition boundary, not the name of one service capability.
+For example, `gcp` bundles the independently named `gcp-gce` VM platform and optional `gcloud-cli`
+guest apt package, while `aws` currently contributes only `aws-ec2`. A future vendor capability
+keeps its own existing capability contract, model, and service-specific name, then joins the
+existing vendor plugin. Do not introduce a provider-wide base class or reserve an unconsumed
+abstraction merely because a vendor bundle gains a second contribution.
 
 ### Guide contribution boundaries
 
@@ -312,6 +325,14 @@ reference paths are not gated (such as `secret` or `vm-site`) are rejected at pu
 reserved auto-declared name (a `default` template). They load through the same typed, validated
 loader the built-in manifests use, stamped with the plugin's `system-plugin` origin. A malformed
 bundle is a typed error attributed to the plugin, never a bare import or assertion failure.
+
+Install-command manifests contain one logical shell invocation as a single-line YAML scalar, either
+plain or quoted. Prefer the template's `apt`, `apt_packages`, `snap`, or `mise_packages` surfaces,
+followed by a maintained package-manager or vendor entry point. Do not embed a script, block scalar,
+here-document, multi-step installer, state machine, signature pipeline, or cleanup routine. The
+invocation must be repeat-safe itself or use the existing `test_exec`, `test_file`, or `test_dir`
+completion fields. A system install command still runs as the VM admin, not root, and explicitly
+invokes `sudo` for any privileged step.
 
 ## Reserved fields (inert in v1)
 

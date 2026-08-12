@@ -27,8 +27,8 @@ import pytest
 # the REAL env-chain resolve.
 from agentworks.bootstrap import build_registry as _real_build_registry
 from agentworks.bootstrap import load_request_registry as _real_load_request_registry
-from agentworks.db import Database, SessionMode, SessionStatus
-from agentworks.errors import StateError
+from agentworks.db import Database, InitStatus, SessionMode, SessionStatus
+from agentworks.errors import StateError, ValidationError
 from agentworks.output import Role
 from agentworks.secrets.orchestration import (
     resolve_for_command as _real_resolve_for_command,
@@ -745,6 +745,47 @@ def test_create_stopped_vm_gate_resolves_once_and_seeds_the_boundary(
     )
 
 
+def test_create_multiline_environment_secret_refuses_before_session_mutation(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.sessions.manager import create_session
+    from agentworks.vms import manager as vm_manager
+
+    config = make_config()
+    environment_value = "session-create-sentinel\r\ninjected\r\n"
+    monkeypatch.setenv("AW_SECRET_API_KEY", environment_value)
+    _seed_stopped_proxmox_vm(db)
+    db.update_vm_init_status("box", InitStatus.COMPLETE)
+    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
+    events: list[str] = []
+    captured_env: dict[str, str] = {}
+    _patch_session_ops(monkeypatch, events, captured_env)
+
+    with pytest.raises(ValidationError) as caught:
+        create_session(
+            db,
+            config,
+            name="s1",
+            new_workspace=True,
+            workspace_name="fresh-ws",
+            new_agent=True,
+            agent_name="fresh-agent",
+            vm_name="box",
+            interaction=InteractionPolicy.REFUSE,
+        )
+
+    assert db.get_session("s1") is None
+    assert db.get_workspace("fresh-ws") is None
+    assert db.get_agent("fresh-agent") is None
+    assert events == []
+    assert captured_env == {}
+    assert "session-create-sentinel" not in repr((caught.value.args, vars(caught.value)))
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+
+
 def test_create_new_agent_on_disabled_plugin_recipe_refuses_before_any_work(
     db: Database,
     make_config,  # noqa: ANN001
@@ -845,6 +886,53 @@ def test_resume_stopped_vm_gate_seeds_and_env_pass_is_the_only_other(
         role is Role.RESULT and level == 0 and msg == "Session 's1' resumed"
         for role, level, msg in captured_output.lines
     )
+
+
+def test_resume_multiline_environment_secret_refuses_before_kill(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.sessions import manager as session_manager
+    from agentworks.sessions.manager import resume_session
+    from agentworks.vms import manager as vm_manager
+
+    config = make_config()
+    environment_value = "session-resume-sentinel\nsecond\n"
+    monkeypatch.setenv("AW_SECRET_API_KEY", environment_value)
+    _seed_stopped_proxmox_vm(db)
+    db.insert_session("s1", "ws1", "default", SessionMode.ADMIN, socket_path="/tmp/s1.sock")
+    db.update_session_pid("s1", 4242, boot_id="boot-x")
+    monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
+    events: list[str] = []
+    captured_env: dict[str, str] = {}
+    _patch_session_ops(monkeypatch, events, captured_env)
+    monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, **kwargs: session)
+    monkeypatch.setattr(session_manager, "check_session_status", lambda *args, **kwargs: SessionStatus.OK)
+    monkeypatch.setattr(
+        session_manager,
+        "_kill_session",
+        lambda *args, **kwargs: events.append("kill") or True,
+    )
+
+    with pytest.raises(ValidationError) as caught:
+        resume_session(
+            db,
+            config,
+            name="s1",
+            yes=True,
+            interaction=InteractionPolicy.REFUSE,
+        )
+
+    refreshed = db.get_session("s1")
+    assert refreshed is not None
+    assert refreshed.pid == 4242
+    assert "kill" not in events
+    assert "tmux_create" not in events
+    assert captured_env == {}
+    assert "session-resume-sentinel" not in repr((caught.value.args, vars(caught.value)))
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
 def test_resume_broken_force_kill_warning_nests_under_starting_session(

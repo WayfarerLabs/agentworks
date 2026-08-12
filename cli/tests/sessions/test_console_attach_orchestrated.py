@@ -21,11 +21,12 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.db import VMStatus
-from agentworks.errors import StateError
+from agentworks.errors import StateError, ValidationError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import InteractionPolicy
 from agentworks.sessions import multi_console
 from agentworks.vms import manager as vm_manager
+from tests.conftest import ManifestDoc
 
 if TYPE_CHECKING:
     from agentworks.db import Database
@@ -149,6 +150,51 @@ def test_named_console_attach_holds_across_the_interactive_attach(
 
     assert events == ["hold-open", "interactive", "hold-close"]
     assert any("Attaching to running console 'c1'" in m for m in captured_output.info)
+
+
+def test_console_recreate_multiline_environment_secret_refuses_before_rebuild(
+    db: Database,
+    make_config,  # noqa: ANN001
+    target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    environment_value = "console-recreate-sentinel\nsecond\n"
+    monkeypatch.setenv("AW_SECRET_CONSOLE_ENV", environment_value)
+    config = make_config(
+        manifests=[
+            ManifestDoc(
+                "vm-template",
+                "default",
+                {"env": {"CONSOLE_ENV": {"secret": "console-env"}}},
+            ),
+            ManifestDoc("secret", "console-env", description="console environment"),
+        ]
+    )
+    _seed_vm(db)
+    db.insert_console("c1", "box", admin_shell=True)
+    _reachable(monkeypatch, True)
+    monkeypatch.setattr(multi_console, "_console_tmux_exists", lambda *args: True)
+    rebuilds: list[str] = []
+    monkeypatch.setattr(
+        "agentworks.sessions.multi_console.attach._build_console_tmux",
+        lambda *args, **kwargs: rebuilds.append("rebuild"),
+    )
+
+    with pytest.raises(ValidationError) as caught:
+        multi_console.attach_console(
+            db,
+            config,
+            name="c1",
+            recreate=True,
+            interaction=InteractionPolicy.REFUSE,
+        )
+
+    assert rebuilds == []
+    assert target.interactive_calls == []
+    assert db.get_console("c1") is not None
+    assert "console-recreate-sentinel" not in repr((caught.value.args, vars(caught.value)))
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
 def test_named_console_stopped_vm_gate_burst_seeds_the_boundary(

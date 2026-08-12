@@ -196,6 +196,9 @@ def _patch_actual_ensure_sequence(
         calls["rejoin"] += 1
         events.append("rejoin")
         _raise_at("rejoin")
+        database = cast("Database", args[0])
+        name = cast("str", args[1])
+        database.update_vm_tailscale(name, "100.64.0.10")
 
     def _final_wait(*args: object, **kwargs: object) -> bool:
         calls["final-wait"] += 1
@@ -314,6 +317,84 @@ def test_start_rejoin_orders_acquisition_reader_ensure_cleanup_and_release(
     ]
     assert values == {}
     assert calls == {"verify": 1, "native": 1, "rejoin": 1, "final-wait": 1, "sync": 1}
+
+
+def test_start_lazy_repair_validates_after_start_and_delivery_before_rejoin_work(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agentworks.secrets as secret_package
+    import agentworks.transports as transports
+    from agentworks.errors import ValidationError
+    from agentworks.secrets.orchestration import resolve_for_command as actual_resolve
+    from agentworks.vms.manager.tailscale import _ensure_tailscale as actual_ensure
+
+    auth_key = "tskey-prefix\r\ntskey-suffix\r\n"
+    config = make_config()
+    _seed_vm(db)
+    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", auth_key)
+    events: list[str] = []
+    monkeypatch.setattr(
+        ProxmoxPlatform,
+        "status",
+        lambda self, row, ctx: events.append("status") or VMStatus.STOPPED,
+    )
+    monkeypatch.setattr(
+        ProxmoxPlatform,
+        "start",
+        lambda self, row, ctx: events.append("start"),
+    )
+    monkeypatch.setattr(
+        ProxmoxPlatform,
+        "vm_active",
+        lambda self, row, *, config: contextlib.nullcontext(),
+    )
+    monkeypatch.setattr(
+        transports,
+        "transport",
+        lambda *args, **kwargs: events.append("probe-transport") or object(),
+    )
+    monkeypatch.setattr(
+        transports,
+        "wait_for_reconnect",
+        lambda *args, **kwargs: events.append("repair-required") or False,
+    )
+
+    def _resolve(*args: object, **kwargs: object) -> dict[str, str]:
+        events.append("late-resolve")
+        return actual_resolve(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(secret_package, "resolve_for_command", _resolve)
+
+    def _ensure(*args: object, **kwargs: object) -> None:
+        events.append("ensure")
+        actual_ensure(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(vm_manager, "_ensure_tailscale", _ensure)
+    monkeypatch.setattr(
+        vm_manager,
+        "verify_tailscale_available",
+        lambda: pytest.fail("line-unsafe late key reached Tailscale availability work"),
+    )
+
+    with pytest.raises(ValidationError) as caught:
+        vm_manager.start_vm(db, config, "box", interaction=InteractionPolicy.REFUSE)
+
+    assert events == [
+        "status",
+        "start",
+        "probe-transport",
+        "repair-required",
+        "late-resolve",
+        "ensure",
+    ]
+    refreshed = db.get_vm("box")
+    assert refreshed is not None
+    assert refreshed.tailscale_host == "100.64.0.9"
+    assert "tskey-prefix" not in repr((caught.value.args, vars(caught.value)))
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
 @pytest.mark.parametrize("failure_type", [RuntimeError, KeyboardInterrupt])

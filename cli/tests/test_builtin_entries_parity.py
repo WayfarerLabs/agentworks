@@ -292,12 +292,11 @@ def test_bundled_builtin_rows_match_oracle(tmp_path: Path) -> None:
     cfg = load_config(_write_operator_config(tmp_path), warn_issues=False)
     registry = build_registry(cfg)
 
-    srcs = kind_dict(registry, "apt-source")
-    pkgs = kind_dict(registry, "apt-package")
-    # The `az-cli` system-install-command now ships (present-but-disabled) from
-    # the `azure` system plugin, and the `claude` user-install-command from the
-    # `claude` system plugin, each with a system-plugin origin; scope the
-    # built-in oracles to the built-in-origin rows.
+    srcs = {n: e for n, e in kind_dict(registry, "apt-source").items() if e.origin.variant == "built-in"}
+    pkgs = {n: e for n, e in kind_dict(registry, "apt-package").items() if e.origin.variant == "built-in"}
+    # Vendor guest CLI rows and the claude user-install-command ship
+    # present-but-disabled from system plugins. Scope every built-in oracle to
+    # built-in-origin rows.
     sys_cmds = {
         n: e for n, e in kind_dict(registry, "system-install-command").items() if e.origin.variant == "built-in"
     }
@@ -318,13 +317,20 @@ def test_bundled_builtin_rows_match_oracle(tmp_path: Path) -> None:
     assert claude.origin.variant == "system-plugin"
     assert claude.origin.plugin == "claude"
 
-    # The migrated `az-cli` install-command is gone from the built-in bundle and
-    # now carries the `azure` system-plugin origin (Phase 11).
-    assert "az-cli" not in sys_cmds  # not a built-in row anymore
+    # Provider guest CLIs are plugin-owned optional tooling, never built-in
+    # provisioning dependencies. Their system-plugin origins remain visible
+    # even while the vendor plugin is disabled.
+    assert "az-cli" not in sys_cmds  # not a built-in row
     az_cli = kind_dict(registry, "system-install-command")["az-cli"]
     assert az_cli.origin is not None
     assert az_cli.origin.variant == "system-plugin"
     assert az_cli.origin.plugin == "azure"
+    for kind, name in (("apt-source", "google-cloud-cli"), ("apt-package", "gcloud-cli")):
+        entry = kind_dict(registry, kind)[name]
+        assert entry.origin is not None
+        assert entry.origin.variant == "system-plugin"
+        assert entry.origin.plugin == "gcp"
+    assert "gcloud-cli" not in kind_dict(registry, "system-install-command")
 
     # Provenance: every built-in row is a built-in origin pointed at the
     # bundled file for its kind (not the former agentworks.catalog source).
