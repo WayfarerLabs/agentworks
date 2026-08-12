@@ -1,6 +1,6 @@
 # Plan: The agentworks.build Website
 
-- Status: Phase 4P implementation review in progress
+- Status: Phase 4P implementation review complete; operator acceptance pending
 - Date: 2026-08-07
 - Last revised: 2026-08-12
 - FRD: `frd.md`
@@ -1038,7 +1038,7 @@ behavior remains unchanged; and the immutable result is review-clean and gate-cl
       near-bound extrema, realistic grade/curvature/reversal limits, peak/canyon silhouettes,
       static/dynamic parity, support/collision alignment, route replay, camera visibility, bounded
       retention, responsive layout, reduced motion, privacy, and deterministic reconstruction.
-- [ ] Run ordinary derivation/verification, focused and full website suites, deterministic builds,
+- [x] Run ordinary derivation/verification, focused and full website suites, deterministic builds,
       complete repository gates, code review, fresh-eyes browser review, and exact-head CI/CodeQL.
       Refresh port 8766 and update PR #486 only after the immutable head is clean.
 
