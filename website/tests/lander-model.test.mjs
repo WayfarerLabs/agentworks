@@ -320,10 +320,11 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
         "for (let bay = 0; bay < 12; bay += 1) {",
         "for (let bay = 0; bay < 12; bay += 1) { if (bay === 2) continue;",
     );
+    assert.notEqual(openFaceSource, await readFile(tool, "utf8"));
     await writeFile(openFaceTool, openFaceSource, "utf8");
-    const openFace = spawnSync(process.execPath,
-        [openFaceTool, "--geometry", geometry, "--output", output], { encoding: "utf8" });
-    assert.equal(openFace.status, 1); assert.match(openFace.stderr, /Connected clear face exceeds/);
+    const openFace = spawnSync(process.execPath, [openFaceTool, "--geometry", geometry, "--output", output]);
+    assert.equal(openFace.status, 1);
+    assert.equal(await readFile(fixture, "utf8"), authorityBytes);
 
     const weakPrefixTool = join(directory, "weak-prefix.mjs");
     const weakPrefixSource = (await readFile(tool, "utf8"))

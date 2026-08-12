@@ -98,9 +98,11 @@ projection evidence, not the qualitative or cross-engine signoff below.
       reference. Time 0.9-second agent travel separately from the unchanged 0.3-second refuel and
       1.4-second power sequence; hidden time freezes each and reduced motion completes atomically.
 - [ ] From every page footer, confirm the icon navigates directly to `/lander/` without adding a
-      fragment. Its accessibility label and hover title both read `Help deploy some agents!`.
-      Confirm the Lander heading reads `We need agents!` and the 404 explanation reads
-      `This route     is broken! We need agents!`.
+      fragment. Confirm its accessibility label and hover title are equal and nonempty. Human-review
+      their wording, the Lander heading, and the 404 explanation against the canonical
+      [shared footer contract](../../docs/sdd/2026-08-07-website/site-shell-lld.md#4-shared-footer-contract),
+      [shared DOM contract](../../docs/sdd/2026-08-07-website/brand-and-lander-lld.md#4-shared-dom-and-no-javascript-contract),
+      and the current live templates; verify each appears in its intended semantic location.
 - [ ] Confirm the visual fuel level drains smoothly without repetitive live announcements. Spend
       fuel on thrust, carry excess through multiple sites, and verify empty fuel produces no thrust.
 - [ ] Crash on terrain, a platform end or underside, the truss or any lattice-column envelope, the
@@ -324,10 +326,12 @@ new run records the refined source.
 
 ## Static recovery and initial presentation
 
-- [ ] With JavaScript disabled, `/lander/` shows one `We need agents!` heading and the complete
-      static scene. `/404.html` shows one `Page not found` heading, the explanation
-      `This route is     broken! We need agents!`, a working linked `Agentworks` breadcrumb home
-      crumb, and the same scene. There is no error-code eyebrow or body-level home link.
+- [ ] With JavaScript disabled, `/lander/` shows one nonempty, currently approved primary heading
+      and the complete static scene. `/404.html` shows its nonempty primary heading followed by its
+      nonempty, currently approved explanatory paragraph, a working linked `Agentworks` breadcrumb
+      home crumb, and the same scene. Compare the heading and explanation with the canonical
+      [shared DOM contract](../../docs/sdd/2026-08-07-website/brand-and-lander-lld.md#4-shared-dom-and-no-javascript-contract)
+      and current live templates. There is no error-code eyebrow or body-level home link.
 - [x] With JavaScript disabled, no start target or control instructions are exposed visually or to
       the accessibility tree. The document has header, main, and footer landmarks in that order.
 - [x] With JavaScript enabled and normal motion, each reload gives one subtle three-pulse plume cue
