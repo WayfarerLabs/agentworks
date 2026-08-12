@@ -1,6 +1,6 @@
 # HLA: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander Phase 4L refinement in progress
+- Status: Interim implementation complete; continuous Lander Phase 4M refinement in progress
 - Date: 2026-08-07
 - Last revised: 2026-08-11
 - FRD: `frd.md`
@@ -79,11 +79,11 @@ small header mark because its large hero follows immediately in `main`.
 
 The shared footer contains `Product of Wayfarer Labs, LLC` at the left. Its right side contains the
 only manifesto and security text links, labeled `Agentworks Manifesto` and
-`We take security seriously`, followed by a small AGW rocket link to `/lander/#lander-game`. That
-final icon-only link is accessibly named `Play Lunar Lander`; its image has empty alternative text
-so the accessible name is not duplicated. The header and footer wrap in source order rather than
-collapsing behind a menu. This is consistent navigation across a tiny static site, not a new
-navigation system.
+`We take security seriously`, followed by a small AGW rocket link to `/lander/`. That final
+icon-only link uses `Help deploy some agents!` as both its accessible name and hover text; its image
+has empty alternative text so the accessible name is not duplicated. The header and footer wrap in
+source order rather than collapsing behind a menu. This is consistent navigation across a tiny
+static site, not a new navigation system.
 
 ### D1A. Long-form pages are complete generated documents
 
@@ -282,9 +282,9 @@ checkpoint.
 
 The 404 body begins directly with `Page not found` after the compact detail-page inset. It has no
 error-code, eyebrow, provenance, or other pre-title label; its explanatory copy remains below the
-title and is exactly `This route is broken! We need to deploy some agents!`. The dedicated page
-similarly begins with `We need to deploy some agents!`. Both titles and their shared game remain
-semantic and useful before JavaScript runs.
+title and is exactly `This route is broken! We need agents!`. The dedicated page similarly begins
+with `We need agents!`. Both titles and their shared game remain semantic and useful before
+JavaScript runs.
 
 The game is a small DOM/SVG state machine, not canvas and not a general engine. A timestamp-driven
 animation loop integrates a fixed-step two-dimensional flight model with bounded catch-up: gravity,
@@ -309,9 +309,14 @@ camera/path/offscreen projection helpers directly from the pure world module and
 browser clock, input, focus, and DOM adapter. This acyclic controller-to-model-and-world,
 model-to-world graph prevents a physics/world cycle and split-brain site state while avoiding
 duplicate projection math. The controller translates one stable nearby-world SVG group as the camera
-follows the lander and only regenerates terrain/site nodes when the rolling window changes. The
-runtime retains a fixed number of nearby chunks and sites, so an arbitrarily long forward expedition
-does not imply unbounded DOM or terrain history.
+follows the lander in either horizontal direction and only regenerates terrain/site nodes when the
+rolling window changes. There is no horizontal mission boundary: passing a target or returning
+behind a prior site is not a contact and cannot itself crash the vehicle. The runtime retains a
+fixed number of nearby chunks and sites, so arbitrarily long or reversing exploration does not imply
+unbounded DOM or terrain history. A separate decorative sky projection derives bounded deterministic
+stars and occasional celestial landmarks from the same run seed and nearby sky chunks. It translates
+at a slower camera rate for parallax, owns no collision or semantic state, and retains a fixed node
+count.
 
 Each deterministic site retains the same coarse, irregular terrain generator beneath its complete
 footprint; it does not replace a site span with a flat shelf. The world derives a sufficiently high
@@ -321,24 +326,28 @@ disagree through duplicate horizontal positions or vertical closing segments. Th
 elevated platform remains exactly three lander widths long beside one solid NOC building. One
 collider-backed open truss uses continuous top and bottom chords and a uniform sequence of
 alternating triangular braces across the complete platform-to-NOC span. Exactly three visible,
-collider-backed pylons at the structure's left, center, and right descend to the terrain height
-interpolated from that same authoritative chain. The structure has no region-specific pad,
-connector, or NOC brace pattern, so the site reads as one elevated engineered structure without a
-long exposed sky strip, repeated X fields, a false flat foundation, or a decorative opening the
-lander could appear able to traverse. A safe landing under the pinned, modestly relaxed speed and
-attitude limits consumes that site's one gas can exactly once. The fuel award is computed only after
-the next site exists: a deterministic reference plan starts at the post-refuel, post-power platform
-checkpoint, includes the pinned player-reachable launch prefix, uses the same immutable physics
-profile as play, and demonstrates a safe next landing to establish its conservative minimum fuel.
-The award is that minimum multiplied by the refuel ratio `1 + 0.5^(n-1)`, where `n` is the
-one-indexed number of the base just powered. The sequence begins `2, 1.5, 1.25, 1.125` and
-mathematically approaches one from above in constant time. Its binary runtime projection never falls
-below one and may round to exactly one when the remaining bonus is smaller than representable
-precision. The award is added to the carried reserve without erasing unused fuel. Fixed-seed tests
-pin both the route proof and the smallest successful allowance within the LLD's search resolution.
+collider-backed open lattice columns at the structure's left, center, and right descend to the
+terrain height interpolated from that same authoritative chain. Each column uses the same member
+weight, joins, and triangular rhythm as the Warren truss; its conservative fixture-derived envelope
+contains every rail and brace pixel while remaining collision-honest. The structure has no
+region-specific pad, connector, or NOC brace pattern, so the site reads as one elevated engineered
+structure without a long exposed sky strip, repeated X fields, a false flat foundation, or a
+decorative opening the lander could appear able to traverse. A safe landing under the pinned,
+modestly relaxed speed and attitude limits consumes that site's one gas can exactly once. The fuel
+award is computed only after the next site exists: a deterministic reference plan starts at the
+post-refuel, post-power platform checkpoint, includes the pinned player-reachable launch prefix,
+uses the same immutable physics profile as play, and demonstrates a safe next landing to establish
+its conservative minimum fuel. The award is that minimum multiplied by the refuel ratio
+`1 + 0.5^(n-1)`, where `n` is the one-indexed number of the base just powered. The sequence begins
+`2, 1.5, 1.25, 1.125` and mathematically approaches one from above in constant time. Its binary
+runtime projection never falls below one and may round to exactly one when the remaining bonus is
+smaller than representable precision. The award is added to the carried reserve without erasing
+unused fuel. Fixed-seed tests pin both the route proof and the smallest successful allowance within
+the LLD's search resolution.
 
 After refueling, the G opening acts as a deployment bay: a small terminal-inspired agent reaches the
-surface and enters the single NOC. A clean rectangular vertical phone-battery-style indicator, with
+surface and enters the single NOC in half the Phase 4L travel time. The later battery and signal
+sequence keeps its existing pace. A clean rectangular vertical phone-battery-style indicator, with
 no terminal nub, fills from bottom to top in distinct warm-to-cool stages. A vertically symmetric
 network signal then builds through the final three stages above it. State and timing, not color
 alone, communicate progress. The agent remains visibly installed in the NOC entry as the first
@@ -350,21 +359,22 @@ vehicle safely at rest, exposes the exact visible and announced `Agent Deployed!
 existing status live region, and consumes no fuel until the player commands thrust. No Launch button
 or other launch-ready action is rendered: the same keyboard, vi, pointer, and touch collective
 controls used in flight initiate liftoff; once both feet clear the deck, ordinary flight resumes
-with the next site already generated offscreen to the right. Retry returns to this same launch-ready
-checkpoint, including its centered pose and carried post-award fuel, rather than replaying an award
-or launch. A right-edge direction cue blinks only while that target is outside the viewport; reduced
-motion keeps the useful arrow static. Deployment never enters a terminal success state.
+with the next site already generated offscreen. Retry returns to this same launch-ready checkpoint,
+including its centered pose and carried post-award fuel, rather than replaying an award or launch. A
+directional edge cue appears only while that target is outside the viewport and points left or right
+toward it; reduced motion keeps the useful arrow static. Deployment never enters a terminal success
+state.
 
-The fuel projection does not invent a fixed tank capacity for an uncapped reserve. The visually
-hidden non-live text remains the sole accessible rounded presentation of exact model engine-seconds.
-A decorative left-side vertical bar shows the current reserve as a fraction of the immutable
-departure reserve for the current leg: it is full when an award/checkpoint establishes that leg and
-drains toward empty as fuel is spent. Its fill height and red-to-amber-to-green presentation are
-independent level signals. On touchdown, model sequence time projects the collected can toward the
-gauge and interpolates the displayed fill from the pre-award fraction to full over the existing
-landed interval; the physics reserve and checkpoint award remain one atomic authority. Reduced
-motion skips both projections and shows the final full gauge. The next award can establish a larger
-reference without clipping or discarding carried excess.
+The fuel projection does not cap an uncapped reserve. The visually hidden non-live text remains the
+sole accessible rounded presentation of exact model engine-seconds. A decorative left-side vertical
+bar shows the current reserve against an immutable visual reference for the current leg. A fresh
+initial approach begins at exactly one half of its reference; an award/checkpoint establishes the
+later leg at full and it drains toward empty as fuel is spent. Its fill height and
+red-to-amber-to-green presentation are independent level signals. On touchdown, model sequence time
+projects the collected can toward the gauge and interpolates the displayed fill from the pre-award
+fraction to full over the existing landed interval; the physics reserve and checkpoint award remain
+one atomic authority. Reduced motion skips both projections and shows the final full gauge. The next
+award can establish a larger reference without clipping or discarding carried excess.
 
 Activated game chrome uses one local system-monospace arcade stack, heavy block lettering, crisp
 shadows, and bounded stepped animation; it adds no webfont, asset request, canvas, or semantic-text

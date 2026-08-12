@@ -1,6 +1,6 @@
 # FRD: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander Phase 4L refinement in progress
+- Status: Interim implementation complete; continuous Lander Phase 4M refinement in progress
 - Date: 2026-08-07
 - Last revised: 2026-08-11
 - Seeded by: the saga lead, at operator request. This is a standalone effort, deliberately NOT a
@@ -122,10 +122,11 @@ forecloses it, and none of it is in scope now.
   its breadcrumb. On the 404, the breadcrumb's `Agentworks` link is the sole visible route-home
   action. A shared traditional footer places the exact text `Product of Wayfarer Labs, LLC` at the
   left and one `Agentworks Manifesto` link, one `We take security seriously` link, and one small
-  icon-only AGW rocket link to `/lander/#lander-game` at the right. The rocket link is the final
-  footer item, has an accessible name independent of the image, and is the sole Lander destination
-  on each page. These placements supersede the Phase 4A combined exploration panel while preserving
-  one link per external, manifesto, security, and Lander destination.
+  icon-only AGW rocket link to `/lander/` at the right. The rocket link is the final footer item,
+  has the accessible name and hover text `Help deploy some agents!` independent of the image, and is
+  the sole Lander destination on each page. These placements supersede the Phase 4A combined
+  exploration panel while preserving one link per external, manifesto, security, and Lander
+  destination.
 - R16. The footer's `Agentworks Manifesto` link opens a semantic static page at `/manifesto/`, not
   the repository document. The page renders the complete `docs/manifesto.md` document at build time,
   including its source `h1`, introduction, problem space, and key principles, without a separately
@@ -143,11 +144,10 @@ forecloses it, and none of it is in scope now.
   validator exception may permit an emitted local link to resolve outside the selected manifest.
 - R18. Manifesto, Security, Lander, and 404 start with their `h1` after only the shared compact
   detail-page inset. They show no eyebrow, error-code, repository-provenance, or other pre-title
-  label. The dedicated Lander page uses the exact visible `h1` `We need to deploy some agents!`. The
-  404 retains `Page not found` and the exact explanatory copy
-  `This route is broken! We need to deploy some agents!` below the title; removing the redundant
-  `404` label does not weaken document metadata, breadcrumb state, HTTP fallback behavior, or
-  recovery.
+  label. The dedicated Lander page uses the exact visible `h1` `We need agents!`. The 404 retains
+  `Page not found` and the exact explanatory copy `This route is broken! We need agents!` below the
+  title; removing the redundant `404` label does not weaken document metadata, breadcrumb state,
+  HTTP fallback behavior, or recovery.
 - R19. Manifesto and Security automatically expose an `On this page` navigation generated from every
   source `h2` and `h3`, preserving heading order and nesting without a separately maintained
   inventory. On narrow or zoomed layouts it appears inline immediately after the source `h1`. When
@@ -158,7 +158,7 @@ forecloses it, and none of it is in scope now.
   A/G/W rocket mark without exhaust. The favicon preserves the exact selected mark geometry, has no
   flame paths or colors, resolves beneath both supported site bases, and adds no remote request,
   runtime script, font, or hand-maintained raster fallback.
-- R21. The game is one continuous, forward-moving lunar expedition rather than a terminal level. It
+- R21. The game is one continuous lunar deployment expedition rather than a terminal level. It
   presents visibly rising, falling, and sloped lunar-lander terrain between sites and a
   deterministic sequence of sites generated from one fresh in-memory run seed. Each site has one
   materially elevated helicopter-style landing platform exactly three lander widths long beside one
@@ -180,16 +180,16 @@ forecloses it, and none of it is in scope now.
   is retained in the run's rolling world. The player must command the subsequent liftoff; there is
   no automatic launch and no terminal success after a deployment.
 - R22. After each safe landing, the next site is deterministically placed beyond the right edge of
-  the current view. A visible right-edge arrow blinks while that target remains offscreen and hides
-  once the site enters view; under reduced motion it remains a static direction cue. Before issuing
-  the departing site's gas can, the game calculates a conservative minimum fuel requirement for a
-  demonstrated reference flight to the generated next platform. The can adds that requirement
-  multiplied by the **refuel ratio** `1 + 0.5^(n-1)`, where `n` is the one-indexed number of the
-  base just powered. The first base therefore uses `2`, followed by `1.5`, `1.25`, `1.125`, and a
-  mathematically monotonic approach to one from above. The runtime's binary-number projection never
-  falls below one and may round to exactly one once the remaining bonus is below representable
-  precision. Unused fuel carries forward and is never discarded merely because another site was
-  completed.
+  the current view. A visible edge arrow points toward that target from either side while it remains
+  offscreen and hides once the site enters view; under reduced motion it remains a static direction
+  cue. Before issuing the departing site's gas can, the game calculates a conservative minimum fuel
+  requirement for a demonstrated reference flight to the generated next platform. The can adds that
+  requirement multiplied by the **refuel ratio** `1 + 0.5^(n-1)`, where `n` is the one-indexed
+  number of the base just powered. The first base therefore uses `2`, followed by `1.5`, `1.25`,
+  `1.125`, and a mathematically monotonic approach to one from above. The runtime's binary-number
+  projection never falls below one and may round to exactly one once the remaining bonus is below
+  representable precision. Unused fuel carries forward and is never discarded merely because another
+  site was completed.
 - R23. Unsafe terrain, platform, or building contact produces a brief vacuum-appropriate crash: a
   compact propellant flash and ballistic fragments, with no smoke cloud, atmospheric shock wave,
   sustained fireball, audio, or page movement. Reduced motion skips fragment travel and exposes the
@@ -213,6 +213,20 @@ forecloses it, and none of it is in scope now.
   keyboard, vi, pointer, and touch thrust controls as flight and has no dedicated Launch action.
   Arcade decoration and motion never duplicate semantic text, obscure the world, expand the bounded
   world DOM, or survive under reduced motion.
+- R25. The initial approach starts with exactly half of the visual fuel reference instead of a full
+  gauge, while later post-award checkpoints continue to establish a full leg-relative gauge without
+  capping or discarding carried fuel. The player may explore indefinitely in either horizontal
+  direction while fuel and collision outcomes permit: leaving the current or target platform behind
+  is never itself a crash, the camera follows in both directions, and the offscreen target cue
+  points toward the retained target from either side. Deterministic native terrain remains
+  collision-backed throughout that exploration. The decorative sky shares the world's travel rather
+  than staying fixed to the viewport: bounded deterministic stars pan at a slower parallax rate and
+  occasional local celestial landmarks add variety without collision, semantics, requests,
+  persistence, or an unbounded DOM. Each of the three platform supports reads as an open lattice
+  column integrated with the continuous Warren truss, reaches its independently sampled terrain
+  foot, and has a conservative collider that contains every rendered member without implying
+  traversable openings. Agent travel from the lander to the NOC completes in half the Phase 4L time;
+  refueling and the subsequent battery and network power stages retain their existing durations.
 
 ## Settled constraints (inherited; do not reopen)
 
@@ -357,9 +371,10 @@ merged and settled on `main`. The first slice must not build toward them specula
   without crossing it. A test-controlled reference flight reaches and safely lands on every
   representative generated next platform using no more than the calculated minimum; a
   one-step-smaller tested allowance cannot complete that same reference plan.
-- AC23. While the next site is right of the viewport, a visible right-pointing cue is present and
-  blinks only when motion is allowed and the document is active. It becomes static under reduced
-  motion, pauses while hidden, and disappears when the target enters view. Direction is never
+- AC23. While the next site is outside the viewport, a visible cue points toward it from the
+  corresponding left or right edge and blinks only when motion is allowed and the document is
+  active. It becomes static under reduced motion, pauses while hidden, reverses correctly when the
+  player passes the target, and disappears when the target enters view. Direction is never
   communicated by animation alone.
 - AC24. Every unsafe terrain, pad, or building impact reaches a finite crash sequence with a brief
   flash and deterministic ballistic debris but no smoke, shock wave, sustained fire, sound, page
@@ -393,6 +408,23 @@ merged and settled on `main`. The first slice must not build toward them specula
   requests remain intact. Phase 4L regenerates the geometry and world digests atomically for the
   continuous truss and regenerates the physics and derived output digests for that geometry plus the
   revised safe-contact envelope.
+- AC26. A fresh run begins with an exact half-height fuel gauge and enough model fuel for the pinned
+  first reference landing, while its accessible reserve remains the exact rounded model value.
+  Crossing either former horizontal mission boundary causes no crash and no implicit target
+  completion; deterministic tests and browser input drive the lander past the target and back from
+  both directions while the camera, bounded retained world, collision terrain, and bidirectional cue
+  remain coherent. Fuel exhaustion still suppresses thrust, and only actual terrain, platform,
+  building, ceiling, or vehicle-safety contact can enter the crash sequence. Fixed-seed browser
+  evidence shows stars moving with the world at the pinned parallax rate and deterministic
+  occasional celestial landmarks entering and leaving a bounded sky projection without extra
+  requests or accessibility nodes. Every retained site renders exactly three independently
+  reconstructed open lattice support columns whose member pixels lie inside their fixture-derived
+  colliders, whose feet meet native terrain, and whose visual rhythm joins the platform truss.
+  Normal motion completes the agent's pre-NOC travel in half its Phase 4L duration, reduced motion
+  remains atomic, and refuel plus power-stage timings are byte-for-byte unchanged. The built footer
+  resolves directly to `/lander/`, its live accessible name and hover text agree, and the reviewed
+  Lander/404 copy uses the shortened operator wording without adding a fragment redirect or a second
+  game route.
 
 ## Settled implementation rulings
 

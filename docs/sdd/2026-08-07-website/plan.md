@@ -1,6 +1,6 @@
 # Plan: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander Phase 4L refinement in progress
+- Status: Interim implementation complete; continuous Lander Phase 4M refinement in progress
 - Date: 2026-08-07
 - Last revised: 2026-08-11
 - FRD: `frd.md`
@@ -24,7 +24,7 @@ availability notice with the canonical README bootstrap and copy enhancement. It
 the page, fork the content, or create another deployment path. A final closeout PR records complete
 production acceptance, final truthful checkbox flips, and `locked.md`.
 
-`locked.md` never merges before AC1-AC25 and R1-R24 are accepted in production. Every earlier merge
+`locked.md` never merges before AC1-AC26 and R1-R25 are accepted in production. Every earlier merge
 is independently useful and operable: the interim release does not claim onboarding exists, and the
 onboarding release consumes only the eventual canonical contract from `main`. No website code binds
 to the onboarding feature branch.
@@ -881,6 +881,65 @@ uninterrupted varied terrain; terrain projection has no vertical seam; the refue
 carried-excess award are exact; revised contact boundaries and all derived proof artifacts are
 deterministic; and the immutable result is review-clean, browser-accepted, and merge-ready.
 
+## Phase 4M: free exploration, lattice supports, and a living sky
+
+- [x] Inspect the exact support/truss projection, initial fuel and gauge authorities, camera and
+      horizontal failure bounds, target cue, deployment timing, static sky, shared copy, and footer
+      route/name contract before selecting the refinement.
+- [x] Amend the FRD, HLA, and this plan without rewriting completed Phase 4L evidence. Require three
+      lattice columns integrated with the Warren truss, an exact half-gauge initial reserve, bounded
+      deterministic parallax stars and occasional celestial landmarks, bidirectional exploration
+      without artificial horizontal crashes, half-duration pre-NOC agent travel, shortened page
+      copy, and a direct fragment-free Lander footer destination with new hover/accessibility text.
+- [ ] Delegate and lead-review exact LLD amendments for both the shared site shell and Lander. Pin
+      column member geometry, honest colliders and aperture bounds; initial fuel feasibility and an
+      honestly named display reference; sky generation, parallax, static fallback, and DOM limits;
+      two-way camera/retention/cue behavior; actual-contact-only crash classification; deployment
+      timing; copy/route projection; fixture/digest impact; and mutation-sensitive browser evidence.
+- [ ] Obtain an `agentworks-reviewer` approval of the Phase 4M artifact amendments and resolve every
+      valid finding before changing production or canonical fixtures.
+- [ ] Delegate implementation to an `agentworks-dev` subagent in an isolated worktree. Update the
+      shared shell and game fragment, CSS, world/model/controller modules, independent derivation
+      and fixtures when required, validators, focused tests, permanent README, and browser checklist
+      as one coherent change without prose-policing unit assertions.
+- [ ] Prove a fresh run begins at exactly half of its visual reference and the first demonstrated
+      landing remains feasible; later awards/checkpoints still project full without capping carried
+      excess. Prove the lander can pass the target and both former horizontal bounds, reverse, and
+      return without failure while camera, retained terrain/sites, cue direction, collision, fuel
+      exhaustion, and teardown remain deterministic and bounded.
+- [ ] Prove all three supports render as fixture-derived lattice columns joined to the Warren truss,
+      reach independent native-terrain feet, contain every member pixel inside honest colliders, and
+      retain bounded aperture/DOM guarantees. Prove deterministic stars pan at the pinned parallax
+      rate and occasional celestial landmarks enter/leave a bounded decorative layer with no
+      requests or accessibility exposure.
+- [ ] Prove normal agent travel reaches the NOC in half the Phase 4L time while refuel, battery,
+      signal, reduced-motion, hidden-time, installed-agent, checkpoint, and power-stage behavior
+      stay unchanged. Review the shortened Lander/404 copy and footer hover text manually while
+      automated tests enforce only structure, nonempty live-derived accessible names, and the direct
+      fragment-free `/lander/` route.
+- [ ] Run focused website suites, deterministic root/project builds, complete repository gates,
+      artifact/code/fresh-eyes reviews, and automated Chromium acceptance; resolve every valid
+      finding and re-review the immutable integrated head.
+- [ ] Refresh port 8766 from the exact reviewed head and obtain operator Chrome and Edge acceptance
+      of the lattice supports, half-tank opening, free exploration, parallax sky, doubled deployment
+      travel speed, shortened copy, direct Lander route, and footer hover text.
+- [ ] Merge or rebase the latest `main`, update PR #486 and its evidence, mark it ready only after
+      operator acceptance, and monitor every required CI and CodeQL check to completion.
+
+Operator evidence (2026-08-11): after approving the native terrain and continuous shallow truss, the
+operator requested more expressive truss-integrated lattice columns; a half-gauge initial reserve;
+stars that travel with the landscape plus occasional celestial variety; unrestricted horizontal
+exploration without missing-target failure; twice-fast pre-NOC agent travel with unchanged power-up
+timing; shorter `We need agents!` page copy; a direct `/lander/` footer destination; and the hover
+text `Help deploy some agents!`.
+
+Definition of done: the opening fuel presentation is honest and playable; only real collision or
+vertical safety outcomes crash the lander; both-direction exploration, camera, cue, world retention,
+and parallax remain bounded; each support is an honest integrated lattice column; deployment travel
+alone is twice as fast; shared copy and direct routing are correct; derivation and fixtures remain
+independent and deterministic; and the immutable result is review-clean, browser-accepted, and
+merge-ready.
+
 ## Phase 5: CI and default Pages deployment
 
 - [x] Delegate workflow implementation to an `agentworks-dev` subagent with ownership of the Pages
@@ -966,8 +1025,8 @@ Phase 6 retains the one-time same-run root-base redeployment gate before DNS cut
       boundary, and limitation content, private reporting path, no-JavaScript behavior, and
       non-preachy hierarchy.
 - [ ] Verify the production footer rocket on all five pages is the final lower-right footer item,
-      has one `/lander/#lander-game` destination, an independent accessible name, at least a 24 by
-      24 CSS-pixel target, visible focus, and no narrow-width or zoom overlap.
+      has one direct `/lander/` destination, an independent accessible name, at least a 24 by 24
+      CSS-pixel target, visible focus, and no narrow-width or zoom overlap.
 - [ ] Verify the production `/lander/` metadata/CSP, compact heading, static no-JavaScript scene,
       original twin-plume mark, hidden preflight, keyboard/vi and touch controls, independent plume
       response, continuous seeded terrain, repeated deployments, elevated pads, carried fuel and
@@ -989,7 +1048,7 @@ Phase 6 retains the one-time same-run root-base redeployment gate before DNS cut
       `website/README.md` and this feature directory on the existing evidence branch; mark its draft
       PR ready, obtain review, and merge it. Do not create `locked.md` or claim AC3/AC4.
 
-Definition of done: R3-R11 and R13-R24 plus AC1, AC2, AC5-AC11, and AC13-AC25's interim conditions
+Definition of done: R3-R11 and R13-R25 plus AC1, AC2, AC5-AC11, and AC13-AC26's interim conditions
 hold at `https://agentworks.build`; the public site is useful and honest while onboarding remains
 pending.
 
@@ -1037,7 +1096,7 @@ with no branch-only dependency or duplicated bootstrap.
       metadata/CSP, byte-equivalent Lander/404 game subtree, and compact 404 title after onboarding
       integration.
 
-Definition of done: R1-R24, AC2-AC3, and AC5-AC25 hold in production through the existing site and
+Definition of done: R1-R25, AC2-AC3, and AC5-AC26 hold in production through the existing site and
 pipeline, with the temporary notice removed rather than retained as configuration.
 
 ## Phase 9: complete acceptance and closeout
@@ -1061,7 +1120,7 @@ pipeline, with the temporary notice removed rather than retained as configuratio
       run final gates, obtain the required closeout review, and hand the ready PR to the operator
       for merge.
 
-Definition of done: AC1-AC25 hold at `https://agentworks.build`, R1-R24 and C1-C5 are production
+Definition of done: AC1-AC26 hold at `https://agentworks.build`, R1-R25 and C1-C5 are production
 facts, the deployment is operable without this SDD, all plan boxes are truthful, and the effort is
 locked.
 
