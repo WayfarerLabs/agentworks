@@ -2,19 +2,18 @@
 
 <!-- cspell:ignore canonicalization keypath keypaths nonblank sdds TUI -->
 
-- Status: Phase 4F implemented; release acceptance remains pending
-- Date: 2026-08-10
-- FRD: `frd.md`, specifically R7-R11 and R13-R20
+- Status: Phase 4M design complete; implementation and release acceptance pending
+- Date: 2026-08-11
+- FRD: `frd.md`, specifically R7-R11, R13-R20, and R25
 - HLA: `hla.md`, specifically D1-D5, D7, D8, and D10
-- Source baseline: `5598a12c`
+- Source baseline: `4b280f88`
 
 ## 1. Scope and release invariant
 
 The checked-in `website/` tree produces the complete static shell for Home, Manifesto, Security,
-Lander, and 404. Phase 4C adds a deliberate game route and a footer easter-egg link without changing
-deployment, DNS, onboarding, or game mechanics. Home, Manifesto, and Security remain script-free.
-Lander and 404 remain useful without JavaScript and progressively enhance only their one shared game
-subtree.
+Lander, and 404. The deliberate game route and footer easter-egg link do not change deployment, DNS,
+onboarding, or game mechanics. Home, Manifesto, and Security remain script-free. Lander and 404
+remain useful without JavaScript and progressively enhance only their one shared game subtree.
 
 The release still has no guided onboarding implementation. Home contains the one reviewed ordinary
 text availability notice, with no command, copy control, empty placeholder, or runtime release mode.
@@ -66,8 +65,8 @@ always uses the custom-domain URLs at `https://agentworks.build`. Game developme
 
 The Lander metadata contract is exact:
 
-- document title: `We need to deploy some agents! | Agentworks`;
-- `h1`: `We need to deploy some agents!`;
+- document title: `We need agents! | Agentworks`;
+- `h1`: `We need agents!`;
 - description: `Fly the Agentworks lunar deployment mission and deliver an agent to the NOC.`;
 - canonical URL: `https://agentworks.build/lander/`;
 - Content Security Policy: byte-identical to 404's restrictive policy:
@@ -112,9 +111,10 @@ Its right side is one `nav` named `Footer` containing exactly:
 
 - `Agentworks Manifesto` to `{{SITE_BASE}}manifesto/`;
 - `We take security seriously` to `{{SITE_BASE}}security/`;
-- an icon-only `.footer-game-link` to `{{SITE_BASE}}lander/#lander-game`, with the accessible name
-  `Play Lunar Lander` and one `.footer-game-mark` image using the selected rocket, empty alternative
-  text, and no duplicate visible label.
+- an icon-only `.footer-game-link` directly to `{{SITE_BASE}}lander/`, with no fragment, with both
+  its accessible name and hover text exactly `Help deploy some agents!`, and with one
+  `.footer-game-mark` image using the selected rocket, empty alternative text, and no duplicate
+  visible label.
 
 The Manifesto, Security, and Lander destinations occur nowhere else as anchors on a page. The
 repository and package destinations occur nowhere else as anchors on a page. The linked home crumb
@@ -124,9 +124,12 @@ flex layouts in source order, with no menu or hidden navigation.
 
 The deliberately small visible footer mark sits inside an interactive area of at least 24 by 24 CSS
 pixels at every viewport. Padding may provide that area without enlarging the mark. The link uses
-the shared three-pixel focus outline and two-pixel offset without clipping. Automated CSS and
-template assertions pin its minimum target dimensions and accessible name; manual narrow-width,
-zoom, pointer, and keyboard acceptance verifies computed size, focus visibility, and no overlap.
+the shared three-pixel focus outline and two-pixel offset without clipping. Every template authors
+one nonempty `aria-label` and one nonempty `title` on that anchor, and their normalized live values
+must agree. Automated CSS and template assertions pin this structure, the direct fragment-free
+route, the empty image alternative, and minimum target dimensions without embedding the authored
+label. Human review owns the exact wording. Manual narrow-width, zoom, pointer, and keyboard
+acceptance verifies computed size, focus visibility, hover text, and no overlap.
 
 ## 5. Whole-document Markdown source contract
 
@@ -219,7 +222,7 @@ lives in the focused `website/site_asset_validation.py`. Each production module 
 remains below 1,000 lines. The split preserves one public build command and introduces no package or
 runtime dependency.
 
-Tests own a literal expected eleven-file manifest independent of production constants. They scan
+Tests own a literal expected twelve-file manifest independent of production constants. They scan
 every static JavaScript module import, resolve same-origin relative imports against its emitted
 path, and require the target in that literal manifest; a missing `lander-model.js` mutation must
 fail. A malicious reviewed-link canary containing quotes, ampersands, and an attempted attribute
@@ -241,12 +244,14 @@ independently edited placement.
 
 Both game shells load the same `site.css`, `lander.css`, and `lander-game.js`. Each document
 contains only one game subtree, so the controller's stable IDs remain unique without route-specific
-logic. Lander uses the document title `We need to deploy some agents! | Agentworks` and the `h1`
-`We need to deploy some agents!`; 404 retains its established metadata and the `h1`
-`Page not found`. Each `main` uses the shared `.detail-main` inset and a game-specific compact gap.
-Its `.page-heading` is the first child and contains only the reviewed `h1`. The 404 explanatory
-paragraph follows the heading, and neither shell includes an eyebrow, error code, provenance, or
-other pre-title label.
+logic. Lander uses the document title `We need agents! | Agentworks` and the `h1` `We need agents!`;
+404 retains its established metadata and the `h1` `Page not found`, followed by the exact
+explanation `This route is broken! We need agents!`. Each `main` uses the shared `.detail-main`
+inset and a game-specific compact gap. Its `.page-heading` is the first child and contains only the
+reviewed `h1`. The 404 explanatory paragraph follows the heading, and neither shell includes an
+eyebrow, error code, provenance, or other pre-title label. These authored strings are reviewed
+directly; automated tests assert the title/heading/paragraph structure and metadata relationships
+without copying their wording into expectations.
 
 ## 8. Accessibility, reflow, and presentation
 
@@ -271,15 +276,15 @@ specified as two to three times the current compact `1.2rem` header mark; no CSS
 
 ## 9. Verification matrix
 
-| Contract                       | Automated evidence                                                                                                             |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| Source completeness and safety | Complete-source projection, single-`h1`, UTF-8, fence, syntax, and link-map failure tests                                      |
-| Template closure               | Token vocabulary, exact shell tree, HTML-hidden CTA, icon, breadcrumb, image, route-duplicate, and ownership mutation tests    |
-| Generated semantics            | Five-page metadata, canonicals, landmarks, headings, skip links, shell, no-duplicate links, scripts, and local-reference tests |
-| Exact artifacts                | The complete eleven-file manifest at `/` and `/agentworks/`; no partial API or CLI option                                      |
-| Determinism and safety         | Repeated byte snapshots, hostile output trees, rollback injection, path and symlink tests                                      |
-| Lander/404 preservation        | Shared-subtree identity, Python source/build tests, and Node model/controller contracts                                        |
-| Browser acceptance             | `website/tests/lander-browser-checklist.md` pending five-page manual run                                                       |
+| Contract                       | Automated evidence                                                                                                                                                                                          |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Source completeness and safety | Complete-source projection, single-`h1`, UTF-8, fence, syntax, and link-map failure tests                                                                                                                   |
+| Template closure               | Token vocabulary, exact shell tree, HTML-hidden CTA, icon, breadcrumb, image, route-duplicate, direct Lander route, equal live label/title sources, and ownership mutation tests without authored-copy pins |
+| Generated semantics            | Five-page metadata structure, canonicals, landmarks, headings, skip links, shell, no-duplicate links, scripts, and local-reference tests; human review owns authored wording                                |
+| Exact artifacts                | The complete twelve-file manifest at `/` and `/agentworks/`; no partial API or CLI option                                                                                                                   |
+| Determinism and safety         | Repeated byte snapshots, hostile output trees, rollback injection, path and symlink tests                                                                                                                   |
+| Lander/404 preservation        | Shared-subtree identity, Python source/build tests, and Node model/controller contracts                                                                                                                     |
+| Browser acceptance             | `website/tests/lander-browser-checklist.md` pending five-page manual run                                                                                                                                    |
 
 Before handoff, run:
 
