@@ -279,16 +279,32 @@ function interpolatePose(left, right, fraction) {
 }
 
 function hullForPose(pose) {
-    return HULL.map(([x, y]) => transformLocalPoint(pose, x, y));
+    const radians = (pose.angle * Math.PI) / 180;
+    const sine = Math.sin(radians);
+    const cosine = Math.cos(radians);
+    return HULL.map(([x, y]) => ({
+        x: pose.x + x * cosine + y * sine,
+        y: pose.y - x * sine + y * cosine,
+    }));
 }
 
 function hullBounds(pose) {
-    const hull = hullForPose(pose);
+    const radians = (pose.angle * Math.PI) / 180;
+    const sine = Math.sin(radians);
+    const cosine = Math.cos(radians);
+    const leftBottomX = pose.x - 1.6 * cosine;
+    const rightBottomX = pose.x + 1.6 * cosine;
+    const leftTopX = leftBottomX + 6.5 * sine;
+    const rightTopX = rightBottomX + 6.5 * sine;
+    const leftBottomY = pose.y + 1.6 * sine;
+    const rightBottomY = pose.y - 1.6 * sine;
+    const leftTopY = leftBottomY + 6.5 * cosine;
+    const rightTopY = rightBottomY + 6.5 * cosine;
     return {
-        left: Math.min(...hull.map((point) => point.x)),
-        right: Math.max(...hull.map((point) => point.x)),
-        bottom: Math.min(...hull.map((point) => point.y)),
-        top: Math.max(...hull.map((point) => point.y)),
+        left: Math.min(leftBottomX, rightBottomX, leftTopX, rightTopX),
+        right: Math.max(leftBottomX, rightBottomX, leftTopX, rightTopX),
+        bottom: Math.min(leftBottomY, rightBottomY, leftTopY, rightTopY),
+        top: Math.max(leftBottomY, rightBottomY, leftTopY, rightTopY),
     };
 }
 
@@ -356,11 +372,34 @@ function terrainSegments(model, bounds) {
     if (!vertices) throw new TypeError("Collision classification requires retained terrain vertices");
     const segments = [];
     for (let index = 1; index < vertices.length; index += 1) {
-        const left = { x: vertices[index - 1][0], y: vertices[index - 1][1] };
-        const right = { x: vertices[index][0], y: vertices[index][1] };
-        if (right.x >= bounds.left - COLLISION_MARGIN && left.x <= bounds.right + COLLISION_MARGIN) segments.push([left, right]);
+        const left = vertices[index - 1];
+        const right = vertices[index];
+        if (right[0] < bounds.left - COLLISION_MARGIN) continue;
+        if (left[0] > bounds.right + COLLISION_MARGIN) break;
+        segments.push([{ x: left[0], y: left[1] }, { x: right[0], y: right[1] }]);
     }
     return segments;
+}
+
+function terrainMayOverlap(model, bounds) {
+    const vertices = model.terrainVertices;
+    if (!vertices) throw new TypeError("Collision classification requires retained terrain vertices");
+    const minimumX = bounds.left - COLLISION_MARGIN;
+    let lower = 1;
+    let upper = vertices.length;
+    while (lower < upper) {
+        const middle = Math.floor((lower + upper) / 2);
+        if (vertices[middle][0] < minimumX) lower = middle + 1;
+        else upper = middle;
+    }
+    for (let index = Math.max(1, lower); index < vertices.length; index += 1) {
+        const left = vertices[index - 1];
+        const right = vertices[index];
+        if (left[0] > bounds.right + COLLISION_MARGIN) return false;
+        if (Math.max(left[1], right[1]) >= bounds.bottom - COLLISION_MARGIN &&
+            Math.min(left[1], right[1]) <= bounds.top + COLLISION_MARGIN) return true;
+    }
+    return false;
 }
 
 function belowTerrain(hull, segment) {
@@ -492,16 +531,14 @@ export function classifySweptContact(model, previous, next, options = {}) {
         right: Math.max(previousBounds.right, nextBounds.right) + travel,
         bottom: Math.min(previousBounds.bottom, nextBounds.bottom) - travel,
         top: Math.max(previousBounds.top, nextBounds.top) + travel };
-    const overlaps = (bounds) => bounds.right >= swept.left - COLLISION_MARGIN &&
-        bounds.left <= swept.right + COLLISION_MARGIN && bounds.top >= swept.bottom - COLLISION_MARGIN &&
-        bounds.bottom <= swept.top + COLLISION_MARGIN;
     const features = options.features ?? unsafeFeatures(model, previous, target, options.ignoreTopSiteId);
     const topPossible = target && target.platformRight >= swept.left && target.platformLeft <= swept.right &&
         target.platformTop >= swept.bottom && target.platformTop <= swept.top;
-    const featurePossible = features.some((feature) => overlaps(feature.bounds));
-    const terrainPossible = terrainSegments(model, swept).some(([left, right]) => overlaps({
-        left: left.x, right: right.x, bottom: Math.min(left.y, right.y), top: Math.max(left.y, right.y),
-    }));
+    const featurePossible = features.some((feature) => feature.bounds.right >= swept.left - COLLISION_MARGIN &&
+        feature.bounds.left <= swept.right + COLLISION_MARGIN &&
+        feature.bounds.top >= swept.bottom - COLLISION_MARGIN &&
+        feature.bounds.bottom <= swept.top + COLLISION_MARGIN);
+    const terrainPossible = terrainMayOverlap(model, swept);
     if (!topPossible && !featurePossible && !terrainPossible) return null;
     const topContact = topPossible ? targetTopSweptContact(previous, next, target) : null;
     let unsafeContact = null;

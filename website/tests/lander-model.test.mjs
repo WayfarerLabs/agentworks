@@ -739,39 +739,56 @@ test("worst-case world projection stays within eighty descendants during a crash
 
 test("100-site deterministic mission keeps generation, retention, and DOM bounded", async () => {
     const { LanderGameController } = await controllerClasses();
-    const fixture = controllerFixture();
-    const controller = new LanderGameController(fixture.root);
-    const world = new FakeElement(); const missionLander = new FakeElement();
-    missionLander.append(...Array.from({ length: 4 }, () => new FakeElement()));
-    fixture.elements["mission-agent"].append(new FakeElement(), new FakeElement());
-    world.append(fixture.elements["terrain-layer"], fixture.elements["site-layer"],
-        fixture.elements["debris-layer"], missionLander, fixture.elements["mission-agent"]);
-    let model = updateRetention(createRun({ seed: 0x12345678, reducedMotion: true }));
-    let maximumGenerationMilliseconds = 0;
-    for (let completed = 0; completed < 100; completed += 1) {
-        if (model.state === "launching") {
-            for (let step = 0; step < 90 && model.state === "launching"; step += 1) {
-                model = updateRetention(stepFlight(model, { left: 0.72, right: 0.72 }));
+    const expectedCounts = new Map([
+        [11, [31, 30, 38]],
+        [39, [37, 29, 33]],
+        [41, [34, 33, 32]],
+        [STATIC_WORLD_SEED, [29, 33, 37]],
+    ]);
+    for (const [seed, expected] of expectedCounts) {
+        const fixture = controllerFixture();
+        const controller = new LanderGameController(fixture.root);
+        const world = new FakeElement(); const missionLander = new FakeElement();
+        missionLander.append(...Array.from({ length: 4 }, () => new FakeElement()));
+        fixture.elements["mission-agent"].append(new FakeElement(), new FakeElement());
+        world.append(fixture.elements["terrain-layer"], fixture.elements["site-layer"],
+            fixture.elements["debris-layer"], missionLander, fixture.elements["mission-agent"]);
+        let model = updateRetention(createRun({ seed, reducedMotion: true }));
+        let maximumGenerationMilliseconds = 0;
+        const counts = new Map(REFERENCE_TEMPLATES.map(({ templateId }) => [templateId, 0]));
+        for (let completed = 0; completed < 100; completed += 1) {
+            if (model.state === "launching") {
+                for (let step = 0; step < 90 && model.state === "launching"; step += 1) {
+                    model = updateRetention(stepFlight(model, { left: 0.72, right: 0.72 }));
+                }
             }
+            const target = model.retainedSites.find((site) => site.id === model.targetSiteId);
+            model = { ...model, pose: { x: target.center, y: target.platformTop + 0.001, vx: 0, vy: -1,
+                angle: 0, angularVelocity: 0 } };
+            const started = performance.now();
+            model = updateRetention(stepFlight(model, { left: 0, right: 0 }));
+            maximumGenerationMilliseconds = Math.max(maximumGenerationMilliseconds, performance.now() - started);
+            const active = model.retainedSites.find((site) => site.id === model.activeSiteId);
+            assert.equal(model.state, "launching");
+            assert.equal(active.powered, true);
+            assert.equal(active.nocStage, 7);
+            assert.ok(model.retainedSites.length <= 3);
+            assert.ok(model.retainedChunks.length <= 5);
+            assert.ok(model.fuel >= 0);
+            if (model.targetSiteId <= 99) {
+                const generated = model.retainedSites.find((site) => site.id === model.targetSiteId);
+                counts.set(generated.templateId, counts.get(generated.templateId) + 1);
+            }
+            controller.model = model;
+            controller.render();
+            assert.equal(fixture.elements["terrain-layer"].children.length, 2);
+            assert.ok(fixture.elements["site-layer"].children.length <= 3);
+            assert.ok(descendantCount(world) <= 80);
         }
-        const target = model.retainedSites.find((site) => site.id === model.targetSiteId);
-        model = { ...model, pose: { x: target.center, y: target.platformTop + 0.001, vx: 0, vy: -1,
-            angle: 0, angularVelocity: 0 } };
-        const started = performance.now();
-        model = updateRetention(stepFlight(model, { left: 0, right: 0 }));
-        maximumGenerationMilliseconds = Math.max(maximumGenerationMilliseconds, performance.now() - started);
-        assert.equal(model.state, "launching");
-        assert.ok(model.retainedSites.length <= 3);
-        assert.ok(model.retainedChunks.length <= 5);
-        assert.ok(model.fuel >= 0);
-        controller.model = model;
-        controller.render();
-        assert.equal(fixture.elements["terrain-layer"].children.length, 2);
-        assert.ok(fixture.elements["site-layer"].children.length <= 3);
-        assert.ok(descendantCount(world) <= 80);
+        assert.equal(model.completedSites, 100);
+        assert.deepEqual([...counts.values()], expected);
+        assert.ok(model.refuelRatio >= 1);
+        assert.ok(maximumGenerationMilliseconds < 50);
+        controller.destroy();
     }
-    assert.equal(model.completedSites, 100);
-    assert.ok(model.refuelRatio >= 1);
-    assert.ok(maximumGenerationMilliseconds < 50);
-    controller.destroy();
 });

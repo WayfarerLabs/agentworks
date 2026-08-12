@@ -19,7 +19,8 @@ PROBE = r"""
 import { landerGameController as controller } from "/static/lander-game.js";
 import { createRun, stepFlight, updateRetention } from "/static/lander-model.js";
 import { STATIC_WORLD_SEED, cameraForPose, siteScaffoldMembers,
-    terrainHeightAt, terrainSurfacePath, terrainVerticesForWindow } from "/static/lander-world.js";
+    siteStructure, terrainHeightAt, terrainNormalizedHeightAt, terrainSurfacePath, terrainVerticesForWindow,
+    worldSceneX, worldSceneY, worldViewportX, worldViewportY } from "/static/lander-world.js";
 
 try {
 if (controller.frameId !== null) cancelAnimationFrame(controller.frameId);
@@ -27,6 +28,14 @@ controller.frameId = null;
 controller.paused = true;
 const root = document.querySelector("#lander-game");
 const world = document.querySelector("#lander-world");
+const stage = document.querySelector("#lander-scene-stage");
+const rail = document.querySelector("#lander-controls-rail");
+const scene = document.querySelector("#lander-scene");
+const rect = (element) => {
+    const value = element.getBoundingClientRect();
+    return {top: value.top, right: value.right, bottom: value.bottom, left: value.left,
+        width: value.width, height: value.height};
+};
 let model = updateRetention(createRun({seed: STATIC_WORLD_SEED}));
 const site = model.retainedSites[0];
 const staticTerrain = document.querySelector(".terrain-surface").getAttribute("d");
@@ -36,7 +45,22 @@ controller.model = model;
 controller.render();
 const runtimeTerrain = document.querySelector(".terrain-surface").getAttribute("d");
 const group = document.querySelector(`[data-site-id="${site.id}"]`);
-const columns = siteScaffoldMembers(site);
+const scaffoldMembers = siteScaffoldMembers(site);
+const supportColumns = siteStructure(site).supportColumns;
+const terrainNode = document.querySelector(".terrain-surface");
+const scaffoldNode = group.querySelector(".site-scaffold");
+const sceneBounds = rect(scene);
+const visibleFeet = supportColumns
+    .flatMap((column) => [[column.left, column.leftFoot], [column.right, column.rightFoot]])
+    .map(([x, y]) => {
+        const terrainPoint = new DOMPoint(worldSceneX(x), worldSceneY(y)).matrixTransform(terrainNode.getScreenCTM());
+        const scaffoldPoint = new DOMPoint(worldSceneX(x), worldSceneY(y)).matrixTransform(scaffoldNode.getScreenCTM());
+        return {x, y, terrainX: terrainPoint.x, terrainY: terrainPoint.y,
+            scaffoldX: scaffoldPoint.x, scaffoldY: scaffoldPoint.y,
+            terrainVertex: model.terrainVertices.some(([vertexX, vertexY]) => vertexX === x && vertexY === y),
+            inside: terrainPoint.x >= sceneBounds.left && terrainPoint.x <= sceneBounds.right &&
+                terrainPoint.y >= sceneBounds.top && terrainPoint.y <= sceneBounds.bottom};
+    });
 const opening = {
     cameraX: root.style.getPropertyValue("--camera-x"),
     cameraY: root.style.getPropertyValue("--camera-y"),
@@ -44,7 +68,8 @@ const opening = {
     staticTerrainParity,
     runtimeTerrainParity: runtimeTerrain === terrainSurfacePath(model.terrainVertices),
     scaffoldMembers: (group.querySelector(".site-scaffold").getAttribute("d").match(/M/g) || []).length,
-    expectedMembers: columns.length,
+    expectedMembers: scaffoldMembers.length,
+    visibleFeet,
     feet: [site.platformLeft, site.platformLeft + 1, site.platformLeft + 8.8,
         site.platformLeft + 9.8, site.platformLeft + 17.6, site.platformLeft + 18.6]
         .map((x) => terrainHeightAt(site.seed, x)),
@@ -60,6 +85,51 @@ const explored = {
     descendants: world.querySelectorAll("*").length,
     targetDirection: root.dataset.targetDirection,
 };
+const reliefVectors = [
+    {name: "basin", seed: 11, anchorX: -640, normalized: 0.10337466620840133,
+        pose: {x: -683.3, y: 11.6}, camera: {left: -690, down: 0}, viewportY: 573.8402136266232,
+        targetDirection: "right"},
+    {name: "ridge", seed: 41, anchorX: 1920, normalized: 0.5986480843508616,
+        pose: {x: 1903.3, y: 40}, camera: {left: 1870, down: 159}, viewportY: 415.86522601544857,
+        targetDirection: "left"},
+    {name: "peak", seed: 11, anchorX: 320, normalized: 0.5618129291338846,
+        pose: {x: 303.3, y: 56}, camera: {left: 270, down: 319}, viewportY: 599.4397253543139,
+        targetDirection: "left"},
+    {name: "canyon", seed: 41, anchorX: 2560, normalized: 0.180077174003236,
+        pose: {x: 2543.3, y: 32}, camera: {left: 2510, down: 79}, viewportY: 603.750608637929,
+        targetDirection: "left"},
+];
+const windows = reliefVectors.map((witness) => {
+    let relief = createRun({seed: witness.seed, reducedMotion: true});
+    relief = updateRetention({...relief, pose: {...relief.pose, ...witness.pose,
+        vx: 0, vy: 0, angle: 0, angularVelocity: 0}});
+    controller.model = relief;
+    controller.render();
+    const camera = cameraForPose(relief.pose);
+    const terrain = document.querySelector(".terrain-surface");
+    const terrainPath = terrain.getAttribute("d");
+    const anchorWorldY = terrainHeightAt(witness.seed, witness.anchorX);
+    const landerBounds = rect(document.querySelector("#mission-lander"));
+    const cueBounds = rect(document.querySelector("#next-site-cue"));
+    const currentScene = rect(scene);
+    const currentStage = rect(stage);
+    const currentRail = rect(rail);
+    return {name: witness.name, camera, expectedCamera: witness.camera,
+        normalized: terrainNormalizedHeightAt(witness.seed, witness.anchorX),
+        expectedNormalized: witness.normalized,
+        anchorSceneX: worldViewportX(witness.anchorX, camera),
+        anchorViewportY: worldViewportY(anchorWorldY, camera), expectedViewportY: witness.viewportY,
+        terrainParity: terrainPath === terrainSurfacePath(relief.terrainVertices),
+        terrainVertex: relief.terrainVertices.some(([x, y]) => x === witness.anchorX && y === anchorWorldY),
+        landerInside: landerBounds.left >= currentScene.left - .5 && landerBounds.right <= currentScene.right + .5 &&
+            landerBounds.top >= currentScene.top - .5 && landerBounds.bottom <= currentScene.bottom + .5,
+        targetDirection: root.dataset.targetDirection, expectedTargetDirection: witness.targetDirection,
+        cueVisible: cueBounds.width > 0 && cueBounds.height > 0 && cueBounds.left >= currentScene.left - .5 &&
+            cueBounds.right <= currentScene.right + .5 && cueBounds.top >= currentScene.top - .5 &&
+            cueBounds.bottom <= currentScene.bottom + .5,
+        stageRailSeparated: currentStage.bottom <= currentRail.top,
+        overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth};
+});
 const zero = {left: 0, right: 0};
 const collective = {left: 0.72, right: 0.72};
 let warmup = updateRetention(createRun({seed: 0x12345678, reducedMotion: true}));
@@ -103,7 +173,7 @@ const hundredSites = {
     maximumSites,
     maximumChunks,
 };
-window.phase4p = {opening, explored, hundredSites};
+window.phase4p = {layoutWidth: innerWidth, opening, explored, windows, hundredSites};
 document.documentElement.dataset.phase4pReady = "true";
 } catch (error) {
     window.phase4p = {error: String(error), stack: error.stack};
@@ -112,7 +182,12 @@ document.documentElement.dataset.phase4pReady = "true";
 """
 
 
-def browser_phase4p_contract(output: Path) -> dict[str, object]:
+def browser_phase4p_contract(
+    output: Path,
+    width: int = 960,
+    *,
+    cpu_throttle_rate: int = 1,
+) -> dict[str, object]:
     chromium = next(
         (candidate for name in ("google-chrome", "chromium", "chromium-browser") if (candidate := shutil.which(name))),
         None,
@@ -154,9 +229,15 @@ def browser_phase4p_contract(output: Path) -> dict[str, object]:
         connection = DevToolsConnection(_devtools_target(Path(profile.name), process))
         for domain in ("Runtime", "Page"):
             connection.call(f"{domain}.enable")
+        connection.call(
+            "Emulation.setDeviceMetricsOverride",
+            {"width": width, "height": 1000, "deviceScaleFactor": 1, "mobile": False},
+        )
+        if cpu_throttle_rate > 1:
+            connection.call("Emulation.setCPUThrottlingRate", {"rate": cpu_throttle_rate})
         connection.call("Page.navigate", {"url": f"http://127.0.0.1:{server.server_address[1]}/lander/"})
         for _ in range(240):
-            if connection.evaluate("document.documentElement.dataset.phase4pReady === 'true'"):
+            if connection.evaluate("document.documentElement?.dataset.phase4pReady === 'true'"):
                 return connection.evaluate("phase4p")
             time.sleep(0.025)
         raise AssertionError("Phase 4P browser probe did not initialize")
@@ -181,8 +262,30 @@ def browser_phase4p_contract(output: Path) -> dict[str, object]:
 
 class Phase4PBrowserTests(RepositoryFixture):
     def test_real_chromium_projects_canonical_relief_lattice_and_vertical_camera(self) -> None:
-        result = browser_phase4p_contract(self.build())
-        self.assertNotIn("error", result, result)
+        output = self.build()
+        results = [browser_phase4p_contract(output, width) for width in (960, 320)]
+        for result, width in zip(results, (960, 320), strict=True):
+            with self.subTest(width=width):
+                self.assertNotIn("error", result, result)
+                self.assertEqual(result["layoutWidth"], width)
+                for foot in result["opening"]["visibleFeet"]:
+                    self.assertTrue(foot["terrainVertex"])
+                    self.assertTrue(foot["inside"])
+                    self.assertAlmostEqual(foot["terrainX"], foot["scaffoldX"])
+                    self.assertAlmostEqual(foot["terrainY"], foot["scaffoldY"])
+                for witness in result["windows"]:
+                    self.assertEqual(witness["camera"], witness["expectedCamera"])
+                    self.assertAlmostEqual(witness["normalized"], witness["expectedNormalized"])
+                    self.assertEqual(witness["anchorSceneX"], 500)
+                    self.assertAlmostEqual(witness["anchorViewportY"], witness["expectedViewportY"])
+                    self.assertTrue(witness["terrainParity"])
+                    self.assertTrue(witness["terrainVertex"])
+                    self.assertTrue(witness["landerInside"])
+                    self.assertEqual(witness["targetDirection"], witness["expectedTargetDirection"])
+                    self.assertTrue(witness["cueVisible"])
+                    self.assertTrue(witness["stageRailSeparated"])
+                    self.assertEqual(witness["overflow"], 0)
+        result = results[0]
         opening = result["opening"]
         self.assertEqual(opening["cameraX"], "0px")
         self.assertEqual(opening["cameraY"], "79px")

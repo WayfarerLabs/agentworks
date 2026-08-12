@@ -107,8 +107,10 @@ test("canonical relief independently stays broad, bounded, and deterministic", (
         const grades = samples.slice(1).map((rightPoint, index) =>
             (rightPoint[1] - samples[index][1]) / 10);
         assert.ok(grades.every((grade) => Math.abs(grade) <= 0.00439453125 + 1e-15));
-        assert.ok(grades.slice(1).every((grade, index) =>
-            Math.abs(grade - grades[index]) / 10 <= 0.0008985859292196934 + 1e-15));
+        const adjacentGradeDeltas = grades.slice(1).map((grade, index) => Math.abs(grade - grades[index]));
+        const adjacentCurvatures = adjacentGradeDeltas.map((delta) => delta / TERRAIN_SAMPLE_SPACING);
+        assert.ok(adjacentGradeDeltas.every((delta) => delta <= 0.0008985859292196934 + 1e-15));
+        assert.ok(adjacentCurvatures.every((curvature) => curvature <= 0.00008985859292196934 + 1e-15));
         const reversals = [];
         let previousSign = 0;
         for (let index = 0; index < grades.length; index += 1) {
