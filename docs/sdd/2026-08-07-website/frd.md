@@ -1,6 +1,6 @@
 # FRD: The agentworks.build Website
 
-- Status: Phase 4O implementation and automated review complete; operator browser acceptance pending
+- Status: Phase 4P terrain-relief design in progress
 - Date: 2026-08-07
 - Last revised: 2026-08-12
 - Seeded by: the saga lead, at operator request. This is a standalone effort, deliberately NOT a
@@ -232,6 +232,16 @@ forecloses it, and none of it is in scope now.
   foot, and has a conservative collider that contains every rendered member without implying
   traversable openings. Agent travel from the lander to the NOC completes in half the Phase 4L time;
   refueling and the subsequent battery and network power stages retain their existing durations.
+- R26. The lunar terrain uses substantially more of the scene's vertical range without becoming
+  noisy. Measure normalized relief from the top of the in-game instruction rail: zero is that rail's
+  top edge and one is the scene's top edge. Every native terrain surface lies between `0.1` and
+  `0.6` on that scale, and deterministic witness runs include both low basins and high peaks near
+  the ends of the band. Elevation changes form broad slopes, ridges, and canyons with bounded grade
+  and bounded changes in grade; the generator must not alternate direction at every sample or turn
+  the surface into a repeated sawtooth. The visible surface, collision terrain, platform-support
+  feet, site clearance, route proof, ceiling behavior, and static no-JavaScript scene all consume
+  the same terrain authority. Platforms remain honestly supported above untouched native terrain,
+  and the player and target remain visible and reachable across the expanded relief.
 
 ## Settled constraints (inherited; do not reopen)
 
@@ -437,6 +447,16 @@ merged and settled on `main`. The first slice must not build toward them specula
   directly to `/lander/`, its live accessible name and hover text agree, and the reviewed Lander/404
   copy uses the shortened operator wording without adding a fragment redirect or a second game
   route.
+- AC27. For every generated terrain vertex, the independently reconstructed normalized height
+  `(640-sceneY)/640` is inclusively within `[0.1,0.6]`. A fixed, reviewed seed/window corpus reaches
+  at least one value no greater than `0.11` and one no less than `0.59`, while independent grade,
+  grade-change, and reversal-density checks enforce the LLD's realistic-relief limits. Forward and
+  reverse traversal reproduce byte-identical terrain and collision heights without a seam, duplicate
+  horizontal position, per-frame randomness, or retained history. All site feet meet that terrain,
+  all structures clear it, every canonical success and one-quantum failure proof remains valid
+  against regenerated worlds, and 100-site runs terminate without generation failure. Real browser
+  evidence covers a low basin, high ridge, broad peak, and canyon at wide and narrow layouts while
+  the lander, target, cue, HUD, and instruction rail remain visible and non-overlapping.
 
 ## Settled implementation rulings
 

@@ -1,6 +1,6 @@
 # Plan: The agentworks.build Website
 
-- Status: Phase 4O implementation and automated review complete; operator browser acceptance pending
+- Status: Phase 4P terrain-relief design in progress
 - Date: 2026-08-07
 - Last revised: 2026-08-12
 - FRD: `frd.md`
@@ -1015,6 +1015,38 @@ occlusion behind the planet and modest deterministic variation in ring count and
 Definition of done: every generated ring has an exact foreground arc and no visible rear-center
 segment; planets use only the three restrained one/two-ring profiles; bounded deterministic sky
 behavior remains unchanged; and the immutable result is review-clean and gate-clean.
+
+## Phase 4P: broad lunar relief
+
+- [ ] Amend `brand-and-lander-lld.md` with one exact deterministic relief kernel, the normalized
+      `[0.1,0.6]` coordinate conversion, independently computable grade/grade-change/reversal
+      limits, and exact static/runtime parity. Pin a coherent deck, route, ceiling, and
+      vertical-projection design that keeps all sites reachable and the active vehicle visible; stop
+      with an exact infeasibility witness rather than flattening terrain, weakening collision, or
+      hiding relief in a presentation-only offset.
+- [ ] Independently review the amended FRD, HLA, plan, and LLD before implementation. Prove the
+      chosen design across canonical route worlds, representative low/high terrain witnesses, and
+      four 100-site runs without changing physics or proof bounds merely to preserve old literals.
+- [ ] Implement the reviewed world/model/controller/static-scene contract through an
+      `agentworks-dev` delegation. Regenerate the geometry/world/output fixture evidence atomically,
+      preserve one strict terrain authority for rendering/collision/support feet, and update
+      permanent README/checklist guidance in the same change.
+- [ ] Add mutation-sensitive Node, Python, and real-browser witnesses for exact normalized bounds,
+      near-bound extrema, realistic grade/curvature/reversal limits, peak/canyon silhouettes,
+      static/dynamic parity, support/collision alignment, route replay, camera visibility, bounded
+      retention, responsive layout, reduced motion, privacy, and deterministic reconstruction.
+- [ ] Run ordinary derivation/verification, focused and full website suites, deterministic builds,
+      complete repository gates, code review, fresh-eyes browser review, and exact-head CI/CodeQL.
+      Refresh port 8766 and update PR #486 only after the immutable head is clean.
+
+Operator evidence (2026-08-12): the operator requested substantially taller terrain occupying the
+normalized `0.1` through `0.6` scene band, with peaks and canyons but realistic, non-jagged
+inflection.
+
+Definition of done: native terrain visibly spans the requested vertical band without sawtooth
+chatter; rendering, collision, support feet, sites, routes, ceiling, camera, and static recovery use
+one deterministic authority; every canonical proof and long-run generation witness remains valid;
+and the reviewed browser artifact is deterministic, bounded, and gate-clean.
 
 ## Phase 5: CI and default Pages deployment
 
