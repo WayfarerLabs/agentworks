@@ -413,18 +413,18 @@ merged and settled on `main`. The first slice must not build toward them specula
   Crossing either former horizontal mission boundary causes no crash and no implicit target
   completion; deterministic tests and browser input drive the lander past the target and back from
   both directions while the camera, bounded retained world, collision terrain, and bidirectional cue
-  remain coherent. Fuel exhaustion still suppresses thrust, and only actual terrain, platform,
-  building, ceiling, or vehicle-safety contact can enter the crash sequence. Fixed-seed browser
-  evidence shows stars moving with the world at the pinned parallax rate and deterministic
-  occasional celestial landmarks entering and leaving a bounded sky projection without extra
-  requests or accessibility nodes. Every retained site renders exactly three independently
-  reconstructed open lattice support columns whose member pixels lie inside their fixture-derived
-  colliders, whose feet meet native terrain, and whose visual rhythm joins the platform truss.
-  Normal motion completes the agent's pre-NOC travel in half its Phase 4L duration, reduced motion
-  remains atomic, and refuel plus power-stage timings are byte-for-byte unchanged. The built footer
-  resolves directly to `/lander/`, its live accessible name and hover text agree, and the reviewed
-  Lander/404 copy uses the shortened operator wording without adding a fragment redirect or a second
-  game route.
+  remain coherent. Fuel exhaustion still suppresses thrust, and only actual terrain, platform, or
+  building contact, the vertical ceiling, or the excessive-speed vehicle-safety classification can
+  enter the crash sequence. Fixed-seed browser evidence shows stars moving with the world at the
+  pinned parallax rate and deterministic occasional celestial landmarks entering and leaving a
+  bounded sky projection without extra requests or accessibility nodes. Every retained site renders
+  exactly three independently reconstructed open lattice support columns whose member pixels lie
+  inside their fixture-derived colliders, whose feet meet native terrain, and whose visual rhythm
+  joins the platform truss. Normal motion completes the agent's pre-NOC travel in half its Phase 4L
+  duration, reduced motion remains atomic, and refuel plus power-stage timings are byte-for-byte
+  unchanged. The built footer resolves directly to `/lander/`, its live accessible name and hover
+  text agree, and the reviewed Lander/404 copy uses the shortened operator wording without adding a
+  fragment redirect or a second game route.
 
 ## Settled implementation rulings
 
