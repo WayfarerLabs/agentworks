@@ -53,7 +53,6 @@ class Database:
         path: Path | None = None,
         *,
         read_only: bool = False,
-        immutable: bool = False,
     ) -> None:
         db_path = path or _db.DB_PATH
         if read_only:
@@ -61,8 +60,7 @@ class Database:
 
             connection: sqlite3.Connection | None = None
             try:
-                query = "mode=ro&immutable=1" if immutable else "mode=ro"
-                connection = sqlite3.connect(f"{db_path.resolve().as_uri()}?{query}", uri=True)
+                connection = sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True)
                 row = connection.execute("SELECT MAX(version) FROM schema_version").fetchone()
             except sqlite3.DatabaseError as error:
                 if connection is not None:

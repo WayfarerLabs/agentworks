@@ -954,6 +954,29 @@ def _installed_agw() -> Path:
     return Path(sys.executable).with_name(f"agw{suffix}")
 
 
+def _assert_no_committed_writes(config_dir: Path, database_path: Path, before: dict[str, bytes]) -> None:
+    """Assert a completion probe committed no writes to the state database.
+
+    The main database file's bytes never change and no rollback-journal
+    appears. Merely opening a real (non-immutable) read connection to a
+    WAL-mode database can create or update the `-wal`/`-shm` coordination
+    sidecars, even when the probe ultimately refuses; that is intrinsic
+    SQLite WAL-reader bookkeeping (issue #502's fix trades the old veto on
+    those sidecars' mere existence for accepting this harmless side effect
+    of reading through them correctly), so a freshly appearing `-wal` is
+    only checked for staying empty, and `-shm` is not checked at all.
+    """
+    after = {entry.name: entry.read_bytes() for entry in config_dir.iterdir()}
+    assert after[database_path.name] == before[database_path.name]
+    wal_name = f"{database_path.name}-wal"
+    if wal_name in after:
+        assert after[wal_name] == b""
+    shm_name = f"{database_path.name}-shm"
+    unrelated = (set(before) | set(after)) - {wal_name, shm_name}
+    for name in unrelated:
+        assert after.get(name) == before.get(name), name
+
+
 def _write_warning_config(home: Path) -> Path:
     config_dir = home / ".config" / "agentworks"
     config_dir.mkdir(parents=True)
@@ -1000,7 +1023,7 @@ def test_marker_probe_refuses_stale_database_for_every_dynamic_path_without_side
     assert completed.returncode != 0
     assert completed.stdout == ""
     assert completed.stderr == ""
-    assert {entry.name: entry.read_bytes() for entry in config_dir.iterdir()} == before
+    _assert_no_committed_writes(config_dir, database_path, before)
     assert not backup_directory(database_path).exists()
 
 
@@ -1035,7 +1058,7 @@ def test_shell_wrapped_probe_suppresses_config_warning_and_preserves_database_by
     assert completed.returncode == 0
     assert completed.stdout == ""
     assert completed.stderr == ""
-    assert {entry.name: entry.read_bytes() for entry in config_dir.iterdir()} == before
+    _assert_no_committed_writes(config_dir, database_path, before)
 
 
 def test_shell_wrapped_probe_consumes_empty_stdout_when_config_is_invalid(tmp_path: Path) -> None:
@@ -1093,5 +1116,5 @@ def test_marker_free_legacy_probe_refuses_stale_database_without_side_effects(tm
 
     assert process.returncode != 0
     assert stdout == ""
-    assert {entry.name: entry.read_bytes() for entry in config_dir.iterdir()} == before
+    _assert_no_committed_writes(config_dir, database_path, before)
     assert not backup_directory(database_path).exists()

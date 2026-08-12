@@ -94,14 +94,13 @@ def backup_directory(database_path: Path) -> Path:
     return database_path.parent / BACKUP_DIRECTORY_NAME
 
 
-def inspect_schema(database_path: Path, *, immutable: bool = False) -> SchemaInspection:
+def inspect_schema(database_path: Path) -> SchemaInspection:
     """Inspect schema version and cookie without creating or migrating state."""
     if not database_path.exists():
         return SchemaInspection(SchemaState.ABSENT, 0, LATEST_VERSION, None)
     connection: sqlite3.Connection | None = None
-    query = "mode=ro&immutable=1" if immutable else "mode=ro"
     try:
-        connection = sqlite3.connect(f"{database_path.resolve().as_uri()}?{query}", uri=True)
+        connection = sqlite3.connect(f"{database_path.resolve().as_uri()}?mode=ro", uri=True)
         entry = connection.execute("SELECT type FROM sqlite_master WHERE name = 'schema_version'").fetchone()
         if entry is None:
             version = 0
@@ -251,15 +250,26 @@ def _construct_writable_database(database_path: Path) -> Database:
 
 
 def open_completion_database(database_path: Path) -> Database | None:
-    """Open current state immutably, or return no database for completion."""
+    """Open current state read-only, or return no database for completion.
+
+    Uses an ordinary read-only open, not an immutable one: the state database
+    runs in WAL mode, so `-wal`/`-shm` sidecars are the normal steady state of
+    any live connection, not evidence of unavailable or damaged state.
+    Immutable mode ignores the WAL and would silently serve stale rows
+    whenever committed content still sits there uncheckpointed (issue #502).
+    An ordinary read-only open reads the WAL correctly, so a concurrent
+    writer is a non-issue rather than a veto.
+
+    This read-only open still needs `-shm` to be creatable in the config
+    directory on any platform (SQLite's shared-memory index for WAL readers);
+    that directory is user-owned, so this is always satisfiable here.
+    """
     from agentworks.db.database import Database
 
-    if any(_sqlite_sidecar(database_path, suffix).exists() for suffix in ("-wal", "-shm", "-journal")):
-        return None
-    inspection = inspect_schema(database_path, immutable=True)
+    inspection = inspect_schema(database_path)
     if inspection.state is not SchemaState.CURRENT:
         return None
-    return Database(database_path, read_only=True, immutable=True)
+    return Database(database_path, read_only=True)
 
 
 def render_restore_command(backup_path: Path, *, platform: str | None = None) -> str:
@@ -335,10 +345,6 @@ def _release_migration_lock(connection: sqlite3.Connection) -> None:
         connection.rollback()
     finally:
         connection.close()
-
-
-def _sqlite_sidecar(database_path: Path, suffix: str) -> Path:
-    return database_path.with_name(f"{database_path.name}{suffix}")
 
 
 def create_manual_backup(database_path: Path) -> Path:
