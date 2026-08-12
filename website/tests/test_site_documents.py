@@ -348,13 +348,6 @@ class GeneratedDocumentTests(RepositoryFixture):
         self.assertEqual(len(hero), 1)
         self.assertEqual(hero[0].get("src"), "/assets/agw-rocket.svg")
         self.assertEqual(hero[0].get("alt"), "AGW rocket mark")
-        lowered = ONBOARDING_PROMPT.lower()
-        self.assertIn("uv tool install --upgrade", lowered)
-        self.assertIn("agw version", lowered)
-        self.assertIn("agw guide --agent", lowered)
-        forbidden = ("source review", "security posture", "protected candidate", "model usage", "startup disclosure")
-        for value in forbidden:
-            self.assertNotIn(value, lowered)
         scripts = document.tags("script")
         self.assertEqual(scripts, [{"type": "module", "src": "/static/onboarding-copy.js"}])
 

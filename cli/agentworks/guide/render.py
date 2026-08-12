@@ -497,7 +497,23 @@ def render_index(topics: tuple[TopicContribution, ...], mode: GuideMode) -> str:
             "impact briefly and proceed. Sensitive discovery checks presence only unless content access is "
             "separately covered. Guide output and action records are teaching, never authorization by themselves."
         )
-        intro += f"\n\n{framework_heading('Agent operating contract')}\n\n{contract}"
+        intent_map = (
+            f"{framework_heading('Intent map')}\n\n"
+            "Use this map as current context. The Agentworks assistant agent interprets the operator's request and "
+            "decides what topic, proposal, or inert action to use next; the guide does not route the request or grant "
+            "authority.\n\n"
+            "- First setup, current capabilities, or current adoption: `concept-onboarding`.\n"
+            "- Changes across versions or over time: `concept-release-notes`. Current facts are not a "
+            "version-to-version delta.\n"
+            "- Optional review of the canonical Agentworks source: `concept-source-review`.\n"
+            "- Configuration, declared-resource changes, or VM, workspace, Agentworks-managed agent, session, "
+            "console, or secret operation: `concept-management`, then the applicable live kind or `kind/name` topic.\n"
+            "- Health diagnosis and recovery: `concept-troubleshooting`.\n"
+            "- Exceptional breaking-input conversion: `concept-migration`.\n"
+            "- Secret handling: `concept-secrets`.\n"
+            "- Product defects: `concept-reporting-bugs`."
+        )
+        intro += f"\n\n{framework_heading('Agent operating contract')}\n\n{contract}\n\n{intent_map}"
     else:
         security = (
             "Agentworks can inspect or change local configuration and state, resolve named secret references, and "
@@ -509,24 +525,7 @@ def render_index(topics: tuple[TopicContribution, ...], mode: GuideMode) -> str:
             f"\n\n{framework_heading('Security and consent')}\n\n{security}\n\n"
             f"{framework_heading('Start here')}\n\n{start}"
         )
-    intent_map = (
-        f"{framework_heading('Intent map')}\n\n"
-        "Use this map as current context. The Agentworks assistant agent interprets the operator's request and "
-        "decides what topic, proposal, or inert action to use next; the guide does not route the request or grant "
-        "authority.\n\n"
-        "- First setup, current capabilities, or current adoption: `concept-onboarding`.\n"
-        "- Changes across versions or over time: `concept-release-notes`. Current facts are not a "
-        "version-to-version delta.\n"
-        "- Optional review of the canonical Agentworks source: `concept-source-review`.\n"
-        "- Configuration, declared-resource changes, or VM, workspace, Agentworks-managed agent, session, "
-        "console, or secret operation: `concept-management`, then the applicable live kind or `kind/name` topic.\n"
-        "- Health diagnosis and recovery: `concept-troubleshooting`.\n"
-        "- Exceptional breaking-input conversion: `concept-migration`.\n"
-        "- Secret handling: `concept-secrets`.\n"
-        "- Product defects: `concept-reporting-bugs`."
-    )
     rows = "\n".join(f"- `{topic.topic}`: {topic.summary}" for topic in topics)
-    agent_context = f"\n\n{intent_map}" if mode is GuideMode.AGENT else ""
     return sanitize_terminal_output(
-        f"{intro}{agent_context}\n\n{framework_heading('Topics')}\n\n{rows or 'No topics are available.'}\n"
+        f"{intro}\n\n{framework_heading('Topics')}\n\n{rows or 'No topics are available.'}\n"
     )

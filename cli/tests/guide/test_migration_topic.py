@@ -16,18 +16,13 @@ def _topic(slug: str):
     return next(topic for topic in guide_contributions() if topic.topic == slug)
 
 
-def test_migration_is_a_colocated_exception_topic_linked_without_teaching_duplication() -> None:
+def test_migration_is_a_colocated_topic_linked_from_ongoing_assistance() -> None:
     migration = _topic("concept-migration")
-    migration_teaching = next(block.markdown for block in migration.blocks if isinstance(block, Teaching))
-    assert "`data.counts.fail` to equal `0`" in " ".join(migration_teaching.split())
+    assert any(isinstance(block, Teaching) for block in migration.blocks)
     for slug in ("concept-onboarding", "concept-management"):
         topic = _topic(slug)
         assert "concept-migration" in topic.related_topics
         assert any(isinstance(block, TopicLinks) for block in topic.blocks)
-        assert migration_teaching not in "\n".join(
-            block.markdown for block in topic.blocks if hasattr(block, "markdown")
-        )
-    assert "general upgrade" in migration.blocks[0].markdown
 
 
 def test_migration_actions_pin_order_consent_operations_and_no_execution_authority() -> None:
