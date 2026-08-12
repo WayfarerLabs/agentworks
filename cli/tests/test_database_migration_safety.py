@@ -200,6 +200,22 @@ def test_busy_state_error_message_and_hint_are_not_caller_suppliable() -> None:
     assert error.hint is not None
 
 
+def test_busy_state_error_round_trips_through_pickle() -> None:
+    """BaseException's default __reduce__ replays construction as
+    type(self)(*self.args); BusyStateError's own zero-argument __init__
+    (see the caller-suppliable test above) makes that reduction raise on
+    unpickling, since self.args is non-empty (the message
+    AgentworksError.__init__ forwards to Exception.__init__). Nothing
+    pickles this today, but it is a latent break for the first caller
+    that puts one on a queue or multiprocessing boundary; BusyStateError
+    overrides __reduce__ to avoid it."""
+    import pickle
+
+    restored = pickle.loads(pickle.dumps(BusyStateError()))
+    assert isinstance(restored, BusyStateError)
+    assert restored.hint is not None
+
+
 def test_inspection_matrix_is_non_migrating_and_wal_aware(tmp_path: Path) -> None:
     absent = tmp_path / "absent.db"
     stale = tmp_path / "stale.db"
@@ -273,6 +289,43 @@ def test_prepare_database_open_raises_a_distinct_busy_error_and_recovers_once_lo
 
     plan = prepare_database_open(path)
     assert plan.inspection.state is SchemaState.CURRENT
+
+
+def test_prepare_database_open_raises_busy_when_the_migration_lock_is_busy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The migration lock is a separate lock FILE from the state database
+    itself, but errors.py's BusyStateError docstring claims it unifies
+    under this type too; nothing proved that before this test, and the
+    reviewer confirmed replacing both migration-lock raise sites with
+    their pre-consolidation plain-StateError shape left the full suite
+    green. prepare_database_open only reaches the lock for a STALE
+    inspection, so this builds one version behind current."""
+    from agentworks.db import backup as backup_module
+
+    path = tmp_path / "state.db"
+    _build_schema(path, LATEST_VERSION - 1)
+    monkeypatch.setattr(backup_module, "_acquire_migration_lock", lambda path, *, timeout: None)
+
+    with pytest.raises(BusyStateError):
+        prepare_database_open(path)
+
+
+def test_open_database_safely_raises_busy_when_the_migration_lock_is_busy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same unification claim, the other migration-lock raise site."""
+    from agentworks.db import backup as backup_module
+
+    path = tmp_path / "state.db"
+    _build_schema(path, LATEST_VERSION - 1)
+    plan = prepare_database_open(path)
+    assert plan.inspection.state is SchemaState.STALE
+
+    monkeypatch.setattr(backup_module, "_acquire_migration_lock", lambda path, *, timeout: None)
+
+    with pytest.raises(BusyStateError):
+        open_database_safely(path, plan, create_backup=False)
 
 
 def test_check_schema_raises_a_distinct_busy_error_with_a_hint(tmp_path: Path) -> None:

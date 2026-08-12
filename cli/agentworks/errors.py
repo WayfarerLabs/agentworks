@@ -123,6 +123,20 @@ class BusyStateError(StateError):
             hint="Retry after the other database user finishes.",
         )
 
+    def __reduce__(self) -> tuple[type[BusyStateError], tuple[()]]:
+        """Pickle as a bare `BusyStateError()` call.
+
+        BaseException's own `__reduce__` replays construction as
+        `type(self)(*self.args)`; `self.args` is the single positional
+        message `AgentworksError.__init__` passed to `Exception.__init__`,
+        but this type's own `__init__` takes no arguments, so the default
+        reduction would raise on unpickling. Nothing pickles this today,
+        but exceptions cross process and queue boundaries often enough
+        elsewhere in this codebase that a type-specific reduction is worth
+        having before the first caller needs it.
+        """
+        return (type(self), ())
+
 
 class ConnectivityError(AgentworksError):
     """Network or transport-level failure (SSH, Tailscale, host unreachable)."""

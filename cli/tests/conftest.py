@@ -187,11 +187,20 @@ def db(tmp_path: Path) -> Generator[Database, None, None]:
 
 @contextmanager
 def held_exclusive_lock(path: Path) -> Iterator[None]:
-    """Hold BEGIN EXCLUSIVE on `path` for the with-block's duration,
+    """Hold an exclusive lock on `path` for the with-block's duration,
     blocking every other reader and writer. Used to synthesize a busy
     database for tests, shared across test modules so each does not carry
-    its own copy of the lock/rollback/close idiom."""
+    its own copy of the lock/rollback/close idiom.
+
+    `PRAGMA locking_mode = EXCLUSIVE` before `BEGIN EXCLUSIVE` is what
+    makes this reliably block a new reader in WAL mode, not only in
+    rollback-journal mode: WAL's ordinary MVCC design otherwise lets a new
+    reader see a stable snapshot even while another connection holds
+    `BEGIN EXCLUSIVE`, but this is the same lock class SQLite itself takes
+    during WAL recovery and checkpoint restart, so it is reachable on a
+    real always-WAL state database, not just a synthetic rollback one."""
     locker = sqlite3.connect(path)
+    locker.execute("PRAGMA locking_mode = EXCLUSIVE")
     locker.execute("BEGIN EXCLUSIVE")
     try:
         yield

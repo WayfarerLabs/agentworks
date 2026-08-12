@@ -24,19 +24,6 @@ class _LiveRegistry:
         return iter(())
 
 
-def _build_rollback_mode_database(path: Path) -> None:
-    """Build a CURRENT-schema database, then force it back to SQLite's
-    default rollback-journal mode. Database.__init__ always sets WAL, but
-    BEGIN EXCLUSIVE only reliably blocks other readers in rollback mode:
-    WAL's MVCC design lets a new reader see a stable snapshot even while
-    another connection holds the write lock, so a WAL-mode database would
-    not actually synthesize a busy database for held_exclusive_lock()."""
-    Database(path).close()
-    connection = sqlite3.connect(path)
-    connection.execute("PRAGMA journal_mode = DELETE")
-    connection.close()
-
-
 def test_read_only_database_handles_uri_significant_path_without_migrating(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -140,7 +127,7 @@ def test_render_guide_surfaces_busy_not_malformed_under_a_held_lock(
     import agentworks.guide.service as guide_service
 
     path = tmp_path / "state.db"
-    _build_rollback_mode_database(path)
+    Database(path).close()
     monkeypatch.setattr(db_package, "DB_PATH", path)
 
     captured: list[Exception] = []
@@ -198,7 +185,7 @@ def test_read_only_database_raises_busy_not_malformed_under_a_held_lock(tmp_path
     StateError subtype the old code never raised here (it always raised
     plain StateError, the shape the malformed case above still uses)."""
     path = tmp_path / "state.db"
-    _build_rollback_mode_database(path)
+    Database(path).close()
 
     with held_exclusive_lock(path), pytest.raises(BusyStateError) as raised:
         Database(path, read_only=True)
