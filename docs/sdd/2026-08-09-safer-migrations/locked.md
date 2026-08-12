@@ -71,4 +71,5 @@ fixing pull request, number 503, replaced both with an ordinary, WAL-aware read-
 (no sidecar veto, no `immutable=1`), bounded by a short connection timeout so a database locked by a
 concurrent writer still fails a completion probe quickly instead of freezing it. Every other item
 recorded under "What shipped" and "Verification" still stands; this note narrows only the
-sidecar-gating and immutable-read clauses of the completion-probe bullet.
+sidecar-gating and immutable-read clauses of the completion-probe bullet under "What shipped" and
+the "completion immutability" item in the shipped-CLI validation list under "Verification".

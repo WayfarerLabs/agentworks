@@ -30,6 +30,10 @@ MIGRATION_LOCK_TIMEOUT_SECONDS = 30.0
 
 _BACKUP_PAGES = 256
 _BACKUP_SLEEP_SECONDS = 0.05
+# Shared by two unrelated consumers: backup/restore validation's read-only
+# opens, and open_completion_database()'s TAB-press budget. Raising this for
+# backup tolerance silently reopens a multi-second completion freeze; if
+# backup ever needs a longer wait, give it its own constant instead.
 _CONNECTION_TIMEOUT_SECONDS = 0.1
 _AUTOMATIC_NAME = re.compile(
     r"^agentworks-pre-migration-(?P<timestamp>\d{8}T\d{12}Z)-v(?P<version>\d+)(?:-(?P<collision>\d+))?\.db$"

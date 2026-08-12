@@ -65,6 +65,7 @@ class Database:
         read-only open passes an explicit, tight bound instead, since it
         backs a TAB press and must fail fast rather than block the shell.
         """
+        assert timeout is None or read_only, "timeout only applies to the read-only path"
         db_path = path or _db.DB_PATH
         if read_only:
             from agentworks.errors import StateError
