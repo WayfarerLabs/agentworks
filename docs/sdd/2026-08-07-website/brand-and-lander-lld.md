@@ -150,7 +150,7 @@ The physics pose `(x, y, angle)` refers to the midpoint between the W's two lowe
 asset coordinate `(120, 415)`. The inline scene applies transforms in this order:
 
 ```text
-translate(worldX * WORLD_SCALE, worldSceneY(worldY))
+translate(worldSceneX(worldX), worldSceneY(worldY))
 rotate(angleDeg)
 scale(0.16)
 translate(-120, -415)
@@ -418,13 +418,13 @@ former connector region and beneath the complete NOC. It has no platform, connec
 partition and no region-specific scaffold X fields.
 
 One `.site-scaffold` path renders every exposed member, with no filled face behind it. In scene
-coordinates, let `L=platformLeft*WORLD_SCALE`, `Q=buildingRight*WORLD_SCALE=L+186`,
-`T=worldSceneY(platformBottom)`, `B=T+7.5`, and `X_i=L+15.5*i` for integer `i in [0,12]`. The path
-begins with the two uniform chords `M L T H Q M L B H Q`. Append exactly one diagonal per bay in
-increasing bay order: for even `i in [0,11]`, `M X_i T L X_(i+1) B`; for odd `i`,
-`M X_i B L X_(i+1) T`. The first diagonal therefore descends from the top-left, and successive
-diagonals alternate across all 12 equal `1.55 m` bays without resetting at the platform or NOC
-boundaries.
+coordinates, let `L=worldSceneX(platformLeft)`, `Q=worldSceneX(buildingRight)`,
+`T=worldSceneY(platformBottom)`, `B=worldSceneY(platformBottom-.75)`, and
+`X_i=worldSceneX(platformLeft+1.55*i)` for integer `i in [0,12]`. The path begins with the two
+uniform chords `M L T H Q M L B H Q`. Append exactly one diagonal per bay in increasing bay order:
+for even `i in [0,11]`, `M X_i T L X_(i+1) B`; for odd `i`, `M X_i B L X_(i+1) T`. The first
+diagonal therefore descends from the top-left, and successive diagonals alternate across all 12
+equal `1.55 m` bays without resetting at the platform or NOC boundaries.
 
 Exactly three visible load-bearing open lattice columns join that truss. Their rail pairs, relative
 to `platformLeft`, are exactly `[0,1]`, `[8.8,9.8]`, and `[17.6,18.6] m`. The first and last outer
@@ -615,20 +615,20 @@ HORIZONTAL_HULL_MARGIN = LANDER_BOUNDING_RADIUS = 6.7 m
 cameraLeftForPose(pose) = pose.x < 6.7 ? pose.x-6.7 : pose.x > 33.3 ? pose.x-33.3 : 0
 ```
 
-It writes `--camera-x=-cameraLeft*10px` on the game root. CSS applies one transform on
-`#lander-world`:
+It writes `--camera-x=worldGroupOffsetX(camera)px` and `--camera-y=worldGroupOffsetY(camera)px` on
+the game root. CSS applies one transform on `#lander-world`:
 
 ```text
-transform: translate(var(--camera-x), 0)
+transform: translate(var(--camera-x), var(--camera-y))
 ```
 
 All terrain, sites, lander, agent, and debris retain absolute world-derived scene coordinates inside
-that group. The camera holds the opening viewport while the reference point remains in `[5,35] m`,
-keeps its conservative hull reference at scene `x=67` during leftward travel and `x=333` during
-rightward travel, and is continuous at both dead-zone boundaries. It has no origin clamp, monotonic
-furthest-X value, horizontal extent, or controller cache. Contact, service, crash, checkpoint
-restoration, passing a target, and returning from either direction always use the current frozen or
-restored pose.
+that group. The camera holds the opening viewport while the reference point remains in
+`[6.7,33.3] m`, keeps its conservative hull reference at scene `x=67` during leftward travel and
+`x=333` during rightward travel, and is continuous at both dead-zone boundaries. It has no origin
+clamp, monotonic furthest-X value, horizontal extent, or controller cache. Contact, service, crash,
+checkpoint restoration, passing a target, and returning from either direction always use the current
+frozen or restored pose.
 
 Phase 4P uses the shared `worldSceneY` conversion above. For canonical terrain it is algebraically
 `640*(1-normalizedHeight)`, before camera motion. A test reconstructs both expressions and requires
@@ -645,24 +645,27 @@ cameraDown = clamp(TOP_MARGIN-preCameraHullTop,0,MAX_CAMERA_DOWN)
 cameraForPose(pose) = {left: cameraLeft, down: cameraDown}
 worldViewportX(worldX,frozenCamera) = worldSceneX(worldX)-worldSceneX(frozenCamera.left)
 worldViewportY(worldY,frozenCamera) = worldSceneY(worldY)+frozenCamera.down
+worldGroupOffsetX(frozenCamera) = worldSceneX(-frozenCamera.left)
+worldGroupOffsetY(frozenCamera) = frozenCamera.down
 ```
 
 Only overlays outside `#lander-world` call `worldViewportX/Y`, and they receive the same immutable
 camera object frozen for that modeled event or render. Descendants of `#lander-world` use
 `worldSceneX/Y` only and inherit both camera axes from the group transform; applying camera values
-inside them is a double transform and an invariant failure.
+inside them is a double transform and an invariant failure. `worldGroupOffsetX` composes the shared
+world conversion with the negated camera world coordinate. `worldGroupOffsetY` is the only justified
+identity projection because `camera.down` is already defined in scene units, not metres.
 
 The radius exceeds `hypot(1.6,6.5)`, so it contains the rotated hull at every attitude. The matching
 horizontal margin keeps that complete conservative circle inside scene X `[0,1000]`. At the
 unchanged playable ceiling `pose.y=56`, `cameraDown=319<320` and the complete hull stays below the
 `40`-unit top margin. At maximum camera motion the fixed landing face projects to `551`, the NOC
 bottom to `554.5`, its roof to `479`, and its mast top to `447`, all inside scene Y `[0,640]`. Thus
-the active lander and every horizontally visible target structure remain completely visible without
-changing physics or `MAX_PLAYABLE_Y=56`. CSS becomes
-`transform:translate(var(--camera-x),var(--camera-y))` on the one `#lander-world` group, with
-`--camera-y=cameraDown px`. Lander, sites, terrain, traveling agent, and debris share it. Crash
-flash coordinates add the same frozen camera-down value because that flash remains outside the world
-group. Sky keeps horizontal `.24` parallax and no vertical camera shift.
+the active lander and the horizontally visible landing face, NOC, and mast remain completely visible
+without changing physics or `MAX_PLAYABLE_Y=56`. The one `#lander-world` transform above consumes
+only `worldGroupOffsetX/Y(camera)`. Lander, sites, terrain, traveling agent, and debris share it.
+Crash flash coordinates add the same frozen camera-down value because that flash remains outside the
+world group. Sky keeps horizontal `.24` parallax and no vertical camera shift.
 
 The stage remains the clipping authority. During high flight, terrain and the terrain-derived ends
 of both rails in a support column may move below the stage and clip together at the same boundary;
@@ -671,26 +674,41 @@ instruction rail, and the canonical terrain value is not changed or flattened. T
 face remains at or above scene Y `551`, so no vertical target cue is needed. Static markup uses the
 exact camera-zero horizontal and initial-pose vertical projection for `STATIC_WORLD_SEED`, including
 the initial camera-down value; START reconciliation changes only the run seed. Wide and narrow
-browser witnesses exercise zero, intermediate, and maximum camera-down states and prove the hull,
-target, horizontal cue, HUD, and rail have no overlap or clipping.
+browser witnesses exercise zero, intermediate, and maximum camera-down states and prove the hull
+and, when the cue is absent, the landing face/NOC/mast have no clipping. Support columns may clip
+with terrain as specified above; the horizontal cue, HUD, and rail must not overlap.
 
 The sky is a separate bounded decorative projection between `#scene-sky` and `#lander-world`. Define
-`SKY_PARALLAX=.24`, `SKY_CHUNK_WIDTH=50 m`, `SKY_CHUNK_COUNT=5`, and `STARS_PER_SKY_CHUNK=4`. Let
-`skyLeft=cameraLeft*.24`, `firstSkyChunk=floor(skyLeft/50)-1`, and retain exactly the five
-consecutive indexes beginning there. Their `250 m` span always covers the `100 m` visible sky
-interval plus at least one `50 m` buffer. The controller writes
-`--sky-camera-x=-cameraLeft*10*.24px`; CSS translates only `#lander-sky-world` by that value. Stars
-therefore move in the same direction as terrain at exactly 24 percent of its distance, producing
-depth without autonomous animation.
+`SKY_PARALLAX=.24`, `SKY_CHUNK_WIDTH=50 m`, `SKY_CHUNK_COUNT=5`, and `STARS_PER_SKY_CHUNK=4`, with
+these pure compositions:
+
+```text
+skyWorldLeftForCamera(frozenCamera) = frozenCamera.left*SKY_PARALLAX
+skyGroupOffsetX(frozenCamera) = worldSceneX(-skyWorldLeftForCamera(frozenCamera))
+skyStarWorldX(seed,c,k) = c*SKY_CHUNK_WIDTH+4+42*sampleUnit(seed,6,k)
+skyStarSceneY(seed,k) = 50+190*sampleUnit(seed,7,k)
+skyLandmarkWorldX(seed,c,q) = c*SKY_CHUNK_WIDTH+10+30*sampleUnit(seed,9,q)
+skyLandmarkSceneY(seed,q) = 90+110*sampleUnit(seed,10,q)
+```
+
+The X helpers generate world positions and route their projection only through `worldSceneX`.
+`skyStarSceneY` and `skyLandmarkSceneY` are intentionally named scene-space decorative lanes; they
+are the justified direct scene-Y composition and never receive terrain conversion or vertical camera
+motion. Let `skyLeft=skyWorldLeftForCamera(frozenCamera)`,
+`firstSkyChunk=floor(skyLeft/SKY_CHUNK_WIDTH)-1`, and retain exactly the five consecutive indexes
+beginning there. Their `250 m` span always covers the `100 m` visible sky interval plus at least one
+`50 m` buffer. The controller writes `--sky-camera-x=skyGroupOffsetX(frozenCamera)px`; CSS
+translates only `#lander-sky-world` by that value. Stars therefore move in the same direction as
+terrain at exactly 24 percent of its distance, producing depth without autonomous animation.
 
 For each retained sky chunk `c` and local star `i=0..3`, let unsigned `k=(Math.imul(c,4)+i)>>>0`,
-`x=c*50+4+42*sampleUnit(seed,6,k)`, and `y=50+190*sampleUnit(seed,7,k)`. Append `M(x*10) y h2` to
-the sole `#scene-stars` path in chunk then local-star order. Set
+`X=worldSceneX(skyStarWorldX(seed,c,k))`, and `Y=skyStarSceneY(seed,k)`. Append `M X Y h2` to the
+sole `#scene-stars` path in chunk then local-star order. Set
 `landmarkOffset=floor(4*sampleUnit(seed,8,0))`. A chunk contains one landmark exactly when
 `positiveModulo(c-landmarkOffset,4)===0`, so every retained five-chunk window contains one or two.
-For such a chunk, use unsigned `q=c>>>0`, scene center `X=10*(c*50+10+30*sampleUnit(seed,9,q))` and
-`Y=90+110*sampleUnit(seed,10,q)`, and select a crescent when `sampleUnit(seed,11,q)<.5`, otherwise a
-ringed planet. A crescent is the two-arc outline
+For such a chunk, use unsigned `q=c>>>0`, scene center `X=worldSceneX(skyLandmarkWorldX(seed,c,q))`
+and `Y=skyLandmarkSceneY(seed,q)`, and select a crescent when `sampleUnit(seed,11,q)<.5`, otherwise
+a ringed planet. A crescent is the two-arc outline
 `M X (Y-18) A18 18 0 1 0 X (Y+18) A13 18 0 0 1 X (Y-18)`. A planet is the closed circle
 `M (X-16) Y A16 16 0 1 0 (X+16) Y A16 16 0 1 0 (X-16) Y Z`. Set
 `ringProfile=floor(3*sampleUnit(seed,12,q))`; profiles `0`, `1`, and `2` respectively use radii
@@ -706,15 +724,17 @@ foreground half remains visible across the planet. Full rear ellipses, quadratic
 than two rings, and radii outside the three profiles are forbidden. All landmark subpaths share the
 sole `#scene-landmarks` path.
 
-`skyProjectionForCamera(seed,cameraLeft)` returns the exact five-index key plus those two path
-strings. Static no-JavaScript markup is its exact output for `STATIC_WORLD_SEED` and camera zero;
-START and every sky-key change reconcile the same two nodes, while ordinary frames update only the
-group transform. The group and both paths are permanently `aria-hidden`; they receive no title,
-description, focus, pointer behavior, collision, model field, game state, request, storage, timer,
-or event listener. `#scene-stars` retains its existing rounded graphite-gray stroke. Landmarks use
-`fill="none"`, `stroke="#8a867c"`, `stroke-width="3"`, and round caps/joins. Hidden time freezes the
-pose and both transforms; reduced motion changes no deterministic positional projection because the
-sky has no independent motion. DOM stays exactly one group and two paths regardless of travel.
+`skyProjectionForCamera(seed,frozenCamera)` obtains its world window only from
+`skyWorldLeftForCamera`, routes every X through `worldSceneX`, and returns the exact five-index key,
+the two path strings, and `skyGroupOffsetX(frozenCamera)`. Static no-JavaScript markup is its exact
+output for `STATIC_WORLD_SEED` and the initial frozen camera; START and every sky-key change
+reconcile the same two nodes, while ordinary frames update only the returned group transform. The
+group and both paths are permanently `aria-hidden`; they receive no title, description, focus,
+pointer behavior, collision, model field, game state, request, storage, timer, or event listener.
+`#scene-stars` retains its existing rounded graphite-gray stroke. Landmarks use `fill="none"`,
+`stroke="#8a867c"`, `stroke-width="3"`, and round caps/joins. Hidden time freezes the pose and both
+transforms; reduced motion changes no deterministic positional projection because the sky has no
+independent motion. DOM stays exactly one group and two paths regardless of travel.
 
 Terrain range projection never drops a segment merely because neither endpoint lies on a retained
 `50 m` chunk boundary. Chunk indexes choose one closed retained range from the minimum retained
@@ -766,21 +786,23 @@ canonical terrain-window construction, and exactly two proof replays together mu
 ms at the 95th percentile and 50 ms maximum over the same witness; record actual results rather than
 weakening the ceiling.
 
-Pure `targetDirectionForViewport(target,cameraLeft)` compares the complete structure interval
-`[target.platformLeft,target.buildingRight]` with `[cameraLeft,cameraLeft+100]`. It returns `"left"`
-exactly when `target.platformLeft<cameraLeft`, `"right"` exactly when
-`target.buildingRight>cameraLeft+100`, and `null` otherwise. Equality is inside. Because the
-structure is only `18.6 m` wide, both non-null predicates cannot hold at once. The fixed `44 by 44`
-solid right-arrow path uses transform `translate(932 280)` for right and
-`translate(68 280) scale(-1 1)` for left, placing its mirrored paint at scene `x=[24,68]`; direction
-never depends on blinking. The controller writes `data-target-direction="right|left|none"`, reveals
-the visually hidden direction node on the same non-null predicate, and writes the corresponding
-reviewed left/right sentence before adding its IDREF. Automated tests derive expected accessible
-direction from the live predicate and current DOM text instead of embedding either authored
-sentence. The cue initially points right after a service, reverses to left after the player passes
-the target, and returns right if they cross back. It hides only when the full landing face, NOC, and
-mast are horizontally in view; vertical camera bounds keep all three vertically in view. Reduced
-motion leaves the arrow static; hidden time pauses its existing blink.
+Pure `targetDirectionForViewport(target,cameraLeft)` first computes
+`targetBuildingRight=siteStructure(target).buildingRight`; it never reads or duplicates a
+building-right field on the target descriptor. It compares the landing-face/NOC/mast horizontal
+interval `[target.platformLeft,targetBuildingRight]` with `[cameraLeft,cameraLeft+100]`. It returns
+`"left"` exactly when `target.platformLeft<cameraLeft`, `"right"` exactly when
+`targetBuildingRight>cameraLeft+100`, and `null` otherwise. Equality is inside. Because the interval
+is only `18.6 m` wide, both non-null predicates cannot hold at once. The fixed `44 by 44` solid
+right-arrow path uses transform `translate(932 280)` for right and `translate(68 280) scale(-1 1)`
+for left, placing its mirrored paint at scene `x=[24,68]`; direction never depends on blinking. The
+controller writes `data-target-direction="right|left|none"`, reveals the visually hidden direction
+node on the same non-null predicate, and writes the corresponding reviewed left/right sentence
+before adding its IDREF. Automated tests derive expected accessible direction from the live
+predicate and current DOM text instead of embedding either authored sentence. The cue initially
+points right after a service, reverses to left after the player passes the target, and returns right
+if they cross back. It hides only when the full landing face, NOC, and mast are horizontally in
+view; vertical camera bounds keep all three vertically in view. Reduced motion leaves the arrow
+static; hidden time pauses its existing blink.
 
 ## 7. Model shape, mission states, and checkpoint
 
@@ -2166,12 +2188,15 @@ any added world descendant, a maximum other than exact 75 or greater than 80, an
 route/physics/geometry/world/output digest change.
 
 Phase 4M/4O projection mutations reject a horizontal world-edge failure or clamp, a camera that
-cannot follow both signs of X, any camera dead zone other than section 6's exact two-sided formula,
-a cue that cannot produce `right/left/right` while passing and returning, cue absence while any part
-of the complete target structure remains outside the viewport, cue visibility after the full landing
-face/NOC/mast interval is inside, or a mirrored cue with different geometry. They reject a sky speed
-other than `.24` of camera motion, a sky window other than five `50 m` chunks, a count other than
-four stars per chunk, a landmark cadence other than every fourth chunk, or a landmark other than the
+cannot follow both signs of X, any camera dead zone other than exact closed `[6.7,33.3]` with
+section 6's two-sided formula, a cue that cannot produce `right/left/right` while passing and
+returning, cue absence while any part of the landing-face/NOC/mast interval remains outside the
+viewport, cue visibility after that full interval is inside, a building-right authority other than
+`siteStructure(target).buildingRight`, a duplicated building-right target field, or a mirrored cue
+with different geometry. They reject a sky speed other than `.24` of camera motion, a sky window
+other than five `50 m` chunks, a count other than four stars per chunk, sky X or group translation
+that bypasses `worldSceneX` and the named sky helpers, sky decorative Y outside its two named
+scene-lane helpers, a landmark cadence other than every fourth chunk, or a landmark other than the
 seeded crescent/planet choice. Planet mutations reject a profile other than exact radii `[(28,9)]`,
 `[(31,10)]`, or `[(28,9),(34,12)]`; a ring count outside one or two; circle-intersection drift; a
 visible rear-center arc; a missing foreground arc; quadratic geometry; or the old full ellipse. Sky
@@ -2194,18 +2219,19 @@ non-collinear inserted points, non-increasing X, different forward/reverse bytes
 terrain generator, height cap, shelf, local deck search, terrain retry, or retained terrain history.
 Projection mutations reject world conversion other than `64*h-29.2`; any scene conversion outside
 shared `worldSceneX/Y`; an overlay outside `#lander-world` that does not use the event's frozen
-camera through `worldViewportX/Y`; a world descendant that applies camera twice; camera-derived
-normalized height; camera-down outside `0..320`; a conservative hull outside scene X `[0,1000]` or
-above scene Y `40`; maximum-camera landing face/NOC bottom/roof/mast-top values other than
-`551/554.5/479/447`; cue/complete-structure visibility disagreement; sky vertical motion; rail
-overlap; independent clipping of terrain and either support rail foot; or a camera transform that
-collision code can observe. Structure mutations reject deck level other than `116`, an ordinary
-selection count other than one, more than three defensive checks, a nonzero deck transition, a
-catalog other than `78/93/102`, a column outside `3..43` bays or `9..89` members, a scaffold path
-outside `41..281` segments, or a terrain wedge higher than `.28125 m`. Fixture mutations reject
-geometry/derived schema other than v5, deriver other than v6, a recipe change from v3, candidate
-count other than 12, selected replay count other than 54, witness count other than 27, any retained
-v4 geometry/world/output hash, or any change to the exact v4 physics hash.
+camera through `worldViewportX/Y`; a world-group transform outside `worldGroupOffsetX/Y`; a world
+descendant that applies camera twice; camera-derived normalized height; camera-down outside
+`0..320`; a conservative hull outside scene X `[0,1000]` or above scene Y `40`; maximum-camera
+landing face/NOC bottom/roof/mast-top values other than `551/554.5/479/447`;
+cue/landing-face/NOC/mast visibility disagreement; sky vertical motion; rail overlap; independent
+clipping of terrain and either support rail foot; or a camera transform that collision code can
+observe. Structure mutations reject deck level other than `116`, an ordinary selection count other
+than one, more than three defensive checks, a nonzero deck transition, a catalog other than
+`78/93/102`, a column outside `3..43` bays or `9..89` members, a scaffold path outside `41..281`
+segments, or a terrain wedge higher than `.28125 m`. Fixture mutations reject geometry/derived
+schema other than v5, deriver other than v6, a recipe change from v3, candidate count other than 12,
+selected replay count other than 54, witness count other than 27, any retained v4
+geometry/world/output hash, or any change to the exact v4 physics hash.
 
 Input and physics mutations reject component-wise keyboard/pointer engine merging, mixed-input
 thrust above straight `1.44`, full-steer total other than `.8`, vector angle other than 30 degrees,
