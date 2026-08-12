@@ -68,16 +68,13 @@ class Database:
         assert timeout is None or read_only, "timeout only applies to the read-only path"
         db_path = path or _db.DB_PATH
         if read_only:
+            from agentworks.db.backup import _connect_ro
             from agentworks.errors import StateError
 
             connection: sqlite3.Connection | None = None
             ro_uri = f"{db_path.resolve().as_uri()}?mode=ro"
             try:
-                connection = (
-                    sqlite3.connect(ro_uri, uri=True, timeout=timeout)
-                    if timeout is not None
-                    else sqlite3.connect(ro_uri, uri=True)
-                )
+                connection = _connect_ro(ro_uri, timeout=timeout)
                 row = connection.execute("SELECT MAX(version) FROM schema_version").fetchone()
             except sqlite3.DatabaseError as error:
                 if connection is not None:

@@ -30,11 +30,8 @@ MIGRATION_LOCK_TIMEOUT_SECONDS = 30.0
 
 _BACKUP_PAGES = 256
 _BACKUP_SLEEP_SECONDS = 0.05
-# Shared by two unrelated consumers: backup/restore validation's read-only
-# opens, and open_completion_database()'s TAB-press budget. Raising this for
-# backup tolerance silently reopens a multi-second completion freeze; if
-# backup ever needs a longer wait, give it its own constant instead.
-_CONNECTION_TIMEOUT_SECONDS = 0.1
+_BACKUP_CONNECTION_TIMEOUT_SECONDS = 0.1
+_COMPLETION_TIMEOUT_SECONDS = 0.1
 _AUTOMATIC_NAME = re.compile(
     r"^agentworks-pre-migration-(?P<timestamp>\d{8}T\d{12}Z)-v(?P<version>\d+)(?:-(?P<collision>\d+))?\.db$"
 )
@@ -98,6 +95,21 @@ def backup_directory(database_path: Path) -> Path:
     return database_path.parent / BACKUP_DIRECTORY_NAME
 
 
+def _connect_ro(uri: str, *, timeout: float | None) -> sqlite3.Connection:
+    """Open a read-only SQLite URI connection, passing `timeout` through
+    only when the caller supplies one.
+
+    Omitting the keyword entirely, rather than passing `timeout=None`
+    through to `sqlite3.connect`, is what leaves the driver's own
+    multi-second default wait untouched for callers that do not opt into a
+    bound; `sqlite3.connect`'s `timeout` parameter has no `None` meaning of
+    its own, so this can't be collapsed into a single call.
+    """
+    if timeout is not None:
+        return sqlite3.connect(uri, uri=True, timeout=timeout)
+    return sqlite3.connect(uri, uri=True)
+
+
 def inspect_schema(database_path: Path, *, timeout: float | None = None) -> SchemaInspection:
     """Inspect schema version and cookie without creating or migrating state.
 
@@ -113,9 +125,7 @@ def inspect_schema(database_path: Path, *, timeout: float | None = None) -> Sche
     connection: sqlite3.Connection | None = None
     uri = f"{database_path.resolve().as_uri()}?mode=ro"
     try:
-        connection = (
-            sqlite3.connect(uri, uri=True, timeout=timeout) if timeout is not None else sqlite3.connect(uri, uri=True)
-        )
+        connection = _connect_ro(uri, timeout=timeout)
         entry = connection.execute("SELECT type FROM sqlite_master WHERE name = 'schema_version'").fetchone()
         if entry is None:
             version = 0
@@ -281,7 +291,7 @@ def open_completion_database(database_path: Path) -> Database | None:
     it is not (a read-only mount, a permission-damaged home), the probe
     refuses cleanly with no candidates rather than hanging or writing.
 
-    Both connects use ``_CONNECTION_TIMEOUT_SECONDS`` rather than the
+    Both connects use ``_COMPLETION_TIMEOUT_SECONDS`` rather than the
     driver's multi-second default: a completion probe backs a TAB press, so
     it must fail fast against a database another process holds locked
     (e.g. a concurrent writer inside `BEGIN EXCLUSIVE`) rather than freeze
@@ -289,11 +299,11 @@ def open_completion_database(database_path: Path) -> Database | None:
     """
     from agentworks.db.database import Database
 
-    inspection = inspect_schema(database_path, timeout=_CONNECTION_TIMEOUT_SECONDS)
+    inspection = inspect_schema(database_path, timeout=_COMPLETION_TIMEOUT_SECONDS)
     if inspection.state is not SchemaState.CURRENT:
         return None
     try:
-        return Database(database_path, read_only=True, timeout=_CONNECTION_TIMEOUT_SECONDS)
+        return Database(database_path, read_only=True, timeout=_COMPLETION_TIMEOUT_SECONDS)
     except StateError:
         # A lock acquired between the inspection above and this open (or one
         # still resolving within the bounded wait) is the same "unavailable
@@ -534,7 +544,7 @@ def _validate_sqlite_file(path: Path, *, source_kind: str) -> sqlite3.Connection
         connection = sqlite3.connect(
             f"{path.resolve().as_uri()}?mode=ro",
             uri=True,
-            timeout=_CONNECTION_TIMEOUT_SECONDS,
+            timeout=_BACKUP_CONNECTION_TIMEOUT_SECONDS,
         )
         rows = connection.execute("PRAGMA quick_check").fetchall()
         if rows != [("ok",)]:
@@ -571,9 +581,9 @@ def _online_copy(source_path: Path, destination_path: Path) -> None:
         source = sqlite3.connect(
             f"{source_path.resolve().as_uri()}?mode=ro",
             uri=True,
-            timeout=_CONNECTION_TIMEOUT_SECONDS,
+            timeout=_BACKUP_CONNECTION_TIMEOUT_SECONDS,
         )
-        destination = sqlite3.connect(str(destination_path), timeout=_CONNECTION_TIMEOUT_SECONDS)
+        destination = sqlite3.connect(str(destination_path), timeout=_BACKUP_CONNECTION_TIMEOUT_SECONDS)
         source.backup(
             destination,
             pages=_BACKUP_PAGES,

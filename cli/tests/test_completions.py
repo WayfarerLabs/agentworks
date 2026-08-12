@@ -954,6 +954,36 @@ def _installed_agw() -> Path:
     return Path(sys.executable).with_name(f"agw{suffix}")
 
 
+def _isolated_subprocess_env(home: Path) -> dict[str, str]:
+    """Build a subprocess environment isolated to `home`, verified by
+    construction rather than assumed from a POSIX-only test run.
+
+    `HOME` governs ``Path.home()`` on POSIX; `USERPROFILE` governs it on
+    Windows. `agw`'s own `CONFIG_DIR` is `Path.home() / ".config" /
+    "agentworks"` (computed at import time), so whichever variable the
+    platform actually reads is what determines which config and state
+    database a spawned `agw` touches. Setting only one leaves the other
+    platform silently reading the operator's real home and state (a live
+    Windows review of issue #503 caught exactly this: tests that isolated
+    only `HOME` spawned probes against the operator's real config and
+    database, and passed anyway for an unrelated reason). Resolving
+    `Path.home()` in a throwaway child with this exact environment, rather
+    than trusting the two assignments above, is what makes this correct by
+    construction: a future platform where neither variable governs fails
+    this assertion loudly instead of silently reading real state.
+    """
+    env = {**os.environ, "HOME": str(home), "USERPROFILE": str(home)}
+    resolved = subprocess.run(
+        [sys.executable, "-c", "from pathlib import Path; print(Path.home())"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert Path(resolved.stdout.strip()).resolve() == home.resolve()
+    return env
+
+
 def _assert_no_committed_writes(config_dir: Path, database_path: Path, before: dict[str, bytes]) -> None:
     """Assert a completion probe committed no writes to the state database.
 
@@ -1008,7 +1038,7 @@ def test_marker_probe_refuses_stale_database_for_every_dynamic_path_without_side
     connection.commit()
     connection.close()
     before = {entry.name: entry.read_bytes() for entry in config_dir.iterdir()}
-    env = {**os.environ, "HOME": str(tmp_path)}
+    env = _isolated_subprocess_env(tmp_path)
     env["PATH"] = f"{_installed_agw().parent}{os.pathsep}{env.get('PATH', '')}"
     command = f"agw --completion-probe {' '.join(command_path)} --names-only 2>/dev/null"
 
@@ -1034,7 +1064,7 @@ def test_shell_wrapped_probe_suppresses_config_warning_and_preserves_database_by
     database_path = config_dir / "agentworks.db"
     Database(database_path).close()
     before = {entry.name: entry.read_bytes() for entry in config_dir.iterdir()}
-    env = {**os.environ, "HOME": str(tmp_path)}
+    env = _isolated_subprocess_env(tmp_path)
     env["PATH"] = f"{_installed_agw().parent}{os.pathsep}{env.get('PATH', '')}"
 
     direct = subprocess.run(
@@ -1069,7 +1099,7 @@ def test_shell_wrapped_probe_consumes_empty_stdout_when_config_is_invalid(tmp_pa
     Database(config_dir / "agentworks.db").close()
     (config_dir / "config.toml").write_text("[database\n")
     before = {entry.name: entry.read_bytes() for entry in config_dir.iterdir()}
-    env = {**os.environ, "HOME": str(tmp_path)}
+    env = _isolated_subprocess_env(tmp_path)
     env["PATH"] = f"{_installed_agw().parent}{os.pathsep}{env.get('PATH', '')}"
 
     completed = subprocess.run(
@@ -1104,7 +1134,7 @@ def test_marker_free_legacy_probe_refuses_stale_database_without_side_effects(tm
     master, slave = pty.openpty()
     process = subprocess.Popen(
         [str(_installed_agw()), "vm", "list", "--names-only"],
-        env={**os.environ, "HOME": str(tmp_path)},
+        env=_isolated_subprocess_env(tmp_path),
         stdin=slave,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
