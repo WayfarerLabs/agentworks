@@ -64,6 +64,7 @@ Implementation uses these permanent names:
 | `website/static/lander-model.js`                       | Flight/run state, physics, contact, and constructive proofs     |
 | `website/static/lander-game.js`                        | DOM, clock/input, camera, focus, lifecycle, and rendering       |
 | `website/tools/derive_lander_routes.mjs`               | Independent, deterministic route-fixture derivation CLI         |
+| `website/tools/lander_clear_faces.mjs`                 | Independent scaffold-overlay and clear-face enumeration         |
 | `website/tests/fixtures/lander-route-geometry-v4.json` | Canonical site, template, and envelope geometry input           |
 | `website/tests/fixtures/lander-route-derived-v4.json`  | Reviewed independent schedules and witness output               |
 | `website/tests/lander-world.test.mjs`                  | Seeded world, window, site, and template vectors                |
