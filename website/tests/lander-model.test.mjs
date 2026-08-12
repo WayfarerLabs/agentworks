@@ -217,9 +217,9 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
     assert.equal(digest(unsignedDerived), outputDigest);
     assert.equal(derived.worldWitnesses.length, 81);
     assert.equal(derived.geometryDigest, "a5120d97782b73afb43cabae038412252f644656f41c0ab9e33f5413da9be7ca");
-    assert.equal(derived.physicsDigest, "34a7cb64a3457c4df028031968e7ef00fde56fc445db6af6ab89eb7b737f692e");
+    assert.equal(derived.physicsDigest, "e08f8260b723dd245db88de9ae2cdbac54bf9a97cb0bed1b6f170eda362c48dc");
     assert.equal(derived.worldDigest, "c666bb42918301f93386bb1373e92da662d333006d8684946fd80a10761d1e32");
-    assert.equal(derived.outputDigest, "628c3562ca9e71f704669a7ad1ed2462806f158f66bcc20c33c2f66a6d10b595");
+    assert.equal(derived.outputDigest, "a922372760f850386810fd6eb60f7aa807bac8b03ee5f0a2b1dec1968ee27b69");
     assert.equal(derived.routes.reduce((total, route) => total + route.combinationsEvaluated, 0), 36);
     assert.equal(derived.worldWitnesses.length * 2, 162);
     assert.equal(spawnSync(process.execPath, [tool, "--bogus"]).status, 2);
@@ -446,19 +446,19 @@ test("production route proof rejects a weak or inexact launch prefix before coll
 test("safe target top is inclusive and epsilon excess is unsafe", () => {
     const model = createRun({ seed: 1 });
     const target = model.retainedSites[0];
-    const previous = { x: target.center, y: target.platformTop + 0.5, vx: 2, vy: -3.2,
-        angle: -15, angularVelocity: 22 };
+    const previous = { x: target.center, y: target.platformTop + 0.5, vx: 2.2, vy: -3.6,
+        angle: -18, angularVelocity: 26 };
     const next = { ...previous, y: target.platformTop + 0.2 };
     assert.equal(classifySweptContact(model, previous, next).kind, "safe");
     const limits = [
-        ["vx", 2], ["vy", -3.2], ["angle", -15], ["angularVelocity", 22],
+        ["vx", 2.2], ["vy", -3.6], ["angle", -18], ["angularVelocity", 26],
     ];
     for (const [field, limit] of limits) {
         const excess = limit + Math.sign(limit) * 1e-9;
         assert.equal(classifySweptContact(model, { ...previous, [field]: excess },
             { ...next, [field]: excess }).kind, "unsafe", `${field} beyond the inclusive limit must crash`);
     }
-    for (const [field, value] of [["vx", -2], ["angle", 15], ["angularVelocity", -22]]) {
+    for (const [field, value] of [["vx", -2.2], ["angle", 18], ["angularVelocity", -26]]) {
         assert.equal(classifySweptContact(model, { ...previous, [field]: value },
             { ...next, [field]: value }).kind, "safe", `${field} mirrors through absolute value`);
     }

@@ -6,7 +6,7 @@
 <!-- cspell:ignore lerp Minkowski overspeed subinterval unhashed unmarginated -->
 <!-- cspell:ignore substep underframe unitless uint32 quantized quantization Warren -->
 
-- Status: Phase 4M implementation and automated review complete; operator browser acceptance pending
+- Status: Phase 4M implementation complete; final landing/antenna/sky polish in review
 - Date: 2026-08-12
 - FRD: `frd.md`, specifically R6-R9, R15-R24, and R25
 - HLA: `hla.md`, specifically D5 and D7
@@ -641,9 +641,10 @@ For such a chunk, use unsigned `q=c>>>0`, scene center `X=10*(c*50+10+30*sampleU
 `Y=90+110*sampleUnit(seed,10,q)`, and select a crescent when `sampleUnit(seed,11,q)<.5`, otherwise a
 ringed planet. A crescent is the two-arc outline
 `M X (Y-18) A18 18 0 1 0 X (Y+18) A13 18 0 0 1 X (Y-18)`. A planet is the closed circle
-`M (X-16) Y A16 16 0 1 0 (X+16) Y A16 16 0 1 0 (X-16) Y Z` plus the two quadratic ring strokes from
-`(X-28,Y)` through `(X,Y+12)` to `(X+28,Y)` and from `(X-27,Y-4)` through `(X,Y+8)` to `(X+27,Y-4)`.
-All landmark subpaths share the sole `#scene-landmarks` path.
+`M (X-16) Y A16 16 0 1 0 (X+16) Y A16 16 0 1 0 (X-16) Y Z` plus one complete closed elliptical ring
+`M (X-30) Y A30 10 0 1 0 (X+30) Y A30 10 0 1 0 (X-30) Y Z`. Partial quadratic ring strokes are
+forbidden because they read as an unfinished object rather than a recognizable ringed planet. All
+landmark subpaths share the sole `#scene-landmarks` path.
 
 `skyProjectionForCamera(seed,cameraLeft)` returns the exact five-index key plus those two path
 strings. Static no-JavaScript markup is its exact output for `STATIC_WORLD_SEED` and camera zero;
@@ -920,10 +921,10 @@ export const MAX_THRUST_VECTOR = 30.0;
 export const ANGULAR_ASSIST_DIFFERENTIAL = 0.12;
 export const ANGULAR_ASSIST_FULL_SPEED = 15.0;
 export const MAX_PLAYABLE_Y = 56.0;
-export const MAX_LANDING_HORIZONTAL_SPEED = 2.0;
-export const MAX_LANDING_DESCENT_SPEED = 3.2;
-export const MAX_LANDING_ANGLE = 15.0;
-export const MAX_LANDING_ANGULAR_SPEED = 22.0;
+export const MAX_LANDING_HORIZONTAL_SPEED = 2.2;
+export const MAX_LANDING_DESCENT_SPEED = 3.6;
+export const MAX_LANDING_ANGLE = 18.0;
+export const MAX_LANDING_ANGULAR_SPEED = 26.0;
 ```
 
 Let the raw post-input request be `(rawLeft,rawRight)`, `T=rawLeft+rawRight`, and
@@ -1094,14 +1095,14 @@ when both transformed feet are on its closed `9.6 m` span, neither hull side int
 `vy<=0`, and these inclusive limits hold at contact:
 
 ```text
-abs(vy) <= 3.2
-abs(vx) <= 2.0
-abs(normalizeDegrees(angle)) <= 15.0
-abs(angularVelocity) <= 22.0
+abs(vy) <= 3.6
+abs(vx) <= 2.2
+abs(normalizeDegrees(angle)) <= 18.0
+abs(angularVelocity) <= 26.0
 ```
 
-The boundary is inclusive and independently witnessed. A combined contact at `vx=2.0`, `vy=-3.2`,
-`angle=-15`, and `angularVelocity=22` is safe. Four otherwise identical contacts that increase
+The boundary is inclusive and independently witnessed. A combined contact at `vx=2.2`, `vy=-3.6`,
+`angle=-18`, and `angularVelocity=26` is safe. Four otherwise identical contacts that increase
 exactly one magnitude by `1e-9` are unsafe. Mirrored signs independently prove the absolute-value
 branches for horizontal speed, angle, and angular speed; any upward contact with `vy>0` remains
 unsafe regardless of its magnitude.
@@ -1274,7 +1275,7 @@ host, and prove all strict world/geometry values remain untouched.
 The reviewed output becomes `website/tests/fixtures/lander-route-derived-v4.json`. Phase 4M uses
 deriver v5, unchanged recipes v3, geometry v4, and derived schema/file v4. Regeneration
 independently applies section 5.3's six rail feet, variable lattice members, three column colliders,
-and section 9's unchanged landing limits to all 36 candidates and then all 162 selected
+and section 9's revised landing limits to all 36 candidates and then all 162 selected
 success/failure replays. The intended result is byte-identical schedules, schedule digests,
 demonstrated minima, success and one-quantum-failure vectors, and `combinationsEvaluated=4` values.
 That equality is evidence to establish, not an assumption: if any widened column changes a selected
@@ -1282,17 +1283,15 @@ collision or makes a recipe family infeasible, implementation stops with the exa
 translation, member, collision, candidate count, and replay witness. It must not weaken a column,
 collider, clearance knot, terrain, landing limit, or proof bound to retain an old route.
 
-`geometryDigest` must change because the geometry object replaces three thin pylons with three
-variable lattice columns. Every one of the 81 descriptor digests and `worldDigest` must change
-because each site gains six foot samples, variable member arrays, and new column colliders.
-`outputDigest` must consequently change. `physicsDigest` must remain exactly the Phase 4L value
-`34a7cb64a3457c4df028031968e7ef00fde56fc445db6af6ab89eb7b737f692e`, because none of its named
-physics constants or eight command rows changes. Initial fuel/reference, deployment timing,
-horizontal-bound removal, camera, cue, and sky are deliberately outside route derivation and do not
-enter any of the four digests. Implementation records the three new SHA-256 values in this section,
-the fixture, production `ROUTE_DIGESTS`, tests, and review evidence only after independent ordinary
-generation and verification agree. A missing expected change, an unexpected physics change, a
-route-literal change, or a partial digest update is a hard failure.
+The final geometry digest is `a5120d97782b73afb43cabae038412252f644656f41c0ab9e33f5413da9be7ca` and
+the world digest is `c666bb42918301f93386bb1373e92da662d333006d8684946fd80a10761d1e32`. The final
+tolerance bump changes only the physics digest to
+`e08f8260b723dd245db88de9ae2cdbac54bf9a97cb0bed1b6f170eda362c48dc` and the consequent output digest
+to `a922372760f850386810fd6eb60f7aa807bac8b03ee5f0a2b1dec1968ee27b69`. Ordinary generation and
+verification prove all 81 world descriptors and all nine route/failure records remain
+byte-identical; the antenna and sky projections are outside route derivation. A missing expected
+change, a geometry or world change, a route-literal change, or a partial digest update is a hard
+failure.
 
 Regenerate the complete v4 geometry and derived fixtures and compare production route/failure
 literals and digests in one atomic change. Tests project production arrays back to the two schemas,
@@ -1758,12 +1757,13 @@ byte-equivalent substituted coordinates.
 
 The battery outline is always visible. At exactly 200, 400, 600, and 800 ms, stages 1 through 4
 permanently fill the next bottom-to-top bar with `#d94a1e`, `#ff7a00`, `#ffe09a`, and `#7de2c5`
-respectively. At exactly 1,000 ms, stage 5 activates the mast/head and inner arch in `#d94a1e`; at
-1,200 ms, stage 6 adds the middle arch in `#ff7a00`; at 1,400 ms, stage 7 adds the outer arch in
-`#7de2c5` and marks the site powered. Earlier bars and arches remain, so count and nested symmetric
-shape communicate every stage without color. Once powered, attributes remain on that retained site.
-Reduced motion creates no intermediate projection and applies all four bars, three arches, powered
-state, and the `Agent Deployed!` banner atomically.
+respectively. The physical mast and antenna head are always visible in fixed graphite `#292b30`,
+independent of power state. At exactly 1,000 ms, stage 5 activates only the inner radiating arch in
+`#d94a1e`; at 1,200 ms, stage 6 adds the middle arch in `#ff7a00`; at 1,400 ms, stage 7 adds the
+outer arch in `#7de2c5` and marks the site powered. Earlier bars and arches remain, so count and
+nested symmetric shape communicate every stage without color. Once powered, attributes remain on
+that retained site. Reduced motion creates no intermediate projection and applies all four bars,
+three arches, powered state, and the `Agent Deployed!` banner atomically.
 
 Pure `agentInstalled(site)` returns `site.powered || (site.nocStage ?? 0)>=1`. The controller writes
 that result as `data-agent`. Set rendered SVG coordinates `B=structure.buildingLeft*10` and
@@ -1882,7 +1882,7 @@ human-reviewed rather than asserted. Every schedule includes an explicit final c
 | Controls lines        | 320 px and 400%-equivalent layouts; keyboard child then touch child                          | one client rect per line; every relevant `scrollWidth<=clientWidth`; Exit in row 2; no authored-copy assertion   |
 | Refuel ratio          | Base `n=1,2,3,4`; test minimum `8`; carried fuel `7,20,5,4`                                  | ratios `2,1.5,1.25,1.125`; awards `16,12,10,9`; reserves `23,32,15,13`; next ratios direct from `n+1`            |
 | Ratio precision       | Direct Number formula at bases `52,53,54,100`                                                | `1.0000000000000004`, `1.0000000000000002`, `1`, `1`; never below `1`, no bound or arbitrary precision           |
-| Safe inclusive edge   | Target top; `vx=2,vy=-3.2,angle=-15,omega=22`                                                | safe contact                                                                                                     |
+| Safe inclusive edge   | Target top; `vx=2.2,vy=-3.6,angle=-18,omega=26`                                              | safe contact                                                                                                     |
 | Unsafe epsilon        | Four contacts, each increasing exactly one boundary magnitude by `1e-9`                      | each is unsafe; mirrored absolute-value signs and positive-`vy` rejection are independently covered              |
 | Swept unsafe equality | Hull only grazes terrain/truss/column/NOC/mast between step endpoints                        | closed 0.02 m expansion detects it; no visual tunneling                                                          |
 | Target-top separation | Safe descent over deck center; then a separate exact tangential graze                        | descent uses true top crossing and can be safe; unresolved graze is unsafe                                       |
@@ -1949,25 +1949,25 @@ static/lander-model.js
 static/lander-game.js
 ```
 
-Phase 4M keeps the exact physics digest
-`34a7cb64a3457c4df028031968e7ef00fde56fc445db6af6ab89eb7b737f692e`. It requires new geometry, world,
-and output digests, but this design does not invent their values. Implementation must replace this
-sentence with the three independently generated literals after ordinary generation and verification
-agree, before implementation handoff. Missing literals, copied Phase 4L literals, or an altered
-physics literal stop the implementation with derivation evidence.
+Final ordinary generation and independent verification pin geometry
+`a5120d97782b73afb43cabae038412252f644656f41c0ab9e33f5413da9be7ca`, physics
+`e08f8260b723dd245db88de9ae2cdbac54bf9a97cb0bed1b6f170eda362c48dc`, world
+`c666bb42918301f93386bb1373e92da662d333006d8684946fd80a10761d1e32`, and output
+`a922372760f850386810fd6eb60f7aa807bac8b03ee5f0a2b1dec1968ee27b69`. Geometry/world and every route
+record remain byte-identical; the final tolerance bump changes physics/output only.
 
 | Layer                                                                   | Required coverage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `node --test website/tests/lander-world.test.mjs`                       | Independently reconstruct native minima and integer deck levels; the bounded strict-X terrain projection; two open render paths; 14 fixed truss members; exactly three lattice columns with six independent native feet, bounded levels, alternating braces, exact variable member counts, exact stroked colliders, and all aperture proofs; static/dynamic parity; and complete 81-witness regeneration. Pin exact geometry/world digests and mutation-kill any floor closure, foot/member/order/style drift, collider mismatch, or aperture diameter at or above `3.2 m`. World descendants remain exactly 75 at maximum.                                                                                                                                                                                                                                                                                |
-| `node --test website/tests/lander-model.test.mjs`                       | All-nine success and one-quantum exhaustion replays remain exact. Pin all four inclusive `2/3.2/15/22` limits and their epsilon failures, plus real ceiling/overspeed/terrain/structure collision while crossing arbitrary negative and positive X without failure. Exact vectors cover opening `fuel=15` and reference `30`, the three independently authored first-contact schedules and reserves, direct O(1) refuel ratios, uncapped carried-excess addition, checkpoint restore of fuel and reference twice, exact initial Retry to `15/30`, zero-fuel ballistic continuation, `.9 s` agent travel, unchanged `.3/1.4 s` stages, reduced-motion atomic projection, and hidden-time freeze. No assertion encodes authored prose.                                                                                                                                                                       |
+| `node --test website/tests/lander-model.test.mjs`                       | All-nine success and one-quantum exhaustion replays remain exact. Pin all four inclusive `2.2/3.6/18/26` limits and their epsilon failures, plus real ceiling/overspeed/terrain/structure collision while crossing arbitrary negative and positive X without failure. Exact vectors cover opening `fuel=15` and reference `30`, the three independently authored first-contact schedules and reserves, direct O(1) refuel ratios, uncapped carried-excess addition, checkpoint restore of fuel and reference twice, exact initial Retry to `15/30`, zero-fuel ballistic continuation, `.9 s` agent travel, unchanged `.3/1.4 s` stages, reduced-motion atomic projection, and hidden-time freeze. No assertion encodes authored prose.                                                                                                                                                                     |
 | `node --test website/tests/lander-phase4l.test.mjs`                     | Mutation-sensitive controller/DOM tests pin exactly two controls-line children in keyboard/touch order, Retry label-source and hint structure without asserting text, internal `RESTART` dispatch, crash focus stability, click/`r` teardown-render-focus order, shell focus with `preventScroll`, and no synthesized input. Existing outside-shell and native-button rejection coverage remains exact.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `node --test website/tests/lander-phase4m.test.mjs`                     | Mutation-sensitive controller/DOM tests pin five sky chunks, 20 stars, one or two deterministic landmarks in exactly two paths, static/dynamic descriptor equality, bounded reconciliation, `.24` parallax transforms, negative/positive camera following, bidirectional cue changes, pass/reverse/return, and no horizontal-bound failure. They also pin the exact opening half-gauge, post-award full reference without cap, `.9 s` deploy travel, unchanged refuel/power timing, hidden-time freeze, reduced-motion atomic projection, and structural copy/link/accessibility sources without embedding authored wording.                                                                                                                                                                                                                                                                               |
+| `node --test website/tests/lander-phase4m.test.mjs`                     | Mutation-sensitive controller/DOM tests pin five sky chunks, 20 stars, one or two deterministic landmarks in exactly two paths, the complete two-arc crescent and closed two-arc elliptical planetary ring, static/dynamic descriptor equality, bounded reconciliation, `.24` parallax transforms, negative/positive camera following, bidirectional cue changes, pass/reverse/return, and no horizontal-bound failure. They also pin the exact opening half-gauge, post-award full reference without cap, `.9 s` deploy travel, unchanged refuel/power timing, hidden-time freeze, reduced-motion atomic projection, and structural copy/link/accessibility sources without embedding authored wording.                                                                                                                                                                                                   |
 | Derivation CLI fixture verification                                     | Generate to a temporary output with v5 deriver, unchanged v3 recipes, geometry v4, and derived v4; review the canonical delta, delete the v3 pair, install the v4 pair, update all digests atomically, then run ordinary `--verify`. Generation and verification each evaluate exactly 4 combinations per template, 36 total, while 256/template and 2,304 total remain ceilings. All 162 selected replays pass; all nine route/failure literals must remain byte-identical or implementation stops with exact infeasibility evidence; all 81 world witnesses regenerate. Physics remains the pinned Phase 4L literal and the other exact digests match section 10.2's generated evidence.                                                                                                                                                                                                                 |
 | `python -m unittest discover -s website/tests -p 'test_*.py'`           | The validator pins one shared fragment, exact sky/site/stage/outcome/Retry/rail/controls/Exit parent and source order, exactly two sky paths, exactly two controls spans, native action label/hint sources, shortcut ARIA, direct fragment-free footer Lander destinations, equal nonempty footer `aria-label`/`title`, v4 fixture/schema names, and no obsolete regional or pylon fields. It validates structure and accessible-name sources, never authored title, heading, 404, controls, status, action-label, or hover wording. Exact artifact, DOM-budget, privacy, module-DAG, route uniqueness, recovery, and static/dynamic parity contracts remain.                                                                                                                                                                                                                                              |
 | Automated Chromium projection witness                                   | At 320 px, 400%-equivalent, touch landscape, and 60rem, prove the controls/rail fit, Retry derives its computed name from the visible label while excluding the hint, and crash/Retry focus behavior remains exact. Cross both `x=-5` and `x=101`, pass the target, reverse, and return; prove no horizontal failure, continuous camera projection, right/left/right cue changes, exact `.24` sky parallax, five chunks, 20 stars, one or two landmarks, stable two-path DOM, and exact reconstruction on return. Begin at `15/30` and half fill; after award prove exact uncapped reserve/reference and full fill. At exact zero prove the red border/background plus the `700ms` stepped infinite blink; reduced motion retains the static red warning. Time normal, reduced, and hidden deployment vectors, then restore the checkpoint twice and initial approach once with no duplicate service work. |
 | Pseudo-can computed-style and screenshot witness                        | For `getComputedStyle(stage,"::after")`, assert `width=20px`, `height=22px`, `pointer-events=none`, `image-rendering=pixelated`, transparent background color, exactly six gradient images, sizes `6px 2px,10px 6px,2px 4px,4px 8px,12px 14px,16px 18px`, positions `6px 2px,4px 0px,16px 10px,16px 8px,2px 6px,0px 4px`, `no-repeat` six times, and alternating normalized paints `rgb(217,74,30)`/`rgb(41,43,48)` in the pinned top-to-bottom order. At DPR 1 and an integer transfer center, take exact `20 by 22` CSS-pixel crops with refueling on and off: on-crop probes `(5,1)`, `(7,3)`, `(18,9)`, `(16,11)`, `(1,5)`, and `(3,7)` prove the six graphite/orange parts; `(0,0)` and `(19,21)` are byte-equal to the off-crop background, proving transparency. The crop visibly reads as one block can. No golden asset ships.                                                                    |
 | Human-authored copy review                                              | A reviewer compares the document title, headings, 404 explanation, controls, outcome/status, action labels, and visible shortcut hints with sections 4 and 13. This is deliberately human evidence; automated suites do not encode authored phrases, substrings, or blacklists.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| Manual Chrome and Edge pre-merge; Firefox and Safari/WebKit post-launch | Confirm untouched coarse/random terrain stays continuous beneath each elevated site; the shallow Warren truss and exactly three open lattice columns read as one integrated load-bearing structure from platform through NOC, with six honest native-terrain feet, no backing face, seam, floating foot, or vertical terrain artifact. Travel freely past and back across the target in both directions; inspect slower stars and occasional crescent/planet landmark without pop or gameplay effect. Confirm the exact current Lander title/heading, 404 explanation, footer hover/accessibility copy, direct `/lander/` navigation, half-full opening gauge, normal/reduced deployment timing, checkpoint Retry, and inclusive landing edges.                                                                                                                                                            |
+| Manual Chrome and Edge pre-merge; Firefox and Safari/WebKit post-launch | Confirm untouched coarse/random terrain stays continuous beneath each elevated site; the shallow Warren truss and exactly three open lattice columns read as one integrated load-bearing structure from platform through NOC, with six honest native-terrain feet, no backing face, seam, floating foot, or vertical terrain artifact. Travel freely past and back across the target in both directions; inspect slower stars, recognizable crescents, and a fully ringed planet without pop or gameplay effect. Confirm the fixed mast/head stay graphite while only signal arches gain color, plus the exact current Lander title/heading, 404 explanation, footer hover/accessibility copy, direct `/lander/` navigation, half-full opening gauge, normal/reduced deployment timing, checkpoint Retry, and inclusive landing edges.                                                                     |
 | Responsive, zoom, focus, and accessibility acceptance                   | At 320 CSS pixels, 400-percent zoom, touch landscape, and `60rem`: stage and rail remain normal-flow separated; gauge/outcome, crash/Retry, controls lines, and Exit do not overlap or overflow; buttons are at least `44 by 44`. A real accessibility-tree witness derives expected names from current visible label nodes, proves hint exclusion and shortcut ARIA, one live region, controls IDREF, and tab order shell then Exit or shell then Retry then Exit. Retry returns to shell, Exit to Start; no trap. Authored strings are reviewed by a human, not embedded in automation.                                                                                                                                                                                                                                                                                                                  |
 | Performance and longevity witness                                       | For each seed `11`, `39`, `41`, and `STATIC_WORLD_SEED`, generate and power 100 sequential sites with no generation error, more than nine eligibility checks, terrain ordering fault, or level outside `83/91/99`; the selection vectors below remain pinned. Keep exactly two terrain paths, at most three sites, eight fragments, 80 world descendants and exactly 75 at maximum, exactly two native action descendants, at most 51 projected terrain vertices, exactly five sky chunks represented by 20 stars and one or two landmarks in one group/two paths, and no retained sky history. Each site still owns one scaffold path despite variable lattice members. Refuel ratio, camera, and sky derivation remain bounded constant work; fixed timers, frame ceiling, lifecycle teardown, and bounded world history remain exact.                                                                   |
 | Permanent documentation and repository gates                            | `website/README.md` and browser checklist teach the changed actions, ordinary departure, tolerances, rail, accessibility, shared-fragment/no-JS behavior, and derivation workflow in lockstep. Focused suites, deterministic root/project builds, complete gates, file lint, locked-SDD, Rulesync drift, module-size report, and an exact intended-file diff pass. Permanent docs do not link to this SDD.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
@@ -2077,12 +2077,14 @@ that cannot produce `right/left/right` while passing and returning, cue visibili
 the target enters the viewport, or a mirrored cue with different geometry. They reject a sky speed
 other than `.24` of camera motion, a sky window other than five `50 m` chunks, a count other than
 four stars per chunk, a landmark cadence other than every fourth chunk, a landmark other than the
-seeded crescent/planet choice, a sky group/path count other than `1/2`, retained off-window sky
-history, nondeterministic regeneration, or any sky semantics, collision, network, or storage state.
-They reject terrain projection beyond the visible buffered interval, more than 51 strict-X vertices,
-or retained offscreen sites expanding that projection. They also reject agent travel other than
-`.9 s`, any change to `.3 s` refuel or `1.4 s` power, hidden-time advancement, or reduced motion
-that exposes an intermediate stage.
+seeded crescent/planet choice, an open or quadratic planet ring, a sky group/path count other than
+`1/2`, retained off-window sky history, nondeterministic regeneration, or any sky semantics,
+collision, network, or storage state. Battery/signal mutations reject a mast or antenna head that
+changes from fixed `#292b30` at any power stage while retaining the three established arch colors
+and timings. They reject terrain projection beyond the visible buffered interval, more than 51
+strict-X vertices, or retained offscreen sites expanding that projection. They also reject agent
+travel other than `.9 s`, any change to `.3 s` refuel or `1.4 s` power, hidden-time advancement, or
+reduced motion that exposes an intermediate stage.
 
 Input and physics mutations reject component-wise keyboard/pointer engine merging, mixed-input
 thrust above straight `1.44`, full-steer total other than `.8`, vector angle other than 30 degrees,
@@ -2107,7 +2109,7 @@ token, or queues a pointer-flight edge; a native click that fires twice after th
 Exit reaching a stage handler; and ordinary keyboard/vi/pointer/touch departure that discards or
 changes the first qualifying fixed step. They retain no passive damping, assist while coasting or
 steering, assist that changes total thrust/fuel, reversed/cosmetic-only gimbal, stale 8.4/70
-integration, or safe-contact limits other than exact `2/3.2/15/22`.
+integration, or safe-contact limits other than exact `2.2/3.6/18/26`.
 
 Retry mutations reject moving focus at crash time, any accessible name not derived from the visible
 label child, inclusion or hiding of the visible `r` hint, missing `aria-keyshortcuts="r"`, an

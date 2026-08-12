@@ -28,10 +28,10 @@ export const MAX_THRUST_VECTOR = 30;
 export const ANGULAR_ASSIST_DIFFERENTIAL = 0.12;
 export const ANGULAR_ASSIST_FULL_SPEED = 15;
 export const MAX_PLAYABLE_Y = 56;
-export const MAX_LANDING_HORIZONTAL_SPEED = 2;
-export const MAX_LANDING_DESCENT_SPEED = 3.2;
-export const MAX_LANDING_ANGLE = 15;
-export const MAX_LANDING_ANGULAR_SPEED = 22;
+export const MAX_LANDING_HORIZONTAL_SPEED = 2.2;
+export const MAX_LANDING_DESCENT_SPEED = 3.6;
+export const MAX_LANDING_ANGLE = 18;
+export const MAX_LANDING_ANGULAR_SPEED = 26;
 export const COLLISION_MARGIN = 0.02;
 
 export const FAILURE_STATUS = "Crashed!";
@@ -64,8 +64,8 @@ const FAILURE_LITERALS = [[8,8.000000000000018,-9.375629389,12.57275481],[8,8.00
 
 export const ROUTE_DIGESTS = Object.freeze({
     geometryDigest: "a5120d97782b73afb43cabae038412252f644656f41c0ab9e33f5413da9be7ca",
-    outputDigest: "628c3562ca9e71f704669a7ad1ed2462806f158f66bcc20c33c2f66a6d10b595",
-    physicsDigest: "34a7cb64a3457c4df028031968e7ef00fde56fc445db6af6ab89eb7b737f692e",
+    outputDigest: "a922372760f850386810fd6eb60f7aa807bac8b03ee5f0a2b1dec1968ee27b69",
+    physicsDigest: "e08f8260b723dd245db88de9ae2cdbac54bf9a97cb0bed1b6f170eda362c48dc",
     worldDigest: "c666bb42918301f93386bb1373e92da662d333006d8684946fd80a10761d1e32",
 });
 

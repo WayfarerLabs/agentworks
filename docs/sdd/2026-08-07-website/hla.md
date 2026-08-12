@@ -317,7 +317,9 @@ fixed number of nearby chunks and sites, so arbitrarily long or reversing explor
 unbounded DOM or terrain history. A separate decorative sky projection derives bounded deterministic
 stars and occasional celestial landmarks from the same run seed and nearby sky chunks. It translates
 at a slower camera rate for parallax, owns no collision or semantic state, and retains a fixed node
-count.
+count. Decorative landmarks remain recognizable astronomical silhouettes: a crescent moon or one
+circular planet with a complete elliptical ring, never disconnected strokes that resemble an
+unfinished object.
 
 Each deterministic site retains the same coarse, irregular terrain generator beneath its complete
 footprint; it does not replace a site span with a flat shelf. The world derives a sufficiently high

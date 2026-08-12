@@ -91,8 +91,10 @@ projection evidence, not the qualitative or cross-engine signoff below.
       left and right without clamping or changing mission progress.
 - [ ] Watch the stars and occasional crescent or ringed planet while traversing and reversing. They
       move with the landscape at visibly slower 24-percent parallax, never affect collision or
-      accessibility, and reconstruct without a pop when returning. Inspect the SVG and confirm one
-      sky group with exactly two paths, twenty stars, and one or two landmarks in its five chunks.
+      accessibility, and reconstruct without a pop when returning. Confirm crescents read as moons,
+      every planet has one complete closed elliptical ring, and there are no disconnected partial
+      ring strokes. Inspect the SVG and confirm one sky group with exactly two paths, twenty stars,
+      and one or two landmarks in its five chunks.
 - [ ] Start a fresh run and confirm the visual gauge is exactly half full for the 15/30 opening
       reserve/reference. After service, confirm carried reserve is uncapped and becomes the full
       reference. Time 0.9-second agent travel separately from the unchanged 0.3-second refuel and
@@ -128,7 +130,7 @@ projection evidence, not the qualitative or cross-engine signoff below.
 - [ ] Perform a short primary tap whose browser-generated `lostpointercapture` fires synchronously.
       Confirm thrust remains active through 139.999 ms, ends once at 140 ms, and cancel/blur/hide
       tears it down immediately. Repeat with a reused browser pointer ID.
-- [ ] Land exactly at the inclusive 2.0 m/s horizontal, 3.2 m/s descent, 15 degree tilt, and 22
+- [ ] Land exactly at the inclusive 2.2 m/s horizontal, 3.6 m/s descent, 18 degree tilt, and 26
       degree/s rotation limits; increase each independently and confirm a crash.
 - [ ] Hide and restore the tab during flight, arrow blink, service, launch, and crash. Hidden time
       advances none of them, input and pointer capture clear, and the first visible frame only
@@ -415,7 +417,8 @@ new run records the refined source.
       crosses the surface, and enters the west operations-center door.
 - [ ] Power proceeds vertically through four sharp-cornered battery bars at 200 ms intervals, then
       through three bilaterally symmetric signal arches at 1,000, 1,200, and 1,400 ms. There is no
-      battery terminal, nub, rounded battery corner, or duplicate payoff.
+      battery terminal, nub, rounded battery corner, or duplicate payoff. The fixed mast and antenna
+      head stay graphite before, during, and after power-up; only the radiating arches gain color.
 - [ ] At power completion, the sole live status presents the reviewed deployment copy; the matching
       banner remains centered over the scene at every width without overlapping the complete left
       fuel overlay. The lander, mission clock, pose, and fuel then remain unchanged indefinitely

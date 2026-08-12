@@ -19,8 +19,8 @@ import { FakeElement, controllerClasses, controllerFixture } from "./lander-test
 const ROOT = new URL("../", import.meta.url);
 const EXPECTED_DIGESTS = Object.freeze({
     geometryDigest: "a5120d97782b73afb43cabae038412252f644656f41c0ab9e33f5413da9be7ca",
-    outputDigest: "628c3562ca9e71f704669a7ad1ed2462806f158f66bcc20c33c2f66a6d10b595",
-    physicsDigest: "34a7cb64a3457c4df028031968e7ef00fde56fc445db6af6ab89eb7b737f692e",
+    outputDigest: "a922372760f850386810fd6eb60f7aa807bac8b03ee5f0a2b1dec1968ee27b69",
+    physicsDigest: "e08f8260b723dd245db88de9ae2cdbac54bf9a97cb0bed1b6f170eda362c48dc",
     worldDigest: "c666bb42918301f93386bb1373e92da662d333006d8684946fd80a10761d1e32",
 });
 
@@ -67,7 +67,7 @@ test("Phase 4K pins the exact landing profile, digests, and sole changed route",
         MAX_LANDING_DESCENT_SPEED,
         MAX_LANDING_ANGLE,
         MAX_LANDING_ANGULAR_SPEED,
-    ], [2, 3.2, 15, 22]);
+    ], [2.2, 3.6, 18, 26]);
     assert.deepEqual(ROUTE_DIGESTS, EXPECTED_DIGESTS);
     const route = REFERENCE_TEMPLATES.find(({ templateId }) => templateId === "route-93-flat");
     assert.deepEqual(route.runs.slice(24), [[3, 46], [4, 1], [3, 36], [4, 49]]);

@@ -390,8 +390,8 @@ merged and settled on `main`. The first slice must not build toward them specula
   centered pose and carried post-award fuel, without duplicating its can or fuel; retry before the
   first deployment restores the initial approach, while Exit and reload create a fresh run. Boundary
   tests pin the modestly relaxed safe-contact envelope, revised upward just enough to accept
-  near-miss arrivals at `2.0` model units per second horizontal speed, `3.2` model units per second
-  descent, `15` degrees tilt, and `22` degrees per second angular speed. Browser handling proves
+  near-miss arrivals at `2.2` model units per second horizontal speed, `3.6` model units per second
+  descent, `18` degrees tilt, and `26` degrees per second angular speed. Browser handling proves
   that collective-plus-turn vectoring stays within the LLD's materially lower axial ceiling,
   turn-only input does not overcome gravity, neutral collective counters residual rotation through
   the deterministic assist, and engine-off vehicle motion plus crash debris remain undamped and
@@ -425,14 +425,17 @@ merged and settled on `main`. The first slice must not build toward them specula
   building contact, the vertical ceiling, or the excessive-speed vehicle-safety classification can
   enter the crash sequence. Fixed-seed browser evidence shows stars moving with the world at the
   pinned parallax rate and deterministic occasional celestial landmarks entering and leaving a
-  bounded sky projection without extra requests or accessibility nodes. Every retained site renders
-  exactly three independently reconstructed open lattice support columns whose member pixels lie
-  inside their fixture-derived colliders, whose feet meet native terrain, and whose visual rhythm
-  joins the platform truss. Normal motion completes the agent's pre-NOC travel in half its Phase 4L
-  duration, reduced motion remains atomic, and refuel plus power-stage timings are byte-for-byte
-  unchanged. The built footer resolves directly to `/lander/`, its live accessible name and hover
-  text agree, and the reviewed Lander/404 copy uses the shortened operator wording without adding a
-  fragment redirect or a second game route.
+  bounded sky projection without extra requests or accessibility nodes. Crescent moons remain closed
+  astronomical silhouettes, and every planet has one complete elliptical ring rather than
+  disconnected partial strokes. The NOC's physical mast and antenna head remain black at every power
+  stage while only the radiating signal arches gain their established colors. Every retained site
+  renders exactly three independently reconstructed open lattice support columns whose member pixels
+  lie inside their fixture-derived colliders, whose feet meet native terrain, and whose visual
+  rhythm joins the platform truss. Normal motion completes the agent's pre-NOC travel in half its
+  Phase 4L duration, reduced motion remains atomic, and refuel plus power-stage timings are
+  byte-for-byte unchanged. The built footer resolves directly to `/lander/`, its live accessible
+  name and hover text agree, and the reviewed Lander/404 copy uses the shortened operator wording
+  without adding a fragment redirect or a second game route.
 
 ## Settled implementation rulings
 

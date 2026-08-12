@@ -972,6 +972,32 @@ is an honest integrated lattice column; deployment travel alone is twice as fast
 direct routing are correct; derivation and fixtures remain independent and deterministic; and the
 immutable result is review-clean, browser-accepted, and merge-ready.
 
+## Phase 4N: final tolerance and celestial polish
+
+- [ ] Raise the inclusive safe-contact limits by the same increments as the preceding tolerance
+      adjustment: horizontal speed `2.0→2.2`, descent `3.2→3.6`, tilt `15→18`, and angular speed
+      `22→26`. Regenerate the v4 derived fixture through the ordinary v5 tool and stop if any route,
+      world descriptor, geometry digest, or proof cardinality changes.
+- [ ] Keep the NOC mast and antenna head fixed graphite in every power state while preserving the
+      existing three signal-arch colors, sequence, and timing. Replace the planet's disconnected
+      partial ring strokes with one complete closed ellipse and retain the existing deterministic
+      crescent, sky cadence, parallax, DOM bound, and non-semantic projection.
+- [ ] Add mutation-sensitive model, CSS, and sky-geometry coverage; update the permanent README and
+      manual browser checklist; and reconcile the FRD, HLA, and LLD without changing historical
+      completed-phase evidence.
+- [ ] Run ordinary generation/verification, focused and full website suites, deterministic builds,
+      repository gates, code review, fresh-eyes browser review, and update PR #486 only after the
+      immutable head is clean.
+
+Operator evidence (2026-08-12): after approving the Phase 4M parallax sky, the operator requested
+one more tolerance increase, a permanently black fixed NOC antenna with unchanged radiating signal,
+and a complete realistic-looking ring around the occasional planet.
+
+Definition of done: the four inclusive touchdown boundaries are exact and independently fail at one
+epsilon beyond; canonical geometry/world/routes remain unchanged while physics/output regenerate;
+the fixed antenna never inherits signal color; the planet has one complete closed ring and no
+partial quadratic artifact; and the reviewed build is deterministic and gate-clean.
+
 ## Phase 5: CI and default Pages deployment
 
 - [x] Delegate workflow implementation to an `agentworks-dev` subagent with ownership of the Pages

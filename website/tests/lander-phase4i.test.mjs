@@ -301,6 +301,8 @@ test("independent static and dynamic site geometry stays inside exact colliders 
         assert.equal(startX + endX, 2 * controlX); assert.equal(startY, endY);
     });
     const css = (await readFile(join(ROOT, "static/lander.css"), "utf8")).replace(/\s+/g, " ");
+    assert.match(css, /\.antenna-mast, \.antenna-head \{ stroke: #292b30; \}/);
+    assert.doesNotMatch(css, /data-noc-stage[^}]+\.antenna-(?:mast|head)/);
     assert.match(css, /\.antenna-signal \{ opacity: 0; \}/);
     assert.match(css, /data-noc-stage="5"[\s\S]*?\.antenna-signal-1 \{ stroke: #d94a1e; opacity: 1; \}/);
     assert.match(css, /data-noc-stage="6"[\s\S]*?\.antenna-signal-2 \{ stroke: #ff7a00; opacity: 1; \}/);

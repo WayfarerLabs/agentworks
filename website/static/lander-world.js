@@ -454,8 +454,7 @@ export function skyProjectionForCamera(seed, cameraLeft) {
             landmarks.push(`M${x} ${y - 18}A18 18 0 1 0 ${x} ${y + 18}A13 18 0 0 1 ${x} ${y - 18}`);
         } else {
             landmarks.push(`M${x - 16} ${y}A16 16 0 1 0 ${x + 16} ${y}A16 16 0 1 0 ${x - 16} ${y}Z` +
-                `M${x - 28} ${y}Q${x} ${y + 12} ${x + 28} ${y}` +
-                `M${x - 27} ${y - 4}Q${x} ${y + 8} ${x + 27} ${y - 4}`);
+                `M${x - 30} ${y}A30 10 0 1 0 ${x + 30} ${y}A30 10 0 1 0 ${x - 30} ${y}Z`);
         }
     }
     return freeze({ key, chunks, starsPath: stars.join(""), landmarksPath: landmarks.join("") });

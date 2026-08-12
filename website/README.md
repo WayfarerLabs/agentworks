@@ -83,8 +83,8 @@ Right/L steer. Steered thrust is deliberately vectored by up to 30 degrees and u
 forward thrust than straight collective. A powered neutral collective redistributes thrust between
 the two engines to arrest rotation without adding drag or changing fuel use. Pointer and touch input
 use the same bounded mixer: press for collective, drag horizontally to steer, and a short tap
-retains a 140 ms pulse. Safe landing limits are inclusive at 2.0 m/s horizontal speed, 3.2 m/s
-descent, 15 degrees of tilt, and 22 degrees/s rotation.
+retains a 140 ms pulse. Safe landing limits are inclusive at 2.2 m/s horizontal speed, 3.6 m/s
+descent, 18 degrees of tilt, and 26 degrees/s rotation.
 
 Terrain is deterministic per run, sampled every 10 m from four visibly different motifs, and remains
 native beneath every site. One strict-X terrain authority projects as one closed fill without a
@@ -95,8 +95,9 @@ right edge. Three one-metre, two-rail lattice columns extend from its underside 
 interpolated native-terrain feet. Their ties and alternating braces use the truss member style.
 Exact closed colliders cover the truss and each complete column; the NOC begins at the deck
 underside. The NOC battery fills four colored bars bottom-to-top, then three symmetric signal arches
-power outward. These shapes, fills, and outlines preserve their meaning without relying on color
-alone.
+power outward; its fixed mast and antenna head remain graphite at every stage. The parallax sky uses
+recognizable crescent moons and circular planets with complete elliptical rings. These shapes,
+fills, and outlines preserve their meaning without relying on color alone.
 
 Flight has no horizontal world edge: the lander can pass a target or explore in either direction
 until it collides or crosses the vertical ceiling. The camera follows both directions with a stable

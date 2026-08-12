@@ -182,8 +182,11 @@
     stroke-width: 3;
 }
 
-.lander-site:is([data-noc-stage="5"], [data-noc-stage="6"], [data-noc-stage="7"]) .antenna-mast,
-.lander-site:is([data-noc-stage="5"], [data-noc-stage="6"], [data-noc-stage="7"]) .antenna-head,
+.antenna-mast,
+.antenna-head {
+    stroke: #292b30;
+}
+
 .lander-site:is([data-noc-stage="5"], [data-noc-stage="6"], [data-noc-stage="7"]) .antenna-signal-1 {
     stroke: #d94a1e;
     opacity: 1;

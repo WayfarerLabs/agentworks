@@ -113,6 +113,10 @@ test("camera, bidirectional target cue, and deterministic bounded sky cover both
             assert.ok(count >= 1 && count <= 2);
         }
     }
+    const realisticLandmarks = skyProjectionForCamera(1, -200).landmarksPath;
+    assert.match(realisticLandmarks,
+        /A16 16 0 1 0 [^A]+A16 16 0 1 0 [^Z]+ZM[^A]+A30 10 0 1 0 [^A]+A30 10 0 1 0 [^Z]+Z/);
+    assert.doesNotMatch(realisticLandmarks, /Q/);
     assert.deepEqual(skyProjectionForCamera(STATIC_WORLD_SEED, 0), skyProjectionForCamera(STATIC_WORLD_SEED, 0));
 });
 
