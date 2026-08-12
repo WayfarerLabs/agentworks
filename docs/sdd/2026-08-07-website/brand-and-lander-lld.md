@@ -555,7 +555,7 @@ truss by `.1 m`, and has no invented common foundation. Platform, truss, and col
 overlap but never reach the landing face.
 
 Before columns subdivide it, every complete Warren-truss opening fits inside `3.1 by .75 m`, whose
-diameter is `sqrt(10.1725)=3.189435684729195 m < 3.2 m`; either end half-opening fits inside
+diameter is `sqrt(10.1725)=3.1894356867634124 m < 3.2 m`; either end half-opening fits inside
 `1.55 by .75 m`, whose diameter is `1.7219186970537043 m`. A lattice bay fits inside `1 by .8 m`,
 whose diameter is `sqrt(1.64)=1.2806248474865698 m`. Because native samples are at least `10 m`
 apart and clamped to `[.5,7.5]`, the terrain height can change by at most `.7 m` across one column
@@ -571,7 +571,7 @@ variable column members, and the native terrain surface across each column; spli
 intersection; and enumerates each bounded connected clear face inside the truss/column collider
 union. Every face must fit within one of the three raw centerline boxes above. It records the actual
 maximum face's axis-aligned envelope width and height plus their `hypot` diameter, and proves that
-diameter is no greater than `3.189435684729195 m`. Column bay count and terrain feet may change the
+diameter is no greater than `3.1894356867634124 m`. Column bay count and terrain feet may change the
 face inventory, so neither production, fixtures, nor tests assign a fixed full/half-face count.
 
 Static markup and dynamic rendering use byte-equivalent path/member attributes; model polygons,
@@ -1223,7 +1223,7 @@ width, thickness, `2.4 m` clearance, exact deck levels `[8.3,9.1,9.9]`, `7.0 m` 
 roof offset, `0.5 by 3.2 m` mast, `0.2 m` member width, butt cap, and round join. Its `truss` object
 pins `span=18.6`, `bayCount=12`, `bayWidth=1.55`, `bayHeight=.75`, `chordCount=2`,
 `diagonalsPerBay=1`, `alternation="top-left-to-bottom-right-first"`, the conservative raw clear-face
-maximum `width=3.1`, `height=.75`, and `diameter=3.189435684729195`, and collision envelope
+maximum `width=3.1`, `height=.75`, and `diameter=3.1894356867634124`, and collision envelope
 `[-4.9,13.9] x [-1.2,-.25]`. Its sibling `supportColumns` object pins count `3`, rail-pair offsets
 `[[0,1],[8.8,9.8],[17.6,18.6]]`, rail/tie/brace width `.2`, maximum bay height `.8`, first-brace
 alternation `"top-left-to-bottom-right-first"`, independently interpolated rail feet, bottom-tie
@@ -1850,8 +1850,8 @@ human-reviewed rather than asserted. Every schedule includes an explicit final c
 | Structure parity      | Static and dynamic site with platform top `p`                                                | one 18.6 m path; 14 fixed truss members plus exactly three bounded variable lattice columns                      |
 | Truss envelope        | Relative chords `[-4.8,13.8] x [-1.1,-.35]`, member width `.2 m`                             | collider `[-4.9,13.9] x [-1.2,-.25]`; deck/NOC overlap; top remains `.25 m` below landing face                   |
 | Column envelopes      | rail pairs `0/1,8.8/9.8,17.6/18.6`; six native feet; top `p-.35`                             | each collider is the exact stroked axis-aligned box through its lower foot; all members contained and joined     |
-| Aperture bounds       | Raw truss, `.8 m` lattice bays, and the native-slope wedge                                   | diameters `3.189435684729195`, `1.2806248474865698`, and at most `1.2206555615733703`, all below hull `3.2`      |
-| Connected clear face  | Every independently split face for each pinned site descriptor                               | actual maximum axis-aligned envelope equals fixture fields; `hypot(width,height)<=3.189435684729195`             |
+| Aperture bounds       | Raw truss, `.8 m` lattice bays, and the native-slope wedge                                   | diameters `3.1894356867634124`, `1.2806248474865698`, and at most `1.2206555615733703`, all below hull `3.2`     |
+| Connected clear face  | Every independently split face for each pinned site descriptor                               | actual maximum axis-aligned envelope equals fixture fields; `hypot(width,height)<=3.1894356867634124`            |
 | Opening gauge         | Fresh run `fuel=15`, `fuelGaugeReference=30`                                                 | exact level `.5`, exact accessible reserve `15.0`; no cap or hidden extra fuel                                   |
 | Later gauge           | `fuel=37.5`, `fuelGaugeReference=50`, then checkpoint restore                                | level `.75`, level `ready`; restore reproduces both values and never caps fuel                                   |
 | Gauge contrast        | danger/caution/ready against `#20232a`; gauge level zero                                     | ratios `5.068/8.584/8.243`; graphite boundary plus colored inset remain visible with zero-height fill            |
