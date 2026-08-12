@@ -16,6 +16,7 @@ terminal's mouse-report byte stream. To verify by hand on a real terminal:
 
 from __future__ import annotations
 
+import io
 import re
 import sys
 
@@ -37,10 +38,20 @@ def _plain(s: str) -> str:
 
 
 def _tty(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make both captured streams report as terminals with color allowed."""
+    """Turn the color gate on so these tests exercise the palette.
+
+    Stating the condition rather than faking a terminal: patching
+    ``isatty`` binds to whichever object ``sys.stdout`` names at patch
+    time, while the gate reads the stream at emit time and pytest's
+    capture replaces it, so the two can disagree (issue #495). The gate's
+    own logic is covered by TestColorGate at the bottom of this file.
+    """
     monkeypatch.delenv("NO_COLOR", raising=False)
-    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
+    monkeypatch.setattr(TyperHandler, "_color_enabled", lambda self, stream: True)
+    # The echo implementation strips ANSI when it decides the destination
+    # is not a terminal, so the handler's gate is only half the condition.
+    # Patch the module typer.echo actually resolves (typer vendors click).
+    monkeypatch.setattr(sys.modules[typer.echo.__module__], "resolve_color_default", lambda color=None: True)
 
 
 # --- Color on a TTY: each colorable role carries its palette entry --------
@@ -239,3 +250,40 @@ def test_confirm_emits_no_escape_under_non_interactive_even_on_a_tty(
         assert capsys.readouterr().out == ""
     finally:
         output.set_non_interactive(False)
+
+
+class TestColorGate:
+    """`TyperHandler._color_enabled` decides colorization; test it directly
+    rather than through captured output, so the decision is not entangled
+    with pytest's stream replacement.
+
+    Every patch targets `agentworks.cli._typer_output`, not `agentworks.output`:
+    the module imported `non_interactive` into its own binding, so patching the
+    definition site leaves the gate reading the real ambient value."""
+
+    @staticmethod
+    def _stream(*, is_a_tty: bool) -> io.StringIO:
+        stream = io.StringIO()
+        stream.isatty = lambda: is_a_tty  # type: ignore[method-assign]
+        return stream
+
+    def test_color_is_enabled_on_a_terminal(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.setattr("agentworks.cli._typer_output.non_interactive", lambda: False)
+        assert TyperHandler()._color_enabled(self._stream(is_a_tty=True)) is True
+
+    def test_color_is_disabled_off_a_terminal(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.setattr("agentworks.cli._typer_output.non_interactive", lambda: False)
+        assert TyperHandler()._color_enabled(self._stream(is_a_tty=False)) is False
+
+    @pytest.mark.parametrize("value", ["1", "", "anything"])
+    def test_no_color_disables_color_by_presence(self, monkeypatch: pytest.MonkeyPatch, value: str) -> None:
+        monkeypatch.setenv("NO_COLOR", value)
+        monkeypatch.setattr("agentworks.cli._typer_output.non_interactive", lambda: False)
+        assert TyperHandler()._color_enabled(self._stream(is_a_tty=True)) is False
+
+    def test_non_interactive_disables_color(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.setattr("agentworks.cli._typer_output.non_interactive", lambda: True)
+        assert TyperHandler()._color_enabled(self._stream(is_a_tty=True)) is False
