@@ -331,6 +331,7 @@ class Phase4PBrowserTests(RepositoryFixture):
             with self.subTest(width=width):
                 self.assertNotIn("error", result, result)
                 self.assertEqual(result["layoutWidth"], width)
+                expected_gauge_height = 112 if width == 960 else 36
                 for foot in result["opening"]["visibleFeet"]:
                     self.assertTrue(foot["terrainVertex"])
                     self.assertTrue(foot["inside"])
@@ -369,6 +370,9 @@ class Phase4PBrowserTests(RepositoryFixture):
                     for name in ("cue", "hud", "lander", "action"):
                         self.assertGreater(witness["geometry"][name]["width"], 0)
                         self.assertGreater(witness["geometry"][name]["height"], 0)
+                    self.assertAlmostEqual(
+                        witness["geometry"]["hud"]["height"], expected_gauge_height
+                    )
                     for pair in witness["geometry"]["overlaps"]:
                         self.assertFalse(pair["overlaps"], {"witness": witness["name"], **pair})
                     self.assertTrue(witness["stageRailSeparated"])

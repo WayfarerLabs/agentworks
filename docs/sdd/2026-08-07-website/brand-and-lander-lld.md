@@ -6,7 +6,7 @@
 <!-- cspell:ignore lerp Minkowski overspeed subinterval unhashed unmarginated -->
 <!-- cspell:ignore smootherstep substep underframe unitless uint32 quantized quantization Warren -->
 
-- Status: Phase 4P broad-relief detailed design ready for independent review
+- Status: Phase 4P implementation review in progress
 - Date: 2026-08-12
 - FRD: `frd.md`, specifically R6-R9 and R15-R26
 - HLA: `hla.md`, specifically D5 and D7
@@ -1714,14 +1714,18 @@ signals; none is an accessible semantic meter.
 
 When visible, `#lander-fuel` is a pointer-transparent block positioned inside `#lander-scene-stage`
 at `left:clamp(0.5rem,2vw,1rem)` and `top:clamp(0.5rem,2vw,1rem)`. The track is exactly `1rem` wide
-by `7rem` tall with `box-sizing:border-box`, a three-pixel graphite outer border, dark `#20232a`
-background, square corners, the exact `inset 0 0 0 3px var(--fuel-level-color)` indicator, and the
-pinned outer block shadow. Its child occupies the inner track, uses
-`background:var(--fuel-level-color)`, and uses `transform:scaleY(var(--fuel-gauge-level))` with
-bottom-center origin. The label and value span remain in the accessibility tree through
-`.visually-hidden`; no CSS rule may use `display:none`, `visibility:hidden`, zero font size, or
-`aria-hidden` on either. CSS must select `#lander-fuel:not([hidden])`, preserve the global
-`[hidden]` authority, and avoid intercepting scene input.
+and normally `7rem` tall. At `max-width:32rem`, its height is exactly `clamp(2.25rem,11.25vw,7rem)`,
+preserving the complete gauge while preventing overlap with the cue, lander, or rail; the reviewed
+320 CSS pixel and 400-percent-equivalent projection is `36px`, while the 960 CSS pixel projection
+remains `112px` at the default 16px root size. The track uses `box-sizing:border-box`, a three-pixel
+graphite outer border, dark `#20232a` background, square corners, the exact
+`inset 0 0 0 3px var(--fuel-level-color)` indicator, and the pinned outer block shadow. Its child
+occupies the inner track, uses `background:var(--fuel-level-color)`, and uses
+`transform:scaleY(var(--fuel-gauge-level))` with bottom-center origin. The label and value span
+remain in the accessibility tree through `.visually-hidden`; no CSS rule may use `display:none`,
+`visibility:hidden`, zero font size, or `aria-hidden` on either. CSS must select
+`#lander-fuel:not([hidden])`, preserve the global `[hidden]` authority, and avoid intercepting scene
+input.
 
 For normal motion only, `data-refueling="true"` makes the sole `#lander-scene-stage::after`
 pseudo-element visible as a small blocky gas can. It contains no text and creates no DOM or world

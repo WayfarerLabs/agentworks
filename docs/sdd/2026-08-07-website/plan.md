@@ -1,6 +1,6 @@
 # Plan: The agentworks.build Website
 
-- Status: Phase 4P terrain-relief design in progress
+- Status: Phase 4P implementation review in progress
 - Date: 2026-08-07
 - Last revised: 2026-08-12
 - FRD: `frd.md`
@@ -1018,23 +1018,23 @@ behavior remains unchanged; and the immutable result is review-clean and gate-cl
 
 ## Phase 4P: broad lunar relief
 
-- [ ] Amend `brand-and-lander-lld.md` with one exact deterministic relief kernel, the normalized
+- [x] Amend `brand-and-lander-lld.md` with one exact deterministic relief kernel, the normalized
       `[0.1,0.6]` coordinate conversion, independently computable grade/grade-change/reversal
       limits, and exact static/runtime parity. Pin a coherent deck, route, ceiling, and
       vertical-projection design that keeps all sites reachable and the active vehicle visible; stop
       with an exact infeasibility witness rather than flattening terrain, weakening collision, or
       hiding relief in a presentation-only offset.
-- [ ] Independently review the amended FRD, HLA, plan, and LLD before implementation. Prove the
+- [x] Independently review the amended FRD, HLA, plan, and LLD before implementation. Prove the
       chosen design across canonical route worlds, representative low/high terrain witnesses, and
       four 100-site runs without changing physics or proof bounds merely to preserve old literals.
       In addition to sampled evidence, prove for every seed that bounded site selection terminates
       and that every allowed deck transition has a collision-safe, below-ceiling constructive route;
       otherwise define and surface the exact infeasibility outcome rather than retrying forever.
-- [ ] Implement the reviewed world/model/controller/static-scene contract through an
+- [x] Implement the reviewed world/model/controller/static-scene contract through an
       `agentworks-dev` delegation. Regenerate the geometry/world/output fixture evidence atomically,
       preserve one strict terrain authority for rendering/collision/support feet, and update
       permanent README/checklist guidance in the same change.
-- [ ] Add mutation-sensitive Node, Python, and real-browser witnesses for exact normalized bounds,
+- [x] Add mutation-sensitive Node, Python, and real-browser witnesses for exact normalized bounds,
       near-bound extrema, realistic grade/curvature/reversal limits, peak/canyon silhouettes,
       static/dynamic parity, support/collision alignment, route replay, camera visibility, bounded
       retention, responsive layout, reduced motion, privacy, and deterministic reconstruction.
