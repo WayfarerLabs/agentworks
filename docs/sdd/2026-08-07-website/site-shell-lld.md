@@ -34,6 +34,7 @@ A later onboarding phase replaces that notice through its own canonical contract
 | `website/static/site.css`            | Shared tokens, shell, document presentation, focus, and reflow              |
 | `website/static/lander.css`          | Shared Lander/404 scene and mission presentation                            |
 | `website/static/lander-model.js`     | Pure deterministic lander model                                             |
+| `website/static/lander-world.js`     | Pure seeded terrain, site, sky, and camera projection                       |
 | `website/static/lander-game.js`      | Page-agnostic game controller                                               |
 | `website/build.py`                   | Closed inputs, rendering, validation, manifest, and atomic installation     |
 | `website/site_content.py`            | Complete Markdown projection and safe HTML rendering                        |
@@ -54,6 +55,7 @@ lander/index.html
 security/index.html
 static/lander-game.js
 static/lander-model.js
+static/lander-world.js
 static/lander.css
 static/site.css
 ```
@@ -73,8 +75,11 @@ The Lander metadata contract is exact:
   `default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self';`
   `connect-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'`.
 
-Template and generated-document mutation tests pin every value and reject a missing, duplicated,
-relaxed, reordered, or route-mismatched metadata field.
+Template and generated-document mutation tests reject a missing, duplicated, reordered, empty, or
+route-mismatched metadata field; pin the canonical and restrictive CSP invariants; and compare
+generated authored values with their current live template, heading, and description sources. They
+do not copy the title, `h1`, or description wording into expectations. Human copy review compares
+those three values with the exact contract above.
 
 ## 3. Shared header contract
 
