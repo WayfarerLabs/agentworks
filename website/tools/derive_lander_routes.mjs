@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 
 import { maximumConnectedClearFace } from "./lander_clear_faces.mjs";
 
-const DERIVER_VERSION = "agw-lander-route-deriver/v5";
+const DERIVER_VERSION = "agw-lander-route-deriver/v6";
 const RECIPE_VERSION = "agw-lander-route-recipes/v3";
 const REPLAY_POSE_DECIMAL_PLACES = 9;
 export const MAX_RECIPE_COMBINATIONS = 256;
@@ -15,15 +15,11 @@ export const MAX_RECIPE_STEPS = 2880;
 const STEP_SECONDS = 1 / 120;
 const FUEL_QUANTUM = 0.05;
 const TERRAIN_SAMPLE_SPACING = 10;
+const RELIEF_SPAN = 320;
+const DECK_LEVEL = 116;
 const PLATFORM_WIDTH = 9.6;
 const PLATFORM_CLEARANCE = 2.4;
 const PLATFORM_THICKNESS = 0.35;
-const MOTIFS = Object.freeze([
-    Object.freeze([0, 2.4, -1.5, 1.8, -1.1, 0]),
-    Object.freeze([0, -2.1, -0.8, 2.2, 1, 0]),
-    Object.freeze([0, 0.9, 2.5, 0.6, -1.9, 0]),
-    Object.freeze([0, -1.4, 1.3, 2.4, -0.5, 0]),
-]);
 const WORLD_SEEDS = Object.freeze([11, 39, 41]);
 const WORLD_TRANSLATIONS = Object.freeze([
     Object.freeze({ originCenter: 36 }),
@@ -54,7 +50,8 @@ const CONSTANTS = Object.freeze({
 const EXPECTED_SITE_GEOMETRY = Object.freeze({
     member: { cap: "butt", join: "round", width: 0.2 },
     noc: { mastHeight: 3.2, mastWidth: 0.5, roofOffset: 7.2, width: 7 },
-    platform: { clearance: 2.4, deckTiers: [8.3, 9.1, 9.9], thickness: 0.35, width: 9.6 },
+    platform: { clearance: 2.4, deckDatum: [11.6], thickness: 0.35, width: 9.6 },
+    scaffold: { memberCount: { maximum: 281, minimum: 41 } },
     supportColumns: {
         alternation: "top-left-to-bottom-right-first",
         bayMaximum: { height: 0.8, width: 1 },
@@ -62,10 +59,23 @@ const EXPECTED_SITE_GEOMETRY = Object.freeze({
         collisionExpansion: 0.1,
         count: 3,
         feet: "independent-native-terrain-interpolation",
+        memberCount: { maximum: 89, minimum: 9 },
         railPairOffsets: [[0, 1], [8.8, 9.8], [17.6, 18.6]],
         railTieBraceWidth: 0.2,
-        terrainWedgeMaximum: { height: 0.7, width: 1 },
+        terrainWedgeMaximum: { height: 0.28125, width: 1 },
         top: "platform-bottom",
+    },
+    terrain: {
+        adjacentNormalizedGradeChangeMaximum: 0.0008985859292196934,
+        anchorStream: 13,
+        normalizedChordGradeMaximum: 0.00439453125,
+        normalizedRange: [0.1, 0.6],
+        sampleSpacing: 10,
+        smootherstep: "6*t^5-15*t^4+10*t^3",
+        span: 320,
+        warp: "t+b*(S(t)-t)",
+        warpStream: 14,
+        worldProjection: "64*h-29.2",
     },
     truss: {
         alternation: "top-left-to-bottom-right-first",
@@ -105,40 +115,10 @@ const RECIPE_PHASE_RANGES = new Map([
             [1,76],[0,259],[1,103],[0,497],[1,81],[2,16],[3,1],[1,53],[4,1],[0,486],[1,87]],
         35, [0,1], 51, [[4,46]],
     )],
-    [81, rangedAttitudeFamily(
-        [[1,90],[0,1],[1,20],[0,7],[2,15],[5,4],[3,44],[0,138],[2,21],[0,356],[2,30],[1,82],[0,255],
-            [1,80],[0,259],[1,103],[0,497],[1,79],[2,16],[1,53],[4,2],[0,486],[1,88]],
-        37, [0,1], 54, [[1,3],[2,59]],
-    )],
-    [84, rangedAttitudeFamily(
-        [[1,90],[0,1],[1,20],[0,7],[2,15],[5,4],[3,44],[0,138],[2,21],[0,356],[2,30],[1,82],[0,250],
-            [1,76],[0,259],[1,103],[0,500],[1,82],[2,15],[4,1],[1,53],[5,2],[0,486],[1,73]],
-        39, [0,1], 56, [[4,70]],
-    )],
-    [87, rangedAttitudeFamily(
-        [[1,90],[0,1],[1,20],[0,7],[4,15],[5,4],[3,44],[0,138],[2,21],[0,359],[2,27],[1,82],[0,250],
-            [1,78],[0,271],[1,101],[0,487],[1,81],[2,21],[1,45],[4,1],[0,480],[1,81]],
-        37, [0,1], 54, [[4,123]],
-    )],
-    [90, rangedAttitudeFamily(
-        [[1,90],[0,1],[1,20],[0,7],[2,15],[5,4],[3,44],[0,138],[2,21],[0,356],[2,28],[1,82],[0,250],
-            [1,76],[0,259],[1,103],[0,497],[1,81],[2,19],[4,1],[1,53],[4,1],[0,486],[1,81]],
-        37, [0,1], 54, [[4,62]],
-    )],
     [93, rangedAttitudeFamily(
         [[1,90],[0,1],[1,27],[0,7],[2,15],[5,4],[3,44],[0,160],[2,21],[0,352],[2,30],[1,82],[0,250],
             [1,76],[0,259],[1,100],[0,497],[1,81],[2,16],[5,1],[1,54],[4,2],[0,493],[1,81]],
         45, [4,1], 35, [[4,56]],
-    )],
-    [96, rangedAttitudeFamily(
-        [[1,90],[0,1],[1,20],[0,7],[2,15],[5,4],[3,44],[0,138],[2,21],[0,356],[2,26],[1,82],[0,250],
-            [1,77],[0,259],[1,100],[0,487],[1,82],[2,20],[4,5],[1,53],[4,1],[0,480],[1,79]],
-        46, [0,1], 57, [[4,123]],
-    )],
-    [99, rangedAttitudeFamily(
-        [[1,90],[0,1],[1,20],[0,7],[2,15],[5,4],[3,44],[0,141],[2,21],[0,359],[2,27],[1,85],[0,252],
-            [1,77],[0,251],[1,100],[0,487],[1,81],[2,20],[4,7],[1,53],[4,1],[0,480],[1,67]],
-        55, [0,1], 51, [[4,125]],
     )],
     [102, rangedAttitudeFamily(
         [[1,90],[0,1],[1,14],[0,7],[2,15],[5,4],[3,44],[0,138],[2,21],[0,356],[2,27],[1,82],[0,242],
@@ -196,53 +176,35 @@ function sampleUnit(seed, stream, index) {
         Math.imul((Number(index) + 1) >>> 0, 0x85ebca6b)) / 2 ** 32;
 }
 
-function positiveModulo(value, modulus) {
-    return ((value % modulus) + modulus) % modulus;
+function smootherstep(value) {
+    return value * value * value * (value * (value * 6 - 15) + 10);
 }
 
-function motifSelection(seed) {
-    return {
-        direction: sampleUnit(seed, 2, 1) < 0.5 ? 1 : 3,
-        offset: Math.floor(4 * sampleUnit(seed, 2, 0)),
-    };
+function terrainKernel(seed, x) {
+    const span = Math.floor(x / RELIEF_SPAN);
+    const local = (x - span * RELIEF_SPAN) / RELIEF_SPAN;
+    const leftAnchor = sampleUnit(seed, 13, span >>> 0);
+    const rightAnchor = sampleUnit(seed, 13, (span + 1) >>> 0);
+    const bias = sampleUnit(seed, 14, span >>> 0) - 0.5;
+    const warped = local + bias * (smootherstep(local) - local);
+    return 0.1 + 0.5 * (leftAnchor + (rightAnchor - leftAnchor) * smootherstep(warped));
 }
 
-function motifIndex(seed, chunkIndex) {
-    const selection = motifSelection(seed);
-    return positiveModulo(selection.offset + selection.direction * chunkIndex, 4);
+function terrainNormalizedSample(seed, sampleIndex) {
+    return terrainKernel(seed, sampleIndex * TERRAIN_SAMPLE_SPACING);
 }
 
-function terrainSample(seed, sampleIndex) {
-    const chunk = Math.floor(sampleIndex / 5); const local = sampleIndex - chunk * 5;
-    const boundary = (index) => 1.5 + 4.5 * sampleUnit(seed, 1, index);
-    if (local === 0) return boundary(chunk);
-    const base = boundary(chunk) + (boundary(chunk + 1) - boundary(chunk)) * (local / 5);
-    return Math.max(0.5, Math.min(7.5, base + MOTIFS[motifIndex(seed, chunk)][local]));
-}
-
-function terrainHeightAt(seed, x) {
+function terrainNormalizedHeightAt(seed, x) {
     const leftIndex = Math.floor(x / TERRAIN_SAMPLE_SPACING);
     const leftX = leftIndex * TERRAIN_SAMPLE_SPACING;
     const fraction = (x - leftX) / TERRAIN_SAMPLE_SPACING;
-    const left = terrainSample(seed, leftIndex);
-    const right = terrainSample(seed, leftIndex + 1);
+    const left = terrainNormalizedSample(seed, leftIndex);
+    const right = terrainNormalizedSample(seed, leftIndex + 1);
     return left + (right - left) * fraction;
 }
 
-function maximumNativeTerrain(seed, left, right) {
-    const xs = [left, right];
-    for (let index = Math.ceil(left / TERRAIN_SAMPLE_SPACING);
-        index * TERRAIN_SAMPLE_SPACING < right; index += 1) xs.push(index * TERRAIN_SAMPLE_SPACING);
-    return Math.max(...xs.map((x) => terrainHeightAt(seed, x)));
-}
-
-function interpolateKnots(knots, x) {
-    if (x <= knots[0][0]) return knots[0][1];
-    for (let index = 1; index < knots.length; index += 1) {
-        const left = knots[index - 1]; const right = knots[index];
-        if (x <= right[0]) return left[1] + (right[1] - left[1]) * (x - left[0]) / (right[0] - left[0]);
-    }
-    return knots.at(-1)[1];
+function terrainHeightAt(seed, x) {
+    return 64 * terrainNormalizedHeightAt(seed, x) - 29.2;
 }
 
 function step(pose, engines, fuel = Infinity) {
@@ -368,47 +330,25 @@ const WORLD_CACHE = new WeakMap();
 function constructWorld(geometry, trial) {
     const cached = WORLD_CACHE.get(geometry) ?? new Map();
     if (cached.has(trial)) return cached.get(trial);
-    const originLevel = geometry.deckDelta === 1.6 ? 83 : geometry.deckDelta === 0.8 ? 91 : 99;
-    const originTop = originLevel / 10;
-    const site = (center, top) => {
-        const left = center - PLATFORM_WIDTH / 2;
-        return {
-            center,
-            deckLevel: Math.round(top * 10),
-            minimumDeckTop: maximumNativeTerrain(trial.seed, left, left + 18.6) + PLATFORM_CLEARANCE,
-            top,
-        };
-    };
-    const origin = site(trial.originCenter, originTop);
-    const target = site(origin.center + geometry.centerDelta,
-        (originLevel + Math.round(geometry.deckDelta * 10)) / 10);
-    const originShelfLeft = origin.center - PLATFORM_WIDTH / 2;
-    const originShelfRight = origin.center + PLATFORM_WIDTH / 2 + 9;
-    const targetShelfLeft = target.center - PLATFORM_WIDTH / 2;
-    const targetShelfRight = target.center + PLATFORM_WIDTH / 2 + 9;
-    const firstIndex = Math.floor((originShelfLeft - 10) / TERRAIN_SAMPLE_SPACING);
-    const lastIndex = Math.ceil((targetShelfRight + 50) / TERRAIN_SAMPLE_SPACING);
+    if (geometry.deckDelta !== 0) throw new Error(`${geometry.templateId} must use a flat deck transition`);
+    const site = (center) => ({ center, deckLevel: DECK_LEVEL, top: DECK_LEVEL / 10 });
+    const origin = site(trial.originCenter);
+    const target = site(origin.center + geometry.centerDelta);
+    const terrainLeft = origin.center - PLATFORM_WIDTH / 2 - 10;
+    const terrainRight = target.center + PLATFORM_WIDTH / 2 + 9 + 50;
+    const firstIndex = Math.floor(terrainLeft / TERRAIN_SAMPLE_SPACING);
+    const lastIndex = Math.ceil(terrainRight / TERRAIN_SAMPLE_SPACING);
     const xs = new Set();
     for (let index = firstIndex; index <= lastIndex; index += 1) xs.add(index * TERRAIN_SAMPLE_SPACING);
+    xs.add(terrainLeft);
+    xs.add(terrainRight);
     for (const descriptor of [origin, target]) {
         const left = descriptor.center - PLATFORM_WIDTH / 2;
-        const right = left + 18.6;
         for (const offset of [0, 1, 8.8, 9.6, 9.8, 11.6, 17.6, 18.6]) xs.add(left + offset);
     }
-    const corridorSamples = [];
-    const vertices = [...xs].sort((a,b) => a-b).map((x) => {
-        const raw = terrainHeightAt(trial.seed, x);
-        if (x <= originShelfRight || x >= targetShelfLeft || x % TERRAIN_SAMPLE_SPACING !== 0) return [x, raw];
-        const index = x / TERRAIN_SAMPLE_SPACING;
-        const cap = origin.top + interpolateKnots(geometry.clearanceKnots, x - origin.center);
-        const reliefUnit = sampleUnit(trial.seed, 4, index >>> 0);
-        const y = raw > cap ? Math.max(0.5, cap - 0.15 * reliefUnit) : raw;
-        corridorSamples.push({ cap, index, motifIndex: motifIndex(trial.seed, Math.floor(index / 5)),
-            raw, reliefUnit, relieved: raw > cap, x, y });
-        return [x, y];
-    });
-    const world = { corridorSamples, geometry, origin,
-        originShelfLeft, originShelfRight, seed: trial.seed, target, targetShelfLeft, targetShelfRight, vertices };
+    const vertices = [...xs].filter((x) => x >= terrainLeft && x <= terrainRight)
+        .sort((a,b) => a-b).map((x) => [x, terrainHeightAt(trial.seed, x)]);
+    const world = { geometry, origin, seed: trial.seed, target, terrainLeft, terrainRight, vertices };
     cached.set(trial, world); WORLD_CACHE.set(geometry, cached);
     return world;
 }
@@ -455,7 +395,6 @@ function siteSolids(world) {
                 mast: { bottom: roof, left: buildingLeft + 3.25, right: buildingLeft + 3.75, top: roof + 3.2 },
                 noc: { bottom, left: buildingLeft, right: buildingLeft + 7, top: roof },
                 platform: { bottom, left, right, top },
-                minimumDeckTop: isOrigin ? world.origin.minimumDeckTop : world.target.minimumDeckTop,
                 supportColumns,
                 truss: { bottom: trussBottom - 0.1, left: left - 0.1,
                     right: buildingLeft + 7.1, top: trussTop + 0.1 },
@@ -528,38 +467,47 @@ function connectedClearFaceMaximum(site) {
     return maximum;
 }
 
+function terrainWitness(world) {
+    const normalizedVertices = world.vertices.map(([x]) => [x, terrainNormalizedHeightAt(world.seed, x)]);
+    const segmentGrades = normalizedVertices.slice(1).map((right, index) =>
+        (right[1] - normalizedVertices[index][1]) / (right[0] - normalizedVertices[index][0]));
+    const adjacentGradeChanges = segmentGrades.slice(1).map((grade, index) =>
+        Math.abs(grade - segmentGrades[index]) / (normalizedVertices[index + 1][0] - normalizedVertices[index][0]));
+    const signs = segmentGrades.map((grade) => Math.sign(grade)).filter((sign) => sign !== 0);
+    const reversalCount = signs.slice(1).filter((sign, index) => sign !== signs[index]).length;
+    const firstSpan = Math.floor(world.terrainLeft / RELIEF_SPAN);
+    const lastSpan = Math.floor(world.terrainRight / RELIEF_SPAN);
+    const spans = Array.from({ length: lastSpan - firstSpan + 1 }, (_, offset) => {
+        const span = firstSpan + offset;
+        return {
+            bias: sampleUnit(world.seed, 14, span >>> 0) - 0.5,
+            leftAnchor: sampleUnit(world.seed, 13, span >>> 0),
+            rightAnchor: sampleUnit(world.seed, 13, (span + 1) >>> 0),
+            span,
+        };
+    });
+    return { adjacentGradeChanges, normalizedVertices, reversalCount, segmentGrades, spans,
+        worldVertices: world.vertices };
+}
+
 function worldWitness(geometry, trial) {
     const world = constructWorld(geometry, trial);
-    const selection = motifSelection(world.seed);
-    const insertedSiteSamples = [world.origin, world.target].map((site) => {
-        const left = site.center - PLATFORM_WIDTH / 2;
-        return [left, left + 1, left + 8.8, left + 9.8, left + 17.6, left + 18.6]
-            .map((x) => [x, terrainHeightAt(world.seed, x)]);
-    });
     const descriptor = {
-        capRelief: 0.15,
-        corridorSamples: world.corridorSamples,
-        insertedSiteSamples,
-        motifSelection: {
-            direction: selection.direction,
-            indexes: Array.from({ length: 4 }, (_, index) => motifIndex(world.seed, index)),
-            offset: selection.offset,
-        },
         origin: world.origin,
         seed: world.seed,
         sites: siteSolids(world).map((site) => ({ ...site,
             clearApertures: {
                 actualMaximumConnectedFace: connectedClearFaceMaximum(site),
                 latticeBay: { diameter: Math.hypot(1, 0.8), height: 0.8, width: 1 },
-                terrainWedge: { diameter: Math.hypot(1, 0.7), height: 0.7, width: 1 },
+                terrainWedge: { diameter: Math.hypot(1, 0.28125), height: 0.28125, width: 1 },
                 truss: { ...EXPECTED_SITE_GEOMETRY.truss.clearApertureMaximum },
             },
             scaffoldMembers: scaffoldMembers(site),
         })),
         target: world.target,
         templateId: geometry.templateId,
-        terrainRange: [world.vertices[0][0], world.vertices.at(-1)[0]],
-        vertices: world.vertices,
+        terrain: terrainWitness(world),
+        terrainRange: [world.terrainLeft, world.terrainRight],
     };
     return { descriptor, digest: digest(descriptor) };
 }
@@ -837,6 +785,42 @@ function verifySelectedRoutes(routes, templates) {
     }
 }
 
+function verifyOpeningLanding() {
+    const expectedLastClear = {
+        angle: 0,
+        angularVelocity: 0,
+        vx: 0.8,
+        vy: -3.5680000000000396,
+        x: 33.8400000000006,
+        y: 11.60599999999987,
+    };
+    let pose = { angle: 0, angularVelocity: 0, vx: 0.8, vy: -0.4, x: 30, y: 32 };
+    let fuel = 15;
+    for (let stepIndex = 1; stepIndex <= 2000; stepIndex += 1) {
+        const previous = pose;
+        const request = stepIndex <= 352 || stepIndex > 456 ? COMMANDS[0] : COMMANDS[1];
+        const result = step(pose, request, fuel);
+        pose = result.pose;
+        fuel = result.fuel;
+        if (hullBottom(previous) > DECK_LEVEL / 10 && hullBottom(pose) <= DECK_LEVEL / 10) {
+            const contact = contactPose(previous, pose, DECK_LEVEL / 10);
+            const lastClearMatches = Object.entries(expectedLastClear).every(([key, value]) =>
+                Math.abs(previous[key] - value) <= 1e-10);
+            if (stepIndex !== 577 || !lastClearMatches || !safe(contact, 36) ||
+                Math.abs(fuel - 13.751999999999953) > 1e-10) {
+                throw new Error(`Opening landing feasibility mismatch: ${JSON.stringify({
+                    contact,
+                    fuel,
+                    lastClear: previous,
+                    stepIndex,
+                })}`);
+            }
+            return;
+        }
+    }
+    throw new Error("Opening landing did not contact the fixed deck within 2,000 steps");
+}
+
 function parseArguments(argumentsList) {
     const result = {};
     for (let index = 0; index < argumentsList.length; index += 2) {
@@ -867,10 +851,11 @@ async function main() {
     }
     try {
         const geometry = JSON.parse(await readFile(options.geometry, "utf8"));
-        if (geometry.schema !== "agw-lander-route-geometry/v4" || geometry.templates.length !== 9 ||
+        if (geometry.schema !== "agw-lander-route-geometry/v5" || geometry.templates.length !== 3 ||
             canonicalBytes(geometry.siteGeometry) !== canonicalBytes(EXPECTED_SITE_GEOMETRY)) {
             throw new Error("Unsupported or incomplete geometry fixture");
         }
+        verifyOpeningLanding();
         const worldWitnesses = geometry.templates.flatMap((template) =>
             WORLD_WITNESS_CASES.map((trial) => worldWitness(template, trial)));
         const routes = geometry.templates.map(deriveTemplate);
@@ -885,7 +870,7 @@ async function main() {
             physicsDigest: digest({ commands: COMMANDS, constants: CONSTANTS }),
             recipeVersion: RECIPE_VERSION,
             routes,
-            schema: "agw-lander-route-derived/v4",
+            schema: "agw-lander-route-derived/v5",
             worldDigest: digest(worldWitnesses),
             worldWitnesses,
         };

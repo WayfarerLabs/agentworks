@@ -9,7 +9,7 @@ import {
     stepFlight,
     transitionMission,
 } from "../static/lander-model.js";
-import { cameraLeftForPose } from "../static/lander-world.js";
+import { cameraForPose, cameraLeftForPose } from "../static/lander-world.js";
 import { FakeElement, controllerClasses, controllerFixture, descendantCount } from "./lander-test-dom.mjs";
 
 const INSTALLED_PATH = "M -4 -9 H 4 A 1 1 0 0 1 5 -8 V 1 A 1 1 0 0 1 4 2 " +
@@ -132,14 +132,14 @@ test("refuel transfer uses the exact stage-local linear frame and resize reproje
     const { controller, elements, root } = await controllerAt(model);
     elements["lander-scene-stage"].rect = { left: 100, top: 50, width: 1000, height: 640 };
     elements["lander-fuel-gauge"].rect = { left: 120, top: 70, width: 16, height: 112 };
-    controller.renderRefuel(0);
+    controller.renderRefuel(cameraForPose(model.pose));
     assert.equal(root.dataset.refueling, "true");
     assert.equal(root.style.getPropertyValue("--refuel-progress"), "0.25");
     assert.equal(root.style.getPropertyValue("--fuel-transfer-x"), "104.5px");
-    assert.equal(root.style.getPropertyValue("--fuel-transfer-y"), "343.75px");
+    assert.equal(root.style.getPropertyValue("--fuel-transfer-y"), "253px");
     elements["lander-scene-stage"].rect = { left: 40, top: 20, width: 500, height: 320 };
     elements["lander-fuel-gauge"].rect = { left: 50, top: 30, width: 16, height: 112 };
-    controller.renderRefuel(0);
+    controller.renderRefuel(cameraForPose(model.pose));
     assert.equal(controller.model.refuel.progress, 0.25);
     assert.notEqual(root.style.getPropertyValue("--fuel-transfer-x"), "104.5px");
     controller.destroy();
@@ -198,17 +198,18 @@ test("active description follows the exact offscreen predicate without referenci
     const run = createRun({ seed: 1 });
     const target = run.retainedSites.find((site) => site.id === run.targetSiteId);
     const boundary = cameraLeftForPose(run.pose) + 100;
-    const withTargetLeft = (platformLeft) => ({
+    const withTargetRight = (buildingRight) => ({
         ...run,
-        retainedSites: run.retainedSites.map((site) => site.id === target.id ? { ...site, platformLeft } : site),
+        retainedSites: run.retainedSites.map((site) => site.id === target.id ?
+            { ...site, platformRight: buildingRight - 9 } : site),
     });
-    const { controller, elements } = await controllerAt(withTargetLeft(boundary));
+    const { controller, elements } = await controllerAt(withTargetRight(boundary));
     const permanent = ["lander-scene-description", "lander-controls", "lander-fuel-label",
         "lander-fuel-value", "lander-status"];
     assert.deepEqual(elements["lander-scene-shell"].attributes.get("aria-describedby").split(" "), permanent);
     assert.equal(elements["lander-target-direction"].hidden, true);
 
-    controller.model = withTargetLeft(boundary + Number.EPSILON * boundary);
+    controller.model = withTargetRight(boundary + Number.EPSILON * boundary);
     controller.render();
     assert.deepEqual(elements["lander-scene-shell"].attributes.get("aria-describedby").split(" "),
         [...permanent.slice(0, -1), "lander-target-direction", permanent.at(-1)]);

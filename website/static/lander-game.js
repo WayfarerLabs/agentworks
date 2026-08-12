@@ -21,9 +21,10 @@ import {
     transitionMission,
     updateRetention,
 } from "./lander-model.js";
-import { cameraLeftForPose, CHUNK_WIDTH, mixUint32, siteScaffoldPath, siteStructure, skyProjectionForCamera,
-    skyProjectionIdentityForCamera,
-    terrainFillPath, terrainSurfacePath, terrainVerticesForRange, targetDirectionForViewport } from "./lander-world.js";
+import { cameraForPose, CHUNK_WIDTH, mixUint32, siteScaffoldPath, siteStructure, skyProjectionForCamera,
+    skyProjectionIdentityForCamera, terrainFillPath, terrainSurfacePath, terrainVerticesForRange,
+    targetDirectionForViewport, worldGroupOffsetX, worldGroupOffsetY, worldSceneX, worldSceneY,
+    worldViewportX, worldViewportY } from "./lander-world.js";
 
 const SVG_NAMESPACE = document.querySelector("#lander-scene")?.namespaceURI;
 const ACTIVE_STATES = new Set(["flying", "landed", "deploying", "powering", "launching", "crashing", "failed", "generation-error"]);
@@ -122,8 +123,8 @@ function createSiteGroup(site) {
     return group;
 }
 
-function projectSiteState(group, site, buildingLeft = siteStructure(site).buildingLeft * 10,
-    top = 548 - site.platformTop * 10) {
+function projectSiteState(group, site, buildingLeft = worldSceneX(siteStructure(site).buildingLeft),
+    top = worldSceneY(site.platformTop)) {
     group.dataset.can = site.canCollected ? "collected" : "present";
     group.dataset.power = site.powered ? "on" : "off";
     group.dataset.agent = agentInstalled(site) ? "installed" : "absent";
@@ -139,20 +140,20 @@ function projectSiteState(group, site, buildingLeft = siteStructure(site).buildi
 }
 
 function positionSite(group, site) {
-    const left = site.platformLeft * 10;
-    const right = site.platformRight * 10;
-    const top = 548 - site.platformTop * 10;
-    const bottom = 548 - site.platformBottom * 10;
-    const center = site.center * 10;
+    const left = worldSceneX(site.platformLeft);
+    const right = worldSceneX(site.platformRight);
+    const top = worldSceneY(site.platformTop);
+    const bottom = worldSceneY(site.platformBottom);
+    const center = worldSceneX(site.center);
     const deck = group.querySelector(".landing-platform");
     deck.setAttribute("x", left); deck.setAttribute("y", top); deck.setAttribute("width", right - left); deck.setAttribute("height", bottom - top);
     group.querySelector(".helipad-mark").setAttribute("d", `M${center - 9} ${top + 1.7}v-20m18 20v-20m-18 10h18`);
     group.querySelector(".site-scaffold").setAttribute("d", siteScaffoldPath(site));
     group.querySelector(".gas-can").setAttribute("transform", `translate(${center + 30} ${top - 15})`);
     const structure = siteStructure(site);
-    const buildingLeft = structure.buildingLeft * 10;
-    const roof = 548 - structure.roof * 10;
-    const buildingBottom = 548 - structure.noc.bottom * 10;
+    const buildingLeft = worldSceneX(structure.buildingLeft);
+    const roof = worldSceneY(structure.roof);
+    const buildingBottom = worldSceneY(structure.noc.bottom);
     group.querySelector(".noc-building").setAttribute("d",
         `M${buildingLeft} ${buildingBottom}V${roof}h70V${buildingBottom}Z`);
     projectSiteState(group, site, buildingLeft, top);
@@ -238,7 +239,7 @@ export class LanderGameController {
         }
         this.listen(document, "visibilitychange", () => this.onVisibilityChange());
         this.listen(this.motion, "change", (event) => this.onMotionChange(event));
-        this.listen(window, "resize", () => this.renderRefuel(cameraLeftForPose(this.model.pose)));
+        this.listen(window, "resize", () => this.renderRefuel(cameraForPose(this.model.pose)));
     }
 
     queueInput(timestamp, token = null) {
@@ -528,17 +529,17 @@ export class LanderGameController {
         this.worldWindowKey = this.model.retentionKey;
     }
 
-    reconcileSky(cameraLeft) {
+    reconcileSky(camera) {
         const seed = this.model.seed ?? 0x41475731;
-        const identity = skyProjectionIdentityForCamera(seed, cameraLeft);
+        const identity = skyProjectionIdentityForCamera(seed, camera);
         if (identity === this.skyWindowKey) return;
-        const projection = this.skyProjectionForCamera(seed, cameraLeft);
+        const projection = this.skyProjectionForCamera(seed, camera);
         this.scene_stars.setAttribute("d", projection.starsPath);
         this.scene_landmarks.setAttribute("d", projection.landmarksPath);
         this.skyWindowKey = identity;
     }
 
-    renderCrash(cameraLeft) {
+    renderCrash(camera) {
         if (this.model.state !== "crashing" || !this.model.crash) {
             if (this.debris_layer.children.length) this.debris_layer.replaceChildren();
             return;
@@ -553,17 +554,17 @@ export class LanderGameController {
                 node = svg("rect", { width: 8, height: 8, fill: fragment.color, "data-fragment-id": fragment.id });
                 this.debris_layer.append(node);
             }
-            node.setAttribute("x", x * 10 - 4); node.setAttribute("y", 548 - y * 10 - 4);
-            node.setAttribute("transform", `rotate(${fragment.angularVelocity * time} ${x * 10} ${548 - y * 10})`);
+            node.setAttribute("x", worldSceneX(x) - 4); node.setAttribute("y", worldSceneY(y) - 4);
+            node.setAttribute("transform", `rotate(${fragment.angularVelocity * time} ${worldSceneX(x)} ${worldSceneY(y)})`);
             existing.delete(fragment.id);
         }
         for (const node of existing.values()) node.remove();
-        this.root.style.setProperty("--crash-x", `${(this.model.crash.pose.x - cameraLeft) * 10}px`);
-        this.root.style.setProperty("--crash-y", `${548 - this.model.crash.pose.y * 10}px`);
+        this.root.style.setProperty("--crash-x", `${worldViewportX(this.model.crash.pose.x, camera)}px`);
+        this.root.style.setProperty("--crash-y", `${worldViewportY(this.model.crash.pose.y, camera)}px`);
         this.root.style.setProperty("--crash-progress", String(Math.min(1, time / 0.14)));
     }
 
-    renderRefuel(cameraLeft) {
+    renderRefuel(camera) {
         const refuel = this.model.refuel;
         const active = refuel && this.model.retainedSites?.find((site) => site.id === refuel.siteId);
         const enabled = Boolean(refuel && active && !this.motion.matches);
@@ -574,8 +575,8 @@ export class LanderGameController {
         const gaugeRect = this.lander_fuel_gauge.getBoundingClientRect();
         const scaleX = stageRect.width / 1000;
         const scaleY = stageRect.height / 640;
-        const sceneCanX = (active.center + 3) * 10 - cameraLeft * 10;
-        const sceneCanY = 548 - (active.platformTop + 1.5) * 10;
+        const sceneCanX = worldViewportX(active.center + 3, camera);
+        const sceneCanY = worldViewportY(active.platformTop + 1.5, camera);
         const startX = stageRect.left + sceneCanX * scaleX - stageRect.left;
         const startY = stageRect.top + sceneCanY * scaleY - stageRect.top;
         const targetX = gaugeRect.left + gaugeRect.width / 2 - stageRect.left;
@@ -592,27 +593,29 @@ export class LanderGameController {
         this.lander_outcome.hidden = !activeMission;
         this.lander_controls_rail.hidden = !activeMission;
         this.lander_exit.disabled = !activeMission;
-        const cameraLeft = cameraLeftForPose(pose);
+        const camera = cameraForPose(pose);
         const left = plumeForThrust(this.model.commanded.left); const right = plumeForThrust(this.model.commanded.right);
         this.root.dataset.missionState = this.model.state; this.root.dataset.cue = this.cue.state;
         this.root.dataset.paused = String(this.paused); this.root.dataset.reducedMotion = String(this.motion.matches);
-        this.root.style.setProperty("--camera-x", `${-cameraLeft * 10}px`);
-        this.root.style.setProperty("--sky-camera-x", `${-cameraLeft * 10 * 0.24}px`);
-        this.root.style.setProperty("--lander-x", `${pose.x * 10}px`); this.root.style.setProperty("--lander-y", `${548 - pose.y * 10}px`);
+        this.root.style.setProperty("--camera-x", `${worldGroupOffsetX(camera)}px`);
+        this.root.style.setProperty("--camera-y", `${worldGroupOffsetY(camera)}px`);
+        this.root.style.setProperty("--sky-camera-x", `${worldSceneX(-camera.left * 0.24)}px`);
+        this.root.style.setProperty("--lander-x", `${worldSceneX(pose.x)}px`);
+        this.root.style.setProperty("--lander-y", `${worldSceneY(pose.y)}px`);
         this.root.style.setProperty("--lander-angle", `${pose.angle}deg`);
         this.root.style.setProperty("--thrust-vector-angle", `${this.model.commanded.vectorAngle ?? 0}deg`);
         for (const [name, value] of [["left-plume-scale", left.scaleY], ["right-plume-scale", right.scaleY],
             ["left-plume-opacity", left.opacity], ["right-plume-opacity", right.opacity]]) this.root.style.setProperty(`--${name}`, String(value));
-        this.reconcileWorld(); this.reconcileSky(cameraLeft); this.renderCrash(cameraLeft);
+        this.reconcileWorld(); this.reconcileSky(camera); this.renderCrash(camera);
         const active = this.model.retainedSites?.find((site) => site.id === this.model.activeSiteId);
         if (this.model.agent && active) {
             const startX = this.model.touchdownPose.x + 1.1; const endX = active.platformRight + 2;
             const progress = this.model.agent.progress;
-            this.root.style.setProperty("--agent-x", `${(startX + (endX - startX) * progress) * 10}px`);
-            this.root.style.setProperty("--agent-y", `${548 - (active.platformTop + 0.2) * 10}px`);
+            this.root.style.setProperty("--agent-x", `${worldSceneX(startX + (endX - startX) * progress)}px`);
+            this.root.style.setProperty("--agent-y", `${worldSceneY(active.platformTop + 0.2)}px`);
         }
         const target = this.model.retainedSites?.find((site) => site.id === this.model.targetSiteId);
-        const targetDirection = targetDirectionForViewport(target, cameraLeft);
+        const targetDirection = targetDirectionForViewport(target, camera.left);
         const offscreen = targetDirection !== null;
         this.root.dataset.targetOffscreen = String(offscreen);
         this.root.dataset.targetDirection = targetDirection ?? "none";
@@ -638,7 +641,7 @@ export class LanderGameController {
         const fuelColor = { empty: "#ff5a36", danger: "#ff5a36", caution: "#ffb000", ready: "#2ed49b" }[fuelLevel];
         this.root.dataset.fuelLevel = fuelLevel;
         this.root.style.setProperty("--fuel-level-color", fuelColor);
-        this.renderRefuel(cameraLeft);
+        this.renderRefuel(camera);
         if (this.lander_status.textContent !== this.model.status) this.lander_status.textContent = this.model.status;
         const launchReady = this.model.state === "launching" && !this.model.launchStarted;
         this.root.dataset.launchReady = String(launchReady);

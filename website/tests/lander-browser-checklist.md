@@ -33,6 +33,12 @@ uncapped post-award full reference. Run
 `python3 -m unittest discover -s website/tests -p 'test_lander_phase4m_browser.py'`. It is automated
 projection evidence, not the qualitative or cross-engine signoff below.
 
+The Phase 4P automated Chromium witness exercises the fixed 11.6 m deck, exact static/runtime
+terrain parity, variable terrain-reaching lattice columns, vertical plus horizontal camera
+projection, cue retention, and the bounded world DOM in a real browser. Run
+`python3 -m unittest discover -s website/tests -p 'test_lander_phase4p_browser.py'`. The
+corresponding qualitative broad-relief and cross-engine rows remain pending.
+
 ## Arcade presentation acceptance
 
 - [ ] At normal and 400-percent-equivalent reflow, verify the game is a 25:16 scene stage followed
@@ -73,8 +79,11 @@ projection evidence, not the qualitative or cross-engine signoff below.
 
 - [ ] Record the exact source SHA and current Chrome and Edge versions. Exercise both `/lander/` and
       `/404.html`; confirm their `#lander-game` subtrees are byte-equivalent.
-- [ ] Fly and safely service at least three sites across four visibly different coarse terrain
-      motifs. Each target has one elevated H platform exactly three lander widths long, one gas can,
+- [ ] Fly and safely service at least three sites across broad peaks and canyons spanning the
+      normalized 0.1-to-0.6 terrain band without sawtooth or abrupt grade changes. Confirm relief
+      remains deterministic when revisiting the same location and the vertical camera keeps the
+      lander, target, cue, and controls rail feasible near both terrain extrema. Each target has one
+      elevated H platform exactly three lander widths long at the fixed 11.6 m datum, one gas can,
       and one solid NOC. Confirm native terrain remains visible beneath it, with one continuous
       twelve-bay Warren truss and exactly three one-metre lattice columns terminating at six
       independent native-terrain feet, with no internal closure stroke, vertical artifact, filled

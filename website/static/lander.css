@@ -19,9 +19,10 @@
     --fuel-transfer-x: 0px;
     --fuel-transfer-y: 0px;
     --camera-x: 0px;
+    --camera-y: 79px;
     --sky-camera-x: 0px;
     --lander-x: 300px;
-    --lander-y: 228px;
+    --lander-y: 28px;
     --lander-angle: 0deg;
     --thrust-vector-angle: 0deg;
     --left-plume-scale: 0.08;
@@ -79,7 +80,7 @@
 }
 
 #lander-world {
-    transform: translate(var(--camera-x), 0);
+    transform: translate(var(--camera-x), var(--camera-y));
 }
 
 .terrain-fill {

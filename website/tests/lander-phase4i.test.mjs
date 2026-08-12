@@ -38,7 +38,7 @@ function linearSegments(path) {
 
 function expectedScaffold(site) {
     const x = (value) => Number((value * 10).toFixed(12));
-    const y = (value) => 548 - value * 10;
+    const y = (value) => 348 - value * 10;
     return siteScaffoldMembers(site).map(({ start, end }) =>
         [x(start[0]), y(start[1]), x(end[0]), y(end[1])]);
 }
@@ -46,7 +46,7 @@ function expectedScaffold(site) {
 function withinCollider(segments, collider) {
     const tolerance = 1e-10;
     for (const [x1, y1, x2, y2] of segments) {
-        const world = [[x1 / 10, (548 - y1) / 10], [x2 / 10, (548 - y2) / 10]];
+        const world = [[x1 / 10, (348 - y1) / 10], [x2 / 10, (348 - y2) / 10]];
         assert.ok(Math.min(...world.map(([x]) => x)) - 0.1 >= collider.left - tolerance);
         assert.ok(Math.max(...world.map(([x]) => x)) + 0.1 <= collider.right + tolerance);
         assert.ok(Math.min(...world.map(([, y]) => y)) - 0.1 >= collider.bottom - tolerance);
@@ -252,7 +252,7 @@ test("site structure exposes exact truss, three lattice-column, NOC, and mast en
 test("independent static and dynamic site geometry stays inside exact colliders and stage pins", async () => {
     const model = createRun({ seed: 0x41475731 }); const site = model.retainedSites[0];
     const structure = siteStructure(site); const expected = expectedScaffold(site);
-    assert.ok(expected.length >= 41 && expected.length <= 95);
+    assert.ok(expected.length >= 41 && expected.length <= 281);
     const template = await readFile(join(ROOT, "templates/lander-game.html"), "utf8");
     const staticTag = template.match(/<path class="site-scaffold"[^>]+>/)?.[0];
     assert.ok(staticTag); assert.match(staticTag, /stroke-width="2"/); assert.match(staticTag, /stroke-linecap="butt"/);
@@ -277,7 +277,7 @@ test("independent static and dynamic site geometry stays inside exact colliders 
     assert.equal(memberIndex, expected.length);
     for (const [width, height] of [[1,0.8],[1,0.7],[3.1,0.75]]) assert.ok(Math.hypot(width, height) < 3.2);
 
-    const buildingLeft = site.platformRight * 10 + 20; const roof = 548 - structure.roof * 10;
+    const buildingLeft = site.platformRight * 10 + 20; const roof = 348 - structure.roof * 10;
     const battery = group.querySelector(".noc-battery"); const barTops = [46, 38, 30, 22];
     const dynamicBars = barTops.map((offset, index) => battery.querySelector(`.battery-bar-${index + 1}`).attributes.get("d"));
     const expectedBars = barTops.map((offset) => `M${buildingLeft + 29} ${roof + offset}h12v5h-12Z`);

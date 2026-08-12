@@ -252,9 +252,9 @@ const resultElement = document.querySelector("#phase4j-description-result");
 controller.start(false, performance.now());
 const targetId = controller.model.targetSiteId;
 const cameraLeft = Math.max(0, controller.model.pose.x - 35);
-const withTargetLeft = (platformLeft) => {
+const withTargetRight = (buildingRight) => {
     controller.model = {...controller.model, retainedSites: controller.model.retainedSites.map((site) =>
-        site.id === targetId ? {...site, platformLeft} : site)};
+        site.id === targetId ? {...site, platformRight: buildingRight - 9} : site)};
     controller.render();
 };
 const snapshot = () => ({
@@ -262,9 +262,9 @@ const snapshot = () => ({
     resolved: shell.ariaDescribedByElements.map((element) => element.id),
     directionHidden: direction.hidden,
 });
-withTargetLeft(cameraLeft + 100);
+withTargetRight(cameraLeft + 100);
 const boundary = snapshot();
-withTargetLeft(cameraLeft + 100 + 1e-9);
+withTargetRight(cameraLeft + 100 + 1e-9);
 const offscreen = snapshot();
 resultElement.textContent = JSON.stringify({boundary, offscreen});
 controller.destroy();

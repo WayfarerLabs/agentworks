@@ -12,6 +12,7 @@ import {
 } from "../static/lander-model.js";
 import {
     STATIC_WORLD_SEED,
+    cameraForPose,
     cameraLeftForPose,
     siteScaffoldMembers,
     siteStructure,
@@ -55,23 +56,16 @@ test("opening and post-award fuel use honest uncapped gauge references", async (
     assert.equal(powered.checkpoint.fuelGaugeReference, powered.fuelGaugeReference);
 });
 
-test("half-tank opening lands at every deck tier with independent off-on-off schedules", () => {
-    const cases = [
-        { seed: 1, level: 83, off: 396, on: 108, steps: 554, reserve: 13.70399999999995 },
-        { seed: 8, level: 91, off: 396, on: 96, steps: 501, reserve: 13.847999999999956 },
-        { seed: 13, level: 99, off: 384, on: 96, steps: 512, reserve: 13.847999999999956 },
-    ];
-    for (const witness of cases) {
-        let model = createRun({ seed: witness.seed });
-        assert.equal(model.retainedSites[0].deckLevel, witness.level);
-        let steps = 0;
-        for (; steps < witness.off; steps += 1) model = stepFlight(model, ZERO);
-        for (let index = 0; index < witness.on; index += 1, steps += 1) model = stepFlight(model, COLLECTIVE);
-        while (model.state === "flying" && steps < 600) { model = stepFlight(model, ZERO); steps += 1; }
-        assert.equal(model.state, "landed");
-        assert.equal(steps, witness.steps);
-        close(model.refuel.fromLevel * 30, witness.reserve);
-    }
+test("half-tank opening lands on the fixed deck with the reviewed off-on-off schedule", () => {
+    let model = createRun({ seed: 1 });
+    assert.equal(model.retainedSites[0].deckLevel, 116);
+    let steps = 0;
+    for (; steps < 352; steps += 1) model = stepFlight(model, ZERO);
+    for (let index = 0; index < 104; index += 1, steps += 1) model = stepFlight(model, COLLECTIVE);
+    while (model.state === "flying" && steps < 600) { model = stepFlight(model, ZERO); steps += 1; }
+    assert.equal(model.state, "landed");
+    assert.equal(steps, 577);
+    close(model.refuel.fromLevel * 30, 13.751999999999953);
 });
 
 test("horizontal exploration is unbounded while the ceiling remains a failure", () => {
@@ -91,18 +85,19 @@ test("horizontal exploration is unbounded while the ceiling remains a failure", 
 });
 
 test("camera, bidirectional target cue, and deterministic bounded sky cover both directions", () => {
-    assert.equal(cameraLeftForPose({ x: -20 }), -25);
+    assert.equal(cameraLeftForPose({ x: -20 }), -26.7);
     assert.equal(cameraLeftForPose({ x: 20 }), 0);
-    assert.equal(cameraLeftForPose({ x: 80 }), 45);
+    assert.equal(cameraLeftForPose({ x: 80 }), 46.7);
     const target = { platformLeft: 120, platformRight: 129.6 };
     assert.equal(targetDirectionForViewport(target, 0), "right");
-    assert.equal(skyProjectionIdentityForCamera(-1, 0),
-        skyProjectionIdentityForCamera(0xffffffff, 0));
+    assert.equal(skyProjectionIdentityForCamera(-1, { left: 0, down: 0 }),
+        skyProjectionIdentityForCamera(0xffffffff, { left: 0, down: 0 }));
     assert.equal(targetDirectionForViewport(target, 120), null);
     assert.equal(targetDirectionForViewport(target, 130), "left");
     assert.equal(targetDirectionForViewport(target, 0), "right");
 
-    for (const camera of [0, 50, -50]) {
+    for (const left of [0, 50, -50]) {
+        const camera = { left, down: 0 };
         const projection = skyProjectionForCamera(STATIC_WORLD_SEED, camera);
         assert.equal(projection.chunks.length, 5);
         assert.equal(new Set(projection.chunks).size, 5);
@@ -119,7 +114,7 @@ test("camera, bidirectional target cue, and deterministic bounded sky cover both
         { seed: 10, profile: [[28, 9], [34, 12]] },
     ];
     for (const { seed, profile } of ringVectors) {
-        const landmarks = skyProjectionForCamera(seed, -200).landmarksPath;
+        const landmarks = skyProjectionForCamera(seed, { left: -200, down: 0 }).landmarksPath;
         assert.doesNotMatch(landmarks, /Q|A30 10/);
         const circle = landmarks.match(/M(-?[\d.]+) (-?[\d.]+)A16 16 0 1 0/);
         assert.ok(circle);
@@ -142,16 +137,17 @@ test("camera, bidirectional target cue, and deterministic bounded sky cover both
         assert.equal((landmarks.match(/A(?:28 9|31 10|34 12) 0 0 1/g) ?? []).length,
             profile.length * 3);
     }
-    assert.deepEqual(skyProjectionForCamera(STATIC_WORLD_SEED, 0), skyProjectionForCamera(STATIC_WORLD_SEED, 0));
+    assert.deepEqual(skyProjectionForCamera(STATIC_WORLD_SEED, { left: 0, down: 0 }),
+        skyProjectionForCamera(STATIC_WORLD_SEED, { left: 0, down: 320 }));
 });
 
 test("sky controller keys reconciliation by normalized seed and chunk before projection", async () => {
     const { LanderGameController } = await controllerClasses();
     const fixture = controllerFixture();
     const calls = [];
-    const project = (seed, cameraLeft) => {
-        calls.push([seed, cameraLeft]);
-        return skyProjectionForCamera(seed, cameraLeft);
+    const project = (seed, camera) => {
+        calls.push([seed, camera]);
+        return skyProjectionForCamera(seed, camera);
     };
     const controller = new LanderGameController(fixture.root, [], fixture.root.cloneNode(true), {
         freshSeed: () => 11,
@@ -178,7 +174,7 @@ test("sky controller keys reconciliation by normalized seed and chunk before pro
 
     controller.model = { ...controller.model, pose: { ...controller.model.pose, x: 260 } };
     controller.render();
-    assert.equal(fixture.root.style.getPropertyValue("--sky-camera-x"), "-540px");
+    assert.equal(fixture.root.style.getPropertyValue("--sky-camera-x"), "-544.08px");
     controller.model = { ...controller.model, seed: 11,
         pose: { ...controller.model.pose, x: 20 } };
     controller.render();
@@ -202,7 +198,7 @@ test("deployment travel is 0.9 seconds while refuel and power timings remain ind
 });
 
 test("three native-foot lattice columns integrate with the one-path scaffold and honest colliders", async () => {
-    const derived = JSON.parse(await readFile(new URL("tests/fixtures/lander-route-derived-v4.json", ROOT), "utf8"));
+    const derived = JSON.parse(await readFile(new URL("tests/fixtures/lander-route-derived-v5.json", ROOT), "utf8"));
     for (const site of derived.worldWitnesses[0].descriptor.sites) {
         const descriptor = { seed: derived.worldWitnesses[0].descriptor.seed,
             platformLeft: site.platform.left, platformRight: site.platform.right,
@@ -210,7 +206,7 @@ test("three native-foot lattice columns integrate with the one-path scaffold and
         const structure = siteStructure(descriptor);
         const members = siteScaffoldMembers(descriptor);
         assert.equal(structure.supportColumns.length, 3);
-        assert.ok(members.length >= 41 && members.length <= 95);
+        assert.ok(members.length >= 41 && members.length <= 281);
         structure.supportColumns.forEach((column, index) => {
             assert.equal(column.left, descriptor.platformLeft + [0, 8.8, 17.6][index]);
             assert.equal(column.right, descriptor.platformLeft + [1, 9.8, 18.6][index]);
@@ -232,7 +228,7 @@ test("three native-foot lattice columns integrate with the one-path scaffold and
 });
 
 test("independent planar overlay derives every connected clear-face maximum and kills member mutations", async () => {
-    const derived = JSON.parse(await readFile(new URL("tests/fixtures/lander-route-derived-v4.json", ROOT), "utf8"));
+    const derived = JSON.parse(await readFile(new URL("tests/fixtures/lander-route-derived-v5.json", ROOT), "utf8"));
     for (const witness of derived.worldWitnesses) {
         for (const site of witness.descriptor.sites) {
             assert.deepEqual(independentMaximumClearFace(site), site.clearApertures.actualMaximumConnectedFace);
@@ -251,7 +247,7 @@ test("independent planar overlay derives every connected clear-face maximum and 
 
 test("static sky and footer navigation preserve structural no-script parity", async () => {
     const template = await readFile(new URL("templates/lander-game.html", ROOT), "utf8");
-    const projection = skyProjectionForCamera(STATIC_WORLD_SEED, 0);
+    const projection = skyProjectionForCamera(STATIC_WORLD_SEED, cameraForPose({ x: 30, y: 32 }));
     const stars = template.match(/id="scene-stars"[^>]+d="([^"]*)"/)?.[1];
     const landmarks = template.match(/id="scene-landmarks"[^>]+d="([^"]*)"/)?.[1];
     assert.equal(stars, projection.starsPath);
