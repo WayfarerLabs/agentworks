@@ -46,6 +46,7 @@ from agentworks.terminal import sanitize_terminal_output as sanitize_terminal_ou
 
 if TYPE_CHECKING:
     from agentworks.guide.assessment import OnboardingSnapshot, VerificationEvidence
+    from agentworks.guide.contract import GuideAction
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,9 +230,9 @@ def _field_reference(block: FieldReference, target: str) -> str:
     return f"Reference target: {_code(reference.target)}\n\n" + ("\n".join(rows) or "No configurable fields.")
 
 
-def _action_list(block: ActionList) -> str:
+def _action_records(actions: tuple[GuideAction, ...]) -> str:
     records: list[str] = []
-    for action in block.actions:
+    for action in actions:
         inputs = (
             "; ".join(
                 f"{_code(item.name)} ({'required' if item.required else 'optional'}"
@@ -259,6 +260,10 @@ def _action_list(block: ActionList) -> str:
             f"- If refused: {_plain_description(action.refusal_alternative)}"
         )
     return "\n\n".join(records) or "No actions."
+
+
+def _action_list(block: ActionList) -> str:
+    return _action_records(block.actions)
 
 
 def _schema_target(contribution: TopicContribution) -> str | None:
@@ -354,20 +359,7 @@ def _onboarding_plan(
         f"unverifiable: {summary.unverifiable}."
     )
     if assessment.actions:
-        records = []
-        for action in assessment.actions:
-            inputs = ", ".join(item.name for item in action.required_inputs) or "none"
-            records.append(
-                f"### `{action.id}`\n\n"
-                f"- Precondition: {action.precondition}\n"
-                f"- Required inputs: {inputs}\n"
-                f"- Expected state: {action.expected_state}\n"
-                f"- Authorization class: `{action.consent.value}`\n"
-                f"- Command: `{' '.join(action.command or ())}`\n"
-                + (f"- Verification: `{' '.join(action.verification)}`\n" if action.verification is not None else "")
-                + f"- If refused: {action.refusal_alternative}"
-            )
-        plan = "\n\n".join(records)
+        plan = _action_records(assessment.actions)
     else:
         plan = "No onboarding actions are needed for the projected facts and accepted evidence."
     body = f"{counts}\n\n{findings}\n\n{plan}"

@@ -640,6 +640,19 @@ def test_real_views_compose_snapshot_and_render_target_scoped_evidence(
     monkeypatch.setattr("agentworks.output.prompt", denied)
     monkeypatch.setattr("agentworks.secrets.resolve.resolve_batch", denied)
     monkeypatch.setattr("agentworks.transports.transport", denied)
+    pending = render_guide(
+        ("concept-onboarding",),
+        GuideMode.AGENT,
+        load_config_fn=lambda: cast("Config", SimpleNamespace()),
+        load_registry_fn=lambda config: registry,
+        db=db,
+    )
+    vm_action = next(action for action in onboarding_actions() if action.id == "verify-vm-connection")
+    action_start = pending.markdown.index(f"### `{vm_action.id}`")
+    action_end = pending.markdown.find("\n### `", action_start + 1)
+    rendered_action = pending.markdown[action_start : action_end if action_end >= 0 else None]
+    assert "- If refused:" in rendered_action
+
     evidence = (
         _evidence("verify-named-secret", "secret", "tailscale-auth-key", VerificationOutcome.VERIFIED),
         _evidence("verify-vm-connection", "vm", "worker", VerificationOutcome.VERIFIED),
