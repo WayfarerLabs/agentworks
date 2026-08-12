@@ -894,8 +894,9 @@ deterministic; and the immutable result is review-clean, browser-accepted, and m
 - [ ] Delegate and lead-review exact LLD amendments for both the shared site shell and Lander. Pin
       column member geometry, honest colliders and aperture bounds; initial fuel feasibility and an
       honestly named display reference; sky generation, parallax, static fallback, and DOM limits;
-      two-way camera/retention/cue behavior; actual-contact-only crash classification; deployment
-      timing; copy/route projection; fixture/digest impact; and mutation-sensitive browser evidence.
+      two-way camera/retention/cue behavior; removal of horizontal-position failure while preserving
+      collision, ceiling, and excessive-speed safety outcomes; deployment timing; copy/route
+      projection; fixture/digest impact; and mutation-sensitive browser evidence.
 - [ ] Obtain an `agentworks-reviewer` approval of the Phase 4M artifact amendments and resolve every
       valid finding before changing production or canonical fixtures.
 - [ ] Delegate implementation to an `agentworks-dev` subagent in an isolated worktree. Update the
@@ -933,12 +934,12 @@ exploration without missing-target failure; twice-fast pre-NOC agent travel with
 timing; shorter `We need agents!` page copy; a direct `/lander/` footer destination; and the hover
 text `Help deploy some agents!`.
 
-Definition of done: the opening fuel presentation is honest and playable; only real collision or
-vertical safety outcomes crash the lander; both-direction exploration, camera, cue, world retention,
-and parallax remain bounded; each support is an honest integrated lattice column; deployment travel
-alone is twice as fast; shared copy and direct routing are correct; derivation and fixtures remain
-independent and deterministic; and the immutable result is review-clean, browser-accepted, and
-merge-ready.
+Definition of done: the opening fuel presentation is honest and playable; horizontal position alone
+never crashes the lander while collision, ceiling, and excessive-speed safety outcomes remain;
+both-direction exploration, camera, cue, world retention, and parallax remain bounded; each support
+is an honest integrated lattice column; deployment travel alone is twice as fast; shared copy and
+direct routing are correct; derivation and fixtures remain independent and deterministic; and the
+immutable result is review-clean, browser-accepted, and merge-ready.
 
 ## Phase 5: CI and default Pages deployment
 
