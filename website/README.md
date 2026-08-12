@@ -96,8 +96,9 @@ interpolated native-terrain feet. Their ties and alternating braces use the trus
 Exact closed colliders cover the truss and each complete column; the NOC begins at the deck
 underside. The NOC battery fills four colored bars bottom-to-top, then three symmetric signal arches
 power outward; its fixed mast and antenna head remain graphite at every stage. The parallax sky uses
-recognizable crescent moons and circular planets with complete elliptical rings. These shapes,
-fills, and outlines preserve their meaning without relying on color alone.
+recognizable crescent moons and circular planets with one or two restrained elliptical rings. Each
+ring keeps its foreground arc while the planet hides its rear center. These shapes, fills, and
+outlines preserve their meaning without relying on color alone.
 
 Flight has no horizontal world edge: the lander can pass a target or explore in either direction
 until it collides or crosses the vertical ceiling. The camera follows both directions with a stable

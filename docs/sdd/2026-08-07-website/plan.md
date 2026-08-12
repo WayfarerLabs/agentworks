@@ -1,6 +1,6 @@
 # Plan: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander Phase 4M refinement in progress
+- Status: Interim implementation complete; continuous Lander Phase 4O refinement in progress
 - Date: 2026-08-07
 - Last revised: 2026-08-12
 - FRD: `frd.md`
@@ -997,6 +997,24 @@ Definition of done: the four inclusive touchdown boundaries are exact and indepe
 epsilon beyond; canonical geometry/world/routes remain unchanged while physics/output regenerate;
 the fixed antenna never inherits signal color; the planet has one complete closed ring and no
 partial quadratic artifact; and the reviewed build is deterministic and gate-clean.
+
+## Phase 4O: occluded planetary rings
+
+- [x] Replace the fully visible planet ring with exact foreground and exposed rear-side arcs whose
+      rear center is hidden by the planet. Add deterministic restrained profiles for a compact
+      single ring, a wider single ring, and a modest double ring without changing sky cadence,
+      parallax, node count, semantics, or route fixtures.
+- [x] Add independent geometry coverage for all three profiles and update the permanent sky guidance
+      plus FRD, HLA, and LLD contracts without changing historical completed-phase evidence.
+- [ ] Run focused/full suites, deterministic builds, repository gates, code review, and fresh-eyes
+      browser review; update PR #486 only after the immutable head is clean.
+
+Operator evidence (2026-08-12): after reviewing the complete ring, the operator requested realistic
+occlusion behind the planet and modest deterministic variation in ring count and diameter.
+
+Definition of done: every generated ring has an exact foreground arc and no visible rear-center
+segment; planets use only the three restrained one/two-ring profiles; bounded deterministic sky
+behavior remains unchanged; and the immutable result is review-clean and gate-clean.
 
 ## Phase 5: CI and default Pages deployment
 

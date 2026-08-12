@@ -1,6 +1,6 @@
 # HLA: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander Phase 4M refinement in progress
+- Status: Interim implementation complete; continuous Lander Phase 4O refinement in progress
 - Date: 2026-08-07
 - Last revised: 2026-08-12
 - FRD: `frd.md`
@@ -318,8 +318,8 @@ unbounded DOM or terrain history. A separate decorative sky projection derives b
 stars and occasional celestial landmarks from the same run seed and nearby sky chunks. It translates
 at a slower camera rate for parallax, owns no collision or semantic state, and retains a fixed node
 count. Decorative landmarks remain recognizable astronomical silhouettes: a crescent moon or one
-circular planet with a complete elliptical ring, never disconnected strokes that resemble an
-unfinished object.
+circular planet with one or two modest elliptical rings. Planet geometry occludes each ring's rear
+center while retaining its foreground arc and the two exposed rear-side segments.
 
 Each deterministic site retains the same coarse, irregular terrain generator beneath its complete
 footprint; it does not replace a site span with a flat shelf. The world derives a sufficiently high

@@ -429,6 +429,26 @@ function skyChunkKeyForCamera(cameraLeft) {
     return Array.from({ length: 5 }, (_, index) => firstChunk + index).join(":");
 }
 
+const PLANET_RADIUS = 16;
+const PLANET_RING_PROFILES = Object.freeze([
+    Object.freeze([[28, 9]]),
+    Object.freeze([[31, 10]]),
+    Object.freeze([
+        [28, 9],
+        [34, 12],
+    ]),
+]);
+
+function occludedRingPath(x, y, radiusX, radiusY) {
+    const cutX = Math.sqrt((PLANET_RADIUS ** 2 - radiusY ** 2) / (1 - radiusY ** 2 / radiusX ** 2));
+    const cutY = Math.sqrt(PLANET_RADIUS ** 2 - cutX ** 2);
+    return (
+        `M${x - radiusX} ${y}A${radiusX} ${radiusY} 0 0 1 ${x - cutX} ${y - cutY}` +
+        `M${x + cutX} ${y - cutY}A${radiusX} ${radiusY} 0 0 1 ${x + radiusX} ${y}` +
+        `M${x + radiusX} ${y}A${radiusX} ${radiusY} 0 0 1 ${x - radiusX} ${y}`
+    );
+}
+
 export function skyProjectionIdentityForCamera(seed, cameraLeft) {
     return `${normalizeSeed(seed)}|${skyChunkKeyForCamera(cameraLeft)}`;
 }
@@ -453,8 +473,13 @@ export function skyProjectionForCamera(seed, cameraLeft) {
         if (sampleUnit(seed, 11, key) < 0.5) {
             landmarks.push(`M${x} ${y - 18}A18 18 0 1 0 ${x} ${y + 18}A13 18 0 0 1 ${x} ${y - 18}`);
         } else {
-            landmarks.push(`M${x - 16} ${y}A16 16 0 1 0 ${x + 16} ${y}A16 16 0 1 0 ${x - 16} ${y}Z` +
-                `M${x - 30} ${y}A30 10 0 1 0 ${x + 30} ${y}A30 10 0 1 0 ${x - 30} ${y}Z`);
+            const profile = PLANET_RING_PROFILES[Math.floor(3 * sampleUnit(seed, 12, key))];
+            landmarks.push(
+                `M${x - PLANET_RADIUS} ${y}A${PLANET_RADIUS} ${PLANET_RADIUS} 0 1 0 ` +
+                    `${x + PLANET_RADIUS} ${y}A${PLANET_RADIUS} ${PLANET_RADIUS} 0 1 0 ` +
+                    `${x - PLANET_RADIUS} ${y}Z` +
+                    profile.map(([radiusX, radiusY]) => occludedRingPath(x, y, radiusX, radiusY)).join(""),
+            );
         }
     }
     return freeze({ key, chunks, starsPath: stars.join(""), landmarksPath: landmarks.join("") });

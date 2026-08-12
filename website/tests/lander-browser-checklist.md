@@ -92,9 +92,9 @@ projection evidence, not the qualitative or cross-engine signoff below.
 - [ ] Watch the stars and occasional crescent or ringed planet while traversing and reversing. They
       move with the landscape at visibly slower 24-percent parallax, never affect collision or
       accessibility, and reconstruct without a pop when returning. Confirm crescents read as moons,
-      every planet has one complete closed elliptical ring, and there are no disconnected partial
-      ring strokes. Inspect the SVG and confirm one sky group with exactly two paths, twenty stars,
-      and one or two landmarks in its five chunks.
+      every planet has one or two restrained elliptical rings, each rear-center segment disappears
+      behind the planet, and each foreground arc remains visible. Inspect the SVG and confirm one
+      sky group with exactly two paths, twenty stars, and one or two landmarks in its five chunks.
 - [ ] Start a fresh run and confirm the visual gauge is exactly half full for the 15/30 opening
       reserve/reference. After service, confirm carried reserve is uncapped and becomes the full
       reference. Time 0.9-second agent travel separately from the unchanged 0.3-second refuel and

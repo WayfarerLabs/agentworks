@@ -113,10 +113,35 @@ test("camera, bidirectional target cue, and deterministic bounded sky cover both
             assert.ok(count >= 1 && count <= 2);
         }
     }
-    const realisticLandmarks = skyProjectionForCamera(1, -200).landmarksPath;
-    assert.match(realisticLandmarks,
-        /A16 16 0 1 0 [^A]+A16 16 0 1 0 [^Z]+ZM[^A]+A30 10 0 1 0 [^A]+A30 10 0 1 0 [^Z]+Z/);
-    assert.doesNotMatch(realisticLandmarks, /Q/);
+    const ringVectors = [
+        { seed: 2, profile: [[28, 9]] },
+        { seed: 1, profile: [[31, 10]] },
+        { seed: 10, profile: [[28, 9], [34, 12]] },
+    ];
+    for (const { seed, profile } of ringVectors) {
+        const landmarks = skyProjectionForCamera(seed, -200).landmarksPath;
+        assert.doesNotMatch(landmarks, /Q|A30 10/);
+        const circle = landmarks.match(/M(-?[\d.]+) (-?[\d.]+)A16 16 0 1 0/);
+        assert.ok(circle);
+        const x = Number(circle[1]) + 16;
+        const y = Number(circle[2]);
+        for (const [radiusX, radiusY] of profile) {
+            const cutX = Math.sqrt((16 ** 2 - radiusY ** 2) /
+                (1 - radiusY ** 2 / radiusX ** 2));
+            const cutY = Math.sqrt(16 ** 2 - cutX ** 2);
+            const expected =
+                `M${x - radiusX} ${y}` +
+                `A${radiusX} ${radiusY} 0 0 1 ${x - cutX} ${y - cutY}` +
+                `M${x + cutX} ${y - cutY}` +
+                `A${radiusX} ${radiusY} 0 0 1 ${x + radiusX} ${y}` +
+                `M${x + radiusX} ${y}` +
+                `A${radiusX} ${radiusY} 0 0 1 ${x - radiusX} ${y}`;
+            assert.ok(landmarks.includes(expected));
+            assert.equal((landmarks.match(new RegExp(`A${radiusX} ${radiusY} 0 0 1`, "g")) ?? []).length, 3);
+        }
+        assert.equal((landmarks.match(/A(?:28 9|31 10|34 12) 0 0 1/g) ?? []).length,
+            profile.length * 3);
+    }
     assert.deepEqual(skyProjectionForCamera(STATIC_WORLD_SEED, 0), skyProjectionForCamera(STATIC_WORLD_SEED, 0));
 });
 
