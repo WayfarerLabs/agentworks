@@ -1,6 +1,6 @@
 # Plan: The agentworks.build Website
 
-- Status: Interim implementation complete; continuous Lander Phase 4O refinement in progress
+- Status: Phase 4O implementation and automated review complete; operator browser acceptance pending
 - Date: 2026-08-07
 - Last revised: 2026-08-12
 - FRD: `frd.md`
@@ -1006,7 +1006,7 @@ partial quadratic artifact; and the reviewed build is deterministic and gate-cle
       parallax, node count, semantics, or route fixtures.
 - [x] Add independent geometry coverage for all three profiles and update the permanent sky guidance
       plus FRD, HLA, and LLD contracts without changing historical completed-phase evidence.
-- [ ] Run focused/full suites, deterministic builds, repository gates, code review, and fresh-eyes
+- [x] Run focused/full suites, deterministic builds, repository gates, code review, and fresh-eyes
       browser review; update PR #486 only after the immutable head is clean.
 
 Operator evidence (2026-08-12): after reviewing the complete ring, the operator requested realistic
