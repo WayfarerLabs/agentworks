@@ -985,7 +985,7 @@ immutable result is review-clean, browser-accepted, and merge-ready.
 - [x] Add mutation-sensitive model, CSS, and sky-geometry coverage; update the permanent README and
       manual browser checklist; and reconcile the FRD, HLA, and LLD without changing historical
       completed-phase evidence.
-- [ ] Run ordinary generation/verification, focused and full website suites, deterministic builds,
+- [x] Run ordinary generation/verification, focused and full website suites, deterministic builds,
       repository gates, code review, fresh-eyes browser review, and update PR #486 only after the
       immutable head is clean.
 

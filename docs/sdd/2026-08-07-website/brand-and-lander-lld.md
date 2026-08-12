@@ -6,7 +6,7 @@
 <!-- cspell:ignore lerp Minkowski overspeed subinterval unhashed unmarginated -->
 <!-- cspell:ignore substep underframe unitless uint32 quantized quantization Warren -->
 
-- Status: Phase 4M implementation complete; final landing/antenna/sky polish in review
+- Status: Phase 4N implementation and automated review complete; operator browser acceptance pending
 - Date: 2026-08-12
 - FRD: `frd.md`, specifically R6-R9, R15-R24, and R25
 - HLA: `hla.md`, specifically D5 and D7
