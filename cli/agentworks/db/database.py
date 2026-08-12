@@ -166,7 +166,7 @@ class Database:
         if inspection.state is SchemaState.BUSY:
             raise StateError(
                 inspection.error_message or "state database is busy; retry after other database users finish",
-                hint="Retry after the other Agentworks command finishes.",
+                hint="Retry after the other database user finishes.",
             )
         if inspection.state is SchemaState.MALFORMED:
             raise StateError(inspection.error_message or "state database schema is unavailable or malformed")

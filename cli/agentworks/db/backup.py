@@ -150,8 +150,7 @@ def inspect_schema(database_path: Path, *, timeout: float | None = None) -> Sche
     except (OSError, sqlite3.DatabaseError, StateError) as error:
         if isinstance(error, StateError) and "schema version is invalid" in str(error):
             return SchemaInspection(SchemaState.MALFORMED, 0, LATEST_VERSION, None, str(error))
-        code = getattr(error, "sqlite_errorcode", None)
-        if code is not None and code & 0xFF in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+        if _is_busy(error):
             return SchemaInspection(
                 SchemaState.BUSY,
                 0,
@@ -357,7 +356,7 @@ def _raise_if_unopenable(inspection: SchemaInspection) -> None:
     if inspection.state is SchemaState.BUSY:
         raise StateError(
             inspection.error_message or "state database is busy; retry after other database users finish",
-            hint="Retry after the other Agentworks command finishes.",
+            hint="Retry after the other database user finishes.",
         )
     if inspection.state is SchemaState.MALFORMED:
         raise StateError(
@@ -395,8 +394,7 @@ def _acquire_migration_lock(database_path: Path, *, timeout: float) -> sqlite3.C
     except sqlite3.DatabaseError as error:
         if connection is not None:
             connection.close()
-        code = getattr(error, "sqlite_errorcode", None)
-        if code is not None and code & 0xFF in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+        if _is_busy(error):
             return None
         raise StateError(f"state database migration lock is unavailable: {error}") from error
 
@@ -578,9 +576,17 @@ def _validate_sqlite_file(path: Path, *, source_kind: str) -> sqlite3.Connection
         _raise_sqlite_error(error, source_kind=source_kind)
 
 
-def _raise_sqlite_error(error: sqlite3.DatabaseError, *, source_kind: str) -> NoReturn:
+def _is_busy(error: BaseException) -> bool:
+    """True for SQLITE_BUSY/SQLITE_LOCKED, masking off SQLite's extended
+    result-code bits in ``sqlite_errorcode`` (the low byte is the primary
+    code). Safe to call on any exception: one without that attribute (a
+    non-SQLite error) simply is not busy."""
     code = getattr(error, "sqlite_errorcode", None)
-    if code is not None and code & 0xFF in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+    return code is not None and code & 0xFF in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED)
+
+
+def _raise_sqlite_error(error: sqlite3.DatabaseError, *, source_kind: str) -> NoReturn:
+    if _is_busy(error):
         raise BackupError(f"{source_kind} is busy; retry after other database users finish") from error
     raise StateError(f"{source_kind} is unavailable or malformed") from error
 

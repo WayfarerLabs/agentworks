@@ -245,8 +245,9 @@ agw doctor --output json
 ```
 
 Doctor checks the schema before opening current state through the existing read-only database
-connection. Its WAL-aware inspection reports a pending migration without applying it, and future or
-malformed state fails without a writable open.
+connection. Its WAL-aware inspection reports a pending migration without applying it, and future,
+busy, or malformed state fails without a writable open; busy (another process holding the database
+open) is the one an operator is actually likely to hit.
 
 #### Errors and compatibility
 

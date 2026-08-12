@@ -221,10 +221,10 @@ def test_check_schema_raises_for_busy_like_it_already_does_for_malformed(tmp_pat
     """Database.check_schema() is agw doctor's only production entry point
     (via doctor_state._current_database, which every doctor database check
     wraps in a broad except). It already raised for MALFORMED rather than
-    returning a fabricated version tuple; it must do the same for BUSY
-    instead of silently reporting a busy database as if it were an
-    uninitialized (version 0) one. The classification check is what makes
-    this fail on the old code, which raised here too, but via MALFORMED."""
+    returning a fabricated version tuple; it must do the same for BUSY, with
+    a distinct classification, rather than folding it into the malformed
+    case. The classification check is what makes this fail on the old code,
+    which raised here too, but via MALFORMED."""
     path = tmp_path / "state.db"
     _build_schema(path, LATEST_VERSION)
 
