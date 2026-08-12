@@ -665,6 +665,31 @@ def test_completion_open_never_writes_while_sidecars_are_live(tmp_path: Path) ->
         writer.close()
 
 
+def test_completion_open_fails_fast_under_a_held_exclusive_lock(tmp_path: Path) -> None:
+    """Issue #503: a busy database must not freeze a TAB press. A rollback-
+    journal database (the reported shape; WAL sidecars are covered above)
+    with another connection holding `BEGIN EXCLUSIVE` blocks every reader.
+    The completion path must give up within its bounded connection timeout
+    rather than inherit the driver's multi-second default wait."""
+    path = tmp_path / "state.db"
+    _build_schema(path, LATEST_VERSION)
+
+    locker = sqlite3.connect(path)
+    locker.execute("BEGIN EXCLUSIVE")
+    try:
+        start = time.monotonic()
+        completion_database = open_completion_database(path)
+        elapsed = time.monotonic() - start
+    finally:
+        locker.rollback()
+        locker.close()
+
+    assert completion_database is None
+    # Real headroom over the 0.1s connection timeout, far below the driver's
+    # 5s default, and generous enough not to flake on a loaded CI box.
+    assert elapsed < 2.0
+
+
 def test_recovery_command_rendering_quotes_posix_and_powershell(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -53,14 +53,30 @@ class Database:
         path: Path | None = None,
         *,
         read_only: bool = False,
+        timeout: float | None = None,
     ) -> None:
+        """Open the state database, or a read-only view of it.
+
+        ``timeout`` only affects the read-only path: it bounds how long
+        SQLite retries against a locked database before raising, in seconds.
+        Omitted (the default), the read-only open keeps the driver's own
+        multi-second default wait, unchanged for existing read-only
+        consumers (``doctor_state``, the guide service). Completion's
+        read-only open passes an explicit, tight bound instead, since it
+        backs a TAB press and must fail fast rather than block the shell.
+        """
         db_path = path or _db.DB_PATH
         if read_only:
             from agentworks.errors import StateError
 
             connection: sqlite3.Connection | None = None
+            ro_uri = f"{db_path.resolve().as_uri()}?mode=ro"
             try:
-                connection = sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True)
+                connection = (
+                    sqlite3.connect(ro_uri, uri=True, timeout=timeout)
+                    if timeout is not None
+                    else sqlite3.connect(ro_uri, uri=True)
+                )
                 row = connection.execute("SELECT MAX(version) FROM schema_version").fetchone()
             except sqlite3.DatabaseError as error:
                 if connection is not None:

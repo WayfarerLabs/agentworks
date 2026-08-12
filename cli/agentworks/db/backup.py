@@ -94,13 +94,24 @@ def backup_directory(database_path: Path) -> Path:
     return database_path.parent / BACKUP_DIRECTORY_NAME
 
 
-def inspect_schema(database_path: Path) -> SchemaInspection:
-    """Inspect schema version and cookie without creating or migrating state."""
+def inspect_schema(database_path: Path, *, timeout: float | None = None) -> SchemaInspection:
+    """Inspect schema version and cookie without creating or migrating state.
+
+    ``timeout`` bounds how long SQLite retries against a busy database
+    (``sqlite3.connect``'s own ``timeout`` parameter) before raising
+    "database is locked", which this function reports as
+    :attr:`SchemaState.MALFORMED`. Omit it (the default) to keep the
+    driver's own default wait; callers that must not block a fast path
+    (completion) pass an explicit, tight bound.
+    """
     if not database_path.exists():
         return SchemaInspection(SchemaState.ABSENT, 0, LATEST_VERSION, None)
     connection: sqlite3.Connection | None = None
+    uri = f"{database_path.resolve().as_uri()}?mode=ro"
     try:
-        connection = sqlite3.connect(f"{database_path.resolve().as_uri()}?mode=ro", uri=True)
+        connection = (
+            sqlite3.connect(uri, uri=True, timeout=timeout) if timeout is not None else sqlite3.connect(uri, uri=True)
+        )
         entry = connection.execute("SELECT type FROM sqlite_master WHERE name = 'schema_version'").fetchone()
         if entry is None:
             version = 0
@@ -261,15 +272,30 @@ def open_completion_database(database_path: Path) -> Database | None:
     writer is a non-issue rather than a veto.
 
     This read-only open still needs `-shm` to be creatable in the config
-    directory on any platform (SQLite's shared-memory index for WAL readers);
-    that directory is user-owned, so this is always satisfiable here.
+    directory (SQLite's shared-memory index for WAL readers). That directory
+    being user-owned and writable is the normal supported configuration; if
+    it is not (a read-only mount, a permission-damaged home), the probe
+    refuses cleanly with no candidates rather than hanging or writing.
+
+    Both connects use ``_CONNECTION_TIMEOUT_SECONDS`` rather than the
+    driver's multi-second default: a completion probe backs a TAB press, so
+    it must fail fast against a database another process holds locked
+    (e.g. a concurrent writer inside `BEGIN EXCLUSIVE`) rather than freeze
+    the shell for seconds.
     """
     from agentworks.db.database import Database
 
-    inspection = inspect_schema(database_path)
+    inspection = inspect_schema(database_path, timeout=_CONNECTION_TIMEOUT_SECONDS)
     if inspection.state is not SchemaState.CURRENT:
         return None
-    return Database(database_path, read_only=True)
+    try:
+        return Database(database_path, read_only=True, timeout=_CONNECTION_TIMEOUT_SECONDS)
+    except StateError:
+        # A lock acquired between the inspection above and this open (or one
+        # still resolving within the bounded wait) is the same "unavailable
+        # for completion" outcome as every other refusal here, not a reason
+        # to raise past a TAB press.
+        return None
 
 
 def render_restore_command(backup_path: Path, *, platform: str | None = None) -> str:
