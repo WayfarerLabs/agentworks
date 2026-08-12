@@ -55,7 +55,7 @@ def check_system() -> HealthGroup:
         else:
             group.info("System slug", "unset (will ask at first vm create)")
     except Exception as error:
-        group.warn("System slug", f"could not check the database: {error}")
+        group.warn("System slug", f"could not check the database: {error}", hint=getattr(error, "hint", None))
     return group
 
 
@@ -86,7 +86,7 @@ def check_database() -> HealthGroup:
                     hint="Back it up, restore a compatible backup before downgrading, or use a newer release.",
                 )
     except Exception as error:
-        group.fail("Database", str(error))
+        group.fail("Database", str(error), hint=getattr(error, "hint", None))
     return group
 
 
@@ -149,4 +149,4 @@ def append_vm_site_database_checks(
                         hint=site_manifest_hint(vm.site),
                     )
     except Exception as error:
-        group.warn("VM sites", f"could not check the database: {error}")
+        group.warn("VM sites", f"could not check the database: {error}", hint=getattr(error, "hint", None))

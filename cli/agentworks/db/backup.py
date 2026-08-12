@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
 from agentworks.db.migrations import LATEST_VERSION, SCHEMA_SENTINELS
-from agentworks.errors import BackupError, NotFoundError, StateError, ValidationError
+from agentworks.errors import BackupError, DatabaseBusyError, NotFoundError, StateError, ValidationError
 from agentworks.path_rendering import format_host_path
 
 if TYPE_CHECKING:
@@ -156,7 +156,7 @@ def inspect_schema(database_path: Path, *, timeout: float | None = None) -> Sche
                 0,
                 LATEST_VERSION,
                 None,
-                "state database is busy; retry after other database users finish",
+                "state database is busy",
             )
         return SchemaInspection(
             SchemaState.MALFORMED,
@@ -354,8 +354,8 @@ def _raise_if_unopenable(inspection: SchemaInspection) -> None:
             hint="Preserve it with `agw database backup`, then use a release that understands its schema.",
         )
     if inspection.state is SchemaState.BUSY:
-        raise StateError(
-            inspection.error_message or "state database is busy; retry after other database users finish",
+        raise DatabaseBusyError(
+            inspection.error_message or "state database is busy",
             hint="Retry after the other database user finishes.",
         )
     if inspection.state is SchemaState.MALFORMED:

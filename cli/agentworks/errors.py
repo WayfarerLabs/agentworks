@@ -95,6 +95,18 @@ class BrokenStateError(StateError):
     """
 
 
+class DatabaseBusyError(StateError):
+    """The state database is busy: another connection holds a lock (for
+    example another process inside BEGIN EXCLUSIVE, or a WAL writer's open
+    transaction).
+
+    Distinct from other StateErrors because it is transient: retrying once
+    the other connection finishes is expected to succeed, unlike a durable
+    state problem such as a malformed schema. Catch separately from
+    StateError wherever that distinction matters to the caller.
+    """
+
+
 class ConnectivityError(AgentworksError):
     """Network or transport-level failure (SSH, Tailscale, host unreachable)."""
 

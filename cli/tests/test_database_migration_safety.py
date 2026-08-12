@@ -32,7 +32,7 @@ from agentworks.db import (
     prepare_database_open,
     render_restore_command,
 )
-from agentworks.errors import StateError
+from agentworks.errors import DatabaseBusyError, StateError
 from tests.conftest import CapturedOutput
 
 
@@ -140,6 +140,48 @@ def _tainted_baseline_writer(path: Path, committed: Any, release: Any, released:
     released.set()
 
 
+@pytest.mark.parametrize(
+    "code",
+    [
+        sqlite3.SQLITE_BUSY,
+        sqlite3.SQLITE_LOCKED,
+        sqlite3.SQLITE_BUSY_RECOVERY,
+        sqlite3.SQLITE_LOCKED_SHAREDCACHE,
+    ],
+    ids=["BUSY", "LOCKED", "BUSY_RECOVERY", "LOCKED_SHAREDCACHE"],
+)
+def test_is_busy_matches_primary_and_extended_busy_and_locked_codes(code: int) -> None:
+    """A real held lock only ever provokes the primary BUSY code (5), which
+    would stay green even with the `& 0xFF` extended-result-code mask
+    deleted (5 & 0xFF == 5 either way). SQLite reports finer-grained
+    conditions, a busy recovery rollback or a shared-cache lock, as an
+    *extended* result code: the primary code plus a shifted detail byte.
+    Constructing the error directly, rather than trying to provoke an
+    extended code from a real database (not practically reproducible in a
+    test), is what exercises the mask deterministically."""
+    from agentworks.db.backup import _is_busy
+
+    error = sqlite3.OperationalError("synthetic")
+    error.sqlite_errorcode = code
+    assert _is_busy(error)
+
+
+@pytest.mark.parametrize(
+    "code",
+    [sqlite3.SQLITE_CORRUPT, sqlite3.SQLITE_NOTADB],
+    ids=["CORRUPT", "NOTADB"],
+)
+def test_is_busy_rejects_non_busy_codes(code: int) -> None:
+    """The mask must not over-match: a genuinely different failure code
+    (even one that happens to share low bits with BUSY/LOCKED once
+    extended) must not be classified as busy."""
+    from agentworks.db.backup import _is_busy
+
+    error = sqlite3.OperationalError("synthetic")
+    error.sqlite_errorcode = code
+    assert not _is_busy(error)
+
+
 def test_inspection_matrix_is_non_migrating_and_wal_aware(tmp_path: Path) -> None:
     absent = tmp_path / "absent.db"
     stale = tmp_path / "stale.db"
@@ -174,24 +216,29 @@ def test_inspection_matrix_is_non_migrating_and_wal_aware(tmp_path: Path) -> Non
     locker = sqlite3.connect(busy)
     locker.execute("BEGIN EXCLUSIVE")
     try:
-        # A short explicit bound keeps this fast; inspect_schema's default
-        # (unbounded here) wait is exercised separately below.
+        # A short explicit bound keeps this fast; a later test calls
+        # inspect_schema with no completion-specific timeout, which retains
+        # the driver-default wait.
         assert inspect_schema(busy, timeout=0.1).state is SchemaState.BUSY
     finally:
         locker.rollback()
         locker.close()
 
 
-def test_prepare_database_open_raises_for_busy_and_recovers_once_lock_clears(tmp_path: Path) -> None:
-    """Busy and malformed share the StateError type but differ in what they
-    mean operationally: malformed is durable (the "malformed" case of
+def test_prepare_database_open_raises_a_distinct_busy_error_and_recovers_once_lock_clears(
+    tmp_path: Path,
+) -> None:
+    """Busy and malformed both raise, but mean different things
+    operationally: malformed is durable (the "malformed" case of
     test_prepare_refuses_unopenable_state_before_writable_open below proves
-    retrying does not help), while busy is transient. This proves the
-    transient half behaviorally, by retrying the exact same path once the
-    lock releases and confirming it now opens cleanly, rather than by
-    asserting on either raised message's wording. The classification check
-    (not just "it raised something") is what makes this fail on the old
-    code, which misrouted this exact scenario through MALFORMED.
+    retrying does not help), while busy is transient. Pinned structurally,
+    not by wording: DatabaseBusyError is a distinct StateError subtype the
+    old code never raised (it always raised plain StateError, the shape
+    MALFORMED still uses), so a revert that keeps *a* StateError coming out
+    of this path but drops back to that plain type fails the
+    ``pytest.raises(DatabaseBusyError)`` match. The transient half is
+    proved behaviorally, by retrying the exact same path once the lock
+    releases and confirming it now opens cleanly.
 
     prepare_database_open's own inspect_schema call carries no bounded
     timeout (the writable path's existing, unchanged wait), so this
@@ -203,28 +250,37 @@ def test_prepare_database_open_raises_for_busy_and_recovers_once_lock_clears(tmp
     locker.execute("BEGIN EXCLUSIVE")
     try:
         # A short explicit-timeout probe is a faithful proxy for what
-        # prepare_database_open's own unbounded call sees next: SQLite's
-        # busy/locked error code (and therefore this classification) does
-        # not depend on how long the caller was willing to wait for it.
+        # prepare_database_open's own call, with no completion-specific
+        # timeout, sees next: SQLite's busy/locked error code (and
+        # therefore this classification) does not depend on how long the
+        # caller was willing to wait for it.
         assert inspect_schema(path, timeout=0.1).state is SchemaState.BUSY
-        with pytest.raises(StateError):
+        with pytest.raises(DatabaseBusyError) as raised:
             prepare_database_open(path)
     finally:
         locker.rollback()
         locker.close()
 
+    assert raised.value.hint is not None
+
     plan = prepare_database_open(path)
     assert plan.inspection.state is SchemaState.CURRENT
 
 
-def test_check_schema_raises_for_busy_like_it_already_does_for_malformed(tmp_path: Path) -> None:
+def test_check_schema_raises_a_distinct_busy_error_with_a_hint(tmp_path: Path) -> None:
     """Database.check_schema() is agw doctor's only production entry point
     (via doctor_state._current_database, which every doctor database check
     wraps in a broad except). It already raised for MALFORMED rather than
     returning a fabricated version tuple; it must do the same for BUSY, with
-    a distinct classification, rather than folding it into the malformed
-    case. The classification check is what makes this fail on the old code,
-    which raised here too, but via MALFORMED."""
+    a distinct exception type and its own hint, rather than folding it into
+    the malformed case's type or wording.
+
+    Pinned structurally (the exception TYPE and that a hint is attached),
+    not by asserting either raised message's wording: DatabaseBusyError is
+    a StateError subtype the old code never raised, so reverting this
+    site's classification back to a plain StateError (the shape MALFORMED
+    still uses) fails the ``pytest.raises(DatabaseBusyError)`` match below
+    even though a StateError still comes out."""
     path = tmp_path / "state.db"
     _build_schema(path, LATEST_VERSION)
 
@@ -232,11 +288,42 @@ def test_check_schema_raises_for_busy_like_it_already_does_for_malformed(tmp_pat
     locker.execute("BEGIN EXCLUSIVE")
     try:
         assert inspect_schema(path, timeout=0.1).state is SchemaState.BUSY
-        with pytest.raises(StateError):
+        with pytest.raises(DatabaseBusyError) as raised:
             Database.check_schema(path)
     finally:
         locker.rollback()
         locker.close()
+
+    assert raised.value.hint is not None
+
+
+def test_doctor_check_database_preserves_the_busy_hint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """agw doctor's database check (doctor_state.check_database) reads
+    through the exact same Database.check_schema() seam as the writable
+    path, via a broad `except Exception` that used to render only
+    `str(error)` and drop the typed hint on the floor. Pinned structurally
+    by asserting the rendered HealthCheck's own status and hint fields,
+    not by asserting either's wording: a revert that keeps the busy
+    classification correct but stops passing the hint through fails the
+    `hint is not None` assertion below."""
+    import agentworks.db as db_module
+    from agentworks.doctor import Status
+    from agentworks.doctor_state import check_database
+
+    path = tmp_path / "state.db"
+    _build_schema(path, LATEST_VERSION)
+    monkeypatch.setattr(db_module, "DB_PATH", path)
+
+    locker = sqlite3.connect(path)
+    locker.execute("BEGIN EXCLUSIVE")
+    try:
+        check = check_database().checks[0]
+    finally:
+        locker.rollback()
+        locker.close()
+
+    assert check.status is Status.FAIL
+    assert check.hint is not None
 
 
 def test_completion_open_returns_none_for_a_busy_database_not_just_malformed_ones(tmp_path: Path) -> None:
