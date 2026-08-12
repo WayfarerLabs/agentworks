@@ -145,13 +145,19 @@ def test_inspection_matrix_is_non_migrating_and_wal_aware(tmp_path: Path) -> Non
     stale = tmp_path / "stale.db"
     current = tmp_path / "current.db"
     malformed = tmp_path / "malformed.db"
+    busy = tmp_path / "busy.db"
     _build_schema(stale, LATEST_VERSION - 1)
     Database(current).close()
     malformed.write_text("not sqlite")
+    _build_schema(busy, LATEST_VERSION)
 
     assert inspect_schema(absent).state is SchemaState.ABSENT
     assert inspect_schema(stale).state is SchemaState.STALE
     assert inspect_schema(current).state is SchemaState.CURRENT
+    # An actually-corrupt file (not a SQLite database at all) must stay
+    # MALFORMED even though the busy branch below now shares its except
+    # clause: a busy database is transient, corruption is not, and the two
+    # must never collapse into the same classification.
     assert inspect_schema(malformed).state is SchemaState.MALFORMED
     assert _version(stale) == LATEST_VERSION - 1
 
@@ -164,6 +170,91 @@ def test_inspection_matrix_is_non_migrating_and_wal_aware(tmp_path: Path) -> Non
     assert current.with_name(f"{current.name}-wal").stat().st_size > 0
     assert inspect_schema(current).state is SchemaState.FUTURE
     writer.close()
+
+    locker = sqlite3.connect(busy)
+    locker.execute("BEGIN EXCLUSIVE")
+    try:
+        # A short explicit bound keeps this fast; inspect_schema's default
+        # (unbounded here) wait is exercised separately below.
+        assert inspect_schema(busy, timeout=0.1).state is SchemaState.BUSY
+    finally:
+        locker.rollback()
+        locker.close()
+
+
+def test_prepare_database_open_raises_for_busy_and_recovers_once_lock_clears(tmp_path: Path) -> None:
+    """Busy and malformed share the StateError type but differ in what they
+    mean operationally: malformed is durable (the "malformed" case of
+    test_prepare_refuses_unopenable_state_before_writable_open below proves
+    retrying does not help), while busy is transient. This proves the
+    transient half behaviorally, by retrying the exact same path once the
+    lock releases and confirming it now opens cleanly, rather than by
+    asserting on either raised message's wording. The classification check
+    (not just "it raised something") is what makes this fail on the old
+    code, which misrouted this exact scenario through MALFORMED.
+
+    prepare_database_open's own inspect_schema call carries no bounded
+    timeout (the writable path's existing, unchanged wait), so this
+    exercises the real driver-default busy wait."""
+    path = tmp_path / "state.db"
+    _build_schema(path, LATEST_VERSION)
+
+    locker = sqlite3.connect(path)
+    locker.execute("BEGIN EXCLUSIVE")
+    try:
+        # A short explicit-timeout probe is a faithful proxy for what
+        # prepare_database_open's own unbounded call sees next: SQLite's
+        # busy/locked error code (and therefore this classification) does
+        # not depend on how long the caller was willing to wait for it.
+        assert inspect_schema(path, timeout=0.1).state is SchemaState.BUSY
+        with pytest.raises(StateError):
+            prepare_database_open(path)
+    finally:
+        locker.rollback()
+        locker.close()
+
+    plan = prepare_database_open(path)
+    assert plan.inspection.state is SchemaState.CURRENT
+
+
+def test_check_schema_raises_for_busy_like_it_already_does_for_malformed(tmp_path: Path) -> None:
+    """Database.check_schema() is agw doctor's only production entry point
+    (via doctor_state._current_database, which every doctor database check
+    wraps in a broad except). It already raised for MALFORMED rather than
+    returning a fabricated version tuple; it must do the same for BUSY
+    instead of silently reporting a busy database as if it were an
+    uninitialized (version 0) one. The classification check is what makes
+    this fail on the old code, which raised here too, but via MALFORMED."""
+    path = tmp_path / "state.db"
+    _build_schema(path, LATEST_VERSION)
+
+    locker = sqlite3.connect(path)
+    locker.execute("BEGIN EXCLUSIVE")
+    try:
+        assert inspect_schema(path, timeout=0.1).state is SchemaState.BUSY
+        with pytest.raises(StateError):
+            Database.check_schema(path)
+    finally:
+        locker.rollback()
+        locker.close()
+
+
+def test_completion_open_returns_none_for_a_busy_database_not_just_malformed_ones(tmp_path: Path) -> None:
+    """Hard constraint: adding SchemaState.BUSY must not change completion
+    behavior. open_completion_database()'s `state is not CURRENT` check is
+    inclusive by construction, so this pins that shape rather than proving
+    new code is needed."""
+    path = tmp_path / "state.db"
+    _build_schema(path, LATEST_VERSION)
+
+    locker = sqlite3.connect(path)
+    locker.execute("BEGIN EXCLUSIVE")
+    try:
+        assert inspect_schema(path, timeout=0.1).state is SchemaState.BUSY
+        assert open_completion_database(path) is None
+    finally:
+        locker.rollback()
+        locker.close()
 
 
 def test_prepare_qualifies_stale_state_under_restrictive_persistent_lock(tmp_path: Path) -> None:

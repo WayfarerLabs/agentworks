@@ -60,6 +60,7 @@ class SchemaState(Enum):
     STALE = auto()
     CURRENT = auto()
     FUTURE = auto()
+    BUSY = auto()
     MALFORMED = auto()
 
 
@@ -114,11 +115,13 @@ def inspect_schema(database_path: Path, *, timeout: float | None = None) -> Sche
     """Inspect schema version and cookie without creating or migrating state.
 
     ``timeout`` bounds how long SQLite retries against a busy database
-    (``sqlite3.connect``'s own ``timeout`` parameter) before raising
-    "database is locked", which this function reports as
-    :attr:`SchemaState.MALFORMED`. Omit it (the default) to keep the
-    driver's own default wait; callers that must not block a fast path
-    (completion) pass an explicit, tight bound.
+    (``sqlite3.connect``'s own ``timeout`` parameter) before giving up.
+    Omit it (the default) to keep the driver's own default wait; callers
+    that must not block a fast path (completion) pass an explicit, tight
+    bound. A database still busy when the wait expires is reported as
+    :attr:`SchemaState.BUSY`, a distinct, transient classification from
+    :attr:`SchemaState.MALFORMED`: retrying once the other connection
+    finishes is expected to succeed, unlike genuine corruption.
     """
     if not database_path.exists():
         return SchemaInspection(SchemaState.ABSENT, 0, LATEST_VERSION, None)
@@ -146,10 +149,23 @@ def inspect_schema(database_path: Path, *, timeout: float | None = None) -> Sche
             raise StateError("state database schema cookie is invalid")
     except (OSError, sqlite3.DatabaseError, StateError) as error:
         if isinstance(error, StateError) and "schema version is invalid" in str(error):
-            message = str(error)
-        else:
-            message = "state database schema is unavailable or malformed"
-        return SchemaInspection(SchemaState.MALFORMED, 0, LATEST_VERSION, None, message)
+            return SchemaInspection(SchemaState.MALFORMED, 0, LATEST_VERSION, None, str(error))
+        code = getattr(error, "sqlite_errorcode", None)
+        if code is not None and code & 0xFF in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+            return SchemaInspection(
+                SchemaState.BUSY,
+                0,
+                LATEST_VERSION,
+                None,
+                "state database is busy; retry after other database users finish",
+            )
+        return SchemaInspection(
+            SchemaState.MALFORMED,
+            0,
+            LATEST_VERSION,
+            None,
+            "state database schema is unavailable or malformed",
+        )
     finally:
         if connection is not None:
             connection.close()
@@ -337,6 +353,11 @@ def _raise_if_unopenable(inspection: SchemaInspection) -> None:
             f"state database schema version {inspection.current_version} is newer than this "
             f"Agentworks release supports ({inspection.latest_version})",
             hint="Preserve it with `agw database backup`, then use a release that understands its schema.",
+        )
+    if inspection.state is SchemaState.BUSY:
+        raise StateError(
+            inspection.error_message or "state database is busy; retry after other database users finish",
+            hint="Retry after the other Agentworks command finishes.",
         )
     if inspection.state is SchemaState.MALFORMED:
         raise StateError(

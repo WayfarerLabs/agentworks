@@ -153,13 +153,21 @@ class Database:
     def check_schema(path: Path | None = None) -> tuple[bool, int, int]:
         """Check DB schema version without migrating.
 
-        Returns (exists, current_version, latest_version).
+        Returns (exists, current_version, latest_version). Raises for BUSY
+        and MALFORMED: neither has a coherent version to report, unlike
+        FUTURE, which still returns its (current, latest) pair for the
+        caller (`agw doctor`) to display.
         """
         db_path = path or _db.DB_PATH
         from agentworks.db.backup import SchemaState, inspect_schema
         from agentworks.errors import StateError
 
         inspection = inspect_schema(db_path)
+        if inspection.state is SchemaState.BUSY:
+            raise StateError(
+                inspection.error_message or "state database is busy; retry after other database users finish",
+                hint="Retry after the other Agentworks command finishes.",
+            )
         if inspection.state is SchemaState.MALFORMED:
             raise StateError(inspection.error_message or "state database schema is unavailable or malformed")
         return (
