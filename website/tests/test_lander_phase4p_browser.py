@@ -36,6 +36,21 @@ const rect = (element) => {
     return {top: value.top, right: value.right, bottom: value.bottom, left: value.left,
         width: value.width, height: value.height};
 };
+const paintRect = (element) => {
+    const bounds = rect(element);
+    const halfStroke = Number.parseFloat(getComputedStyle(element).strokeWidth) / 2 || 0;
+    return {top: bounds.top - halfStroke, right: bounds.right + halfStroke,
+        bottom: bounds.bottom + halfStroke, left: bounds.left - halfStroke,
+        width: bounds.width + 2 * halfStroke, height: bounds.height + 2 * halfStroke};
+};
+const overlaps = (left, right) => left.left < right.right && left.right > right.left &&
+    left.top < right.bottom && left.bottom > right.top;
+const inside = (inner, outer) => inner.left >= outer.left - .5 && inner.right <= outer.right + .5 &&
+    inner.top >= outer.top - .5 && inner.bottom <= outer.bottom + .5;
+const pairwiseOverlaps = (entries) => entries.flatMap(([leftName, left], index) =>
+    entries.slice(index + 1).map(([rightName, right]) => ({
+        pair: [leftName, rightName], overlaps: overlaps(left, right),
+    })));
 let model = updateRetention(createRun({seed: STATIC_WORLD_SEED}));
 const site = model.retainedSites[0];
 const staticTerrain = document.querySelector(".terrain-surface").getAttribute("d");
@@ -74,6 +89,49 @@ const opening = {
         site.platformLeft + 9.8, site.platformLeft + 17.6, site.platformLeft + 18.6]
         .map((x) => terrainHeightAt(site.seed, x)),
 };
+let maximum = updateRetention(createRun({seed: STATIC_WORLD_SEED, reducedMotion: true}));
+maximum = updateRetention({...maximum, pose: {...maximum.pose, x: 30, y: 56,
+    vx: 0, vy: 0, angle: 0, angularVelocity: 0}});
+controller.model = maximum;
+controller.render();
+const maximumCamera = cameraForPose(maximum.pose);
+const maximumSite = maximum.retainedSites.find((candidate) => candidate.id === maximum.targetSiteId);
+const maximumGroup = document.querySelector(`[data-site-id="${maximumSite.id}"]`);
+const maximumTerrain = document.querySelector(".terrain-surface");
+const maximumScaffold = maximumGroup.querySelector(".site-scaffold");
+const maximumStageBounds = rect(stage);
+const maximumSceneBounds = rect(scene);
+const maximumMembers = siteScaffoldMembers(maximumSite);
+const maximumSupportFeet = siteStructure(maximumSite).supportColumns
+    .flatMap((column) => [[column.left, column.leftFoot], [column.right, column.rightFoot]])
+    .map(([x, y]) => {
+        const terrainPoint = new DOMPoint(worldSceneX(x), worldSceneY(y))
+            .matrixTransform(maximumTerrain.getScreenCTM());
+        const scaffoldPoint = new DOMPoint(worldSceneX(x), worldSceneY(y))
+            .matrixTransform(maximumScaffold.getScreenCTM());
+        return {x, y, terrainX: terrainPoint.x, terrainY: terrainPoint.y,
+            scaffoldX: scaffoldPoint.x, scaffoldY: scaffoldPoint.y,
+            terrainVertex: maximum.terrainVertices.some(([vertexX, vertexY]) => vertexX === x && vertexY === y),
+            scaffoldEndpoint: maximumMembers.some(({end}) => end[0] === x && end[1] === y),
+            terrainClipped: terrainPoint.y > maximumStageBounds.bottom,
+            scaffoldClipped: scaffoldPoint.y > maximumStageBounds.bottom};
+    });
+const maximumTarget = {
+    direction: root.dataset.targetDirection,
+    cue: rect(document.querySelector("#next-site-cue")),
+    landingFace: paintRect(maximumGroup.querySelector(".landing-platform")),
+    noc: paintRect(maximumGroup.querySelector(".noc-building:not(.noc-entry)")),
+    mast: paintRect(maximumGroup.querySelector(".antenna-mast")),
+};
+const maximumWindow = {
+    camera: maximumCamera,
+    terrainParity: maximumTerrain.getAttribute("d") === terrainSurfacePath(maximum.terrainVertices),
+    supportFeet: maximumSupportFeet,
+    target: {...maximumTarget,
+        landingFaceInside: inside(maximumTarget.landingFace, maximumSceneBounds),
+        nocInside: inside(maximumTarget.noc, maximumSceneBounds),
+        mastInside: inside(maximumTarget.mast, maximumSceneBounds)},
+};
 model = {...model, pose: {...model.pose, x: 160, y: 55, vx: 0, vy: 0}};
 controller.model = model;
 controller.render();
@@ -111,6 +169,8 @@ const windows = reliefVectors.map((witness) => {
     const anchorWorldY = terrainHeightAt(witness.seed, witness.anchorX);
     const landerBounds = rect(document.querySelector("#mission-lander"));
     const cueBounds = rect(document.querySelector("#next-site-cue"));
+    const hudBounds = rect(document.querySelector("#lander-fuel-gauge"));
+    const actionBounds = rect(document.querySelector("#lander-exit"));
     const currentScene = rect(scene);
     const currentStage = rect(stage);
     const currentRail = rect(rail);
@@ -127,6 +187,9 @@ const windows = reliefVectors.map((witness) => {
         cueVisible: cueBounds.width > 0 && cueBounds.height > 0 && cueBounds.left >= currentScene.left - .5 &&
             cueBounds.right <= currentScene.right + .5 && cueBounds.top >= currentScene.top - .5 &&
             cueBounds.bottom <= currentScene.bottom + .5,
+        geometry: {cue: cueBounds, hud: hudBounds, lander: landerBounds, action: actionBounds,
+            overlaps: pairwiseOverlaps([["cue", cueBounds], ["hud", hudBounds],
+                ["lander", landerBounds], ["action", actionBounds]])},
         stageRailSeparated: currentStage.bottom <= currentRail.top,
         overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth};
 });
@@ -173,7 +236,7 @@ const hundredSites = {
     maximumSites,
     maximumChunks,
 };
-window.phase4p = {layoutWidth: innerWidth, opening, explored, windows, hundredSites};
+window.phase4p = {layoutWidth: innerWidth, opening, maximumWindow, explored, windows, hundredSites};
 document.documentElement.dataset.phase4pReady = "true";
 } catch (error) {
     window.phase4p = {error: String(error), stack: error.stack};
@@ -273,6 +336,26 @@ class Phase4PBrowserTests(RepositoryFixture):
                     self.assertTrue(foot["inside"])
                     self.assertAlmostEqual(foot["terrainX"], foot["scaffoldX"])
                     self.assertAlmostEqual(foot["terrainY"], foot["scaffoldY"])
+                maximum = result["maximumWindow"]
+                self.assertEqual(maximum["camera"], {"left": 0, "down": 319})
+                self.assertTrue(maximum["terrainParity"])
+                self.assertEqual(maximum["target"]["direction"], "none")
+                self.assertEqual(maximum["target"]["cue"]["width"], 0)
+                self.assertEqual(maximum["target"]["cue"]["height"], 0)
+                for name in ("landingFace", "noc", "mast"):
+                    self.assertGreater(maximum["target"][name]["width"], 0)
+                    self.assertGreater(maximum["target"][name]["height"], 0)
+                self.assertTrue(maximum["target"]["landingFaceInside"])
+                self.assertTrue(maximum["target"]["nocInside"])
+                self.assertTrue(maximum["target"]["mastInside"])
+                self.assertEqual(len(maximum["supportFeet"]), 6)
+                for foot in maximum["supportFeet"]:
+                    self.assertTrue(foot["terrainVertex"])
+                    self.assertTrue(foot["scaffoldEndpoint"])
+                    self.assertTrue(foot["terrainClipped"])
+                    self.assertTrue(foot["scaffoldClipped"])
+                    self.assertAlmostEqual(foot["terrainX"], foot["scaffoldX"])
+                    self.assertAlmostEqual(foot["terrainY"], foot["scaffoldY"])
                 for witness in result["windows"]:
                     self.assertEqual(witness["camera"], witness["expectedCamera"])
                     self.assertAlmostEqual(witness["normalized"], witness["expectedNormalized"])
@@ -283,6 +366,11 @@ class Phase4PBrowserTests(RepositoryFixture):
                     self.assertTrue(witness["landerInside"])
                     self.assertEqual(witness["targetDirection"], witness["expectedTargetDirection"])
                     self.assertTrue(witness["cueVisible"])
+                    for name in ("cue", "hud", "lander", "action"):
+                        self.assertGreater(witness["geometry"][name]["width"], 0)
+                        self.assertGreater(witness["geometry"][name]["height"], 0)
+                    for pair in witness["geometry"]["overlaps"]:
+                        self.assertFalse(pair["overlaps"], {"witness": witness["name"], **pair})
                     self.assertTrue(witness["stageRailSeparated"])
                     self.assertEqual(witness["overflow"], 0)
         result = results[0]

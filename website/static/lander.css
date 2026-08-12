@@ -521,6 +521,10 @@
 }
 
 @media (max-width: 32rem) {
+    #lander-fuel-gauge {
+        height: clamp(2.25rem, 11.25vw, 7rem);
+    }
+
     #lander-controls-rail:not([hidden]) {
         grid-template-columns: minmax(0, 1fr);
         row-gap: 0.4rem;

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
 import tempfile
 import threading
 import time
+from contextlib import suppress
 from functools import partial
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -66,6 +68,23 @@ document.documentElement.dataset.phase4mReady = "true";
 """
 
 
+class _DisconnectQuietHandler(_QuietHandler):
+    def copyfile(self, source: object, outputfile: object) -> None:
+        with suppress(BrokenPipeError, ConnectionResetError):
+            super().copyfile(source, outputfile)
+
+
+def _page_ready(connection: DevToolsConnection, expected_url: str) -> bool:
+    expected = json.dumps(expected_url)
+    return (
+        connection.evaluate(
+            f"document.documentElement?.dataset.phase4mReady === 'true' && "
+            f"document.readyState === 'complete' && document.URL === {expected}"
+        )
+        is True
+    )
+
+
 def browser_phase4m_contract(output: Path) -> dict[str, object]:
     chromium = next(
         (candidate for name in ("google-chrome", "chromium", "chromium-browser") if (candidate := shutil.which(name))),
@@ -76,7 +95,7 @@ def browser_phase4m_contract(output: Path) -> dict[str, object]:
     page = output / "lander/index.html"
     probe_path = output / "phase4m-browser.js"
     source = page.read_text(encoding="utf-8")
-    server = ThreadingHTTPServer(("127.0.0.1", 0), partial(_QuietHandler, directory=str(output)))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), partial(_DisconnectQuietHandler, directory=str(output)))
     thread = threading.Thread(target=server.serve_forever, daemon=True, name="phase4m-browser-server")
     profile = tempfile.TemporaryDirectory()
     process: subprocess.Popen[bytes] | None = None
@@ -108,9 +127,13 @@ def browser_phase4m_contract(output: Path) -> dict[str, object]:
         connection = DevToolsConnection(_devtools_target(Path(profile.name), process))
         for domain in ("Runtime", "Page"):
             connection.call(f"{domain}.enable")
-        connection.call("Page.navigate", {"url": f"http://127.0.0.1:{server.server_address[1]}/lander/"})
+        expected_url = f"http://127.0.0.1:{server.server_address[1]}/lander/"
+        connection.evaluate("document.documentElement.remove()")
+        if _page_ready(connection, expected_url):
+            raise AssertionError("Detached bootstrap document matched the Phase 4M page lifecycle")
+        connection.call("Page.navigate", {"url": expected_url})
         for _ in range(240):
-            if connection.evaluate("document.documentElement.dataset.phase4mReady === 'true'"):
+            if _page_ready(connection, expected_url):
                 return connection.evaluate("phase4m")
             time.sleep(0.025)
         raise AssertionError("Phase 4M browser probe did not initialize")
