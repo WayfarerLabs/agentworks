@@ -565,6 +565,15 @@ and member stroke can only shrink them. The conservative truss and column collid
 honest: no complete `3.2 m` hull can enter an opening they reject while the narrower lattice remains
 visibly open.
 
+These are independently reconstructed conservative maxima, not a fixed inventory of opening counts.
+For each site descriptor, the independent test implementation overlays all 14 truss members, all
+variable column members, and the native terrain surface across each column; splits them at every
+intersection; and enumerates each bounded connected clear face inside the truss/column collider
+union. Every face must fit within one of the three raw centerline boxes above. It records the actual
+maximum face's axis-aligned envelope width and height plus their `hypot` diameter, and proves that
+diameter is no greater than `3.189435684729195 m`. Column bay count and terrain feet may change the
+face inventory, so neither production, fixtures, nor tests assign a fixed full/half-face count.
+
 Static markup and dynamic rendering use byte-equivalent path/member attributes; model polygons,
 independent world witnesses, and fixtures use the one truss envelope and three column envelopes.
 Tests independently reconstruct the fixed truss plus every variable column segment, butt cap, round
@@ -1213,38 +1222,39 @@ IDs, deltas, and literal clearance knots, plus one `siteGeometry` object with th
 width, thickness, `2.4 m` clearance, exact deck levels `[8.3,9.1,9.9]`, `7.0 m` NOC width, `7.2 m`
 roof offset, `0.5 by 3.2 m` mast, `0.2 m` member width, butt cap, and round join. Its `truss` object
 pins `span=18.6`, `bayCount=12`, `bayWidth=1.55`, `bayHeight=.75`, `chordCount=2`,
-`diagonalsPerBay=1`, `alternation="top-left-to-bottom-right-first"`, section 5.3's ten full/four
-half raw aperture bounds, and collision envelope `[-4.9,13.9] x [-1.2,-.25]`. Its sibling
-`supportColumns` object pins count `3`, rail-pair offsets `[[0,1],[8.8,9.8],[17.6,18.6]]`,
-rail/tie/brace width `.2`, maximum bay height `.8`, first-brace alternation
-`"top-left-to-bottom-right-first"`, independently interpolated rail feet, bottom-tie rule
-`max-rail-foot`, collision expansion `.1`, and section 5.3's aperture bounds. It contains no
-`pylons`, target-band, shelf, connector-width, regional scaffold, post-grid, or
-platform/connector/NOC underframe fields. This incompatible field and member-shape change advances
-both fixture filenames and schemas from v3 to v4; the v3 pair is deleted in the same atomic commit
-with no reader, alias, fallback, or compatibility shim. Output schema `agw-lander-route-derived/v4`
-contains `deriverVersion`, `recipeVersion`, `canonicalPoseDecimals:9`, exact per-route
-`combinationsEvaluated`, `physicsDigest`, `geometryDigest`, the ordered route records from section
-10.1, `worldWitnesses`, `worldDigest`, and `outputDigest`. `worldWitnesses` contains exactly 81
-independently reconstructed world descriptors: nine templates times three pinned seeds times three
-translations. Nesting is template outermost in section 10.1 order, then seed in exact order
-`[11,39,41]`, then origin center in exact order `[36,117,-42]`. For each template, the witness
-origin deck level is `83` for delta `+1.6`, `91` for delta `+.8`, and `99` otherwise; target level
-is the exact integer sum with the template's decimeter delta. The serialized flat array follows that
-nested order without sorting or regrouping. Independent feasibility enumeration proves both closed
-site footprints satisfy their local native minimum in all 81 cases; changing a seed, center, level,
-or comparison must fail rather than silently raise a platform. Each descriptor includes the selected
-motif-bank offset, direction, and relevant per-chunk indexes; the one strict-X terrain array with
-`10 m`, site-boundary, and six column-rail-foot samples; open-corridor cap relief; both platform
-decks; the fixed 14 truss members plus every bounded variable lattice member with cap and join
-semantics; the raw-truss, lattice-bay, and terrain-wedge aperture bounds; the one pair of truss and
-six column conservative collision envelopes; NOC bodies, complete NOC collision envelopes, and mast
-colliders; and its own digest. Canonical JSON recursively sorts object keys, preserves array order,
-uses `JSON.stringify` without whitespace, and hashes UTF-8 bytes with lowercase SHA-256.
-`geometryDigest` hashes the complete geometry object; `physicsDigest` hashes an object containing
-every named numeric constant in sections 8-10, including gimbal and assist constants, plus the eight
-pre-assist command rows; `worldDigest` hashes the ordered world descriptors; `outputDigest` hashes
-the output object with only `outputDigest` omitted. The file adds one unhashed trailing LF.
+`diagonalsPerBay=1`, `alternation="top-left-to-bottom-right-first"`, the conservative raw clear-face
+maximum `width=3.1`, `height=.75`, and `diameter=3.189435684729195`, and collision envelope
+`[-4.9,13.9] x [-1.2,-.25]`. Its sibling `supportColumns` object pins count `3`, rail-pair offsets
+`[[0,1],[8.8,9.8],[17.6,18.6]]`, rail/tie/brace width `.2`, maximum bay height `.8`, first-brace
+alternation `"top-left-to-bottom-right-first"`, independently interpolated rail feet, bottom-tie
+rule `max-rail-foot`, collision expansion `.1`, lattice maximum `1 by .8 m`, and terrain-wedge
+maximum `1 by .7 m`. It contains no `pylons`, target-band, shelf, connector-width, regional
+scaffold, post-grid, or platform/connector/NOC underframe fields. This incompatible field and
+member-shape change advances both fixture filenames and schemas from v3 to v4; the v3 pair is
+deleted in the same atomic commit with no reader, alias, fallback, or compatibility shim. Output
+schema `agw-lander-route-derived/v4` contains `deriverVersion`, `recipeVersion`,
+`canonicalPoseDecimals:9`, exact per-route `combinationsEvaluated`, `physicsDigest`,
+`geometryDigest`, the ordered route records from section 10.1, `worldWitnesses`, `worldDigest`, and
+`outputDigest`. `worldWitnesses` contains exactly 81 independently reconstructed world descriptors:
+nine templates times three pinned seeds times three translations. Nesting is template outermost in
+section 10.1 order, then seed in exact order `[11,39,41]`, then origin center in exact order
+`[36,117,-42]`. For each template, the witness origin deck level is `83` for delta `+1.6`, `91` for
+delta `+.8`, and `99` otherwise; target level is the exact integer sum with the template's decimeter
+delta. The serialized flat array follows that nested order without sorting or regrouping.
+Independent feasibility enumeration proves both closed site footprints satisfy their local native
+minimum in all 81 cases; changing a seed, center, level, or comparison must fail rather than
+silently raise a platform. Each descriptor includes the selected motif-bank offset, direction, and
+relevant per-chunk indexes; the one strict-X terrain array with `10 m`, site-boundary, and six
+column-rail-foot samples; open-corridor cap relief; both platform decks; the fixed 14 truss members
+plus every bounded variable lattice member with cap and join semantics; the raw-truss, lattice-bay,
+terrain-wedge, and actual maximum connected clear-face bounds; the one truss and three column
+conservative collision envelopes; NOC bodies, complete NOC collision envelopes, and mast colliders;
+and its own digest. Canonical JSON recursively sorts object keys, preserves array order, uses
+`JSON.stringify` without whitespace, and hashes UTF-8 bytes with lowercase SHA-256. `geometryDigest`
+hashes the complete geometry object; `physicsDigest` hashes an object containing every named numeric
+constant in sections 8-10, including gimbal and assist constants, plus the eight pre-assist command
+rows; `worldDigest` hashes the ordered world descriptors; `outputDigest` hashes the output object
+with only `outputDigest` omitted. The file adds one unhashed trailing LF.
 
 Candidate search, fuel burn, collision classification, route ordering, demonstrated minima, and all
 world/geometry values retain raw JavaScript numbers. Only after the winning route is selected, the
@@ -1284,7 +1294,8 @@ literals and digests in one atomic change. Tests project production arrays back 
 compare canonical bytes with both fixtures, and recompute all digests before replay. Independent
 test-side reconstruction compares all 81 motif selections, strict-X native/corridor arrays,
 deck-level/truss/column/NOC descriptors, inserted native boundary and six-foot values, lattice
-levels, variable members, colliders, aperture bounds, and corridor samples to production with strict
+levels, variable members, colliders, the independently enumerated maximum connected clear-face
+envelope, the three conservative aperture maxima, and corridor samples to production with strict
 numeric equality and pinned ULP-sensitive vectors. Thus the world and tool consume identical
 envelope values while independently implementing corridor construction, physics, assist, gimbal, and
 collision. Intentional regeneration writes to temporary paths, reviews the canonical mismatch,
@@ -1840,6 +1851,7 @@ human-reviewed rather than asserted. Every schedule includes an explicit final c
 | Truss envelope        | Relative chords `[-4.8,13.8] x [-1.1,-.35]`, member width `.2 m`                             | collider `[-4.9,13.9] x [-1.2,-.25]`; deck/NOC overlap; top remains `.25 m` below landing face                   |
 | Column envelopes      | rail pairs `0/1,8.8/9.8,17.6/18.6`; six native feet; top `p-.35`                             | each collider is the exact stroked axis-aligned box through its lower foot; all members contained and joined     |
 | Aperture bounds       | Raw truss, `.8 m` lattice bays, and the native-slope wedge                                   | diameters `3.189435684729195`, `1.2806248474865698`, and at most `1.2206555615733703`, all below hull `3.2`      |
+| Connected clear face  | Every independently split face for each pinned site descriptor                               | actual maximum axis-aligned envelope equals fixture fields; `hypot(width,height)<=3.189435684729195`             |
 | Opening gauge         | Fresh run `fuel=15`, `fuelGaugeReference=30`                                                 | exact level `.5`, exact accessible reserve `15.0`; no cap or hidden extra fuel                                   |
 | Later gauge           | `fuel=37.5`, `fuelGaugeReference=50`, then checkpoint restore                                | level `.75`, level `ready`; restore reproduces both values and never caps fuel                                   |
 | Gauge contrast        | danger/caution/ready against `#20232a`; gauge level zero                                     | ratios `5.068/8.584/8.243`; graphite boundary plus colored inset remain visible with zero-height fill            |
@@ -1980,16 +1992,17 @@ outside `41..95`. They reject a regional perimeter, post grid, X brace, any surv
 platform/connector/NOC underframe collider field, a truss collider other than
 `[-4.9,13.9] x [-1.2,-.25]`, any column collider other than the exact stroked axis-aligned box
 through its two feet, any raw-truss/lattice-bay/terrain-wedge aperture diameter at least `3.2 m`, a
-NOC lower bound other than `platformBottom`, a deck/NOC/truss/column visual-collision seam,
-disagreement between member geometry and conservative colliders, an extra scaffold wrapper, or a
-production import outside the exact DAG. They also reject fuel caps, rounded model fuel, an opening
-fuel/reference other than `15/30`, retaining `legDepartureFuel`, a gauge based on invented capacity
-or current award instead of `fuelGaugeReference` plus the one pinned refuel interpolation, an
-accessible duplicate meter, gauge level outside `[0,1]`, can recollection, or proof dependence on
-carried fuel. They reject a second banner/live region, a generated duplicate status copy,
-status-wording-driven banner selection, automatic launch, gravity or fuel burn while launch-ready,
-steer-only release of the pad hold, discarding the first collective step, a time-based launch exit,
-transition before both feet clear, Retry into an already started launch, duplicated
+reported actual maximum connected clear face that differs from independent enumeration, a fixed
+full/half-face inventory, a NOC lower bound other than `platformBottom`, a deck/NOC/truss/column
+visual-collision seam, disagreement between member geometry and conservative colliders, an extra
+scaffold wrapper, or a production import outside the exact DAG. They also reject fuel caps, rounded
+model fuel, an opening fuel/reference other than `15/30`, retaining `legDepartureFuel`, a gauge
+based on invented capacity or current award instead of `fuelGaugeReference` plus the one pinned
+refuel interpolation, an accessible duplicate meter, gauge level outside `[0,1]`, can recollection,
+or proof dependence on carried fuel. They reject a second banner/live region, a generated duplicate
+status copy, status-wording-driven banner selection, automatic launch, gravity or fuel burn while
+launch-ready, steer-only release of the pad hold, discarding the first collective step, a time-based
+launch exit, transition before both feet clear, Retry into an already started launch, duplicated
 can/fuel/ratio/progress/power, a missing or non-native Retry or Exit control, hidden-but-enabled
 actions, wrong active-state Exit projection, or a second launch/status authority. Phase 4K
 specifically rejects any `lander-launch` element, controller lookup/property/listener/handler,
