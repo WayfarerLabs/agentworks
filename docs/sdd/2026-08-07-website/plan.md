@@ -891,13 +891,13 @@ deterministic; and the immutable result is review-clean, browser-accepted, and m
       deterministic parallax stars and occasional celestial landmarks, bidirectional exploration
       without artificial horizontal crashes, half-duration pre-NOC agent travel, shortened page
       copy, and a direct fragment-free Lander footer destination with new hover/accessibility text.
-- [ ] Delegate and lead-review exact LLD amendments for both the shared site shell and Lander. Pin
+- [x] Delegate and lead-review exact LLD amendments for both the shared site shell and Lander. Pin
       column member geometry, honest colliders and aperture bounds; initial fuel feasibility and an
       honestly named display reference; sky generation, parallax, static fallback, and DOM limits;
       two-way camera/retention/cue behavior; removal of horizontal-position failure while preserving
       collision, ceiling, and excessive-speed safety outcomes; deployment timing; copy/route
       projection; fixture/digest impact; and mutation-sensitive browser evidence.
-- [ ] Obtain an `agentworks-reviewer` approval of the Phase 4M artifact amendments and resolve every
+- [x] Obtain an `agentworks-reviewer` approval of the Phase 4M artifact amendments and resolve every
       valid finding before changing production or canonical fixtures.
 - [ ] Delegate implementation to an `agentworks-dev` subagent in an isolated worktree. Update the
       shared shell and game fragment, CSS, world/model/controller modules, independent derivation
