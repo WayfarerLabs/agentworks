@@ -26,7 +26,7 @@ availability notice with the canonical README bootstrap and copy enhancement. It
 the page, fork the content, or create another deployment path. A final closeout PR records complete
 production acceptance, final truthful checkbox flips, and `locked.md`.
 
-`locked.md` never merges before AC1-AC26 and R1-R25 are accepted in production. Every earlier merge
+`locked.md` never merges before AC1-AC27 and R1-R26 are accepted in production. Every earlier merge
 is independently useful and operable: the interim release does not claim onboarding exists, and the
 onboarding release consumes only the eventual canonical contract from `main`. No website code binds
 to the onboarding feature branch.
@@ -1027,6 +1027,9 @@ behavior remains unchanged; and the immutable result is review-clean and gate-cl
 - [ ] Independently review the amended FRD, HLA, plan, and LLD before implementation. Prove the
       chosen design across canonical route worlds, representative low/high terrain witnesses, and
       four 100-site runs without changing physics or proof bounds merely to preserve old literals.
+      In addition to sampled evidence, prove for every seed that bounded site selection terminates
+      and that every allowed deck transition has a collision-safe, below-ceiling constructive route;
+      otherwise define and surface the exact infeasibility outcome rather than retrying forever.
 - [ ] Implement the reviewed world/model/controller/static-scene contract through an
       `agentworks-dev` delegation. Regenerate the geometry/world/output fixture evidence atomically,
       preserve one strict terrain authority for rendering/collision/support feet, and update
@@ -1163,7 +1166,7 @@ release PR, not only its implementation merge.
       draft PR ready, obtain review, and merge it. Do not create `locked.md` until Phase 9 closes
       every acceptance condition.
 
-Definition of done: both prerequisite acceptance gates remain recorded, and R3-R25 plus AC1-AC26's
+Definition of done: both prerequisite acceptance gates remain recorded, and R3-R26 plus AC1-AC27's
 custom-domain conditions hold at `https://agentworks.build`; no interim-only artifact is cut over.
 
 ## Phase 7: merged onboarding pickup and integration LLD
@@ -1210,7 +1213,7 @@ with no branch-only dependency or duplicated bootstrap.
       metadata/CSP, byte-equivalent Lander/404 game subtree, and compact 404 title after onboarding
       integration.
 
-Definition of done: R1-R25, AC2-AC3, and AC5-AC26 hold in production through the existing site and
+Definition of done: R1-R26, AC2-AC3, and AC5-AC27 hold in production through the existing site and
 pipeline at the default Pages URL, with the temporary notice removed rather than retained as
 configuration. Together with the accepted continuous Lander, this completion unlocks Phase 6;
 custom-domain activation is not claimed until that phase is executed.
@@ -1236,7 +1239,7 @@ custom-domain activation is not claimed until that phase is executed.
       run final gates, obtain the required closeout review, and hand the ready PR to the operator
       for merge.
 
-Definition of done: AC1-AC26 hold at `https://agentworks.build`, R1-R25 and C1-C5 are production
+Definition of done: AC1-AC27 hold at `https://agentworks.build`, R1-R26 and C1-C5 are production
 facts, both prerequisite acceptance gates and the Phase 6 cutover are recorded, the deployment is
 operable without this SDD, all plan boxes are truthful, and the effort is locked.
 

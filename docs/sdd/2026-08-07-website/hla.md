@@ -327,13 +327,15 @@ level deck from the native terrain envelope rather than flattening the surface. 
 chain remains authoritative through site and chunk boundaries, so rendering and collision cannot
 disagree through duplicate horizontal positions or vertical closing segments. A pure deterministic
 multi-scale relief kernel replaces the repeated motif bank. It derives a continuous terrain height
-in normalized scene space, bounded between `0.1` and `0.6` above the instruction rail, then projects
-that same value into world geometry for rendering, collision, site feet, and clearance. Smooth
-interpolation and independently tested grade, grade-change, and reversal bounds allow broad peaks
-and canyons without sample-to-sample chatter. The world/model contract jointly revises deck
-selection, route witnesses, ceiling handling, and any required vertical camera projection so the
-larger relief never creates an unreachable site or hides the active lander, target, HUD, or
-controls. No presentation-only terrain offset is permitted.
+in canonical, untransformed normalized scene space, bounded between `0.1` and `0.6` above the
+instruction rail at every point by a non-overshooting interpolation kernel, then projects that same
+value into world geometry for rendering, collision, site feet, and clearance. Smooth interpolation
+and independently tested grade, grade-change, and reversal bounds allow broad peaks and canyons
+without sample-to-sample chatter. The world/model contract jointly revises deck selection, route
+witnesses, ceiling handling, and any required vertical camera projection so the larger relief never
+creates an unreachable site or hides the active lander, target, HUD, or controls. Camera motion is
+applied only after canonical terrain/world projection and does not alter the normalized-height
+invariant. No presentation-only terrain offset is permitted.
 
 The materially elevated platform remains exactly three lander widths long beside one solid NOC
 building. One collider-backed open truss uses continuous top and bottom chords and a uniform
