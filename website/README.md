@@ -311,20 +311,26 @@ custom domain. The `github-pages` environment uses custom deployment-branch poli
 protected branches and has exactly one policy: branch `main`. No site deployment is expected until
 the publishing workflow first runs from a merged `main` commit.
 
+The default project URL may host the useful interim release while onboarding is pending. Do not
+attach `agentworks.build` or change DNS until both the continuous Lander and the canonical
+onboarding integration have passed their recorded acceptance gates on the deployed `main` artifact.
+
 1. Set GitHub Pages to use GitHub Actions as its publishing source.
 2. Protect the `github-pages` environment so only the default branch can deploy.
 3. Merge the complete publishing workflow and verify the expected commit at the default Pages URL
    before attaching the custom domain.
-4. Verify `agentworks.build` for the WayfarerLabs organization and retain the generated GitHub TXT
+4. Verify that both the continuous Lander and the canonical onboarding integration have passed their
+   recorded acceptance gates on that deployed `main` artifact.
+5. Verify `agentworks.build` for the WayfarerLabs organization and retain the generated GitHub TXT
    record.
-5. Set `agentworks.build` as this repository's custom domain. Do not mutate DNS yet.
-6. On the same already verified implementation merge-push workflow, use GitHub's **Re-run all
+6. Set `agentworks.build` as this repository's custom domain. Do not mutate DNS yet.
+7. On the same already verified implementation merge-push workflow, use GitHub's **Re-run all
    jobs**. Prove the rerun checked out the same source SHA, normalized `site_base=/`, built and
    uploaded the exact root-base twelve-file artifact, and deployed that artifact successfully. If
    the deployment fails or cannot be verified, execute the activation rollback below.
-7. Re-inventory DNS. Only after the same-SHA root deployment is proven, obtain explicit operator
+8. Re-inventory DNS. Only after the same-SHA root deployment is proven, obtain explicit operator
    approval for the exact cutover and then change only the identified parking records.
-8. Verify apex content, the `www` redirect, certificate hostname, and HTTPS enforcement.
+9. Verify apex content, the `www` redirect, certificate hostname, and HTTPS enforcement.
 
 The publishing workflow must build and test from a clean checkout on every push to `main`, without
 path filters. Authoritative inputs live outside `website/`, so a website-only trigger could publish

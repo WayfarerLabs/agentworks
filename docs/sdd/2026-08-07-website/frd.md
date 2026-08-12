@@ -2,7 +2,7 @@
 
 - Status: Interim implementation complete; continuous Lander Phase 4M refinement in progress
 - Date: 2026-08-07
-- Last revised: 2026-08-11
+- Last revised: 2026-08-12
 - Seeded by: the saga lead, at operator request. This is a standalone effort, deliberately NOT a
   child of the 2026-08-04-next-steps saga (see that saga's `target-state.md` out-of-scope section
   for the recorded relationship). It follows the ordinary SDD process: the effort lead owns the HLA
@@ -37,9 +37,11 @@ forecloses it, and none of it is in scope now.
 - R3. An integrated deployment pipeline: routine site-source merges to `main` deploy automatically,
   with no manual publish step. The one-time default-host to custom-domain base-path transition uses
   an explicitly invoked deployment of the same `main` commit after the custom domain is attached and
-  before DNS changes, because a Pages settings change does not trigger a build. That restricted
-  activation is setup, not a second publishing path. The site source and pipeline live in this
-  repository unless the effort lead makes a recorded case otherwise.
+  before DNS changes, because a Pages settings change does not trigger a build. That transition may
+  begin only after the continuous Lander and canonical onboarding integration have both passed their
+  recorded acceptance gates. The restricted activation is setup, not a second publishing path. The
+  site source and pipeline live in this repository unless the effort lead makes a recorded case
+  otherwise.
 - R4. Static only. No backend, no accounts, no data collection beyond whatever minimal analytics the
   operator explicitly approves (none is the default).
 - R5. The site serves humans and agents alike, consistent with destination 1's spirit: content is
@@ -77,11 +79,12 @@ forecloses it, and none of it is in scope now.
   hint-free preflight.
 - R10. Before the onboarding effort's canonical bootstrap source lands, an **interim public
   release** may serve the complete site shell, repository-sourced problem and principle content,
-  selected brand, permanent links, custom 404, deployment pipeline, and custom domain. It states
-  plainly that guided onboarding is not yet published and provides no substitute installation
-  command, bootstrap text, disabled copy affordance, or implication that onboarding is available.
-  The later bootstrap integration replaces this bounded notice; it does not require a redesign or a
-  second site.
+  selected brand, permanent links, custom 404, and deployment pipeline at the default GitHub Pages
+  project URL. It states plainly that guided onboarding is not yet published and provides no
+  substitute installation command, bootstrap text, disabled copy affordance, or implication that
+  onboarding is available. The later bootstrap integration replaces this bounded notice; it does not
+  require a redesign or a second site. `agentworks.build` is not attached or cut over until both
+  that canonical onboarding integration and the continuous Lander have passed acceptance.
 - R11. The main page includes the restrained link text `We take security seriously.` as optional
   depth, not a warning gate or dominant call to action. It leads to a dedicated static security page
   that renders the complete root `SECURITY.md` as HTML. That document is the single authority for
@@ -202,17 +205,19 @@ forecloses it, and none of it is in scope now.
   a downloaded font, remote asset, second status authority, canvas, or framework. The left fuel
   reserve is visual-only for sighted players: its bottom-up fill changes from danger red through
   amber to ready green, while a named rounded representation of the exact model reserve remains
-  available to assistive technology. A successful touchdown shows the collected can traveling toward
-  that gauge while its fill rises over the existing refuel interval; reduced motion exposes the
-  final full gauge atomically. The sole status live region becomes the centered, bordered arcade
-  banner for exact `Agent Deployed!` and exact `Crashed!` outcomes. Concise controls move inside the
-  scene in a small bottom rail whose reserved band never overlaps terrain. Exit is a persistent
-  bottom-right rail control, while failure adds only Retry beneath `Crashed!`; each control shows
-  its keyboard shortcut on a smaller second line and keeps its accessible name, focus behavior, and
-  minimum touch target. Launch-ready presents only `Agent Deployed!`: departure uses the same
-  keyboard, vi, pointer, and touch thrust controls as flight and has no dedicated Launch action.
-  Arcade decoration and motion never duplicate semantic text, obscure the world, expand the bounded
-  world DOM, or survive under reduced motion.
+  available to assistive technology. At exactly zero fuel the entire gauge flashes red when motion
+  is allowed, pauses with the game, and remains a strong static red warning under reduced motion. A
+  successful touchdown shows the collected can traveling toward that gauge while its fill rises over
+  the existing refuel interval; reduced motion exposes the final full gauge atomically. The sole
+  status live region becomes the centered, bordered arcade banner for exact `Agent Deployed!` and
+  exact `Crashed!` outcomes. Concise controls move inside the scene in a small bottom rail whose
+  reserved band never overlaps terrain. Exit is a persistent bottom-right rail control, while
+  failure adds only Retry beneath `Crashed!`; each control shows its keyboard shortcut on a smaller
+  second line and keeps its accessible name, focus behavior, and minimum touch target. Launch-ready
+  presents only `Agent Deployed!`: departure uses the same keyboard, vi, pointer, and touch thrust
+  controls as flight and has no dedicated Launch action. Arcade decoration and motion never
+  duplicate semantic text, obscure the world, expand the bounded world DOM, or survive under reduced
+  motion.
 - R25. The initial approach starts with exactly half of the visual fuel reference instead of a full
   gauge, while later post-award checkpoints continue to establish a full leg-relative gauge without
   capping or discarding carried fuel. The player may explore indefinitely in either horizontal
@@ -291,10 +296,12 @@ merged and settled on `main`. The first slice must not build toward them specula
   fixed-step physics across representative frame schedules, seeded terrain and site generation,
   route-home fallback, hidden-until-start instructions, fuel and checkpoint transitions, reduced
   motion, keyboard focus, narrow screens, bounded runtime work, and paused background behavior.
-- AC9. Before onboarding is available, `https://agentworks.build` serves the useful interim release
-  described by R10 over TLS. The page contains no bootstrap code region, copy control, installation
-  instruction, empty onboarding container, or unexpanded template token, and its availability notice
-  is exposed in ordinary semantic markup.
+- AC9. Before onboarding is available, the default GitHub Pages project URL serves the useful
+  interim release described by R10 over TLS. The page contains no bootstrap code region, copy
+  control, installation instruction, empty onboarding container, or unexpanded template token, and
+  its availability notice is exposed in ordinary semantic markup. Custom-domain activation remains
+  blocked until the accepted continuous Lander and canonical onboarding integration are both present
+  in the deployed `main` artifact.
 - AC10. The interim release satisfies AC1, AC2, and AC5-AC8 independently. AC3 and AC4 remain
   explicitly unaccepted until the canonical bootstrap is integrated; replacing the interim notice
   with that bootstrap leaves the established information architecture, visual system, URLs, 404, and
@@ -395,19 +402,20 @@ merged and settled on `main`. The first slice must not build toward them specula
   gauge independently communicates level by height and a red-to-amber-to-green progression. Normal
   motion shows one deterministic can-to-gauge transfer and gauge-rise sequence during the pinned
   refuel interval; reduced motion shows neither animation and lands directly on the same full value.
-  The existing sole live region presents centered, bordered `Agent Deployed!` and `Crashed!`
-  banners, with no pseudo-element or duplicate text authority. The controls legend omits shortcuts
-  represented by self-documenting buttons and shares the scene's bottom rail with an
-  always-available bottom-right Exit action whose smaller second line identifies Escape. Terrain
-  remains wholly above that rail. Launch-ready contains no action control, while failure adds only
-  Retry beneath the crash banner with `r` on its smaller second line. Those controls and overlays do
-  not overlap at 320 CSS pixels or 400 percent zoom. Normal arcade motion pauses while hidden and is
-  absent under reduced motion. The installed-agent mark persists at each powered retained NOC
-  without increasing the established 80-descendant world ceiling. Shared-game byte identity, focus
-  order, 44-pixel targets, contrast, no-JavaScript recovery, and zero runtime font or cross-origin
-  requests remain intact. Phase 4L regenerates the geometry and world digests atomically for the
-  continuous truss and regenerates the physics and derived output digests for that geometry plus the
-  revised safe-contact envelope.
+  Exactly zero fuel selects a distinct empty projection whose red gauge blinks with normal motion,
+  pauses with the inactive game, and stays statically red with reduced motion. The existing sole
+  live region presents centered, bordered `Agent Deployed!` and `Crashed!` banners, with no
+  pseudo-element or duplicate text authority. The controls legend omits shortcuts represented by
+  self-documenting buttons and shares the scene's bottom rail with an always-available bottom-right
+  Exit action whose smaller second line identifies Escape. Terrain remains wholly above that rail.
+  Launch-ready contains no action control, while failure adds only Retry beneath the crash banner
+  with `r` on its smaller second line. Those controls and overlays do not overlap at 320 CSS pixels
+  or 400 percent zoom. Normal arcade motion pauses while hidden and is absent under reduced motion.
+  The installed-agent mark persists at each powered retained NOC without increasing the established
+  80-descendant world ceiling. Shared-game byte identity, focus order, 44-pixel targets, contrast,
+  no-JavaScript recovery, and zero runtime font or cross-origin requests remain intact. Phase 4L
+  regenerates the geometry and world digests atomically for the continuous truss and regenerates the
+  physics and derived output digests for that geometry plus the revised safe-contact envelope.
 - AC26. A fresh run begins with an exact half-height fuel gauge and enough model fuel for the pinned
   first reference landing, while its accessible reserve remains the exact rounded model value.
   Crossing either former horizontal mission boundary causes no crash and no implicit target

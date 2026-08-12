@@ -634,8 +634,8 @@ export class LanderGameController {
         if (this.root.style.getPropertyValue("--fuel-gauge-level") !== gaugeText) {
             this.root.style.setProperty("--fuel-gauge-level", gaugeText);
         }
-        const fuelLevel = gauge > 0.5 ? "ready" : gauge > 0.2 ? "caution" : "danger";
-        const fuelColor = { danger: "#ff5a36", caution: "#ffb000", ready: "#2ed49b" }[fuelLevel];
+        const fuelLevel = gauge === 0 ? "empty" : gauge > 0.5 ? "ready" : gauge > 0.2 ? "caution" : "danger";
+        const fuelColor = { empty: "#ff5a36", danger: "#ff5a36", caution: "#ffb000", ready: "#2ed49b" }[fuelLevel];
         this.root.dataset.fuelLevel = fuelLevel;
         this.root.style.setProperty("--fuel-level-color", fuelColor);
         this.renderRefuel(cameraLeft);

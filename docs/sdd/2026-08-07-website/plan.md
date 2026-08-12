@@ -2,7 +2,7 @@
 
 - Status: Interim implementation complete; continuous Lander Phase 4M refinement in progress
 - Date: 2026-08-07
-- Last revised: 2026-08-11
+- Last revised: 2026-08-12
 - FRD: `frd.md`
 - HLA: `hla.md`
 - Research: `prior-art-research.md`
@@ -16,8 +16,10 @@ footer/game contracts, CI, automatic Pages deployment, runbook, and default-host
 complete. The continuous-Lander refinement proceeds as one stacked PR so its material game redesign
 does not make #439's already-reviewed website scope unready. Once #439 merges, the stacked PR
 changes its base to `main`; it still ships only as part of the same site artifact. Custom-domain
-activation then publishes the complete approved interim release at `agentworks.build`, and the small
-evidence PR records the observed result.
+activation remains deferred: the default Pages project URL carries the useful interim release until
+both the continuous Lander and canonical onboarding integration have passed acceptance. The later
+activation publishes that complete accepted artifact at `agentworks.build`, and the small evidence
+PR records the observed result.
 
 After onboarding Phase 3 lands on `main`, a separately reviewed integration PR replaces the bounded
 availability notice with the canonical README bootstrap and copy enhancement. It does not redesign
@@ -687,6 +689,13 @@ review-clean, browser-accepted, and merge-ready.
 - [x] Run focused website suites, deterministic root/project builds, complete repository gates,
       artifact/code/fresh-eyes reviews, and automated Chromium acceptance; resolve every valid
       finding and re-review the immutable integrated head.
+- [x] Add an exact-zero whole-gauge red blink with paused and reduced-motion behavior; cover the
+      model-to-DOM band, computed browser style, and static CSS contract without adding semantic or
+      timing authority.
+- [x] Triage the live PR timeline. Preserve the operator-superseded scope decisions and correct the
+      remaining saga-lead finding: default-host interim publication stays useful, while
+      custom-domain activation waits for both accepted Lander and canonical onboarding integration
+      gates.
 - [ ] Refresh port 8766 from the exact reviewed head and obtain operator Chrome and Edge acceptance
       of the arcade feel, fuel transfer, success/crash overlays, in-game controls/actions, and
       persistent agents across at least three deployments.
@@ -934,6 +943,12 @@ exploration without missing-target failure; twice-fast pre-NOC agent travel with
 timing; shorter `We need agents!` page copy; a direct `/lander/` footer destination; and the hover
 text `Help deploy some agents!`.
 
+Operator evidence (2026-08-12): the operator requested that exact fuel exhaustion make the visual
+gauge blink and asked for a current PR-feedback audit. The live PR has no formal review or inline
+review comments. Its older proportionality objections were explicitly superseded by the operator;
+the remaining valid saga-lead feedback requires both Lander and onboarding acceptance before custom
+domain cutover.
+
 Implementation and automated-review evidence (2026-08-11): exact runtime head `06cfd05a` and its
 production-identical final documentation/test head `194cee21` implement three integrated open
 lattice columns, a `15/30` half-gauge opening, deterministic `.24` parallax sky with 20 stars and
@@ -1006,13 +1021,17 @@ evidence commit, PR-body refresh, and scoped exact-head comment, with no further
 
 Definition of done: R3 and AC2 are implemented as a least-privilege automatic pipeline, and the
 interim artifact is merged and live at the default Pages URL without a routine manual publish step;
-Phase 6 retains the one-time same-run root-base redeployment gate before DNS cutover.
+custom-domain, onboarding, and lock boxes remain unchecked.
 
-## Phase 6: interim domain activation and acceptance
+## Phase 6: deferred custom-domain activation and acceptance
 
-- [ ] Start the interim-acceptance branch from `main`, confirm the implementation commit is deployed
-      at the default Pages URL, and keep the branch limited to evidence and truthful documentation
-      updates while the external activation proceeds.
+This phase is numbered here to preserve the established plan, but it cannot begin until Phase 8 is
+complete. Both the continuous Lander and canonical onboarding integration must be accepted on the
+deployed `main` artifact before any repository custom-domain setting or DNS mutation.
+
+- [ ] Start the activation-evidence branch from `main`; confirm the accepted continuous Lander and
+      canonical onboarding integration are both deployed at the default Pages URL; keep the branch
+      limited to evidence and truthful documentation updates while external activation proceeds.
 - [ ] Re-inventory GoDaddy `A`, `AAAA`, `CNAME`, `MX`, `TXT`, and `CAA` records immediately before
       cutover; save the non-secret before-state and exact rollback record in the feature evidence,
       commit it, push it, and open the draft evidence PR before any mutation. If any record's
@@ -1035,8 +1054,8 @@ Phase 6 retains the one-time same-run root-base redeployment gate before DNS cut
       CNAME. Do not add a wildcard.
 - [ ] Verify DNS answers, certificate hostname, HTTPS, apex canonical metadata, `www` redirect, and
       the saved record inventory plus approved delta after propagation.
-- [ ] Verify the production home page has sourced product content, permanent links, the semantic
-      availability notice, and no bootstrap, install instruction, copy affordance, external runtime
+- [ ] Verify the production home page has sourced product content, permanent links, the canonical
+      bootstrap and copy affordance, no interim availability notice, and no external runtime
       request, analytics, storage, or unexpanded token.
 - [ ] Verify the secondary home-page security link and stable deep-dive URL, sourced threat,
       boundary, and limitation content, private reporting path, no-JavaScript behavior, and
@@ -1055,19 +1074,19 @@ Phase 6 retains the one-time same-run root-base redeployment gate before DNS cut
       screen reader, on physical mobile/touch hardware, and on at least one additional computer or
       device outside the pre-merge machine. Smoke all five pages, record device/OS/browser evidence,
       and route defects into the next website work round before final closeout.
-- [ ] Run interim accessibility acceptance: keyboard-only flow, visible focus, landmarks/headings,
-      320 CSS pixel reflow, 400 percent zoom, contrast evidence, reduced motion, and recognizable
-      controls independent of terminal familiarity.
-- [ ] Run clean-context interim acceptance: a newcomer understands what Agentworks is, recognizes
-      that guided onboarding is not yet published, and can choose the repository, package,
-      rationale, or security path without explanation. Record timing and any intervention.
-- [ ] Record dated, non-secret interim acceptance evidence and all load-bearing operating facts in
-      `website/README.md` and this feature directory on the existing evidence branch; mark its draft
-      PR ready, obtain review, and merge it. Do not create `locked.md` or claim AC3/AC4.
+- [ ] Run production accessibility acceptance: keyboard-only flow, visible focus,
+      landmarks/headings, 320 CSS pixel reflow, 400 percent zoom, contrast evidence, reduced motion,
+      and recognizable controls independent of terminal familiarity.
+- [ ] Run clean-context complete-site acceptance: a newcomer understands Agentworks, finds the
+      canonical onboarding handoff, and can choose the repository, package, rationale, or security
+      path without explanation. Record timing and any intervention.
+- [ ] Record dated, non-secret activation acceptance evidence and all load-bearing operating facts
+      in `website/README.md` and this feature directory on the existing evidence branch; mark its
+      draft PR ready, obtain review, and merge it. Do not create `locked.md` until Phase 9 closes
+      every acceptance condition.
 
-Definition of done: R3-R11 and R13-R25 plus AC1, AC2, AC5-AC11, and AC13-AC26's interim conditions
-hold at `https://agentworks.build`; the public site is useful and honest while onboarding remains
-pending.
+Definition of done: both prerequisite acceptance gates remain recorded, and R3-R25 plus AC1-AC26's
+custom-domain conditions hold at `https://agentworks.build`; no interim-only artifact is cut over.
 
 ## Phase 7: merged onboarding pickup and integration LLD
 
@@ -1114,12 +1133,14 @@ with no branch-only dependency or duplicated bootstrap.
       integration.
 
 Definition of done: R1-R25, AC2-AC3, and AC5-AC26 hold in production through the existing site and
-pipeline, with the temporary notice removed rather than retained as configuration.
+pipeline at the default Pages URL, with the temporary notice removed rather than retained as
+configuration. Together with the accepted continuous Lander, this completion unlocks Phase 6;
+custom-domain activation is not claimed until that phase is executed.
 
 ## Phase 9: complete acceptance and closeout
 
-- [ ] Start the closeout branch from `main` and verify the onboarding integration commit is the
-      production deployment at the apex.
+- [ ] Start the closeout branch from `main` and verify the accepted Lander plus onboarding artifact
+      is the production deployment at the apex after Phase 6 activation.
 - [ ] Verify production HTTPS, certificate, apex metadata, `www` redirect, permanent links, no
       runtime third-party requests, and byte-identical copied bootstrap.
 - [ ] Run human acceptance from a clean context: a newcomer understands the product and hands the
@@ -1138,8 +1159,8 @@ pipeline, with the temporary notice removed rather than retained as configuratio
       for merge.
 
 Definition of done: AC1-AC26 hold at `https://agentworks.build`, R1-R25 and C1-C5 are production
-facts, the deployment is operable without this SDD, all plan boxes are truthful, and the effort is
-locked.
+facts, both prerequisite acceptance gates and the Phase 6 cutover are recorded, the deployment is
+operable without this SDD, all plan boxes are truthful, and the effort is locked.
 
 ## Escalation triggers
 

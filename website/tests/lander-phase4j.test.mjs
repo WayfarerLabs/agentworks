@@ -145,10 +145,11 @@ test("refuel transfer uses the exact stage-local linear frame and resize reproje
     controller.destroy();
 });
 
-test("fuel height and exact danger, caution, and ready colors are independent projections", async () => {
+test("fuel height and exact empty, danger, caution, and ready colors are independent projections", async () => {
     const run = createRun({ seed: 1 });
     const { controller, root } = await controllerAt(run);
     for (const [level, name, color] of [
+        [0, "empty", "#ff5a36"],
         [0.2, "danger", "#ff5a36"],
         [0.200001, "caution", "#ffb000"],
         [0.5, "caution", "#ffb000"],

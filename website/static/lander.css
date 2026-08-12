@@ -371,6 +371,13 @@
     transform-origin: bottom center;
 }
 
+#lander-game[data-fuel-level="empty"] #lander-fuel-gauge {
+    border-color: var(--fuel-danger-color);
+    background: var(--fuel-danger-color);
+    box-shadow: inset 0 0 0 3px #20232a, 3px 3px 0 #292b30;
+    animation: agw-fuel-empty-blink 700ms steps(1, end) infinite;
+}
+
 #lander-game[data-refueling="true"] #lander-scene-stage::after {
     position: absolute;
     top: var(--fuel-transfer-y);
@@ -535,6 +542,12 @@
 @keyframes agw-target-cue {
     50% {
         opacity: 0.35;
+    }
+}
+
+@keyframes agw-fuel-empty-blink {
+    50% {
+        opacity: 0.3;
     }
 }
 

@@ -101,9 +101,9 @@ restart.disabled = false;
 status.textContent = "x";
 game.dataset.banner = "crashed";
 game.dataset.refueling = new URLSearchParams(location.search).get("refuel") !== "off" ? "true" : "false";
-game.dataset.fuelLevel = "danger";
+game.dataset.fuelLevel = "empty";
 game.style.setProperty("--fuel-level-color", "#ff5a36");
-game.style.setProperty("--fuel-gauge-level", "0.25");
+game.style.setProperty("--fuel-gauge-level", "0");
 game.style.setProperty("--fuel-transfer-x", "120px");
 game.style.setProperty("--fuel-transfer-y", "120px");
 const rect = (element) => {
@@ -112,6 +112,7 @@ const rect = (element) => {
         width: value.width, height: value.height};
 };
 const pseudo = getComputedStyle(stage, "::after");
+const gaugeStyle = getComputedStyle(gauge);
 const actions = [restart, document.querySelector("#lander-exit")].filter((button) => !button.hidden);
 const result = {
     stage: rect(stage), rail: rect(rail), controls: rect(controls), gauge: rect(gauge), outcome: rect(outcome),
@@ -121,6 +122,10 @@ const result = {
         backgroundImage: pseudo.backgroundImage, backgroundSize: pseudo.backgroundSize,
         backgroundPosition: pseudo.backgroundPosition, backgroundRepeat: pseudo.backgroundRepeat,
         transform: pseudo.transform},
+    emptyGauge: {animationName: gaugeStyle.animationName, animationDuration: gaugeStyle.animationDuration,
+        animationTimingFunction: gaugeStyle.animationTimingFunction,
+        animationIterationCount: gaugeStyle.animationIterationCount,
+        borderColor: gaugeStyle.borderColor, backgroundColor: gaugeStyle.backgroundColor},
     fontFamily: getComputedStyle(status).fontFamily,
     hiddenFuel: [fuelLabel, fuelValue].map((element) => ({rect: rect(element),
         clip: getComputedStyle(element).clip, display: getComputedStyle(element).display,
@@ -505,6 +510,14 @@ class ArcadeBrowserTests(RepositoryFixture):
 
     def test_computed_pseudo_can_font_touch_scope_and_requests_match_the_contract(self) -> None:
         result = browser_arcade_contract(self.build(), 960, screenshot=True)
+        self.assertEqual(result["emptyGauge"], {
+            "animationName": "agw-fuel-empty-blink",
+            "animationDuration": "0.7s",
+            "animationTimingFunction": "steps(1)",
+            "animationIterationCount": "infinite",
+            "borderColor": "rgb(255, 90, 54)",
+            "backgroundColor": "rgb(255, 90, 54)",
+        })
         pseudo = result["pseudo"]
         self.assertEqual(pseudo["width"], "20px")
         self.assertEqual(pseudo["height"], "22px")

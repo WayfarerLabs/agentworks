@@ -2,7 +2,7 @@
 
 - Status: Interim implementation complete; continuous Lander Phase 4M refinement in progress
 - Date: 2026-08-07
-- Last revised: 2026-08-11
+- Last revised: 2026-08-12
 - FRD: `frd.md`
 - Research: `prior-art-research.md`
 - Brand direction: `brand-direction.md`
@@ -374,7 +374,9 @@ red-to-amber-to-green presentation are independent level signals. On touchdown, 
 projects the collected can toward the gauge and interpolates the displayed fill from the pre-award
 fraction to full over the existing landed interval; the physics reserve and checkpoint award remain
 one atomic authority. Reduced motion skips both projections and shows the final full gauge. The next
-award can establish a larger reference without clipping or discarding carried excess.
+award can establish a larger reference without clipping or discarding carried excess. At exact
+exhaustion, the gauge becomes a whole-track red warning that blinks only when motion is allowed and
+the game is active; reduced motion preserves the red warning without animation.
 
 Activated game chrome uses one local system-monospace arcade stack, heavy block lettering, crisp
 shadows, and bounded stepped animation; it adds no webfont, asset request, canvas, or semantic-text
@@ -448,10 +450,12 @@ The artifact boundary is portable: another static host can accept the generated 
 changing content or build contracts. Hosting-specific behavior stays in the workflow and operator
 runbook.
 
-The workflow first goes live with the interim release. The onboarding integration later uses the
-same merge-to-`main` path; it neither adds a second Pages project nor changes domain configuration.
-This exercises the delivery system and custom 404 before the upstream content dependency is ready,
-while keeping every deployed artifact reproducible from its source commit.
+The workflow first goes live with the interim release at the default GitHub Pages project URL. The
+onboarding integration later uses the same merge-to-`main` path; it neither adds a second Pages
+project nor changes the deployment architecture. This exercises the delivery system and custom 404
+before the upstream content dependency is ready while keeping every deployed artifact reproducible
+from its source commit. Custom-domain activation remains deferred until both the continuous Lander
+and canonical onboarding integration have passed their recorded acceptance gates.
 
 ### D9. DNS and domain setup are explicit one-time operations
 
@@ -461,24 +465,26 @@ rollback, and recovery. Setup and go-live are ordered so deployment exists befor
 1. enable GitHub Actions as this repository's Pages source and protect the `github-pages`
    environment so only `main` can deploy;
 2. merge the implementation and verify its automatic deployment at the default Pages URL;
-3. verify `agentworks.build` in the WayfarerLabs GitHub organization and retain GitHub's TXT record;
-4. set `agentworks.build` as this repository's custom domain;
-5. rerun all jobs on the verified `main` merge-push workflow, prove it built with site base `/`, and
+3. complete and record acceptance of both the continuous Lander and the canonical onboarding
+   integration on the deployed `main` artifact;
+4. verify `agentworks.build` in the WayfarerLabs GitHub organization and retain GitHub's TXT record;
+5. set `agentworks.build` as this repository's custom domain;
+6. rerun all jobs on the verified `main` merge-push workflow, prove it built with site base `/`, and
    verify the expected commit's successful Pages deployment before any DNS mutation;
-6. if step 5 fails, detach the custom domain, rerun that same workflow to restore the same SHA at
+7. if step 6 fails, detach the custom domain, rerun that same workflow to restore the same SHA at
    `/agentworks/`, verify the default project URL, leave DNS unchanged, and stop;
-7. after explicit operator approval, replace GoDaddy's apex parking record with GitHub's documented
+8. after explicit operator approval, replace GoDaddy's apex parking record with GitHub's documented
    `A` records and point `www` by `CNAME` to `wayfarerlabs.github.io`;
-8. verify DNS answers, apex content, `www` redirect, certificate, and HTTPS enforcement;
-9. remove or repoint the DNS records promptly if Pages is ever disabled.
+9. verify DNS answers, apex content, `www` redirect, certificate, and HTTPS enforcement;
+10. remove or repoint the DNS records promptly if Pages is ever disabled.
 
 DNS values are copied from current GitHub documentation during go-live and recorded in acceptance
 evidence. They are not hidden in application code. No wildcard record is created.
 
-The DNS cutover belongs to the interim release, after that artifact passes acceptance at the default
-Pages URL. The onboarding release is then an ordinary site-source deployment. Production closeout
-waits until the canonical bootstrap is live and AC3/AC4 are accepted; the existence of a healthy
-interim domain does not lock the effort early.
+The default-host interim release does not authorize DNS cutover. Custom-domain activation belongs
+only to the accepted complete artifact after both the continuous Lander and canonical onboarding
+integration are present and accepted on `main`. Production closeout still waits for AC3/AC4 and all
+other acceptance criteria; a healthy default-host interim deployment does not lock the effort early.
 
 ### D10. The interim-to-complete transition is explicit and disposable
 
@@ -578,13 +584,14 @@ recommendation.
 
 - pull request proves build without deploy permissions;
 - a merge-to-`main` source change produces a successful Pages deployment with the expected commit;
-- production returns the built content over HTTPS at the apex;
+- the useful interim release returns built content over HTTPS at the default project URL, with its
+  availability notice and no bootstrap affordance;
+- only after accepted Lander and onboarding gates does complete production return the byte-identical
+  bootstrap and no interim notice over HTTPS at the apex;
 - `www` redirects to the apex without a certificate warning;
 - DNS A, AAAA, CNAME, MX, TXT, and CAA answers match the recorded before-state plus approved cutover
   delta;
-- GitHub and PyPI links resolve. Interim production contains the availability notice and no
-  bootstrap affordance; complete production contains the byte-identical bootstrap and no interim
-  notice.
+- GitHub and PyPI links resolve.
 
 ## Security and privacy
 

@@ -412,8 +412,11 @@ class StaticDocumentTests(unittest.TestCase):
     ) -> None:
         self.assertEqual(
             set(re.findall(r"@keyframes\s+([\w-]+)", self.css)),
-            {"agw-preflight-cue", "agw-target-cue"},
+            {"agw-preflight-cue", "agw-target-cue", "agw-fuel-empty-blink"},
         )
+        empty_gauge = self.css.split('[data-fuel-level="empty"] #lander-fuel-gauge {', 1)[1].split("}", 1)[0]
+        self.assertIn("animation: agw-fuel-empty-blink 700ms steps(1, end) infinite", empty_gauge)
+        self.assertIn("background: var(--fuel-danger-color)", empty_gauge)
         reduced = self.css.split("@media (prefers-reduced-motion: reduce)", 1)[1]
         self.assertIn("animation: none !important", reduced)
         self.assertIn("transition: none !important", reduced)

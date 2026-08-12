@@ -105,6 +105,8 @@ projection evidence, not the qualitative or cross-engine signoff below.
       and the current live templates; verify each appears in its intended semantic location.
 - [ ] Confirm the visual fuel level drains smoothly without repetitive live announcements. Spend
       fuel on thrust, carry excess through multiple sites, and verify empty fuel produces no thrust.
+      At exactly zero, the whole red gauge blinks with normal motion, pauses while the game is
+      inactive, and remains a strong static red warning with reduced motion.
 - [ ] Crash on terrain, a platform end or underside, the truss or any lattice-column envelope, the
       NOC, and the mast. Normal motion shows one brief compact flash and exactly eight ballistic
       fragments for 600 milliseconds, with no smoke, dust, sound, shake, or page movement. Reduced
