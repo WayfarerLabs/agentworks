@@ -68,8 +68,8 @@ class Database:
         assert timeout is None or read_only, "timeout only applies to the read-only path"
         db_path = path or _db.DB_PATH
         if read_only:
-            from agentworks.db.backup import _connect_ro
-            from agentworks.errors import StateError
+            from agentworks.db.backup import _connect_ro, _is_busy
+            from agentworks.errors import BusyStateError, StateError
 
             connection: sqlite3.Connection | None = None
             ro_uri = f"{db_path.resolve().as_uri()}?mode=ro"
@@ -79,6 +79,8 @@ class Database:
             except sqlite3.DatabaseError as error:
                 if connection is not None:
                     connection.close()
+                if _is_busy(error):
+                    raise BusyStateError() from error
                 raise StateError(
                     "state database is unavailable or malformed",
                     hint="Run a normal Agentworks command to initialize or repair the state database.",

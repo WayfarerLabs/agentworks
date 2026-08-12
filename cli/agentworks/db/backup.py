@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
 from agentworks.db.migrations import LATEST_VERSION, SCHEMA_SENTINELS
-from agentworks.errors import BackupError, DatabaseBusyError, NotFoundError, StateError, ValidationError
+from agentworks.errors import BackupError, BusyStateError, NotFoundError, StateError, ValidationError
 from agentworks.path_rendering import format_host_path
 
 if TYPE_CHECKING:
@@ -151,13 +151,7 @@ def inspect_schema(database_path: Path, *, timeout: float | None = None) -> Sche
         if isinstance(error, StateError) and "schema version is invalid" in str(error):
             return SchemaInspection(SchemaState.MALFORMED, 0, LATEST_VERSION, None, str(error))
         if _is_busy(error):
-            return SchemaInspection(
-                SchemaState.BUSY,
-                0,
-                LATEST_VERSION,
-                None,
-                "state database is busy",
-            )
+            return SchemaInspection(SchemaState.BUSY, 0, LATEST_VERSION, None)
         return SchemaInspection(
             SchemaState.MALFORMED,
             0,
@@ -186,10 +180,7 @@ def prepare_database_open(database_path: Path) -> DatabaseOpenPlan:
 
     lock = _acquire_migration_lock(database_path, timeout=MIGRATION_LOCK_TIMEOUT_SECONDS)
     if lock is None:
-        raise StateError(
-            "state database migration lock is busy",
-            hint="Retry after the other Agentworks command finishes.",
-        )
+        raise BusyStateError()
     try:
         qualified = inspect_schema(database_path)
         _raise_if_unopenable(qualified)
@@ -242,10 +233,7 @@ def open_database_safely(
 
     lock = _acquire_migration_lock(database_path, timeout=MIGRATION_LOCK_TIMEOUT_SECONDS)
     if lock is None:
-        raise StateError(
-            "state database migration lock is busy",
-            hint="Retry after the other Agentworks command finishes.",
-        )
+        raise BusyStateError()
     backup: AutomaticBackupResult | None = None
     try:
         current = inspect_schema(database_path)
@@ -347,19 +335,17 @@ def render_restore_command(backup_path: Path, *, platform: str | None = None) ->
 
 
 def _raise_if_busy(inspection: SchemaInspection) -> None:
-    """Raise DatabaseBusyError with its message and hint if BUSY; no-op
-    otherwise. Shared so the two independent BUSY raise sites
-    (_raise_if_unopenable below and Database.check_schema) do not each
-    carry their own copy of the message default and hint string; each site
-    still decides for itself whether to call this, so either can be
-    reverted to its own pre-DatabaseBusyError shape without touching the
-    other.
+    """Raise BusyStateError if BUSY; no-op otherwise. Shared so the
+    independent BUSY raise sites (_raise_if_unopenable below and
+    Database.check_schema) agree on the exception type without either
+    carrying its own construction; each site still decides for itself
+    whether to call this, so either can be reverted to its own
+    pre-BusyStateError shape without touching the other. BusyStateError
+    builds its own fixed message and hint, so this never has an
+    opportunity to pass through caller-suppliable text.
     """
     if inspection.state is SchemaState.BUSY:
-        raise DatabaseBusyError(
-            inspection.error_message or "state database is busy",
-            hint="Retry after the other database user finishes.",
-        )
+        raise BusyStateError()
 
 
 def _raise_if_unopenable(inspection: SchemaInspection) -> None:

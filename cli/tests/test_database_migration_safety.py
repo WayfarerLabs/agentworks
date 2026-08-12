@@ -9,9 +9,7 @@ import queue
 import sqlite3
 import stat
 import time
-from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -34,8 +32,8 @@ from agentworks.db import (
     prepare_database_open,
     render_restore_command,
 )
-from agentworks.errors import DatabaseBusyError, StateError
-from tests.conftest import CapturedOutput
+from agentworks.errors import BusyStateError, StateError
+from tests.conftest import CapturedOutput, held_exclusive_lock
 
 
 def _build_schema(path: Path, target_version: int) -> None:
@@ -66,20 +64,6 @@ def _version(path: Path) -> int:
     version = int(connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0])
     connection.close()
     return version
-
-
-@contextmanager
-def held_exclusive_lock(path: Path) -> Iterator[None]:
-    """Hold BEGIN EXCLUSIVE on `path` for the with-block's duration,
-    blocking every other reader and writer. Used to synthesize a busy
-    database for tests."""
-    locker = sqlite3.connect(path)
-    locker.execute("BEGIN EXCLUSIVE")
-    try:
-        yield
-    finally:
-        locker.rollback()
-        locker.close()
 
 
 def _serialized_open_worker(
@@ -198,6 +182,24 @@ def test_is_busy_rejects_non_busy_codes(code: int) -> None:
     assert not _is_busy(error)
 
 
+def test_busy_state_error_message_and_hint_are_not_caller_suppliable() -> None:
+    """Structural guard for the message/remediation split (not a test of
+    wording): restoring retry prose into a caller-suppliable message
+    argument is exactly the regression this closes. BusyStateError's
+    constructor takes no parameters besides self, so no caller (an
+    inspect_schema classification's error_message, a raise site, or any
+    future one) has a parameter through which to inject text into the
+    message or override the hint; the message and hint the type produces
+    are fixed by the type itself, provable from the signature alone."""
+    import inspect
+
+    signature = inspect.signature(BusyStateError.__init__)
+    assert list(signature.parameters) == ["self"]
+
+    error = BusyStateError()
+    assert error.hint is not None
+
+
 def test_inspection_matrix_is_non_migrating_and_wal_aware(tmp_path: Path) -> None:
     absent = tmp_path / "absent.db"
     stale = tmp_path / "stale.db"
@@ -243,11 +245,11 @@ def test_prepare_database_open_raises_a_distinct_busy_error_and_recovers_once_lo
     operationally: malformed is durable (the "malformed" case of
     test_prepare_refuses_unopenable_state_before_writable_open below proves
     retrying does not help), while busy is transient. Pinned structurally,
-    not by wording: DatabaseBusyError is a distinct StateError subtype the
+    not by wording: BusyStateError is a distinct StateError subtype the
     old code never raised (it always raised plain StateError, the shape
     MALFORMED still uses), so a revert that keeps *a* StateError coming out
     of this path but drops back to that plain type fails the
-    ``pytest.raises(DatabaseBusyError)`` match. The transient half is
+    ``pytest.raises(BusyStateError)`` match. The transient half is
     proved behaviorally, by retrying the exact same path once the lock
     releases and confirming it now opens cleanly.
 
@@ -264,7 +266,7 @@ def test_prepare_database_open_raises_a_distinct_busy_error_and_recovers_once_lo
         # therefore this classification) does not depend on how long the
         # caller was willing to wait for it.
         assert inspect_schema(path, timeout=0.1).state is SchemaState.BUSY
-        with pytest.raises(DatabaseBusyError) as raised:
+        with pytest.raises(BusyStateError) as raised:
             prepare_database_open(path)
 
     assert raised.value.hint is not None
@@ -282,17 +284,17 @@ def test_check_schema_raises_a_distinct_busy_error_with_a_hint(tmp_path: Path) -
     the malformed case's type or wording.
 
     Pinned structurally (the exception TYPE and that a hint is attached),
-    not by asserting either raised message's wording: DatabaseBusyError is
+    not by asserting either raised message's wording: BusyStateError is
     a StateError subtype the old code never raised, so reverting this
     site's classification back to a plain StateError (the shape MALFORMED
-    still uses) fails the ``pytest.raises(DatabaseBusyError)`` match below
+    still uses) fails the ``pytest.raises(BusyStateError)`` match below
     even though a StateError still comes out."""
     path = tmp_path / "state.db"
     _build_schema(path, LATEST_VERSION)
 
     with held_exclusive_lock(path):
         assert inspect_schema(path, timeout=0.1).state is SchemaState.BUSY
-        with pytest.raises(DatabaseBusyError) as raised:
+        with pytest.raises(BusyStateError) as raised:
             Database.check_schema(path)
 
     assert raised.value.hint is not None
