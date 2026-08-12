@@ -899,26 +899,26 @@ deterministic; and the immutable result is review-clean, browser-accepted, and m
       projection; fixture/digest impact; and mutation-sensitive browser evidence.
 - [x] Obtain an `agentworks-reviewer` approval of the Phase 4M artifact amendments and resolve every
       valid finding before changing production or canonical fixtures.
-- [ ] Delegate implementation to an `agentworks-dev` subagent in an isolated worktree. Update the
+- [x] Delegate implementation to an `agentworks-dev` subagent in an isolated worktree. Update the
       shared shell and game fragment, CSS, world/model/controller modules, independent derivation
       and fixtures when required, validators, focused tests, permanent README, and browser checklist
       as one coherent change without prose-policing unit assertions.
-- [ ] Prove a fresh run begins at exactly half of its visual reference and the first demonstrated
+- [x] Prove a fresh run begins at exactly half of its visual reference and the first demonstrated
       landing remains feasible; later awards/checkpoints still project full without capping carried
       excess. Prove the lander can pass the target and both former horizontal bounds, reverse, and
       return without failure while camera, retained terrain/sites, cue direction, collision, fuel
       exhaustion, and teardown remain deterministic and bounded.
-- [ ] Prove all three supports render as fixture-derived lattice columns joined to the Warren truss,
+- [x] Prove all three supports render as fixture-derived lattice columns joined to the Warren truss,
       reach independent native-terrain feet, contain every member pixel inside honest colliders, and
       retain bounded aperture/DOM guarantees. Prove deterministic stars pan at the pinned parallax
       rate and occasional celestial landmarks enter/leave a bounded decorative layer with no
       requests or accessibility exposure.
-- [ ] Prove normal agent travel reaches the NOC in half the Phase 4L time while refuel, battery,
+- [x] Prove normal agent travel reaches the NOC in half the Phase 4L time while refuel, battery,
       signal, reduced-motion, hidden-time, installed-agent, checkpoint, and power-stage behavior
       stay unchanged. Review the shortened Lander/404 copy and footer hover text manually while
       automated tests enforce only structure, nonempty live-derived accessible names, and the direct
       fragment-free `/lander/` route.
-- [ ] Run focused website suites, deterministic root/project builds, complete repository gates,
+- [x] Run focused website suites, deterministic root/project builds, complete repository gates,
       artifact/code/fresh-eyes reviews, and automated Chromium acceptance; resolve every valid
       finding and re-review the immutable integrated head.
 - [ ] Refresh port 8766 from the exact reviewed head and obtain operator Chrome and Edge acceptance
@@ -933,6 +933,22 @@ stars that travel with the landscape plus occasional celestial variety; unrestri
 exploration without missing-target failure; twice-fast pre-NOC agent travel with unchanged power-up
 timing; shorter `We need agents!` page copy; a direct `/lander/` footer destination; and the hover
 text `Help deploy some agents!`.
+
+Implementation and automated-review evidence (2026-08-11): exact runtime head `06cfd05a` and its
+production-identical final documentation/test head `194cee21` implement three integrated open
+lattice columns, a `15/30` half-gauge opening, deterministic `.24` parallax sky with 20 stars and
+one or two celestial landmarks, unrestricted horizontal exploration with reversible camera and cue,
+`.9 s` pre-NOC travel, shortened page copy, and direct footer navigation. Independent v5/v4
+derivation evaluates 36 candidates, 162 selected replays, and 81 world witnesses; all nine
+route/failure records and physics digest remain unchanged. The independently enumerated clear-face
+maximum is `3.1894356867634124 m`, below the `3.2 m` hull, with geometry digest `a5120d97...e7ca`,
+world digest `c666bb42...1e32`, and output digest `628c3562...b595`. Final gates pass 79 Node tests,
+143 website Python tests including real Chromium, 7,754 repository tests, deterministic root/project
+builds, lint, locked-SDD, Rulesync, and diff checks. Cold code and fresh-eyes reviews approve with
+no remaining finding. Isolated Chromium traversed `x=+/-10000`, reversed and returned, reconstructed
+the seed-correct sky, retained at most five chunks/three sites, and completed a 100-site run at
+render p95 `.4 ms` and generation p95 `10 ms`. This is automated Chromium evidence only; human
+Chrome and Edge acceptance remains open.
 
 Definition of done: the opening fuel presentation is honest and playable; horizontal position alone
 never crashes the lander while collision, ceiling, and excessive-speed safety outcomes remain;
