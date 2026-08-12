@@ -885,26 +885,26 @@ and rewrite any that still live in `config.toml`; the
 ### Guide
 
 `agw guide [TOPIC]...` renders Markdown teaching together with safe facts from the current finalized
-resource registry. With no topic it gives the Agentworks assistant agent the current assistance
-contract, a complete intent map, and the live topic index. The assistant interprets the operator's
-request and decides what to do next; the guide is not a router and grants no authorization. Current
-capability and adoption questions point to `concept-onboarding`, ongoing operation points to
-`concept-management`, and temporal version-change questions point to `concept-release-notes`.
-Current facts are never presented as a version-to-version delta. Bare declarable-kind topics such as
-`vm-template` render current resources, a live field reference, and a generated sample from the same
-schema services the manifest loader uses. Capability-kind and implementation topics render their
-live alternatives or configuration fields, including implementations that are installed but
-disabled. Exact declared-resource topics describe current state and relationships and link back to
-their kind's shared schema. Core concepts use names such as `concept-onboarding`,
-`concept-migration`, `concept-secrets`, and `concept-reporting-bugs`. Schema literal values remain
-on one reference row: YAML-rendered backslashes, carriage returns, line feeds, and tabs appear as
-distinct visible escape sequences inside safe variable-backtick code spans.
+resource registry. With no topic, agent mode gives the Agentworks assistant agent the current
+assistance contract, a complete intent map, and the live topic index. Human mode instead gives the
+operator a short security note, a starting command, and the topic index. The assistant interprets
+the operator's request and decides what to do next; the guide is not a router and grants no
+authorization. Current capability and adoption questions point to `concept-onboarding`, ongoing
+operation points to `concept-management`, and temporal version-change questions point to
+`concept-release-notes`. Current facts are never presented as a version-to-version delta. Bare
+declarable-kind topics such as `vm-template` render current resources, a live field reference, and a
+generated sample from the same schema services the manifest loader uses. Capability-kind and
+implementation topics render their live alternatives or configuration fields, including
+implementations that are installed but disabled. Exact declared-resource topics describe current
+state and relationships and link back to their kind's shared schema. Core concepts use names such as
+`concept-onboarding`, `concept-migration`, `concept-secrets`, and `concept-reporting-bugs`. Schema
+literal values remain on one reference row: YAML-rendered backslashes, carriage returns, line feeds,
+and tabs appear as distinct visible escape sequences inside safe variable-backtick code spans.
 
-The no-topic output also presents the exact installed canonical source tag and an optional
-source-review offer. If the operator has not already decided for that exact version in the current
-session, the Agentworks assistant agent offers focused review, full repository review, or decline
-once. It warns that the repository is substantial and full review may consume significant model
-usage. `inspect-focused-source` and `inspect-full-source` are inert actions with authorization class
+`concept-source-review` owns the optional canonical source-review workflow. Establish exact stable
+`VERSION` with `agw version`, then choose focused review, full repository review, or decline. It
+warns that the repository is substantial and full review may consume significant model usage.
+`inspect-focused-source` and `inspect-full-source` are inert actions with authorization class
 `read-canonical-source`; they perform no network request during rendering. An operator selection
 authorizes only the selected read-only review. Install or update authorization does not authorize
 review, review does not authorize installation, update, or candidate execution, and decline changes
@@ -920,9 +920,10 @@ Candidate code execution is a separate action outside source review.
 `concept-release-notes` reads only the canonical `CHANGELOG.md` packaged in the installed wheel. The
 base topic selects the exact installed distribution version. Strict dynamic topics such as
 `concept-release-notes/v0-13-0` expose one normalized historical section at a time and participate
-in Bash, Zsh, and PowerShell topic completion through `agw guide --names-only`. Multi-release
-questions use the ordered applicable exact-version topics; rendering never concatenates or emits the
-complete changelog.
+in Bash, Zsh, and PowerShell topic completion through `agw guide --names-only`. They remain directly
+addressable but are omitted from the no-topic index because their templated summaries do not help
+choose between versions. Multi-release questions use the ordered applicable exact-version topics;
+rendering never concatenates or emits the complete changelog.
 
 The changelog read is capped at 2 MiB and each selected section at 256 KiB. Missing, duplicate,
 malformed, oversized, control-bearing, expression-bearing, or reserved-delimiter content fails
@@ -939,7 +940,8 @@ page, it follows no embedded links, and refusal performs no network request or c
 Multiple topics render in the requested order and are validated atomically: one unknown topic
 prevents all output. Repeated topics render once at their first position. `--agent` and `--human`
 override automatic presentation selection; explicit selection wins over the Claude Code execution
-signature and stdout TTY fallback. Both modes carry the same semantic content. Guide output is
+signature and stdout TTY fallback. Agent mode carries the operating contract and intent map. Human
+mode carries a short operator-facing security note and starting command instead. Guide output is
 instructional and never grants authorization to resolve secrets, inspect the workstation, connect to
 a VM, or mutate state. At assistance startup, the Agentworks assistant agent discloses once that it
 can inspect files and run commands with the workstation account's permissions, reach configured
@@ -993,12 +995,13 @@ future bootstrap service consumers may provide the typed tuple they own at the s
 
 Guide remains useful when configuration or registry finalization fails. Authored prose still
 renders, schema-derived field references and samples remain available without configuration, other
-live blocks are marked unavailable, the framed failure appears once, and the command exits 1.
-`--names-only` emits one retained topic per line, degrades to authored topics plus every retained
-schema-describable kind and capability implementation under broken configuration, and exits 0. An
-invalid schema-derived topic is isolated as a scoped content issue in normal rendering and omitted
-from name discovery, while unaffected topics remain available. This stable stream backs Bash, Zsh,
-and PowerShell topic completion.
+live blocks are marked unavailable, and the framed failure appears once. A missing configuration
+file exits 0 because that is normal guide input on a clean workstation; unreadable or malformed
+configuration exits 1. `--names-only` emits one retained topic per line, degrades to authored topics
+plus every retained schema-describable kind and capability implementation under broken
+configuration, and exits 0. An invalid schema-derived topic is isolated as a scoped content issue in
+normal rendering and omitted from name discovery, while unaffected topics remain available. This
+stable stream backs Bash, Zsh, and PowerShell topic completion.
 
 `concept-management` covers day-two operation from live facts instead of duplicating the command
 registry. It combines the current kind, implementation, and kind-owned live-instance inventory with
@@ -1019,15 +1022,17 @@ identity matching keeps operator origin and manifest paths while ignoring mutabl
 final operator inventory can probe host readiness, so run it only when workstation examination is
 inside the current envelope.
 
-| Command                                                               | Description                                                                      |
-| --------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `agw guide`                                                           | Render the assistance contract, source-review offer, intent map, and topic index |
-| `agw guide TOPIC...`                                                  | Render one or more exact topics atomically                                       |
-| `agw guide TOPIC... --agent/--human`                                  | Override automatic presentation mode                                             |
-| `agw guide concept-release-notes`                                     | Render the installed release's packaged notes                                    |
-| `agw guide concept-release-notes/vMAJOR-MINOR-PATCH`                  | Render one exact packaged historical section                                     |
-| `agw guide concept-onboarding --evidence ACTION_ID:KIND/NAME=OUTCOME` | Replay caller-owned proof                                                        |
-| `agw guide --names-only`                                              | Emit topic names for shell completion                                            |
+| Command                                                               | Description                                                      |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `agw guide`                                                           | Render the human starting context and topic index                |
+| `agw guide --agent`                                                   | Render the agent operating contract, intent map, and topic index |
+| `agw guide TOPIC...`                                                  | Render one or more exact topics atomically                       |
+| `agw guide TOPIC... --agent/--human`                                  | Override automatic presentation mode                             |
+| `agw guide concept-release-notes`                                     | Render the installed release's packaged notes                    |
+| `agw guide concept-release-notes/vMAJOR-MINOR-PATCH`                  | Render one exact packaged historical section                     |
+| `agw guide concept-source-review`                                     | Render optional focused and full source-review actions           |
+| `agw guide concept-onboarding --evidence ACTION_ID:KIND/NAME=OUTCOME` | Replay caller-owned proof                                        |
+| `agw guide --names-only`                                              | Emit topic names for shell completion                            |
 
 ### Guide management coverage
 
@@ -1040,13 +1045,18 @@ points:
 | Adopt a capability              | `concept-management`, then the capability implementation topic       | `agw resource list --include-disabled` and the owning configuration surface             |
 | Assess current adoption         | `concept-onboarding`                                                 | Live guide facts and JSON v1 inspection                                                 |
 | Review changes across versions  | `concept-release-notes`, then exact packaged version topics          | Offline packaged changelog; bounded canonical fallback only for missing local history   |
+| Inspect canonical source        | `concept-source-review`                                              | Exact version from `agw version`; focused or full inert review action                   |
 | Resolve upgrade deprecations    | `concept-management`                                                 | Follow the emitted migration instruction before unrelated changes                       |
 | Migrate the 0.14 resource model | `concept-migration`, then each live kind or implementation topic     | Validate each manifest with doctor, cut over TOML once, then compare operator inventory |
 | Troubleshoot                    | `concept-troubleshooting`                                            | Run `agw doctor` inside the current envelope; expand it before an uncovered repair      |
 
 Guide assistance adds no configuration setting, so the sample configuration and its synchronization
-surfaces are unchanged. The source-review offer adds inert records under the existing no-topic guide
-surface, not a topic identity or CLI option, so shell-completion generation remains unchanged.
+surfaces are unchanged. `concept-source-review` uses the existing dynamic topic completion surface;
+no hand-maintained completion source or generated command shape changes.
+
+A missing configuration file is normal guide input on a clean workstation: the requested guide
+content and framed missing-config guidance render with exit 0 for either an index or an exact topic.
+Unreadable or malformed configuration remains an error and exits nonzero.
 
 ### Config
 

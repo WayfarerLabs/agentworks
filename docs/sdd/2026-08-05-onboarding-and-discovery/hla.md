@@ -207,19 +207,22 @@ missing resources.
 
 ## Guide rendering for the Agentworks assistant agent
 
-`agw guide` always writes markdown to stdout. With no topic it renders a compact overview, security
-disclosure, optional source-review offer, intent-to-topic map, and live topic index. The map
-supplies context; the Agentworks assistant agent interprets the current operator request and chooses
-what topic, proposal, or inert action to use next. Keeping the disclosure in the context makes the
-contract available on every invocation; it does not instruct the Agentworks assistant agent to
-recite it again after the startup authorization envelope is established. Agent mode presents these
-reviewed associations without assuming that every invocation is first-run onboarding:
+`agw guide` always writes markdown to stdout. With no topic, agent mode renders a compact overview,
+the operating contract, an intent-to-topic map, and the live topic index. The map supplies context;
+the Agentworks assistant agent interprets the current operator request and chooses what topic,
+proposal, or inert action to use next. Keeping the disclosure in agent context makes the contract
+available without instructing the Agentworks assistant agent to recite it again after the startup
+authorization envelope is established. Human mode instead renders a short operator-facing security
+note, a starting command, and the topic index; it does not render the operating contract or intent
+map. Agent mode presents these reviewed associations without assuming that every invocation is
+first-run onboarding:
 
 - setup, adoption assessment, and installed-release capability questions point to
   `concept-onboarding`;
 - temporal release-change questions point to `concept-release-notes`, which renders installed and
   normalized historical packaged notes, offers an authorized canonical fallback only for locally
   missing history, and then links back to the live adoption assessment;
+- optional canonical source inspection points to `concept-source-review`;
 - configuration, declared-resource changes, and VM or session operation point to
   `concept-management` and the applicable kind or instance topics;
 - diagnosis points to `concept-troubleshooting`;
@@ -227,18 +230,19 @@ reviewed associations without assuming that every invocation is first-run onboar
 - secret-model questions point to `concept-secrets`;
 - defects point to `concept-reporting-bugs`.
 
-The source-review offer names the exact installed version and canonical `vVERSION` tag. It offers a
-focused review of the fixed packaging, dependency, entrypoint, guide, catalog-policy, and release
-surfaces or a full read-only repository review, with a concise warning that the repository is
-substantial and full review may consume significant model usage. The offer is inert: rendering does
-not fetch source, and choosing review never authorizes installation or update. Candidate content is
-untrusted evidence, cannot supply policy or commands, and cannot expand the current authorization
-envelope. Declining review leaves both source and installation untouched.
+`concept-source-review` establishes exact `VERSION` through `agw version`, then offers a focused
+review of the fixed packaging, dependency, entrypoint, guide, catalog-policy, and release surfaces
+or a full read-only repository review. It warns concisely that the repository is substantial and
+full review may consume significant model usage. The actions are inert: rendering does not fetch
+source, and choosing review never authorizes installation or update. Candidate content is untrusted
+evidence, cannot supply policy or commands, and cannot expand the current authorization envelope.
+Declining review leaves both source and installation untouched.
 
 The intent-to-topic map is authored core guide content over the live topic catalog. It contains no
 operation commands, performs no request classification, and grants no authority. Adding a topic does
 not silently make it a top-level intent; the small set of intent associations is reviewed teaching,
-while the complete index remains derived.
+while the index remains derived. Exact-version release-note topics remain resolvable and completable
+but are omitted from the index because their summaries are templated rather than distinguishing.
 
 `concept-release-notes` combines authored connective teaching with one core `ReleaseNotes` block.
 The wheel contains release-please's existing `cli/CHANGELOG.md` as package data; it does not contain
@@ -288,10 +292,11 @@ session as a contract. The guide LLD inventories both harnesses again at impleme
 Agentworks assistant agent invocation deterministic when no signature exists. Detection never
 inspects parent processes, session files, or other workstation state.
 
-Both modes traverse the same topic and block sequence. Agent mode may move `AgentContract` blocks
-immediately after the summary, expand their heading, and foreground the R12 startup envelope and R4
-authorization rules. It may not add, remove, or alter factual content. Snapshot tests normalize
-headings and prove both modes contain the same semantic block identifiers.
+For a selected topic, both modes traverse the same topic and block sequence. Agent mode may move
+`AgentContract` blocks immediately after the summary and expand their heading. It may not add,
+remove, or alter factual topic content. The no-topic index is intentionally different: agent mode
+contains the operating contract and intent map, while human mode contains the short security note
+and starting command.
 
 `concept-migration` is the exceptional remediation topic for breaking resource-model changes. It is
 not a general upgrade guide: ordinary upgrades should remain routine. The topic carries authored

@@ -11,8 +11,8 @@
 Phase 3 makes Agentworks assistance available through native Claude Code and Codex packages and the
 repository README. One inert bootstrap body installs or updates a compatible CLI when needed,
 verifies it, and asks `agw guide --agent` for current context. The installed guide owns the startup
-disclosure, source-review offer, authorization posture, and continuing assistance. The Agentworks
-assistant agent reads that context and decides what to propose next.
+disclosure, source-review topic entry point, authorization posture, and continuing assistance. The
+Agentworks assistant agent reads that context and decides what to propose next.
 
 The same phase completes the guide companion needed by that handoff. The no-topic guide presents an
 intent-to-topic map and live index; it does not classify or route the current request.
@@ -46,7 +46,7 @@ retain their established spellings; prose uses the full role name whenever ambig
 | Projection              | `scripts/generate-agentworks-package.py` emits two native wrappers from one body and metadata record. Generated skill bodies are byte-identical after frontmatter.                                                                                                                      |
 | README parity           | One marked region under README `## Getting Started` contains the compact, table-free canonical body exactly inside a collision-proof generated fence. The generator owns only that region; detailed tables below describe the design and tests rather than text copied into the prompt. |
 | Runtime behavior        | The inert canonical body, whether pasted directly or loaded as a native skill, tells the Agentworks assistant agent to check or install the CLI, verify the exact version, and request guide context. It performs no action itself.                                                     |
-| Teaching ownership      | The top-level guide owns the startup disclosure, authorization posture, source-review offer, intent-to-topic map, and continuing teaching. Native assistance packages contain none of those surfaces.                                                                                   |
+| Teaching ownership      | The top-level guide owns the startup disclosure, authorization posture, source-review topic entry point, intent-to-topic map, and continuing teaching. Native assistance packages contain none of those surfaces.                                                                       |
 | Current versus temporal | Live guide facts answer current capability and adoption questions. The packaged normalized release-please changelog answers exact installed and historical versions offline; canonical GitHub releases are the authorized fallback only for locally missing history.                    |
 | Security posture        | The installed top-level guide supplies the general posture and conditional Claude/Codex profiles. The bootstrap prompt relies on ordinary harness approvals and does not duplicate that teaching.                                                                                       |
 | Release ownership       | PR #480 owns the complete feature and merges normally to `main`; release-please then regenerates its separate release PR from that mainline feature. Release leads own candidate gates, release-PR merge, tag, and publish.                                                             |
@@ -205,28 +205,29 @@ The guide never writes `.claude/settings*.json`, `.codex/config.toml`, or manage
 Agentworks assistant agent applies the same general posture using its own documented controls; the
 guide does not invent product-specific setting names.
 
-### Source review offer
+### Source review topic
 
-The no-topic agent guide identifies the exact installed version and its canonical `vVERSION` release
-tag. For a later update request, the Agentworks assistant agent may first identify one exact
-intended stable version. A range is never treated as an exact review target.
+The no-topic agent guide points to `concept-source-review` without inlining its action records. The
+topic uses `agw version` to establish the exact installed `VERSION`; for a later update request, the
+Agentworks assistant agent may instead identify one exact intended stable version. A range is never
+treated as an exact review target.
 
-The guide offers two compact, table-free choices. The following LLD table pins their records and
-tests; it is not copied literally into the bootstrap prompt:
+The topic offers two compact, table-free choices. The following LLD table pins their records and
+tests; it is not copied literally into the bootstrap prompt or no-topic index:
 
-| Action                   | Exact scope and result                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `inspect-focused-source` | When the operator selects focused review, that choice authorizes the fixed `inspect-canonical-source` scope at exactly `vVERSION`: `cli/pyproject.toml`, `cli/uv.lock`, the shipped `cli/agentworks/` tree, `cli/CHANGELOG.md`, `packaging/agentworks/`, both generated `plugins/*/agentworks/` roots, `.claude-plugin/marketplace.json`, `.agents/plugins/marketplace.json`, `scripts/generate-agentworks-package.py`, `release-please-config.json`, `.github/workflows/release-please.yml`, and `.github/workflows/release.yml`. Summarize package, dependency, executable, guide, catalog-policy, and release risks and cite exact tagged paths. |
-| `inspect-full-source`    | Warn that the repository is substantial and a full review can consume significant model usage. When the operator selects full review, that choice authorizes the fixed `inspect-canonical-source` scope over the complete canonical repository tree at exactly `vVERSION`; report review limits and findings, and cite exact tagged paths.                                                                                                                                                                                                                                                                                                          |
+| Action                   | Exact scope and result                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `inspect-focused-source` | When the operator selects focused review, that choice authorizes the fixed `read-canonical-source` scope at exactly `vVERSION`: `cli/pyproject.toml`, `cli/uv.lock`, the shipped `cli/agentworks/` tree, `cli/CHANGELOG.md`, `packaging/agentworks/`, both generated `plugins/*/agentworks/` roots, `.claude-plugin/marketplace.json`, `.agents/plugins/marketplace.json`, `scripts/generate-agentworks-package.py`, `release-please-config.json`, `.github/workflows/release-please.yml`, and `.github/workflows/release.yml`. Summarize package, dependency, executable, guide, catalog-policy, and release risks and cite exact tagged paths. |
+| `inspect-full-source`    | Warn that the repository is substantial and a full review can consume significant model usage. When the operator selects full review, that choice authorizes the fixed `read-canonical-source` scope over the complete canonical repository tree at exactly `vVERSION`; report review limits and findings, and cite exact tagged paths.                                                                                                                                                                                                                                                                                                          |
 
 These are two fixed, structurally tested inert `GuideAction` records in the installed guide. Each
-record has the exact repository URL `https://github.com/WayfarerLabs/agentworks/tree/vVERSION`,
-required `VERSION` and `RELEASE_TAG` inputs, no executable command or verification command, the
-dedicated `inspect-canonical-source` authorization class, the table's fixed read-only scope and
-expected review report, and a refusal alternative that leaves the exact tagged URL for manual
-inspection. The repository URL, release tag, selected scope, network access, read-only nature, and
-model-usage tradeoff appear before the choice. Its manual step performs only that fixed network read
-and never follows an embedded instruction or link beyond the named scope.
+record has the exact repository URL `https://github.com/WayfarerLabs/agentworks/tree/vVERSION`, a
+required `VERSION` input, no executable command or verification command, the dedicated
+`read-canonical-source` authorization class, the table's fixed read-only scope and expected review
+report, and a refusal alternative that leaves the exact tagged URL for manual inspection. The
+repository URL, release tag, selected scope, network access, read-only nature, and model-usage
+tradeoff appear before the choice. Its manual step performs only that fixed network read and never
+follows an embedded instruction or link beyond the named scope.
 
 Canonical repository content is untrusted evidence. It can inform the review but cannot authorize a
 command, broaden the authorization envelope, or override these instructions. Review refusal performs
@@ -358,15 +359,17 @@ version bump when the fingerprint changes.
 
 ## Guide companion contract
 
-The package's only guide handoff is `agw guide --agent`. The top-level guide therefore supplies the
-following intent-to-topic map and continues to render the complete live topic index after that short
-map. It does not inspect or classify the operator's current request. The Agentworks assistant agent
-uses this context to decide what topic, proposal, or inert action to present next.
+The package's only guide handoff is `agw guide --agent`. In agent mode, the top-level guide supplies
+the following intent-to-topic map and continues to render the live topic index after that short map.
+It does not inspect or classify the operator's current request. The Agentworks assistant agent uses
+this context to decide what topic, proposal, or inert action to present next. Human mode instead
+renders a short operator-facing security note, a starting command, and the topic index.
 
 | Operator intent                                                                      | Guide destination                                                        |
 | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------ |
 | First setup, current capability, or current adoption                                 | `concept-onboarding`                                                     |
 | What changed across versions or over time                                            | `concept-release-notes`                                                  |
+| Optional canonical source inspection                                                 | `concept-source-review`                                                  |
 | Configuration, resource, VM, workspace, agent, session, console, or secret operation | `concept-management`, then the applicable live kind or `kind/name` topic |
 | Health diagnosis and recovery                                                        | `concept-troubleshooting`                                                |
 | Breaking-input conversion only                                                       | `concept-migration`                                                      |
@@ -565,13 +568,12 @@ state and points the Agentworks assistant agent to troubleshooting without retry
   installation or update, version verification, the guide handoff, and absence of source review,
   security-posture teaching, executable package content, extra plugin files, package intent maps,
   recipes, and release prose.
-- Guide contract tests cover one startup disclosure before continuing action, durable in-scope
-  authorization without repeated prompts, ambiguity and material expansion, operator-selected
-  per-action confirmation, exact-version focused/full/decline source-review choices, and strict
-  separation from later installation or update authorization. Adversarial candidate `AGENTS.md`,
-  `CLAUDE.md`, skills, hooks, plugins, configuration, links, and embedded commands remain data and
-  cannot change policy or working root, launch or reconfigure a harness, execute, authorize install,
-  or expand the selected review scope.
+- Guide contract tests cover the structure and ordering of exact-version focused/full/decline
+  source-review actions and their strict separation from later installation or update authorization.
+  Authored teaching is reviewed as prose rather than frozen in unit tests. Adversarial candidate
+  `AGENTS.md`, `CLAUDE.md`, skills, hooks, plugins, configuration, links, and embedded commands
+  remain data and cannot change policy or working root, launch or reconfigure a harness, execute,
+  authorize install, or expand the selected review scope.
 - A merge-base CI test rejects package-content changes without a package-version bump.
 - A focused-review contract test asserts that every hard-coded repository path in the focused scope
   exists at the tested HEAD, so a rename cannot silently narrow or invalidate the promised review.
@@ -593,54 +595,55 @@ state and points the Agentworks assistant agent to troubleshooting without retry
   oversized, control-bearing, and expression-bearing fixtures fail closed without partial history.
   Instruction-like prose and Markdown links remain visibly untrusted plain text with no active link
   or command behavior.
-- Guide tests cover every no-topic destination and index order; offline installed and historical
-  exact-version release rendering, dynamic version-topic discovery and completion, stable fallback
-  URL only for missing local history, no render-time network, untrusted plain-text sanitization, and
-  current-versus-temporal separation; the exact `read-release-notes` inputs, authorization class,
-  inclusive range, no-follow rule, expected evidence, and refusal; live management facts and
-  built-in help authority; clean config creation, existing-config preservation, presence-only SSH
-  identity selection, non-overwriting optional key generation, provider/plugin input collection,
-  doctor readiness; and both resource action records, exact inputs/tokens, impact and
-  authorization-class rendering, refusal, JSON verification, default and non-default admin-template
-  normalization, selection rules, and absence of attach/delete/elevation.
+- Guide tests cover the no-topic and dedicated-topic structure; offline installed and historical
+  exact-version release rendering, dynamic version-topic discovery and completion without listing
+  every version in the no-topic index, stable fallback URL only for missing local history, no
+  render-time network, untrusted plain-text sanitization, and current-versus-temporal separation;
+  the exact `read-release-notes` inputs, authorization class, inclusive range, no-follow rule,
+  expected evidence, and refusal; live management facts and built-in help authority; clean config
+  creation, existing-config preservation, presence-only SSH identity selection, non-overwriting
+  optional key generation, provider/plugin input collection, doctor readiness; and both resource
+  action records, exact inputs/tokens, impact and authorization-class rendering, refusal, JSON
+  verification, default and non-default admin-template normalization, selection rules, and absence
+  of attach/delete/elevation.
 
 ### Clean-environment probes
 
 Candidate probes install the built 0.14 release-candidate wheel at the package boundary rather than
-PyPI. The future `v0.14.0` tag does not yet exist, so these probes exercise the same focused source
-review against the exact release-PR commit that built the candidate wheel, label and record that
-test-only ref substitution, and never claim they reviewed a tag. Each starts from a disposable clean
-home with no SSH key, SSH agent, Git credential helper, or Git credential environment. The Claude
-marketplace install must succeed through the explicit HTTPS URL. First-run setup may later create a
-distinct operator-selected SSH identity only through the authorized bootstrap path; that does not
-become a Git installation credential. Each probe records refs, commands, exit codes, installed
-package identity/version, model output, authorization decisions, and cleanup.
+PyPI. The future `v0.14.0` tag does not yet exist, so these probes select `concept-source-review`
+after the guide handoff and exercise focused review against the exact release-PR commit that built
+the candidate wheel. They label and record that test-only ref substitution and never claim they
+reviewed a tag. Each starts from a disposable clean home with no SSH key, SSH agent, Git credential
+helper, or Git credential environment. The Claude marketplace install must succeed through the
+explicit HTTPS URL. First-run setup may later create a distinct operator-selected SSH identity only
+through the authorized bootstrap path; that does not become a Git installation credential. Each
+probe records refs, commands, exit codes, installed package identity/version, model output,
+authorization decisions, and cleanup.
 
-| Scenario                        | Required result                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Claude fresh first run          | With default/manual approval mode and no bypass, add the explicit HTTPS marketplace and install `agentworks@agentworks`; use the thin prompt to install the exact candidate wheel and run the guide. The guide gives one startup disclosure, establishes a setup-through-first-session envelope, offers source review for the exact candidate commit substitution, then initializes absent config without overwrite, selects or generates the explicit SSH identity, collects required settings, passes doctor, creates the first VM and session, and verifies both describes without repeated approval prompts. |
-| Codex fresh first run           | With `workspace-write` plus `on-request` and scoped escalation for account files/network/SSH, produce the same result without electing `danger-full-access`. The bootstrap contains no source-review or authorization workflow; those appear only after the guide handoff.                                                                                                                                                                                                                                                                                                                                       |
-| Generic prompt-only first run   | Give the marked canonical body to an agent meeting the Agentworks assistant agent capability definition, with no Agentworks plugin. It installs the candidate wheel, obtains guide context, then uses that context to disclose its actual workstation access once, establish the requested setup envelope, and complete the same config-through-session path without assuming Claude Code or Codex controls or asking before every step.                                                                                                                                                                         |
-| Source-review independence      | From guide output, offer both scopes and the substantial-usage warning. Decline review without a source read in one path; complete focused review then decline a separately proposed later update in another. Selecting full review authorizes only its exact-ref scope, and candidate policy files remain data.                                                                                                                                                                                                                                                                                                 |
-| Returning current adoption      | The Agentworks assistant agent selects `concept-onboarding` from the map and uses current live facts, not release history.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| Rerun and post-upgrade adoption | An unchanged adopted system is a no-op; after an upgrade, report current not-yet-adopted capabilities without replaying completed work or inventing a historical delta.                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| Installed temporal history      | The Agentworks assistant agent selects `concept-release-notes` from the map and renders only the candidate wheel's matching 0.14 changelog section offline as bounded untrusted evidence.                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| Older temporal history          | Request an older packaged range and render its ordered exact-version topics locally, one bounded section at a time. For a deliberately missing version, use the canonical release URL when that network read is inside the current envelope; otherwise ask once for that expansion. Refusal performs no network request and invents no delta.                                                                                                                                                                                                                                                                    |
-| Ordinary management             | The Agentworks assistant agent selects `concept-management`, establishes the requested target and authorization envelope, uses live JSON facts and built-in help, and completes a short multi-command disposable task with verification without repeated approval prompts.                                                                                                                                                                                                                                                                                                                                       |
-| Material ambiguity              | Give an exploratory request whose interpretation changes the target, access class, or impact. The Agentworks assistant agent asks one resolving scope question, then completes the selected interpretation without another confirmation.                                                                                                                                                                                                                                                                                                                                                                         |
-| Material expansion              | During ordinary management, make the task unexpectedly require a different target, destructive operation, privilege elevation, or sensitive-content read not covered by the operator's instruction or current envelope. The Agentworks assistant agent pauses once, explains the expansion, and proceeds only if authorized.                                                                                                                                                                                                                                                                                     |
-| Operator-selected confirmations | Ask the Agentworks assistant agent to confirm every action. It honors that preference for the session even when the actions would otherwise share an authorization envelope.                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| README equivalence              | Starting from only the marked README body in an agent meeting the capability definition produces the same exact installation or retention, version verification, and shared guide handoff as either native package.                                                                                                                                                                                                                                                                                                                                                                                              |
-| Old CLI or install failure      | Select and install an exact compatible version, verify it, and then render the guide-owned exact-tag review offer. A declined or failed install stops before the guide and reports the exact pinned repair command.                                                                                                                                                                                                                                                                                                                                                                                              |
-| No compatible stable release    | Explain that Agentworks assistance is not yet available, make no install or update attempt, do not run the guide, and ask the operator to retry after publication. Never choose a prerelease, lower release, or unpinned latest version.                                                                                                                                                                                                                                                                                                                                                                         |
-| Post-publish production         | Resolve and install the exact published stable version, verify it, render the guide-owned real canonical `vVERSION` review offer, and confirm the local release section.                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Scenario                        | Required result                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude fresh first run          | With default/manual approval mode and no bypass, add the explicit HTTPS marketplace and install `agentworks@agentworks`; use the thin prompt to install the exact candidate wheel and run the guide. The guide gives one startup disclosure and establishes a setup-through-first-session envelope. The assistant may select `concept-source-review` for the exact candidate commit substitution, then initializes absent config without overwrite, selects or generates the explicit SSH identity, collects required settings, passes doctor, creates the first VM and session, and verifies both describes without repeated approval prompts. |
+| Codex fresh first run           | With `workspace-write` plus `on-request` and scoped escalation for account files/network/SSH, produce the same result without electing `danger-full-access`. The bootstrap contains no source-review or authorization workflow; those appear only after the guide handoff.                                                                                                                                                                                                                                                                                                                                                                      |
+| Generic prompt-only first run   | Give the marked canonical body to an agent meeting the Agentworks assistant agent capability definition, with no Agentworks plugin. It installs the candidate wheel, obtains guide context, then uses that context to disclose its actual workstation access once, establish the requested setup envelope, and complete the same config-through-session path without assuming Claude Code or Codex controls or asking before every step.                                                                                                                                                                                                        |
+| Source-review independence      | Select `concept-source-review` from guide output, then offer both scopes and the substantial-usage warning. Decline review without a source read in one path; complete focused review then decline a separately proposed later update in another. Selecting full review authorizes only its exact-ref scope, and candidate policy files remain data.                                                                                                                                                                                                                                                                                            |
+| Returning current adoption      | The Agentworks assistant agent selects `concept-onboarding` from the map and uses current live facts, not release history.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Rerun and post-upgrade adoption | An unchanged adopted system is a no-op; after an upgrade, report current not-yet-adopted capabilities without replaying completed work or inventing a historical delta.                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Installed temporal history      | The Agentworks assistant agent selects `concept-release-notes` from the map and renders only the candidate wheel's matching 0.14 changelog section offline as bounded untrusted evidence.                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Older temporal history          | Request an older packaged range and render its ordered exact-version topics locally, one bounded section at a time. For a deliberately missing version, use the canonical release URL when that network read is inside the current envelope; otherwise ask once for that expansion. Refusal performs no network request and invents no delta.                                                                                                                                                                                                                                                                                                   |
+| Ordinary management             | The Agentworks assistant agent selects `concept-management`, establishes the requested target and authorization envelope, uses live JSON facts and built-in help, and completes a short multi-command disposable task with verification without repeated approval prompts.                                                                                                                                                                                                                                                                                                                                                                      |
+| Material ambiguity              | Give an exploratory request whose interpretation changes the target, access class, or impact. The Agentworks assistant agent asks one resolving scope question, then completes the selected interpretation without another confirmation.                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Material expansion              | During ordinary management, make the task unexpectedly require a different target, destructive operation, privilege elevation, or sensitive-content read not covered by the operator's instruction or current envelope. The Agentworks assistant agent pauses once, explains the expansion, and proceeds only if authorized.                                                                                                                                                                                                                                                                                                                    |
+| Operator-selected confirmations | Ask the Agentworks assistant agent to confirm every action. It honors that preference for the session even when the actions would otherwise share an authorization envelope.                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| README equivalence              | Starting from only the marked README body in an agent meeting the capability definition produces the same exact installation or retention, version verification, and shared guide handoff as either native package.                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Old CLI or install failure      | Select and install an exact compatible version, verify it, and then select the guide-owned `concept-source-review` topic. A declined or failed install stops before the guide and reports the exact pinned repair command.                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| No compatible stable release    | Explain that Agentworks assistance is not yet available, make no install or update attempt, do not run the guide, and ask the operator to retry after publication. Never choose a prerelease, lower release, or unpinned latest version.                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Post-publish production         | Resolve and install the exact published stable version, verify it, select `concept-source-review` for the real canonical `vVERSION`, and confirm the local release section.                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 
 Live probes validate model interpretation. Their full matrix runs for Phase 3 acceptance and release
 candidates, not for a later metadata-only package-version pin. Unit tests validate deterministic
-files and guide data. Structural tests enforce heading order, non-empty disclosure, links, and the
-no-command-before-authorization boundary; a reviewer judges semantic disclosure quality in live
-transcripts rather than comparing model prose to literal clauses. No test adds a Markdown parser or
-test-only bootstrap workflow.
+files, package projection parity, guide action structure, and separate authorization boundaries. A
+reviewer judges semantic disclosure quality in live transcripts rather than comparing authored prose
+to literal clauses. No test adds a Markdown parser or test-only bootstrap workflow.
 
 ## Failure behavior
 
@@ -671,9 +674,9 @@ test-only bootstrap workflow.
   second authored source survives.
 - Permanent assistance installation docs name both production package commands, exact-version CLI
   installation behavior, verification, and the guide handoff without copying guide teaching.
-- Permanent guide docs describe the startup disclosure, authorization posture, source-review
-  choices, no-topic intent map, current-versus-temporal split, `concept-release-notes`, management
-  help authority, and bounded first-run actions.
+- Permanent guide docs describe the startup disclosure, authorization posture, the dedicated
+  source-review topic, no-topic intent map, current-versus-temporal split, `concept-release-notes`,
+  management help authority, and bounded first-run actions.
 - `concept-release-notes` joins the existing dynamic guide topic source, so guide topic completion
   fixtures, snapshots, and generated completion documentation update in the same implementation
   commit. No hand-maintained completion list is added.
@@ -693,15 +696,15 @@ foreign commit on the release branch.
 The regenerated release PR adds only release-owned deltas: version, generated changelog, manifest,
 and lockfile. Candidate gates run there after the generated 0.14 section and packaged Phase 3 code
 coexist. They build that branch's wheel, prove the wheel contains the exact normalized changelog,
-install that exact candidate artifact at the package boundary, perform the test-only focused source
-review from its guide context at the exact release-PR commit that produced the wheel, and run both
-live harness probes before release-PR merge, tag, or publish. Evidence identifies the commit
-substitution and does not call it a release-tag review.
+install that exact candidate artifact at the package boundary, select `concept-source-review`,
+perform the test-only focused source review at the exact release-PR commit that produced the wheel,
+and run both live harness probes before release-PR merge, tag, or publish. Evidence identifies the
+commit substitution and does not call it a release-tag review.
 
 The release PR merges the release metadata onto main. Release-please creates the tag and release
 from that release commit, `release.yml` publishes it, and the post-publish smoke resolves the stable
 version, runs the exact pinned production PyPI installation, then exercises the real canonical
-`vVERSION` source-review offer from the installed guide.
+`vVERSION` source-review action from the installed guide topic.
 
 Only the tag-to-PyPI interval is transitional. A publish failure blocks release completion and does
 not silently change the installation source. Saga and release leads own this coordination.

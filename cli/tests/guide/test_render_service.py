@@ -769,18 +769,24 @@ def test_live_catalog_advertises_every_valid_platform_name_and_filters_invalid_n
 def test_no_topic_live_rendering_includes_authored_and_dynamic_entries() -> None:
     registry = _ExactRegistry()
     config = cast("Config", object())
-    response = render_guide(
+    human = render_guide(
         (),
         GuideMode.HUMAN,
         load_config_fn=lambda: config,
         load_registry_fn=lambda loaded: cast("Registry", registry),
     )
+    agent = render_guide(
+        (),
+        GuideMode.AGENT,
+        load_config_fn=lambda: config,
+        load_registry_fn=lambda loaded: cast("Registry", registry),
+    )
 
-    assert response.exit_code == 0
-    assert "First setup, current capabilities, or current adoption: `concept-onboarding`" in response.markdown
-    assert "The Agentworks assistant agent interprets the operator's request" in response.markdown
-    assert "`concept-onboarding`" in response.markdown
-    assert "`vm-template/demo`" in response.markdown
+    assert human.exit_code == agent.exit_code == 0
+    assert human.markdown != agent.markdown
+    for response in (human, agent):
+        assert "`concept-onboarding`" in response.markdown
+        assert "`vm-template/demo`" in response.markdown
 
 
 def test_fresh_install_uses_empty_inventory_without_creating_state_database(

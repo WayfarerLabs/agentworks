@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
-from agentworks.errors import AgentworksError, ConfigError, StateError, ValidationError
+from agentworks.errors import AgentworksError, ConfigError, ConfigFileNotFoundError, StateError, ValidationError
 from agentworks.guide.assessment import OnboardingSnapshot
 from agentworks.guide.catalog import GuideCatalog, GuideCatalogIssue, _build_guide_catalog
 from agentworks.guide.contract import (
@@ -33,7 +33,7 @@ from agentworks.guide.contributions import guide_contributions
 from agentworks.guide.render import framework_heading, render_index, render_topic, sanitize_terminal_output
 from agentworks.guide.view import GuideInstanceFact, GuideRelationship, build_guide_view
 from agentworks.manifests.reference import describable_targets, reference_for
-from agentworks.release_notes import ReleaseNotesError, read_release_history
+from agentworks.release_notes import ReleaseNotesError, read_release_history, topic_version
 from agentworks.resources import KIND_REGISTRY
 
 if TYPE_CHECKING:
@@ -325,19 +325,10 @@ def render_guide(
     if load_config_fn is None:
         from agentworks.config import load_config
 
-        absent_default_config = False
-
         def load_config_for_guide() -> Config:
-            nonlocal absent_default_config
-
-            from agentworks.config import CONFIG_PATH
-
-            absent_default_config = not CONFIG_PATH.exists()
             return load_config(raise_errors=True)
 
         load_config_fn = load_config_for_guide
-    else:
-        absent_default_config = False
     if load_registry_fn is None:
         from agentworks.bootstrap import load_guide_registry
 
@@ -403,7 +394,13 @@ def render_guide(
         runtime_dynamic_topics = tuple(
             _dynamic_topic(registry, name) for name in dynamic_only_names if name not in schema_dynamic_names
         )
-        index_topics = tuple((*authored.topics, *schema_dynamic_topics, *runtime_dynamic_topics))
+        # Exact release topics remain addressable and completable, but their
+        # templated summaries do not help choose between versions in the index.
+        index_topics = tuple(
+            topic
+            for topic in (*authored.topics, *schema_dynamic_topics, *runtime_dynamic_topics)
+            if topic_version(str(topic.topic)) is None
+        )
         markdown = render_index(index_topics, mode)
     else:
         from agentworks.db import DatabaseDriverError
@@ -514,9 +511,7 @@ def render_guide(
     error_markdown = (
         f"\n\n{framework_heading('Live facts unavailable')}\n\n{_framed_error(system_error)}" if system_error else ""
     )
-    expected_clean_home_handoff = not requested and absent_default_config and isinstance(system_error, ConfigError)
-    exit_code = (
-        1 if visible_issues or runtime_issues or (system_error is not None and not expected_clean_home_handoff) else 0
-    )
+    expected_clean_home = isinstance(system_error, ConfigFileNotFoundError)
+    exit_code = 1 if visible_issues or runtime_issues or (system_error is not None and not expected_clean_home) else 0
     output = sanitize_terminal_output(markdown.rstrip() + issue_markdown + error_markdown + "\n")
     return GuideResponse(output, exit_code, all_names)

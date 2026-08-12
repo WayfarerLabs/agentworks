@@ -381,6 +381,13 @@ installed no-topic agent guide owns source-review and continuing assistance.
       written correctly and remains ordinary review-owned prose, not a frozen unit-test vocabulary.
       Retain executable and structural coverage for clean-home exit behavior, source-review path
       existence, action records, generation parity, and authorization boundaries.
+- [x] Apply the operator's 2026-08-12 guide-proportionality correction. Keep the completed journey
+      above intact, but simplify the destination: move full source-review teaching and actions to
+      `concept-source-review`; omit repetitive exact-version release topics from the no-topic index
+      while retaining resolution and completion; give human and agent indexes distinct concise
+      bodies; remove remaining authored-prose policing from the touched tests; and treat a missing
+      configuration file uniformly as successful guide input for indexes and selected topics while
+      preserving nonzero exits for malformed configuration.
 - [ ] PR #480 contains the complete Phase 3 feature, passes its repo and live feature gates, and
       merges normally to `main` with a conventional `feat:` title. Release-please then regenerates
       the separate 0.14 release PR from that mainline feature, adding the version, changelog,

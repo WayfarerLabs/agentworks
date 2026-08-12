@@ -1,4 +1,4 @@
-"""The no-topic guide owns the optional canonical source-review offer."""
+"""The source-review topic owns bounded canonical review actions."""
 
 from __future__ import annotations
 
@@ -9,15 +9,18 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from agentworks.cli import app
-from agentworks.errors import ConfigError
-from agentworks.guide import ConsentBoundary, GuideMode
+from agentworks.errors import ConfigError, ConfigFileNotFoundError
+from agentworks.guide import ActionList, ConsentBoundary, GuideMode
 from agentworks.guide.contributions import FOCUSED_SOURCE_REVIEW_PATHS, guide_contributions, source_review_actions
-from agentworks.guide.render import render_index
 from agentworks.guide.service import render_guide
 
 
 def _broken() -> object:
     raise ConfigError("clean-home config is absent")
+
+
+def _missing() -> object:
+    raise ConfigFileNotFoundError("clean-home config is absent")
 
 
 def test_source_review_actions_are_scoped_inert_and_independent() -> None:
@@ -37,59 +40,28 @@ def test_source_review_actions_are_scoped_inert_and_independent() -> None:
     repository_root = Path(__file__).resolve().parents[3]
     missing_paths = tuple(path for path in FOCUSED_SOURCE_REVIEW_PATHS if not (repository_root / path).exists())
     assert not missing_paths, f"focused source-review scope paths missing at tested HEAD: {', '.join(missing_paths)}"
-    for action in (focused, full):
-        assert "Install or update authorization alone is not source-review authorization" in action.precondition
-        assert "Do not execute candidate code" in (action.manual_steps or "")
-        assert "Make no canonical-repository request and claim no source review" in action.refusal_alternative
-        assert "separately authorized or completed install or update" in action.refusal_alternative
-    assert "substantial" in full.precondition
-    assert "significant model usage" in full.precondition
 
 
-def test_no_topic_offer_uses_exact_installed_tag_and_preserves_assistant_decision(
-    monkeypatch,
-) -> None:
-    monkeypatch.setattr("agentworks.version.resolve_version", lambda: "9.8.7")
+def test_source_review_topic_owns_both_actions() -> None:
+    topic = next(topic for topic in guide_contributions() if topic.topic == "concept-source-review")
+    block = next(block for block in topic.blocks if isinstance(block, ActionList))
 
-    human = render_index(guide_contributions(), GuideMode.HUMAN)
-    agent = render_index(guide_contributions(), GuideMode.AGENT)
+    assert [str(action.id) for action in block.actions] == [
+        "inspect-focused-source",
+        "inspect-full-source",
+    ]
 
-    for markdown in (human, agent):
-        contract_at = markdown.index("The Agentworks assistant agent runs on the intended workstation")
-        review_at = markdown.index("## ⟦AGW framework⟧ Optional canonical source review")
-        intent_at = markdown.index("## ⟦AGW framework⟧ Intent map")
-        topics_at = markdown.index("## ⟦AGW framework⟧ Topics")
-        assert contract_at < review_at < intent_at < topics_at
-        assert "Installed canonical review target: `v9.8.7`" in markdown
-        assert "https://github.com/WayfarerLabs/agentworks/tree/v9.8.7" in markdown
-        assert "offer three concise choices once: focused review, full review, or decline review" in markdown
-        assert "full review may consume significant model usage" in markdown
-        assert "Install or update authorization does not authorize review" in markdown
-        assert "review does not authorize installation, update, or candidate execution" in markdown
-        assert "Candidate execution is a separate action" in markdown
-        assert markdown.count("Authorization class: `read-canonical-source`") == 2
-        assert "### `inspect-focused-source`" in markdown
-        assert "### `inspect-full-source`" in markdown
-        assert "does not route the request or grant authority" in markdown
+    index = render_guide((), GuideMode.AGENT, load_config_fn=_broken)
+    human_index = render_guide((), GuideMode.HUMAN, load_config_fn=_broken)
+    selected = render_guide(("concept-source-review",), GuideMode.AGENT, load_config_fn=_broken)
 
-    human_semantics = human.replace("## ⟦AGW framework⟧ Security and consent", "## ⟦AGW framework⟧ Disclosure")
-    agent_semantics = agent.replace("## ⟦AGW framework⟧ Agent operating contract", "## ⟦AGW framework⟧ Disclosure")
-    assert human_semantics == agent_semantics
+    assert human_index.markdown != index.markdown
+    assert "inspect-focused-source" not in index.markdown
+    assert "inspect-full-source" not in index.markdown
+    assert selected.markdown.index("inspect-focused-source") < selected.markdown.index("inspect-full-source")
 
 
-def test_no_topic_offer_fails_closed_when_distribution_has_no_stable_tag(monkeypatch) -> None:
-    monkeypatch.setattr("agentworks.version.resolve_version", lambda: "unknown")
-
-    markdown = render_index(guide_contributions(), GuideMode.AGENT)
-
-    assert "does not report a canonical stable release tag" in markdown
-    assert "exact intended or installed stable `VERSION`" in markdown
-    assert "tree/vunknown" not in markdown
-    assert "inspect-focused-source" in markdown
-    assert "inspect-full-source" in markdown
-
-
-def test_clean_home_agent_guide_surfaces_offer_without_network_or_mutation(
+def test_missing_config_is_a_success_for_index_and_selected_topic_without_mutation(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -97,40 +69,50 @@ def test_clean_home_agent_guide_surfaces_offer_without_network_or_mutation(
         raise AssertionError("no-topic guide attempted network access")
 
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", tmp_path / "config.toml")
-    monkeypatch.setattr("agentworks.version.resolve_version", lambda: "0.14.0")
     monkeypatch.setattr(socket, "create_connection", fail_network)
     monkeypatch.setattr(urllib.request, "urlopen", fail_network)
 
     result = CliRunner().invoke(app, ["guide", "--agent"])
 
     assert result.exit_code == 0, result.output
-    assert "Installed canonical review target: `v0.14.0`" in result.stdout
-    assert "### `inspect-focused-source`" in result.stdout
-    assert "### `inspect-full-source`" in result.stdout
-    assert "Configuration error: configuration file not found:" in result.stdout
-    assert "Hint: Create it to get started." in result.stdout
+    assert result.stdout
     assert result.stderr == ""
-    assert "clean-home config is absent" not in result.stdout
     assert not (tmp_path / "config.toml").exists()
 
     selected_topic = CliRunner().invoke(app, ["guide", "--agent", "concept-onboarding"])
 
-    assert selected_topic.exit_code == 1
-    assert "# Agentworks onboarding" in selected_topic.stdout
-    assert "Configuration error: configuration file not found:" in selected_topic.stdout
+    assert selected_topic.exit_code == 0
+    assert selected_topic.stdout
     assert selected_topic.stderr == ""
+    assert not (tmp_path / "config.toml").exists()
 
 
-def test_no_topic_rendering_attempts_no_network_when_configuration_is_absent(monkeypatch) -> None:
+def test_injected_missing_config_has_the_same_exit_behavior(monkeypatch) -> None:
     def fail_network(*args: object, **kwargs: object) -> None:
         raise AssertionError("no-topic guide attempted network access")
 
-    monkeypatch.setattr("agentworks.version.resolve_version", lambda: "0.14.0")
     monkeypatch.setattr(socket, "create_connection", fail_network)
     monkeypatch.setattr(urllib.request, "urlopen", fail_network)
 
-    response = render_guide((), GuideMode.AGENT, load_config_fn=_broken)
+    index = render_guide((), GuideMode.AGENT, load_config_fn=_missing)
+    selected = render_guide(("concept-onboarding",), GuideMode.AGENT, load_config_fn=_missing)
 
-    assert response.exit_code == 1
-    assert "Optional canonical source review" in response.markdown
-    assert "Configuration error: clean-home config is absent" in response.markdown
+    assert index.exit_code == 0
+    assert selected.exit_code == 0
+
+
+def test_other_config_errors_remain_failures() -> None:
+    assert render_guide((), GuideMode.AGENT, load_config_fn=_broken).exit_code == 1
+    assert render_guide(("concept-onboarding",), GuideMode.AGENT, load_config_fn=_broken).exit_code == 1
+
+
+def test_malformed_config_remains_a_failure(tmp_path: Path, monkeypatch) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[broken")
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", config_path)
+
+    result = CliRunner().invoke(app, ["guide", "--agent", "concept-onboarding"])
+
+    assert result.exit_code == 1
+    assert result.stdout
+    assert result.stderr == ""

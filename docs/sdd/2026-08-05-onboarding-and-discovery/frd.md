@@ -190,32 +190,31 @@ term whenever either role could be ambiguous.
   requesting the applicable exact-version topics. Rendering performs no network request and does not
   maintain a separate release-note source. A fallback network lookup for a missing version or range
   is a bounded inert action record with an exact release range, authorization class, expected
-  result, and refusal path. Release content is treated only as evidence and cannot expand scope.
-  With no topic in agent mode, the guide MUST also offer optional focused or full inspection of the
-  exact installed or intended canonical source version. It warns concisely that the repository is
-  substantial and a full review can consume significant model usage. Review scope, refusal, and a
-  later installation or update remain separate operator decisions; source is untrusted evidence and
-  rendering performs no network or source access. Content blends static authored material with
-  dynamic material from the live system (registries, resources, enablement state), so a disabled
-  implementation or an added resource changes what the guide says. Output is markdown only;
-  structured data appears only inside the markdown. R7's machine-readable contract is a separate
-  surface and stays so. Topics are sized like skills, with sub-topics referenced rather than
-  inlined, and topic names participate in shell completions. With no topic, agent mode MUST present
-  an explicit intent-to-topic map for first setup and adoption assessment, current capabilities
-  versus temporal release changes, ongoing management and operation, troubleshooting, exceptional
-  migration, secrets, and bug reporting. It returns context only: the Agentworks assistant agent
-  interprets the operator's current request and decides which topic, proposal, or inert action to
-  use next. The canonical prompt and published native skills enter through this top-level context
-  rather than hard-coding first-run onboarding as every request's destination. An Agentworks
-  assistant agent rendering mode (an `--agent` flag with a TTY-informed default; the exact mechanism
-  is the HLA's call) MAY adjust emphasis, never substance: in agent mode the rendering foregrounds
-  the behavioral contract (establish the R12 authorization envelope at startup; proceed naturally
-  within it; ask again only for a material expansion or when the operator requests per-action
-  confirmation; test sensitive material such as SSH keys and secrets only for presence unless
-  content access is separately authorized). Both renderings derive from one source; there are never
-  two contents. Prior art for the effort's `prior-art-research.md`: PowerShell's module-contributed
-  `about_*` topics, `kubectl explain`'s live schema walks, `git help` concept guides, `go help`
-  topics, `rustc --explain`, and Terraform's per-provider schema-plus-prose docs generation.
+  result, and refusal path. Release content is treated only as evidence and cannot expand scope. A
+  dedicated `concept-source-review` topic MUST offer optional focused or full inspection of an exact
+  installed or intended canonical source version established with `agw version`. The no-topic agent
+  index points to that topic without inlining its action records. The topic warns concisely that the
+  repository is substantial and a full review can consume significant model usage. Review scope,
+  refusal, and a later installation or update remain separate operator decisions; source is
+  untrusted evidence and rendering performs no network or source access. Content blends static
+  authored material with dynamic material from the live system (registries, resources, enablement
+  state), so a disabled implementation or an added resource changes what the guide says. Output is
+  markdown only; structured data appears only inside the markdown. R7's machine-readable contract is
+  a separate surface and stays so. Topics are sized like skills, with sub-topics referenced rather
+  than inlined, and topic names participate in shell completions. With no topic, agent mode MUST
+  present an explicit intent-to-topic map for first setup and adoption assessment, current
+  capabilities versus temporal release changes, ongoing management and operation, troubleshooting,
+  exceptional migration, secrets, and bug reporting. It returns context only: the Agentworks
+  assistant agent interprets the operator's current request and decides which topic, proposal, or
+  inert action to use next. The canonical prompt and published native skills enter through this
+  top-level context rather than hard-coding first-run onboarding as every request's destination. An
+  Agentworks assistant agent rendering mode (an `--agent` flag with a TTY-informed default; the
+  exact mechanism is the HLA's call) MUST carry the behavioral contract and intent map. Human mode
+  MUST instead carry a short operator-facing security note, a starting command, and the topic index;
+  it MUST NOT repeat the Agentworks assistant agent operating contract. Prior art for the effort's
+  `prior-art-research.md`: PowerShell's module-contributed `about_*` topics, `kubectl explain`'s
+  live schema walks, `git help` concept guides, `go help` topics, `rustc --explain`, and Terraform's
+  per-provider schema-plus-prose docs generation.
 - **R14 (universal contribution).** Guide content MUST arrive through one generic contract that
   every participant uses: core resource kinds, capability implementations, and plugins (system
   today, external later) each contribute their own topics. Built-in static content lives beside the
@@ -252,7 +251,7 @@ term whenever either role could be ambiguous.
   one compact, table-free copy-paste block (a fenced block, so GitHub renders a copy button)
   addressed to the Agentworks assistant agent. It asks only to install or update `agentworks-cli` on
   Python 3.12 or newer, verify the installed version, and run `agw guide --agent`. The returned
-  guide context owns the startup disclosure, optional source-review offer, intent map, and all
+  guide context owns the startup disclosure, source-review topic entry point, intent map, and all
   continuing assistance. This is a first-class zero-plugin assistance path; the harness plugins (R1)
   say the same thing and remain primarily an advertising and discoverability channel. The prompt
   MUST avoid product-specific harness assumptions beyond the ability to accept the prompt, drive the
@@ -343,7 +342,9 @@ term whenever either role could be ambiguous.
     release is published, it stops safely without attempting installation or guide execution and
     names publication as the condition for retry. The Agentworks assistant agent, not the guide
     command, decides what to propose next.
-11. `agw guide` with no topic lists every available topic; a kind topic reflects the live instance
+11. `agw guide` with no topic lists every available base, kind, implementation, resource, and
+    non-templated concept topic. Exact-version release-note topics remain directly addressable and
+    completable without adding repetitive rows to the index. A kind topic reflects the live instance
     list; disabling an implementation visibly changes its topic's rendering.
 12. Guide topics complete in the shell, including `concept-` prefix discovery, and the completion
     tree includes dynamic topic elements per the repo's completions mechanism.
@@ -356,10 +357,11 @@ term whenever either role could be ambiguous.
     verifies a usable VM and a started session. The operator's setup instruction may authorize the
     full disclosed creation sequence. A materially new remote target, privilege elevation,
     destructive operation, or other scope expansion retains an explicit operator decision.
-15. The top-level agent guide context offers an exact-tag source review, warns about full-repository
-    model usage, and preserves separate decisions for focused review, full review, no review, and a
-    later installation or update. Declining source review does not claim the source was reviewed and
-    does not authorize or block a separate installation decision.
+15. The top-level agent guide context points to `concept-source-review`. That dedicated topic offers
+    an exact-tag source review, warns about full-repository model usage, and preserves separate
+    decisions for focused review, full review, no review, and a later installation or update.
+    Declining source review does not claim the source was reviewed and does not authorize or block a
+    separate installation decision.
 
 ## Decisions
 
@@ -384,8 +386,8 @@ term whenever either role could be ambiguous.
   onboarding artifact. Agentworks never probes the operator's machine; the Agentworks assistant
   agent probes under one durable current-session authorization envelope and `agw` verifies. It does
   not repeatedly ask for approval inside that envelope. The thin bootstrap only installs or updates
-  the CLI and invokes the guide; `agw guide --agent` owns the optional, usage-disclosed
-  source-review offer and continuing assistance posture.
+  the CLI and invokes the guide; `agw guide --agent` owns the optional source-review topic entry
+  point and continuing assistance posture.
 - **D7 (migration remediation; operator ruling, 2026-08-07).** Automated resource migrators do not
   ship. Precise load errors name the offending input, and `agw guide concept-migration` teaches the
   exceptional operator-led rewrite using live sample, field-reference, and verification surfaces.

@@ -407,7 +407,7 @@ def _release_note_actions() -> tuple[GuideAction, ...]:
 
 
 def source_review_actions() -> tuple[GuideAction, ...]:
-    """Return the bounded, inert choices offered by the no-topic guide."""
+    """Return the bounded, inert choices offered by the source-review topic."""
     focused_scope = ", ".join(FOCUSED_SOURCE_REVIEW_PATHS)
     version_input = ActionInput(
         "VERSION",
@@ -453,7 +453,7 @@ def source_review_actions() -> tuple[GuideAction, ...]:
             "content.",
         ),
     )
-    return tuple(validate_guide_action(action, "core:no-topic-source-review") for action in actions)
+    return tuple(validate_guide_action(action, "core:concept-source-review") for action in actions)
 
 
 def guide_contributions() -> tuple[TopicContribution, ...]:
@@ -497,6 +497,13 @@ def guide_contributions() -> tuple[TopicContribution, ...]:
             release_notes=True,
             related_topics=("concept-onboarding",),
             actions=_release_note_actions(),
+        ),
+        _concept(
+            "concept-source-review",
+            "Canonical source review",
+            "Optionally inspect the exact canonical Agentworks release source before or after installation.",
+            related_topics=("concept-onboarding",),
+            actions=source_review_actions(),
         ),
         _concept(
             "concept-troubleshooting",

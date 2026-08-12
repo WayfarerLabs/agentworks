@@ -149,6 +149,10 @@ class ConfigError(AgentworksError):
     """
 
 
+class ConfigFileNotFoundError(ConfigError):
+    """The selected Agentworks configuration file does not exist."""
+
+
 class InheritanceCycleError(ConfigError):
     """An ``inherits`` chain that loops back on itself.
 
