@@ -23,6 +23,7 @@ from agentworks.db import (
     MIGRATIONS,
     Database,
     MigrationContext,
+    SchemaInspection,
     SchemaState,
     backup_directory,
     inspect_schema,
@@ -260,9 +261,9 @@ def test_stale_inspector_waits_then_refuses_changed_state(tmp_path: Path, monkey
     real_inspect = backup_module.inspect_schema
     calls = 0
 
-    def _inspect_then_wait(database_path: Path, *, immutable: bool = False):
+    def _inspect_then_wait(database_path: Path):
         nonlocal calls
-        result = real_inspect(database_path, immutable=immutable)
+        result = real_inspect(database_path)
         calls += 1
         if calls == 1:
             start.set()
@@ -296,9 +297,9 @@ def test_prepare_refuses_changed_stale_state_when_lock_released_before_first_acq
     real_inspect = backup_module.inspect_schema
     calls = 0
 
-    def _inspect_then_release(database_path: Path, *, immutable: bool = False):
+    def _inspect_then_release(database_path: Path):
         nonlocal calls
-        result = real_inspect(database_path, immutable=immutable)
+        result = real_inspect(database_path)
         calls += 1
         if calls == 1:
             start.set()
@@ -335,8 +336,8 @@ def test_prepare_refuses_identical_tainted_baseline_after_lock_released_before_f
     real_inspect = backup_module.inspect_schema
     observed_tokens: list[tuple[int, int | None]] = []
 
-    def _inspect_then_release(database_path: Path, *, immutable: bool = False):
-        result = real_inspect(database_path, immutable=immutable)
+    def _inspect_then_release(database_path: Path):
+        result = real_inspect(database_path)
         observed_tokens.append((result.current_version, result.schema_cookie))
         if len(observed_tokens) == 1:
             release.set()
@@ -549,26 +550,6 @@ def test_base_exception_migration_failure_preserves_identity_and_visible_recover
     _release_migration_lock(lock)
 
 
-def test_completion_open_is_immutable_and_refuses_every_sidecar(tmp_path: Path) -> None:
-    path = tmp_path / "state.db"
-    Database(path).close()
-
-    completion_database = open_completion_database(path)
-    assert completion_database is not None
-    completion_database.close()
-    pristine = {entry.name: entry.read_bytes() for entry in tmp_path.iterdir()}
-
-    for suffix in ("-wal", "-shm", "-journal"):
-        sidecar = path.with_name(f"{path.name}{suffix}")
-        sidecar.write_bytes(b"sentinel")
-        before = {entry.name: entry.read_bytes() for entry in tmp_path.iterdir()}
-        assert open_completion_database(path) is None
-        assert {entry.name: entry.read_bytes() for entry in tmp_path.iterdir()} == before
-        sidecar.unlink()
-
-    assert {entry.name: entry.read_bytes() for entry in tmp_path.iterdir()} == pristine
-
-
 def test_completion_probe_unavailable_state_fails_before_database_caller(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -576,8 +557,7 @@ def test_completion_probe_unavailable_state_fails_before_database_caller(
     from agentworks.cli import _helpers
 
     path = tmp_path / "state.db"
-    Database(path).close()
-    path.with_name(f"{path.name}-journal").write_bytes(b"sentinel")
+    _build_schema(path, LATEST_VERSION - 1)
     before = {entry.name: entry.read_bytes() for entry in tmp_path.iterdir()}
     monkeypatch.setattr(db_module, "DB_PATH", path)
     monkeypatch.setattr(_helpers, "completion_mode_enabled", lambda: True)
@@ -591,6 +571,161 @@ def test_completion_probe_unavailable_state_fails_before_database_caller(
         _helpers.get_db()
 
     assert {entry.name: entry.read_bytes() for entry in tmp_path.iterdir()} == before
+
+
+def test_completion_open_reads_committed_rows_from_a_live_writer(tmp_path: Path) -> None:
+    """Issue #502 regression. A live writer connection leaves `-wal`/`-shm`
+    sidecars on disk for as long as it stays open: that is the normal steady
+    state of a WAL database with any live connection, not evidence the
+    database is unavailable. Completion must still read committed state
+    through it. This fails on the old sidecar-veto code, which returned
+    ``None`` whenever any sidecar existed."""
+    path = tmp_path / "state.db"
+    writer = Database(path)
+    try:
+        writer.insert_vm("web", "local", "web.local")
+
+        assert path.with_name(f"{path.name}-wal").exists()
+        assert path.with_name(f"{path.name}-shm").exists()
+
+        completion_database = open_completion_database(path)
+        assert completion_database is not None
+        try:
+            assert [vm.name for vm in completion_database.list_vms()] == ["web"]
+        finally:
+            completion_database.close()
+    finally:
+        writer.close()
+
+
+def test_completion_open_sees_uncheckpointed_wal_content_that_immutable_mode_would_miss(
+    tmp_path: Path,
+) -> None:
+    """The stale-read property immutable mode broke. Immutable connections
+    ignore the WAL entirely, so a row committed by another connection but not
+    yet checkpointed into the main database file is invisible to them; an
+    ordinary read-only connection reads the WAL correctly and sees it."""
+    path = tmp_path / "state.db"
+    Database(path).close()  # migration DDL checkpointed and committed cleanly
+
+    writer = Database(path)
+    try:
+        writer.insert_vm("web", "local", "web.local")
+
+        wal_path = path.with_name(f"{path.name}-wal")
+        assert wal_path.exists() and wal_path.stat().st_size > 0
+
+        immutable_view = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro&immutable=1", uri=True)
+        try:
+            stale_count = immutable_view.execute("SELECT COUNT(*) FROM vms").fetchone()[0]
+        finally:
+            immutable_view.close()
+        assert stale_count == 0  # what the old immutable completion open would have served
+
+        completion_database = open_completion_database(path)
+        assert completion_database is not None
+        try:
+            assert [vm.name for vm in completion_database.list_vms()] == ["web"]
+        finally:
+            completion_database.close()
+    finally:
+        writer.close()
+
+
+def test_completion_open_of_a_nonexistent_database_creates_nothing(tmp_path: Path) -> None:
+    path = tmp_path / "state.db"
+
+    assert open_completion_database(path) is None
+
+    assert tuple(tmp_path.iterdir()) == ()
+
+
+def test_completion_open_never_writes_while_sidecars_are_live(tmp_path: Path) -> None:
+    """Completion open commits nothing: the main database file and the WAL's
+    actual frame content are byte-identical before and after. SQLite may
+    still rewrite the `-shm` coordination file's reader-mark bookkeeping as a
+    reader attaches and detaches; that is WAL-index protocol overhead, not a
+    write to database content, so it is deliberately not asserted here."""
+    path = tmp_path / "state.db"
+    writer = Database(path)
+    try:
+        writer.insert_vm("web", "local", "web.local")
+
+        wal_path = path.with_name(f"{path.name}-wal")
+        db_bytes_before = path.read_bytes()
+        wal_bytes_before = wal_path.read_bytes()
+
+        completion_database = open_completion_database(path)
+        assert completion_database is not None
+        completion_database.list_vms()
+        completion_database.close()
+
+        assert path.read_bytes() == db_bytes_before
+        assert wal_path.read_bytes() == wal_bytes_before
+    finally:
+        writer.close()
+
+
+def test_completion_open_fails_fast_under_a_held_exclusive_lock(tmp_path: Path) -> None:
+    """Issue #502: a busy database must not freeze a TAB press. The
+    schema-builder helper never sets WAL, so this database sits in SQLite's
+    default rollback-journal mode; holding `BEGIN EXCLUSIVE` from another
+    connection blocks every reader regardless of journal mode, which is
+    enough to synthesize contention for this test. The completion path must
+    give up within its bounded connection timeout rather than inherit the
+    driver's multi-second default wait."""
+    path = tmp_path / "state.db"
+    _build_schema(path, LATEST_VERSION)
+
+    locker = sqlite3.connect(path)
+    locker.execute("BEGIN EXCLUSIVE")
+    try:
+        start = time.monotonic()
+        completion_database = open_completion_database(path)
+        elapsed = time.monotonic() - start
+    finally:
+        locker.rollback()
+        locker.close()
+
+    assert completion_database is None
+    # Real headroom over the 0.1s connection timeout, far below the driver's
+    # 5s default, and generous enough not to flake on a loaded CI box.
+    assert elapsed < 2.0
+
+
+def test_completion_open_returns_none_when_construction_hits_a_held_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The construction path itself, not just `inspect_schema`'s own busy
+    check inside `open_completion_database`, must fail fast and return None
+    rather than raise (issue #502). `inspect_schema` is monkeypatched to
+    unconditionally report CURRENT so control passes the inspection gate and
+    reaches `Database(...)` while the lock is still held: this exercises the
+    construction call's own bounded timeout and its `except StateError`
+    handling specifically, which the inspection-gate test above never
+    reaches (a held lock trips the inspection's own busy check first)."""
+    from agentworks.db import backup as backup_module
+
+    path = tmp_path / "state.db"
+    _build_schema(path, LATEST_VERSION)
+
+    def _fake_current(_database_path: Path, *, timeout: float | None = None) -> SchemaInspection:
+        return SchemaInspection(SchemaState.CURRENT, LATEST_VERSION, LATEST_VERSION, 1)
+
+    monkeypatch.setattr(backup_module, "inspect_schema", _fake_current)
+
+    locker = sqlite3.connect(path)
+    locker.execute("BEGIN EXCLUSIVE")
+    try:
+        start = time.monotonic()
+        completion_database = open_completion_database(path)
+        elapsed = time.monotonic() - start
+    finally:
+        locker.rollback()
+        locker.close()
+
+    assert completion_database is None
+    assert elapsed < 2.0
 
 
 def test_recovery_command_rendering_quotes_posix_and_powershell(

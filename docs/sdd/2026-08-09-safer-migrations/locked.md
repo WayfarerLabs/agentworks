@@ -57,3 +57,19 @@ WAL-aware read-only validation may leave restrictive `-shm` and zero-byte `-wal`
 beside a selected backup. The backup database itself remains byte-identical, valid, and retryable.
 Immutable reads were deliberately not used for backup/restore validation because they can ignore
 committed WAL content; deleting coordination files would add ownership and race hazards.
+
+## Supersession (2026-08-12)
+
+Bug report 502 found that two pieces of the completion mechanism recorded above under "Non-mutating
+completion probes", sidecar gating and immutable current-schema reads, were the wrong design for the
+property they were trying to protect. The state database runs in WAL mode, so `-wal`/`-shm`
+coordination files are its normal steady state under any live connection, not evidence of
+unavailable or damaged state; vetoing on their presence made every database-backed completer return
+no candidates whenever any other `agw` process held the database open, and the immutable read that
+remained after clearing the veto would have ignored the WAL and served stale, pre-write rows. The
+fixing pull request, number 503, replaced both with an ordinary, WAL-aware read-only completion open
+(no sidecar veto, no `immutable=1`), bounded by a short connection timeout so a database locked by a
+concurrent writer still fails a completion probe quickly instead of freezing it. Every other item
+recorded under "What shipped" and "Verification" still stands; this note narrows only the
+sidecar-gating and immutable-read clauses of the completion-probe bullet under "What shipped" and
+the "completion immutability" item in the shipped-CLI validation list under "Verification".
