@@ -19,7 +19,7 @@ from agentworks import output
 from agentworks.env.identity import ResourceContext, per_context_identity_env
 from agentworks.env.merge import effective_env
 from agentworks.errors import ValidationError
-from agentworks.secrets.outcomes import ResolutionOutcome, format_outcome
+from agentworks.secrets.outcomes import format_outcome
 from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 
 if TYPE_CHECKING:
@@ -386,7 +386,7 @@ def _reveal_values(
     *,
     reveal: bool,
     interaction: InteractionPolicy,
-) -> tuple[dict[str, str], dict[str, ResolutionOutcome]]:
+) -> tuple[dict[str, str], dict[str, str]]:
     """Resolve every secret referenced by ``merged`` when revealing.
 
     Returns ``(values, errors)`` keyed by secret name: ONE batched
@@ -395,10 +395,9 @@ def _reveal_values(
     front in a single interaction, run in the loop's collect mode --
     per-secret failures land in ``errors`` and render inline instead of
     aborting the table, while successfully-resolved values (including
-    already-answered prompts) are kept. That covers the resolve loop's
-    transport-safety guard too: a backend value containing newline / CR
-    / NUL bytes renders as ``<error: secret 'X': resolved value
-    contains a control character...>``.
+    already-answered prompts) are kept. Source resolution accepts opaque
+    multiline strings; this environment consumer applies its own line-safety
+    guard before any value reaches a render input.
     """
     interaction = validate_interaction_policy(interaction)
     if not reveal:
@@ -423,15 +422,32 @@ def _reveal_values(
 
     result = resolve_partial_for_reveal(needed, sources, interaction=interaction)
     errors = {
-        outcome.name: outcome for outcome in result.outcomes if outcome.category is not ResolutionCategory.RESOLVED
+        outcome.name: format_outcome(outcome)
+        for outcome in result.outcomes
+        if outcome.category is not ResolutionCategory.RESOLVED
     }
-    return result.values, errors
+    from agentworks.secrets.line_safety import (
+        LineOrientedSecretUse,
+        require_line_safe_secret,
+    )
+
+    safe_values: dict[str, str] = {}
+    for name, value in result.values.items():
+        try:
+            safe_values[name] = require_line_safe_secret(
+                value,
+                use=LineOrientedSecretUse.ENVIRONMENT_REVEAL,
+                secret_name=name,
+            )
+        except ValidationError as exc:
+            errors[name] = str(exc)
+    return safe_values, errors
 
 
 def _render_value(
     entry: EnvEntry,
     values: dict[str, str],
-    errors: dict[str, ResolutionOutcome],
+    errors: dict[str, str],
     reveal_secrets: bool,
 ) -> tuple[str, bool]:
     """Return ``(rendered_value, is_secret)`` for one EnvEntry.
@@ -445,7 +461,7 @@ def _render_value(
         if not reveal_secrets:
             return f"<from secret: {entry.secret}>", True
         if entry.secret in errors:
-            return f"<error: {format_outcome(errors[entry.secret])}>", True
+            return f"<error: {errors[entry.secret]}>", True
         return values[entry.secret], True
     assert entry.value is not None  # EnvEntry invariant
     return entry.value, False

@@ -188,8 +188,8 @@ class _VMSiteKind:
         The `lima-local` and `wsl2` sites ship built in and need no declaration; they
         disable themselves on a host that lacks what they need. Declare a site for a
         remote or cloud backend, one per subscription, region, or cluster you target.
-        The cloud platforms ship as opt-in system plugins, so an azure-vm, aws-ec2, or
-        proxmox site stays not-ready with an "enable plugin" hint until its plugin is
+        The cloud platforms ship as opt-in system plugins, so an azure-vm, aws-ec2,
+        gcp-gce, or proxmox site stays not-ready with an "enable plugin" hint until its plugin is
         listed under `[plugins] system` in config.toml. `agw doctor` shows each site's
         state.
         """,

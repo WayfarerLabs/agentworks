@@ -61,7 +61,7 @@ class _EnvVarClient:
             env_name = mapping.root if isinstance(mapping, EnvVarMapping) else env_var_name_for(request.name)
             raw = os.environ.get(env_name)
             if raw is not None:
-                resolved[request.name] = raw.rstrip("\r\n")
+                resolved[request.name] = raw
         return resolved
 
 

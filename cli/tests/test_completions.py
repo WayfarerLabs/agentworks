@@ -317,6 +317,7 @@ printf '%s\\0' "${{COMPREPLY[@]}}"
         assert response.exit_code == 0
         assert "vm-template" in response.names
         assert "vm-platform/wsl2" in response.names
+        assert "vm-platform/gcp-gce" in response.names
 
     def test_guide_topic_completion_stream_omits_rejected_schema_target(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from dataclasses import replace

@@ -309,13 +309,25 @@ def create_vm(
             # own); lima and wsl2 have nothing to authenticate, so it is a
             # silent no-op for them. The credentials' write-step runup stays
             # deferred into initialization, under the skip-and-degrade policy.
-            site_node.runup(scoped_ctx(site_node.secret_refs()))
-            tailscale_auth_key = scoped_ctx(template_node.secret_refs()).secret(vm_tmpl.tailscale_auth_key)
+            from agentworks.secrets.line_safety import (
+                LineOrientedSecretUse,
+                require_line_safe_secret,
+            )
+
+            tailscale_auth_key = require_line_safe_secret(
+                scoped_ctx(template_node.secret_refs()).secret(vm_tmpl.tailscale_auth_key),
+                use=LineOrientedSecretUse.TAILSCALE,
+                secret_name=vm_tmpl.tailscale_auth_key,
+            )
             # Each credential's token, read through its node's SCOPED delivery.
             git_tokens = {
                 node.provider.owner_name: scoped_ctx(node.secret_refs()).secret(node.provider.secret_name)
                 for node in cred_nodes
             }
+            from agentworks.git_credentials import validate_git_tokens
+
+            git_tokens = validate_git_tokens(providers, git_tokens)
+            site_node.runup(scoped_ctx(site_node.secret_refs()))
 
             # The VM's OS hostname, computed once at create time and recorded on the
             # row: {slug}-{name} with a slug, the bare name without. Bounded by
@@ -694,6 +706,9 @@ def reinit_vm(
             node.provider.owner_name: scoped_ctx(node.secret_refs()).secret(node.provider.secret_name)
             for node in cred_nodes
         }
+        from agentworks.git_credentials import validate_git_tokens
+
+        git_tokens = validate_git_tokens(providers, git_tokens)
 
         # Build Tailscale SSH target with logging
         from agentworks.ssh import SSHLogger

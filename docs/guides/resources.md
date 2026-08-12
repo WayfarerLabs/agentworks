@@ -231,6 +231,24 @@ spec:
     auth: { mode: ambient }
 ```
 
+Google Compute Engine uses the same tagged site shape:
+
+```yaml
+apiVersion: agentworks/v1
+kind: vm-site
+metadata:
+  name: gcp-dev
+spec:
+  platform:
+    name: gcp-gce
+    project_id: agentworks-dev
+    zone: us-central1-a
+    auth: { mode: ambient }
+```
+
+See [Using Google Compute Engine](gcp.md) for IAM, API, VPC firewall-policy, credential, and safe
+recovery prerequisites.
+
 - `spec.platform` is one table: its `name` key names a `vm-platform` capability row and the
   remaining keys are that platform's configuration, validated by it (unknown keys are errors).
   `agw resource describe-kind vm-platform` lists the platforms this build has, including any that
@@ -251,20 +269,21 @@ spec:
   otherwise). Those secrets are auto-declared and resolved through the configured source chain like
   any other, and `agw resource describe-kind vm-platform/<name>` shows each platform's secret fields
   with their default names.
-- **Azure and AWS sites say how they authenticate, in a tagged `auth` table that defaults to
+- **Azure, AWS, and GCP sites say how they authenticate, in a tagged `auth` table that defaults to
   ambient.** `auth: {mode: ambient}` is the declared default, so omitting the table means it: the
   host's own credential chain (for Azure, `az login` / `AZURE_*` / managed identity / browser
-  fallback; for AWS, environment, shared config, instance profile, SSO), which is what each wrapped
-  SDK does when told nothing. `auth: {mode: service-principal, ...}` and
-  `auth: {mode: access-key, ...}` name an explicit identity. An explicit identity is used and only
-  it, so a rejected or expired credential fails the command rather than falling back to the ambient
-  chain. The same shape reads back out: an `ambient` site declares no secret and shows no secret
-  edge, a credential arm declares exactly the one secret it names, and `agw doctor`'s site row shows
-  the resolved mode (`platform azure-vm (auth: ambient)`) whether it was written or defaulted.
-  Lima's `placement` works the same way, defaulting to `{mode: local}`. Proxmox has no mode selector
-  at all: it has one authentication shape, so it keeps its required token fields, which is the
-  pattern (a default where the underlying tool has an ambient notion, required fields where it does
-  not).
+  fallback; for AWS, environment, shared config, instance profile, SSO; for GCP, Application Default
+  Credentials), which is what each wrapped SDK does when told nothing.
+  `auth: {mode: service-principal, ...}`, `auth: {mode: access-key, ...}`, and
+  `auth: {mode: service-account, ...}` name an explicit identity. An explicit identity is used and
+  only it, so a rejected or expired credential fails the command rather than falling back to the
+  ambient chain. The same shape reads back out: an `ambient` site declares no secret and shows no
+  secret edge, a credential arm declares exactly the one secret it names, and `agw doctor`'s site
+  row shows the resolved mode (`platform azure-vm (auth: ambient)`) whether it was written or
+  defaulted. Lima's `placement` works the same way, defaulting to `{mode: local}`. Proxmox has no
+  mode selector at all: it has one authentication shape, so it keeps its required token fields,
+  which is the pattern (a default where the underlying tool has an ambient notion, required fields
+  where it does not).
 - The cloud and datacenter platforms ship as opt-in system plugins, so a site that names one is
   not-ready with an "enable plugin `<name>`" hint, and refused at use, until you list that plugin in
   `[plugins] system`. The `azure-dev` example above is not-ready until you set
@@ -412,6 +431,39 @@ is added as its own integration with its own config vocabulary. `claude-code` ab
 Claude-specific `model` / `permission_mode` fields) is one worked example; the core assumes no
 particular runtime, and a session runs whatever integration its template selects.
 
+## Install-command reruns and optional checks
+
+Prefer a VM template's `apt`, `apt_packages`, or `snap` fields for system software and
+`mise_packages` for user tools. Use an install-command only when those package paths do not fit. Its
+`command` must be one logical shell invocation written as a single-line YAML scalar, either plain or
+quoted. Prefer one maintained package-manager or vendor entry point. Embedded scripts, block
+scalars, here-documents, multi-step installers, state machines, signature pipelines, and cleanup
+routines do not belong in an install-command manifest.
+
+Agentworks runs install commands during init and may run them again during every reinit. Each
+invocation must therefore be repeat-safe itself or declare `test_exec`, `test_file`, or `test_dir`
+completion checks that reliably skip it after success. When multiple non-empty checks are declared,
+all must pass before Agentworks skips the command. With no checks, the command always runs.
+
+A `system-install-command` is VM-wide in scope, but Agentworks executes it as the VM admin user, not
+root. The command must explicitly use `sudo` for each step that needs root privileges. A
+`user-install-command` runs as the admin or agent user whose template selects it and should not
+assume elevation.
+
+`test_exec` resolves a command on `PATH` in the target user's login shell. `test_file` and
+`test_dir` check for an existing path; a leading `~` resolves to the target user's home. Declare a
+check only when its success proves that no work is needed. For example:
+
+```yaml
+apiVersion: agentworks/v1
+kind: system-install-command
+metadata:
+  name: my-tool
+spec:
+  command: sudo vendor-tool install my-tool
+  test_exec: my-tool
+```
+
 ## Built-ins and overrides
 
 Built-in resources ship with the app and appear in `agw resource list --origin builtin`. Override
@@ -458,11 +510,10 @@ system = ["azure"]
 - A plugin you have **not** enabled still publishes both its capability rows AND its bundled
   manifest resources, all **disabled**: a resource referencing a disabled capability is not-ready
   with an `enable plugin <name>` hint (not an unknown-name error), and a reference to a disabled
-  bundled resource (for example a template's `system_install_commands` naming the `az-cli`
-  install-command while `azure` is off) is refused at use with the same hint, never an unknown-name
-  error. A disabled plugin's resources are hidden from `resource list` and never block an operator's
-  identically-named resource, but they are present, so the reference always resolves to the friendly
-  hint.
+  bundled resource (for example a template's `system_install_commands` naming `az-cli` while `azure`
+  is off) is refused at use with the same hint, never an unknown-name error. A disabled plugin's
+  resources are hidden from `resource list` and never block an operator's identically-named
+  resource, but they are present, so the reference always resolves to the friendly hint.
 
 **Disabled resources are hidden by default.** `agw resource list` omits disabled rows; pass
 `--include-disabled` to reveal them. `--origin plugin` narrows the listing to plugin-contributed
@@ -489,7 +540,8 @@ use.
 
 **Which plugins you need follows from what your resources reference.** Enable `onepassword` if a
 declared secret source selects the `onepassword` backend; `proxmox` if a `vm-site` uses the
-`proxmox` platform; `azure` if you use the `azure-vm` platform, the `azdo` (Azure DevOps)
+`proxmox` platform; `gcp` if you use `gcp-gce` or a template installs the `gcloud-cli` apt package;
+`aws` if you use `aws-ec2`; `azure` if you use the `azure-vm` platform, the `azdo` (Azure DevOps)
 git-credential provider, or the `az-cli` install-command; and `claude` if a `session-template` uses
 the `claude-code` integration or a template installs the `claude` CLI. Until you do, a resource that
 references one is not-ready (or refused at use) with an "enable plugin `<name>`" hint, never a
@@ -553,9 +605,12 @@ should you when reading them:
   is a `false` opt-out, or a mapping-required backend (like `onepassword`) with no mapping.
 
 Resolution is a pass over the chain in precedence order: the first source that produces a value
-wins. You are never prompted for the same secret twice in one command, and all prompting happens up
-front, before the command starts changing anything. The walk considers a candidate only when it is
-**present, enabled, ready, active, and would-attempt** the secret.
+wins. You are never prompted for the same secret twice in one command, and plan-wide prompting
+happens up front, before the command starts changing anything. Conditional Tailscale repair remains
+lazy so healthy and already-connected paths never ask for a repair key: a stopped VM may start
+before late key delivery, then Agentworks validates the key before any rejoin-specific mutation,
+transport, installation, or daemon action. The walk considers a candidate only when it is **present,
+enabled, ready, active, and would-attempt** the secret.
 
 A **not-ready** active source is **skipped with a warning**, and resolution continues with the next
 candidate. A _ready_ store's hard miss stops the chain so a bad mapping cannot fall through to a

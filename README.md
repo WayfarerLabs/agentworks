@@ -18,11 +18,12 @@ when done. One `agw` CLI drives all of it declaratively via an **SSH-over-Tailsc
 
 The operator runs the `agw` CLI on their workstation. VMs are created at declared **vm-sites**
 (configured places to create VMs), each backed by a **vm-platform** that knows how to work with a
-given provider (Lima, WSL2, Proxmox, Azure VMs, and AWS EC2 today, with more to come). Regardless of
-the platform, every VM runs the same base operating system (Debian Bookworm), is joined to the same
-Tailscale tailnet, and is accessible over SSH at its Tailscale IP address using the operator's keys.
+given provider (Lima, WSL2, Proxmox, Azure VMs, AWS EC2, and Google Compute Engine today).
+Regardless of the platform, every VM runs the same base operating system (Debian Bookworm), is
+joined to the same Tailscale tailnet, and is accessible over SSH at its Tailscale IP address using
+the operator's keys.
 
-![Agentworks topology: the operator's workstation runs the agw CLI, which creates VMs at declared sites across local platforms (Lima or WSL2), a remote SSH VM site (e.g. Lima), Azure, AWS EC2, and Proxmox, with room reserved for future platforms. Every VM and the workstation itself join a shared Tailnet overlay, which is how the CLI reaches them all.](docs/images/agw-topology.png)
+![Agentworks topology: the operator's workstation runs the agw CLI, which creates VMs at declared sites across local platforms (Lima or WSL2), a remote SSH VM site (e.g. Lima), Azure, AWS EC2, and Proxmox, with a placeholder for future VM platforms. Every VM and the workstation itself join a shared Tailnet overlay, which is how the CLI reaches them all.](docs/images/agw-topology.png)
 
 Beyond the VMs themselves, Agentworks provides several layered primitives for organizing agentic
 workloads:
@@ -187,13 +188,13 @@ interchangeable alternatives.
 
 - **SSH** is the control plane after provisioning: initialization, agent and session management,
   file transfer, and command execution. Provisioning uses the platform's native transport (Lima
-  shell, SSH over a scoped Azure or EC2 public route, WSL2 exec, or Proxmox guest agent). The
+  shell, SSH over a scoped Azure, EC2, or GCE public route, WSL2 exec, or Proxmox guest agent). The
   operator's key (configured in `[operator]`) is deployed during provisioning and is the sole SSH
   authentication mechanism thereafter. Once Tailscale is joined, routine access goes over the
   tailnet, and `~/.ssh/config` entries are managed automatically so standard clients (scp, ssh, VS
   Code Remote) work seamlessly.
 - **[Tailscale](https://tailscale.com/)** is the network fabric. VMs join a tailnet during
-  provisioning and routine SSH access rides it. Azure and EC2 temporarily open TCP/22 on their
+  provisioning and routine SSH access rides it. Azure, EC2, and GCE temporarily open TCP/22 on their
   public interfaces to the operator's detected public IPv4 address (as a `/32`), plus configured
   allow-list CIDRs, during bootstrap or explicit native-platform access, then close it again. The
   `tailscale-auth-key` secret resolves through the configured source chain on `vm create` (and

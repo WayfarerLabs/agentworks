@@ -120,11 +120,13 @@ processes the user delegates from there).
   if a regression appears, this ADR is the place to revisit.
 - **Values containing newlines** are not reliably transportable via SetEnv (the SSH protocol encodes
   env strings without escaping mechanisms for control chars). Agentworks secrets are expected to be
-  opaque tokens; an operator who tries to set a multiline value in `[admin.env]` may see truncation.
-  Surfaced as a config-load warning when a plaintext value contains a newline; resolved secret
-  values are also checked at `SecretResolver.resolve_all` time and raise `ConfigError` rather than
-  silently corrupting the SSH argument. The env-var source additionally strips trailing newlines
-  (the common copy-paste artifact).
+  opaque strings, and structured credentials may legitimately be multiline. A plaintext env value
+  containing a newline receives a config-load warning. A secret-backed env value is checked by
+  environment composition immediately after resolution and by `agw env show --resolve` before
+  rendering; either rejects CR, LF, or NUL with a fixed value-free error before SSH transport.
+  Secret sources and the shared resolver do not trim or reject line endings because capable SDK
+  consumers must receive structured values exactly as supplied. The resolver still rejects NUL
+  globally.
 - **The wildcard is a one-time decision per VM.** Operators who want a curated allowlist for their
   own audit reasons would need to override agentworks's init template. This is supported (init
   writes a single file under `/etc/ssh/sshd_config.d/`; operators can replace it) but adds one more

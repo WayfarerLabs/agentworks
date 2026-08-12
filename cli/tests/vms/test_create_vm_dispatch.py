@@ -15,7 +15,7 @@ import pytest
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionResult
 from agentworks.config import load_config
-from agentworks.errors import NotFoundError, ProvisioningError
+from agentworks.errors import NotFoundError, ProvisioningError, ValidationError
 from agentworks.secrets.policy import InteractionPolicy
 from agentworks.vms import manager as vm_manager
 from tests.conftest import ManifestDoc, write_manifests
@@ -311,6 +311,72 @@ def test_slug_resolution_precedes_secrets_and_insert(
 
     assert order == ["slug", "secrets"]
     assert db.get_vm("ovm") is None  # insert happens after the resolve
+
+
+def test_create_rejects_multiline_tailscale_key_before_runup_db_or_platform(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: object,
+) -> None:
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+
+    auth_key = "tskey-prefix\r\ntskey-suffix\r\n"
+    monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", auth_key)
+    monkeypatch.setattr(
+        LimaPlatform,
+        "runup",
+        lambda *args, **kwargs: pytest.fail("platform runup reached with a line-unsafe Tailscale key"),
+    )
+    monkeypatch.setattr(
+        LimaPlatform,
+        "create",
+        lambda *args, **kwargs: pytest.fail("platform create reached with a line-unsafe Tailscale key"),
+    )
+
+    with pytest.raises(ValidationError) as caught:
+        vm_manager.create_vm(db, make_config(), name="unsafe-ts", interaction=InteractionPolicy.REFUSE)
+
+    assert db.get_vm("unsafe-ts") is None
+    assert auth_key not in repr((caught.value.args, vars(caught.value)))
+
+
+def test_create_rejects_multiline_git_token_before_runup_db_or_platform(
+    db: Database,
+    make_config,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: object,
+) -> None:
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+
+    token = "ghp-prefix\nghp-suffix\n"
+    monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GITHUB", token)
+    config = make_config(
+        manifests=[
+            ManifestDoc(
+                "admin-template",
+                "default",
+                {"shell": "zsh", "git_credentials": ["github"]},
+            ),
+            ManifestDoc("git-credential", "github", {"provider": {"name": "github"}}),
+        ]
+    )
+    monkeypatch.setattr(
+        LimaPlatform,
+        "runup",
+        lambda *args, **kwargs: pytest.fail("platform runup reached with a line-unsafe Git token"),
+    )
+    monkeypatch.setattr(
+        LimaPlatform,
+        "create",
+        lambda *args, **kwargs: pytest.fail("platform create reached with a line-unsafe Git token"),
+    )
+
+    with pytest.raises(ValidationError) as caught:
+        vm_manager.create_vm(db, config, name="unsafe-git", interaction=InteractionPolicy.REFUSE)
+
+    assert db.get_vm("unsafe-git") is None
+    assert token not in repr((caught.value.args, vars(caught.value)))
 
 
 def test_r11_hostname_and_vnet_bound_by_construction() -> None:

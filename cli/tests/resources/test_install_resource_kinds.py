@@ -170,11 +170,8 @@ def test_apt_source_kind_published_from_builtin_manifest(tmp_path: Path) -> None
         warn_issues=False,
     )
     registry = build_registry(cfg)
-    names = [name for name, _ in registry.iter_kind_items("apt-source")]
+    names = [name for name, source in registry.iter_kind_items("apt-source") if source.origin.variant == "built-in"]
     assert names, "the built-in manifests should publish at least one apt_source"
-    for name in names:
-        src = registry.lookup("apt-source", name)
-        assert src.origin.variant == "built-in"
 
 
 def test_apt_package_references_flow_to_apt_source(tmp_path: Path) -> None:

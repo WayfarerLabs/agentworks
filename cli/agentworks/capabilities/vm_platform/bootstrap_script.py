@@ -270,6 +270,16 @@ def generate_bootstrap_script(
     system default, free to disagree with the first. It did: this
     parameter defaulted to 0 while ``ResolvedVMTemplate.swap`` is 4.
     """
+    if tailscale_auth_key is not None:
+        from agentworks.secrets.line_safety import (
+            LineOrientedSecretUse,
+            require_line_safe_secret,
+        )
+
+        tailscale_auth_key = require_line_safe_secret(
+            tailscale_auth_key,
+            use=LineOrientedSecretUse.TAILSCALE,
+        )
     return SCRIPT_TEMPLATE.format(
         admin_username=shlex.quote(admin_username),
         ssh_public_key=shlex.quote(ssh_public_key),

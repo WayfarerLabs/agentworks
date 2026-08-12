@@ -24,7 +24,7 @@ includes location, credentials, and other platform-specific settings.
 
 ## Available Platforms
 
-Five platforms ship today. This list can change, so `agw resource describe-kind vm-platform` is the
+Six platforms ship today. This list can change, so `agw resource describe-kind vm-platform` is the
 definitive set on any given install (it reads no config, so it answers even on a host that cannot
 load one), and `agw resource describe-kind vm-platform/<name>` is the definitive config for one.
 
@@ -42,20 +42,22 @@ load one), and `agw resource describe-kind vm-platform/<name>` is the definitive
   resource group, and region.
 - **`aws-ec2`** (via the `aws` system plugin) runs VMs on Amazon EC2 in an operator-selected region
   and optional subnet.
+- **`gcp-gce`** (via the `gcp` system plugin) runs VMs on Google Compute Engine in an
+  operator-selected project, zone, and optional subnet.
 
 Per the Agentworks model, the choice of platform largely disappears once a VM is up and running. All
 VMs run the same base OS (Debian Bookworm) and are accessible via SSH over Tailscale.
 
 ## Security Posture
 
-On the full-control cloud platforms (`azure-vm` and `aws-ec2`), Agentworks provisions not just the
-VM but its whole network exposure surface, and it locks that surface down by default. The baseline
-is no standing inbound access at all: a freshly provisioned cloud VM has nothing open to the
-internet. When Agentworks genuinely needs to reach the VM (to bring it up, or to open a shell for
-the operator), it opens a narrowly scoped hole for the workstation's detected public IPv4 address
-(as a `/32`) plus any configured `operator.ssh_allow_cidrs`. The hole exists only for that operation
-and closes as soon as the work is done; this scoped, ephemeral behavior is the cloud-platform
-default.
+On the full-control cloud platforms (`azure-vm`, `aws-ec2`, and `gcp-gce`), Agentworks provisions
+not just the VM but its whole network exposure surface, and it locks that surface down by default.
+The baseline is no standing inbound access at all: a freshly provisioned cloud VM has nothing open
+to the internet. When Agentworks genuinely needs to reach the VM (to bring it up, or to open a shell
+for the operator), it opens a narrowly scoped hole for the workstation's detected public IPv4
+address (as a `/32`) plus any configured `operator.ssh_allow_cidrs`. The hole exists only for that
+operation and closes as soon as the work is done; this scoped, ephemeral behavior is the
+cloud-platform default.
 
 On platforms where the host is not Agentworks' to control (`proxmox` and remote Lima on
 operator-administered hosts, or a local `lima` / `wsl2` VM on the operator's machine), the existing
@@ -108,8 +110,8 @@ A vm-platform stands up a machine and hands Agentworks an administrative foothol
   closed rather than open; on an externally administered or local host it **MUST NOT** manage the
   host's or network's security at all.
 - **MUST NOT** share host filesystem paths into the guest by default (a VM is self-contained), and
-  **MUST NOT** log or persist resolved secret values (its metadata carries only backend
-  identifiers).
+  **MUST NOT** log or persist resolved secret values (its metadata carries only non-secret state
+  required for safe lifecycle operations).
 
 Notably, VM platforms do not create agent users, workspaces, groups, sessions, or inject secrets.
 Those are managed by the Agentworks core system through platform-agnostic mechanisms.
@@ -122,14 +124,15 @@ dependencies, the exposure and credential machinery on the cloud platforms, the 
 timeline, and implementation pitfalls. If you are selecting or configuring a platform rather than
 writing one, you can stop here.
 
-Five platforms ship today and are the working references throughout this guide: `lima` (`lima.py`)
-and `wsl2` (`wsl2.py`) as core built-ins, plus `proxmox`, `azure-vm`, and `aws-ec2`, which ship in
-opt-in system plugins (`agentworks/plugins/proxmox/platform.py`, with its REST client in `api.py`;
-`agentworks/plugins/azure/platform.py`, with its network mechanics in `network.py`; and
-`agentworks/plugins/aws/platform.py`, likewise split from its `network.py`). The rules below apply
-to a plugin-shipped platform exactly as to a core one; each plugin re-seats its class into
-`VM_PLATFORM_REGISTRY` at import, so authoring a platform is the same either way. When a rule below
-has a concrete example, it names the platform and file that demonstrates it.
+Six platforms ship today and are the working references throughout this guide: `lima` (`lima.py`)
+and `wsl2` (`wsl2.py`) as core built-ins, plus `proxmox`, `azure-vm`, `aws-ec2`, and `gcp-gce`,
+which ship in opt-in system plugins (`agentworks/plugins/proxmox/platform.py`, with its REST client
+in `api.py`; `agentworks/plugins/azure/platform.py`, with its network mechanics in `network.py`; and
+`agentworks/plugins/aws/platform.py`, likewise split from its `network.py`; and
+`agentworks/plugins/gcp/platform.py`, with request ownership and firewall mechanics in its sibling
+modules). The rules below apply to a plugin-shipped platform exactly as to a core one; each plugin
+re-seats its class into `VM_PLATFORM_REGISTRY` at import, so authoring a platform is the same either
+way. When a rule below has a concrete example, it names the platform and file that demonstrates it.
 
 ### Technical Definition of a VM Platform
 
@@ -147,11 +150,11 @@ Platform patterns depend on who controls the machine and its surrounding network
 below (baseline deny, ephemeral scoped allows) is a category-1 obligation, not a universal one;
 replicating it in another category would cross the platform's ownership boundary.
 
-1. **Full-control cloud platforms** (`azure-vm` and `aws-ec2` today). Agentworks provisions the host
-   AND its network exposure surface (Azure: public IP, NSG, VNet, NIC; EC2: public IP, security
-   group, ENI, launched into an existing subnet), so it owns the security posture end to end. The
-   locked-down-by-default exposure model below applies in full, as do the rollback obligations for
-   the remotely billed resources a failed create must not leak.
+1. **Full-control cloud platforms** (`azure-vm`, `aws-ec2`, and `gcp-gce` today). Agentworks
+   provisions the host AND its network exposure surface (Azure: public IP, NSG, VNet, NIC; EC2:
+   public IP, security group, ENI, launched into an existing subnet), so it owns the security
+   posture end to end. The locked-down-by-default exposure model below applies in full, as do the
+   rollback obligations for the remotely billed resources a failed create must not leak.
 2. **Externally administered hosts** (`proxmox`; Lima via a site's `ssh` placement). The hypervisor
    belongs to the operator's infrastructure. Agentworks does not control host or network security
    there and must not try to: no firewall management, no exposure toggling. The operator's own
@@ -175,7 +178,7 @@ and DB migration.
 `RunContext` after `vm` (see the next section for what that is and how to read from it):
 
 - `create(request, ctx) -> ProvisionResult` is deliberately **not** `@idempotent_op`: it runs a
-  pre-flight collision check, then either raises `StateError` (all five in-tree platforms) or, for a
+  pre-flight collision check, then either raises `StateError` (all six in-tree platforms) or, for a
   soft-name backend, selects a different collision-free backend name and records that identifier in
   `platform_metadata`. A re-run must never target or replace an existing VM.
 - `start(vm, ctx)`, `stop(vm, ctx)`, `delete(vm, ctx)` are flagged `@idempotent_op` and must land in
@@ -184,13 +187,13 @@ and DB migration.
   guarantee has to be real: `start`/`stop` on Lima and Proxmox and `stop` on WSL2 check `status()`
   first and short-circuit, because the backend verb is not reliably a no-op on an already-in-state
   instance; WSL2's `start` needs no guard because running a command boots a stopped distro and is a
-  plain exec on a running one, and Azure and EC2 need no guard because their SDK start/stop calls
-  are themselves idempotent on an already-in-state instance; `delete` treats already-gone as success
-  on all five. `delete` is NOT unconditionally best-effort though: a delete that cannot remove the
-  backend VM must raise a typed error (the manager deletes the DB row only on success, so a
-  swallowed backend failure orphans the VM; #329). Azure enforces this with a post-teardown
-  existence probe (`verify_vm_deleted`); only auxiliary-resource stragglers (its NIC/IP/NSG/disk
-  sweep) stay warn-and-continue. Lima, WSL2, Proxmox, and EC2 do not yet verify; their teardown
+  plain exec on a running one; Azure and EC2 rely on idempotent provider verbs, while GCE uses live
+  state guards; `delete` treats already-gone as success on all six. `delete` is NOT unconditionally
+  best-effort though: a delete that cannot remove the backend VM must raise a typed error (the
+  manager deletes the DB row only on success, so a swallowed backend failure orphans the VM; #329).
+  Azure enforces this with a post-teardown existence probe (`verify_vm_deleted`), and GCE requires
+  provider-ID-owned instance absence before removing its lifetime deny. Only auxiliary-resource
+  stragglers stay warn-and-continue. Lima, WSL2, Proxmox, and EC2 do not yet verify; their teardown
   verbs remain fire-and-forget (tracked in #356).
 - `status(vm, ctx) -> VMStatus` is a read-only query.
 - `display_backend_name(vm) -> str` is pure display and takes no `ctx`.
@@ -200,18 +203,19 @@ what their backends need). All are entered by callers that gate first, so on ent
 or was just started. The three transport hooks take `ctx: RunContext` for the same reason the ops
 do: opening a route to a cloud VM is a backend call, so a platform reads any credential it needs
 from `ctx.secret(name)` here exactly as in an op. Lima and WSL2 accept and ignore it (their
-transports are local); Azure and EC2 use it:
+transports are local); Azure, EC2, and GCE use it:
 
 - `native_transport(vm, ctx, *, config=None) -> Transport | None` (default `None`). The
   `agentworks.transports.native_transport` factory wraps the call in `transient_route`, probes
   reachability with an `echo ok` retry loop, and raises a typed `StateError` (using
   `no_native_transport_hint`) when a platform returns `None`. Lima returns a `limactl shell`
-  transport, Azure and EC2 an `SSHTransport` against the VM's current public IP (Azure reads its
-  persistent address live off the NIC; EC2 reads its address live off a fresh `describe_instances`,
-  because EC2 reassigns the auto-assigned IP across stop/start, so it is never cached), WSL2 a
-  `wsl.exe`-backed transport. Proxmox deliberately returns the default `None` and sets
-  `no_native_transport_hint` to point the operator at the Proxmox web-UI serial console, because its
-  guest-agent exec is one-shot and cannot host an interactive shell.
+  transport, Azure, EC2, and GCE an `SSHTransport` against the VM's current public IP (Azure reads
+  its persistent address live off the NIC; EC2 reads its address live off a fresh
+  `describe_instances`, because EC2 reassigns the auto-assigned IP across stop/start; GCE likewise
+  reads its lifetime ephemeral access config live), WSL2 a `wsl.exe`-backed transport. Proxmox
+  deliberately returns the default `None` and sets `no_native_transport_hint` to point the operator
+  at the Proxmox web-UI serial console, because its guest-agent exec is one-shot and cannot host an
+  interactive shell.
 - `transient_route(vm, ctx, *, config=None) -> context manager` (default `nullcontext()`). Azure
   opens a scoped SSH route on enter (heals a missing public IP, converges the NSG onto the
   baseline-deny model, pokes this operation's own ephemeral allow rule scoped to the operator's
@@ -223,8 +227,9 @@ transports are local); Azure and EC2 use it:
   routes from one operator egress share ONE rule rather than owning independent ones. The poke is
   therefore idempotent (tolerate `InvalidPermission.Duplicate`) and the per-op remove tolerant
   (tolerate `InvalidPermission.NotFound`), failing CLOSED (the deny baseline), never open; see
-  `plugins/aws/network.py`. Those calls read the credential from `ctx`, so a credentials-configured
-  site authenticates as itself with no ambient fallback.
+  `plugins/aws/network.py`. GCE uses a distinct UUID-suffixed firewall rule and provider ID for each
+  route, so concurrent routes close independently. Those calls read the credential from `ctx`, so a
+  credentials-configured site authenticates as itself with no ambient fallback.
 - `vm_active(vm, *, config=None) -> context manager` (default `nullcontext()`). WSL2 returns a
   keepalive that holds the distro against Windows' idle-shutdown for the span of a command, with
   Win32 Job-Object orphan-proofing for a hard-killed `agw`. No `ctx`: every hold that exists is
@@ -234,17 +239,18 @@ transports are local); Azure and EC2 use it:
   allow rule here, leaving the VM with zero inbound exposure behind its permanent deny-all-inbound
   baseline (the public IP itself stays attached for the VM's whole lifetime); EC2 revokes exactly
   the bootstrap allow's tuples (recorded in platform_metadata at create) to the same end, so a
-  concurrent native route's distinct allow survives. The asymmetry with `transient_route` is
-  intentional: the bootstrap ingress opens inside `create()` (cloud-init needs inbound SSH from the
-  operator), and neither that nor this closing point is context-manager-shaped.
+  concurrent native route's distinct allow survives; GCE removes its provider-ID-owned stable allow
+  and retains its priority-1 all-ingress deny. The asymmetry with `transient_route` is intentional:
+  the bootstrap ingress opens inside `create()` (cloud-init needs inbound SSH from the operator),
+  and neither that nor this closing point is context-manager-shaped.
 - `secure_failed_vm(vm, ctx) -> None` (default no-op). Same contract as `post_tailscale_ready`, for
   the paths where a completed create is kept after Phase A Tailscale SSH verification fails (row
   marked FAILED) or the operator interrupts verification (row status untouched); the success-only
   hook never fired on either. Create-time bootstrap failure stays inside the platform rollback
-  window and never reaches this hook. Azure deletes the fixed-name bootstrap allow and EC2 revokes
-  the recorded bootstrap tuples, so the VM defaults to zero inbound exposure; debugging survives via
-  `vm shell --platform` (a fresh per-operation allow) and the platform's serial console (not
-  firewall-gated).
+  window and never reaches this hook. Azure and GCE delete the owned fixed-name bootstrap allow and
+  EC2 revokes the recorded bootstrap tuples, so the VM defaults to zero inbound exposure; debugging
+  survives via `vm shell --platform` (a fresh per-operation allow) and the platform's serial console
+  (not firewall-gated).
 
 The two closing hooks and `transient_route` take `ctx` because opening or closing the firewall route
 (an Azure NSG rule, an EC2 security-group rule) is a backend call; the caller (Phase A's
@@ -335,17 +341,23 @@ prompting reads ok in the VM sites group, and resolvability is reported once, on
 row in the Secrets group.
 
 **The pattern for a backend client:** memoize the _derived client_, never the raw secret. Proxmox's
-`_api(ctx)` builds a `ProxmoxAPI` from `ctx.secret(token_secret)` on first need and caches the
-client (`self._api_cached`), never the token. Any future platform with an API token (a hypothetical
-GCP or AWS backend) should follow that shape.
+`_api(ctx)` reads `ctx.secret(token_secret)` on first need; `_build_api` applies the line-oriented
+consumer guard before `ProxmoxAPI` can construct a header, then `_api` caches only that client
+(`self._api_cached`). GCE follows the same rule: its cache retains the derived credential and typed
+Compute clients, never the service-account JSON.
 
 ### Credentials on a Cloud Platform: The Reference Shape
 
 Azure is the worked example, and a new cloud platform should copy it rather than invent a variant.
-The `aws-ec2` platform (`plugins/aws/platform.py`) is the first copy of it: its `access-key` arm is
-the AWS analogue named below, with `access_key_id` as the plain identifier and `access_key_secret`
-naming the secret that holds the secret access key (plus an optional `assume_role_arn`). Read it
-alongside azure when adding the third. Four rules, in `plugins/azure/platform.py`:
+The `aws-ec2` and `gcp-gce` platforms are copies of it. AWS's `access-key` arm is the AWS analogue
+named below, with `access_key_id` as the plain identifier and `access_key_secret` naming the secret
+that holds the secret access key (plus an optional `assume_role_arn`). Read it alongside GCE's
+`service-account` arm, whose one secret is the complete service-account JSON document exactly as
+downloaded, including its ordinary formatting and terminal line ending. Secret resolution preserves
+that opaque text; platforms must not trim, compact, split, or re-encode it. A platform whose own
+credential syntax is line-oriented must instead apply the shared consumer guard immediately after
+delivery and before constructing its client or authentication header. Four rules, in
+`plugins/azure/platform.py`:
 
 **1. Authentication is a REQUIRED tagged union, one arm per mechanism.** The site's platform block
 carries an `auth` table whose `mode` selects the arm:
@@ -448,29 +460,37 @@ This is the category-1 obligation from the host-control categories above: a full
 platform owns the exposure surface, so it owns keeping it shut. An externally administered or local
 platform has no business here and does none of it.
 
-Azure and EC2 share the firewall model, but not the address lifetime. Azure keeps a persistent
-public IP for the VM's whole lifetime. EC2 receives an auto-assigned public IP while running,
-releases it on stop, and receives a different one on start, so Agentworks always reads it live. In
-both cases, inbound exposure is controlled by firewall rules rather than using address attachment as
-an access switch. The baseline is deny-all-inbound; SSH happens only through ephemeral rules on
-TCP/22 scoped to the operator's detected public IPv4 address as a `/32`, plus any addresses or CIDR
-ranges in `operator.ssh_allow_cidrs`. The rules open for the bootstrap window and each
-native-transport session and close afterward. The shared operator-egress detection and the
-`ssh_allow_cidrs` fold live in `capabilities/vm_platform/ssh_exposure.py` so both platforms use one
-detector and one policy; the per-platform rule mechanics stay in each plugin's `network.py`.
+Azure, EC2, and GCE share the firewall model, but not the address lifetime or provider rule shape.
+Azure keeps a persistent public IP for the VM's whole lifetime. GCE keeps one lifetime ephemeral
+external access config, although the address may change across power transitions. EC2 receives an
+auto-assigned public IP while running, releases it on stop, and receives a different one on start,
+so Agentworks always reads it live. In both cases, inbound exposure is controlled by firewall rules
+rather than using address attachment as an access switch. The baseline is deny-all-inbound; SSH
+happens only through ephemeral rules on TCP/22 scoped to the operator's detected public IPv4 address
+as a `/32`, plus any addresses or CIDR ranges in `operator.ssh_allow_cidrs`. The rules open for the
+bootstrap window and each native-transport session and close afterward. The shared operator-egress
+detection and the `ssh_allow_cidrs` fold live in `capabilities/vm_platform/ssh_exposure.py` so all
+three platforms use one detector and one policy; the per-platform rule mechanics stay in each
+plugin's `network.py`.
 
-One asymmetry is worth calling out because it drives the EC2 code. Azure must INSTALL an explicit
-`deny-all-inbound` rule (an NSG carries permissive defaults, and the deny has to outrank any allow),
-so its baseline is a rule it writes. An EC2 security group is the opposite: a group with no ingress
-rules already denies all inbound, so EC2's baseline is the group's NATURAL empty state, with nothing
-to install. That is why `plugins/aws/network.py`'s `create_security_group` authorizes no ingress at
-all. The close hooks revoke exactly the bootstrap allow's recorded prefixes (not a blanket
-revoke-all), so a concurrent `vm shell --platform` route's distinct allow survives (nothing
-serializes commands per VM); the prefixes are recorded in platform_metadata at create rather than
-recomputed, which would drift if the operator's egress or `ssh_allow_cidrs` changed. The other
-EC2-native divergence (tuple-identity rules, so concurrent same-egress routes share one rule and the
-poke/remove are idempotent/tolerant and fail closed) is covered under `transient_route` above and in
-`network.py`.
+Two asymmetries are worth calling out. Azure must install an explicit `deny-all-inbound` rule (an
+NSG carries permissive defaults, and the deny has to outrank any allow), so its baseline is a rule
+it writes. GCE's shared VPC may also carry permissive default rules, so the instance tag receives a
+priority-1 all-ingress deny and priority-0 scoped SSH allows. GCE requires classic rules to evaluate
+before global/regional network firewall policies and rejects applicable priority-0 conflicts;
+organization/folder terminal policies remain an operator-owned prerequisite. An EC2 security group
+is the opposite: a group with no ingress rules already denies all inbound, so EC2's baseline is the
+group's NATURAL empty state, with nothing to install. That is why `plugins/aws/network.py`'s
+`create_security_group` authorizes no ingress at all. The close hooks use exactly the bootstrap
+allow's recorded prefixes, not a blanket or a recomputed scope that could drift if the operator's
+egress or `ssh_allow_cidrs` changed. EC2 revokes only those tuples. GCE reconstructs the complete
+fixed-name allow from the persisted canonical prefixes, network, tag, and contract fields, then
+requires both its persisted provider ID and that independent full shape before a name-based delete;
+a same-ID rule whose shape changed is retained and reported. In both platforms a concurrent
+`vm shell --platform` route's distinct allow survives (nothing serializes commands per VM). The
+other EC2-native divergence (tuple-identity rules, so concurrent same-egress routes share one rule
+and the poke/remove are idempotent/tolerant and fail closed) is covered under `transient_route`
+above and in `network.py`.
 
 ### Resources on a Cloud Platform: Per-VM Lifecycle, Shared State Stays Ambient
 
@@ -479,17 +499,20 @@ to exactly one VM and share that VM's lifecycle. It is created during that VM's 
 down when the VM is deleted or when create rolls back, and nothing Agentworks makes outlives the VM
 it belongs to. The shipped platforms hold to this. Azure gives each VM its own NIC, public IP, NSG,
 OS disk, and even its own VNet (`{name}-vnet`, its own `10.0.0.0/16`), and the delete and rollback
-sweep removes exactly that set; EC2 gives each VM its own security group, instance, and ENI. Per-VM
-scoping is what makes teardown and rollback total: there is no shared thing a delete could
-half-break.
+sweep removes exactly that set; EC2 gives each VM its own security group, instance, and ENI; GCE
+gives each VM one auto-deleted boot disk, one stable deny, and scoped allow rules while reusing the
+operator's network/subnet. Per-VM scoping is what makes teardown and rollback total: there is no
+shared thing a delete could half-break.
 
 Shared infrastructure gets the opposite treatment: assume it, do not manage it. The resource group a
-VNet lives in, the VPC and subnet an instance launches into, are the operator's to provision, and
-the platform only READS them. Azure requires a `resource_group` in config and its `runup` checks
-that the group EXISTS, failing with a hint to create it rather than creating it silently; EC2 takes
-an optional `subnet_id` (falling back to the account's default subnet) and existence-checks it the
-same way, deriving the VPC from it. Neither creates or deletes shared infrastructure, because
-deleting one VM must never risk something another VM, or the operator, still depends on.
+VNet lives in, the VPC and subnet an instance launches into, and the GCE project network/subnet are
+the operator's to provision, and the platform only READS them. Azure requires a `resource_group` in
+config and its `runup` checks that the group EXISTS, failing with a hint to create it rather than
+creating it silently; EC2 takes an optional `subnet_id` (falling back to the account's default
+subnet) and existence-checks it the same way, deriving the VPC from it. GCE resolves and persists
+canonical network identity but never creates or deletes it. None creates or deletes shared
+infrastructure, because deleting one VM must never risk something another VM, or the operator, still
+depends on.
 
 If a platform genuinely must manage a shared resource itself (none of the shipped ones do; a future
 backend might), two rules keep it safe:
@@ -515,15 +538,17 @@ and the operator-facing command banners that the rest of the codebase calls "pha
 - **Create-time bootstrap** is owned completely by `create()`, plus whatever the backend runs at
   creation time to get the VM reachable over Tailscale. The shared payload is `bootstrap_script.py`
   (admin user, packages, SSH key, swap, hostname, the Apple-vz SVE grub mask, Tailscale). Lima
-  instance YAML, Azure `custom_data`, and EC2 `UserData` retain credential-free forms of that
-  payload. After it installs Tailscale, `create()` sends the resolved key through one fixed guest
-  command on the provisioning transport's stdin. The value is absent from provider-retained
-  configuration and host-side argv; the guest `tailscale` process necessarily receives its
-  `--auth-key` argument transiently. Proxmox runs the key-bearing bootstrap from a private
-  guest-agent staging file inside `create()`. WSL2 runs its generated bootstrap from private local
-  and guest staging inside `create()`. Each staging file receives one verified removal attempt.
-  `create()` returns only after bootstrap succeeds and Tailscale joins, or it raises after rolling
-  back partial backend resources. **This stage runs once, at create.**
+  instance YAML, Azure `custom_data`, EC2 `UserData`, and GCE `Instance.metadata` retain
+  credential-free forms of that payload. GCE's startup wrapper checks a durable success marker
+  before any mutation and is rejected when its exact UTF-8 value exceeds 256 KiB. After the payload
+  installs Tailscale, `create()` sends the resolved key through one fixed guest command on the
+  provisioning transport's stdin. The value is absent from provider-retained configuration and
+  host-side argv; the guest `tailscale` process necessarily receives its `--auth-key` argument
+  transiently. Proxmox runs the key-bearing bootstrap from a private guest-agent staging file inside
+  `create()`. WSL2 runs its generated bootstrap from private local and guest staging inside
+  `create()`. Each staging file receives one verified removal attempt. `create()` returns only after
+  bootstrap succeeds and Tailscale joins, or it raises after rolling back partial backend resources.
+  **This stage runs once, at create.**
 - **Phase A** receives only the returned optional Tailscale IP and the provisioning transport. If
   the platform could not discover an IP after joining, Phase A runs only `tailscale ip -4` over that
   transport. It then records the IP and provisioning state, verifies Tailscale SSH, closes temporary
@@ -542,9 +567,10 @@ secrets delivered through `ctx.secret(name)`. The manager owns and closes the sa
 once after platform bootstrap, Phase A, and initialization.
 
 A platform-native configuration that the provider retains must never contain the resolved key. The
-five final-inspection surfaces are Lima instance YAML, WSL2 and Proxmox bootstrap staging, Azure
-`OSProfile.custom_data`, and EC2 `RunInstances.UserData`. The provider-faithful test inspects that
-final submitted or staged surface and, for temporary staging, verifies removal.
+six final-inspection surfaces are Lima instance YAML, WSL2 and Proxmox bootstrap staging, Azure
+`OSProfile.custom_data`, EC2 `RunInstances.UserData`, and GCE `Instance.metadata`. The
+provider-faithful test inspects that final submitted or staged surface and, for temporary staging,
+verifies removal.
 
 The seam between the two stages is the source of the most important gotcha below.
 
@@ -665,7 +691,8 @@ YAML block scalar, remote shell). Two traps that have already occurred:
 2. `config_model` declares the shape of the platform's own config block, with a `SecretRef` marker
    on each field naming a secret the implementation reads. Marking a field authorizes the op to read
    that secret later.
-3. The class is registered in `VM_PLATFORM_REGISTRY` (`__init__.py`).
+3. A core class is registered in `VM_PLATFORM_REGISTRY`; a separable platform is contributed by a
+   `Plugin` descriptor and seated by the installed plugin index.
 4. `unsupported_reason` identifies platforms that cannot run on some hosts (WSL2 off Windows), while
    the non-constructing `not_ready(config)` handles per-site tool checks (Lima with no `limactl`).
    `legacy_platform_metadata` is needed only when pre-migration rows must be mapped.

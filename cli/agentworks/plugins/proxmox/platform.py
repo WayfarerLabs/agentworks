@@ -151,6 +151,16 @@ class ProxmoxPlatform(VMPlatform):
         """Construct an API client for a resolved token. Shared by the op
         client and ``runup``, so the two stages build the client the same
         way from the same value."""
+        from agentworks.secrets.line_safety import (
+            LineOrientedSecretUse,
+            require_line_safe_secret,
+        )
+
+        token_value = require_line_safe_secret(
+            token_value,
+            use=LineOrientedSecretUse.PROXMOX_API,
+            secret_name=self.config.token_secret,
+        )
         return ProxmoxAPI(
             api_url=self.config.api_url,
             token_id=self.config.token_id,
@@ -197,7 +207,16 @@ class ProxmoxPlatform(VMPlatform):
         # Read the token before announcing the check, so a context with
         # no resolved secrets fails before the banner (the old guard's
         # error-path ordering).
-        token = ctx.secret(token_secret)
+        from agentworks.secrets.line_safety import (
+            LineOrientedSecretUse,
+            require_line_safe_secret,
+        )
+
+        token = require_line_safe_secret(
+            ctx.secret(token_secret),
+            use=LineOrientedSecretUse.PROXMOX_API,
+            secret_name=token_secret,
+        )
         output.detail(f"Performing runup test for vm-site/{self.site_name}...")
         api = self._build_api(token)
         try:

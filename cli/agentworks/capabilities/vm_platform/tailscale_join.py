@@ -15,6 +15,8 @@ if TYPE_CHECKING:
 TAILSCALE_JOIN_STDIN_COMMAND = (
     'IFS= read -r TAILSCALE_AUTH_KEY && test -n "$TAILSCALE_AUTH_KEY" && tailscale up --auth-key "$TAILSCALE_AUTH_KEY"'
 )
+DEFAULT_READINESS_COMMAND = "cloud-init status --wait"
+DEFAULT_READINESS_LABEL = "cloud-init"
 
 
 def join_tailscale_ephemerally(
@@ -29,6 +31,15 @@ def join_tailscale_ephemerally(
     sensitive-input semantics also keep reflected output and native failures
     out of logs, return values, diagnostics, and chained exception objects.
     """
+    from agentworks.secrets.line_safety import (
+        LineOrientedSecretUse,
+        require_line_safe_secret,
+    )
+
+    auth_key = require_line_safe_secret(
+        auth_key,
+        use=LineOrientedSecretUse.TAILSCALE,
+    )
     target.run(
         TAILSCALE_JOIN_STDIN_COMMAND,
         sudo=True,
@@ -40,8 +51,16 @@ def join_tailscale_ephemerally(
 class EphemeralTailscaleBootstrap:
     """Finish a key-free cloud bootstrap through one post-boot stdin join."""
 
-    def __init__(self, target: Transport) -> None:
+    def __init__(
+        self,
+        target: Transport,
+        *,
+        readiness_command: str = DEFAULT_READINESS_COMMAND,
+        readiness_label: str = DEFAULT_READINESS_LABEL,
+    ) -> None:
         self._target = target
+        self._readiness_command = readiness_command
+        self._readiness_label = readiness_label
 
     def complete(self, auth_key: str) -> str | None:
         """Wait for cloud-init, join exactly once, then discover the IP.
@@ -51,13 +70,22 @@ class EphemeralTailscaleBootstrap:
         succeeds, later IP-discovery failure remains a completed bootstrap so
         Phase A cannot deliver the credential a second time.
         """
-        self._wait_for_cloud_init()
+        from agentworks.secrets.line_safety import (
+            LineOrientedSecretUse,
+            require_line_safe_secret,
+        )
+
+        auth_key = require_line_safe_secret(
+            auth_key,
+            use=LineOrientedSecretUse.TAILSCALE,
+        )
+        self._wait_for_readiness()
 
         join_tailscale_ephemerally(self._target, auth_key, timeout=30)
         return self._tailscale_ip()
 
-    def _wait_for_cloud_init(self) -> None:
-        output.detail("Waiting for cloud-init bootstrap to complete (this may take several minutes)...")
+    def _wait_for_readiness(self) -> None:
+        output.detail(f"Waiting for {self._readiness_label} bootstrap to complete (this may take several minutes)...")
 
         for attempt in range(30):
             try:
@@ -69,9 +97,11 @@ class EphemeralTailscaleBootstrap:
                 time.sleep(10)
 
         try:
-            self._target.run("cloud-init status --wait", check=True, timeout=600)
+            self._target.run(self._readiness_command, check=True, timeout=600)
         except SSHError as exc:
-            raise ProvisioningError("cloud-init did not complete successfully during create-time bootstrap") from exc
+            raise ProvisioningError(
+                f"{self._readiness_label} did not complete successfully during create-time bootstrap"
+            ) from exc
 
     def _tailscale_ip(self) -> str | None:
         try:

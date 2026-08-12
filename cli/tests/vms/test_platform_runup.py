@@ -23,7 +23,7 @@ from types import SimpleNamespace
 import pytest
 
 from agentworks.capabilities.base import RunContext
-from agentworks.errors import NotFoundError, TokenRejectedError
+from agentworks.errors import NotFoundError, TokenRejectedError, ValidationError
 from agentworks.plugins.azure.network import AzureError
 from agentworks.plugins.azure.platform import AzureVMPlatform
 from agentworks.plugins.proxmox.api import (
@@ -55,10 +55,10 @@ def _platform() -> ProxmoxPlatform:
     return ProxmoxPlatform("px", _CONFIG)
 
 
-def _ctx() -> RunContext:
+def _ctx(value: str = "tok") -> RunContext:
     """A runup context carrying the resolved API token, as the service
     layer assembles after the boundary resolve pass."""
-    return RunContext(secrets=_StubResolver({"proxmox-token": "tok"}))  # type: ignore[arg-type]
+    return RunContext(secrets=_StubResolver({"proxmox-token": value}))  # type: ignore[arg-type]
 
 
 def test_proxmox_runup_ok(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -106,6 +106,24 @@ def test_proxmox_runup_without_secrets_is_error() -> None:
 
     with pytest.raises(ConfigError, match="resolved secrets"):
         ProxmoxPlatform("px", _CONFIG).runup(RunContext())
+
+
+@pytest.mark.parametrize("token", ["prefix\nsuffix", "prefix\rsuffix", "prefix\0suffix"])
+def test_proxmox_rejects_line_unsafe_token_before_api_client_construction(
+    monkeypatch: pytest.MonkeyPatch,
+    token: str,
+) -> None:
+    def _no_client(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("line-unsafe token reached ProxmoxAPI construction")
+
+    monkeypatch.setattr("agentworks.plugins.proxmox.platform.ProxmoxAPI", _no_client)
+
+    with pytest.raises(ValidationError) as caught:
+        _platform().runup(_ctx(token))
+
+    assert token not in repr((caught.value.args, vars(caught.value)))
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
 # -- Azure -----------------------------------------------------------------

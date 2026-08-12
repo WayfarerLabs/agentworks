@@ -70,7 +70,16 @@ def compose_env(
                     "The SecretTarget and this compose_env site must be "
                     "built from the same scope dicts (drift bug)."
                 )
-            user_env[key] = values[entry.secret]
+            from agentworks.secrets.line_safety import (
+                LineOrientedSecretUse,
+                require_line_safe_secret,
+            )
+
+            user_env[key] = require_line_safe_secret(
+                values[entry.secret],
+                use=LineOrientedSecretUse.ENVIRONMENT,
+                secret_name=entry.secret,
+            )
         else:
             # EnvEntry invariant: exactly one of value/secret set.
             assert entry.value is not None

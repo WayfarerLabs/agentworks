@@ -638,7 +638,7 @@ def resolve_batch(
                 evidence[request.name].soft_missed.append((source.name, identifiers[request.name]))
                 continue
             value = returned_values[request.name]
-            if "\n" in value or "\r" in value or "\0" in value:
+            if "\0" in value:
                 outcomes[request.name] = _outcome(
                     request.name,
                     ResolutionDetail.MALFORMED_VALUE,

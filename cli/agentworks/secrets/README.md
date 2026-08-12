@@ -17,7 +17,8 @@ Agentworks synthesizes `env-var` and `prompt` sources. With no extra configurati
 `["env-var", "prompt"]` and behaves as before:
 
 - `env-var` reads `AW_SECRET_<UPPER_SNAKE_NAME>`, or the environment variable named by that secret's
-  `backend_mappings.env-var` scalar. An unset variable is a soft miss.
+  `backend_mappings.env-var` scalar. An unset variable is a soft miss. A set value is returned
+  exactly, including terminal carriage returns or line feeds.
 - `prompt` asks through an explicit caller-owned interaction broker. It has no mapping vocabulary;
   `backend_mappings.prompt: false` opts one secret out.
 
@@ -76,8 +77,17 @@ Results use five value-free categories: `resolved`, `unavailable`, `refused-inte
 and `resolution-failure`. A not-ready outcome retains only bounded remediation metadata; a disabled
 system-plugin backend is attributed by plugin name and rendered with a fixed enablement action.
 Resolved values live only in a private operation batch and the existing operation cache. Outcomes,
-identifiers, errors, warnings, logs, and render inputs never contain a value. NUL, carriage return,
-and newline are rejected before a value can become resolved.
+identifiers, errors, warnings, and logs never contain a value. NUL is rejected before a value can
+become resolved. Carriage returns and line feeds remain ordinary opaque string content, so a
+structured credential can retain the formatting and terminal newline it had at the source.
+
+Syntax constraints belong to the consumer. Environment injection and `agw env show --resolve`, Git
+authenticated probes and credential lines, Proxmox API headers, and Tailscale stdin joins each
+require one logical line. Those consumers reject CR, LF, or NUL with fixed, value-free diagnostics
+immediately after delivery and again at final material sinks where appropriate. SDK consumers such
+as GCP service-account authentication receive the opaque multiline string unchanged. A successful
+`agw secret verify` proves only that the source contract resolved the value; it does not prove that
+every narrower consumer syntax can use it.
 
 Complete command resolution checks for doomed secrets before every allowed interactive turn, so it
 does not prompt or trigger biometric authentication when another requested secret is already known

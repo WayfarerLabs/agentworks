@@ -266,10 +266,14 @@ def credential_tokens(
     orchestrator's per-node context factory, so delivery stays
     restricted to each credential's own declared names.
     """
-    return {
+    providers = {node.provider.owner_name: node.provider for node in template.credentials}
+    tokens = {
         node.provider.owner_name: scoped_ctx(node.secret_refs()).secret(node.provider.secret_name)
         for node in template.credentials
     }
+    from agentworks.git_credentials import validate_git_tokens
+
+    return validate_git_tokens(providers, tokens)
 
 
 def live_agent_node(row: AgentRow, vm: LiveVMNode) -> LiveAgentNode:

@@ -33,11 +33,23 @@ def _plain(s: str) -> str:
 
 
 def _tty(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make stdout report as a color-allowed terminal. Mirrors the sibling
-    helper in test_typer_output.py: clearing NO_COLOR keeps the on-TTY
-    tests hermetic (they must pass even when a dev/CI has NO_COLOR set)."""
+    """Turn the color gate on, so these tests exercise the palette rather
+    than the gate. Mirrors the sibling helper in test_typer_output.py.
+
+    We state the condition instead of simulating a terminal. Patching
+    ``sys.stdout.isatty`` binds to whichever object ``sys.stdout`` names at
+    patch time, while ``_color_enabled`` reads ``sys.stdout`` when the line
+    is emitted; pytest's capture replaces that object, so the two can
+    disagree and the color silently vanishes (issue #495). The gate's own
+    logic is covered by TestColorGate in tests/test_typer_output.py, which
+    owns this layer.
+    """
     monkeypatch.delenv("NO_COLOR", raising=False)
-    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(TyperHandler, "_color_enabled", lambda self, stream: True)
+    # The echo implementation strips ANSI when it decides the destination
+    # is not a terminal, so the handler's gate is only half the condition.
+    # Patch the module typer.echo actually resolves (typer vendors click).
+    monkeypatch.setattr(sys.modules[typer.echo.__module__], "resolve_color_default", lambda color=None: True)
 
 
 def _fake_report() -> HealthReport:

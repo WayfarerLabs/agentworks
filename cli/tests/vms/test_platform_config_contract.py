@@ -1,4 +1,4 @@
-"""The declared-config contract on the five VM platforms.
+"""The declared-config contract on the six VM platforms.
 
 Each platform DECLARES its config as a model; the core validates a blob
 against it and extracts the references it implies. Nothing here calls a
@@ -26,6 +26,7 @@ from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.errors import ConfigError
 from agentworks.plugins.aws.platform import EC2Platform
 from agentworks.plugins.azure.platform import AzureVMPlatform
+from agentworks.plugins.gcp.platform import GCEPlatform
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.schema import RefOwner
 from agentworks.schema._shape import shape_of
@@ -38,6 +39,7 @@ from agentworks.schema.reference import ConfigReference
 AWS_DEFAULT_SECRET = "aws-secret-access-key"
 AZURE_DEFAULT_SECRET = "azure-client-secret"
 PROXMOX_DEFAULT_SECRET = "proxmox-token"
+GCP_DEFAULT_SECRET = "gcp-service-account-key"
 
 #: The arm every site that is not testing credentials selects. Written
 #: out at every call site's base config even though the unions default to
@@ -65,6 +67,8 @@ PROXMOX_CONFIG = {
 }
 EC2_CONFIG = {"region": "us-east-1", "auth": AMBIENT_AUTH}
 EC2_CREDS = {"mode": "access-key", "access_key_id": "AKIAEXAMPLE", "access_key_secret": "aws-secret"}
+GCP_CONFIG = {"project_id": "project-a", "zone": "us-central1-a", "auth": AMBIENT_AUTH}
+GCP_SERVICE_ACCOUNT = {"mode": "service-account", "secret": "gcp-json"}
 LIMA_LOCAL = {"placement": {"mode": "local"}}
 LIMA_SSH = {"placement": {"mode": "ssh", "host": "me@box"}}
 
@@ -88,6 +92,7 @@ def test_registry_names_match_classes() -> None:
         "azure-vm": AzureVMPlatform,
         "proxmox": ProxmoxPlatform,
         "aws-ec2": EC2Platform,
+        "gcp-gce": GCEPlatform,
     } == VM_PLATFORM_REGISTRY
     for name, cls in VM_PLATFORM_REGISTRY.items():
         assert cls.name == name
@@ -166,6 +171,20 @@ def test_aws_ec2_requires_region() -> None:
         _validate("aws-ec2", {"auth": AMBIENT_AUTH})
     with pytest.raises(ConfigError, match="extra: unknown field"):
         _validate("aws-ec2", {**EC2_CONFIG, "extra": "x"})
+
+
+def test_gcp_gce_location_auth_and_subnet_are_shape_checked() -> None:
+    _validate("gcp-gce", GCP_CONFIG)
+    _validate("gcp-gce", {**GCP_CONFIG, "subnet": "apps"})
+    _validate("gcp-gce", {**GCP_CONFIG, "auth": GCP_SERVICE_ACCOUNT})
+    _validate("gcp-gce", {**GCP_CONFIG, "auth": {"mode": "service-account"}})
+    for missing in ("project_id", "zone"):
+        with pytest.raises(ConfigError, match=f"{missing}: is required"):
+            _validate("gcp-gce", {key: value for key, value in GCP_CONFIG.items() if key != missing})
+    with pytest.raises(ConfigError, match="subnet: must not be empty"):
+        _validate("gcp-gce", {**GCP_CONFIG, "subnet": ""})
+    with pytest.raises(ConfigError, match="auth: must be a table"):
+        _validate("gcp-gce", {**GCP_CONFIG, "auth": None})
 
 
 def test_aws_ec2_optional_subnet_id_is_shape_checked() -> None:
@@ -401,6 +420,7 @@ _MODES = {
     "azure-vm": ("ambient", "service-principal"),
     "aws-ec2": ("ambient", "access-key"),
     "lima": ("local", "ssh"),
+    "gcp-gce": ("ambient", "service-account"),
 }
 
 
@@ -415,6 +435,7 @@ def test_resolved_modes_report_the_written_tag() -> None:
     assert _modes("lima", LIMA_SSH) == (("placement", "ssh"),)
     assert _modes("azure-vm", {**AZURE_CONFIG, "auth": AZURE_SP}) == (("auth", "service-principal"),)
     assert _modes("aws-ec2", {**EC2_CONFIG, "auth": EC2_CREDS}) == (("auth", "access-key"),)
+    assert _modes("gcp-gce", {**GCP_CONFIG, "auth": GCP_SERVICE_ACCOUNT}) == (("auth", "service-account"),)
 
 
 def test_resolved_modes_report_the_declared_default_for_an_omitting_document() -> None:
@@ -424,6 +445,7 @@ def test_resolved_modes_report_the_declared_default_for_an_omitting_document() -
     assert _modes("lima", {}) == (("placement", "local"),)
     assert _modes("azure-vm", {k: v for k, v in AZURE_CONFIG.items() if k != "auth"}) == (("auth", "ambient"),)
     assert _modes("aws-ec2", {"region": "us-east-1"}) == (("auth", "ambient"),)
+    assert _modes("gcp-gce", {"project_id": "project-a", "zone": "us-central1-a"}) == (("auth", "ambient"),)
 
 
 def test_resolved_modes_are_total_over_what_validation_would_refuse() -> None:
@@ -453,6 +475,7 @@ def test_the_ambient_arm_emits_no_secret_reference() -> None:
     credential", and choosing ambient must not invent one."""
     assert _refs("azure-vm", AZURE_CONFIG) == ()
     assert _refs("aws-ec2", EC2_CONFIG) == ()
+    assert _refs("gcp-gce", GCP_CONFIG) == ()
     # And it stays empty when the arm is the only thing in the blob, so
     # the emptiness is the ARM's property rather than the rest of the
     # config's.
@@ -463,7 +486,16 @@ def test_the_ambient_arm_emits_no_secret_reference() -> None:
     # default names nothing.
     assert _refs("azure-vm", {k: v for k, v in AZURE_CONFIG.items() if k != "auth"}) == ()
     assert _refs("aws-ec2", {k: v for k, v in EC2_CONFIG.items() if k != "auth"}) == ()
+    assert _refs("gcp-gce", {k: v for k, v in GCP_CONFIG.items() if k != "auth"}) == ()
     assert _refs("lima", {}) == ()
+
+
+def test_gcp_gce_returns_one_complete_service_account_secret_reference() -> None:
+    (ref,) = _refs("gcp-gce", {**GCP_CONFIG, "auth": GCP_SERVICE_ACCOUNT})
+    assert (ref.kind, ref.name) == ("secret", "gcp-json")
+    assert ref.usage == "the complete Google service-account JSON document"
+    (defaulted,) = _refs("gcp-gce", {**GCP_CONFIG, "auth": {"mode": "service-account"}})
+    assert defaulted.name == GCP_DEFAULT_SECRET
 
 
 def test_aws_ec2_returns_the_secret_access_key_reference() -> None:

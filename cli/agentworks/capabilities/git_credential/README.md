@@ -143,9 +143,9 @@ capability, never the reverse.
 
 #### How a Credential Reaches a Git Operation
 
-A provider's output is inert on its own. Three domain pieces turn it into working auth on a VM, and
-they are where the `helper_entry` / `credential_lines` / `store_username` / `secret_name` surface is
-actually consumed:
+A provider's output is inert on its own. Three domain pieces turn it into working auth on a VM. Host
+implementations provide `helper_entry` / `credential_lines` / `store_username`; the domain consumes
+that surface through a core-owned safety wrapper with `secret_name`:
 
 1. **Construction** happens in `resolve_git_credential_providers`
    (`vms/initializer/credentials.py`): given the credential names from the admin row or an agent
@@ -161,7 +161,7 @@ actually consumed:
      `reinit`). The stage is skippable by operator policy
      (`[defaults] runup_git_credentials = false`).
    - `build_credential_materials` assembles a `CredentialMaterials` from the survivors: the full
-     `~/.git-credentials` body (from each provider's `credential_lines(token)`), the
+     `~/.git-credentials` body (through `materialize_credential_lines(provider, token)`), the
      Agentworks-owned gitconfig include (exactly the `credential.useHttpPath = true` switch), and
      THE git credential helper, a generated POSIX-sh script. It reads `helper_entry()` for each
      provider's host, username, and scopes; enforces that no two credentials claim the same scope on
@@ -284,15 +284,26 @@ once:
 
 ```python
 def runup(self, ctx: RunContext) -> None:
-    self._verify_token(ctx.secret(self.secret_name))
+    token = require_line_safe_secret(
+        ctx.secret(self.secret_name),
+        use=LineOrientedSecretUse.GIT_CREDENTIAL,
+        secret_name=self.secret_name,
+    )
+    self._verify_token(token)
 ```
 
 `secret_name` is the token secret the credential sources from: a plain read of
 `self.config.token.secret`, which the model layer already resolved to `git-token-<name>` when the
-field was absent. A provider implements exactly one slot, `_verify_token(token)`, and drives it
-through the shared `_probe_pat` helper. `_probe_pat` does the whole HTTP dance and the failure
-classification, so a provider only supplies the URL, the auth headers, the reject-status set, and a
-host label:
+field was absent. The consumer guard rejects CR, LF, and NUL immediately after token delivery,
+before an authenticated request can build a header. `build_credential_materials` repeats the same
+guard before invoking the provider, then rejects CR, LF, and NUL in every returned line. All core
+durable builders and direct write commands use this module-owned wrapper, so an old or malicious
+provider cannot inject another credential line through core even though `credential_lines` remains
+the contract-version-2 provider hook.
+
+A provider implements exactly one slot, `_verify_token(token)`, and drives it through the shared
+`_probe_pat` helper. `_probe_pat` does the whole HTTP dance and the failure classification, so a
+provider only supplies the URL, the auth headers, the reject-status set, and a host label:
 
 - A single authenticated GET via `_http_probe` (which returns HTTP error statuses rather than
   raising them; only network-level failures raise `OSError`).
@@ -323,8 +334,10 @@ files wholesale):
   its `host`, its `username` (the store-line key the helper selects by), and its scopes (`repos`
   match the remote path exactly, `owner` matches the first path segment; no scopes means the host's
   default candidate). `HelperEntry` is a frozen dataclass in `base.py`.
-- `credential_lines(token) -> list[str]` returns the `~/.git-credentials` lines, each a
-  `https://user:token@host` URL. `github` emits `https://<store_username>:<token>@github.com`;
+- `credential_lines(token) -> list[str]` is the contract-version-2 provider implementation hook.
+  Each result is a `~/.git-credentials` line in `https://user:token@host` form. Core consumers must
+  call `materialize_credential_lines(provider, token)`, which validates the token before dispatch
+  and every returned line afterward. `github` emits `https://<store_username>:<token>@github.com`;
   `azdo` emits `https://<org>:<token>@dev.azure.com/<org>`.
 - `store_username` (property) is the username on the store line and the join key the helper selects
   by. Default is the credential's own resource name; a provider overrides where the host dictates.
@@ -366,8 +379,9 @@ are the contract:
 
 The shared shape underneath: one base config model carrying a `token` acquisition union whose stored
 arm carries the marked `secret` field, both driving `_verify_token` through `_probe_pat`, both
-returning `credential_lines` and a `HelperEntry`. A third provider should look the same from the
-outside and differ only in these host-policy rows.
+implementing public `credential_lines`, and both returning a `HelperEntry`. A third provider should
+look the same from the outside and differ only in these host-policy rows. Core callers, rather than
+providers, own the mandatory token and returned-line validation.
 
 ### Best Practices
 
