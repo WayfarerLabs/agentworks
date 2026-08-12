@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from agentworks.env import EnvEntry, ResourceContext, compose_env
+from agentworks.errors import ValidationError
 
 
 def _ctx(**overrides: object) -> ResourceContext:
@@ -64,6 +65,20 @@ def test_compose_env_renders_secrets_from_values() -> None:
         vm={"API_KEY": EnvEntry({"secret": "shared"})},
     )
     assert out["API_KEY"] == "resolved-value"
+
+
+@pytest.mark.parametrize("value", ["line-one\nline-two", "line-one\rline-two", "line-one\0line-two"])
+def test_compose_env_rejects_line_unsafe_secret_before_return(value: str) -> None:
+    with pytest.raises(ValidationError) as caught:
+        compose_env(
+            values={"shared": value},
+            ctx=_ctx(),
+            vm={"API_KEY": EnvEntry({"secret": "shared"})},
+        )
+
+    assert value not in repr((caught.value.args, vars(caught.value)))
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
 def test_compose_env_raises_loudly_on_uncovered_secret() -> None:

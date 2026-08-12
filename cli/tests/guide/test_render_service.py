@@ -80,6 +80,30 @@ def test_human_and_agent_rendering_have_semantic_parity() -> None:
     assert human.markdown != agent.markdown
 
 
+def test_secrets_guide_teaches_opaque_multiline_values_without_resolving(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agentworks.secrets.resolve as secrets
+    from agentworks.secrets.guide_contributions import guide_contributions as secrets_guide
+
+    def denied(*args: object, **kwargs: object) -> None:
+        raise AssertionError("Secrets guide rendering tried to resolve a value")
+
+    monkeypatch.setattr(secrets, "resolve_batch", denied)
+    topic = secrets_guide()[0]
+    human = render_topic(topic, None, GuideMode.HUMAN, unavailable="unused")
+    agent = render_topic(topic, None, GuideMode.AGENT, unavailable="unused")
+
+    assert {(block.key, block.source_payload) for block in human.blocks} == {
+        (block.key, block.source_payload) for block in agent.blocks
+    }
+    for rendered in (human.markdown, agent.markdown):
+        normalized = " ".join(rendered.split())
+        assert "preserves multiline strings as opaque content" in normalized
+        assert "NUL is the one globally rejected string value" in normalized
+        assert "does not prove a multiline value is valid for a line-oriented" in normalized
+
+
 def test_broken_config_keeps_authored_content_and_marks_dynamic_facts() -> None:
     response = render_guide(("concept-onboarding", "vm-template/demo"), GuideMode.AGENT, load_config_fn=_broken)
     assert response.exit_code == 1

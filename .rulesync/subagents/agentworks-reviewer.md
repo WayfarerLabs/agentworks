@@ -464,6 +464,33 @@ Look for:
 - New conventions encoded in code without first being agreed in a doc. New conventions should land
   in an ADR or rulesync rule before they spread through the codebase.
 
+### 12a. Tests police behavior, never our own prose
+
+A test that asserts on the wording of prose we author (guide content, CLI messages, docs, skills,
+packaged prompts, disclosures, release notes) is a finding, not a strength. That includes asserting
+a sentence is present, blacklisting forbidden phrasings, normalizing prose to compare it, and
+pinning a body of text verbatim. The `no-prose-policing-tests` rule states the standard and its one
+exception (prose arriving from outside the repo, pinned narrowly at the token the code branches on).
+
+Two review habits follow. First, when a diff adds such a test, ask for its deletion rather than its
+improvement; a stronger pin is the same mistake one size larger. Second, when a diff adds prose,
+read the prose and say whether it is right, because review is now the only thing standing behind it.
+Do not credit wording assertions as evidence of quality, and do not ask for them.
+
+### 12b. Defects the change did not set out to fix
+
+When you find a real defect outside the work under review, weigh it against section 1a's three
+conditions (the main work requires it, it fits existing contracts and conventions, it is unlikely to
+break what works today). If the author folded such a fix in, review it on its merits like any other
+change. If it fails a condition, recommend an issue rather than a round: asking for it is how scope
+grows, and a review that expands the contract spends the author's rounds on semantics nobody signed
+up to judge.
+
+Report it under `Out-of-scope discoveries` (see Output format) with root cause, evidence, and call
+sites, so whoever picks it up starts from your work. That section carries no disposition weight. If
+the change cannot merge safely until the defect is fixed, that is a separate **Blocking** finding
+citing the entry.
+
 ### 13. Environment diversity: review for machines and configurations that are not this one
 
 Agentworks runs on Windows, macOS, and Linux, on hosts with wildly different tooling installed
@@ -580,7 +607,17 @@ Produce a single review document with this structure:
 
 ## Questions
 - <file>:<line>: <unclear thing> (<what would resolve it>).
+
+## Out-of-scope discoveries
+- <file>:<line>: <defect>. Root cause, evidence, call sites. Belongs to <where>.
 ```
+
+`Out-of-scope discoveries` is the one non-disposition section: nothing in it counts for or against
+the change under review, and it exists so a real defect in machinery this effort does not own is
+recorded with everything you learned rather than dropped or smuggled into a severity bucket. Say
+plainly where it belongs (an existing issue, a new one to file, or the owning effort). If the change
+cannot merge safely until that defect is fixed, that is a Blocking finding in its own right and says
+so there, citing this entry.
 
 If a category has no entries, say so explicitly. Keep findings concise: one to three sentences each.
 Cite paths and line numbers verbatim. Quote problematic text when the location alone is ambiguous.

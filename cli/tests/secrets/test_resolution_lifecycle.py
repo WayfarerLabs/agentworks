@@ -44,6 +44,8 @@ from agentworks.secrets.resolve import (
     resolve_batch,
 )
 
+_VALUE_SENTINEL = "secret-value-sentinel"
+
 
 class _Config(AgwModel):
     name: Literal["fixture"]
@@ -335,8 +337,8 @@ def test_not_ready_source_constructs_nothing() -> None:
     assert batch.outcomes[0].detail is ResolutionDetail.SOURCE_NOT_READY
 
 
-def test_control_characters_hard_fail_before_resolved() -> None:
-    _Backend.values = {"token": "line-one\nline-two"}
+def test_nul_hard_fails_before_resolved() -> None:
+    _Backend.values = {"token": "line-one\0line-two"}
     batch = resolve_batch(
         [SecretDecl(name="token", description="token")],
         [_source()],
@@ -658,8 +660,8 @@ def test_provider_membership_is_not_consulted_during_mapping_validation() -> Non
     assert batch.complete_or_raise() == {"token": "sentinel-provider-value"}
 
 
-@pytest.mark.parametrize("value", ["\0x", "x\0", "\rx", "x\r", "\nx", "x\n", "x\ny"])
-def test_every_transport_control_character_position_is_rejected(value: str) -> None:
+@pytest.mark.parametrize("value", [f"{_VALUE_SENTINEL}\0x", f"x\0{_VALUE_SENTINEL}"])
+def test_every_nul_position_is_rejected(value: str) -> None:
     _Backend.values = {"token": value}
     batch = resolve_batch(
         [SecretDecl(name="token", description="token")],
@@ -668,11 +670,30 @@ def test_every_transport_control_character_position_is_rejected(value: str) -> N
         interaction_broker=None,
     )
     assert batch.outcomes[0].detail is ResolutionDetail.MALFORMED_VALUE
-    assert value not in repr(batch)
+    assert _VALUE_SENTINEL not in repr(batch)
+
+    with pytest.raises(ExternalError) as caught:
+        batch.complete_or_raise()
+
+    rendered_graph = repr((caught.value.args, vars(caught.value), caught.value.__cause__, caught.value.__context__))
+    assert _VALUE_SENTINEL not in rendered_graph
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
-@pytest.mark.parametrize("value", ["", "plain", "\ttab", " leading", "trailing "])
-def test_other_string_values_retain_existing_transport_behavior(value: str) -> None:
+@pytest.mark.parametrize(
+    "value",
+    [
+        "",
+        "plain",
+        "\ttab",
+        " leading",
+        "trailing ",
+        "line-one\nline-two\n",
+        "line-one\r\nline-two\r\n",
+    ],
+)
+def test_all_non_nul_string_values_are_preserved(value: str) -> None:
     _Backend.values = {"token": value}
     batch = resolve_batch(
         [SecretDecl(name="token", description="token")],

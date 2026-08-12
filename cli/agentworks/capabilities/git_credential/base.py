@@ -71,6 +71,20 @@ def _http_probe(url: str, headers: dict[str, str], *, timeout: float = 5.0) -> t
         return (exc.code, body, {k.lower(): v for k, v in exc.headers.items()})
 
 
+def _require_line_safe_token(token: str, *, secret_name: str) -> str:
+    """Return one token safe for Git's header and line syntax."""
+    from agentworks.secrets.line_safety import (
+        LineOrientedSecretUse,
+        require_line_safe_secret,
+    )
+
+    return require_line_safe_secret(
+        token,
+        use=LineOrientedSecretUse.GIT_CREDENTIAL,
+        secret_name=secret_name,
+    )
+
+
 class StoredToken(AgwModel):
     """Obtain this credential's token from a stored secret."""
 
@@ -136,7 +150,8 @@ class GitCredentialProvider(Capability):
     Subclasses (``GitHubCredentialProvider``, ``AzDOCredentialProvider``)
     declare their ``config_model`` (the token secret and any scope
     fields), implement ``_verify_token`` (the authenticated probe), and
-    implement the ops ``helper_entry`` / ``credential_lines``.
+    implement the ops ``helper_entry`` / ``credential_lines``. Core
+    consumers validate tokens and returned material around those ops.
     """
 
     owner_kind: ClassVar[str] = "git-credential"
@@ -191,7 +206,11 @@ class GitCredentialProvider(Capability):
         resolved secrets at all (inspection only?) is the accessor's
         typed ``ConfigError``.
         """
-        self._verify_token(ctx.secret(self.secret_name))
+        token = _require_line_safe_token(
+            ctx.secret(self.secret_name),
+            secret_name=self.secret_name,
+        )
+        self._verify_token(token)
 
     def review_remote(self, url: str) -> list[str]:
         """Advisory review of a declared repo remote URL against THIS
@@ -276,5 +295,6 @@ class GitCredentialProvider(Capability):
     def credential_lines(self, token: str) -> list[str]:
         """Return lines for ~/.git-credentials.
 
-        Each line is a URL in the format: https://user:token@host
+        Each line is a URL in the format: https://user:token@host.
+        Core callers validate both ``token`` and every returned line.
         """

@@ -163,6 +163,12 @@ def _kind_field_topic(kind: str) -> TopicContribution:
             ("config.auth.access_key_id", "config.auth.access_key_secret", "config.auth.assume_role_arn"),
         ),
         (
+            "vm-platform/gcp-gce",
+            "default `{mode: ambient}`",
+            ("ambient", "service-account"),
+            ("config.auth.secret",),
+        ),
+        (
             "vm-platform/lima",
             "default `{mode: local}`",
             ("local", "ssh"),
@@ -236,6 +242,7 @@ def test_git_token_structural_union_renders_without_dropping_untagged_arm_fields
     [
         ("vm-platform/azure-vm", "config.auth.mode"),
         ("vm-platform/aws-ec2", "config.auth.mode"),
+        ("vm-platform/gcp-gce", "config.auth.mode"),
         ("vm-platform/lima", "config.placement.mode"),
     ],
 )
@@ -255,6 +262,7 @@ def test_each_live_auth_or_placement_arm_keeps_its_own_mode_row(
     [
         ("vm-platform/azure-vm", ("auth", "secret"), "config.auth.secret"),
         ("vm-platform/aws-ec2", ("auth", "access_key_id"), "config.auth.access_key_id"),
+        ("vm-platform/gcp-gce", ("auth", "secret"), "config.auth.secret"),
         ("vm-platform/lima", ("placement", "host"), "config.placement.host"),
     ],
 )

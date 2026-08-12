@@ -278,6 +278,23 @@ class _GitProviderOnOldShapeV2(ConformingGitCredentialProvider):
     config_model = _LegacyGitConfig
 
 
+def test_git_contract_v2_retains_public_credential_lines_hook() -> None:
+    class _CompatibleV2Provider(ConformingGitCredentialProvider):
+        name = "compatible-v2-provider"
+        description = "uses the released contract-version-2 material hook"
+
+        def credential_lines(self, token: str) -> list[str]:
+            return [f"https://compatible:{token}@example.test"]
+
+    plugin = Plugin(
+        name="compatible-v2-plugin",
+        capabilities={"git-credential-provider": (_CompatibleV2Provider,)},
+    )
+    with seated_plugin(plugin):
+        instance = _CompatibleV2Provider("credential", {})
+        assert instance.credential_lines("token") == ["https://compatible:token@example.test"]
+
+
 class _NotAModel:
     """Whatever this is, it is not a model, so nothing could validate a
     blob against it."""

@@ -90,10 +90,12 @@ at command entry and not deferred to first op-need. Once the sweep clears, the f
 the union of secrets the walked plan declared (`secret_union` over the nodes' `secret_refs`, in
 `secrets.py`) in one batched pass, values cached. This placement is deliberate: resolving eagerly
 could spend a prompt ahead of a fatal check that would have sunk the op, while deferring to first
-op-need would scatter prompts across the run. The invariant it buys is that all prompting happens
-before the work starts mutating anything (the walk-away point), and nothing is resolved or prompted
-twice in one command. Contiguity is not promised: an activation gate may prompt for a stopped VM's
-credential before the boundary pass does the rest, and both sit before the walk-away point.
+op-need would scatter prompts across the run. The invariant it buys is that all plan-wide prompting
+happens before the work starts mutating anything (the walk-away point), and nothing is resolved or
+prompted twice in one command. Contiguity is not promised: an activation gate may prompt for a
+stopped VM's platform credential before the boundary pass does the rest, and both sit before the
+walk-away point. Conditional Tailscale repair is the deliberate lazy exception: a stopped VM may
+start before late repair-key delivery, then validation precedes every rejoin-specific action.
 
 Runup then runs post-resolve, but **deferred to right before the ops it gates**, not hoisted to the
 front with preflight. It reads the already-cached secrets and fires at the op boundary, so in a

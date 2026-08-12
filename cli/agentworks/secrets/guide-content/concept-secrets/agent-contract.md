@@ -7,4 +7,7 @@ refusal and per-action confirmation.
 
 Do not display, log, retain, or interpolate a resolved value into a command or report. A preview,
 readiness row, or guide rendering is prediction, not proof, and never authorization by itself.
-Presence-only discovery does not authorize reading secret content.
+Presence-only discovery does not authorize reading secret content. Treat a resolved value as opaque.
+Do not trim, compact, split, re-encode, or otherwise normalize it for a capable consumer. A
+successful verification does not authorize delivery and does not prove a multiline value is valid
+for a line-oriented environment, credential, header, or stdin boundary.

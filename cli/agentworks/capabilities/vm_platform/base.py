@@ -2,7 +2,7 @@
 request/result shapes.
 
 A VM platform is the code that runs VMs on one backend kind (lima,
-wsl2, azure-vm, aws-ec2, proxmox). Platforms register in ``VM_PLATFORM_REGISTRY``
+wsl2, azure-vm, aws-ec2, gcp-gce, proxmox). Platforms register in ``VM_PLATFORM_REGISTRY``
 (``agentworks.capabilities.vm_platform``) and publish as read-only ``vm-platform``
 capability resources; the declarable ``vm-site`` kind exposes a
 configured platform ("a place to create VMs"), and all invocation goes
@@ -212,7 +212,7 @@ class VMPlatform(Capability):
           as the namespacing token when set (else ``request.vm_name``).
         - Pre-flight collision check: when a resource with the intended
           name already exists, either raise ``StateError`` with clear
-          guidance (all five in-tree platforms) or choose a different,
+          guidance (all six in-tree platforms) or choose a different,
           collision-free name. A platform that chooses a name must persist
           the exact backend identifier in ``platform_metadata`` so every
           later operation targets the created resource.

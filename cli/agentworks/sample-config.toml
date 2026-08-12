@@ -80,11 +80,14 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # Claude Code harness integration and its `claude` CLI install-command), `codex`
 # (the Codex harness integration and its `codex` CLI install-command), `proxmox`
 # (the Proxmox VE VM platform), `azure` (the Azure VM platform, the Azure
-# DevOps git-credential provider, and the `az-cli` install-command), and `aws`
-# (the EC2 VM platform). `agw doctor` shows a System plugins roster with each
+# DevOps git-credential provider, and the `az-cli` install-command), `aws`
+# (the EC2 VM platform), and `gcp`
+# (the Google Compute Engine VM platform and optional guest `gcloud-cli` apt
+# package).
+# `agw doctor` shows a System plugins roster with each
 # plugin's state.
 #[plugins]
-#system = ["onepassword", "claude", "codex", "proxmox", "azure", "aws"]   # names of installed system plugins to enable
+#system = ["onepassword", "claude", "codex", "proxmox", "azure", "aws", "gcp"]   # installed plugins to enable
 
 # --- Default values for CLI flags ---
 
@@ -132,10 +135,13 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #   env-var     : reads from process env. Default convention is
 #                 AW_SECRET_<UPPER_SNAKE_CASE>, so secret "npm-token" reads
 #                 from AW_SECRET_NPM_TOKEN unless the secret's declaration
-#                 overrides it (`backend_mappings.env-var`).
+#                 overrides it (`backend_mappings.env-var`). A set value is
+#                 read exactly, including terminal CR/LF.
 #   prompt      : interactive prompt. Always applies; you are never asked for
-#                 the same secret twice in one command, and all prompting
-#                 happens before the command starts changing anything.
+#                 the same secret twice in one command. Plan-wide prompting
+#                 happens before mutation. Conditional Tailscale repair stays
+#                 lazy: a stopped VM may start before late key delivery, then
+#                 validation precedes every rejoin-specific action.
 # Additional sources are YAML resources. For 1Password, enable its plugin and
 # declare a source such as `work-op` with `spec.backend.name: onepassword`.
 # Put `account` and the positive `timeout` (default 30 seconds) in that backend
@@ -152,6 +158,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # disables resolution. Every name must be a declared secret-source. A direct
 # backend name is a 0.14 configuration error with the exact source declaration
 # and mapping rewrite needed to fix it.
+# Values are opaque strings. Resolution preserves CR/LF and rejects NUL.
+# Line-oriented consumers such as env injection, Git credentials, Proxmox API
+# auth, and Tailscale joins reject incompatible values at their own boundary.
 
 # =============================================================================
 # Sessions

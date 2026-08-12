@@ -66,7 +66,7 @@ from agentworks.errors import StateError
 from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
 
     from agentworks.config import Config
     from agentworks.env.entry import EnvEntry
@@ -170,6 +170,51 @@ def compute_needed_secrets(
     return out
 
 
+def validate_target_values(
+    targets: Sequence[SecretTarget],
+    values: Mapping[str, str],
+) -> None:
+    """Validate delivered values for every line-oriented env target.
+
+    Resolution deliberately preserves opaque CR/LF content. Environment
+    injection is a one-line consumer, so composition roots call this pure
+    guard immediately after delivery, before any operation can mutate state.
+    ``compose_env`` repeats the same check at the final sink.
+    """
+    from agentworks.secrets.line_safety import (
+        LineOrientedSecretUse,
+        require_line_safe_secret,
+    )
+
+    seen: set[str] = set()
+    for target in targets:
+        merged = effective_env(
+            vm=target.vm,
+            workspace=target.workspace,
+            admin=target.admin,
+            agent=target.agent,
+            session=target.session,
+        )
+        for entry in merged.values():
+            name = entry.secret
+            if name is None or name in seen:
+                continue
+            seen.add(name)
+            try:
+                value = values[name]
+            except KeyError:
+                raise StateError(
+                    f"environment target references secret {name!r}, but the completed resolve result omitted it",
+                    entity_kind="secret",
+                    entity_name=name,
+                ) from None
+            require_line_safe_secret(
+                value,
+                use=LineOrientedSecretUse.ENVIRONMENT,
+                secret_name=name,
+            )
+
+
 def resolve_for_command(
     targets: Sequence[SecretTarget],
     config: Config,
@@ -223,4 +268,6 @@ def resolve_for_command(
         policy=ResolutionPolicy(interaction=interaction, completion=CompletionPolicy.COMPLETE),
         interaction_broker=broker,
     )
-    return batch.complete_or_raise()
+    values = batch.complete_or_raise()
+    validate_target_values(targets, values)
+    return values

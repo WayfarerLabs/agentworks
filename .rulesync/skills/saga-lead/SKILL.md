@@ -24,8 +24,8 @@ below are subagent work; the role itself is not.
 - The lead seeds child efforts (FRDs plus settled constraints), reviews their PRs, and keeps the
   ledger honest. The lead never edits a child effort's implementation or its lead-owned artifacts
   (the seeded FRD included, once its seeding PR merges and ownership transfers per the `sdd` skill);
-  findings and direction flow through PR comments and the message-passing convention in the `sdd`
-  skill.
+  findings and recommendations flow through PR comments and the message-passing convention in the
+  `sdd` skill, and work is authorized only by the operator's authenticated direction.
 
 ## Watch child efforts; review without being asked
 
@@ -43,8 +43,9 @@ below are subagent work; the role itself is not.
   not materialize it.
 - Re-review on the draft-to-ready transition after an effort absorbs findings (the dev-process
   skill's handoff convention); poll ready PRs' heads against the last head you reviewed as the
-  missed-edge fallback. A review verdict stands until the findings are absorbed or successfully
-  pushed back on; track the open verdicts in the ledger.
+  missed-edge fallback. A review verdict stands until the operator resolves it: a directed fix
+  round, an accepted pushback, or an explicit accepted risk. Track open verdicts in your reports;
+  recording them in the ledger is mutation and waits for direction.
 - The lead reviews; the operator merges. Never merge a child PR. When GitHub refuses a formal review
   verdict (a PR owned by the same account), post the review as a comment with the verdict stated in
   the first line.
@@ -85,15 +86,19 @@ with `agentworks-reviewer`. That split is also why the worktree isolation above 
 
 Consolidate into one review: verdict first, then blockers, should-fixes, nits, questions, and an
 explicit verified-sound section recording what held under attack. Kill findings that are wrong
-before posting; every surviving finding carries file:line and a concrete failure scenario. Findings
-on code loop to the effort's implementing dev; artifact and process items go to the effort lead;
-genuinely operator-level decisions are escalated with a recommendation, not an open question.
+before posting; every surviving finding carries file:line and a concrete failure scenario. Address
+the review to the operator: name which findings you believe must block merge and which are optional,
+as a recommendation, never as an instruction to the effort. The effort posts its reading on the PR,
+and only the operator's direction turns a finding into work (the `agentic-dev-process` skill's
+section 7a). Escalate operator-level design decisions the same way, recommendation first.
 
 ## After each round
 
-- Update the ledger (new boxes for new work; completed boxes are immutable).
-- Feed durable lessons to their permanent homes: process lessons to the skills (via their own
-  reviewed PRs), vocabulary and posture changes to the target-state document as dated rulings, and
-  repo defects discovered incidentally to the issue tracker rather than the review.
-- Tell the operator the verdict plainly, findings-first, including what the other in-flight efforts
-  need to hear about it; cross-effort implications are the lead's to route, not the reviewers'.
+Reporting is standing work; mutation waits for direction. Tell the operator the verdict plainly,
+findings-first, with the confidence the evidence earns and whatever the other in-flight efforts need
+to hear (cross-effort implications are the lead's to route, not the reviewers'). Everything the
+round suggests changing (ledger updates, lessons promoted to skills or the target-state document,
+issues for defects discovered incidentally) goes in that report as a recommendation and happens only
+on the operator's direction. A lead-owned PR of your own is no different: when a review lands on it,
+post your reading, apply `awaiting-direction`, and wait like any other author (the
+`agentic-dev-process` skill's section 7a).
