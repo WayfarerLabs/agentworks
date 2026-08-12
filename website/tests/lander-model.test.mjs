@@ -197,6 +197,8 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
     const directory = await mkdtemp(join(tmpdir(), "agw-route-test-"));
     const output = join(directory, "routes.json");
     const tool = join(ROOT, "tools/derive_lander_routes.mjs");
+    await writeFile(join(directory, "lander_clear_faces.mjs"),
+        await readFile(join(ROOT, "tools/lander_clear_faces.mjs"), "utf8"), "utf8");
     const geometry = join(ROOT, "tests/fixtures/lander-route-geometry-v4.json");
     const fixture = join(ROOT, "tests/fixtures/lander-route-derived-v4.json");
     execFileSync(process.execPath, [tool, "--geometry", geometry, "--output", output, "--verify", fixture]);
@@ -214,10 +216,10 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
     const { outputDigest, ...unsignedDerived } = derived;
     assert.equal(digest(unsignedDerived), outputDigest);
     assert.equal(derived.worldWitnesses.length, 81);
-    assert.equal(derived.geometryDigest, "e65792f7719e9e721089401bc5ab49206a26082cfe41676a5dd291177a62699a");
+    assert.equal(derived.geometryDigest, "a5120d97782b73afb43cabae038412252f644656f41c0ab9e33f5413da9be7ca");
     assert.equal(derived.physicsDigest, "34a7cb64a3457c4df028031968e7ef00fde56fc445db6af6ab89eb7b737f692e");
-    assert.equal(derived.worldDigest, "24a3a06a7aa356d00bd4a91b7531196acbd5a040fd97cb6999e6a17d0440bc7e");
-    assert.equal(derived.outputDigest, "1dbdb4b2612d694ea89943fd6fcf6e041c752661007137319b66bd13981e7e08");
+    assert.equal(derived.worldDigest, "c666bb42918301f93386bb1373e92da662d333006d8684946fd80a10761d1e32");
+    assert.equal(derived.outputDigest, "628c3562ca9e71f704669a7ad1ed2462806f158f66bcc20c33c2f66a6d10b595");
     assert.equal(derived.routes.reduce((total, route) => total + route.combinationsEvaluated, 0), 36);
     assert.equal(derived.worldWitnesses.length * 2, 162);
     assert.equal(spawnSync(process.execPath, [tool, "--bogus"]).status, 2);
@@ -233,14 +235,14 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
     assert.equal(digest(derived.worldWitnesses), derived.worldDigest);
     assert.deepEqual([derived.worldWitnesses[0].digest, derived.worldWitnesses[40].digest,
         derived.worldWitnesses.at(-1).digest], [
-        "23e9418a058592862b6daa53f82538f183836e14868097960ad5841a80759525",
-        "e6c485ea255e8b0e07ac815edb306b277aa12e58961553ea4345e0caa0d20454",
-        "68d229dd4764eb2734aeb4329d5d3592580dfbcc2427e266825998268dcdb880",
+        "45030a91cff394bcc98f0dc49109d864c0004a56846cbb46f2abe3dbcbd5341d",
+        "fd6344c9cfb3608931849b717bbfd2659b0578acb437cb069fac38eb2ea7a59f",
+        "ceaa568982045fe4bfb1c101c7174e741e003094989381a57957e11f8fd20a95",
     ]);
     assert.ok(derived.worldWitnesses.some(({ descriptor }) => descriptor.vertices.some(([, value]) =>
         value !== Number(value.toFixed(derived.canonicalPoseDecimals)))));
-    assert.equal(derived.geometryDigest, "e65792f7719e9e721089401bc5ab49206a26082cfe41676a5dd291177a62699a");
-    assert.equal(derived.worldDigest, "24a3a06a7aa356d00bd4a91b7531196acbd5a040fd97cb6999e6a17d0440bc7e");
+    assert.equal(derived.geometryDigest, "a5120d97782b73afb43cabae038412252f644656f41c0ab9e33f5413da9be7ca");
+    assert.equal(derived.worldDigest, "c666bb42918301f93386bb1373e92da662d333006d8684946fd80a10761d1e32");
     for (const witness of derived.worldWitnesses) {
         const { descriptor } = witness;
         const template = REFERENCE_TEMPLATES.find((candidate) => candidate.templateId === descriptor.templateId);
@@ -312,6 +314,16 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
     assert.notEqual(changedSource, await readFile(tool, "utf8"));
     await writeFile(changedTool, changedSource, "utf8");
     assert.equal(spawnSync(process.execPath, [changedTool, "--geometry", geometry, "--output", output]).status, 1);
+
+    const openFaceTool = join(directory, "open-face.mjs");
+    const openFaceSource = (await readFile(tool, "utf8")).replace(
+        "for (let bay = 0; bay < 12; bay += 1) {",
+        "for (let bay = 0; bay < 12; bay += 1) { if (bay === 2) continue;",
+    );
+    await writeFile(openFaceTool, openFaceSource, "utf8");
+    const openFace = spawnSync(process.execPath,
+        [openFaceTool, "--geometry", geometry, "--output", output], { encoding: "utf8" });
+    assert.equal(openFace.status, 1); assert.match(openFace.stderr, /Connected clear face exceeds/);
 
     const weakPrefixTool = join(directory, "weak-prefix.mjs");
     const weakPrefixSource = (await readFile(tool, "utf8"))

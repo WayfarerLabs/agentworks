@@ -273,10 +273,10 @@ footer. The header has exactly one linked `Agentworks` home crumb, a hidden visu
 non-linked current-page item, and one icon-and-text link each for GitHub and PyPI. Home omits the
 small header mark because its large hero follows; every other page has exactly one decorative small
 mark immediately before the breadcrumb. The footer has exact ownership text plus one Manifesto and
-one Security text link, followed by a selected-rocket icon link named `Play Lunar Lander`. Each
-service icon has one pinned direct path; its adjacent visible text supplies the accessible name.
-Those local and external destinations are not repeated in the body. On 404, the linked home crumb is
-the sole visible route-home action.
+one Security text link, followed by a selected-rocket icon link whose matching accessibility label
+and hover title are `Help deploy some agents!`. Each service icon has one pinned direct path; its
+adjacent visible text supplies the accessible name. Those local and external destinations are not
+repeated in the body. On 404, the linked home crumb is the sole visible route-home action.
 
 Every page head references `assets/agw-favicon.svg`, a transparent, flame-free projection of the
 neutral A/G/W mark. Its geometry is checked against `assets/agw-rocket.svg`; maintain the selected

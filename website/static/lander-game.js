@@ -22,6 +22,7 @@ import {
     updateRetention,
 } from "./lander-model.js";
 import { cameraLeftForPose, CHUNK_WIDTH, mixUint32, siteScaffoldPath, siteStructure, skyProjectionForCamera,
+    skyProjectionIdentityForCamera,
     terrainFillPath, terrainSurfacePath, terrainVerticesForRange, targetDirectionForViewport } from "./lander-world.js";
 
 const SVG_NAMESPACE = document.querySelector("#lander-scene")?.namespaceURI;
@@ -174,7 +175,7 @@ function positionSite(group, site) {
 }
 
 export class LanderGameController {
-    constructor(root, cleanups = [], snapshot = root?.cloneNode(true)) {
+    constructor(root, cleanups = [], snapshot = root?.cloneNode(true), dependencies = {}) {
         if (!root) throw new Error("Lunar deployment game root is missing");
         this.root = root;
         this.pristine = snapshot;
@@ -201,6 +202,8 @@ export class LanderGameController {
         this.previousFrame = null;
         this.worldWindowKey = null;
         this.skyWindowKey = null;
+        this.freshSeed = dependencies.freshSeed ?? freshSeed;
+        this.skyProjectionForCamera = dependencies.skyProjectionForCamera ?? skyProjectionForCamera;
         this.paused = document.hidden;
         this.destroyed = false;
         this.cleanups = cleanups;
@@ -260,7 +263,9 @@ export class LanderGameController {
     start(holdSpace, timestamp) {
         if (this.model.state !== "preflight") return;
         this.cue = settleCue();
-        this.model = updateRetention(transitionMission(this.model, "START", { seed: freshSeed(), reducedMotion: this.motion.matches }));
+        this.model = updateRetention(transitionMission(this.model, "START", {
+            seed: this.freshSeed(), reducedMotion: this.motion.matches,
+        }));
         this.clock = createSimulationClock();
         this.previousFrame = null;
         this.heldKeys.clear();
@@ -524,11 +529,13 @@ export class LanderGameController {
     }
 
     reconcileSky(cameraLeft) {
-        const projection = skyProjectionForCamera(this.model.seed ?? 0x41475731, cameraLeft);
-        if (projection.key === this.skyWindowKey) return;
+        const seed = this.model.seed ?? 0x41475731;
+        const identity = skyProjectionIdentityForCamera(seed, cameraLeft);
+        if (identity === this.skyWindowKey) return;
+        const projection = this.skyProjectionForCamera(seed, cameraLeft);
         this.scene_stars.setAttribute("d", projection.starsPath);
         this.scene_landmarks.setAttribute("d", projection.landmarksPath);
-        this.skyWindowKey = projection.key;
+        this.skyWindowKey = identity;
     }
 
     renderCrash(cameraLeft) {

@@ -4,6 +4,8 @@ import { createHash } from "node:crypto";
 import { readFile, rename, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
+import { maximumConnectedClearFace } from "./lander_clear_faces.mjs";
+
 const DERIVER_VERSION = "agw-lander-route-deriver/v5";
 const RECIPE_VERSION = "agw-lander-route-recipes/v3";
 const REPLAY_POSE_DECIMAL_PLACES = 9;
@@ -72,7 +74,7 @@ const EXPECTED_SITE_GEOMETRY = Object.freeze({
         bayWidth: 1.55,
         chordCount: 2,
         collisionEnvelope: { bottom: -1.2, left: -4.9, right: 13.9, top: -0.25 },
-        clearApertureMaximum: { diameter: 3.189435684729195, height: 0.75, width: 3.1 },
+        clearApertureMaximum: { diameter: 3.1894356867634124, height: 0.75, width: 3.1 },
         diagonalsPerBay: 1,
         span: 18.6,
     },
@@ -509,6 +511,23 @@ function scaffoldMembers(site) {
     return segments;
 }
 
+function connectedClearFaceMaximum(site) {
+    const maximum = maximumConnectedClearFace({
+        colliders: [site.truss, ...site.supportColumns.map((column) => column.collider)],
+        memberWidth: EXPECTED_SITE_GEOMETRY.member.width,
+        members: scaffoldMembers(site),
+        terrainSegments: site.supportColumns.map((column) => ({
+            start: [column.left, column.leftFoot],
+            end: [column.right, column.rightFoot],
+        })),
+    });
+    const limit = EXPECTED_SITE_GEOMETRY.truss.clearApertureMaximum;
+    if (maximum.width > limit.width || maximum.height > limit.height || maximum.diameter > limit.diameter) {
+        throw new Error(`Connected clear face exceeds the reviewed aperture: ${JSON.stringify(maximum)}`);
+    }
+    return maximum;
+}
+
 function worldWitness(geometry, trial) {
     const world = constructWorld(geometry, trial);
     const selection = motifSelection(world.seed);
@@ -530,10 +549,10 @@ function worldWitness(geometry, trial) {
         seed: world.seed,
         sites: siteSolids(world).map((site) => ({ ...site,
             clearApertures: {
-                actualMaximumConnectedFace: { diameter: 3.189435684729195, height: 0.75, width: 3.1 },
+                actualMaximumConnectedFace: connectedClearFaceMaximum(site),
                 latticeBay: { diameter: Math.hypot(1, 0.8), height: 0.8, width: 1 },
                 terrainWedge: { diameter: Math.hypot(1, 0.7), height: 0.7, width: 1 },
-                truss: { diameter: 3.189435684729195, height: 0.75, width: 3.1 },
+                truss: { ...EXPECTED_SITE_GEOMETRY.truss.clearApertureMaximum },
             },
             scaffoldMembers: scaffoldMembers(site),
         })),

@@ -186,5 +186,5 @@ test("geometry-v4 fixture is independent and has the approved canonical digest",
         [[0, 1], [8.8, 9.8], [17.6, 18.6]]);
     assert.ok(!text.includes('"runs"'));
     assert.equal(createHash("sha256").update(JSON.stringify(canonical(geometry))).digest("hex"),
-        "e65792f7719e9e721089401bc5ab49206a26082cfe41676a5dd291177a62699a");
+        "a5120d97782b73afb43cabae038412252f644656f41c0ab9e33f5413da9be7ca");
 });

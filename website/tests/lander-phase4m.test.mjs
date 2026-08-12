@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import { independentMaximumClearFace } from "./lander-clear-faces-test-helper.mjs";
 import { controllerClasses, controllerFixture } from "./lander-test-dom.mjs";
 import {
     advanceMissionSequence,
@@ -15,6 +16,7 @@ import {
     siteScaffoldMembers,
     siteStructure,
     skyProjectionForCamera,
+    skyProjectionIdentityForCamera,
     targetDirectionForViewport,
     terrainHeightAt,
 } from "../static/lander-world.js";
@@ -94,6 +96,8 @@ test("camera, bidirectional target cue, and deterministic bounded sky cover both
     assert.equal(cameraLeftForPose({ x: 80 }), 45);
     const target = { platformLeft: 120, platformRight: 129.6 };
     assert.equal(targetDirectionForViewport(target, 0), "right");
+    assert.equal(skyProjectionIdentityForCamera(-1, 0),
+        skyProjectionIdentityForCamera(0xffffffff, 0));
     assert.equal(targetDirectionForViewport(target, 120), null);
     assert.equal(targetDirectionForViewport(target, 130), "left");
     assert.equal(targetDirectionForViewport(target, 0), "right");
@@ -112,22 +116,42 @@ test("camera, bidirectional target cue, and deterministic bounded sky cover both
     assert.deepEqual(skyProjectionForCamera(STATIC_WORLD_SEED, 0), skyProjectionForCamera(STATIC_WORLD_SEED, 0));
 });
 
-test("sky controller owns two fixed paths and reconstructs exact output on return", async () => {
+test("sky controller keys reconciliation by normalized seed and chunk before projection", async () => {
     const { LanderGameController } = await controllerClasses();
     const fixture = controllerFixture();
-    const controller = new LanderGameController(fixture.root);
-    controller.model = createRun({ seed: STATIC_WORLD_SEED });
-    controller.render();
+    const calls = [];
+    const project = (seed, cameraLeft) => {
+        calls.push([seed, cameraLeft]);
+        return skyProjectionForCamera(seed, cameraLeft);
+    };
+    const controller = new LanderGameController(fixture.root, [], fixture.root.cloneNode(true), {
+        freshSeed: () => 11,
+        skyProjectionForCamera: project,
+    });
     const stars = fixture.elements["scene-stars"];
     const landmarks = fixture.elements["scene-landmarks"];
-    const initial = [stars.getAttribute("d"), landmarks.getAttribute("d")];
+    const preflight = [stars.getAttribute("d"), landmarks.getAttribute("d")];
+    controller.start(false, 0);
+    assert.equal(controller.model.seed, 11);
+    assert.equal(calls.length, 2);
+    assert.notDeepEqual([stars.getAttribute("d"), landmarks.getAttribute("d")], preflight);
+
     const initialWrites = [stars.setCount, landmarks.setCount];
     controller.render();
+    const initial = [stars.getAttribute("d"), landmarks.getAttribute("d")];
+    assert.equal(calls.length, 2);
     assert.deepEqual([stars.setCount, landmarks.setCount], initialWrites);
+
+    controller.model = { ...controller.model, seed: 12 };
+    controller.render();
+    assert.equal(calls.length, 3);
+    assert.notDeepEqual([stars.getAttribute("d"), landmarks.getAttribute("d")], initial);
+
     controller.model = { ...controller.model, pose: { ...controller.model.pose, x: 260 } };
     controller.render();
     assert.equal(fixture.root.style.getPropertyValue("--sky-camera-x"), "-540px");
-    controller.model = { ...controller.model, pose: { ...controller.model.pose, x: 20 } };
+    controller.model = { ...controller.model, seed: 11,
+        pose: { ...controller.model.pose, x: 20 } };
     controller.render();
     assert.deepEqual([stars.getAttribute("d"), landmarks.getAttribute("d")], initial);
     assert.equal(fixture.elements["lander-sky-world"].children.length, 2);
@@ -173,9 +197,27 @@ test("three native-foot lattice columns integrate with the one-path scaffold and
         assert.deepEqual(structure.supportColumns, site.supportColumns);
         assert.deepEqual(members, site.scaffoldMembers);
         const apertures = site.clearApertures;
-        assert.equal(apertures.actualMaximumConnectedFace.diameter, 3.189435684729195);
+        assert.equal(apertures.actualMaximumConnectedFace.diameter, 3.1894356867634124);
         assert.ok(Object.values(apertures).every(({ diameter }) => diameter < 3.2));
     }
+});
+
+test("independent planar overlay derives every connected clear-face maximum and kills member mutations", async () => {
+    const derived = JSON.parse(await readFile(new URL("tests/fixtures/lander-route-derived-v4.json", ROOT), "utf8"));
+    for (const witness of derived.worldWitnesses) {
+        for (const site of witness.descriptor.sites) {
+            assert.deepEqual(independentMaximumClearFace(site), site.clearApertures.actualMaximumConnectedFace);
+        }
+    }
+
+    const site = derived.worldWitnesses[0].descriptor.sites[0];
+    const removedDiagonal = site.scaffoldMembers.filter((_, index) => index !== 4);
+    assert.ok(independentMaximumClearFace(site, removedDiagonal).diameter >
+        site.clearApertures.actualMaximumConnectedFace.diameter);
+    const shiftedDiagonal = structuredClone(site.scaffoldMembers);
+    shiftedDiagonal[4].end[0] += 0.2;
+    assert.ok(independentMaximumClearFace(site, shiftedDiagonal).diameter >
+        site.clearApertures.actualMaximumConnectedFace.diameter);
 });
 
 test("static sky and footer navigation preserve structural no-script parity", async () => {

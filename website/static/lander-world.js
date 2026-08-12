@@ -424,10 +424,18 @@ export function targetDirectionForViewport(targetSite, cameraLeft) {
     return null;
 }
 
+function skyChunkKeyForCamera(cameraLeft) {
+    const firstChunk = Math.floor(cameraLeft * 0.24 / 50) - 1;
+    return Array.from({ length: 5 }, (_, index) => firstChunk + index).join(":");
+}
+
+export function skyProjectionIdentityForCamera(seed, cameraLeft) {
+    return `${normalizeSeed(seed)}|${skyChunkKeyForCamera(cameraLeft)}`;
+}
+
 export function skyProjectionForCamera(seed, cameraLeft) {
-    const skyLeft = cameraLeft * 0.24;
-    const firstChunk = Math.floor(skyLeft / 50) - 1;
-    const chunks = Array.from({ length: 5 }, (_, index) => firstChunk + index);
+    const key = skyChunkKeyForCamera(cameraLeft);
+    const chunks = key.split(":").map(Number);
     const stars = [];
     const landmarks = [];
     const landmarkOffset = Math.floor(4 * sampleUnit(seed, 8, 0));
@@ -450,7 +458,7 @@ export function skyProjectionForCamera(seed, cameraLeft) {
                 `M${x - 27} ${y - 4}Q${x} ${y + 8} ${x + 27} ${y - 4}`);
         }
     }
-    return freeze({ key: chunks.join(":"), chunks, starsPath: stars.join(""), landmarksPath: landmarks.join("") });
+    return freeze({ key, chunks, starsPath: stars.join(""), landmarksPath: landmarks.join("") });
 }
 
 export function terrainSurfacePath(vertices) {

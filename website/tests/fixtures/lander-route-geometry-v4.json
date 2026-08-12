@@ -27,7 +27,7 @@
       "bayWidth": 1.55,
       "chordCount": 2,
       "collisionEnvelope": { "bottom": -1.2, "left": -4.9, "right": 13.9, "top": -0.25 },
-      "clearApertureMaximum": { "diameter": 3.189435684729195, "height": 0.75, "width": 3.1 },
+      "clearApertureMaximum": { "diameter": 3.1894356867634124, "height": 0.75, "width": 3.1 },
       "diagonalsPerBay": 1,
       "span": 18.6
     }

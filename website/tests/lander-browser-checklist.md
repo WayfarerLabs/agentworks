@@ -98,8 +98,9 @@ projection evidence, not the qualitative or cross-engine signoff below.
       reference. Time 0.9-second agent travel separately from the unchanged 0.3-second refuel and
       1.4-second power sequence; hidden time freezes each and reduced motion completes atomically.
 - [ ] From every page footer, confirm the icon navigates directly to `/lander/` without adding a
-      fragment. Its nonempty accessibility label and hover title must match. Human-review the
-      current Lander heading, 404 explanation, and footer hover wording against the approved copy.
+      fragment. Its accessibility label and hover title both read `Help deploy some agents!`.
+      Confirm the Lander heading reads `We need agents!` and the 404 explanation reads
+      `This route     is broken! We need agents!`.
 - [ ] Confirm the visual fuel level drains smoothly without repetitive live announcements. Spend
       fuel on thrust, carry excess through multiple sites, and verify empty fuel produces no thrust.
 - [ ] Crash on terrain, a platform end or underside, the truss or any lattice-column envelope, the
@@ -323,10 +324,10 @@ new run records the refined source.
 
 ## Static recovery and initial presentation
 
-- [ ] With JavaScript disabled, `/lander/` shows one `We need to deploy some agents!` heading and
-      the complete static scene. `/404.html` shows one `Page not found` heading, explanatory text, a
-      working linked `Agentworks` breadcrumb home crumb, and the same scene. There is no error-code
-      eyebrow or body-level home link.
+- [ ] With JavaScript disabled, `/lander/` shows one `We need agents!` heading and the complete
+      static scene. `/404.html` shows one `Page not found` heading, the explanation
+      `This route is     broken! We need agents!`, a working linked `Agentworks` breadcrumb home
+      crumb, and the same scene. There is no error-code eyebrow or body-level home link.
 - [x] With JavaScript disabled, no start target or control instructions are exposed visually or to
       the accessibility tree. The document has header, main, and footer landmarks in that order.
 - [x] With JavaScript enabled and normal motion, each reload gives one subtle three-pulse plume cue
