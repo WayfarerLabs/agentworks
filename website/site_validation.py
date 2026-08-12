@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Final, NamedTuple
 
 from site_asset_validation import validate_head_links
-from site_game_validation import validate_game_contract
 from site_content import (
     CLI_SECRETS_URL,
     EMAIL_ADDRESS_PATTERN,
@@ -20,6 +19,7 @@ from site_content import (
     REPORTING_URL,
     REPOSITORY_URL,
 )
+from site_game_validation import validate_game_contract
 
 SITE_BASE_TOKEN: Final = "{{SITE_BASE}}"
 LANDER_GAME_TOKEN: Final = "{{LANDER_GAME}}"
@@ -508,9 +508,12 @@ def _validate_shared_shell(name: str, template: str) -> None:
         if [elements[index].tag for index in heading_children] != ["h1"]:
             raise ValueError(f"{name}: detail page heading must contain only its reviewed h1")
         heading = elements[heading_children[0]]
-        if heading.attributes or _hidden(parser, heading_children[0]) or _children(
-            parser, heading_children[0]
-        ) or not _normalized_text(heading.text):
+        if (
+            heading.attributes
+            or _hidden(parser, heading_children[0])
+            or _children(parser, heading_children[0])
+            or not _normalized_text(heading.text)
+        ):
             raise ValueError(f"{name}: detail page heading requires one visible nonempty h1")
         if name == "lander.html" and main_children != [main_children[0]]:
             raise ValueError(f"{name}: heading must be the only shell element before the shared game")
@@ -518,9 +521,12 @@ def _validate_shared_shell(name: str, template: str) -> None:
             if [elements[index].tag for index in main_children] != ["div", "p"]:
                 raise ValueError(f"{name}: heading and not-found message must precede the shared game")
             message = elements[main_children[1]]
-            if message.attributes != {"id": "not-found-message"} or _hidden(
-                parser, main_children[1]
-            ) or _children(parser, main_children[1]) or not _normalized_text(message.text):
+            if (
+                message.attributes != {"id": "not-found-message"}
+                or _hidden(parser, main_children[1])
+                or _children(parser, main_children[1])
+                or not _normalized_text(message.text)
+            ):
                 raise ValueError(f"{name}: not-found message must be visible ordinary prose")
         if name in {"lander.html", "404.html"} and any(
             marker in template for marker in ('class="error-code"', 'class="eyebrow"')
@@ -652,11 +658,19 @@ def _validate_shared_shell(name: str, template: str) -> None:
             f"{name}: footer destination {destination} is invalid",
         )
     game_link = elements[footer_links[2]]
-    if game_link.attributes != {
-        "class": "footer-game-link",
-        "href": f"{SITE_BASE_TOKEN}lander/#lander-game",
-        "aria-label": "Play Lunar Lander",
-    } or _hidden(parser, footer_links[2]):
+    game_label = game_link.attributes.get("aria-label")
+    if (
+        game_link.attributes
+        != {
+            "class": "footer-game-link",
+            "href": f"{SITE_BASE_TOKEN}lander/",
+            "aria-label": game_label,
+            "title": game_label,
+        }
+        or not game_label
+        or not game_label.strip()
+        or _hidden(parser, footer_links[2])
+    ):
         raise ValueError(f"{name}: footer Lander link contract is invalid")
     game_children = _children(parser, footer_links[2])
     if (

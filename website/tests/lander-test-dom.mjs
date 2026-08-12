@@ -30,6 +30,7 @@ export class FakeElement {
             this.dataset[name.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = String(value);
         }
     }
+    getAttribute(name) { return this.attributes.get(name) ?? null; }
     removeAttribute(name) { this.attributes.delete(name); }
     closest(selector) {
         for (let current = this; current; current = current.parentElement) {
@@ -86,7 +87,8 @@ export function controllerFixture() {
     const ids = ["lander-scene-shell", "lander-scene", "lander-start", "lander-fuel", "lander-fuel-value",
         "lander-fuel-gauge", "lander-fuel-gauge-fill", "lander-target-direction", "lander-controls",
         "lander-scene-stage", "lander-outcome", "lander-controls-rail", "lander-exit",
-        "lander-restart", "lander-status", "terrain-layer", "site-layer", "debris-layer", "mission-agent"];
+        "lander-restart", "lander-status", "lander-sky-world", "scene-stars", "scene-landmarks",
+        "terrain-layer", "site-layer", "debris-layer", "mission-agent"];
     const elements = Object.fromEntries(ids.map((id) => [id, new FakeElement(root)]));
     const shell = elements["lander-scene-shell"];
     const stage = elements["lander-scene-stage"];
@@ -96,6 +98,10 @@ export function controllerFixture() {
     shell.append(stage, rail);
     stage.append(elements["lander-scene"], elements["lander-start"], elements["lander-fuel"],
         elements["lander-target-direction"], outcome);
+    elements["lander-scene"].append(elements["lander-sky-world"]);
+    elements["lander-sky-world"].append(elements["scene-stars"], elements["scene-landmarks"]);
+    elements["scene-stars"].setAttribute("d", "");
+    elements["scene-landmarks"].setAttribute("d", "");
     outcome.append(elements["lander-status"], elements["lander-restart"]);
     rail.append(elements["lander-controls"], elements["lander-exit"]);
     for (const [className, textContent] of [

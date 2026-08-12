@@ -10,6 +10,8 @@ export const SCAFFOLD_MEMBER_HALF = SCAFFOLD_MEMBER_WIDTH / 2;
 export const TRUSS_BAY_COUNT = 12;
 export const TRUSS_BAY_HEIGHT = 0.75;
 export const TRUSS_BAY_WIDTH = 1.55;
+export const COLUMN_WIDTH = 1;
+export const COLUMN_BAY_HEIGHT = 0.8;
 export const NOC_CONNECTOR_WIDTH = 2;
 export const NOC_WIDTH = 7;
 export const NOC_ROOF_OFFSET = 7.2;
@@ -131,16 +133,28 @@ export function siteStructure(site) {
     const buildingRight = buildingLeft + NOC_WIDTH;
     const roof = site.platformTop + NOC_ROOF_OFFSET;
     const trussBottom = site.platformBottom - TRUSS_BAY_HEIGHT;
-    const pylonXs = [site.platformLeft, site.platformLeft + 9.3, buildingRight];
-    const pylons = pylonXs.map((x) => {
-        const foot = terrainHeightAt(site.seed, x);
+    const supportColumns = [[0, 1], [8.8, 9.8], [17.6, 18.6]].map(([leftOffset, rightOffset], index) => {
+        const left = site.platformLeft + leftOffset;
+        const right = site.platformLeft + rightOffset;
+        const leftFoot = terrainHeightAt(site.seed, left);
+        const rightFoot = terrainHeightAt(site.seed, right);
+        const latticeFloor = Math.max(leftFoot, rightFoot);
+        const bayCount = Math.ceil((site.platformBottom - latticeFloor) / COLUMN_BAY_HEIGHT);
+        const levels = Array.from({ length: bayCount + 1 }, (_, index) =>
+            Math.max(latticeFloor, site.platformBottom - COLUMN_BAY_HEIGHT * index));
         return {
-            center: x,
-            foot,
+            bayCount,
+            index,
+            latticeFloor,
+            left,
+            leftFoot,
+            levels: levels.filter((level, index) => index === 0 || level !== levels[index - 1]),
+            right,
+            rightFoot,
             collider: {
-                bottom: foot - SCAFFOLD_MEMBER_HALF,
-                left: x - SCAFFOLD_MEMBER_HALF,
-                right: x + SCAFFOLD_MEMBER_HALF,
+                bottom: Math.min(leftFoot, rightFoot) - SCAFFOLD_MEMBER_HALF,
+                left: left - SCAFFOLD_MEMBER_HALF,
+                right: right + SCAFFOLD_MEMBER_HALF,
                 top: site.platformBottom + SCAFFOLD_MEMBER_HALF,
             },
         };
@@ -155,7 +169,7 @@ export function siteStructure(site) {
             top: roof + NOC_MAST_HEIGHT,
         },
         noc: { bottom: site.platformBottom, left: buildingLeft, right: buildingRight, top: roof },
-        pylons,
+        supportColumns,
         roof,
         truss: {
             bottom: trussBottom - SCAFFOLD_MEMBER_HALF,
@@ -181,8 +195,21 @@ export function siteScaffoldMembers(site) {
             { start: [left, site.platformBottom], end: [right, structure.trussBottom] } :
             { start: [left, structure.trussBottom], end: [right, site.platformBottom] });
     }
-    for (const pylon of structure.pylons) {
-        members.push({ start: [pylon.center, site.platformBottom], end: [pylon.center, pylon.foot] });
+    for (const column of structure.supportColumns) {
+        members.push(
+            { start: [column.left, site.platformBottom], end: [column.left, column.leftFoot] },
+            { start: [column.right, site.platformBottom], end: [column.right, column.rightFoot] },
+        );
+        for (const level of column.levels) {
+            members.push({ start: [column.left, level], end: [column.right, level] });
+        }
+        for (let bay = 0; bay < column.levels.length - 1; bay += 1) {
+            const top = column.levels[bay];
+            const bottom = column.levels[bay + 1];
+            members.push(bay % 2 === 0 ?
+                { start: [column.left, top], end: [column.right, bottom] } :
+                { start: [column.right, top], end: [column.left, bottom] });
+        }
     }
     return freeze(members.map((member) => ({ cap: "butt", join: "round", ...member })));
 }
@@ -194,7 +221,6 @@ export function siteScaffoldPath(site) {
         const [startX, startY] = start;
         const [endX, endY] = end;
         if (index < 2) return `M${projectX(startX)} ${projectY(startY)}H${projectX(endX)}`;
-        if (index >= 14) return `M${projectX(startX)} ${projectY(startY)}V${projectY(endY)}`;
         return `M${projectX(startX)} ${projectY(startY)}L${projectX(endX)} ${projectY(endY)}`;
     }).join("");
 }
@@ -338,8 +364,9 @@ export function terrainVerticesForWindow(seed, sites, left, right) {
     const ordered = [...sites].sort((a, b) => a.center - b.center);
     const points = new Set(nativeTerrainVertices(seed, left, right).map(([x]) => x));
     for (const site of ordered) {
-        [site.platformLeft, site.platformLeft + 9.3, site.platformLeft + 9.6,
-            site.platformLeft + 11.6, site.platformLeft + 18.6].forEach((x) => {
+        [site.platformLeft, site.platformLeft + 1, site.platformLeft + 8.8,
+            site.platformLeft + 9.6, site.platformLeft + 9.8, site.platformLeft + 11.6,
+            site.platformLeft + 17.6, site.platformLeft + 18.6].forEach((x) => {
             if (x >= left && x <= right) points.add(x);
         });
     }
@@ -385,11 +412,45 @@ export function retainedSiteDescriptors(sites, activeSiteId, targetSiteId) {
 }
 
 export function cameraLeftForPose(pose) {
-    return Math.max(0, pose.x - 35);
+    if (pose.x < 5) return pose.x - 5;
+    if (pose.x > 35) return pose.x - 35;
+    return 0;
 }
 
-export function targetIsOffscreen(targetSite, cameraLeft) {
-    return Boolean(targetSite && targetSite.platformLeft > cameraLeft + 100);
+export function targetDirectionForViewport(targetSite, cameraLeft) {
+    if (!targetSite) return null;
+    if (targetSite.platformLeft > cameraLeft + 100) return "right";
+    if (targetSite.platformRight < cameraLeft) return "left";
+    return null;
+}
+
+export function skyProjectionForCamera(seed, cameraLeft) {
+    const skyLeft = cameraLeft * 0.24;
+    const firstChunk = Math.floor(skyLeft / 50) - 1;
+    const chunks = Array.from({ length: 5 }, (_, index) => firstChunk + index);
+    const stars = [];
+    const landmarks = [];
+    const landmarkOffset = Math.floor(4 * sampleUnit(seed, 8, 0));
+    for (const chunk of chunks) {
+        for (let index = 0; index < 4; index += 1) {
+            const key = (Math.imul(chunk, 4) + index) >>> 0;
+            const x = (chunk * 50 + 4 + 42 * sampleUnit(seed, 6, key)) * 10;
+            const y = 50 + 190 * sampleUnit(seed, 7, key);
+            stars.push(`M${x} ${y}h2`);
+        }
+        if (positiveModulo(chunk - landmarkOffset, 4) !== 0) continue;
+        const key = chunk >>> 0;
+        const x = 10 * (chunk * 50 + 10 + 30 * sampleUnit(seed, 9, key));
+        const y = 90 + 110 * sampleUnit(seed, 10, key);
+        if (sampleUnit(seed, 11, key) < 0.5) {
+            landmarks.push(`M${x} ${y - 18}A18 18 0 1 0 ${x} ${y + 18}A13 18 0 0 1 ${x} ${y - 18}`);
+        } else {
+            landmarks.push(`M${x - 16} ${y}A16 16 0 1 0 ${x + 16} ${y}A16 16 0 1 0 ${x - 16} ${y}Z` +
+                `M${x - 28} ${y}Q${x} ${y + 12} ${x + 28} ${y}` +
+                `M${x - 27} ${y - 4}Q${x} ${y + 8} ${x + 27} ${y - 4}`);
+        }
+    }
+    return freeze({ key: chunks.join(":"), chunks, starsPath: stars.join(""), landmarksPath: landmarks.join("") });
 }
 
 export function terrainSurfacePath(vertices) {

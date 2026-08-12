@@ -19,6 +19,7 @@
     --fuel-transfer-x: 0px;
     --fuel-transfer-y: 0px;
     --camera-x: 0px;
+    --sky-camera-x: 0px;
     --lander-x: 300px;
     --lander-y: 228px;
     --lander-angle: 0deg;
@@ -58,11 +59,23 @@
     fill: #f5f2e8;
 }
 
+#lander-sky-world {
+    transform: translate(var(--sky-camera-x), 0);
+}
+
 #scene-stars {
     fill: none;
     stroke: #8a867c;
     stroke-linecap: round;
     stroke-width: 4;
+}
+
+#scene-landmarks {
+    fill: none;
+    stroke: #8a867c;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 3;
 }
 
 #lander-world {
@@ -258,6 +271,14 @@
 #next-site-cue {
     display: none;
     fill: #d94a1e;
+}
+
+#lander-game[data-target-direction="right"] #next-site-cue {
+    transform: translate(932px, 280px);
+}
+
+#lander-game[data-target-direction="left"] #next-site-cue {
+    transform: translate(68px, 280px) scale(-1, 1);
 }
 
 #lander-game[data-target-offscreen="true"] #next-site-cue {

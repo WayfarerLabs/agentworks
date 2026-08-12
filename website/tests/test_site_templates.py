@@ -375,9 +375,13 @@ class TemplateContractTests(RepositoryFixture):
         mutations = (
             template.replace('class="site-scaffold"', 'class="missing-support"', 1),
             template.replace("M312 452.5H498", "M313 452.5H498", 1),
-            template.replace("M312 452.5V476.1557689513639", "M312 460V476.1557689513639", 1),
-            template.replace(bar_one, "BATTERY_SWAP", 1).replace(bar_four, bar_one, 1).replace(
-                "BATTERY_SWAP", bar_four, 1,
+            template.replace("M488 484.5L498 491.77281586216765", "M488 485L498 491.77281586216765", 1),
+            template.replace(bar_one, "BATTERY_SWAP", 1)
+            .replace(bar_four, bar_one, 1)
+            .replace(
+                "BATTERY_SWAP",
+                bar_four,
+                1,
             ),
         )
         for changed in mutations:
@@ -445,15 +449,21 @@ class TemplateContractTests(RepositoryFixture):
     def test_footer_game_link_is_final_icon_only_and_accessibly_named(self) -> None:
         for name in SHELL_TEMPLATES:
             template = (self.root / "website/templates" / name).read_text(encoding="utf-8")
+            footer_tag = re.search(r'<a\s+class="footer-game-link"[\s\S]*?>', template)
+            self.assertIsNotNone(footer_tag)
+            assert footer_tag is not None
+            label = re.search(r'aria-label="([^"]+)"', footer_tag.group(0))
+            self.assertIsNotNone(label)
+            assert label is not None
             variants = (
-                template.replace('aria-label="Play Lunar Lander"', 'aria-label="Game"', 1),
+                template.replace(label.group(0), 'aria-label=""', 1),
                 template.replace(
                     'alt=""\n                /></a>',
                     'alt="Rocket"\n                /></a>',
                     1,
                 ),
                 template.replace('class="footer-game-link"', 'class="footer-rocket"', 1),
-                template.replace("lander/#lander-game", "lander/", 1),
+                template.replace('href="{{SITE_BASE}}lander/"', 'href="{{SITE_BASE}}lander/#lander-game"', 1),
                 template.replace("/></a>", "/>Lander</a>", 1),
             )
             for changed in variants:

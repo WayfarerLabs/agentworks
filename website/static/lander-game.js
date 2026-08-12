@@ -21,8 +21,8 @@ import {
     transitionMission,
     updateRetention,
 } from "./lander-model.js";
-import { cameraLeftForPose, CHUNK_WIDTH, mixUint32, siteScaffoldPath, siteStructure, terrainFillPath,
-    terrainSurfacePath, terrainVerticesForRange, targetIsOffscreen } from "./lander-world.js";
+import { cameraLeftForPose, CHUNK_WIDTH, mixUint32, siteScaffoldPath, siteStructure, skyProjectionForCamera,
+    terrainFillPath, terrainSurfacePath, terrainVerticesForRange, targetDirectionForViewport } from "./lander-world.js";
 
 const SVG_NAMESPACE = document.querySelector("#lander-scene")?.namespaceURI;
 const ACTIVE_STATES = new Set(["flying", "landed", "deploying", "powering", "launching", "crashing", "failed", "generation-error"]);
@@ -182,6 +182,7 @@ export class LanderGameController {
             "lander-fuel-gauge", "lander-fuel-gauge-fill", "lander-target-direction", "lander-controls",
             "lander-scene-stage", "lander-outcome", "lander-controls-rail", "lander-exit",
             "lander-restart", "lander-status",
+            "lander-sky-world", "scene-stars", "scene-landmarks",
             "terrain-layer", "site-layer", "debris-layer", "mission-agent"]) {
             const name = id.replaceAll("-", "_");
             this[name] = root.querySelector(`#${id}`);
@@ -199,6 +200,7 @@ export class LanderGameController {
         this.frameId = null;
         this.previousFrame = null;
         this.worldWindowKey = null;
+        this.skyWindowKey = null;
         this.paused = document.hidden;
         this.destroyed = false;
         this.cleanups = cleanups;
@@ -293,6 +295,9 @@ export class LanderGameController {
         this.terrain_layer.replaceChildren(...[...staticTerrain.children].map((node) => node.cloneNode(true)));
         this.site_layer.replaceChildren(...[...staticSites.children].map((node) => node.cloneNode(true)));
         this.debris_layer.replaceChildren(); this.worldWindowKey = null;
+        this.scene_stars.setAttribute("d", this.pristine.querySelector("#scene-stars").getAttribute("d"));
+        this.scene_landmarks.setAttribute("d", this.pristine.querySelector("#scene-landmarks").getAttribute("d"));
+        this.skyWindowKey = null;
         for (const property of ["--agent-x", "--agent-y", "--crash-x", "--crash-y", "--crash-progress"]) {
             this.root.style.removeProperty(property);
         }
@@ -518,6 +523,14 @@ export class LanderGameController {
         this.worldWindowKey = this.model.retentionKey;
     }
 
+    reconcileSky(cameraLeft) {
+        const projection = skyProjectionForCamera(this.model.seed ?? 0x41475731, cameraLeft);
+        if (projection.key === this.skyWindowKey) return;
+        this.scene_stars.setAttribute("d", projection.starsPath);
+        this.scene_landmarks.setAttribute("d", projection.landmarksPath);
+        this.skyWindowKey = projection.key;
+    }
+
     renderCrash(cameraLeft) {
         if (this.model.state !== "crashing" || !this.model.crash) {
             if (this.debris_layer.children.length) this.debris_layer.replaceChildren();
@@ -577,12 +590,13 @@ export class LanderGameController {
         this.root.dataset.missionState = this.model.state; this.root.dataset.cue = this.cue.state;
         this.root.dataset.paused = String(this.paused); this.root.dataset.reducedMotion = String(this.motion.matches);
         this.root.style.setProperty("--camera-x", `${-cameraLeft * 10}px`);
+        this.root.style.setProperty("--sky-camera-x", `${-cameraLeft * 10 * 0.24}px`);
         this.root.style.setProperty("--lander-x", `${pose.x * 10}px`); this.root.style.setProperty("--lander-y", `${548 - pose.y * 10}px`);
         this.root.style.setProperty("--lander-angle", `${pose.angle}deg`);
         this.root.style.setProperty("--thrust-vector-angle", `${this.model.commanded.vectorAngle ?? 0}deg`);
         for (const [name, value] of [["left-plume-scale", left.scaleY], ["right-plume-scale", right.scaleY],
             ["left-plume-opacity", left.opacity], ["right-plume-opacity", right.opacity]]) this.root.style.setProperty(`--${name}`, String(value));
-        this.reconcileWorld(); this.renderCrash(cameraLeft);
+        this.reconcileWorld(); this.reconcileSky(cameraLeft); this.renderCrash(cameraLeft);
         const active = this.model.retainedSites?.find((site) => site.id === this.model.activeSiteId);
         if (this.model.agent && active) {
             const startX = this.model.touchdownPose.x + 1.1; const endX = active.platformRight + 2;
@@ -591,9 +605,15 @@ export class LanderGameController {
             this.root.style.setProperty("--agent-y", `${548 - (active.platformTop + 0.2) * 10}px`);
         }
         const target = this.model.retainedSites?.find((site) => site.id === this.model.targetSiteId);
-        const offscreen = targetIsOffscreen(target, cameraLeft);
+        const targetDirection = targetDirectionForViewport(target, cameraLeft);
+        const offscreen = targetDirection !== null;
         this.root.dataset.targetOffscreen = String(offscreen);
+        this.root.dataset.targetDirection = targetDirection ?? "none";
         this.lander_target_direction.hidden = !offscreen;
+        if (offscreen) {
+            this.lander_target_direction.textContent = targetDirection === "right" ?
+                "Next site is to the right." : "Next site is to the left.";
+        }
         if (this.model.state !== "preflight") {
             const descriptions = ["lander-scene-description", "lander-controls", "lander-fuel-label", "lander-fuel-value"];
             if (offscreen) descriptions.push("lander-target-direction");

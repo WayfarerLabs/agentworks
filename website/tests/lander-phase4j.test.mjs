@@ -41,7 +41,7 @@ test("normal refuel commits fuel atomically and owns one exact 300 ms linear pro
     const service = beginService(false, 7.5);
     assert.equal(service.state, "landed");
     assert.ok(service.fuel > 7.5, "the real award is committed at contact");
-    assert.equal(service.legDepartureFuel, service.fuel);
+    assert.equal(service.fuelGaugeReference, service.fuel);
     assert.deepEqual(service.refuel, { siteId: 0, fromLevel: 0.25, progress: 0 });
     for (const [seconds, progress, level] of [[0,0,0.25],[0.15,0.5,0.625],[0.299,0.9966666666666667,0.9975]]) {
         const sample = advanceMissionSequence(service, seconds);
@@ -65,7 +65,7 @@ test("reduced motion and a mid-refuel motion change reach the same atomic launch
     assert.equal(toggled.state, "launching");
     assert.equal(toggled.refuel, null);
     for (const result of [reduced, toggled]) {
-        assert.equal(result.fuel, result.legDepartureFuel);
+        assert.equal(result.fuel, result.fuelGaugeReference);
         assert.equal(fuelGaugeLevel(result), 1);
         assert.ok(result.checkpoint);
     }
@@ -75,7 +75,7 @@ test("reduced motion and a mid-refuel motion change reach the same atomic launch
 
 test("refuel presentation is excluded from failure, restart, and preflight authority", () => {
     let ready = advanceMissionSequence(beginService(false), 0.3);
-    ready = advanceMissionSequence(ready, 1.8);
+    ready = advanceMissionSequence(ready, 0.9);
     ready = advanceMissionSequence(ready, 1.4);
     assert.equal(ready.refuel, null);
     const failed = { ...ready, state: "failed", refuel: { siteId: 0, fromLevel: 0.2, progress: 0.4 } };
@@ -89,7 +89,7 @@ test("installed-agent projection begins at NOC stage one and survives powered ch
     assert.equal(agentInstalled({ powered: false, nocStage: 1 }), true);
     assert.equal(agentInstalled({ powered: true, nocStage: 0 }), true);
     let model = advanceMissionSequence(beginService(false), 0.3);
-    model = advanceMissionSequence(model, 1.8);
+    model = advanceMissionSequence(model, 0.9);
     const stageZero = model.retainedSites.find((site) => site.id === model.activeSiteId);
     assert.equal(agentInstalled(stageZero), false);
     const stageOneModel = advanceMissionSequence(model, 0.2);
@@ -154,7 +154,7 @@ test("fuel height and exact danger, caution, and ready colors are independent pr
         [0.5, "caution", "#ffb000"],
         [0.500001, "ready", "#2ed49b"],
     ]) {
-        controller.model = { ...run, fuel: run.legDepartureFuel * level };
+        controller.model = { ...run, fuel: run.fuelGaugeReference * level };
         controller.render();
         assert.equal(root.style.getPropertyValue("--fuel-gauge-level"), String(level));
         assert.equal(root.dataset.fuelLevel, name);

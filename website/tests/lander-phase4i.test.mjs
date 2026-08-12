@@ -91,18 +91,18 @@ function pointerEvent(controller, type, pointerId, timestamp) {
         composedPath: () => [controller.lander_scene_shell], preventDefault() {} };
 }
 
-test("leg-relative gauge is exact, unbounded, and restored with the checkpoint", () => {
+test("fuel-reference gauge is exact, unbounded, and restored with the checkpoint", () => {
     const run = createRun({ seed: 1 });
-    assert.equal(run.fuel, 30); assert.equal(run.legDepartureFuel, 30); assert.equal(fuelGaugeLevel(run), 1);
-    assert.equal(fuelGaugeLevel({ ...run, fuel: 37.5, legDepartureFuel: 50 }), 0.75);
-    assert.equal(fuelGaugeLevel({ ...run, fuel: 75, legDepartureFuel: 50 }), 1);
-    assert.equal(fuelGaugeLevel({ ...run, fuel: 5, legDepartureFuel: 0 }), 0);
+    assert.equal(run.fuel, 15); assert.equal(run.fuelGaugeReference, 30); assert.equal(fuelGaugeLevel(run), 0.5);
+    assert.equal(fuelGaugeLevel({ ...run, fuel: 37.5, fuelGaugeReference: 50 }), 0.75);
+    assert.equal(fuelGaugeLevel({ ...run, fuel: 75, fuelGaugeReference: 50 }), 1);
+    assert.equal(fuelGaugeLevel({ ...run, fuel: 5, fuelGaugeReference: 0 }), 0);
     const ready = serviceFirstSite();
-    assert.equal(ready.fuel, ready.legDepartureFuel); assert.equal(fuelGaugeLevel(ready), 1);
+    assert.equal(ready.fuel, ready.fuelGaugeReference); assert.equal(fuelGaugeLevel(ready), 1);
     const crashed = { ...ready, state: "failed", fuel: ready.fuel - 5 };
     const restored = transitionMission(crashed, "RESTART");
     assert.equal(restored.fuel, ready.checkpoint.fuel);
-    assert.equal(restored.legDepartureFuel, ready.checkpoint.legDepartureFuel);
+    assert.equal(restored.fuelGaugeReference, ready.checkpoint.fuelGaugeReference);
     assert.equal(fuelGaugeLevel(restored), 1);
 });
 
@@ -221,7 +221,7 @@ test("restart uses its independent scene-focus path without synthesizing launch 
 test("service timing exposes four vertical battery and three symmetric signal stages", () => {
     let service = serviceFirstSite(false);
     service = advanceMissionSequence(service, 0.3);
-    service = advanceMissionSequence(service, 1.8);
+    service = advanceMissionSequence(service, 0.9);
     assert.equal(service.state, "powering");
     for (const [seconds, stage] of [[0.2,1],[0.4,2],[0.6,3],[0.8,4],[1,5],[1.2,6]]) {
         assert.equal(advanceMissionSequence(service, seconds).nocStage, stage);
@@ -231,16 +231,19 @@ test("service timing exposes four vertical battery and three symmetric signal st
     assert.equal(ready.status, SUCCESS_STATUS); assert.equal(ready.retainedSites[0].powered, true);
 });
 
-test("site structure exposes exact truss, three pylon, NOC, and mast envelopes", () => {
+test("site structure exposes exact truss, three lattice-column, NOC, and mast envelopes", () => {
     const site = createRun({ seed: 1 }).retainedSites[0];
     const structure = siteStructure(site);
     assert.deepEqual(structure.truss, {
         bottom: site.platformBottom - 0.85, left: site.platformLeft - 0.1,
         right: structure.buildingRight + 0.1, top: site.platformBottom + 0.1,
     });
-    assert.equal(structure.pylons.length, 3);
-    assert.deepEqual(structure.pylons.map(({ center }) => center),
-        [site.platformLeft, site.platformLeft + 9.3, structure.buildingRight]);
+    assert.equal(structure.supportColumns.length, 3);
+    assert.deepEqual(structure.supportColumns.map(({ left, right }) => [left, right]), [
+        [site.platformLeft, site.platformLeft + 1],
+        [site.platformLeft + 8.8, site.platformLeft + 9.8],
+        [site.platformLeft + 17.6, structure.buildingRight],
+    ]);
     assert.equal(structure.noc.bottom, site.platformBottom);
     assert.equal(structure.mast.right - structure.mast.left, 0.5);
     assert.ok(Math.abs(structure.mast.top - structure.mast.bottom - 3.2) < 1e-12);
@@ -249,7 +252,7 @@ test("site structure exposes exact truss, three pylon, NOC, and mast envelopes",
 test("independent static and dynamic site geometry stays inside exact colliders and stage pins", async () => {
     const model = createRun({ seed: 0x41475731 }); const site = model.retainedSites[0];
     const structure = siteStructure(site); const expected = expectedScaffold(site);
-    assert.equal(expected.length, 17);
+    assert.ok(expected.length >= 41 && expected.length <= 95);
     const template = await readFile(join(ROOT, "templates/lander-game.html"), "utf8");
     const staticTag = template.match(/<path class="site-scaffold"[^>]+>/)?.[0];
     assert.ok(staticTag); assert.match(staticTag, /stroke-width="2"/); assert.match(staticTag, /stroke-linecap="butt"/);
@@ -265,11 +268,14 @@ test("independent static and dynamic site geometry stays inside exact colliders 
     assert.equal(dynamicSupport.attributes.get("stroke-linejoin"), "round");
     assert.throws(() => assert.deepEqual(linearSegments(staticPath.replace(/^M312 /, "M313 ")), expected));
     withinCollider(expected.slice(0, 14), structure.truss);
-    structure.pylons.forEach((pylon, index) => withinCollider([expected[14 + index]], pylon.collider));
-    for (const [width, height, diagonalSquared] of [[1.55,0.75,2.965],[3.1,0.75,10.1725]]) {
-        assert.ok(Math.abs(width ** 2 + height ** 2 - diagonalSquared) < 1e-12);
-        assert.ok(Math.sqrt(diagonalSquared) < 3.2);
+    let memberIndex = 14;
+    for (const column of structure.supportColumns) {
+        const memberCount = 3 + 2 * column.bayCount;
+        withinCollider(expected.slice(memberIndex, memberIndex + memberCount), column.collider);
+        memberIndex += memberCount;
     }
+    assert.equal(memberIndex, expected.length);
+    for (const [width, height] of [[1,0.8],[1,0.7],[3.1,0.75]]) assert.ok(Math.hypot(width, height) < 3.2);
 
     const buildingLeft = site.platformRight * 10 + 20; const roof = 548 - structure.roof * 10;
     const battery = group.querySelector(".noc-battery"); const barTops = [46, 38, 30, 22];

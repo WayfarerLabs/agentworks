@@ -63,10 +63,10 @@ const ROUTES = [
 const FAILURE_LITERALS = [[8,8.000000000000018,-9.375629389,12.57275481],[8,8.000000000000005,-10.064366902,11.509402336],[8.1,8.100000000000009,-1.363740541,6.748522861],[8.1,8.099999999999998,-8.991046857,5.59523011],[8.049999999999999,8.050000000000013,-9.636744041,9.438286699],[8.1,8.100000000000005,-9.783560214,6.322201732],[8.2,8.199999999999989,-7.642799015,7.142035851],[8.15,8.150000000000002,-9.486448987,5.720897721],[8.15,8.150000000000016,-6.377854246,-8.305060918]];
 
 export const ROUTE_DIGESTS = Object.freeze({
-    geometryDigest: "2cc7b145dc516426d911f2f51f47cc374f0154905d8ddff00cc78e141de14195",
-    outputDigest: "239a33c5185638b34fd6015155af62f5a8f0583dc25c5804af185bcb8df548b9",
+    geometryDigest: "e65792f7719e9e721089401bc5ab49206a26082cfe41676a5dd291177a62699a",
+    outputDigest: "1dbdb4b2612d694ea89943fd6fcf6e041c752661007137319b66bd13981e7e08",
     physicsDigest: "34a7cb64a3457c4df028031968e7ef00fde56fc445db6af6ab89eb7b737f692e",
-    worldDigest: "c191e4ae97e6c86588a092d531bef1fc8a787bd57bd77405da416fff2c914995",
+    worldDigest: "24a3a06a7aa356d00bd4a91b7531196acbd5a040fd97cb6999e6a17d0440bc7e",
 });
 
 function freeze(value) {
@@ -170,7 +170,7 @@ export function pointerEngineRequests(displacement, sceneWidth) {
 }
 
 export function fuelGaugeLevel(model) {
-    const ordinary = model.legDepartureFuel > 0 ? clamp(model.fuel / model.legDepartureFuel, 0, 1) : 0;
+    const ordinary = model.fuelGaugeReference > 0 ? clamp(model.fuel / model.fuelGaugeReference, 0, 1) : 0;
     if (!model.refuel) return ordinary;
     return model.refuel.fromLevel + (1 - model.refuel.fromLevel) * model.refuel.progress;
 }
@@ -245,7 +245,7 @@ export function checkpointPoseForContact(site, contactPose) {
 }
 
 export function createPreflightModel() {
-    return { state: "preflight", pose: initialPose(), fuel: 0, legDepartureFuel: 0,
+    return { state: "preflight", pose: initialPose(), fuel: 0, fuelGaugeReference: 0,
         commanded: { ...ZERO }, refuel: null, status: "", launchStarted: false, launchCleared: false };
 }
 
@@ -254,8 +254,8 @@ export function createRun({ seed, reducedMotion = false } = {}) {
     const firstSite = createFirstSite(runSeed);
     return updateRetention({
         state: "flying", seed: runSeed, reducedMotion, missionSeconds: 0, completedSites: 0,
-        refuelRatio: refuelRatioForBase(1), pose: initialPose(), commanded: { ...ZERO }, fuel: 30,
-        legDepartureFuel: 30,
+        refuelRatio: refuelRatioForBase(1), pose: initialPose(), commanded: { ...ZERO }, fuel: 15,
+        fuelGaugeReference: 30,
         generatorCursor: 1, retainedChunks: retainedChunkIndexes(0), retainedSites: [firstSite],
         activeSiteId: null, targetSiteId: 0, targetRouteProof: null, touchdownPose: null,
         sequenceSeconds: 0, refuel: null, agent: null, nocStage: 0, checkpoint: null, failureCause: null,
@@ -392,9 +392,9 @@ function unsafeFeatures(model, pose, target, ignoredTopSiteId = null) {
         const structure = siteStructure(site);
         features.push({ cause: "truss", priority: 2, polygon: rectangle(
             structure.truss.left, structure.truss.right, structure.truss.bottom, structure.truss.top) });
-        for (const pylon of structure.pylons) {
-            features.push({ cause: "pylon", priority: 2, polygon: rectangle(
-                pylon.collider.left, pylon.collider.right, pylon.collider.bottom, pylon.collider.top) });
+        for (const column of structure.supportColumns) {
+            features.push({ cause: "column", priority: 2, polygon: rectangle(
+                column.collider.left, column.collider.right, column.collider.bottom, column.collider.top) });
         }
         features.push({ cause: "noc", priority: 1,
             polygon: rectangle(structure.noc.left, structure.noc.right, structure.noc.bottom, structure.noc.top) });
@@ -651,11 +651,11 @@ function prepareService(model, contactPose) {
         const proof = proveTemplate(template, provisionalProofContext(model, serviced, nextSite, contactPose));
         const award = proof.demonstratedMinimum * ratio;
         const sites = model.retainedSites.filter((site) => site.id !== contacted.id).concat(serviced, nextSite).sort((a, b) => a.id - b.id);
-        const fromLevel = model.legDepartureFuel > 0 ? clamp(model.fuel / model.legDepartureFuel, 0, 1) : 0;
-        const legDepartureFuel = model.fuel + award;
+        const fromLevel = model.fuelGaugeReference > 0 ? clamp(model.fuel / model.fuelGaugeReference, 0, 1) : 0;
+        const fuelGaugeReference = model.fuel + award;
         return {
             ...model, state: "landed", pose: checkpointPoseForContact(contacted, contactPose), commanded: { ...ZERO },
-            fuel: legDepartureFuel, legDepartureFuel, completedSites: model.completedSites + 1,
+            fuel: fuelGaugeReference, fuelGaugeReference, completedSites: model.completedSites + 1,
             refuelRatio: refuelRatioForBase(poweredBaseNumber + 1), generatorCursor: model.generatorCursor + 1,
             activeSiteId: contacted.id, targetSiteId: nextSite.id, targetRouteProof: proof,
             retainedSites: sites, touchdownPose: checkpointPoseForContact(contacted, contactPose), sequenceSeconds: 0,
@@ -722,12 +722,8 @@ export function stepFlight(model, requested, options = {}) {
         const serviced = prepareService(stepped, contact.pose);
         return model.reducedMotion ? advanceMissionSequence(serviced, 3.1, true) : serviced;
     }
-    const active = siteById(model, model.activeSiteId);
-    const target = siteById(model, model.targetSiteId);
-    const lowerBound = active ? active.center - 45 : -5;
-    const upperBound = target ? target.center + 65 : 101;
-    if (contact || result.pose.x < lowerBound || result.pose.x > upperBound || result.pose.y > MAX_PLAYABLE_Y) {
-        return beginCrash(stepped, contact?.cause ?? "bounds", contact?.pose ?? result.pose);
+    if (contact || result.pose.y > MAX_PLAYABLE_Y) {
+        return beginCrash(stepped, contact?.cause ?? "ceiling", contact?.pose ?? result.pose);
     }
     return stepped;
 }
@@ -738,7 +734,7 @@ function freezeCheckpoint(model) {
     }
     return freeze({ seed: model.seed, completedSites: model.completedSites, refuelRatio: model.refuelRatio,
         generatorCursor: model.generatorCursor, pose: { ...model.touchdownPose }, fuel: model.fuel,
-        legDepartureFuel: model.legDepartureFuel,
+        fuelGaugeReference: model.fuelGaugeReference,
         activeSiteId: model.activeSiteId, targetSiteId: model.targetSiteId, targetRouteProof: model.targetRouteProof,
         retainedChunks: [...model.retainedChunks], retainedSites: model.retainedSites.map((site) => ({ ...site })) });
 }
@@ -786,9 +782,9 @@ export function advanceMissionSequence(model, seconds, reducedMotion = model.red
             refuel: null, agent: { progress: 0 } };
     }
     if (model.state === "deploying") {
-        const progress = clamp(elapsed / 1.8, 0, 1);
-        if (elapsed < 1.8) return { ...model, sequenceSeconds: elapsed, agent: { progress } };
-        return { ...model, state: "powering", sequenceSeconds: elapsed - 1.8, agent: null };
+        const progress = clamp(elapsed / 0.9, 0, 1);
+        if (elapsed < 0.9) return { ...model, sequenceSeconds: elapsed, agent: { progress } };
+        return { ...model, state: "powering", sequenceSeconds: elapsed - 0.9, agent: null };
     }
     if (model.state === "powering") {
         const stage = Math.min(7, Math.floor((elapsed + 1e-12) / 0.2));
@@ -811,9 +807,8 @@ export function updateRetention(model) {
     const chunks = retainedChunkIndexes(cameraLeft);
     const sites = retainedSiteDescriptors(model.retainedSites, model.activeSiteId, model.targetSiteId);
     const retentionKey = `${chunks[0]}:${chunks.at(-1)}|${sites.map((site) => site.id).join(",")}`;
-    const terrainLeft = Math.min(chunks[0] * CHUNK_WIDTH, ...sites.map((site) => site.center - CHUNK_WIDTH));
-    const terrainRight = Math.max((chunks.at(-1) + 1) * CHUNK_WIDTH,
-        ...sites.map((site) => site.center + CHUNK_WIDTH));
+    const terrainLeft = chunks[0] * CHUNK_WIDTH;
+    const terrainRight = (chunks.at(-1) + 1) * CHUNK_WIDTH;
     const terrainVertices = retentionKey === model.retentionKey && model.terrainVertices ? model.terrainVertices :
         terrainVerticesForWindow(model.seed, sites, terrainLeft, terrainRight);
     return { ...model, retainedChunks: chunks, retainedSites: sites, retentionKey, terrainVertices };

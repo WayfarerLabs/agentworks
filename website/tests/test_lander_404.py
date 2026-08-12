@@ -96,10 +96,7 @@ def transformed_origin(
     point = [0.0, 0.0]
     functions = re.findall(r"([a-z]+)\(([^)]*)\)", transform)
     for name, source in reversed(functions):
-        values = [
-            float(value.removesuffix("px").removesuffix("deg"))
-            for value in re.split(r"[,\s]+", source.strip())
-        ]
+        values = [float(value.removesuffix("px").removesuffix("deg")) for value in re.split(r"[,\s]+", source.strip())]
         if name == "translate":
             point[0] += values[0]
             point[1] += values[1] if len(values) > 1 else 0
@@ -376,25 +373,32 @@ class StaticDocumentTests(unittest.TestCase):
         self.assertIn("#lander-start:focus-visible", self.css)
         self.assertIn("transform-origin: 82px 401px", self.css)
         self.assertIn("transform-origin: 158px 401px", self.css)
-        terrain = [attributes for _, attributes in self.document.tags
-                   if attributes.get("class") in {"terrain-fill", "terrain-surface"}]
+        terrain = [
+            attributes
+            for _, attributes in self.document.tags
+            if attributes.get("class") in {"terrain-fill", "terrain-surface"}
+        ]
         self.assertEqual([attributes["class"] for attributes in terrain], ["terrain-fill", "terrain-surface"])
         self.assertEqual(terrain[0]["stroke"], "none")
         self.assertTrue(terrain[0]["d"].endswith("Z"))
         self.assertEqual(terrain[1]["fill"], "none")
         self.assertNotRegex(terrain[1]["d"], r"[VZ]")
-        surface = [(float(x), float(y)) for x, y in
-                   re.findall(r"[ML](-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?)", terrain[1]["d"])]
+        surface = [
+            (float(x), float(y)) for x, y in re.findall(r"[ML](-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?)", terrain[1]["d"])
+        ]
         self.assertEqual((surface[0][0], surface[-1][0]), (0, 1000))
         self.assertIn((312, 476.1557689513639), surface)
-        self.assertIn((405, 498.9141328226309), surface)
+        self.assertIn((322, 478.78557641083376), surface)
+        self.assertIn((400, 499.29807459469885), surface)
+        self.assertIn((410, 498.530191050563), surface)
+        self.assertIn((488, 492.5406994063035), surface)
         self.assertIn((498, 491.77281586216765), surface)
         deck = next(attributes for _, attributes in self.document.tags if attributes.get("class") == "landing-platform")
         self.assertEqual(float(deck["y"]), 449)
         self.assertEqual(float(deck["y"]) + float(deck["height"]), 452.5)
         support = next(attributes for _, attributes in self.document.tags if attributes.get("class") == "site-scaffold")
         self.assertTrue(support["d"].startswith("M312 452.5H498M312 460H498"))
-        self.assertEqual(support["d"].count("M"), 17)
+        self.assertEqual(support["d"].count("M"), 51)
         self.assertNotIn("Z", support["d"])
         self.assertEqual(support["fill"], "none")
         self.assertEqual(support["stroke-linecap"], "butt")
@@ -453,9 +457,7 @@ class StaticDocumentTests(unittest.TestCase):
                     )
                     self.assertAlmostEqual(actual[0], origin[0])
                     self.assertAlmostEqual(actual[1], origin[1])
-        cue = self.css.split("@keyframes agw-preflight-cue {", 1)[1].split(
-            "@keyframes agw-target-cue", 1
-        )[0]
+        cue = self.css.split("@keyframes agw-preflight-cue {", 1)[1].split("@keyframes agw-target-cue", 1)[0]
         for transform in re.findall(r"transform:\s*([^;]+);", cue):
             for origin, _ in engines.values():
                 self.assertEqual(transformed_origin(transform, origin, {}), origin)

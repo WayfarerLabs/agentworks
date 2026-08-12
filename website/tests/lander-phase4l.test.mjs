@@ -14,7 +14,7 @@ import {
 import { controllerClasses, controllerFixture } from "./lander-test-dom.mjs";
 
 const ROOT = new URL("../", import.meta.url);
-const DERIVED_URL = new URL("fixtures/lander-route-derived-v3.json", import.meta.url);
+const DERIVED_URL = new URL("fixtures/lander-route-derived-v4.json", import.meta.url);
 
 function checkpointRun() {
     let model = createRun({ seed: 1, reducedMotion: true });
@@ -70,7 +70,7 @@ test("Phase 4L controls are exactly two ordered nonwrapping DOM lines with narro
     controller.destroy();
 });
 
-test("all canonical pylons render continuously from deck underside to fixture and collider feet", async () => {
+test("all canonical lattice columns render continuously from deck underside to independent feet", async () => {
     const derived = JSON.parse(await readFile(DERIVED_URL, "utf8"));
     for (const witness of derived.worldWitnesses) {
         for (const canonical of witness.descriptor.sites) {
@@ -78,24 +78,18 @@ test("all canonical pylons render continuously from deck underside to fixture an
                 platformLeft: canonical.platform.left, platformRight: canonical.platform.right,
                 platformTop: canonical.platform.top, platformBottom: canonical.platform.bottom };
             const structure = siteStructure(site);
-            const members = siteScaffoldMembers(site).slice(14);
-            const rendered = [...siteScaffoldPath(site).matchAll(/M(-?[\d.]+) (-?[\d.]+)V(-?[\d.]+)/g)]
-                .map((match) => match.slice(1).map(Number));
-            assert.equal(members.length, 3);
-            assert.equal(rendered.length, 3);
-            members.forEach(({ start, end }, index) => {
-                const fixturePylon = canonical.pylons[index];
-                const collider = structure.pylons[index].collider;
-                assert.deepEqual(start, [fixturePylon.x, canonical.platform.bottom]);
-                assert.notEqual(start[1], canonical.truss.bottom,
-                    "starting at the bottom chord is a rejected reassociation");
-                assert.deepEqual(end, [fixturePylon.x, fixturePylon.footY]);
-                assert.deepEqual(canonical.scaffoldMembers[index + 14],
-                    { cap: "butt", join: "round", start, end });
-                assert.deepEqual(rendered[index], [Number((start[0] * 10).toFixed(12)),
-                    548 - start[1] * 10, 548 - end[1] * 10]);
-                assert.equal(collider.top, start[1] + 0.1);
-                assert.equal(collider.bottom, end[1] - 0.1);
+            const members = siteScaffoldMembers(site);
+            assert.deepEqual(members, canonical.scaffoldMembers);
+            assert.equal((siteScaffoldPath(site).match(/M/g) ?? []).length, members.length);
+            assert.equal(structure.supportColumns.length, 3);
+            structure.supportColumns.forEach((column, index) => {
+                const fixtureColumn = canonical.supportColumns[index];
+                assert.deepEqual(column, fixtureColumn);
+                assert.equal(column.leftFoot, fixtureColumn.leftFoot);
+                assert.equal(column.rightFoot, fixtureColumn.rightFoot);
+                assert.equal(column.collider.top, canonical.platform.bottom + 0.1);
+                assert.equal(column.collider.bottom,
+                    Math.min(fixtureColumn.leftFoot, fixtureColumn.rightFoot) - 0.1);
             });
         }
     }

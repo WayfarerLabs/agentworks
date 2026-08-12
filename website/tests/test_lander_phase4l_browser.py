@@ -21,8 +21,7 @@ from lander_chromium_phase4k import (
 )
 from site_test_support import RepositoryFixture
 
-
-PROBE = r'''
+PROBE = r"""
 import { landerGameController as controller } from "/static/lander-game.js";
 import { createRun, stepFlight } from "/static/lander-model.js";
 
@@ -51,7 +50,7 @@ const checkpointRun = () => {
 const projection = (model) => ({
     state: model.state, seed: model.seed, completedSites: model.completedSites,
     refuelRatio: model.refuelRatio, generatorCursor: model.generatorCursor,
-    pose: structuredClone(model.pose), fuel: model.fuel, legDepartureFuel: model.legDepartureFuel,
+    pose: structuredClone(model.pose), fuel: model.fuel, fuelGaugeReference: model.fuelGaugeReference,
     activeSiteId: model.activeSiteId, targetSiteId: model.targetSiteId,
     targetRouteProof: structuredClone(model.targetRouteProof),
     retainedChunks: structuredClone(model.retainedChunks), retainedSites: structuredClone(model.retainedSites),
@@ -121,13 +120,12 @@ window.phase4l = {
     },
 };
 document.documentElement.dataset.phase4lReady = "true";
-'''
+"""
 
 
 def browser_phase4l_contract(output: Path) -> dict[str, object]:
     chromium = next(
-        (candidate for name in ("google-chrome", "chromium", "chromium-browser")
-         if (candidate := shutil.which(name))),
+        (candidate for name in ("google-chrome", "chromium", "chromium-browser") if (candidate := shutil.which(name))),
         None,
     )
     if chromium is None:
@@ -147,17 +145,35 @@ def browser_phase4l_contract(output: Path) -> dict[str, object]:
             encoding="utf-8",
         )
         thread.start()
-        process = subprocess.Popen((
-            chromium, "--headless", "--disable-gpu", "--no-sandbox", "--no-first-run",
-            "--no-default-browser-check", "--remote-allow-origins=*", "--remote-debugging-port=0",
-            f"--user-data-dir={profile.name}", "about:blank",
-        ), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env={**os.environ, "HOME": profile.name})
+        process = subprocess.Popen(
+            (
+                chromium,
+                "--headless",
+                "--disable-gpu",
+                "--no-sandbox",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--remote-allow-origins=*",
+                "--remote-debugging-port=0",
+                f"--user-data-dir={profile.name}",
+                "about:blank",
+            ),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env={**os.environ, "HOME": profile.name},
+        )
         connection = DevToolsConnection(_devtools_target(Path(profile.name), process))
         for domain in ("Runtime", "Page", "Accessibility"):
             connection.call(f"{domain}.enable")
-        connection.call("Emulation.setDeviceMetricsOverride", {
-            "width": 320, "height": 640, "deviceScaleFactor": 1, "mobile": False,
-        })
+        connection.call(
+            "Emulation.setDeviceMetricsOverride",
+            {
+                "width": 320,
+                "height": 640,
+                "deviceScaleFactor": 1,
+                "mobile": False,
+            },
+        )
         connection.call("Page.navigate", {"url": f"http://127.0.0.1:{server.server_address[1]}/lander/"})
         for _ in range(200):
             if connection.evaluate("document.documentElement.dataset.phase4lReady === 'true'"):
@@ -166,19 +182,31 @@ def browser_phase4l_contract(output: Path) -> dict[str, object]:
         else:
             raise AssertionError("Phase 4L browser probe did not initialize")
         result = {"narrow": connection.evaluate("phase4l.layout()")}
-        connection.call("Emulation.setDeviceMetricsOverride", {
-            "width": 320, "height": 900, "deviceScaleFactor": 4, "mobile": False,
-        })
+        connection.call(
+            "Emulation.setDeviceMetricsOverride",
+            {
+                "width": 320,
+                "height": 900,
+                "deviceScaleFactor": 4,
+                "mobile": False,
+            },
+        )
         result["zoomEquivalent"] = connection.evaluate("phase4l.layout()")
         retry_tree = connection.call("Accessibility.getFullAXTree")
-        hint_remote = connection.call("Runtime.evaluate", {
-            "expression": "phase4l.restart.lastElementChild",
-            "returnByValue": False,
-        })
-        hint_tree = connection.call("Accessibility.getPartialAXTree", {
-            "objectId": hint_remote["result"]["objectId"],
-            "fetchRelatives": False,
-        })
+        hint_remote = connection.call(
+            "Runtime.evaluate",
+            {
+                "expression": "phase4l.restart.lastElementChild",
+                "returnByValue": False,
+            },
+        )
+        hint_tree = connection.call(
+            "Accessibility.getPartialAXTree",
+            {
+                "objectId": hint_remote["result"]["objectId"],
+                "fetchRelatives": False,
+            },
+        )
         connection.evaluate("phase4l.restart.click()")
         result["clickRetry"] = connection.evaluate("phase4l.firstResult()")
         result["retryButtonNames"] = _button_names(retry_tree)
@@ -218,8 +246,7 @@ class Phase4LBrowserTests(RepositoryFixture):
                 self.assertTrue(all(line["rects"] == 1 for line in layout["lines"]))
                 self.assertTrue(all(line["display"] == "block" for line in layout["lines"]))
                 self.assertTrue(all(line["whiteSpace"] == "nowrap" for line in layout["lines"]))
-                for box in (*layout["lines"], layout["controls"], layout["rail"], layout["game"],
-                            layout["document"]):
+                for box in (*layout["lines"], layout["controls"], layout["rail"], layout["game"], layout["document"]):
                     self.assertLessEqual(box["scrollWidth"], box["clientWidth"])
                 self.assertGreaterEqual(layout["exit"]["top"], layout["controls"]["bottom"])
                 self.assertGreaterEqual(layout["exit"]["width"], 44)
@@ -233,17 +260,20 @@ class Phase4LBrowserTests(RepositoryFixture):
         self.assertEqual(click["order"], ["render", {"focus": {"preventScroll": True}}])
         self.assertEqual(click["retryClicks"], 1)
         retry = click["retry"]
-        self.assertEqual(retry["children"], [
-            {"tag": "span", "className": "lander-action-label"},
-            {"tag": "span", "className": "lander-key-hint"},
-        ])
+        self.assertEqual(
+            retry["children"],
+            [
+                {"tag": "span", "className": "lander-action-label"},
+                {"tag": "span", "className": "lander-key-hint"},
+            ],
+        )
         self.assertTrue(retry["label"])
         self.assertEqual(retry["labelRects"], 1)
         self.assertTrue(retry["hint"])
         self.assertEqual(retry["hintHidden"], "true")
         self.assertEqual(retry["shortcut"], "r")
         self.assertEqual(result["retryButtonNames"].count(retry["label"]), 1)
-        self.assertNotIn(f'{retry["label"]} {retry["hint"]}', result["retryButtonNames"])
+        self.assertNotIn(f"{retry['label']} {retry['hint']}", result["retryButtonNames"])
         self.assertTrue(result["retryHintAxIgnored"])
         self.assertTrue(all(result["retryHintAxIgnored"]))
         key = result["keyRetry"]

@@ -18,10 +18,10 @@ import { FakeElement, controllerClasses, controllerFixture } from "./lander-test
 
 const ROOT = new URL("../", import.meta.url);
 const EXPECTED_DIGESTS = Object.freeze({
-    geometryDigest: "2cc7b145dc516426d911f2f51f47cc374f0154905d8ddff00cc78e141de14195",
-    outputDigest: "239a33c5185638b34fd6015155af62f5a8f0583dc25c5804af185bcb8df548b9",
+    geometryDigest: "e65792f7719e9e721089401bc5ab49206a26082cfe41676a5dd291177a62699a",
+    outputDigest: "1dbdb4b2612d694ea89943fd6fcf6e041c752661007137319b66bd13981e7e08",
     physicsDigest: "34a7cb64a3457c4df028031968e7ef00fde56fc445db6af6ab89eb7b737f692e",
-    worldDigest: "c191e4ae97e6c86588a092d531bef1fc8a787bd57bd77405da416fff2c914995",
+    worldDigest: "24a3a06a7aa356d00bd4a91b7531196acbd5a040fd97cb6999e6a17d0440bc7e",
 });
 
 async function controllerAt(model = createRun({ seed: 1 })) {

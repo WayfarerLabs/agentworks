@@ -14,9 +14,10 @@ fallback in the complete built site. Record each execution so a future reader ca
 verified behavior from an expectation that has not been run.
 
 The continuous expedition materially replaces Phase 4C's one-shot mission. Its terrain, sites, fuel,
-route proofs, offscreen cue, checkpoint restart, vacuum crash, rolling retention, arcade fuel gauge,
-and installed-agent payoff require a new browser record. Older checked rows below remain historical
-evidence for their named source only; they do not accept the current game.
+route proofs, bidirectional cue and camera, parallax sky, checkpoint restart, vacuum crash, rolling
+retention, arcade fuel gauge, and installed-agent payoff require a new browser record. Older checked
+rows below remain historical evidence for their named source only; they do not accept the current
+game.
 
 The Phase 4L automated Chromium witness exercises the 320-by-640 layout and the 320-by-900 CSS-pixel
 reflow equivalent of a 1280-pixel viewport at 400 percent. It checks the two single-rect,
@@ -24,6 +25,13 @@ non-wrapping controls lines, rail and page overflow, native Retry click and in-s
 focus-without-scroll ordering, two consecutive exact checkpoint restores, and the pre-checkpoint
 initial restore. Run `python3 website/tests/test_lander_phase4l_browser.py`. This headless Chromium
 evidence is not a manual Chrome or Edge signoff; the corresponding manual rows remain unchecked.
+
+The Phase 4M automated Chromium witness exercises horizontal travel across both former world-edge
+coordinates, pass/reverse/return cue direction, negative and positive camera projection, exact
+24-percent sky parallax, bounded two-path sky reconstruction, the opening 15/30 half gauge, and an
+uncapped post-award full reference. Run
+`python3 -m unittest discover -s website/tests -p 'test_lander_phase4m_browser.py'`. It is automated
+projection evidence, not the qualitative or cross-engine signoff below.
 
 ## Arcade presentation acceptance
 
@@ -68,20 +76,36 @@ evidence is not a manual Chrome or Edge signoff; the corresponding manual rows r
 - [ ] Fly and safely service at least three sites across four visibly different coarse terrain
       motifs. Each target has one elevated H platform exactly three lander widths long, one gas can,
       and one solid NOC. Confirm native terrain remains visible beneath it, with one continuous
-      twelve-bay Warren truss and exactly three terrain-footed pylons, no internal closure stroke,
-      vertical artifact, filled backing face, or pale artifact. The can disappears once, fuel
-      increases once, the agent enters, the four battery bars fill red/orange/pale-yellow/mint from
-      bottom to top, the three signal arches power in order, and manual departure returns to
-      player-controlled flight.
-- [ ] Confirm the next site begins fully offscreen right after service. The solid arrow blinks only
-      while that target remains offscreen; it is static with reduced motion and has equivalent
+      twelve-bay Warren truss and exactly three one-metre lattice columns terminating at six
+      independent native-terrain feet, with no internal closure stroke, vertical artifact, filled
+      backing face, or pale artifact. The can disappears once, fuel increases once, the agent
+      enters, the four battery bars fill red/orange/pale-yellow/mint from bottom to top, the three
+      signal arches power in order, and manual departure returns to player-controlled flight.
+- [ ] Confirm the next site begins fully offscreen right after service. Pass it, reverse, and
+      return; the solid arrow changes right, left, then right and hides whenever any target edge is
+      visible. It blinks only while offscreen, is static with reduced motion, and has equivalent
       visually hidden direction text.
+- [ ] Fly through both former horizontal world-edge coordinates and continue beyond the target in
+      either direction. Confirm that neither position nor zero fuel causes a crash; collision,
+      excessive contact speed, and the vertical ceiling still do. The camera follows continuously
+      left and right without clamping or changing mission progress.
+- [ ] Watch the stars and occasional crescent or ringed planet while traversing and reversing. They
+      move with the landscape at visibly slower 24-percent parallax, never affect collision or
+      accessibility, and reconstruct without a pop when returning. Inspect the SVG and confirm one
+      sky group with exactly two paths, twenty stars, and one or two landmarks in its five chunks.
+- [ ] Start a fresh run and confirm the visual gauge is exactly half full for the 15/30 opening
+      reserve/reference. After service, confirm carried reserve is uncapped and becomes the full
+      reference. Time 0.9-second agent travel separately from the unchanged 0.3-second refuel and
+      1.4-second power sequence; hidden time freezes each and reduced motion completes atomically.
+- [ ] From every page footer, confirm the icon navigates directly to `/lander/` without adding a
+      fragment. Its nonempty accessibility label and hover title must match. Human-review the
+      current Lander heading, 404 explanation, and footer hover wording against the approved copy.
 - [ ] Confirm the visual fuel level drains smoothly without repetitive live announcements. Spend
       fuel on thrust, carry excess through multiple sites, and verify empty fuel produces no thrust.
-- [ ] Crash on terrain, a platform end or underside, the truss or any pylon envelope, the NOC, and
-      the mast. Normal motion shows one brief compact flash and exactly eight ballistic fragments
-      for 600 milliseconds, with no smoke, dust, sound, shake, or page movement. Reduced motion
-      reaches the same failed state with no moving debris.
+- [ ] Crash on terrain, a platform end or underside, the truss or any lattice-column envelope, the
+      NOC, and the mast. Normal motion shows one brief compact flash and exactly eight ballistic
+      fragments for 600 milliseconds, with no smoke, dust, sound, shake, or page movement. Reduced
+      motion reaches the same failed state with no moving debris.
 - [ ] Retry after crashes before and after a powered site. Before the first checkpoint, Retry
       restores the same seeded initial approach. Afterward, it starts on the last powered pad,
       relaunches using fuel, and never duplicates the can, award, progress, ratio, or power
@@ -400,14 +424,15 @@ new run records the refined source.
       powered success result. Changing it during flight does not alter physics.
 - [x] Retry, Escape, and reload each clear powered state. No mission state survives a new run or
       reload.
-- [ ] The vertical left gauge starts each leg full, drains relative to that leg's departure reserve,
-      fills linearly during the 300-millisecond award transfer, and restores exactly after restart.
+- [ ] The vertical left gauge starts the mission half full at 15/30; later legs start full against
+      their exact uncapped post-award reserve. It drains against that honest reference, fills
+      linearly during the 300-millisecond award transfer, and restores exactly after restart.
       Separate rounded hidden label and value spans form one ordered accessible description segment;
       neither is live or a meter, progress element, or output.
 - [ ] Every static and generated site uses one visibly open path containing two chords, twelve
-      alternating diagonals, and exactly three full-height pylons with butt caps and round joins.
-      The pylon feet independently meet native terrain; collision rejects the exact truss, pylon,
-      NOC, and mast envelopes.
+      alternating truss diagonals, and exactly three variable-height two-rail lattice columns with
+      ties, alternating braces, butt caps, and round joins. Six rail feet independently meet native
+      terrain; collision rejects the exact truss, three complete column, NOC, and mast envelopes.
 - [ ] Full steering uses visibly gimbaled 30-degree plumes and lower 0.8 total collective. Turn-only
       axial lift stays below gravity while vacuum coasting retains inertia.
 

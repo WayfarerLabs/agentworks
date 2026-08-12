@@ -11,6 +11,7 @@ import { FakeElement, controllerClasses, controllerFixture, descendantCount, foc
 import {
     ENGINE_ACCELERATION,
     MAX_THRUST_VECTOR,
+    MAX_PLAYABLE_Y,
     FAILURE_STATUS,
     FUEL_QUANTUM,
     REFERENCE_TEMPLATES,
@@ -196,13 +197,13 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
     const directory = await mkdtemp(join(tmpdir(), "agw-route-test-"));
     const output = join(directory, "routes.json");
     const tool = join(ROOT, "tools/derive_lander_routes.mjs");
-    const geometry = join(ROOT, "tests/fixtures/lander-route-geometry-v3.json");
-    const fixture = join(ROOT, "tests/fixtures/lander-route-derived-v3.json");
+    const geometry = join(ROOT, "tests/fixtures/lander-route-geometry-v4.json");
+    const fixture = join(ROOT, "tests/fixtures/lander-route-derived-v4.json");
     execFileSync(process.execPath, [tool, "--geometry", geometry, "--output", output, "--verify", fixture]);
     assert.equal(await readFile(output, "utf8"), await readFile(fixture, "utf8"));
     const derived = JSON.parse(await readFile(fixture, "utf8"));
-    assert.equal(derived.schema, "agw-lander-route-derived/v3");
-    assert.equal(derived.deriverVersion, "agw-lander-route-deriver/v4");
+    assert.equal(derived.schema, "agw-lander-route-derived/v4");
+    assert.equal(derived.deriverVersion, "agw-lander-route-deriver/v5");
     assert.equal(derived.recipeVersion, "agw-lander-route-recipes/v3");
     assert.equal(derived.canonicalPoseDecimals, 9);
     assert.deepEqual(REFERENCE_TEMPLATES, derived.routes);
@@ -213,10 +214,10 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
     const { outputDigest, ...unsignedDerived } = derived;
     assert.equal(digest(unsignedDerived), outputDigest);
     assert.equal(derived.worldWitnesses.length, 81);
-    assert.equal(derived.geometryDigest, "2cc7b145dc516426d911f2f51f47cc374f0154905d8ddff00cc78e141de14195");
+    assert.equal(derived.geometryDigest, "e65792f7719e9e721089401bc5ab49206a26082cfe41676a5dd291177a62699a");
     assert.equal(derived.physicsDigest, "34a7cb64a3457c4df028031968e7ef00fde56fc445db6af6ab89eb7b737f692e");
-    assert.equal(derived.worldDigest, "c191e4ae97e6c86588a092d531bef1fc8a787bd57bd77405da416fff2c914995");
-    assert.equal(derived.outputDigest, "239a33c5185638b34fd6015155af62f5a8f0583dc25c5804af185bcb8df548b9");
+    assert.equal(derived.worldDigest, "24a3a06a7aa356d00bd4a91b7531196acbd5a040fd97cb6999e6a17d0440bc7e");
+    assert.equal(derived.outputDigest, "1dbdb4b2612d694ea89943fd6fcf6e041c752661007137319b66bd13981e7e08");
     assert.equal(derived.routes.reduce((total, route) => total + route.combinationsEvaluated, 0), 36);
     assert.equal(derived.worldWitnesses.length * 2, 162);
     assert.equal(spawnSync(process.execPath, [tool, "--bogus"]).status, 2);
@@ -232,14 +233,14 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
     assert.equal(digest(derived.worldWitnesses), derived.worldDigest);
     assert.deepEqual([derived.worldWitnesses[0].digest, derived.worldWitnesses[40].digest,
         derived.worldWitnesses.at(-1).digest], [
-        "bcb4d8e6cc6cd3254a80da6bda1031a2c834fdc82d67c846126f001c746383fd",
-        "161880ca9701beb013e3fef779fd5f5dbc7960ef0d860015f23d6ae09796bf7d",
-        "a32153e10d3e428e2ec50b4e7618cb0f3361b6e2c1f9793887c5655c93d64576",
+        "23e9418a058592862b6daa53f82538f183836e14868097960ad5841a80759525",
+        "e6c485ea255e8b0e07ac815edb306b277aa12e58961553ea4345e0caa0d20454",
+        "68d229dd4764eb2734aeb4329d5d3592580dfbcc2427e266825998268dcdb880",
     ]);
     assert.ok(derived.worldWitnesses.some(({ descriptor }) => descriptor.vertices.some(([, value]) =>
         value !== Number(value.toFixed(derived.canonicalPoseDecimals)))));
-    assert.equal(derived.geometryDigest, "2cc7b145dc516426d911f2f51f47cc374f0154905d8ddff00cc78e141de14195");
-    assert.equal(derived.worldDigest, "c191e4ae97e6c86588a092d531bef1fc8a787bd57bd77405da416fff2c914995");
+    assert.equal(derived.geometryDigest, "e65792f7719e9e721089401bc5ab49206a26082cfe41676a5dd291177a62699a");
+    assert.equal(derived.worldDigest, "24a3a06a7aa356d00bd4a91b7531196acbd5a040fd97cb6999e6a17d0440bc7e");
     for (const witness of derived.worldWitnesses) {
         const { descriptor } = witness;
         const template = REFERENCE_TEMPLATES.find((candidate) => candidate.templateId === descriptor.templateId);
@@ -270,8 +271,8 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
             close(site.truss.bottom, site.platform.bottom - 0.85);
             close(site.truss.top, site.platform.bottom + 0.1);
             close(site.truss.right - site.truss.left, 18.8);
-            assert.equal(site.pylons.length, 3);
-            assert.equal(site.scaffoldMembers.length, 17);
+            assert.equal(site.supportColumns.length, 3);
+            assert.ok(site.scaffoldMembers.length >= 41 && site.scaffoldMembers.length <= 95);
             assert.deepEqual(siteScaffoldMembers({ seed: descriptor.seed,
                 platformLeft: site.platform.left, platformRight: site.platform.right,
                 platformTop: site.platform.top, platformBottom: site.platform.bottom }), site.scaffoldMembers);
@@ -367,18 +368,18 @@ test("independent derivation CLI reproduces canonical bytes and rejects misuse",
 
     const shiftedSiteSampleTool = join(directory, "shifted-site-sample.mjs");
     const shiftedSiteSampleSource = (await readFile(tool, "utf8")).replace(
-        "[left, left + 9.3, left + 9.6, left + 11.6, left + 18.6]",
-        "[left, left + 9.3, left + 9.6, left + 11.6, left + 18.5]",
+        "[left, left + 1, left + 8.8, left + 9.8, left + 17.6, left + 18.6]",
+        "[left, left + 1, left + 8.8, left + 9.8, left + 17.6, left + 18.5]",
     );
     assert.notEqual(shiftedSiteSampleSource, await readFile(tool, "utf8"));
     await writeFile(shiftedSiteSampleTool, shiftedSiteSampleSource, "utf8");
     assert.equal(spawnSync(process.execPath, [shiftedSiteSampleTool, "--geometry", geometry, "--output", output,
         "--verify", fixture]).status, 1);
 
-    const shortPylonTool = join(directory, "short-pylons.mjs");
+    const shortPylonTool = join(directory, "short-columns.mjs");
     const shortPylonSource = (await readFile(tool, "utf8")).replace(
-        "segment(pylon.x, top, pylon.x, pylon.footY)",
-        "segment(pylon.x, bottom, pylon.x, pylon.footY)",
+        "segment(column.left, top, column.left, column.leftFoot);",
+        "segment(column.left, bottom, column.left, column.leftFoot);",
     );
     assert.notEqual(shortPylonSource, await readFile(tool, "utf8"));
     await writeFile(shortPylonTool, shortPylonSource, "utf8");
@@ -709,7 +710,8 @@ test("live reduced-motion changes persist into crash behavior in both directions
     controller.model = createRun({ seed: 7, reducedMotion: false });
     controller.onMotionChange({ matches: true });
     assert.equal(controller.model.reducedMotion, true);
-    const impact = { ...controller.model, pose: { x: -4.99, y: 20, vx: -10, vy: 0, angle: 0, angularVelocity: 0 } };
+    const impact = { ...controller.model, pose: { x: 12, y: MAX_PLAYABLE_Y, vx: 0, vy: 10,
+        angle: 0, angularVelocity: 0 } };
     assert.equal(stepFlight(impact, { left: 0, right: 0 }).state, "failed");
     controller.model = createRun({ seed: 7, reducedMotion: true });
     controller.onMotionChange({ matches: false });
@@ -741,7 +743,7 @@ test("intermediate NOC battery stages project from model to the retained site DO
         vx: 0, vy: -1, angle: 0, angularVelocity: 0 } };
     model = stepFlight(model, { left: 0, right: 0 });
     model = advanceMissionSequence(model, 0.3);
-    model = advanceMissionSequence(model, 1.8);
+    model = advanceMissionSequence(model, 0.9);
     assert.equal(advanceMissionSequence(model, 0.199).nocStage, 0);
     assert.equal(advanceMissionSequence(model, 0.2).nocStage, 1);
     assert.equal(advanceMissionSequence(model, 0.4).nocStage, 2);
@@ -790,7 +792,7 @@ test("static and dynamic scaffold, battery, signal, and collider geometry stay i
     const left = active.platformLeft * 10; const right = active.platformRight * 10;
     const top = 548 - active.platformTop * 10; const bottom = 548 - active.platformBottom * 10;
     const structure = siteStructure(active);
-    assert.equal(support.attributes.get("d").match(/M/g)?.length, 17);
+    assert.equal(support.attributes.get("d").match(/M/g)?.length, 51);
     assert.doesNotMatch(support.attributes.get("d"), /Z/);
     const riserPose = { x: active.platformLeft, y: active.platformBottom - 0.4,
         vx: 0, vy: 0, angle: 180, angularVelocity: 0 };
@@ -816,7 +818,7 @@ test("static and dynamic scaffold, battery, signal, and collider geometry stay i
 
 test("vacuum crash has exactly eight deterministic fragments and finite duration", () => {
     let model = createRun({ seed: 7 });
-    model = { ...model, pose: { x: -4.99, y: 20, vx: -10, vy: 0, angle: 0, angularVelocity: 0 } };
+    model = { ...model, pose: { x: 30, y: 55.99, vx: 0, vy: 10, angle: 0, angularVelocity: 0 } };
     model = stepFlight(model, { left: 0, right: 0 });
     assert.equal(model.state, "crashing");
     assert.equal(model.crash.fragments.length, 8);
@@ -828,7 +830,7 @@ test("vacuum crash has exactly eight deterministic fragments and finite duration
 
 test("reduced motion crashes atomically with zero debris", () => {
     let model = createRun({ seed: 7, reducedMotion: true });
-    model = { ...model, pose: { x: -4.99, y: 20, vx: -10, vy: 0, angle: 0, angularVelocity: 0 } };
+    model = { ...model, pose: { x: 30, y: 55.99, vx: 0, vy: 10, angle: 0, angularVelocity: 0 } };
     model = stepFlight(model, { left: 0, right: 0 });
     assert.equal(model.state, "failed");
     assert.equal(model.crash, null);

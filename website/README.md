@@ -52,6 +52,7 @@ node --test website/tests/lander-phase4i.test.mjs
 node --test website/tests/lander-phase4j.test.mjs
 node --test website/tests/lander-phase4k.test.mjs
 node --test website/tests/lander-phase4l.test.mjs
+node --test website/tests/lander-phase4m.test.mjs
 ./scripts/lint-files.sh
 ./scripts/check-locked-sdds.sh
 ./scripts/rulesync-upgen.sh --check
@@ -90,11 +91,18 @@ native beneath every site. One strict-X terrain authority projects as one closed
 stroke and one open stroked surface, so retained-window boundaries cannot add internal closure
 strokes. Each 9.6 m deck uses the first clearing integer tier from 8.3, 9.1, or 9.9 m. A continuous
 18.6 m, 0.75 m-deep twelve-bay Warren truss reaches from the deck's left edge through the NOC's
-right edge. Three 0.2 m pylons independently reach native terrain at the left, center, and right
-support points. Exact closed colliders cover the truss and each pylon; the NOC begins at the deck
+right edge. Three one-metre, two-rail lattice columns extend from its underside to six independently
+interpolated native-terrain feet. Their ties and alternating braces use the truss member style.
+Exact closed colliders cover the truss and each complete column; the NOC begins at the deck
 underside. The NOC battery fills four colored bars bottom-to-top, then three symmetric signal arches
 power outward. These shapes, fills, and outlines preserve their meaning without relying on color
 alone.
+
+Flight has no horizontal world edge: the lander can pass a target or explore in either direction
+until it collides or crosses the vertical ceiling. The camera follows both directions with a stable
+dead zone, and the target cue switches sides from live viewport geometry. Five deterministic sky
+chunks supply twenty stars and one or two crescent or ringed-planet landmarks. That fixed two-path
+sky moves at 24 percent of terrain motion and reconstructs exactly after reversal.
 
 ## Artifact contract
 
@@ -119,21 +127,21 @@ This is the builder's only output shape. The manifest is explicit in `build.py`;
 recursively copies source directories or permits a generated local link outside the manifest.
 
 The game keeps its route catalog reviewable and independent from runtime generation. Geometry lives
-in `tests/fixtures/lander-route-geometry-v3.json`; it contains no schedule or fuel result.
+in `tests/fixtures/lander-route-geometry-v4.json`; it contains no schedule or fuel result.
 Regenerate to a temporary path and verify the reviewed fixture with:
 
 ```bash
 node website/tools/derive_lander_routes.mjs \
-  --geometry website/tests/fixtures/lander-route-geometry-v3.json \
-  --output /tmp/lander-route-derived-v3.json \
-  --verify website/tests/fixtures/lander-route-derived-v3.json
+  --geometry website/tests/fixtures/lander-route-geometry-v4.json \
+  --output /tmp/lander-route-derived-v4.json \
+  --verify website/tests/fixtures/lander-route-derived-v4.json
 ```
 
-The v4 deriver uses the v3 geometry schema and v3 recipe family, Node built-ins, versioned finite
-compact phase ranges, reachable keyboard commands, and independent copies of the physics, collision
-geometry, native terrain, strict-X projection, truss, pylons, NOC, and mast. Each template begins
-with the exact player-reachable `[1,90]` request and evaluates four candidates from two
-independently variable pre-contact ranges, for 36 total and well below the 256-per-template and
+The v5 deriver uses the v4 geometry schema and unchanged v3 recipe family, Node built-ins, versioned
+finite compact phase ranges, reachable keyboard commands, and independent copies of the physics,
+collision geometry, native terrain, strict-X projection, truss, lattice columns, NOC, and mast. Each
+template begins with the exact player-reachable `[1,90]` request and evaluates four candidates from
+two independently variable pre-contact ranges, for 36 total and well below the 256-per-template and
 2,304-total bounds. The comparator selects among materially distinct safe outcomes; no selected
 schedule is embedded phase-for-phase as its own verifier. Its reviewed output contains all nine
 routes and 81 ordered world descriptors. Verification also replays each selected success and
@@ -141,7 +149,7 @@ one-quantum failure across all nine worlds, for 162 selected replays. A successf
 classified using the raw replay. Only its reviewed success and exhaustion pose components are
 serialized to nine decimal places, keeping native trigonometric last-bit variation out of the
 canonical fixture while remaining inside the runtime proof tolerance. World descriptors retain their
-exact unrounded values. A deliberate route or world change updates the ranges, reviewed v3 fixture,
+exact unrounded values. A deliberate route or world change updates the ranges, reviewed v4 fixture,
 copied production literals, and all four digests atomically. Runtime code performs exactly the
 successful and one-quantum-smaller proof replays for the directly selected literal. It never imports
 the tool, scans fuel allowances, or plans a route in the browser.
@@ -155,15 +163,17 @@ constant-time ratio `1 + 0.5 ** (n - 1)`. Runtime number precision reaches exact
 remains 1 through base 100. Exit and reload discard the in-memory run; crash Retry restores the last
 powered pad without recollecting fuel or advancing progress.
 
-The left vertical gauge is visual-only. Its bottom-up height and bright danger-red, caution-amber,
-or ready-green indicator independently project fuel against the exact reserve at the start of the
-current leg. Visually hidden, ordinary, non-live label and value spans expose the fuel relationship
-as two ordered scene-description references; the label names the separate rounded value. Exact model
-fuel remains unrounded and uncapped. Normal motion projects the collected can toward the gauge and
-raises the fill linearly over the model-owned 300 ms refuel interval. Reduced motion, or enabling
-reduced motion mid-refuel, exposes the same committed fuel and checkpoint atomically without a
-transfer. Hiding the document freezes model time, while resize and the first visible frame project
-the same progress again from current stage and gauge rectangles.
+The left vertical gauge is visual-only. A new run starts with 15 units against an honest 30-unit
+reference, so its fill begins exactly half full. After each award, the uncapped carried reserve
+becomes the next leg's reference. Its bottom-up height and bright danger-red, caution-amber, or
+ready-green indicator independently project fuel against that reference. Visually hidden, ordinary,
+non-live label and value spans expose the fuel relationship as two ordered scene-description
+references; the label names the separate rounded value. Exact model fuel remains unrounded and
+uncapped. Normal motion projects the collected can toward the gauge and raises the fill linearly
+over the model-owned 300 ms refuel interval. Reduced motion, or enabling reduced motion mid-refuel,
+exposes the same committed fuel and checkpoint atomically without a transfer. Hiding the document
+freezes model time, while resize and the first visible frame project the same progress again from
+current stage and gauge rectangles.
 
 The sole status live region presents centered bordered `Agent Deployed!` and `Crashed!` arcade
 panels. A failure-only native Retry follows the status inside that outcome; a persistent native Exit
@@ -183,8 +193,9 @@ At the first NOC power stage, the existing doorway path becomes the installed-ag
 adding a site node or mutable world field. It stays installed whenever that retained site is
 powered, including later legs, crash, checkpoint restoration, and restart. After all four battery
 and three signal stages complete, `Agent Deployed!` remains visible while the lander waits on the
-pad without spending fuel. Depart through the ordinary keyboard, vi, pointer, or touch flight
-controls.
+pad without spending fuel. Normal deployment travel takes 0.9 seconds; the existing 0.3-second
+refuel and 1.4-second power sequence remain independent. Depart through the ordinary keyboard, vi,
+pointer, or touch flight controls.
 
 All three CLI paths are required. The output must be outside the repository. The site base is an
 ASCII, slash-bounded same-origin path such as `/` or `/agentworks/`; absolute URLs, dot segments,

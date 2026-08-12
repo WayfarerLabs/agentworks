@@ -370,7 +370,7 @@ class GeneratedDocumentTests(RepositoryFixture):
                     site_builder.PYPI_URL,
                     "/manifesto/",
                     "/security/",
-                    "/lander/#lander-game",
+                    "/lander/",
                 ):
                     self.assertEqual(hrefs.count(destination), 1)
                 currents = [tag for tag in document.tags("span") if tag.get("aria-current") == "page"]
@@ -393,16 +393,11 @@ class GeneratedDocumentTests(RepositoryFixture):
                 self.assertEqual(self.pages[name].count(">Agentworks Manifesto</a>"), 1)
                 self.assertEqual(self.pages[name].count(">We take security seriously</a>"), 1)
                 game_links = [tag for tag in document.tags("a") if tag.get("class") == "footer-game-link"]
-                self.assertEqual(
-                    game_links,
-                    [
-                        {
-                            "class": "footer-game-link",
-                            "href": "/lander/#lander-game",
-                            "aria-label": "Play Lunar Lander",
-                        }
-                    ],
-                )
+                self.assertEqual(len(game_links), 1)
+                game_link = game_links[0]
+                self.assertEqual(game_link.get("href"), "/lander/")
+                self.assertTrue(game_link.get("aria-label"))
+                self.assertEqual(game_link.get("title"), game_link.get("aria-label"))
                 game_marks = [image for image in document.tags("img") if image.get("class") == "footer-game-mark"]
                 self.assertEqual(len(game_marks), 1)
                 self.assertEqual(game_marks[0].get("alt"), "")
@@ -421,6 +416,7 @@ class GeneratedDocumentTests(RepositoryFixture):
                 self.assertEqual(rendered.blocks, expected_blocks)
                 self.assertEqual(rendered.links, expected_links)
                 self.assertFalse(self.documents[name].tags("script"))
+
     def test_long_form_contents_navigation_matches_source_h2_h3_structure(self) -> None:
         pages = {
             "manifesto": site_builder.MANIFESTO_CONTRACT,

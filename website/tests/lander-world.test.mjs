@@ -16,7 +16,8 @@ import {
     siteScaffoldMembers,
     siteScaffoldPath,
     siteStructure,
-    targetIsOffscreen,
+    skyProjectionForCamera,
+    targetDirectionForViewport,
     terrainFillPath,
     terrainHeightFromVertices,
     terrainHeightAt,
@@ -25,7 +26,7 @@ import {
     terrainVerticesForWindow,
 } from "../static/lander-world.js";
 
-const GEOMETRY_URL = new URL("fixtures/lander-route-geometry-v3.json", import.meta.url);
+const GEOMETRY_URL = new URL("fixtures/lander-route-geometry-v4.json", import.meta.url);
 const TEMPLATE_URL = new URL("../templates/lander-game.html", import.meta.url);
 
 function canonical(value) {
@@ -49,12 +50,14 @@ test("native terrain is retained beneath every site with strict x authority", as
     assert.ok(vertices.every((point, index) => index === 0 || vertices[index - 1][0] < point[0]));
     for (const site of [origin, target]) {
         const structure = siteStructure(site);
-        for (const x of [site.platformLeft, site.platformLeft + 9.3, site.platformLeft + 9.6,
-            site.platformLeft + 11.6, site.platformLeft + 18.6]) {
+        for (const x of [site.platformLeft, site.platformLeft + 1, site.platformLeft + 8.8,
+            site.platformLeft + 9.6, site.platformLeft + 9.8, site.platformLeft + 11.6,
+            site.platformLeft + 17.6, site.platformLeft + 18.6]) {
             assert.ok(vertices.some(([candidate]) => candidate === x), `missing native site sample ${x}`);
         }
-        for (const { center } of structure.pylons) {
-            close(terrainHeightFromVertices(vertices, center), terrainHeightAt(STATIC_WORLD_SEED, center));
+        for (const column of structure.supportColumns) {
+            close(terrainHeightFromVertices(vertices, column.left), column.leftFoot);
+            close(terrainHeightFromVertices(vertices, column.right), column.rightFoot);
         }
     }
 });
@@ -115,63 +118,73 @@ test("integer deck tiers terminate exactly through one hundred sites for all wit
     }
 });
 
-test("site has one twelve-bay Warren truss and three independently footed pylons", () => {
+test("site has one twelve-bay Warren truss and three independently footed lattice columns", () => {
     const site = createFirstSite(STATIC_WORLD_SEED);
     const structure = siteStructure(site);
     const members = siteScaffoldMembers(site);
-    assert.equal(members.length, 17);
+    assert.ok(members.length >= 41 && members.length <= 95);
     assert.deepEqual(members.slice(0, 2).map(({ start, end }) => [start, end]), [
         [[site.platformLeft, site.platformBottom], [structure.buildingRight, site.platformBottom]],
         [[site.platformLeft, structure.trussBottom], [structure.buildingRight, structure.trussBottom]],
     ]);
     assert.equal(members.slice(2, 14).length, 12);
-    assert.deepEqual(structure.pylons.map(({ center }) => center),
-        [site.platformLeft, site.platformLeft + 9.3, structure.buildingRight]);
-    structure.pylons.forEach((pylon) => close(pylon.foot, terrainHeightAt(site.seed, pylon.center)));
+    assert.deepEqual(structure.supportColumns.map(({ left, right }) => [left, right]), [
+        [site.platformLeft, site.platformLeft + 1],
+        [site.platformLeft + 8.8, site.platformLeft + 9.8],
+        [site.platformLeft + 17.6, structure.buildingRight],
+    ]);
     assert.deepEqual(structure.truss, {
         bottom: site.platformBottom - 0.85,
         left: site.platformLeft - 0.1,
         right: structure.buildingRight + 0.1,
         top: site.platformBottom + 0.1,
     });
-    const pylons = members.slice(14);
-    assert.equal(pylons.length, 3);
-    pylons.forEach(({ start, end }, index) => {
-        const pylon = structure.pylons[index];
-        assert.deepEqual(start, [pylon.center, site.platformBottom]);
-        assert.notEqual(start[1], structure.trussBottom,
-            "a pylon must pass through the bottom chord from the deck underside");
-        assert.deepEqual(end, [pylon.center, pylon.foot]);
-        assert.equal(pylon.collider.top, start[1] + 0.1);
-        assert.equal(pylon.collider.bottom, end[1] - 0.1);
-    });
+    let memberIndex = 14;
+    for (const column of structure.supportColumns) {
+        const columnMembers = members.slice(memberIndex, memberIndex + 3 + 2 * column.bayCount);
+        memberIndex += columnMembers.length;
+        assert.deepEqual(columnMembers[0], { cap: "butt", join: "round",
+            start: [column.left, site.platformBottom], end: [column.left, column.leftFoot] });
+        assert.deepEqual(columnMembers[1], { cap: "butt", join: "round",
+            start: [column.right, site.platformBottom], end: [column.right, column.rightFoot] });
+        assert.ok(column.levels.slice(1).every((level, index) => column.levels[index] > level));
+        assert.ok(column.levels.slice(1).every((level, index) => column.levels[index] - level <= 0.8 + 1e-12));
+        assert.equal(column.collider.left, column.left - 0.1);
+        assert.equal(column.collider.right, column.right + 0.1);
+        assert.equal(column.collider.bottom, Math.min(column.leftFoot, column.rightFoot) - 0.1);
+    }
+    assert.equal(memberIndex, members.length);
     const path = siteScaffoldPath(site);
-    assert.equal(path.match(/M/g)?.length, 17);
+    assert.equal(path.match(/M/g)?.length, members.length);
     assert.doesNotMatch(path, /Z/);
-    const renderedPylons = [...path.matchAll(/M(-?[\d.]+) (-?[\d.]+)V(-?[\d.]+)/g)].map((match) =>
-        match.slice(1).map(Number));
-    assert.deepEqual(renderedPylons, pylons.map(({ start, end }) =>
-        [Number((start[0] * 10).toFixed(12)), 548 - start[1] * 10, 548 - end[1] * 10]));
 });
 
 test("camera and rolling retention stay bounded", () => {
     const site = createFirstSite(STATIC_WORLD_SEED);
     assert.equal(cameraLeftForPose({ x: 34 }), 0);
     assert.equal(cameraLeftForPose({ x: 80 }), 45);
+    assert.equal(cameraLeftForPose({ x: -20 }), -25);
     assert.equal(CHUNK_WIDTH, 50);
     assert.ok(retainedChunkIndexes(45).length <= 5);
     assert.ok(retainedSiteDescriptors([site], 0, 0).length <= 3);
-    assert.equal(targetIsOffscreen({ platformLeft: 200 }, 0), true);
+    assert.equal(targetDirectionForViewport({ platformLeft: 200, platformRight: 210 }, 0), "right");
+    assert.equal(targetDirectionForViewport({ platformLeft: -20, platformRight: -10 }, 0), "left");
+    assert.equal(targetDirectionForViewport({ platformLeft: 99, platformRight: 110 }, 0), null);
+    const sky = skyProjectionForCamera(STATIC_WORLD_SEED, 0);
+    assert.equal(sky.chunks.length, 5);
+    assert.equal((sky.starsPath.match(/h2/g) ?? []).length, 20);
+    assert.ok((sky.landmarksPath.match(/M/g) ?? []).length >= 1);
 });
 
-test("geometry-v3 fixture is independent and has the approved canonical digest", async () => {
+test("geometry-v4 fixture is independent and has the approved canonical digest", async () => {
     const text = await readFile(GEOMETRY_URL, "utf8");
     const geometry = JSON.parse(text);
-    assert.equal(geometry.schema, "agw-lander-route-geometry/v3");
+    assert.equal(geometry.schema, "agw-lander-route-geometry/v4");
     assert.equal(geometry.templates.length, 9);
     assert.equal(geometry.siteGeometry.truss.bayCount, 12);
-    assert.deepEqual(geometry.siteGeometry.pylons.positions, [0, 9.3, 18.6]);
+    assert.deepEqual(geometry.siteGeometry.supportColumns.railPairOffsets,
+        [[0, 1], [8.8, 9.8], [17.6, 18.6]]);
     assert.ok(!text.includes('"runs"'));
     assert.equal(createHash("sha256").update(JSON.stringify(canonical(geometry))).digest("hex"),
-        "2cc7b145dc516426d911f2f51f47cc374f0154905d8ddff00cc78e141de14195");
+        "e65792f7719e9e721089401bc5ab49206a26082cfe41676a5dd291177a62699a");
 });

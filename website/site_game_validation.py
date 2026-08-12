@@ -14,7 +14,9 @@ EXPECTED_GAME_IDS = frozenset(
         "lander-scene-title",
         "lander-scene-description",
         "scene-sky",
+        "lander-sky-world",
         "scene-stars",
+        "scene-landmarks",
         "lander-world",
         "terrain-layer",
         "site-layer",
@@ -135,7 +137,9 @@ def validate_game_contract(template: str) -> None:
         "lander-scene-title": "title",
         "lander-scene-description": "desc",
         "scene-sky": "rect",
+        "lander-sky-world": "g",
         "scene-stars": "path",
+        "scene-landmarks": "path",
         "lander-world": "g",
         "terrain-layer": "g",
         "site-layer": "g",
@@ -241,28 +245,49 @@ def validate_game_contract(template: str) -> None:
         raise ValueError("lander-game.html: exactly one live region is required")
     if any(tag in {"meter", "output", "progress"} for tag, _ in parser.tags):
         raise ValueError("lander-game.html: duplicate semantic fuel authorities are forbidden")
-    stage_positions = [template.index(f'id="{identifier}"') for identifier in
-                       ("lander-scene-stage", "lander-scene", "lander-start", "lander-fuel",
-                        "lander-target-direction", "lander-outcome", "lander-status", "lander-restart",
-                        "lander-controls-rail", "lander-controls", "lander-exit")]
+    stage_positions = [
+        template.index(f'id="{identifier}"')
+        for identifier in (
+            "lander-scene-stage",
+            "lander-scene",
+            "lander-start",
+            "lander-fuel",
+            "lander-target-direction",
+            "lander-outcome",
+            "lander-status",
+            "lander-restart",
+            "lander-controls-rail",
+            "lander-controls",
+            "lander-exit",
+        )
+    ]
     if stage_positions != sorted(stage_positions):
         raise ValueError("lander-game.html: stage, outcome, Restart, and controls rail order is invalid")
     expected_children = {
         "lander-game": ["lander-scene-shell"],
         "lander-scene-shell": ["lander-scene-stage", "lander-controls-rail"],
-        "lander-scene-stage": ["lander-scene", "lander-start", "lander-fuel",
-                               "lander-target-direction", "lander-outcome"],
+        "lander-scene-stage": [
+            "lander-scene",
+            "lander-start",
+            "lander-fuel",
+            "lander-target-direction",
+            "lander-outcome",
+        ],
         "lander-outcome": ["lander-status", "lander-restart"],
         "lander-controls-rail": ["lander-controls", "lander-exit"],
     }
     for parent, identifiers in expected_children.items():
         children = _children(parser, parent)
         parent_index = parser.id_indexes[parent]
-        if (
-            [attributes.get("id") for _, attributes in children] != identifiers
-            or any(parser.parent_indexes[parser.id_indexes[identifier]] != parent_index for identifier in identifiers)
+        if [attributes.get("id") for _, attributes in children] != identifiers or any(
+            parser.parent_indexes[parser.id_indexes[identifier]] != parent_index for identifier in identifiers
         ):
             raise ValueError(f"lander-game.html: #{parent} immediate child structure is invalid")
+    sky_children = _children(parser, "lander-sky-world")
+    if _one(parser, "lander-sky-world")[1] != {"id": "lander-sky-world", "aria-hidden": "true"} or [
+        attributes.get("id") for _, attributes in sky_children
+    ] != ["scene-stars", "scene-landmarks"]:
+        raise ValueError("lander-game.html: bounded decorative sky structure is invalid")
     if _children(parser, "lander-status"):
         raise ValueError("lander-game.html: status must contain direct prose only")
     control_lines = _children(parser, "lander-controls")
@@ -277,8 +302,7 @@ def validate_game_contract(template: str) -> None:
     for child in parser.children[controls_index]:
         if parser.children[child] or not _nonempty("".join(parser.direct_text[child])):
             raise ValueError("lander-game.html: each controls line must be one nonempty text source")
-    for identifier in ("lander-scene-title", "lander-scene-description", "lander-fuel-label",
-                       "lander-fuel-value"):
+    for identifier in ("lander-scene-title", "lander-scene-description", "lander-fuel-label", "lander-fuel-value"):
         index = parser.id_indexes[identifier]
         if parser.children[index] or not _nonempty("".join(parser.direct_text[index])):
             raise ValueError(f"lander-game.html: #{identifier} must be a nonempty direct text source")
@@ -322,13 +346,14 @@ def validate_game_contract(template: str) -> None:
         raise ValueError("lander-game.html: terrain requires one fill and one surface path")
     fill_tag, fill = terrain_children[0]
     surface_tag, surface = terrain_children[1]
+    fill_path = fill.get("d") or ""
     if (
         fill_tag != "path"
         or fill.get("class") != "terrain-fill"
         or fill.get("fill") != "#d7d2c4"
         or fill.get("stroke") != "none"
-        or not (fill.get("d") or "").endswith("Z")
-        or fill.get("d", "").count(" 648") != 2
+        or not fill_path.endswith("Z")
+        or fill_path.count(" 648") != 2
     ):
         raise ValueError("lander-game.html: terrain fill closure contract is invalid")
     surface_path = surface.get("d") or ""
@@ -345,15 +370,21 @@ def validate_game_contract(template: str) -> None:
     ):
         raise ValueError("lander-game.html: open terrain surface contract is invalid")
     scaffold = [attributes for _, attributes in parser.tags if attributes.get("class") == "site-scaffold"]
-    scaffold_contract = {"fill": "none", "stroke": "#4b4e55", "stroke-width": "2",
-                         "stroke-linecap": "butt", "stroke-linejoin": "round"}
-    if len(scaffold) != 1 or any(scaffold[0].get(key) != value for key, value in scaffold_contract.items()) or not (
-        scaffold[0].get("d") or ""
-    ).startswith("M312 452.5H498M312 460H498M312 452.5L327.5 460") or (
-        scaffold[0].get("d") or ""
-    ).count("M") != 17 or "Z" in (scaffold[0].get("d") or "") or not (
-        scaffold[0].get("d") or ""
-    ).endswith("M312 452.5V476.1557689513639M405 452.5V498.9141328226309M498 452.5V491.77281586216765"):
+    scaffold_contract = {
+        "fill": "none",
+        "stroke": "#4b4e55",
+        "stroke-width": "2",
+        "stroke-linecap": "butt",
+        "stroke-linejoin": "round",
+    }
+    if (
+        len(scaffold) != 1
+        or any(scaffold[0].get(key) != value for key, value in scaffold_contract.items())
+        or not (scaffold[0].get("d") or "").startswith("M312 452.5H498M312 460H498M312 452.5L327.5 460")
+        or (scaffold[0].get("d") or "").count("M") != 51
+        or "Z" in (scaffold[0].get("d") or "")
+        or not (scaffold[0].get("d") or "").endswith("M488 484.5L498 491.77281586216765")
+    ):
         raise ValueError("lander-game.html: static open scaffold geometry is invalid")
     battery_contract = (
         '<rect x="452" y="393" width="22" height="40" />',

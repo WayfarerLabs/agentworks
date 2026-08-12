@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { readFile, rename, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-const DERIVER_VERSION = "agw-lander-route-deriver/v4";
+const DERIVER_VERSION = "agw-lander-route-deriver/v5";
 const RECIPE_VERSION = "agw-lander-route-recipes/v3";
 const REPLAY_POSE_DECIMAL_PLACES = 9;
 export const MAX_RECIPE_COMBINATIONS = 256;
@@ -53,13 +53,17 @@ const EXPECTED_SITE_GEOMETRY = Object.freeze({
     member: { cap: "butt", join: "round", width: 0.2 },
     noc: { mastHeight: 3.2, mastWidth: 0.5, roofOffset: 7.2, width: 7 },
     platform: { clearance: 2.4, deckTiers: [8.3, 9.1, 9.9], thickness: 0.35, width: 9.6 },
-    pylons: {
+    supportColumns: {
+        alternation: "top-left-to-bottom-right-first",
+        bayMaximum: { height: 0.8, width: 1 },
+        bottomTie: "max-rail-foot",
         collisionExpansion: 0.1,
         count: 3,
-        foot: "native-terrain-interpolation",
-        positions: [0, 9.3, 18.6],
+        feet: "independent-native-terrain-interpolation",
+        railPairOffsets: [[0, 1], [8.8, 9.8], [17.6, 18.6]],
+        railTieBraceWidth: 0.2,
+        terrainWedgeMaximum: { height: 0.7, width: 1 },
         top: "platform-bottom",
-        width: 0.2,
     },
     truss: {
         alternation: "top-left-to-bottom-right-first",
@@ -68,10 +72,7 @@ const EXPECTED_SITE_GEOMETRY = Object.freeze({
         bayWidth: 1.55,
         chordCount: 2,
         collisionEnvelope: { bottom: -1.2, left: -4.9, right: 13.9, top: -0.25 },
-        clearApertures: {
-            half: { count: 4, diagonalSquared: 2.965, height: 0.75, width: 1.55 },
-            full: { count: 10, diagonalSquared: 10.1725, height: 0.75, width: 3.1 },
-        },
+        clearApertureMaximum: { diameter: 3.189435684729195, height: 0.75, width: 3.1 },
         diagonalsPerBay: 1,
         span: 18.6,
     },
@@ -390,7 +391,7 @@ function constructWorld(geometry, trial) {
     for (const descriptor of [origin, target]) {
         const left = descriptor.center - PLATFORM_WIDTH / 2;
         const right = left + 18.6;
-        xs.add(left); xs.add(left + 9.3); xs.add(left + 9.6); xs.add(left + 11.6); xs.add(right);
+        for (const offset of [0, 1, 8.8, 9.6, 9.8, 11.6, 17.6, 18.6]) xs.add(left + offset);
     }
     const corridorSamples = [];
     const vertices = [...xs].sort((a,b) => a-b).map((x) => {
@@ -432,7 +433,20 @@ function siteSolids(world) {
             const bottom = top - PLATFORM_THICKNESS;
             const buildingLeft = right + 2; const roof = top + 7.2;
             const trussTop = bottom; const trussBottom = trussTop - 0.75;
-            const pylonXs = [left, left + 9.3, buildingLeft + 7];
+            const supportColumns = [[0,1],[8.8,9.8],[17.6,18.6]].map(([leftOffset,rightOffset], index) => {
+                const railLeft = left + leftOffset; const railRight = left + rightOffset;
+                const leftFoot = terrainHeightAt(world.seed, railLeft);
+                const rightFoot = terrainHeightAt(world.seed, railRight);
+                const latticeFloor = Math.max(leftFoot, rightFoot);
+                const bayCount = Math.ceil((bottom - latticeFloor) / 0.8);
+                const levels = Array.from({length:bayCount+1}, (_, levelIndex) =>
+                    Math.max(latticeFloor, bottom - 0.8 * levelIndex))
+                    .filter((level, levelIndex, values) => levelIndex === 0 || level !== values[levelIndex - 1]);
+                return { bayCount, index, latticeFloor, left: railLeft, leftFoot, levels,
+                    right: railRight, rightFoot,
+                    collider: { bottom: Math.min(leftFoot,rightFoot)-0.1, left: railLeft-0.1,
+                        right: railRight+0.1, top: bottom+0.1 } };
+            });
             return {
                 deckLevel: isOrigin ? world.origin.deckLevel : world.target.deckLevel,
                 isOrigin,
@@ -440,9 +454,7 @@ function siteSolids(world) {
                 noc: { bottom, left: buildingLeft, right: buildingLeft + 7, top: roof },
                 platform: { bottom, left, right, top },
                 minimumDeckTop: isOrigin ? world.origin.minimumDeckTop : world.target.minimumDeckTop,
-                pylons: pylonXs.map((x, index) => ({ bottom: terrainHeightAt(world.seed, x) - 0.1,
-                    index, left: x - 0.1, right: x + 0.1, top: trussTop + 0.1, x,
-                    footY: terrainHeightAt(world.seed, x) })),
+                supportColumns,
                 truss: { bottom: trussBottom - 0.1, left: left - 0.1,
                     right: buildingLeft + 7.1, top: trussTop + 0.1 },
             };
@@ -463,8 +475,8 @@ function solidSegments(world, ignoreOriginTop) {
             [{x:right,y:bottom},{x:right,y:top}]);
         segments.push(...rectangleSegments(site.truss.left,site.truss.right,
             site.truss.bottom,site.truss.top));
-        for (const pylon of site.pylons) segments.push(...rectangleSegments(
-            pylon.left,pylon.right,pylon.bottom,pylon.top));
+        for (const column of site.supportColumns) segments.push(...rectangleSegments(
+            column.collider.left,column.collider.right,column.collider.bottom,column.collider.top));
         segments.push(...rectangleSegments(site.noc.left,site.noc.right,site.noc.bottom,site.noc.top));
         segments.push(...rectangleSegments(site.mast.left,site.mast.right,site.mast.bottom,site.mast.top));
     }
@@ -484,7 +496,16 @@ function scaffoldMembers(site) {
         if (bay % 2 === 0) segment(x1, top, x2, bottom);
         else segment(x1, bottom, x2, top);
     }
-    for (const pylon of site.pylons) segment(pylon.x, top, pylon.x, pylon.footY);
+    for (const column of site.supportColumns) {
+        segment(column.left, top, column.left, column.leftFoot);
+        segment(column.right, top, column.right, column.rightFoot);
+        for (const level of column.levels) segment(column.left, level, column.right, level);
+        for (let bay = 0; bay < column.levels.length - 1; bay += 1) {
+            const upper = column.levels[bay]; const lower = column.levels[bay + 1];
+            if (bay % 2 === 0) segment(column.left, upper, column.right, lower);
+            else segment(column.right, upper, column.left, lower);
+        }
+    }
     return segments;
 }
 
@@ -493,7 +514,7 @@ function worldWitness(geometry, trial) {
     const selection = motifSelection(world.seed);
     const insertedSiteSamples = [world.origin, world.target].map((site) => {
         const left = site.center - PLATFORM_WIDTH / 2;
-        return [left, left + 9.3, left + 9.6, left + 11.6, left + 18.6]
+        return [left, left + 1, left + 8.8, left + 9.8, left + 17.6, left + 18.6]
             .map((x) => [x, terrainHeightAt(world.seed, x)]);
     });
     const descriptor = {
@@ -509,8 +530,10 @@ function worldWitness(geometry, trial) {
         seed: world.seed,
         sites: siteSolids(world).map((site) => ({ ...site,
             clearApertures: {
-                trussFull: { count: 10, diagonalSquared: 10.1725, triangleBase: 3.1, triangleHeight: 0.75 },
-                trussHalf: { count: 4, diagonalSquared: 2.965, triangleBase: 1.55, triangleHeight: 0.75 },
+                actualMaximumConnectedFace: { diameter: 3.189435684729195, height: 0.75, width: 3.1 },
+                latticeBay: { diameter: Math.hypot(1, 0.8), height: 0.8, width: 1 },
+                terrainWedge: { diameter: Math.hypot(1, 0.7), height: 0.7, width: 1 },
+                truss: { diameter: 3.189435684729195, height: 0.75, width: 3.1 },
             },
             scaffoldMembers: scaffoldMembers(site),
         })),
@@ -825,7 +848,7 @@ async function main() {
     }
     try {
         const geometry = JSON.parse(await readFile(options.geometry, "utf8"));
-        if (geometry.schema !== "agw-lander-route-geometry/v3" || geometry.templates.length !== 9 ||
+        if (geometry.schema !== "agw-lander-route-geometry/v4" || geometry.templates.length !== 9 ||
             canonicalBytes(geometry.siteGeometry) !== canonicalBytes(EXPECTED_SITE_GEOMETRY)) {
             throw new Error("Unsupported or incomplete geometry fixture");
         }
@@ -843,7 +866,7 @@ async function main() {
             physicsDigest: digest({ commands: COMMANDS, constants: CONSTANTS }),
             recipeVersion: RECIPE_VERSION,
             routes,
-            schema: "agw-lander-route-derived/v3",
+            schema: "agw-lander-route-derived/v4",
             worldDigest: digest(worldWitnesses),
             worldWitnesses,
         };
