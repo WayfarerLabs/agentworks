@@ -96,14 +96,14 @@ def backup_directory(database_path: Path) -> Path:
 
 
 def _connect_ro(uri: str, *, timeout: float | None) -> sqlite3.Connection:
-    """Open a read-only SQLite URI connection, passing `timeout` through
+    """Open a read-only SQLite URI connection, passing ``timeout`` through
     only when the caller supplies one.
 
-    Omitting the keyword entirely, rather than passing `timeout=None`
-    through to `sqlite3.connect`, is what leaves the driver's own
+    Omitting the keyword entirely, rather than passing ``timeout=None``
+    through to ``sqlite3.connect``, is what leaves the driver's own
     multi-second default wait untouched for callers that do not opt into a
-    bound; `sqlite3.connect`'s `timeout` parameter has no `None` meaning of
-    its own, so this can't be collapsed into a single call.
+    bound; ``sqlite3.connect``'s ``timeout`` parameter has no ``None``
+    meaning of its own, so this can't be collapsed into a single call.
     """
     if timeout is not None:
         return sqlite3.connect(uri, uri=True, timeout=timeout)

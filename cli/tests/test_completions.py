@@ -1050,7 +1050,7 @@ def test_marker_probe_refuses_stale_database_for_every_dynamic_path_without_side
         check=False,
     )
 
-    assert completed.returncode != 0
+    assert completed.returncode == 1
     assert completed.stdout == ""
     assert completed.stderr == ""
     _assert_no_committed_writes(config_dir, database_path, before)
@@ -1110,7 +1110,7 @@ def test_shell_wrapped_probe_consumes_empty_stdout_when_config_is_invalid(tmp_pa
         check=False,
     )
 
-    assert completed.returncode != 0
+    assert completed.returncode == 1
     assert completed.stdout == ""
     assert completed.stderr == ""
     assert {entry.name: entry.read_bytes() for entry in config_dir.iterdir()} == before
