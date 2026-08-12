@@ -81,11 +81,12 @@ lander-game.js  -> lander-model.js -> lander-world.js
 
 `lander-game.js` imports the model API plus only the pure `cameraLeftForPose`, `CHUNK_WIDTH`,
 `mixUint32`, `siteScaffoldPath`, `siteStructure`, `skyProjectionForCamera`,
-`targetDirectionForViewport`, `terrainFillPath`, `terrainSurfacePath`, and `terrainVerticesForRange`
-exports directly from `lander-world.js`. `lander-model.js` imports pure world construction,
-retention, seed, and geometry exports. `lander-world.js` imports neither production module, reads no
-DOM, clock, storage, or ambient randomness, and owns no mutable singleton. No production module
-imports upward or sideways outside this DAG.
+`skyProjectionIdentityForCamera`, `targetDirectionForViewport`, `terrainFillPath`,
+`terrainSurfacePath`, and `terrainVerticesForRange` exports directly from `lander-world.js`.
+`lander-model.js` imports pure world construction, retention, seed, and geometry exports.
+`lander-world.js` imports neither production module, reads no DOM, clock, storage, or ambient
+randomness, and owns no mutable singleton. No production module imports upward or sideways outside
+this DAG.
 
 The model is the sole mutable run authority. One run aggregate owns physics, fuel, mission state,
 seed, generator cursor, retained sites, active and target IDs, route proof, checkpoint, and crash
@@ -1179,22 +1180,25 @@ the derivation ordering treats the lower identical command index as canonical.
 
 ### 10.2 Independent derivation tool
 
-Keep `website/tools/derive_lander_routes.mjs` permanently. It uses only Node built-ins and must not
-import production or test code; runtime, model, and tests must not import it. Version
-`agw-lander-route-deriver/v5` with recipes `agw-lander-route-recipes/v3` independently implements
-sections 5.2-5.3, 8, 9, and the reachable command table, including the motif-bank traversal, true
-gimbal force, and neutral-collective assist. Its versioned per-template constructive recipes give
-command phase order and finite integer step ranges. Export `MAX_RECIPE_COMBINATIONS=256`. Each final
-recipe's explicit range Cartesian product contains exactly four lexicographically ordered
-combinations. `256` per template and `2,304` over nine templates are hard ceilings, not declared or
-evaluated family sizes. The complete ordinary run evaluates exactly `9*4=36` candidates. The derived
-fixture pins each route's exact integer `combinationsEvaluated=4`; that value must equal the
-recipe's independently recomputed Cartesian-product size rather than a loop counter chosen after
-success. Derivation evaluates the whole declared family, records that literal, and chooses by
-`(burn,totalSteps,RLE lexicographic)`, failing rather than emitting an incomplete route. Every
-candidate must be safe in all nine pinned seed/translation combinations per template. There is no
-early-success exit, undisclosed candidate, beam, search heuristic, random retry, envelope
-relaxation, or runtime fallback.
+Keep `website/tools/derive_lander_routes.mjs` and its pure sibling
+`website/tools/lander_clear_faces.mjs` permanently. The deriver uses Node built-ins plus that
+sibling only; neither tool imports production or test code, and runtime, model, and tests must not
+import either tool. The sibling independently splits the rendered-member and terrain overlay into
+bounded faces and returns the maximum connected clear-face witness; it owns no route,
+world-generation, or fixture literals. Version `agw-lander-route-deriver/v5` with recipes
+`agw-lander-route-recipes/v3` independently implements sections 5.2-5.3, 8, 9, and the reachable
+command table, including the motif-bank traversal, true gimbal force, and neutral-collective assist.
+Its versioned per-template constructive recipes give command phase order and finite integer step
+ranges. Export `MAX_RECIPE_COMBINATIONS=256`. Each final recipe's explicit range Cartesian product
+contains exactly four lexicographically ordered combinations. `256` per template and `2,304` over
+nine templates are hard ceilings, not declared or evaluated family sizes. The complete ordinary run
+evaluates exactly `9*4=36` candidates. The derived fixture pins each route's exact integer
+`combinationsEvaluated=4`; that value must equal the recipe's independently recomputed
+Cartesian-product size rather than a loop counter chosen after success. Derivation evaluates the
+whole declared family, records that literal, and chooses by `(burn,totalSteps,RLE lexicographic)`,
+failing rather than emitting an incomplete route. Every candidate must be safe in all nine pinned
+seed/translation combinations per template. There is no early-success exit, undisclosed candidate,
+beam, search heuristic, random retry, envelope relaxation, or runtime fallback.
 
 Every tool and production replay begins at the same launch-ready centered pose with both launch
 booleans false. It rejects a schedule whose first request total is at most `.375`, applies the first
