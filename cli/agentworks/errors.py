@@ -102,8 +102,12 @@ class DatabaseBusyError(StateError):
 
     Distinct from other StateErrors because it is transient: retrying once
     the other connection finishes is expected to succeed, unlike a durable
-    state problem such as a malformed schema. Catch separately from
-    StateError wherever that distinction matters to the caller.
+    state problem such as a malformed schema. Today's sole user is
+    inspect_schema's classification (the writable path and
+    Database.check_schema); the state database can still refuse as busy
+    through plain StateError (the migration lock) or BackupError
+    (_raise_sqlite_error) too, so this type alone is not yet a complete
+    busy taxonomy.
     """
 
 

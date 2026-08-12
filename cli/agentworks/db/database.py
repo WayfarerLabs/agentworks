@@ -159,15 +159,11 @@ class Database:
         caller (`agw doctor`) to display.
         """
         db_path = path or _db.DB_PATH
-        from agentworks.db.backup import SchemaState, inspect_schema
-        from agentworks.errors import DatabaseBusyError, StateError
+        from agentworks.db.backup import SchemaState, _raise_if_busy, inspect_schema
+        from agentworks.errors import StateError
 
         inspection = inspect_schema(db_path)
-        if inspection.state is SchemaState.BUSY:
-            raise DatabaseBusyError(
-                inspection.error_message or "state database is busy",
-                hint="Retry after the other database user finishes.",
-            )
+        _raise_if_busy(inspection)
         if inspection.state is SchemaState.MALFORMED:
             raise StateError(inspection.error_message or "state database schema is unavailable or malformed")
         return (

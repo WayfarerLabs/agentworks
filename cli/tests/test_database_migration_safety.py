@@ -9,7 +9,9 @@ import queue
 import sqlite3
 import stat
 import time
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -64,6 +66,20 @@ def _version(path: Path) -> int:
     version = int(connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0])
     connection.close()
     return version
+
+
+@contextmanager
+def held_exclusive_lock(path: Path) -> Iterator[None]:
+    """Hold BEGIN EXCLUSIVE on `path` for the with-block's duration,
+    blocking every other reader and writer. Used to synthesize a busy
+    database for tests."""
+    locker = sqlite3.connect(path)
+    locker.execute("BEGIN EXCLUSIVE")
+    try:
+        yield
+    finally:
+        locker.rollback()
+        locker.close()
 
 
 def _serialized_open_worker(
@@ -213,16 +229,11 @@ def test_inspection_matrix_is_non_migrating_and_wal_aware(tmp_path: Path) -> Non
     assert inspect_schema(current).state is SchemaState.FUTURE
     writer.close()
 
-    locker = sqlite3.connect(busy)
-    locker.execute("BEGIN EXCLUSIVE")
-    try:
+    with held_exclusive_lock(busy):
         # A short explicit bound keeps this fast; a later test calls
         # inspect_schema with no completion-specific timeout, which retains
         # the driver-default wait.
         assert inspect_schema(busy, timeout=0.1).state is SchemaState.BUSY
-    finally:
-        locker.rollback()
-        locker.close()
 
 
 def test_prepare_database_open_raises_a_distinct_busy_error_and_recovers_once_lock_clears(
@@ -246,9 +257,7 @@ def test_prepare_database_open_raises_a_distinct_busy_error_and_recovers_once_lo
     path = tmp_path / "state.db"
     _build_schema(path, LATEST_VERSION)
 
-    locker = sqlite3.connect(path)
-    locker.execute("BEGIN EXCLUSIVE")
-    try:
+    with held_exclusive_lock(path):
         # A short explicit-timeout probe is a faithful proxy for what
         # prepare_database_open's own call, with no completion-specific
         # timeout, sees next: SQLite's busy/locked error code (and
@@ -257,9 +266,6 @@ def test_prepare_database_open_raises_a_distinct_busy_error_and_recovers_once_lo
         assert inspect_schema(path, timeout=0.1).state is SchemaState.BUSY
         with pytest.raises(DatabaseBusyError) as raised:
             prepare_database_open(path)
-    finally:
-        locker.rollback()
-        locker.close()
 
     assert raised.value.hint is not None
 
@@ -284,15 +290,10 @@ def test_check_schema_raises_a_distinct_busy_error_with_a_hint(tmp_path: Path) -
     path = tmp_path / "state.db"
     _build_schema(path, LATEST_VERSION)
 
-    locker = sqlite3.connect(path)
-    locker.execute("BEGIN EXCLUSIVE")
-    try:
+    with held_exclusive_lock(path):
         assert inspect_schema(path, timeout=0.1).state is SchemaState.BUSY
         with pytest.raises(DatabaseBusyError) as raised:
             Database.check_schema(path)
-    finally:
-        locker.rollback()
-        locker.close()
 
     assert raised.value.hint is not None
 
@@ -314,13 +315,8 @@ def test_doctor_check_database_preserves_the_busy_hint(tmp_path: Path, monkeypat
     _build_schema(path, LATEST_VERSION)
     monkeypatch.setattr(db_module, "DB_PATH", path)
 
-    locker = sqlite3.connect(path)
-    locker.execute("BEGIN EXCLUSIVE")
-    try:
+    with held_exclusive_lock(path):
         check = check_database().checks[0]
-    finally:
-        locker.rollback()
-        locker.close()
 
     assert check.status is Status.FAIL
     assert check.hint is not None
@@ -334,14 +330,9 @@ def test_completion_open_returns_none_for_a_busy_database_not_just_malformed_one
     path = tmp_path / "state.db"
     _build_schema(path, LATEST_VERSION)
 
-    locker = sqlite3.connect(path)
-    locker.execute("BEGIN EXCLUSIVE")
-    try:
+    with held_exclusive_lock(path):
         assert inspect_schema(path, timeout=0.1).state is SchemaState.BUSY
         assert open_completion_database(path) is None
-    finally:
-        locker.rollback()
-        locker.close()
 
 
 def test_prepare_qualifies_stale_state_under_restrictive_persistent_lock(tmp_path: Path) -> None:
@@ -855,15 +846,10 @@ def test_completion_open_fails_fast_under_a_held_exclusive_lock(tmp_path: Path) 
     path = tmp_path / "state.db"
     _build_schema(path, LATEST_VERSION)
 
-    locker = sqlite3.connect(path)
-    locker.execute("BEGIN EXCLUSIVE")
-    try:
+    with held_exclusive_lock(path):
         start = time.monotonic()
         completion_database = open_completion_database(path)
         elapsed = time.monotonic() - start
-    finally:
-        locker.rollback()
-        locker.close()
 
     assert completion_database is None
     # Real headroom over the 0.1s connection timeout, far below the driver's
@@ -892,15 +878,10 @@ def test_completion_open_returns_none_when_construction_hits_a_held_lock(
 
     monkeypatch.setattr(backup_module, "inspect_schema", _fake_current)
 
-    locker = sqlite3.connect(path)
-    locker.execute("BEGIN EXCLUSIVE")
-    try:
+    with held_exclusive_lock(path):
         start = time.monotonic()
         completion_database = open_completion_database(path)
         elapsed = time.monotonic() - start
-    finally:
-        locker.rollback()
-        locker.close()
 
     assert completion_database is None
     assert elapsed < 2.0

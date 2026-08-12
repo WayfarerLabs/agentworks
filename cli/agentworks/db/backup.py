@@ -346,6 +346,22 @@ def render_restore_command(backup_path: Path, *, platform: str | None = None) ->
     return f"agw database restore {argument}"
 
 
+def _raise_if_busy(inspection: SchemaInspection) -> None:
+    """Raise DatabaseBusyError with its message and hint if BUSY; no-op
+    otherwise. Shared so the two independent BUSY raise sites
+    (_raise_if_unopenable below and Database.check_schema) do not each
+    carry their own copy of the message default and hint string; each site
+    still decides for itself whether to call this, so either can be
+    reverted to its own pre-DatabaseBusyError shape without touching the
+    other.
+    """
+    if inspection.state is SchemaState.BUSY:
+        raise DatabaseBusyError(
+            inspection.error_message or "state database is busy",
+            hint="Retry after the other database user finishes.",
+        )
+
+
 def _raise_if_unopenable(inspection: SchemaInspection) -> None:
     if inspection.state is SchemaState.FUTURE:
         raise StateError(
@@ -353,11 +369,7 @@ def _raise_if_unopenable(inspection: SchemaInspection) -> None:
             f"Agentworks release supports ({inspection.latest_version})",
             hint="Preserve it with `agw database backup`, then use a release that understands its schema.",
         )
-    if inspection.state is SchemaState.BUSY:
-        raise DatabaseBusyError(
-            inspection.error_message or "state database is busy",
-            hint="Retry after the other database user finishes.",
-        )
+    _raise_if_busy(inspection)
     if inspection.state is SchemaState.MALFORMED:
         raise StateError(
             inspection.error_message or "state database schema is unavailable or malformed",
