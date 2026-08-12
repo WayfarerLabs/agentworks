@@ -65,6 +65,25 @@ test("unavailable clipboard keeps the enhancement hidden and explains manual cop
     assert.ok(current.status.textContent.length > 0);
 });
 
+test("copy outcomes expose distinct status states", async () => {
+    const success = fixture();
+    await copyPrompt(success.prompt, success.status, { async writeText() {} });
+
+    const failure = fixture();
+    await copyPrompt(failure.prompt, failure.status, {
+        async writeText() {
+            throw new Error("clipboard denied");
+        },
+    });
+
+    const manual = fixture();
+    initializeCopy(manual.documentObject, undefined);
+
+    const statuses = [success.status.textContent, failure.status.textContent, manual.status.textContent];
+    assert.ok(statuses.every(Boolean));
+    assert.equal(new Set(statuses).size, statuses.length);
+});
+
 test("missing optional enhancement elements fail safely", () => {
     assert.doesNotThrow(() => initializeCopy({ getElementById() {} }, { writeText() {} }));
 });

@@ -112,6 +112,7 @@ def test_release_topic_and_version_mapping_is_strict() -> None:
 
 def test_exact_historical_topics_are_core_derived_and_complete_offline() -> None:
     response = render_guide((), GuideMode.AGENT, names_only=True, load_config_fn=_broken)
+    render_guide((version_topic("0.2.1"),), GuideMode.AGENT, load_config_fn=_broken)
 
     expected_topics = tuple(version_topic(version) for version in EXPECTED_RELEASES)
     assert all(f"{topic}\n" in response.markdown for topic in expected_topics)

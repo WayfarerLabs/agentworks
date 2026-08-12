@@ -524,6 +524,9 @@ with no branch-only dependency, duplicated bootstrap, or website-owned continuin
 - [x] Run focused tests, full CI-equivalent gates, locked-SDD checks, and file-quality lint.
 - [x] `agentworks-reviewer` and a fresh-eyes reviewer inspect content identity, accessibility,
       migration cleanliness, and scope; resolve valid findings and re-review.
+- [x] Apply the operator's 2026-08-12 prose-test simplification: remove the website-owned semantic
+      phrase guard while retaining canonical byte identity, DOM structure, copy behavior, and
+      accessibility coverage. Authored bootstrap wording remains review-owned.
 - [ ] Open the integration PR ready for review, triage Copilot comments, request the saga lead's
       review, resolve all valid findings, and hand the reviewed PR to the operator for merge.
 - [ ] Verify the matching commit deploys automatically to production and that the interim notice is

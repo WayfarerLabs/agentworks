@@ -213,7 +213,7 @@ def test_first_resource_actions_require_successful_caller_owned_doctor_proof(
     assert assessment.action_ids == expected_actions
 
 
-def test_shared_doctor_record_truthfully_covers_readiness_proof_and_resource_diagnosis() -> None:
+def test_shared_doctor_record_covers_readiness_proof_and_resource_diagnosis() -> None:
     first_resource = assess_onboarding(_snapshot(_fact("workspace-template", "ready")))
     diagnosis = assess_onboarding(
         _snapshot(
@@ -225,11 +225,6 @@ def test_shared_doctor_record_truthfully_covers_readiness_proof_and_resource_dia
     assert first_resource.action_ids == (ActionId("run-doctor"),)
     assert ActionId("run-doctor") in diagnosis.action_ids
     assert first_resource.actions[0] == next(action for action in diagnosis.actions if action.id == "run-doctor")
-    action = first_resource.actions[0]
-    assert "First-resource creation needs explicit configured-readiness proof" in action.precondition
-    assert "a projected resource is not ready" in action.precondition
-    assert "Keep first-resource readiness unverified" in action.refusal_alternative
-    assert "retain the stored not-ready reason" in action.refusal_alternative
 
 
 @pytest.mark.parametrize("available", [False, True])
