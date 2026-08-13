@@ -326,14 +326,18 @@ decorative opening the lander could appear able to traverse. A safe landing unde
 modestly relaxed speed and attitude limits consumes that site's one gas can exactly once. The fuel
 award is computed only after the next site exists: a deterministic reference plan starts at the
 post-refuel, post-power platform checkpoint, includes the pinned player-reachable launch prefix,
-uses the same immutable physics profile as play, and demonstrates a safe next landing to establish
-its conservative minimum fuel. The award is that minimum multiplied by the refuel ratio
+uses the same immutable physics profile as play, and demonstrates a safe next landing within a
+deterministic sufficient allowance. That allowance is an independently certified conservative base
+plus one third of positive platform-height gain, rounded upward to the existing fuel quantum;
+descents receive no negative credit. The award is that allowance multiplied by the refuel ratio
 `1 + 0.5^(n-1)`, where `n` is the one-indexed number of the base just powered. The sequence begins
 `2, 1.5, 1.25, 1.125` and mathematically approaches one from above in constant time. Its binary
 runtime projection never falls below one and may round to exactly one when the remaining bonus is
 smaller than representable precision. The award is added to the carried reserve without erasing
-unused fuel. Fixed-seed tests pin both the route proof and the smallest successful allowance within
-the LLD's search resolution.
+unused fuel. Exhaustive finite geometry classes and independent runtime replay pin the route proof,
+allowance upper bound, and quantum rounding. The sufficient allowance is not described or tested as
+the smallest successful reserve, and the reference plan does not waste fuel to force a
+one-quantum-smaller failure.
 
 After refueling, the G opening acts as a deployment bay: a small terminal-inspired agent reaches the
 surface and enters the single NOC in half the Phase 4L travel time. The later battery and signal

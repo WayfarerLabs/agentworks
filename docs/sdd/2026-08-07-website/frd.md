@@ -173,14 +173,18 @@ recorded as a growth path so nothing forecloses it, and none of it is in scope n
 - R22. After each safe landing, the next site is deterministically placed beyond the right edge of
   the current view. A visible edge arrow points toward that target from either side while it remains
   offscreen and hides once the site enters view; under reduced motion it remains a static direction
-  cue. Before issuing the departing site's gas can, the game calculates a conservative minimum fuel
-  requirement for a demonstrated reference flight to the generated next platform. The can adds that
-  requirement multiplied by the **refuel ratio** `1 + 0.5^(n-1)`, where `n` is the one-indexed
-  number of the base just powered. The first base therefore uses `2`, followed by `1.5`, `1.25`,
-  `1.125`, and a mathematically monotonic approach to one from above. The runtime's binary-number
-  projection never falls below one and may round to exactly one once the remaining bonus is below
-  representable precision. Unused fuel carries forward and is never discarded merely because another
-  site was completed.
+  cue. Before issuing the departing site's gas can, the game calculates a deterministic sufficient
+  fuel allowance for a certified reference flight to the generated next platform. The allowance is
+  an independently derived conservative base plus the positive platform-height difference divided by
+  three, rounded upward to the existing fuel quantum; descending platforms receive no negative
+  credit. The can adds that allowance multiplied by the **refuel ratio** `1 + 0.5^(n-1)`, where `n`
+  is the one-indexed number of the base just powered. The first base therefore uses `2`, followed by
+  `1.5`, `1.25`, `1.125`, and a mathematically monotonic approach to one from above. The runtime's
+  binary-number projection never falls below one and may round to exactly one once the remaining
+  bonus is below representable precision. Unused fuel carries forward and is never discarded merely
+  because another site was completed. The sufficient allowance is not represented as the smallest
+  successful reserve, and the reference plan does not waste fuel to manufacture a
+  one-quantum-smaller failure.
 - R23. Unsafe terrain, platform, or building contact produces a brief vacuum-appropriate crash: a
   compact propellant flash and ballistic fragments, with no smoke cloud, atmospheric shock wave,
   sustained fireball, audio, or page movement. Reduced motion skips fragment travel and exposes the
@@ -392,11 +396,12 @@ merged and settled on `main`. The first slice must not build toward them specula
   visible collision-backed supports reach from that structure to the independently interpolated
   terrain at its left, center, and right, without separate brace fields, an uninterrupted
   sky-colored rectangle beneath it, or a visual opening that contradicts collision. Each award
-  equals the next route's deterministic demonstrated minimum multiplied by the refuel ratio
+  equals the next route's deterministic sufficient allowance multiplied by the refuel ratio
   `1 + 0.5^(n-1)` for one-indexed powered-base number `n`, beginning at `2` and approaching one
   without crossing it. A test-controlled reference flight reaches and safely lands on every
-  representative generated next platform using no more than the calculated minimum; a
-  one-step-smaller tested allowance cannot complete that same reference plan.
+  representative generated next platform using no more than the calculated allowance. Independent
+  arithmetic tests pin upward fuel-quantum rounding and exact exhaustion behavior without asserting
+  that one quantum less than a deliberately conservative allowance must make the route fail.
 - AC23. While the next site is outside the viewport, a visible cue points toward it from the
   corresponding left or right edge and blinks only when motion is allowed and the document is
   active. It becomes static under reduced motion, pauses while hidden, reverses correctly when the
@@ -489,12 +494,12 @@ merged and settled on `main`. The first slice must not build toward them specula
   compute the maximum native height beneath the closed platform-to-NOC footprint and prove exact
   `deck=max+2.5 m` equality. Every support foot equals the native terrain at its own horizontal
   coordinate and every rendered member stays within its conservative collider. Forward/reverse
-  generation, canonical success and one-quantum failure proofs, collision/render parity, static
-  recovery, Retry, and 100-site retention remain deterministic and bounded. Real-browser evidence at
-  wide, 320 CSS pixel, 400-percent-equivalent short-height, and touch-landscape viewport sizes
-  proves the fixed `25/16` scene, zero vertical transform, and equality of document client and
-  scroll heights throughout preflight, flight, service, crash, Retry, reversal, and Exit. Operator
-  hands-on acceptance of the actual terrain is required before closeout.
+  generation, canonical sufficient-allowance route proofs, collision/render parity, static recovery,
+  Retry, and 100-site retention remain deterministic and bounded. Real-browser evidence at wide, 320
+  CSS pixel, 400-percent-equivalent short-height, and touch-landscape viewport sizes proves the
+  fixed `25/16` scene, zero vertical transform, and equality of document client and scroll heights
+  throughout preflight, flight, service, crash, Retry, reversal, and Exit. Operator hands-on
+  acceptance of the actual terrain is required before closeout.
 
 ## Settled implementation rulings
 
