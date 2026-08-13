@@ -90,9 +90,10 @@ locked.
       assistance body is the only source
 - [ ] Simplification and trail-sign phase (operator rulings, 2026-08-12; see `target-state.md`):
       `agw guide` becomes a trail sign, the walkthrough moves to a dedicated onboarding topic, and
-      the track's accumulated tech debt is simplified. Runs first in the pre-0.14 sequence, ahead of
-      the grammar rewrite. This modifies the effort's own SDD; the effort lead owns that revision,
-      including whether its remaining phases still hold as planned
+      the track's accumulated tech debt is simplified. Runs alongside the pre-0.14 serial spine
+      rather than ahead of it (see `phasing.md`), split by boundary: this effort owns guide content,
+      the simplification pass owns guide machinery. This modifies the effort's own SDD; the effort
+      lead owns that revision, including whether its remaining phases still hold as planned
 - [ ] Remaining phases (bootstraps including the README bootstrap that gates 0.14, wave 2 adoption,
       closeout) per the effort's per-phase PR plan
 - [ ] Locked
@@ -171,16 +172,23 @@ item shrinks to a verification sweep.
 - [x] Seeded by the effort lead (findings, FRD, HLA, plan, migration strategy; PR #509 in draft
       artifact review). The first draft was a 35-item coordinated program, cut by operator direction
       to three steps: rule adjustment, deletion waves, reassess
-- [x] Prose-test-purge child absorbed (operator, 2026-08-12): that seed FRD is superseded in place
-      and its directory locked before any work began; its survey and guardrails carry forward into
-      this effort's wave 1 deletion charter
+- [ ] Prose-test-purge child absorbed (operator, 2026-08-12). The supersession header and the
+      directory lock are written but not yet on `main`; they ride PR #509. This box checks when that
+      lands. The seed FRD's survey and guardrails carry forward into this effort's wave 1 deletion
+      charter
 - [ ] Wave 0: establish that always-on rules reach the agents they bind (issue #511) before adding
       criteria to them, then land the trust-boundary and authored-artifact amendments. Moved into
-      wave 0 by operator direction (2026-08-13) from a file-it-and-defer posture; all fourteen rules
-      declare `globs: ["**/*"]`, which Rulesync emits as Claude `paths:`, so the lazy-delivery
-      finding applies to every rule rather than to any one of them
-- [ ] Wave 1: eight independent deletion PRs, unordered by design, each judged locally and green on
-      the full suite
+      wave 0 by operator direction (2026-08-13) from a file-it-and-defer posture. The delivery
+      question is repo-wide rather than per-rule: of the 18 files in `.rulesync/rules/`, `root.md`
+      projects to `CLAUDE.md` and four `always-consider-*` carry no frontmatter, so those five
+      always load; thirteen project as Claude `paths:`, and since `cli-conventions.md` is narrowly
+      scoped by design, **twelve always-on rules are delivered path-conditionally**, among them
+      `operator-authority`, `github-input-trust`, `development-principles`, `code-style` and
+      `no-prose-policing-tests`
+- [ ] Wave 1: eight deletion work items, unordered by design, each judged locally and green on the
+      full suite. How many PRs they land as is the child's call: its plan already allows the prose
+      sweep to span several, and the saga lead has recommended batching by domain to about three so
+      the round count matches the work rather than the item count
 - [ ] Wave 2: process and rule subtraction under a strict net-deletion constraint
 - [ ] Reassessment delivered; surviving findings proposed individually or dropped
 - [ ] Locked
@@ -194,11 +202,12 @@ one-arm `TokenAcquisition` union collapses to the concrete stored-token shape (C
 `canonicalize_null_companions` compat flag stops re-advertising the spelling it just broke (C4); and
 the four compat layers are deleted or given recorded expiries (C7). Migration guidance flows through
 `BREAKING CHANGE:` footers, the packaged changelog, and the guide release-notes topics rather than
-compat code; the simplification pass's `migration-strategy.md` is the seed and travels with the
-task. Runs in parallel with the deletion waves; it owns `env/entry.py` and the token union while the
-pass owns the inert descriptor fields.
+compat code. The strategy artifact behind that (`migration-strategy.md` in the simplification pass's
+directory) is on draft PR #509 rather than on `main`, so the brief names it and says when it becomes
+readable; it is not carried on the task branch. Runs in parallel with the deletion waves; it owns
+`env/entry.py` and the token union while the pass owns the inert descriptor fields.
 
-- [ ] Brief seeded
+- [x] Brief seeded (2026-08-13, on `refactor/breaking-truth-0-14`); awaiting an assignee
 - [ ] Implemented, reviewed, merged before the 0.14.0 tag
 
 ### Dispatched task (not a child SDD): git-credential variant restructure
@@ -362,8 +371,10 @@ poller rule stands as merged in PR #481, and PR #489 closed unmerged.)
 - **Sagas label their PRs (2026-08-13, PR #510):** a `saga:<name>` label on every PR a saga lead
   seeds or reviews, so concurrent sagas can each enumerate their own surface rather than infer it.
   This saga uses `saga:next-steps`. Open question filed as issue #511: whether always-on rules
-  reliably reach an agent before its first consequential action, which applies to all fourteen rules
-  rather than to any one of them.
+  reliably reach an agent before its first consequential action. It applies to the twelve rules
+  delivered path-conditionally rather than to any one of them (see the simplification pass's wave 0
+  entry for the inventory), so fixing one in isolation would only make it inconsistent with the
+  rest.
 - **Use the database, not its sidecars (operator, 2026-08-12, from issue #502):** read state through
   SQLite itself; do not inspect WAL files or other on-disk artifacts to guess whether a read is
   safe. The completion path had vetoed itself whenever any process held the database open, which
@@ -484,11 +495,12 @@ open-ended research placeholder.
     the onboarding trail-sign round (guide content, while the pass owns guide machinery), the
     breaking-truth task (`env/entry.py` and the token union, while the pass owns the inert
     descriptor fields), the installer-plugins bucketing (independent), and the grammar rewrite's
-    design and seeding (only its implementation waits). Wave 1's eight deletion PRs are unordered by
-    design and are themselves the largest parallelism available. One coordination hazard is
-    recorded: the pass's website items touch test files the continuous-lander effort (#486) is
-    actively changing, so those sequence behind #486 or coordinate with that lead first.
+    design and seeding (only its implementation waits). Wave 1's eight deletion work items are
+    unordered by design and are themselves the largest parallelism available. One coordination
+    hazard is recorded: the pass's website items touch test files the continuous-lander effort
+    (#486) is actively changing, so those sequence behind #486 or coordinate with that lead first.
 
-    Next saga-lead actions: seed the breaking-truth brief, task the onboarding effort with the
-    trail-sign round as a modification to its own SDD, and write the supersession note on the
-    safer-migrations lock for #504's classifier change.
+    Discharged in this round: the breaking-truth brief is seeded on `refactor/breaking-truth-0-14`,
+    the trail-sign message to the onboarding effort rides this PR, and the supersession note for
+    #504's classifier change is on the safer-migrations lock. Each still needs a session pointed at
+    it; seeding is not staffing.
