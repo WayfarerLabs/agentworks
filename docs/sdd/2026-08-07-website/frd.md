@@ -220,18 +220,19 @@ recorded as a growth path so nothing forecloses it, and none of it is in scope n
   foot, and has a conservative collider that contains every rendered member without implying
   traversable openings. Agent travel from the lander to the NOC completes in half the Phase 4L time;
   refueling and the subsequent battery and network power stages retain their existing durations.
-- R26. The lunar terrain uses substantially more of the scene's vertical range without becoming
-  noisy. Measure normalized relief from the top of the in-game instruction rail: zero is that rail's
-  top edge and one is the scene's top edge in the canonical, untransformed scene coordinate system;
-  any later camera transform changes only final viewport placement and cannot redefine terrain
-  height. Every point on every continuous native terrain surface lies between `0.1` and `0.6` on
-  that canonical scale, and deterministic witness runs include both low basins and high peaks near
-  the ends of the band. Elevation changes form broad slopes, ridges, and canyons with bounded grade
-  and bounded changes in grade; the generator must not alternate direction at every sample or turn
-  the surface into a repeated sawtooth. The visible surface, collision terrain, platform-support
-  feet, site clearance, route proof, ceiling behavior, and static no-JavaScript scene all consume
-  the same terrain authority. Platforms remain honestly supported above untouched native terrain,
-  and the player and target remain visible and reachable across the expanded relief.
+- R26. **Superseded historical requirement; not active for shipping.** The lunar terrain uses
+  substantially more of the scene's vertical range without becoming noisy. Measure normalized relief
+  from the top of the in-game instruction rail: zero is that rail's top edge and one is the scene's
+  top edge in the canonical, untransformed scene coordinate system; any later camera transform
+  changes only final viewport placement and cannot redefine terrain height. Every point on every
+  continuous native terrain surface lies between `0.1` and `0.6` on that canonical scale, and
+  deterministic witness runs include both low basins and high peaks near the ends of the band.
+  Elevation changes form broad slopes, ridges, and canyons with bounded grade and bounded changes in
+  grade; the generator must not alternate direction at every sample or turn the surface into a
+  repeated sawtooth. The visible surface, collision terrain, platform-support feet, site clearance,
+  route proof, ceiling behavior, and static no-JavaScript scene all consume the same terrain
+  authority. Platforms remain honestly supported above untouched native terrain, and the player and
+  target remain visible and reachable across the expanded relief.
 - R27. The operator's hands-on review supersedes R26's exact global relief-band interpretation and
   rejects its shipping behavior. The game keeps one fixed-height scene with no vertical camera,
   page-height growth, or vertical scrolling. Terrain variation must be obvious within ordinary
@@ -439,18 +440,19 @@ merged and settled on `main`. The first slice must not build toward them specula
   directly to `/lander/`, its live accessible name and hover text agree, and the reviewed Lander/404
   copy uses the shortened operator wording without adding a fragment redirect or a second game
   route.
-- AC27. Before any camera transform, every point on the independently reconstructed continuous
-  terrain surface has canonical normalized height `(640-sceneY)/640` inclusively within `[0.1,0.6]`;
-  the interpolation kernel is non-overshooting, so this invariant is not inferred from vertices
-  alone. A fixed, reviewed seed/window corpus reaches at least one value no greater than `0.11` and
-  one no less than `0.59`, while independent grade, grade-change, and reversal-density checks
-  enforce the LLD's realistic-relief limits. Forward and reverse traversal reproduce byte-identical
-  terrain and collision heights without a seam, duplicate horizontal position, per-frame randomness,
-  or retained history. All site feet meet that terrain, all structures clear it, every canonical
-  success and one-quantum failure proof remains valid against regenerated worlds, and 100-site runs
-  terminate without generation failure. Real browser evidence covers a low basin, high ridge, broad
-  peak, and canyon at wide and narrow layouts while the lander, target, cue, HUD, and instruction
-  rail remain visible and non-overlapping.
+- AC27. **Superseded historical criterion; not active for closeout.** Before any camera transform,
+  every point on the independently reconstructed continuous terrain surface has canonical normalized
+  height `(640-sceneY)/640` inclusively within `[0.1,0.6]`; the interpolation kernel is
+  non-overshooting, so this invariant is not inferred from vertices alone. A fixed, reviewed
+  seed/window corpus reaches at least one value no greater than `0.11` and one no less than `0.59`,
+  while independent grade, grade-change, and reversal-density checks enforce the LLD's
+  realistic-relief limits. Forward and reverse traversal reproduce byte-identical terrain and
+  collision heights without a seam, duplicate horizontal position, per-frame randomness, or retained
+  history. All site feet meet that terrain, all structures clear it, every canonical success and
+  one-quantum failure proof remains valid against regenerated worlds, and 100-site runs terminate
+  without generation failure. Real browser evidence covers a low basin, high ridge, broad peak, and
+  canyon at wide and narrow layouts while the lander, target, cue, HUD, and instruction rail remain
+  visible and non-overlapping.
 - AC28. The recovery checkpoint reproduces the pre-R26 terrain, deck, camera, route, and static
   behavior while preserving later accepted Lander refinements and canonical onboarding. Corrected
   relief then demonstrates multiple locally visible peaks and valleys in real-browser ordinary

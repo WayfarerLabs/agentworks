@@ -22,13 +22,15 @@ same feature PR replaces the retired availability notice with the canonical prom
 enhancement without redesigning the site or creating another deployment path. The website effort
 retains ownership of production acceptance and the final closeout PR.
 
-PR #486 carries the reviewed continuous Lander work recorded by Phases 4A through 4P. It preserves
-the established site, assistance projection, hosting, and routes while replacing the original
-bounded game with the accepted continuous expedition.
+PR #486 carries the continuous Lander work. Phases 4A through 4O are accepted gameplay history;
+Phase 4P's automated record remains immutable but its product behavior was rejected by the operator,
+and Phase 4Q restores the accepted baseline before introducing corrected relief. The PR preserves
+the established site, canonical assistance projection, hosting, and routes throughout that recovery.
 
-`locked.md` never merges before AC1-AC28 and R1-R27 are accepted in production. Every earlier merge
-is independently useful and operable. The first release was honest without an onboarding claim, and
-the integrated release consumes the canonical source from the same reviewed PR while preserving
+`locked.md` never merges before R1-R25 and R27 plus AC1-AC26 and AC28 are accepted in production;
+superseded R26/AC27 are historical evidence, not closeout gates. Every earlier merge is
+independently useful and operable. The first release was honest without an onboarding claim, and the
+integrated release consumes the canonical source from the same reviewed PR while preserving
 deterministic source identity; no permanent website code binds to a branch-only or duplicated
 contract.
 
@@ -1190,8 +1192,8 @@ with no branch-only dependency, duplicated bootstrap, or website-owned continuin
       metadata/CSP, byte-equivalent Lander/404 game subtree, and compact 404 title after onboarding
       integration.
 
-Definition of done: R1-R27, AC2-AC3, and AC5-AC28 hold through the existing site and pipeline, with
-the temporary notice removed rather than retained as configuration.
+Definition of done: R1-R25 and R27, AC2-AC3, and AC5-AC26 plus AC28 hold through the existing site
+and pipeline, with the temporary notice removed rather than retained as configuration.
 
 ## Phase 9: complete acceptance and closeout
 
@@ -1215,9 +1217,9 @@ the temporary notice removed rather than retained as configuration.
       run final gates, obtain the required closeout review, and hand the ready PR to the operator
       for merge.
 
-Definition of done: AC1-AC28 hold at `https://agentworks.build`, R1-R27 and C1-C5 are production
-facts, the deployment is operable without this SDD, all plan boxes are truthful, and the effort is
-locked.
+Definition of done: AC1-AC26 and AC28 hold at `https://agentworks.build`, R1-R25 and R27 plus C1-C5
+are production facts, the deployment is operable without this SDD, all plan boxes are truthful, and
+the effort is locked.
 
 ## Escalation triggers
 
