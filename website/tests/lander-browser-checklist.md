@@ -42,9 +42,10 @@ navigation, and every header/footer/action descendant. It requires exact viewpor
 equality, zero scroll, fixed stage dimensions and `25:16` ratio, zero world Y translation,
 in-viewport descendants, and 44-pixel native actions. The witness also emits three distinct desktop
 PNG artifacts without asserting authored prose or golden pixels. Inside Chromium it also services
-100 real powered sites for each of seeds 11, 39, 41, and STATIC, timing generation plus both proof
-paths and changed-state renders while enforcing the retention and world-DOM ceilings. Exact listener
-inventories and stabilized DOM counts must remain unchanged across all four runs. Run
+100 real powered sites for each of seeds 11, 39, 41, and STATIC after a separate finite 12-site
+production-identical warmup for that seed. The measured 100-site runs time generation plus both
+proof paths and changed-state renders while enforcing the retention and world-DOM ceilings. Exact
+listener inventories and stabilized DOM counts must remain unchanged across all four runs. Run
 `python3 -m unittest discover -s website/tests -p 'test_lander_phase4q_browser.py'`. This is
 automated Chromium evidence; it does not replace the qualitative terrain or cross-engine acceptance
 below.

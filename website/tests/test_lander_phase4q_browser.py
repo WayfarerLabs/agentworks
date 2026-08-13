@@ -113,7 +113,42 @@ const recordRender = (values, states, maxima) => {
     maxima.document = Math.max(maxima.document, counts.document);
     maxima.world = Math.max(maxima.world, counts.world);
 };
+const clearLaunch = (startingModel) => {
+    let model = startingModel;
+    for (let step = 0; step < 90 && model.state === "launching"; step += 1) {
+        model = updateRetention(stepFlight(model, {left: .72, right: .72}));
+    }
+    return model;
+};
+const serviceTarget = (model) => {
+    const target = model.retainedSites.find((site) => site.id === model.targetSiteId);
+    const contact = {...model, pose: {x: target.center, y: target.platformTop + .001,
+        vx: 0, vy: -1, angle: 0, angularVelocity: 0}};
+    return updateRetention(stepFlight(contact, zero));
+};
+const warmup = (seed) => {
+    let model = updateRetention(createRun({seed, reducedMotion: true}));
+    let proofPaths = 0;
+    let poweredCheckpoints = 0;
+    controller.model = model;
+    controller.render();
+    for (let completed = 0; completed < 12; completed += 1) {
+        if (model.state === "launching") {
+            model = clearLaunch(model);
+            controller.model = model;
+            controller.render();
+        }
+        model = serviceTarget(model);
+        if (model.targetRouteProof?.success && model.targetRouteProof?.smallerFailure) proofPaths += 2;
+        const active = model.retainedSites.find((site) => site.id === model.activeSiteId);
+        if (active?.powered && active.nocStage === 7 && model.checkpoint) poweredCheckpoints += 1;
+        controller.model = model;
+        controller.render();
+    }
+    return {completedSites: model.completedSites, proofPaths, poweredCheckpoints};
+};
 const longevity = (seed) => {
+    const warmupResult = warmup(seed);
     const generationValues = [];
     const frameValues = [];
     const frameStates = {};
@@ -126,17 +161,12 @@ const longevity = (seed) => {
     recordRender(frameValues, frameStates, maxima);
     for (let completed = 0; completed < 100; completed += 1) {
         if (model.state === "launching") {
-            for (let step = 0; step < 90 && model.state === "launching"; step += 1) {
-                model = updateRetention(stepFlight(model, {left: .72, right: .72}));
-            }
+            model = clearLaunch(model);
             controller.model = model;
             recordRender(frameValues, frameStates, maxima);
         }
-        const target = model.retainedSites.find((site) => site.id === model.targetSiteId);
-        model = {...model, pose: {x: target.center, y: target.platformTop + .001,
-            vx: 0, vy: -1, angle: 0, angularVelocity: 0}};
         const started = performance.now();
-        model = updateRetention(stepFlight(model, zero));
+        model = serviceTarget(model);
         generationValues.push(performance.now() - started);
         if (model.targetRouteProof?.success && model.targetRouteProof?.smallerFailure) proofPaths += 2;
         const active = model.retainedSites.find((site) => site.id === model.activeSiteId);
@@ -148,9 +178,11 @@ const longevity = (seed) => {
         recordRender(frameValues, frameStates, maxima);
         if (completed === 1) stabilizedDom = domCounts();
     }
-    return {seed, completedSites: model.completedSites, finalState: model.state, proofPaths,
+    return {seed, warmup: warmupResult, completedSites: model.completedSites,
+        finalState: model.state, proofPaths,
         poweredCheckpoints,
-        generation: timingSummary(generationValues), frames: timingSummary(frameValues), frameStates,
+        generation: timingSummary(generationValues),
+        frames: timingSummary(frameValues), frameStates,
         maxima, stabilizedDom, finalDom: domCounts(), cleanupCount: controller.cleanups.length};
 };
 const valleyX = (seed) => (terrainSiteForIndex(seed, 0).center + terrainSiteForIndex(seed, 1).center) / 2;
@@ -188,7 +220,13 @@ def _listener_counts(connection: DevToolsConnection) -> dict[str, dict[str, int]
     return counts
 
 
-def browser_phase4q_contract(output: Path, probe_source: str = PROBE) -> dict[str, object]:
+def browser_phase4q_contract(
+    output: Path,
+    probe_source: str = PROBE,
+    *,
+    chromium_arguments: tuple[str, ...] = (),
+    cpu_throttling_rate: float = 1,
+) -> dict[str, object]:
     chromium = next(
         (candidate for name in ("google-chrome", "chromium", "chromium-browser")
          if (candidate := shutil.which(name))),
@@ -215,7 +253,7 @@ def browser_phase4q_contract(output: Path, probe_source: str = PROBE) -> dict[st
             (
                 chromium, "--headless", "--disable-gpu", "--no-sandbox", "--no-first-run",
                 "--no-default-browser-check", "--remote-allow-origins=*", "--remote-debugging-port=0",
-                f"--user-data-dir={profile.name}", "about:blank",
+                f"--user-data-dir={profile.name}", *chromium_arguments, "about:blank",
             ),
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             env={**os.environ, "HOME": profile.name},
@@ -223,9 +261,10 @@ def browser_phase4q_contract(output: Path, probe_source: str = PROBE) -> dict[st
         connection = DevToolsConnection(_devtools_target(Path(profile.name), process))
         for domain in ("Runtime", "Page"):
             connection.call(f"{domain}.enable")
+        connection.call("Emulation.setCPUThrottlingRate", {"rate": cpu_throttling_rate})
         connection.call("Page.navigate", {"url": f"http://127.0.0.1:{server.server_address[1]}/lander/"})
         for _ in range(240):
-            if connection.evaluate("document.documentElement.dataset.phase4qReady === 'true'"):
+            if connection.evaluate("document.documentElement?.dataset.phase4qReady === 'true'"):
                 break
             time.sleep(0.025)
         else:
@@ -338,6 +377,11 @@ class Phase4QBrowserTests(RepositoryFixture):
         )
         for witness in witnesses:
             with self.subTest(seed=witness["seed"], contract="longevity"):
+                self.assertEqual(witness["warmup"], {
+                    "completedSites": 12,
+                    "proofPaths": 24,
+                    "poweredCheckpoints": 12,
+                })
                 self.assertEqual(witness["completedSites"], 100)
                 self.assertEqual(witness["finalState"], "launching")
                 self.assertEqual(witness["proofPaths"], 200)

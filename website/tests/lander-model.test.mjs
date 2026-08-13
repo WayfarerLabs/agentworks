@@ -419,6 +419,14 @@ test("collision uses the exact retained terrain chain and rejects an absent auth
     assert.equal(classifySweptContact(model, cornerPose, cornerPose).cause, "terrain");
     assert.throws(() => classifySweptContact({ ...model, terrainVertices: null }, cornerPose, cornerPose),
         /requires retained terrain vertices/);
+    const chain = Array.from({ length: 72 }, (_, index) => [index * 2, 3 + (index % 5) / 10]);
+    const chainModel = { ...model, retainedSites: [], targetSiteId: null, terrainVertices: chain };
+    for (let index = 1; index < chain.length; index += 1) {
+        const x = (chain[index - 1][0] + chain[index][0]) / 2;
+        const y = (chain[index - 1][1] + chain[index][1]) / 2;
+        const pose = { x, y: y - 0.25, vx: 0, vy: 0, angle: 0, angularVelocity: 0 };
+        assert.equal(classifySweptContact(chainModel, pose, pose).cause, "terrain");
+    }
 });
 
 test("safe landing creates next target, adds uncapped award, and begins service", () => {

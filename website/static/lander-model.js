@@ -109,6 +109,7 @@ export const REFERENCE_TEMPLATE_CATALOG = freeze(Object.fromEntries(
 
 const STEP_MILLISECONDS = STEP_SECONDS * 1000;
 const HULL = Object.freeze([[-1.6, 0], [1.6, 0], [1.6, 6.5], [-1.6, 6.5]]);
+const HULL_RADIUS = Math.hypot(1.6, 6.5);
 const ZERO = Object.freeze({ left: 0, right: 0, vectorAngle: 0 });
 const STRAIGHT_ENGINE_REQUEST = 0.72;
 const STRAIGHT_COLLECTIVE_TOTAL = STRAIGHT_ENGINE_REQUEST * 2;
@@ -293,13 +294,22 @@ function hullForPose(pose) {
 }
 
 function hullBounds(pose) {
-    const hull = hullForPose(pose);
-    return {
-        left: Math.min(...hull.map((point) => point.x)),
-        right: Math.max(...hull.map((point) => point.x)),
-        bottom: Math.min(...hull.map((point) => point.y)),
-        top: Math.max(...hull.map((point) => point.y)),
-    };
+    const radians = (pose.angle * Math.PI) / 180;
+    const sine = Math.sin(radians);
+    const cosine = Math.cos(radians);
+    let left = Infinity;
+    let right = -Infinity;
+    let bottom = Infinity;
+    let top = -Infinity;
+    for (const [localX, localY] of HULL) {
+        const x = pose.x + localX * cosine + localY * sine;
+        const y = pose.y - localX * sine + localY * cosine;
+        left = Math.min(left, x);
+        right = Math.max(right, x);
+        bottom = Math.min(bottom, y);
+        top = Math.max(top, y);
+    }
+    return { left, right, bottom, top };
 }
 
 function segmentDistanceSquared(a, b, c, d) {
@@ -365,12 +375,39 @@ function terrainSegments(model, bounds) {
     const vertices = model.terrainVertices;
     if (!vertices) throw new TypeError("Collision classification requires retained terrain vertices");
     const segments = [];
-    for (let index = 1; index < vertices.length; index += 1) {
+    const first = firstTerrainSegmentIndex(vertices, bounds.left - COLLISION_MARGIN);
+    for (let index = first; index < vertices.length; index += 1) {
         const left = { x: vertices[index - 1][0], y: vertices[index - 1][1] };
         const right = { x: vertices[index][0], y: vertices[index][1] };
-        if (right.x >= bounds.left - COLLISION_MARGIN && left.x <= bounds.right + COLLISION_MARGIN) segments.push([left, right]);
+        if (left.x > bounds.right + COLLISION_MARGIN) break;
+        segments.push([left, right]);
     }
     return segments;
+}
+
+function firstTerrainSegmentIndex(vertices, minimumRight) {
+    let low = 1;
+    let high = vertices.length;
+    while (low < high) {
+        const middle = Math.floor((low + high) / 2);
+        if (vertices[middle][0] < minimumRight) low = middle + 1;
+        else high = middle;
+    }
+    return low;
+}
+
+function terrainOverlaps(model, bounds) {
+    const vertices = model.terrainVertices;
+    if (!vertices) throw new TypeError("Collision classification requires retained terrain vertices");
+    const first = firstTerrainSegmentIndex(vertices, bounds.left - COLLISION_MARGIN);
+    for (let index = first; index < vertices.length; index += 1) {
+        const left = vertices[index - 1];
+        const right = vertices[index];
+        if (left[0] > bounds.right + COLLISION_MARGIN) break;
+        if (Math.max(left[1], right[1]) >= bounds.bottom - COLLISION_MARGIN &&
+            Math.min(left[1], right[1]) <= bounds.top + COLLISION_MARGIN) return true;
+    }
+    return false;
 }
 
 function belowTerrain(hull, segment) {
@@ -440,15 +477,12 @@ function unsafeCauseAtPose(model, pose, target, ignoredTopSiteId = null, supplie
     return hits[0]?.cause ?? null;
 }
 
-function targetTopSweptContact(previous, next, target) {
-    const radius = Math.hypot(1.6, 6.5);
+function targetTopSweptContact(previous, next, target, initialLeftBounds, initialRightBounds) {
     const topLeft = { x: target.platformLeft, y: target.platformTop };
     const topRight = { x: target.platformRight, y: target.platformTop };
-    function search(leftPose, rightPose, leftTime, rightTime, depth) {
-        const leftBounds = hullBounds(leftPose);
-        const rightBounds = hullBounds(rightPose);
+    function search(leftPose, rightPose, leftBounds, rightBounds, leftTime, rightTime, depth) {
         const translation = Math.hypot(rightPose.x - leftPose.x, rightPose.y - leftPose.y);
-        const rotation = radius * Math.abs(normalizeDegrees(rightPose.angle - leftPose.angle) * Math.PI / 180);
+        const rotation = HULL_RADIUS * Math.abs(normalizeDegrees(rightPose.angle - leftPose.angle) * Math.PI / 180);
         const bound = translation + rotation;
         const enclosure = {
             left: Math.min(leftBounds.left, rightBounds.left) - bound,
@@ -485,19 +519,19 @@ function targetTopSweptContact(previous, next, target) {
         }
         const middleTime = (leftTime + rightTime) / 2;
         const middle = interpolatePose(previous, next, middleTime);
-        return search(leftPose, middle, leftTime, middleTime, depth + 1) ??
-            search(middle, rightPose, middleTime, rightTime, depth + 1);
+        const middleBounds = hullBounds(middle);
+        return search(leftPose, middle, leftBounds, middleBounds, leftTime, middleTime, depth + 1) ??
+            search(middle, rightPose, middleBounds, rightBounds, middleTime, rightTime, depth + 1);
     }
-    return search(previous, next, 0, 1, 0);
+    return search(previous, next, initialLeftBounds, initialRightBounds, 0, 1, 0);
 }
 
-export function classifySweptContact(model, previous, next, options = {}) {
+function classifySweptContactFromBounds(model, previous, next, previousBounds, nextBounds, options) {
     const target = siteById(model, model.targetSiteId);
-    const radius = Math.hypot(1.6, 6.5);
-    const travel = Math.hypot(next.x - previous.x, next.y - previous.y) + radius * Math.abs(normalizeDegrees(next.angle - previous.angle) * Math.PI / 180);
+    const travel = Math.hypot(next.x - previous.x, next.y - previous.y) +
+        HULL_RADIUS * Math.abs(normalizeDegrees(next.angle - previous.angle) * Math.PI / 180);
     const intervals = Math.max(1, Math.ceil(travel / COLLISION_MARGIN));
     if (intervals > 64) return { kind: "unsafe", cause: "overspeed", pose: next };
-    const previousBounds = hullBounds(previous); const nextBounds = hullBounds(next);
     const swept = { left: Math.min(previousBounds.left, nextBounds.left) - travel,
         right: Math.max(previousBounds.right, nextBounds.right) + travel,
         bottom: Math.min(previousBounds.bottom, nextBounds.bottom) - travel,
@@ -509,11 +543,10 @@ export function classifySweptContact(model, previous, next, options = {}) {
     const topPossible = target && target.platformRight >= swept.left && target.platformLeft <= swept.right &&
         target.platformTop >= swept.bottom && target.platformTop <= swept.top;
     const featurePossible = features.some((feature) => overlaps(feature.bounds));
-    const terrainPossible = terrainSegments(model, swept).some(([left, right]) => overlaps({
-        left: left.x, right: right.x, bottom: Math.min(left.y, right.y), top: Math.max(left.y, right.y),
-    }));
+    const terrainPossible = terrainOverlaps(model, swept);
     if (!topPossible && !featurePossible && !terrainPossible) return null;
-    const topContact = topPossible ? targetTopSweptContact(previous, next, target) : null;
+    const topContact = topPossible ?
+        targetTopSweptContact(previous, next, target, previousBounds, nextBounds) : null;
     let unsafeContact = null;
     let clearPose = previous;
     let clearTime = 0;
@@ -553,6 +586,12 @@ export function classifySweptContact(model, previous, next, options = {}) {
     return null;
 }
 
+export function classifySweptContact(model, previous, next, options = {}) {
+    return classifySweptContactFromBounds(
+        model, previous, next, hullBounds(previous), hullBounds(next), options,
+    );
+}
+
 function routeContext(template, supplied = null) {
     if (supplied) return supplied;
     for (const seed of [11, 41]) {
@@ -580,6 +619,7 @@ function replayTemplate(template, fuel, suppliedContext = null) {
     let reserve = fuel;
     let step = 0;
     let launchCleared = false;
+    let previousBounds = hullBounds(pose);
     const rawSites = [originSite, targetSite];
     const terrainVertices = context.terrainVertices ?? terrainVerticesForWindow(context.seed, rawSites,
         originSite.center - 20, targetSite.center + 20);
@@ -588,7 +628,7 @@ function replayTemplate(template, fuel, suppliedContext = null) {
         seed: context.seed, retainedSites, targetSiteId: targetSite.id,
         terrainVertices,
     };
-    const target = retainedSites.find((site) => site.id === targetSite.id);
+    const target = targetSite;
     const ordinaryFeatures = unsafeFeatures(collisionModel, pose, target);
     const launchFeatures = unsafeFeatures(collisionModel, pose, target, originSite.id);
     for (const [commandIndex, count] of template.runs) {
@@ -596,19 +636,24 @@ function replayTemplate(template, fuel, suppliedContext = null) {
             const previous = pose;
             const result = integratePose(pose, { left: REFERENCE_COMMANDS[commandIndex][0], right: REFERENCE_COMMANDS[commandIndex][1] }, reserve);
             pose = result.pose;
+            const nextBounds = hullBounds(pose);
             reserve = result.thrust.fuel;
             step += 1;
             const ignoreTopSiteId = !launchCleared && pose.vy > 0 ? originSite.id : null;
-            const contact = classifySweptContact(collisionModel, previous, pose, { ignoreTopSiteId,
-                features: ignoreTopSiteId === null ? ordinaryFeatures : launchFeatures });
+            const contact = classifySweptContactFromBounds(collisionModel, previous, pose,
+                previousBounds, nextBounds, { ignoreTopSiteId,
+                    features: ignoreTopSiteId === null ? ordinaryFeatures : launchFeatures });
             if (contact) {
                 const relative = { ...contact.pose, x: contact.pose.x - originSite.center,
                     y: contact.pose.y - originSite.platformTop };
                 return { kind: contact.kind === "safe" ? "contact" : "collision", cause: contact.cause,
                     step, pose: relative, burn: fuel - reserve };
             }
-            const feet = [transformLocalPoint(pose, -1.6, 0), transformLocalPoint(pose, 1.6, 0)];
-            launchCleared ||= feet.every((foot) => foot.y > originSite.platformTop + 0.05);
+            if (!launchCleared) {
+                const feet = [transformLocalPoint(pose, -1.6, 0), transformLocalPoint(pose, 1.6, 0)];
+                launchCleared = feet.every((foot) => foot.y > originSite.platformTop + 0.05);
+            }
+            previousBounds = nextBounds;
             if (reserve === 0) return { kind: "exhausted", step,
                 pose: { ...pose, x: pose.x - originSite.center, y: pose.y - originSite.platformTop }, burn: fuel };
         }
