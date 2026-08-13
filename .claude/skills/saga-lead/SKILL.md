@@ -28,12 +28,13 @@ below are subagent work; the role itself is not.
 
 ## Watch child efforts; review without being asked
 
-- At session start, enumerate in-flight child PRs (`gh pr list`) and check the ledger for efforts
-  whose next PR is expected. Arm a background watch for each open draft flipping to ready (and for
-  unexpected close or merge, so silence cannot mask a surprise). Review a PR when it goes ready
-  without waiting for the operator to ask, and review a draft PR carrying the `review-requested`
-  label whose head you have not yet reviewed (a checkpoint review; the label is author-owned and
-  audience-free, so never remove it: track the last head you reviewed, exactly as with ready PRs).
+- At session start, enumerate in-flight child PRs (`gh pr list --label saga:<name>`, since other
+  sagas may be running) and check the ledger for efforts whose next PR is expected. Arm a background
+  watch for each open draft flipping to ready (and for unexpected close or merge, so silence cannot
+  mask a surprise). Review a PR when it goes ready without waiting for the operator to ask, and
+  review a draft PR carrying the `review-requested` label whose head you have not yet reviewed (a
+  checkpoint review; the label is author-owned and audience-free, so never remove it: track the last
+  head you reviewed, exactly as with ready PRs).
 - Stacked PRs review entry-by-entry, bottom-up: each entry is its own handoff surface with its own
   verdict. When an upstream entry changes substantially, expect the cascade (downstream entries back
   to draft) and re-review only what re-hands-off. Discover stack membership by base-ref chain
