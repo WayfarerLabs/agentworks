@@ -1,12 +1,15 @@
 {
   "version": "0.2",
-  "import": ["../../../.cspell.json"],
+  "import": [
+    "../../../.cspell.json"
+  ],
   "words": [
     "colocatable",
     "monkeypatch",
     "monkeypatches",
     "multiprocess",
     "NFKC",
+    "regressable",
     "satisfiability",
     "uninventoried",
     "untooled",
