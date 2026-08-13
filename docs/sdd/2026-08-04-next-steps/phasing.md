@@ -75,13 +75,14 @@ Two things this graph deliberately does not serialize:
   trust-based integration discipline, the gated graph projection and guide content channel,
   secret-source resolution, the event stream) rather than per-change; (2) test consolidation and
   removal, with the working assumption that the accreted unit-test estate can be cut in half, maybe
-  more, without sacrificing any coverage or quality; (3) code cleanup: file-size limits, vestigial
-  code removal, package renaming and refactoring left behind by the waves' moves, and an SDD
-  tombstoning sweep (operator ruling, 2026-08-08): superseded SDDs' contents are deleted down to
-  their `locked.md` tombstones per the sdd skill, with `2026-07-01-resource-manifests` the first
-  identified candidate (its lockfile already carries the supersession record) and individual SDDs
-  tombstoned earlier whenever reading them actively misleads. Findings are fixed before the saga
-  locks.
+  more, without sacrificing any coverage or quality (the pre-0.14 simplification pass does this
+  early, so what remains here is a verification sweep rather than the trim itself); (3) code
+  cleanup: file-size limits, vestigial code removal, package renaming and refactoring left behind by
+  the waves' moves, and an SDD tombstoning sweep (operator ruling, 2026-08-08): superseded SDDs'
+  contents are deleted down to their `locked.md` tombstones per the sdd skill, with
+  `2026-07-01-resource-manifests` the first identified candidate (its lockfile already carries the
+  supersession record) and individual SDDs tombstoned earlier whenever reading them actively
+  misleads. Findings are fixed before the saga locks.
 - **Wave 8: external plugin API.** Registration conformance, discovery, namespacing, versioning, and
   the distribution-trust model, promised publicly only once the internal contracts survive
   first-party use.
@@ -138,12 +139,17 @@ off whenever bandwidth allows, on its own merits and its own schedule.
   operator blesses it: breaking surface changes belong in the same cushioned release. While `main`
   holds unreleased breaking changes, urgent operator fixes ship from a `0.13.x` backport branch.
 
-  **Ruling (operator, 2026-08-12):** the grammar rewrite is no longer conditional — 0.14.0 does not
-  ship until it lands. It joins the cut as a hard gate. **Sequence (operator, 2026-08-13):** the
-  guide trail-sign reshape and the onboarding track's simplifications first, then the grammar
-  rewrite, then the test cleanup pass (prose tests and more). That ordering absorbs the
-  test-consolidation and prose-test-purge children into the final step, so neither starts before the
-  grammar rewrite lands.
+  **Ruling (operator, 2026-08-12):** the grammar rewrite is no longer conditional. 0.14.0 does not
+  ship until it lands, so it joins the cut as a hard gate. **Sequence (operator, 2026-08-13, revised
+  the same day):** the simplification pass runs before the grammar rewrite, not after it. The order
+  is (1) that pass's wave 0, which establishes that always-on rules actually reach the agents they
+  bind (issue #511) and lands the deletion criteria, (2) its deletion waves, (3) the grammar
+  rewrite, (4) its reassessment. Rewriting the CLI grammar over a surface that still carries the
+  deletable scaffolding means the rewrite carries it too. The onboarding trail-sign round runs
+  alongside rather than ahead, split by boundary: the simplification pass owns guide machinery, the
+  onboarding effort owns guide content. The 0.14 breaking-truth items (S5, C3, C4, C7) run as their
+  own dispatched task in parallel, since folding them into the grammar rewrite would grow an already
+  massive effort (operator, 2026-08-13).
 
 - **Later:** remaining waves map to releases as they prove out; no need to pin numbers now.
 

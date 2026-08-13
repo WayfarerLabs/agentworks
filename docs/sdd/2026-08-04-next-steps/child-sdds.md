@@ -155,6 +155,52 @@ locked.
 - [ ] Ships in 0.14.0 (gates the cut per `phasing.md` release mapping)
 - [ ] Locked
 
+### Simplification pass (pre-0.14): 2026-08-12-simplification-pass
+
+Adopted as a child of this saga on 2026-08-13 (operator). A seven-lane study of the 2026-08-06..12
+merge window (68 PRs) found the core models sound and a large scaffolding tax around them: 119,584
+lines of tests against 83,151 lines of `cli/` code, adversarial validation of first-party content,
+tests that police form rather than behavior, and inert generality. The effort ships subtraction
+only, on two doctrines: validate at boundaries and trust the interior, and tests assert behavior
+while agreement is derived.
+
+Adopting it collapses ledger structure rather than adding it. The pre-0.14 test-consolidation child
+and the prose-test-purge child are both absorbed here, and the closeout wave's test-consolidation
+item shrinks to a verification sweep.
+
+- [x] Seeded by the effort lead (findings, FRD, HLA, plan, migration strategy; PR #509 in draft
+      artifact review). The first draft was a 35-item coordinated program, cut by operator direction
+      to three steps: rule adjustment, deletion waves, reassess
+- [x] Prose-test-purge child absorbed (operator, 2026-08-12): that seed FRD is superseded in place
+      and its directory locked before any work began; its survey and guardrails carry forward into
+      this effort's wave 1 deletion charter
+- [ ] Wave 0: establish that always-on rules reach the agents they bind (issue #511) before adding
+      criteria to them, then land the trust-boundary and authored-artifact amendments. Moved into
+      wave 0 by operator direction (2026-08-13) from a file-it-and-defer posture; all fourteen rules
+      declare `globs: ["**/*"]`, which Rulesync emits as Claude `paths:`, so the lazy-delivery
+      finding applies to every rule rather than to any one of them
+- [ ] Wave 1: eight independent deletion PRs, unordered by design, each judged locally and green on
+      the full suite
+- [ ] Wave 2: process and rule subtraction under a strict net-deletion constraint
+- [ ] Reassessment delivered; surviving findings proposed individually or dropped
+- [ ] Locked
+
+### Dispatched task (not a child SDD): 0.14 breaking-truth items
+
+Ruled out of the simplification pass and into its own vehicle (operator, 2026-08-13): folding them
+into the grammar rewrite would grow an already massive effort. Four contract-truth fixes that are
+free only while 0.14 is unreleased: `[secret_config].backends` names sources, not backends (S5); the
+one-arm `TokenAcquisition` union collapses to the concrete stored-token shape (C3); the
+`canonicalize_null_companions` compat flag stops re-advertising the spelling it just broke (C4); and
+the four compat layers are deleted or given recorded expiries (C7). Migration guidance flows through
+`BREAKING CHANGE:` footers, the packaged changelog, and the guide release-notes topics rather than
+compat code; the simplification pass's `migration-strategy.md` is the seed and travels with the
+task. Runs in parallel with the deletion waves; it owns `env/entry.py` and the token union while the
+pass owns the inert descriptor fields.
+
+- [ ] Brief seeded
+- [ ] Implemented, reviewed, merged before the 0.14.0 tag
+
 ### Dispatched task (not a child SDD): git-credential variant restructure
 
 Dispatched via branch-seeded task brief rather than an SDD (the sdd skill's message-passing
@@ -228,25 +274,9 @@ Planned children, seeded when their prerequisites land (see `phasing.md`):
   all relational views with focal-node, kind-filter, direction, depth, and format axes, `describe`'s
   fate is an open A-or-B (remove, or rebuild as the kind-aware card with a per-kind detail hook),
   `--write` semantics unify, and the CLI-hygiene audit bundle rides along. No longer conditional:
-  0.14.0 does not ship until it lands. Runs second in the pre-0.14 sequence, after the onboarding
-  simplification and trail-sign phase, and it owns updating any guide content and docs its renames
-  touch.
-- Pre-0.14 test-consolidation child (operator ruling, 2026-08-09): an aggressive trim pass; the saga
-  lead's accumulating dossier (including the wave 3 enforcement-suite structural pins, whose
-  deferral comments name this child as owner) is its R1 input. Sequenced last (operator, 2026-08-13)
-  as one cleanup pass with the prose-test purge below, after the grammar rewrite lands. The
-  closeout-wave pass remains the final sweep.
-- Prose-test-purge child (seeded 2026-08-11, PR #494 merged; **do not start before the grammar
-  rewrite lands**, operator sequencing 2026-08-13): removes the authored-wording assertions the
-  `no-prose-policing-tests` rule now forbids. A dispatched survey put it at roughly 190 to 230
-  wholly prose-policing test functions plus 620 to 700 carrying one riding-along assertion, about
-  one function in five, concentrated in workspaces, agents, guide, sessions and vms; the widest
-  instance is `pytest.raises(match=)` on authored sentences (362 of 609 sites), not the guide
-  content that prompted the ruling. Its R4 items are small production changes (result records for
-  repair/grant/revoke/console-sync, the schema layer's existing structured problems promoted to a
-  test seam, stable error codes, doctor check IDs) and do not gate 0.14 unless the operator asks.
-  Distinct from the test-consolidation child above: that one trims redundancy, this one removes a
-  category of assertion.
+  0.14.0 does not ship until it lands. Runs after the simplification pass's deletion waves, so the
+  rewrite is done over the smaller surface, and it owns updating any guide content and docs its
+  renames touch.
 - Security-architecture doc child: seeds after wave 3 merges; carries the per-platform
   durable-surface inventory (what each provider retains) so provider-boundary reviews check a list
   rather than rediscovering the class incident-by-incident (lesson from wave 3's three-round class
@@ -444,10 +474,21 @@ open-ended research placeholder.
     hard gate is in implementation.
 17. Gate status (2026-08-13, post-#480): PR #480 merged, so the assistance phase is done. The cut
     now has a longer runway by ruling, not by slip: **0.14.0 waits for the CLI grammar rewrite**
-    (operator, 2026-08-12), and the pre-0.14 sequence is (1) the onboarding trail-sign and
-    simplification round, (2) the grammar rewrite, (3) one test cleanup pass absorbing the
-    prose-test purge and the test consolidation. Open 0.14 gates: that sequence, plus the
-    installer-plugins moves (now scope-reduced to the bucketing) and the README bootstrap. Next
-    saga-lead actions: task the onboarding effort with the trail-sign round as a modification to its
-    own SDD, hold the prose-test-purge child until the grammar rewrite lands, and keep the grammar
-    seed (PR #491) moving as the new long pole.
+    (operator, 2026-08-12), and the simplification pass is adopted as a child and runs before it.
+    The serial spine is: the pass's wave 0 (rule delivery, issue #511, then the deletion criteria),
+    its deletion waves, the grammar rewrite, its reassessment. Open 0.14 gates: that spine, the
+    installer-plugins moves (now scope-reduced to the bucketing), the README bootstrap, and the
+    breaking-truth task.
+
+    Four lanes run in parallel with the spine, and these are the boundaries that keep them apart:
+    the onboarding trail-sign round (guide content, while the pass owns guide machinery), the
+    breaking-truth task (`env/entry.py` and the token union, while the pass owns the inert
+    descriptor fields), the installer-plugins bucketing (independent), and the grammar rewrite's
+    design and seeding (only its implementation waits). Wave 1's eight deletion PRs are unordered by
+    design and are themselves the largest parallelism available. One coordination hazard is
+    recorded: the pass's website items touch test files the continuous-lander effort (#486) is
+    actively changing, so those sequence behind #486 or coordinate with that lead first.
+
+    Next saga-lead actions: seed the breaking-truth brief, task the onboarding effort with the
+    trail-sign round as a modification to its own SDD, and write the supersession note on the
+    safer-migrations lock for #504's classifier change.

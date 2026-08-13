@@ -85,11 +85,11 @@ GitHub through a custom git credential helper serving fine-grained PATs by full 
 environment knowledge an agent currently must be told in conversation; a feature provisioning such a
 helper should emit exactly that fact as a skill.
 
-**Ruling (operator, 2026-08-12):** `agw guide` with no topic becomes a **trail sign** — point at the
-topics, do not teach — and the onboarding walkthrough it currently carries (the source-review offer
-and the rest) moves into a dedicated onboarding topic. The same round takes whatever other
-simplifications the onboarding and discovery track has accumulated; the operator's own reading is
-that earlier phases of that effort landed tech debt while unattended.
+**Ruling (operator, 2026-08-12):** `agw guide` with no topic becomes a **trail sign** that points at
+the topics rather than teaching, and the onboarding walkthrough it currently carries (the
+source-review offer and the rest) moves into a dedicated onboarding topic. The same round takes
+whatever other simplifications the onboarding and discovery track has accumulated; the operator's
+own reading is that earlier phases of that effort landed tech debt while unattended.
 
 ### Declarative model (destination 2)
 
