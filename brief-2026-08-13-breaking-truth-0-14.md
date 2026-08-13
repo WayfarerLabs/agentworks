@@ -43,7 +43,9 @@ release-please accumulates the footers into the packaged changelog; the guide re
 release-notes topics; the assistance flow reads the guide. Update `docs/guides/upgrading-to-0.14.md`
 in the same PR as each change. The full strategy is
 `docs/sdd/2026-08-12-simplification-pass/migration-strategy.md`, which is the authoritative spec for
-this task's approach and carries a worked example for item 1.
+this task's approach and carries a worked example for item 1. It is not on this branch and not yet
+on `main`: it arrives with PR #509. Read it from that PR's head until then, and from
+`git show origin/main:<path>` after. Do not copy it here.
 
 ## Boundaries
 
