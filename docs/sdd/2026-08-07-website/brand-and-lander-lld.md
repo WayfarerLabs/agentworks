@@ -589,22 +589,25 @@ scene's exact projection while making the rail a real terrain-separated band rat
 Neither box can cause page overflow at 320 CSS pixels or 400 percent zoom. Horizontal scale is
 `10 scene units/m`; vertical projection is always `sceneY=548-worldY*10`.
 
-Phase 4Q is fixed-height by invariant. The stage remains the same `25/16` box for the entire run;
-the world transform's Y component is always zero; no pose, terrain, site, ceiling, viewport, zoom,
-or media query may change stage height, viewBox height, shell height, page block size, or a vertical
-camera value. CSS keeps stage overflow clipped and the controls rail in normal flow. The only camera
-state and custom property are horizontal. Flight beyond the fixed view may clip during free
-exploration, but it can never grow or scroll the page to follow the lander. Both rendered game pages
-use a `100svh` bounded grid whose header, game main, and footer fit inside the viewport; the game
-main has `min-block-size:0`, is a size-query container, and owns `--controls-rail-block-size:48px`,
-changed to `84px` at `max-width:32rem`. The shell's rows are `auto var(--controls-rail-block-size)`
-and stage inline size is exactly `min(100%,calc((100cqh - var(--controls-rail-block-size))*25/16))`.
-Only the stage shrinks on a short viewport; the normal-flow rail retains the shell width and every
-action remains at least `44 by 44` CSS pixels. The middle track therefore preserves `25/16` without
-block growth. At all required layouts, `document.scrollHeight==document.clientHeight`,
-`scrollTop==0`, and wheel, touch, focus, thrust, camera, crash, service, Retry, and Exit cause no
-vertical scroll. This is a layout invariant, not wheel/touch event cancellation; every action and
-landmark remains visible and reachable without clipping.
+Phase 4Q is fixed-height by invariant. The stage remains a `25/16` box for the entire run; the world
+transform's Y component is always zero; and no pose, terrain, site, ceiling, or gameplay state may
+change its aspect ratio, viewBox, projected block size, shell block size, page block size, or a
+vertical camera value. Viewport size, zoom, and the pinned width media query may uniformly scale the
+stage down while preserving exactly `25/16` so the complete fixed scene fits the bounded layout;
+they never change scene coordinates, viewBox dimensions, or camera projection. CSS keeps stage
+overflow clipped and the controls rail in normal flow. The only camera state and custom property are
+horizontal. Flight beyond the fixed view may clip during free exploration, but it can never grow or
+scroll the page to follow the lander. Both rendered game pages use a `100svh` bounded grid whose
+header, game main, and footer fit inside the viewport; the game main has `min-block-size:0`, is a
+size-query container, and owns `--controls-rail-block-size:48px`, changed to `84px` at
+`max-width:32rem`. The shell's rows are `auto var(--controls-rail-block-size)` and stage inline size
+is exactly `min(100%,calc((100cqh - var(--controls-rail-block-size))*25/16))`. Only the stage
+shrinks on a short viewport; the normal-flow rail retains the shell width and every action remains
+at least `44 by 44` CSS pixels. The middle track therefore preserves `25/16` without block growth.
+At all required layouts, `document.scrollHeight==document.clientHeight`, `scrollTop==0`, and wheel,
+touch, focus, thrust, camera, crash, service, Retry, and Exit cause no vertical scroll. This is a
+layout invariant, not wheel/touch event cancellation; every action and landmark remains visible and
+reachable without clipping.
 
 The controller computes one reversible dead-zone camera directly from the current immutable pose:
 
