@@ -1,11 +1,16 @@
 # Migration Strategy: Notes Over Shims
 
-Operator direction (2026-08-13): the strategy for every breaking change in this pass is worth
-capturing as its own artifact. It is deliberately not a cutover plan, because there is nothing to
-cut over: 0.14 is unreleased, there is no deployed fleet, and no compat window to bridge. The
-strategy is that migration knowledge is captured once, at commit time, and flows to the people and
-agents who need it through the release pipeline and the self-documenting features, instead of living
-as backward-compatibility code.
+**Status (2026-08-13)**: the breaking changes inventoried below are out of scope for this pass (FRD,
+Out of scope) and recorded as candidates for the broader saga. This artifact is their seed: it
+captures the strategy the operator directed be captured, and travels with the candidates when the
+saga routes them.
+
+Operator direction (2026-08-13): the strategy for breaking changes is worth capturing as its own
+artifact. It is deliberately not a cutover plan, because there is nothing to cut over: 0.14 is
+unreleased, there is no deployed fleet, and no compat window to bridge. The strategy is that
+migration knowledge is captured once, at commit time, and flows to the people and agents who need it
+through the release pipeline and the self-documenting features, instead of living as
+backward-compatibility code.
 
 ## The pipeline
 
@@ -27,7 +32,7 @@ One chain, no new machinery, every link already shipped:
 The default answer to a break is therefore a note, not a shim. Compat code is the exception, and per
 this SDD's acceptance it requires an explicit operator decision with a recorded expiry.
 
-## Inventory: the breaks this pass ships (FRD R5)
+## Inventory: the candidate breaks (saga routing)
 
 | Change                     | Current                                                                               | Target                                                 |
 | -------------------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------ |
@@ -59,15 +64,11 @@ upgrade guide.
 
 ## Sequencing and safeguards
 
-- The convention text (CONTRIBUTING section plus the guide migration-topic update) merges before the
-  first R5 PR, so no break lands without its note (plan, phase 3).
-- Footers are reviewed like code: the reviewer checks the note actually enables the migration (names
-  the surface, shows the edit) rather than restating the diff.
-- If the 0.14 window closes before an R5 item lands, the item escalates to the operator for
-  replanning and an FRD amendment; no compat layer appears as an automatic fallback (FRD
-  Acceptance).
+- The convention (standard `BREAKING CHANGE:` footers written as operator-actionable guidance, plus
+  the existing upgrade guide) needs no custom enforcement machinery; the footer shape above and
+  ordinary review are the mechanism.
+- If a release window closes before a candidate lands, the item goes back to the operator for
+  replanning; no compat layer appears as an automatic fallback.
 - The bootstrap prompt's stop-path already prevents the worst mismatch: an assistant agent with no
   compatible stable release available stops rather than improvising against the wrong version's
   contracts.
-- Release-candidate verification includes rendering the release-notes topic for the candidate
-  version and confirming every R5 footer appears in it.
