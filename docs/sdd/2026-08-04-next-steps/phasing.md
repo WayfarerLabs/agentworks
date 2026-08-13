@@ -1,7 +1,7 @@
 # Phasing
 
 - Status: Active sequencing
-- Last updated: 2026-08-08
+- Last updated: 2026-08-13
 
 This document records only ordering: the dependency structure that forces the sequence, the waves,
 and the release mapping. What each wave builds is defined by `target-state.md`; where the system
@@ -137,6 +137,14 @@ off whenever bandwidth allows, on its own merits and its own schedule.
   repo draws post-release attention). The resource-CLI grammar break shares the window if the
   operator blesses it: breaking surface changes belong in the same cushioned release. While `main`
   holds unreleased breaking changes, urgent operator fixes ship from a `0.13.x` backport branch.
+
+  **Ruling (operator, 2026-08-12):** the grammar rewrite is no longer conditional — 0.14.0 does not
+  ship until it lands. It joins the cut as a hard gate. **Sequence (operator, 2026-08-13):** the
+  guide trail-sign reshape and the onboarding track's simplifications first, then the grammar
+  rewrite, then the test cleanup pass (prose tests and more). That ordering absorbs the
+  test-consolidation and prose-test-purge children into the final step, so neither starts before the
+  grammar rewrite lands.
+
 - **Later:** remaining waves map to releases as they prove out; no need to pin numbers now.
 
 ## Open ordering decisions

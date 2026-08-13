@@ -1,7 +1,7 @@
 # Target State
 
 - Status: North star, accumulating settled rulings
-- Last updated: 2026-08-08
+- Last updated: 2026-08-13
 
 This document describes where Agentworks is going across this saga effort, synthesized from the
 perspectives in `inputs/`. It is the target of these waves, not a forever vision: when
@@ -84,6 +84,12 @@ live example of the artifact need (operator observation, 2026-08-05): this works
 GitHub through a custom git credential helper serving fine-grained PATs by full HTTP path,
 environment knowledge an agent currently must be told in conversation; a feature provisioning such a
 helper should emit exactly that fact as a skill.
+
+**Ruling (operator, 2026-08-12):** `agw guide` with no topic becomes a **trail sign** — point at the
+topics, do not teach — and the onboarding walkthrough it currently carries (the source-review offer
+and the rest) moves into a dedicated onboarding topic. The same round takes whatever other
+simplifications the onboarding and discovery track has accumulated; the operator's own reading is
+that earlier phases of that effort landed tech debt while unattended.
 
 ### Declarative model (destination 2)
 
@@ -214,6 +220,11 @@ owning plugin enabled fails with a crisp disabled error naming the surface, the 
 exact remediation, per the remediation posture below. This gives the internal plugin boundary
 first-party exercise ahead of wave 8's external promises.
 
+**Scope correction (operator, 2026-08-13):** the effort is the bucketing and nothing more. "I
+literally just wanted to bucket the existing installers." The disabled-error experience described
+above is a nice-to-have, not this effort's work, so the paragraph's crisp-disabled-error requirement
+is deferred rather than dropped.
+
 ### Plugin namespace and name stability (operator ruling, 2026-08-07)
 
 **One name, one source.** In-repo contributions (built-ins and system plugins) share one curated
@@ -317,4 +328,13 @@ and so no wave accidentally forecloses them:
   renders from the same authoritative sources as the guide and reference surfaces, never a
   hand-maintained second copy, and its growth path (web-rendered guide topics, schema-derived
   reference) consumes wave 2 and onboarding surfaces as they land on `main`. Launch timing may pair
-  with the 0.14.0 cut as an operator call without structural coupling.
+  with the 0.14.0 cut as an operator call without structural coupling. **Ruling (operator,
+  2026-08-11):** one coupling does exist, at the end of the sequence rather than at launch. The
+  Lander and onboarding both gate the **final custom-domain cutover**, so the interim activation the
+  website plan's Phase 6 describes may not proceed while onboarding is pending. Rationale: the
+  domain is the front door, and the operator will not point it at a site whose onboarding path is
+  unfinished. This qualifies the no-structural-coupling statement above without creating a saga-lock
+  edge: the website still gates no wave and no lock, `phasing.md` acquires no reverse dependency,
+  and the gate binds two adjacent efforts to each other. The website effort owes the matching
+  updates to its Phase 6, 8 and 9 definitions of done, its activation runbook, and
+  `website/README.md` (flagged on PR #486).
