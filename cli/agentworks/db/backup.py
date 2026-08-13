@@ -335,14 +335,11 @@ def render_restore_command(backup_path: Path, *, platform: str | None = None) ->
 
 
 def _raise_if_busy(inspection: SchemaInspection) -> None:
-    """Raise BusyStateError if BUSY; no-op otherwise. Shared so the
-    independent BUSY raise sites (_raise_if_unopenable below and
-    Database.check_schema) agree on the exception type without either
-    carrying its own construction; each site still decides for itself
-    whether to call this, so either can be reverted to its own
-    pre-BusyStateError shape without touching the other. BusyStateError
-    builds its own fixed message and hint, so this never has an
-    opportunity to pass through caller-suppliable text.
+    """Raise BusyStateError if BUSY; no-op otherwise. Shared by the two
+    BUSY raise sites (_raise_if_unopenable below and Database.check_schema)
+    so both construct the exact same exception rather than each carrying
+    its own copy; BusyStateError takes no arguments, so this has no way to
+    pass caller-suppliable text through either.
     """
     if inspection.state is SchemaState.BUSY:
         raise BusyStateError()

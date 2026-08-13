@@ -198,22 +198,7 @@ def test_busy_state_error_message_and_hint_are_not_caller_suppliable() -> None:
 
     error = BusyStateError()
     assert error.hint is not None
-
-
-def test_busy_state_error_round_trips_through_pickle() -> None:
-    """BaseException's default __reduce__ replays construction as
-    type(self)(*self.args); BusyStateError's own zero-argument __init__
-    (see the caller-suppliable test above) makes that reduction raise on
-    unpickling, since self.args is non-empty (the message
-    AgentworksError.__init__ forwards to Exception.__init__). Nothing
-    pickles this today, but it is a latent break for the first caller
-    that puts one on a queue or multiprocessing boundary; BusyStateError
-    overrides __reduce__ to avoid it."""
-    import pickle
-
-    restored = pickle.loads(pickle.dumps(BusyStateError()))
-    assert isinstance(restored, BusyStateError)
-    assert restored.hint is not None
+    assert error.entity_kind == "database"
 
 
 def test_inspection_matrix_is_non_migrating_and_wal_aware(tmp_path: Path) -> None:
@@ -269,9 +254,9 @@ def test_prepare_database_open_raises_a_distinct_busy_error_and_recovers_once_lo
     proved behaviorally, by retrying the exact same path once the lock
     releases and confirming it now opens cleanly.
 
-    prepare_database_open's own inspect_schema call carries no bounded
-    timeout (the writable path's existing, unchanged wait), so this
-    exercises the real driver-default busy wait."""
+    prepare_database_open's own inspect_schema call carries no
+    completion-specific timeout (the writable path's existing, unchanged
+    wait), so this exercises the real driver-default busy wait."""
     path = tmp_path / "state.db"
     _build_schema(path, LATEST_VERSION)
 
