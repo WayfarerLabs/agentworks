@@ -79,20 +79,19 @@ use the same bounded mixer: press for collective, drag horizontally to steer, an
 retains a 140 ms pulse. Safe landing limits are inclusive at 2.2 m/s horizontal speed, 3.6 m/s
 descent, 18 degrees of tilt, and 26 degrees/s rotation.
 
-Terrain is deterministic per run. A single 320 m seeded monotone-warp relief kernel stays within the
-normalized 0.1-to-0.6 band; production samples it every 10 m and linearly interpolates that
-canonical chain for rendering, collision, clearance, and support feet. One strict-X terrain
-authority projects as one closed fill without a stroke and one open stroked surface, so
-retained-window boundaries cannot add internal closure strokes. Every 9.6 m deck uses the fixed 11.6
-m datum. A continuous 18.6 m, 0.75 m-deep twelve-bay Warren truss reaches from the deck's left edge
-through the NOC's right edge. Three one-metre, two-rail lattice columns extend from its underside to
-six independently interpolated native-terrain feet. Their ties and alternating braces use the truss
-member style. Exact closed colliders cover the truss and each complete column; the NOC begins at the
-deck underside. The NOC battery fills four colored bars bottom-to-top, then three symmetric signal
-arches power outward; its fixed mast and antenna head remain graphite at every stage. The parallax
-sky uses recognizable crescent moons and circular planets with one or two restrained elliptical
-rings. Each ring keeps its foreground arc while the planet hides its rear center. These shapes,
-fills, and outlines preserve their meaning without relying on color alone.
+Terrain is deterministic per run, sampled every 10 m from four visibly different motifs, and remains
+native beneath every site. One strict-X terrain authority projects as one closed fill without a
+stroke and one open stroked surface, so retained-window boundaries cannot add internal closure
+strokes. Each 9.6 m deck uses the first clearing integer tier from 8.3, 9.1, or 9.9 m. A continuous
+18.6 m, 0.75 m-deep twelve-bay Warren truss reaches from the deck's left edge through the NOC's
+right edge. Three one-metre, two-rail lattice columns extend from its underside to six independently
+interpolated native-terrain feet. Their ties and alternating braces use the truss member style.
+Exact closed colliders cover the truss and each complete column; the NOC begins at the deck
+underside. The NOC battery fills four colored bars bottom-to-top, then three symmetric signal arches
+power outward; its fixed mast and antenna head remain graphite at every stage. The parallax sky uses
+recognizable crescent moons and circular planets with one or two restrained elliptical rings. Each
+ring keeps its foreground arc while the planet hides its rear center. These shapes, fills, and
+outlines preserve their meaning without relying on color alone.
 
 Flight has no horizontal world edge: the lander can pass a target or explore in either direction
 until it collides or crosses the vertical ceiling. The camera follows both directions with a stable
@@ -124,30 +123,29 @@ This is the builder's only output shape. The manifest is explicit in `build.py`;
 recursively copies source directories or permits a generated local link outside the manifest.
 
 The game keeps its route catalog reviewable and independent from runtime generation. Geometry lives
-in `tests/fixtures/lander-route-geometry-v5.json`; it contains no schedule or fuel result.
+in `tests/fixtures/lander-route-geometry-v4.json`; it contains no schedule or fuel result.
 Regenerate to a temporary path and verify the reviewed fixture with:
 
 ```bash
 node website/tools/derive_lander_routes.mjs \
-  --geometry website/tests/fixtures/lander-route-geometry-v5.json \
-  --output /tmp/lander-route-derived-v5.json \
-  --verify website/tests/fixtures/lander-route-derived-v5.json
+  --geometry website/tests/fixtures/lander-route-geometry-v4.json \
+  --output /tmp/lander-route-derived-v4.json \
+  --verify website/tests/fixtures/lander-route-derived-v4.json
 ```
 
-The v6 deriver uses the v5 geometry schema and unchanged v3 recipe family, Node built-ins, versioned
+The v5 deriver uses the v4 geometry schema and unchanged v3 recipe family, Node built-ins, versioned
 finite compact phase ranges, reachable keyboard commands, and independent copies of the physics,
 collision geometry, native terrain, strict-X projection, truss, lattice columns, NOC, and mast. Each
 template begins with the exact player-reachable `[1,90]` request and evaluates four candidates from
-two independently variable pre-contact ranges, for 12 total and well below the 256-per-template and
-768-total bounds. The comparator selects among materially distinct safe outcomes; no selected
+two independently variable pre-contact ranges, for 36 total and well below the 256-per-template and
+2,304-total bounds. The comparator selects among materially distinct safe outcomes; no selected
 schedule is embedded phase-for-phase as its own verifier. Its reviewed output contains all nine
-world combinations for each of the three retained flat routes: 78, 93, and 102 metres. The fixture
-contains 27 ordered world descriptors. Verification also replays each selected success and
-one-quantum failure across all nine worlds, for 54 selected replays. A successful route is
+routes and 81 ordered world descriptors. Verification also replays each selected success and
+one-quantum failure across all nine worlds, for 162 selected replays. A successful route is
 classified using the raw replay. Only its reviewed success and exhaustion pose components are
 serialized to nine decimal places, keeping native trigonometric last-bit variation out of the
 canonical fixture while remaining inside the runtime proof tolerance. World descriptors retain their
-exact unrounded values. A deliberate route or world change updates the ranges, reviewed v5 fixture,
+exact unrounded values. A deliberate route or world change updates the ranges, reviewed v4 fixture,
 copied production literals, and all four digests atomically. Runtime code performs exactly the
 successful and one-quantum-smaller proof replays for the directly selected literal. It never imports
 the tool, scans fuel allowances, or plans a route in the browser.

@@ -4,20 +4,31 @@
 <!-- cspell:ignore pointerdown pointerup PRNG -->
 <!-- cspell:ignore letterboxing parallax refuel reproject reprojection reprojects repower Segoe -->
 <!-- cspell:ignore lerp Minkowski overspeed subinterval unhashed unmarginated -->
-<!-- cspell:ignore smootherstep substep underframe unitless uint32 quantized quantization Warren -->
+<!-- cspell:ignore substep underframe unitless uint32 quantized quantization Warren -->
 
-- Status: Phase 4P implementation review complete; operator acceptance pending
+- Status: Phase 4P rejected and superseded; Phase 4O behavior restored
+- Operator browser acceptance: pending
 - Date: 2026-08-12
-- FRD: `frd.md`, specifically R6-R9 and R15-R26
+- FRD: `frd.md`, specifically R6-R9, R15-R24, and R25
 - HLA: `hla.md`, specifically D5 and D7
 - Selected geometry: `logo-concept-10-twin-flame.svg`
+
+## Supersession record
+
+Phase 4P's broad-relief implementation was completed and reviewed, then rejected by the operator on
+2026-08-12. Its normalized relief kernel, fixed global 11.6 m platform datum, variable tall support
+columns, vertical camera projection, collision optimization, responsive-gauge-only workaround, v5
+geometry and derived fixtures, and Phase 4P-specific tests are superseded. Commit
+`56650d774e4ba3769ca293072632e5741d493396` is restored as the current Lander behavior while a new,
+separately designed terrain-relief change is considered. The completed Phase 4P record in the
+lead-owned plan remains historical evidence, not a claim about current production behavior.
 
 ## 1. Scope and terms
 
 This LLD preserves the selected brand and defines the continuous Lander and arcade presentation in
-R7-R9 and R21-R26, including the Phase 4M free-exploration, lattice-column, parallax-sky,
-half-reference opening, faster-deployment refinement, and Phase 4P broad terrain relief. It excludes
-main-page, onboarding, deployment, and DNS design. Use plain HTML, CSS, SVG, and JavaScript.
+R7-R9 and R21-R25, including the Phase 4M free-exploration, lattice-column, parallax-sky,
+half-reference opening, and faster-deployment refinement. It excludes main-page, onboarding,
+deployment, and DNS design. Use plain HTML, CSS, SVG, and JavaScript.
 
 A **run** begins at START and ends at Exit or reload. A run contains successive **legs**, each from
 one checkpoint or the initial approach to one target site. A **site** is one platform, gas can, and
@@ -65,8 +76,8 @@ Implementation uses these permanent names:
 | `website/static/lander-game.js`                        | DOM, clock/input, camera, focus, lifecycle, and rendering       |
 | `website/tools/derive_lander_routes.mjs`               | Independent, deterministic route-fixture derivation CLI         |
 | `website/tools/lander_clear_faces.mjs`                 | Independent scaffold-overlay and clear-face enumeration         |
-| `website/tests/fixtures/lander-route-geometry-v5.json` | Canonical site, terrain, template, and envelope geometry input  |
-| `website/tests/fixtures/lander-route-derived-v5.json`  | Reviewed independent schedules and witness output               |
+| `website/tests/fixtures/lander-route-geometry-v4.json` | Canonical site, template, and envelope geometry input           |
+| `website/tests/fixtures/lander-route-derived-v4.json`  | Reviewed independent schedules and witness output               |
 | `website/tests/lander-world.test.mjs`                  | Seeded world, window, site, and template vectors                |
 | `website/tests/lander-model.test.mjs`                  | Scheduler, physics, mission, fuel, and checkpoint vectors       |
 | `website/tests/test_lander_404.py`                     | Build, DOM, no-JS, and forbidden-surface checks                 |
@@ -80,7 +91,7 @@ lander-game.js  -> lander-model.js -> lander-world.js
        |--------------------------------^  read-only projection and seed helpers
 ```
 
-`lander-game.js` imports the model API plus only the pure `cameraForPose`, `CHUNK_WIDTH`,
+`lander-game.js` imports the model API plus only the pure `cameraLeftForPose`, `CHUNK_WIDTH`,
 `mixUint32`, `siteScaffoldPath`, `siteStructure`, `skyProjectionForCamera`,
 `skyProjectionIdentityForCamera`, `targetDirectionForViewport`, `terrainFillPath`,
 `terrainSurfacePath`, and `terrainVerticesForRange` exports directly from `lander-world.js`.
@@ -150,7 +161,7 @@ The physics pose `(x, y, angle)` refers to the midpoint between the W's two lowe
 asset coordinate `(120, 415)`. The inline scene applies transforms in this order:
 
 ```text
-translate(worldSceneX(worldX), worldSceneY(worldY))
+translate(worldX * 10, 548 - worldY * 10)
 rotate(angleDeg)
 scale(0.16)
 translate(-120, -415)
@@ -354,10 +365,9 @@ return (value ^ (value >>> 16)) >>> 0;
 ```
 
 `sampleUnit` mixes `seed ^ Math.imul(stream, 0x9e3779b9) ^ Math.imul(index + 1, 0x85ebca6b)` and
-divides by `2 ** 32`. Stream `3` owns template preference, stream `5` owns debris, streams `6..12`
-retain their sky meanings, and streams `13` and `14` own terrain anchors and monotone span warp.
-Streams `1`, `2`, and `4` are unused. Indexed samples make regeneration independent of call order.
-There is no mutable PRNG cursor inside the world module.
+divides by `2 ** 32`. Streams `1`, `2`, `3`, `4`, and `5` are terrain boundaries, terrain motif-bank
+selection, template preference, corridor relief, and debris. Indexed samples make regeneration
+independent of call order. There is no mutable PRNG cursor inside the world module.
 
 The checked-in preflight scene uses `STATIC_WORLD_SEED=0x41475731`. Production START requests one
 `Uint32Array(2)` from `crypto.getRandomValues` and passes both words through
@@ -367,42 +377,131 @@ integer `Date.now()` and the integer microsecond portion of `performance.now()` 
 aggregate. Tests call `createRun({seed})`; ordinary START, Exit followed by START, and reload
 acquire a fresh seed. Retry reuses the current run seed and checkpoint.
 
-### 5.2 Terrain samples
+### 5.2 Terrain chunks
 
-`CHUNK_WIDTH=50 m` remains retention bookkeeping only. Terrain is the single-scale monotone-warp
-sample chain specified in section 5.4, with global `10 m` samples independent of chunk boundaries.
-`lander-world.js` is the sole production owner of both exported widths; retention, model bounds,
-controller projection, rendering, collision, static markup, fixtures, and independent derivation
-consume that same authority. A chunk is never an independently closed polygon and cannot introduce a
-boundary height, second interpolation, vertical edge, or presentation-only relief.
+Constants are `CHUNK_WIDTH=50 m`, `TERRAIN_SAMPLE_SPACING=10 m`, and six vertices per chunk,
+including both boundaries. `lander-world.js` is the sole production owner of the exported chunk
+width; retention, model bounds, and controller projection import it rather than repeating `50`.
+Shared boundary height for integer boundary `b` is `1.5 + 4.5 * sampleUnit(seed,1,b)`. The exact
+motif bank is:
+
+```text
+k:    0     1      2     3      4    5
+M0:   0   +2.4   -1.5  +1.8   -1.1  0   metres
+M1:   0   -2.1   -0.8  +2.2   +1.0  0   metres
+M2:   0   +0.9   +2.5  +0.6   -1.9  0   metres
+M3:   0   -1.4   +1.3  +2.4   -0.5  0   metres
+```
+
+For seed `seed`, choose one traversal of the bank for the complete world:
+
+```text
+offset = floor(4*sampleUnit(seed,2,0))
+direction = sampleUnit(seed,2,1) < 0.5 ? 1 : 3
+positiveModulo(value,4) = ((value % 4)+4)%4
+motifIndex(chunkIndex) = positiveModulo(offset+direction*chunkIndex,4)
+```
+
+For local vertex `k` in `[0,5]`, interpolate the two boundary heights at `k/5`, add
+`MOTIFS[motifIndex(chunkIndex)][k]`, then clamp the final height to `[0.5,7.5]`. There is no motif
+orientation or sign step. Because `direction` is `1` or `3` modulo four, the selected indexes across
+any four consecutive chunks are all different, including across negative chunk indexes. Adjacent
+chunks share their boundary byte-for-byte because every motif begins and ends at zero. The bank
+guarantees varied shapes while seeded pseudorandom boundary trends vary their absolute slopes
+further. World tests prove the exact bank and traversal, four distinct indexes in every
+representative four-chunk window, one rise and one fall of at least `0.5 m`, at least four nonzero
+slopes, and no three equal consecutive native samples. A single motif or repeated motif selection
+fails even if its sampled heights happen to retain rises and falls.
+
+`terrainHeightAt(seed,x)` linearly interpolates the enclosing sampled edge. Terrain is collision
+geometry, not merely art. Chunk indexes remain generation and retention bookkeeping only; they are
+not independently closed render polygons. Section 6 projects one strictly increasing retained-window
+surface chain so no internal chunk edge can become a vertical terrain stroke.
 
 ### 5.3 Sites and constructive template selection
 
-Site 0 has fixed platform center `x=36 m`. Every site stores `deckLevel=116` integer decimeters and
-derives `platformTop=deckLevel/10`; the global canonical maximum `9.2 m` proves the unchanged
-`2.4 m` minimum terrain clearance without a local search or terrain mutation. The sampled terrain
-remains byte-for-byte present beneath the complete platform, gap, truss, and NOC footprint. Define
-`platformLeft=platformCenter-4.8`, `platformRight=platformCenter+4.8`,
-`buildingLeft=platformRight+2`, and `buildingRight=buildingLeft+7`.
+Site 0 has fixed platform center `x=36 m`. Native terrain remains byte-for-byte present beneath the
+complete platform, gap, truss, and NOC footprint; there is no site shelf, flat replacement, blend,
+or NOC foundation terrain. Define `platformLeft=platformCenter-4.8`,
+`platformRight=platformCenter+4.8`, `buildingLeft=platformRight+2`, and
+`buildingRight=buildingLeft+7`. For a site candidate, compute
 
-Every later target translates one of section 10's three flat templates by center delta `78`, `93`,
-or `102 m`; every `deckDelta` is zero. For site index `i`, set `base=floor(3*sampleUnit(seed,3,i))`
-and inspect slots `(base+2*c)%3` for `c=0..2`. The complete catalog makes the preferred first slot
-eligible, so normal generation performs exactly one check; three checks remain only the corruption
-guard. There is no local deck calculation, terrain retry, route search, dead fallback, or special
-Retry path. The checked-in no-JavaScript scene is the exact site-0 descriptor for
-`STATIC_WORLD_SEED`; START reconciles it to the fresh run seed before the first flight frame.
+```text
+nativeMaximum = max y in nativeTerrainVertices(seed,platformLeft,buildingRight)
+minimumDeckTop = nativeMaximum + 2.4
+DECK_LEVELS = [83,91,99] integer decimeters
+```
 
-Each template retains its reviewed `clearanceKnots=-.65 m` route envelope as proof metadata only. It
-never modifies terrain. `terrainVerticesForWindow` takes the strict sorted union of the retained
-range endpoints, global `10 m` samples, each retained site's four structure boundaries, and its six
-column-rail X coordinates. Every inserted X calls `terrainHeightAt(seed,x)` and subdivides the one
-enclosing canonical segment without changing its line. The final array must satisfy
-`vertices[j-1].x < vertices[j].x`; forward and reverse regeneration must serialize identically.
-There is no cap, secondary relief, discard/resume splice, same-X conflict resolution, vertical
-collision edge, shelf, hidden foundation, or mutable terrain history. The model passes frozen
-geometry to pure `instantiateTemplateSite(seed,siteIndex,originSite,templateGeometry)`; the world
-never imports or selects the model catalog.
+The maximum includes the two closed range endpoints and every intervening `10 m` native sample;
+piecewise linearity proves no omitted point is higher. Site 0 takes the first level in `DECK_LEVELS`
+whose `level/10 >= minimumDeckTop`. Because native terrain is clamped to at most `7.5 m`, level `99`
+always qualifies. Storing `deckLevel` as the integer `83`, `91`, or `99` and deriving
+`platformTop=deckLevel/10` prevents accumulated binary rounding from creating a fourth height. The
+checked-in no-JavaScript scene is the exact site-0 descriptor for `STATIC_WORLD_SEED`; START
+reconciles it to the fresh run seed before the first flight frame. Every later target is a
+translation of one of section 10's nine constructive templates. The catalog maps center delta to
+deck-height delta exactly:
+
+```text
+center delta:  78   81    84    87    90    93    96    99   102 m
+deck delta:     0  +1.6  -0.8  +0.8  -1.6    0   -0.8  +0.8    0 m
+```
+
+For site index `i`, let `base=floor(9*sampleUnit(seed,3,i))` and inspect all nine catalog slots in
+the order `slot=(base+4*c)%9` for `c=0..8`. Four and nine are relatively prime, so this is one
+complete seed-rotated permutation with no duplicate or omitted template. Convert the template delta
+to exact integer decimeters with `deltaLevel=Math.round(deckDelta*10)`, and select the first
+candidate whose `targetLevel=origin.deckLevel+deltaLevel` is a member of `DECK_LEVELS` and whose
+`targetLevel/10 >= minimumDeckTop(seed,targetCenter)`. This is at most nine constant-time
+eligibility checks, not route search. Termination is structural: level `83` has the `+16` route to
+`99`, level `91` has either `+8` route to `99`, and level `99` has the three zero-delta routes; a
+`99` target always clears the `7.5+2.4=9.9 m` native upper envelope. Every permutation therefore
+reaches an eligible entry. The preference retains seeded distance and elevation variety without an
+unbounded terrain or route search. No entry is a dead fallback or a special Retry path.
+
+Each template carries collision-safe `clearanceKnots` relative to the origin center/deck. Relative
+knot heights are at least `-0.65 m`, so every eligible translation has absolute cap at least
+`2.5 m`. `lander-world.js` and the independent tool implement this exact construction separately:
+
+```text
+native(n):
+  x = 10*n; q = floor(n/5); k = n-5*q
+  if k == 0: raw = boundary(q)
+  else: raw = lerp(boundary(q),boundary(q+1),k/5) + MOTIFS[motifIndex(q)][k]
+  return clamp(raw,0.5,7.5)
+
+originBuildingRight = originCenter+13.8
+targetPlatformLeft = targetCenter-4.8
+X = every native 10 m sample in the generated range
+    union every retained site's platformLeft, platformRight, buildingLeft, buildingRight
+    union every retained site's six lattice-column rail X coordinates
+for each x in X in strict numeric order:
+  raw = terrainHeightAt(seed,x)
+  if x is an integer 10 m sample and originBuildingRight < x < targetPlatformLeft:
+    cap = originTop + piecewiseLinear(clearanceKnots,x-originCenter)
+    y = raw > cap ? max(0.5,cap-0.15*sampleUnit(seed,4,(x/10)>>>0)) : raw
+  else:
+    y = raw
+  emit exactly one (x,y)
+join every adjacent emitted vertex with one straight segment
+```
+
+`boundary`, `MOTIFS`, and `motifIndex` are exactly section 5.2; equality at the cap gets no relief.
+`raw` is `terrainHeightAt(seed,x)` when `x` is not a global sample. The set union occurs before
+projection; it cannot emit two values for one X, and the final array must satisfy
+`vertices[j-1].x < vertices[j].x` for every `j`. Exact chunk, site, and column-rail insertions
+therefore lie on the same native segment and share the same numeric Y authority on both sides.
+Relief is permitted only at native `10 m` samples strictly in the open flight corridor; native
+terrain is untouched over both closed site footprints and at both corridor endpoints. There is no
+discard/resume splice, same-X conflict resolution, vertical collision edge, shelf easing, or hidden
+foundation. When the retained window contains three sites, apply this rule independently to the two
+open corridors from their immutable adjacent-leg descriptors; the intervals are disjoint, and every
+other X uses native terrain. Forward or backward reconciliation therefore reproduces the same Y for
+every retained X without mutable terrain history. The model passes frozen geometry to pure
+`instantiateTemplateSite(seed,siteIndex,originSite,templateGeometry)`; the world never imports or
+selects the model catalog. Exact serialized vertices for every template at multiple translations and
+the ordered seeds/translations in section 10.2 catch predicate, motif index, clamp, relief, strict-X
+ordering, every inserted boundary, and native continuity beneath both structures.
 
 A catalog/schema or replay mismatch is an invariant error: site state is left unchanged, the run
 enters `generation-error`, and the live status becomes exactly
@@ -418,19 +517,18 @@ former connector region and beneath the complete NOC. It has no platform, connec
 partition and no region-specific scaffold X fields.
 
 One `.site-scaffold` path renders every exposed member, with no filled face behind it. In scene
-coordinates, let `L=worldSceneX(platformLeft)`, `Q=worldSceneX(buildingRight)`,
-`T=worldSceneY(platformBottom)`, `B=worldSceneY(platformBottom-.75)`, and
-`X_i=worldSceneX(platformLeft+1.55*i)` for integer `i in [0,12]`. The path begins with the two
-uniform chords `M L T H Q M L B H Q`. Append exactly one diagonal per bay in increasing bay order:
-for even `i in [0,11]`, `M X_i T L X_(i+1) B`; for odd `i`, `M X_i B L X_(i+1) T`. The first
-diagonal therefore descends from the top-left, and successive diagonals alternate across all 12
-equal `1.55 m` bays without resetting at the platform or NOC boundaries.
+coordinates, let `L=platformLeft*10`, `Q=buildingRight*10=L+186`, `T=548-platformBottom*10`,
+`B=T+7.5`, and `X_i=L+15.5*i` for integer `i in [0,12]`. The path begins with the two uniform chords
+`M L T H Q M L B H Q`. Append exactly one diagonal per bay in increasing bay order: for even
+`i in [0,11]`, `M X_i T L X_(i+1) B`; for odd `i`, `M X_i B L X_(i+1) T`. The first diagonal
+therefore descends from the top-left, and successive diagonals alternate across all 12 equal
+`1.55 m` bays without resetting at the platform or NOC boundaries.
 
 Exactly three visible load-bearing open lattice columns join that truss. Their rail pairs, relative
 to `platformLeft`, are exactly `[0,1]`, `[8.8,9.8]`, and `[17.6,18.6] m`. The first and last outer
 rails therefore align with the complete structure's ends, while the middle pair is centered on the
 span midpoint at `9.3 m`. All six rails remain inside the closed site footprint used by the `2.4 m`
-canonical-clearance proof. For a column with world rail positions `(A,D)`, independently set
+native-clearance proof. For a column with world rail positions `(A,D)`, independently set
 `footA=terrainHeightAt(seed,A)`, `footD=terrainHeightAt(seed,D)`, `columnTop=platformBottom`, and
 `latticeFloor=max(footA,footD)`. Set `COLUMN_WIDTH=1 m` and `COLUMN_BAY_HEIGHT=.8 m`.
 
@@ -442,12 +540,12 @@ diagonal in every bay. Even bay `i` descends from `(A,Y_i)` to `(D,Y_(i+1))`; od
 from `(D,Y_i)` to `(A,Y_(i+1))`. The first brace therefore continues the shallow Warren truss's
 top-left-to-bottom-right rhythm. The top tie overlaps the truss's top-chord centerline, so each
 column reads as joined rather than hung beneath it. Both rails reach their independently sampled
-terrain feet; below the bottom tie only the rail on the lower side continues through the small
+native feet; below the bottom tie only the rail on the lower side continues through the small
 terrain-slope wedge. The `2.4 m` deck clearance and `.35 m` platform thickness prove
 `columnTop-latticeFloor>=2.05 m`, so every column has at least three bays. There are exactly
-`3+2*bayCount` column members, between 9 and 89 under the `[-22.8,9.2] m` terrain and sole deck
-datum. The complete single path therefore contains the fixed 14 truss members plus three bounded
-column member sets, between 41 and 281 straight segments. It still creates no child node, backing
+`3+2*bayCount` column members, between 9 and 27 under the `[.5,7.5] m` terrain and three deck-level
+bounds. The complete single path therefore contains the fixed 14 truss members plus three bounded
+column member sets, between 41 and 95 straight segments. It still creates no child node, backing
 face, regional brace field, crossing X pair, or common foundation.
 
 Set `fill="none"`, `stroke="#4b4e55"`, `stroke-width="2"`, `stroke-linecap="butt"`, and
@@ -465,23 +563,24 @@ exact axis-aligned `+/-0.1 m` expansion of the two chord extents and conservativ
 diagonal. Its top is `platformTop-0.25`, safely below the unexpanded landing face, so a legal
 target-top contact cannot hit it first. Each exact column collider is the closed stroked-member
 axis-aligned bounding box `[A-.1,D+.1] x [min(footA,footD)-.1,columnTop+.1]`. It contains both
-rails, every tie, every brace, and both butt-capped terrain feet, overlaps the canonical terrain and
+rails, every tie, every brace, and both butt-capped native feet, overlaps the native terrain and
 truss by `.1 m`, and has no invented common foundation. Platform, truss, and column boundaries
 overlap but never reach the landing face.
 
 Before columns subdivide it, every complete Warren-truss opening fits inside `3.1 by .75 m`, whose
 diameter is `sqrt(10.1725)=3.1894356867634124 m < 3.2 m`; either end half-opening fits inside
 `1.55 by .75 m`, whose diameter is `1.7219186970537043 m`. A lattice bay fits inside `1 by .8 m`,
-whose diameter is `sqrt(1.64)=1.2806248474865698 m`. The canonical world-grade bound `.28125 m/m`
-limits terrain change across one column width to `.28125 m`; the small below-tie slope wedge
-therefore fits inside `1 by .28125 m`, with diameter `1.0387981336621663 m`. Added rails, ties, and
-braces can only subdivide these bounds, and member stroke can only shrink them. The conservative
-truss and column colliders are therefore honest: no complete `3.2 m` hull can enter an opening they
-reject while the narrower lattice remains visibly open.
+whose diameter is `sqrt(1.64)=1.2806248474865698 m`. Because native samples are at least `10 m`
+apart and clamped to `[.5,7.5]`, the terrain height can change by at most `.7 m` across one column
+width; the small below-tie slope wedge therefore fits inside `1 by .7 m`, with diameter
+`sqrt(1.49)=1.2206555615733703 m`. Added rails, ties, and braces can only subdivide these bounds,
+and member stroke can only shrink them. The conservative truss and column colliders are therefore
+honest: no complete `3.2 m` hull can enter an opening they reject while the narrower lattice remains
+visibly open.
 
 These are independently reconstructed conservative maxima, not a fixed inventory of opening counts.
 For each site descriptor, the independent test implementation overlays all 14 truss members, all
-variable column members, and the canonical terrain surface across each column; splits them at every
+variable column members, and the native terrain surface across each column; splits them at every
 intersection; and enumerates each bounded connected clear face inside the truss/column collider
 union. Every face must fit within one of the three raw centerline boxes above. It records the actual
 maximum face's axis-aligned envelope width and height plus their `hypot` diameter, and proves that
@@ -497,104 +596,13 @@ elevated helicopter-pad reading, and no pale or white rectangle can appear below
 play starts.
 
 One gas can sits `3.0 m` right of platform center and does not collide. One NOC begins `2.0 m` right
-of the platform edge. Its visual and collision lower bound is exactly `platformBottom`; canonical
+of the platform edge. Its visual and collision lower bound is exactly `platformBottom`; native
 terrain remains visible below it and the truss and columns carry it. Its solid `7.0 m`-wide
 collision shell reaches the roof `7.2 m` above platform top. The NOC shell overlaps the top-chord
 stroke and truss collider by `0.1 m`; that presentation decomposition is not a collision hole and
 does not intersect the landing face. Its face contains one clean rectangular vertical battery
 outline and four fill bars, with no terminal nub or rounded corner. A solid `0.5 m`-wide,
 `3.2 m`-tall mast and antenna head rise from the roof. Three symmetric signal arches do not collide.
-
-### 5.4 Phase 4P canonical relief
-
-The sole canonical terrain authority is the normalized sample chain. Define:
-
-```text
-SCENE_HEIGHT = 640
-WORLD_SCALE = 10 scene units/m
-WORLD_ZERO_SCENE_Y = 348
-TERRAIN_SAMPLE_SPACING = 10 m
-RELIEF_SPAN = 320 m
-S(t) = 6*t^5 - 15*t^4 + 10*t^3
-
-span = floor(x / RELIEF_SPAN)
-t = (x - span*RELIEF_SPAN) / RELIEF_SPAN
-A = sampleUnit(seed,13,span>>>0)
-B = sampleUnit(seed,13,(span+1)>>>0)
-b = sampleUnit(seed,14,span>>>0) - 0.5
-w = t + b*(S(t)-t)
-kernel(seed,x) = 0.1 + 0.5*(A + (B-A)*S(w))
-```
-
-Production evaluates `kernel` only at global `10 m` sample positions. Name those values
-`terrainNormalizedSample(seed,sampleIndex)`. For arbitrary X, `terrainNormalizedHeightAt(seed,x)`
-linearly interpolates the two enclosing normalized samples.
-`terrainHeightAt(seed,x)=64*terrainNormalizedHeightAt(seed,x)-29.2` is the one world-Y conversion.
-Rendering, collision, platform feet, site clearance, fixture derivation, and the no-JavaScript scene
-consume that same sampled chain. There is no analytic-render versus polyline-collision split.
-Inserted site and column X coordinates use `terrainHeightAt`; they subdivide an existing line and
-cannot change its shape. `terrainVerticesForWindow` is the strict sorted union of the retained range
-endpoints, interior global samples, and retained site/column X coordinates. It performs no height
-cap, shelf, blend, discarded-history splice, or per-frame random work.
-
-The warp is safe by construction. For `b in [-.5,.5)`, `w(0)=0`, `w(1)=1`, and
-`0.5 <= dw/dt <= 1.5`; therefore `w` and both applications of `S` are monotone and non-overshooting.
-`S'(0)=S'(1)=S''(0)=S''(1)=0`, so adjacent spans are C2 even though each has an independent `b`. The
-sampled linear surface is wholly inside `[0.1,0.6]`, including between vertices. Within a span its
-chord signs cannot reverse; only an anchor whose two neighboring differences have opposite signs is
-a peak or canyon. Successive reversal coordinates are therefore at least `320 m` apart, and each
-aligned half-open span `[k*320,(k+1)*320)` contains at most one. A reversal can never occur at every
-`10 m` sample.
-
-The exact independent limits use `max(S')=15/8` and `max(abs(S''))=10*sqrt(3)/3`:
-
-```text
-normalized chord grade <= 0.00439453125 /m
-world chord grade <= 0.28125 m/m = atan(0.28125) = 15.708637829015746 degrees
-normalized analytic grade-change <= 0.00008985859292196934 /m^2
-world analytic grade-change <= 0.005750949947006038 /m^2
-adjacent 10 m normalized chord-grade change <= 0.0008985859292196934 /m
-adjacent 10 m world chord-grade change <= 0.05750949947006038 m/m
-```
-
-Tests reconstruct these constants from the formulas rather than trusting exported maxima. They also
-scan every segment and adjacent segment pair, and count sign reversals after ignoring exact
-zero-grade continuations. The fixed extrema corpus includes seed `11`, span `-2` at `x=-640 m`,
-whose normalized anchor is `0.10337466620840133`, and seed `41`, span `6` at `x=1920 m`, whose
-normalized anchor is `0.5986480843508616`. Seed `39`, span `-22`, independently supplies
-`0.5967332982923835`. These values satisfy the reviewed `<=0.11` and `>=0.59` witnesses without a
-special seed, clamping, or witness-only branch.
-
-Canonical world terrain is consequently in `[-22.8,9.2] m`. Every platform uses one exact global
-engineering datum:
-
-```text
-deckLevel = 116 integer decimeters
-platformTop = 11.6 m = 9.2 + PLATFORM_CLEARANCE
-platformBottom = 11.25 m
-```
-
-This datum is derived from the global native envelope, not a presentation offset. It gives every
-possible site at least the existing `2.4 m` native clearance without inspecting, flattening, or
-rejecting local terrain. Site 0 remains centered at `36 m`. Later sites use only the three allowed
-flat transitions at center deltas `78`, `93`, and `102 m`; every template has `deckDelta=0`. For
-site index `i`, set `base=floor(3*sampleUnit(seed,3,i))` and inspect slots `(base+2*c)%3` for
-`c=0..2`. Two and three are relatively prime. A missing fixture or any nonzero deck delta is
-corruption, but every complete catalog returns its first preferred entry, so normal selection
-performs one eligibility check and is structurally seed-independent. The declared hard ceiling
-remains three checks. There is no terrain retry, route search, or generation-error path for an
-ordinary seed. Four 100-site runs must reproduce selection directly from this formula and never
-retain discarded sites.
-
-The existing platform, truss, column, NOC, and collision shapes remain unchanged except for their
-terrain-derived vertical extents. With the expanded envelope, each column has `3..43` bays, `4..44`
-ties, and `9..89` members. The complete single scaffold path has `41..281` straight segments. It
-remains one DOM descendant and is rebuilt only on site reconciliation. Across a `1 m` column the
-terrain wedge is at most `.28125 m`; its conservative raw box has diameter
-`hypot(1,.28125)=1.0387981336621663 m`. The existing `1.2806248474865698 m` lattice and
-`3.1894356867634124 m` truss bounds remain larger and below the `3.2 m` hull. The independent
-clear-face enumerator must consume all variable members and actual terrain rather than assuming the
-old `9..27` member or `41..95` scaffold ranges.
 
 ## 6. Projection, camera, and bounded retention
 
@@ -603,112 +611,46 @@ minimum width. `#lander-scene-stage` is `position:relative`, has `aspect-ratio:2
 SVG plus every overlay. `#lander-scene-shell` is a normal-flow column, `width:min(100%,60rem)`, and
 contains the stage followed by the controls rail. It has no aspect ratio of its own. This keeps the
 scene's exact projection while making the rail a real terrain-separated band rather than an overlay.
-Neither box can cause page overflow at 320 CSS pixels or 400 percent zoom. All production projection
-calls the shared pure helpers `worldSceneX(worldX)=worldX*WORLD_SCALE` and
-`worldSceneY(worldY)=WORLD_ZERO_SCENE_Y-worldY*WORLD_SCALE`; no caller repeats an arithmetic
-projection literal.
+Neither box can cause page overflow at 320 CSS pixels or 400 percent zoom. Horizontal scale is
+`10 scene units/m`; vertical projection is `sceneY=548-worldY*10`.
 
 The controller computes one reversible dead-zone camera directly from the current immutable pose:
 
 ```text
-HORIZONTAL_HULL_MARGIN = LANDER_BOUNDING_RADIUS = 6.7 m
-cameraLeftForPose(pose) = pose.x < 6.7 ? pose.x-6.7 : pose.x > 33.3 ? pose.x-33.3 : 0
+cameraLeftForPose(pose) = pose.x < 5 ? pose.x-5 : pose.x > 35 ? pose.x-35 : 0
 ```
 
-It writes `--camera-x=worldGroupOffsetX(camera)px` and `--camera-y=worldGroupOffsetY(camera)px` on
-the game root. CSS applies one transform on `#lander-world`:
+It writes `--camera-x=-cameraLeft*10px` on the game root. CSS applies one transform on
+`#lander-world`:
 
 ```text
-transform: translate(var(--camera-x), var(--camera-y))
+transform: translate(var(--camera-x), 0)
 ```
 
 All terrain, sites, lander, agent, and debris retain absolute world-derived scene coordinates inside
-that group. The camera holds the opening viewport while the reference point remains in
-`[6.7,33.3] m`, keeps its conservative hull reference at scene `x=67` during leftward travel and
-`x=333` during rightward travel, and is continuous at both dead-zone boundaries. It has no origin
-clamp, monotonic furthest-X value, horizontal extent, or controller cache. Contact, service, crash,
-checkpoint restoration, passing a target, and returning from either direction always use the current
-frozen or restored pose.
-
-Phase 4P uses the shared `worldSceneY` conversion above. For canonical terrain it is algebraically
-`640*(1-normalizedHeight)`, before camera motion. A test reconstructs both expressions and requires
-agreement within `1e-12` scene units for every fixed vertex. The normalized value is never recovered
-from a camera-shifted coordinate.
-
-Let `LANDER_BOUNDING_RADIUS=6.7 m`, `TOP_MARGIN=40` scene units, and `MAX_CAMERA_DOWN=320` scene
-units. The pure projection is:
-
-```text
-cameraLeft = cameraLeftForPose(pose)
-preCameraHullTop = worldSceneY(pose.y + LANDER_BOUNDING_RADIUS)
-cameraDown = clamp(TOP_MARGIN-preCameraHullTop,0,MAX_CAMERA_DOWN)
-cameraForPose(pose) = {left: cameraLeft, down: cameraDown}
-worldViewportX(worldX,frozenCamera) = worldSceneX(worldX)-worldSceneX(frozenCamera.left)
-worldViewportY(worldY,frozenCamera) = worldSceneY(worldY)+frozenCamera.down
-worldGroupOffsetX(frozenCamera) = worldSceneX(-frozenCamera.left)
-worldGroupOffsetY(frozenCamera) = frozenCamera.down
-```
-
-Only overlays outside `#lander-world` call `worldViewportX/Y`, and they receive the same immutable
-camera object frozen for that modeled event or render. Descendants of `#lander-world` use
-`worldSceneX/Y` only and inherit both camera axes from the group transform; applying camera values
-inside them is a double transform and an invariant failure. `worldGroupOffsetX` composes the shared
-world conversion with the negated camera world coordinate. `worldGroupOffsetY` is the only justified
-identity projection because `camera.down` is already defined in scene units, not metres.
-
-The radius exceeds `hypot(1.6,6.5)`, so it contains the rotated hull at every attitude. The matching
-horizontal margin keeps that complete conservative circle inside scene X `[0,1000]`. At the
-unchanged playable ceiling `pose.y=56`, `cameraDown=319<320` and the complete hull stays below the
-`40`-unit top margin. At maximum camera motion the fixed landing face projects to `551`, the NOC
-bottom to `554.5`, its roof to `479`, and its mast top to `447`, all inside scene Y `[0,640]`. Thus
-the active lander and the horizontally visible landing face, NOC, and mast remain completely visible
-without changing physics or `MAX_PLAYABLE_Y=56`. The one `#lander-world` transform above consumes
-only `worldGroupOffsetX/Y(camera)`. Lander, sites, terrain, traveling agent, and debris share it.
-Crash flash coordinates add the same frozen camera-down value because that flash remains outside the
-world group. Sky keeps horizontal `.24` parallax and no vertical camera shift.
-
-The stage remains the clipping authority. During high flight, terrain and the terrain-derived ends
-of both rails in a support column may move below the stage and clip together at the same boundary;
-neither may be clipped independently or shortened. They cannot paint over the normal-flow
-instruction rail, and the canonical terrain value is not changed or flattened. The target landing
-face remains at or above scene Y `551`, so no vertical target cue is needed. Static markup uses the
-exact camera-zero horizontal and initial-pose vertical projection for `STATIC_WORLD_SEED`, including
-the initial camera-down value; START reconciliation changes only the run seed. Wide and narrow
-browser witnesses exercise zero, intermediate, and maximum camera-down states and prove the hull
-and, when the cue is absent, the landing face/NOC/mast have no clipping. Support columns may clip
-with terrain as specified above; the horizontal cue, HUD, and rail must not overlap.
+that group. The camera holds the opening viewport while the reference point remains in `[5,35] m`,
+keeps it at scene `x=50` during leftward travel and `x=350` during rightward travel, and is
+continuous at both dead-zone boundaries. It has no origin clamp, monotonic furthest-X value,
+horizontal extent, or controller cache. Contact, service, crash, checkpoint restoration, passing a
+target, and returning from either direction always use the current frozen or restored pose.
 
 The sky is a separate bounded decorative projection between `#scene-sky` and `#lander-world`. Define
-`SKY_PARALLAX=.24`, `SKY_CHUNK_WIDTH=50 m`, `SKY_CHUNK_COUNT=5`, and `STARS_PER_SKY_CHUNK=4`, with
-these pure compositions:
-
-```text
-skyWorldLeftForCamera(frozenCamera) = frozenCamera.left*SKY_PARALLAX
-skyGroupOffsetX(frozenCamera) = worldSceneX(-skyWorldLeftForCamera(frozenCamera))
-skyStarWorldX(seed,c,k) = c*SKY_CHUNK_WIDTH+4+42*sampleUnit(seed,6,k)
-skyStarSceneY(seed,k) = 50+190*sampleUnit(seed,7,k)
-skyLandmarkWorldX(seed,c,q) = c*SKY_CHUNK_WIDTH+10+30*sampleUnit(seed,9,q)
-skyLandmarkSceneY(seed,q) = 90+110*sampleUnit(seed,10,q)
-```
-
-The X helpers generate world positions and route their projection only through `worldSceneX`.
-`skyStarSceneY` and `skyLandmarkSceneY` are intentionally named scene-space decorative lanes; they
-are the justified direct scene-Y composition and never receive terrain conversion or vertical camera
-motion. Let `skyLeft=skyWorldLeftForCamera(frozenCamera)`,
-`firstSkyChunk=floor(skyLeft/SKY_CHUNK_WIDTH)-1`, and retain exactly the five consecutive indexes
-beginning there. Their `250 m` span always covers the `100 m` visible sky interval plus at least one
-`50 m` buffer. The controller writes `--sky-camera-x=skyGroupOffsetX(frozenCamera)px`; CSS
-translates only `#lander-sky-world` by that value. Stars therefore move in the same direction as
-terrain at exactly 24 percent of its distance, producing depth without autonomous animation.
+`SKY_PARALLAX=.24`, `SKY_CHUNK_WIDTH=50 m`, `SKY_CHUNK_COUNT=5`, and `STARS_PER_SKY_CHUNK=4`. Let
+`skyLeft=cameraLeft*.24`, `firstSkyChunk=floor(skyLeft/50)-1`, and retain exactly the five
+consecutive indexes beginning there. Their `250 m` span always covers the `100 m` visible sky
+interval plus at least one `50 m` buffer. The controller writes
+`--sky-camera-x=-cameraLeft*10*.24px`; CSS translates only `#lander-sky-world` by that value. Stars
+therefore move in the same direction as terrain at exactly 24 percent of its distance, producing
+depth without autonomous animation.
 
 For each retained sky chunk `c` and local star `i=0..3`, let unsigned `k=(Math.imul(c,4)+i)>>>0`,
-`X=worldSceneX(skyStarWorldX(seed,c,k))`, and `Y=skyStarSceneY(seed,k)`. Append `M X Y h2` to the
-sole `#scene-stars` path in chunk then local-star order. Set
+`x=c*50+4+42*sampleUnit(seed,6,k)`, and `y=50+190*sampleUnit(seed,7,k)`. Append `M(x*10) y h2` to
+the sole `#scene-stars` path in chunk then local-star order. Set
 `landmarkOffset=floor(4*sampleUnit(seed,8,0))`. A chunk contains one landmark exactly when
 `positiveModulo(c-landmarkOffset,4)===0`, so every retained five-chunk window contains one or two.
-For such a chunk, use unsigned `q=c>>>0`, scene center `X=worldSceneX(skyLandmarkWorldX(seed,c,q))`
-and `Y=skyLandmarkSceneY(seed,q)`, and select a crescent when `sampleUnit(seed,11,q)<.5`, otherwise
-a ringed planet. A crescent is the two-arc outline
+For such a chunk, use unsigned `q=c>>>0`, scene center `X=10*(c*50+10+30*sampleUnit(seed,9,q))` and
+`Y=90+110*sampleUnit(seed,10,q)`, and select a crescent when `sampleUnit(seed,11,q)<.5`, otherwise a
+ringed planet. A crescent is the two-arc outline
 `M X (Y-18) A18 18 0 1 0 X (Y+18) A13 18 0 0 1 X (Y-18)`. A planet is the closed circle
 `M (X-16) Y A16 16 0 1 0 (X+16) Y A16 16 0 1 0 (X-16) Y Z`. Set
 `ringProfile=floor(3*sampleUnit(seed,12,q))`; profiles `0`, `1`, and `2` respectively use radii
@@ -724,17 +666,15 @@ foreground half remains visible across the planet. Full rear ellipses, quadratic
 than two rings, and radii outside the three profiles are forbidden. All landmark subpaths share the
 sole `#scene-landmarks` path.
 
-`skyProjectionForCamera(seed,frozenCamera)` obtains its world window only from
-`skyWorldLeftForCamera`, routes every X through `worldSceneX`, and returns the exact five-index key,
-the two path strings, and `skyGroupOffsetX(frozenCamera)`. Static no-JavaScript markup is its exact
-output for `STATIC_WORLD_SEED` and the initial frozen camera; START and every sky-key change
-reconcile the same two nodes, while ordinary frames update only the returned group transform. The
-group and both paths are permanently `aria-hidden`; they receive no title, description, focus,
-pointer behavior, collision, model field, game state, request, storage, timer, or event listener.
-`#scene-stars` retains its existing rounded graphite-gray stroke. Landmarks use `fill="none"`,
-`stroke="#8a867c"`, `stroke-width="3"`, and round caps/joins. Hidden time freezes the pose and both
-transforms; reduced motion changes no deterministic positional projection because the sky has no
-independent motion. DOM stays exactly one group and two paths regardless of travel.
+`skyProjectionForCamera(seed,cameraLeft)` returns the exact five-index key plus those two path
+strings. Static no-JavaScript markup is its exact output for `STATIC_WORLD_SEED` and camera zero;
+START and every sky-key change reconcile the same two nodes, while ordinary frames update only the
+group transform. The group and both paths are permanently `aria-hidden`; they receive no title,
+description, focus, pointer behavior, collision, model field, game state, request, storage, timer,
+or event listener. `#scene-stars` retains its existing rounded graphite-gray stroke. Landmarks use
+`fill="none"`, `stroke="#8a867c"`, `stroke-width="3"`, and round caps/joins. Hidden time freezes the
+pose and both transforms; reduced motion changes no deterministic positional projection because the
+sky has no independent motion. DOM stays exactly one group and two paths regardless of travel.
 
 Terrain range projection never drops a segment merely because neither endpoint lies on a retained
 `50 m` chunk boundary. Chunk indexes choose one closed retained range from the minimum retained
@@ -757,13 +697,14 @@ The visible interval is `[cameraLeft,cameraLeft+100]`. Retain chunks intersectin
 `40 m` on each side, at most five `50 m` chunks. Retain the active checkpoint site, target site, and
 at most one immediately preceding powered site, at most three immutable site-state records. Terrain
 generation uses only the retained chunk edges as its closed range. It receives the three small site
-records only to add intersecting site/column X coordinates; it must never widen the terrain range to
-reach an offscreen site. The result has at most 51 strict-X vertices and reconstructs identical
-canonical sampled values from seed after arbitrary eviction, reversal, and return. This closes the
-otherwise unbounded gap between a far-away camera and a retained target while preserving collision
-terrain around the vehicle. When a terrain or sky key changes, reconcile the fixed nodes once;
-ordinary frames update transforms and attributes only. The run retains no discarded terrain or site
-history beyond `completedSites` and the latest checkpoint snapshot.
+records so it can add site/column boundaries and apply either adjacent corridor rule only where that
+range intersects them; it must never widen the terrain range to reach an offscreen site. The result
+has at most 51 strict-X vertices and reconstructs identical native/corridor values from seed and
+site descriptors after arbitrary eviction, reversal, and return. This closes the otherwise unbounded
+gap between a far-away camera and a retained target while preserving collision terrain around the
+vehicle. When a terrain or sky key changes, reconcile the fixed nodes once; ordinary frames update
+transforms and attributes only. The run retains no discarded terrain or site history beyond
+`completedSites` and the latest checkpoint snapshot.
 
 Hard runtime ceilings are two terrain paths, three site groups, eight debris fragments, 80
 descendants under `#lander-world`, one sky group with exactly two path descendants, 51 terrain
@@ -782,27 +723,22 @@ deadline. Intermediate edges are deliberately lost; subsequent edges append afte
 is deterministic degradation, not an ordering-preservation claim. A 100-site browser witness must
 keep these counts constant, show no increasing event-listener count, and keep active-game frame work
 below 4 ms at the 95th percentile on the pre-merge Chromium machine. Direct template selection,
-canonical terrain-window construction, and exactly two proof replays together must finish below 25
-ms at the 95th percentile and 50 ms maximum over the same witness; record actual results rather than
-weakening the ceiling.
+corridor construction, and exactly two proof replays together must finish below 25 ms at the 95th
+percentile and 50 ms maximum over the same witness; record actual results rather than weakening the
+ceiling.
 
-Pure `targetDirectionForViewport(target,cameraLeft)` first computes
-`targetBuildingRight=siteStructure(target).buildingRight`; it never reads or duplicates a
-building-right field on the target descriptor. It compares the landing-face/NOC/mast horizontal
-interval `[target.platformLeft,targetBuildingRight]` with `[cameraLeft,cameraLeft+100]`. It returns
-`"left"` exactly when `target.platformLeft<cameraLeft`, `"right"` exactly when
-`targetBuildingRight>cameraLeft+100`, and `null` otherwise. Equality is inside. Because the interval
-is only `18.6 m` wide, both non-null predicates cannot hold at once. The fixed `44 by 44` solid
-right-arrow path uses transform `translate(932 280)` for right and `translate(68 280) scale(-1 1)`
-for left, placing its mirrored paint at scene `x=[24,68]`; direction never depends on blinking. The
-controller writes `data-target-direction="right|left|none"`, reveals the visually hidden direction
-node on the same non-null predicate, and writes the corresponding reviewed left/right sentence
-before adding its IDREF. Automated tests derive expected accessible direction from the live
-predicate and current DOM text instead of embedding either authored sentence. The cue initially
-points right after a service, reverses to left after the player passes the target, and returns right
-if they cross back. It hides only when the full landing face, NOC, and mast are horizontally in
-view; vertical camera bounds keep all three vertically in view. Reduced motion leaves the arrow
-static; hidden time pauses its existing blink.
+Pure `targetDirectionForViewport(target,cameraLeft)` returns `"right"` exactly when
+`target.platformLeft>cameraLeft+100`, `"left"` exactly when `target.platformRight<cameraLeft`, and
+`null` otherwise. Equality means the platform has entered the viewport and hides the cue. The fixed
+`44 by 44` solid right-arrow path uses transform `translate(932 280)` for right and
+`translate(68 280) scale(-1 1)` for left, placing its mirrored paint at scene `x=[24,68]`; direction
+never depends on blinking. The controller writes `data-target-direction="right|left|none"`, reveals
+the visually hidden direction node on the same non-null predicate, and writes the corresponding
+reviewed left/right sentence before adding its IDREF. Automated tests derive expected accessible
+direction from the live predicate and current DOM text instead of embedding either authored
+sentence. The cue initially points right after a service, reverses to left after the player passes
+the target, and returns right if they cross back. It hides whenever the target platform is partly
+visible. Reduced motion leaves the arrow static; hidden time pauses its existing blink.
 
 ## 7. Model shape, mission states, and checkpoint
 
@@ -856,13 +792,15 @@ creates site 0 as target, `fuel=15`, `fuelGaugeReference=30`, `completedSites=0`
 `refuelRatio=ratio(1)=2`, and the initial approach:
 `(x,y,vx,vy,angle,angularVelocity)=(30,32,0.8,-0.4,0,0)`.
 
-The opening reserve has one seed-independent fixed-step feasibility witness for the sole deck datum.
-Starting from that exact pose with fuel `15`, command zero engines for `352` steps, straight
-collective `(.72,.72)` for `104`, then zero until contact. The last clear pose at step `576` is
-`(33.8400000000006,11.60599999999987,.8,-3.5680000000000396,0,0)`; step `577` contacts safely with
-pre-award reserve `13.751999999999953`. Section 14 pins the same values. This test-only schedule is
-not a runtime assist, planner, award input, or claim of minimum fuel. It proves the exact half-gauge
-opening remains comfortably feasible under the real collision and landing profile.
+The opening reserve has an independent, fixed-step feasibility witness for every possible first-site
+deck. Starting from that exact pose with fuel `15`, command zero engines, then straight collective
+`(.72,.72)`, then zero engines until first contact. For deck levels `83`, `91`, and `99`, the first
+two run lengths are respectively `[396,108]`, `[396,96]`, and `[384,96]` steps. Representative seeds
+`1`, `8`, and `13` select those three levels and land safely after `554`, `501`, and `512` total
+steps with pre-award reserves `13.70399999999995`, `13.847999999999956`, and `13.847999999999956`.
+The last clear poses are pinned in section 14. This test-only schedule is not a runtime assist,
+planner, award input, or claim of minimum fuel. It proves the exact half-gauge opening remains
+comfortably feasible under the real collision and landing profile.
 
 ### 7.2 State machine
 
@@ -1216,8 +1154,8 @@ horizontal failure.
 
 ### 10.1 Checked-in constructive catalog
 
-`lander-model.js` owns an immutable `REFERENCE_TEMPLATES` array keyed by the three flat distances in
-section 5.3. It is data, not a runtime planner. Every entry contains these literal values:
+`lander-model.js` owns an immutable `REFERENCE_TEMPLATES` array keyed by the nine distance and deck
+deltas in section 5.3. It is data, not a runtime planner. Every entry contains these literal values:
 
 ```text
 templateId, centerDelta, deckDelta
@@ -1232,11 +1170,11 @@ All run counts are positive integers, adjacent command indexes differ, total sch
 most `24*120=2,880` fixed steps, and the first run is the player-reachable launch prefix `[1,90]`:
 hold Space for exactly 90 fixed steps from launch-ready. The first effective step releases the pad
 hold, and the remaining held steps continue through the ordinary `launching` to `flying` boundary.
-The schedule stops at its first target contact. Clearance knots include both route-envelope
-endpoints, have strictly increasing relative X, and remain proof metadata only; they never alter the
-canonical terrain chain. The stored successful contact satisfies every inclusive landing limit. The
-smaller allowance's trajectory remains inside its envelope until it exhausts fuel before target
-contact; replay stops at that exhaustion step, which is its exact checked-in failure witness.
+The schedule stops at its first target contact. Clearance knots include both corridor endpoints,
+have strictly increasing relative X, and linearly define the upper terrain envelope used in section
+5.3. The stored successful contact satisfies every inclusive landing limit. The smaller allowance's
+trajectory remains inside its envelope until it exhausts fuel before target contact; replay stops at
+that exhaustion step, which is its exact checked-in failure witness.
 
 The schedule digest starts at `2166136261`. For each `[commandIndex,stepCount]`, fold the command,
 then the low and high step-count bytes, in that order, using
@@ -1269,21 +1207,20 @@ Keep `website/tools/derive_lander_routes.mjs` and its pure sibling
 sibling only; neither tool imports production or test code, and runtime, model, and tests must not
 import either tool. The sibling independently splits the rendered-member and terrain overlay into
 bounded faces and returns the maximum connected clear-face witness; it owns no route,
-world-generation, or fixture literals. Version `agw-lander-route-deriver/v6` with recipes
-`agw-lander-route-recipes/v3` independently implements sections 5.2-5.4, 8, 9, and the reachable
-command table, including the canonical normalized sample chain, true gimbal force, and
-neutral-collective assist. Its versioned per-template constructive recipes give command phase order
-and finite integer step ranges. Export `MAX_RECIPE_COMBINATIONS=256`. Each final recipe's explicit
-range Cartesian product contains exactly four lexicographically ordered combinations. `256` per
-template and `768` over three templates are hard ceilings, not declared or evaluated family sizes.
-The complete ordinary run evaluates exactly `3*4=12` candidates. The derived fixture pins each
-route's exact integer `combinationsEvaluated=4`; that value must equal the recipe's independently
-recomputed Cartesian-product size rather than a loop counter chosen after success. Derivation
-evaluates the whole declared family, records that literal, and chooses by
-`(burn,totalSteps,RLE lexicographic)`, failing rather than emitting an incomplete route. Every
-candidate must be safe in all nine pinned seed/translation combinations per template. There is no
-early-success exit, undisclosed candidate, beam, search heuristic, random retry, envelope
-relaxation, or runtime fallback.
+world-generation, or fixture literals. Version `agw-lander-route-deriver/v5` with recipes
+`agw-lander-route-recipes/v3` independently implements sections 5.2-5.3, 8, 9, and the reachable
+command table, including the motif-bank traversal, true gimbal force, and neutral-collective assist.
+Its versioned per-template constructive recipes give command phase order and finite integer step
+ranges. Export `MAX_RECIPE_COMBINATIONS=256`. Each final recipe's explicit range Cartesian product
+contains exactly four lexicographically ordered combinations. `256` per template and `2,304` over
+nine templates are hard ceilings, not declared or evaluated family sizes. The complete ordinary run
+evaluates exactly `9*4=36` candidates. The derived fixture pins each route's exact integer
+`combinationsEvaluated=4`; that value must equal the recipe's independently recomputed
+Cartesian-product size rather than a loop counter chosen after success. Derivation evaluates the
+whole declared family, records that literal, and chooses by `(burn,totalSteps,RLE lexicographic)`,
+failing rather than emitting an incomplete route. Every candidate must be safe in all nine pinned
+seed/translation combinations per template. There is no early-success exit, undisclosed candidate,
+beam, search heuristic, random retry, envelope relaxation, or runtime fallback.
 
 Every tool and production replay begins at the same launch-ready centered pose with both launch
 booleans false. It rejects a schedule whose first request total is at most `.375`, applies the first
@@ -1295,34 +1232,50 @@ The exact invocation is:
 
 ```text
 node website/tools/derive_lander_routes.mjs \
-  --geometry website/tests/fixtures/lander-route-geometry-v5.json \
+  --geometry website/tests/fixtures/lander-route-geometry-v4.json \
   --output PATH [--verify PATH]
 ```
 
 Unknown/missing flags exit 2; derivation or verification failure exits 1; success exits 0. Both
-ordinary generation and ordinary `--verify` enumerate those same bounded families for all three
+ordinary generation and ordinary `--verify` enumerate those same bounded families for all nine
 templates. Verification then replays every selected winner and its one-quantum-smaller failure
 witness across all nine pinned seed/translation combinations before comparing canonical output bytes
 with the checked fixture; it has no theoretical two-million-candidate path or unchecked fast mode.
-Thus a routine verification invocation evaluates exactly 12 candidates plus 54 selected replays; the
-larger ceilings remain guards only. This is the required local/CI workflow, not a special
-release-only regeneration job. `--geometry` contains schema `agw-lander-route-geometry/v5`, exactly
-the three flat IDs, deltas, and literal route envelopes, plus one `siteGeometry` object with deck
-datum `[11.6]`, the section 5.4 normalized kernel and projection, platform/NOC/mast geometry, truss
-geometry, three support-column rail pairs, `.28125 m` terrain wedge, `9..89` column-member bound,
-and `41..281` scaffold-segment bound. The v4 geometry fixture is deleted atomically with no reader,
-alias, fallback, or compatibility shim.
-
-Output schema `agw-lander-route-derived/v5` contains `deriverVersion`, `recipeVersion`,
+Thus a routine verification invocation evaluates exactly 36 candidates plus 162 selected replays;
+the larger ceilings remain guards only. This is the required local/CI workflow, not a special
+release-only regeneration job. `--geometry` contains schema `agw-lander-route-geometry/v4`, the nine
+IDs, deltas, and literal clearance knots, plus one `siteGeometry` object with the exact platform
+width, thickness, `2.4 m` clearance, exact deck levels `[8.3,9.1,9.9]`, `7.0 m` NOC width, `7.2 m`
+roof offset, `0.5 by 3.2 m` mast, `0.2 m` member width, butt cap, and round join. Its `truss` object
+pins `span=18.6`, `bayCount=12`, `bayWidth=1.55`, `bayHeight=.75`, `chordCount=2`,
+`diagonalsPerBay=1`, `alternation="top-left-to-bottom-right-first"`, the conservative raw clear-face
+maximum `width=3.1`, `height=.75`, and `diameter=3.1894356867634124`, and collision envelope
+`[-4.9,13.9] x [-1.2,-.25]`. Its sibling `supportColumns` object pins count `3`, rail-pair offsets
+`[[0,1],[8.8,9.8],[17.6,18.6]]`, rail/tie/brace width `.2`, maximum bay height `.8`, first-brace
+alternation `"top-left-to-bottom-right-first"`, independently interpolated rail feet, bottom-tie
+rule `max-rail-foot`, collision expansion `.1`, lattice maximum `1 by .8 m`, and terrain-wedge
+maximum `1 by .7 m`. It contains no `pylons`, target-band, shelf, connector-width, regional
+scaffold, post-grid, or platform/connector/NOC underframe fields. This incompatible field and
+member-shape change advances both fixture filenames and schemas from v3 to v4; the v3 pair is
+deleted in the same atomic commit with no reader, alias, fallback, or compatibility shim. Output
+schema `agw-lander-route-derived/v4` contains `deriverVersion`, `recipeVersion`,
 `canonicalPoseDecimals:9`, exact per-route `combinationsEvaluated`, `physicsDigest`,
 `geometryDigest`, the ordered route records from section 10.1, `worldWitnesses`, `worldDigest`, and
-`outputDigest`. `worldWitnesses` contains exactly 27 independently reconstructed descriptors: three
-templates times seeds `[11,39,41]` times origins `[36,117,-42]`, in that nesting order. Every origin
-and target stores deck level `116`. Each descriptor contains the canonical strict-X normalized and
-world terrain arrays, anchor/warp values, segment-grade and adjacent-grade-change values, reversal
-count, six support feet, complete scaffold members and colliders, maximum connected clear face,
-NOC/mast colliders, route record, and its own digest. No second terrain representation or modifying
-field exists. Canonical JSON recursively sorts object keys, preserves array order, uses
+`outputDigest`. `worldWitnesses` contains exactly 81 independently reconstructed world descriptors:
+nine templates times three pinned seeds times three translations. Nesting is template outermost in
+section 10.1 order, then seed in exact order `[11,39,41]`, then origin center in exact order
+`[36,117,-42]`. For each template, the witness origin deck level is `83` for delta `+1.6`, `91` for
+delta `+.8`, and `99` otherwise; target level is the exact integer sum with the template's decimeter
+delta. The serialized flat array follows that nested order without sorting or regrouping.
+Independent feasibility enumeration proves both closed site footprints satisfy their local native
+minimum in all 81 cases; changing a seed, center, level, or comparison must fail rather than
+silently raise a platform. Each descriptor includes the selected motif-bank offset, direction, and
+relevant per-chunk indexes; the one strict-X terrain array with `10 m`, site-boundary, and six
+column-rail-foot samples; open-corridor cap relief; both platform decks; the fixed 14 truss members
+plus every bounded variable lattice member with cap and join semantics; the raw-truss, lattice-bay,
+terrain-wedge, and actual maximum connected clear-face bounds; the one truss and three column
+conservative collision envelopes; NOC bodies, complete NOC collision envelopes, and mast colliders;
+and its own digest. Canonical JSON recursively sorts object keys, preserves array order, uses
 `JSON.stringify` without whitespace, and hashes UTF-8 bytes with lowercase SHA-256. `geometryDigest`
 hashes the complete geometry object; `physicsDigest` hashes an object containing every named numeric
 constant in sections 8-10, including gimbal and assist constants, plus the eight pre-assist command
@@ -1339,39 +1292,52 @@ descriptor, geometry value, or geometry/physics/world digest. Tests collapse sub
 jitter, reject a precision change, reproduce the canonical bytes on x64 CI and the ARM64 pre-merge
 host, and prove all strict world/geometry values remain untouched.
 
-The reviewed output becomes `website/tests/fixtures/lander-route-derived-v5.json`. Phase 4P uses
-deriver v6, unchanged recipes v3, geometry v5, and derived schema/file v5. Regeneration
-independently applies the canonical sample chain, six rail feet, variable lattice members, three
-column colliders, and section 9's unchanged landing limits to all 12 candidates and then all 54
-selected success/failure replays. It must preserve schedules, schedule digests, demonstrated minima,
-success and one-quantum-failure vectors, and `combinationsEvaluated=4`; otherwise it stops on the
-first exact terrain, member, collision, candidate-count, or replay mismatch without weakening any
-bound.
+The reviewed output becomes `website/tests/fixtures/lander-route-derived-v4.json`. Phase 4M uses
+deriver v5, unchanged recipes v3, geometry v4, and derived schema/file v4. Regeneration
+independently applies section 5.3's six rail feet, variable lattice members, three column colliders,
+and section 9's revised landing limits to all 36 candidates and then all 162 selected
+success/failure replays. The intended result is byte-identical schedules, schedule digests,
+demonstrated minima, success and one-quantum-failure vectors, and `combinationsEvaluated=4` values.
+That equality is evidence to establish, not an assumption: if any widened column changes a selected
+collision or makes a recipe family infeasible, implementation stops with the exact template, seed,
+translation, member, collision, candidate count, and replay witness. It must not weaken a column,
+collider, clearance knot, terrain, landing limit, or proof bound to retain an old route.
 
-The exact physics digest remains `e08f8260b723dd245db88de9ae2cdbac54bf9a97cb0bed1b6f170eda362c48dc`.
-The independent v5 derivation is the sole authority for the necessarily changed geometry, world, and
-output digests; the LLD does not pre-author them. Ordinary generation and verification prove all 27
-world descriptors and all three route/failure records. A retained v4 non-physics digest, changed
-physics digest, route-literal change, or partial digest update is a hard failure.
+The final geometry digest is `a5120d97782b73afb43cabae038412252f644656f41c0ab9e33f5413da9be7ca` and
+the world digest is `c666bb42918301f93386bb1373e92da662d333006d8684946fd80a10761d1e32`. The final
+tolerance bump changes only the physics digest to
+`e08f8260b723dd245db88de9ae2cdbac54bf9a97cb0bed1b6f170eda362c48dc` and the consequent output digest
+to `a922372760f850386810fd6eb60f7aa807bac8b03ee5f0a2b1dec1968ee27b69`. Ordinary generation and
+verification prove all 81 world descriptors and all nine route/failure records remain
+byte-identical; the antenna and sky projections are outside route derivation. A missing expected
+change, a geometry or world change, a route-literal change, or a partial digest update is a hard
+failure.
 
-Regenerate complete v5 geometry and derived fixtures and compare production route/failure literals
-and digests in one atomic change. Tests project production arrays back to both schemas, compare
-canonical bytes, and independently reconstruct all 27 strict-X sampled terrain arrays, anchor/warp
-values, support feet, lattice levels, members, colliders, connected clear faces, and route replays.
-Intentional regeneration writes temporary paths, reviews the canonical mismatch, atomically replaces
-both v4 fixtures, updates production `ROUTE_DIGESTS`, proves route/failure literals equal, and then
-runs ordinary `--verify` against v5. Recipe v3 remains unchanged. No old fixture, schema reader, or
-dual authority survives; ordinary tests verify checked data and never regenerate expectations.
-`website/README.md` permanently teaches this workflow. Neither fixture nor tool enters the 12-file
-artifact.
+Regenerate the complete v4 geometry and derived fixtures and compare production route/failure
+literals and digests in one atomic change. Tests project production arrays back to the two schemas,
+compare canonical bytes with both fixtures, and recompute all digests before replay. Independent
+test-side reconstruction compares all 81 motif selections, strict-X native/corridor arrays,
+deck-level/truss/column/NOC descriptors, inserted native boundary and six-foot values, lattice
+levels, variable members, colliders, the independently enumerated maximum connected clear-face
+envelope, the three conservative aperture maxima, and corridor samples to production with strict
+numeric equality and pinned ULP-sensitive vectors. Thus the world and tool consume identical
+envelope values while independently implementing corridor construction, physics, assist, gimbal, and
+collision. Intentional regeneration writes to temporary paths, reviews the canonical mismatch,
+atomically deletes both v3 fixtures and installs both v4 fixtures, updates all four production
+`ROUTE_DIGESTS`, proves route/failure literals equal before retaining them, and updates independent
+expected tests. It then runs ordinary `--verify` against the checked v4 fixture. Recipe v3 remains
+unchanged. No old fixture, schema reader, or dual authority survives. Never weaken geometry or proof
+bounds merely to make a recipe pass. Ordinary tests only verify checked data and never regenerate
+expectations. `website/README.md` permanently teaches this workflow. Neither fixture nor tool enters
+the 12-file artifact.
 
 Catalog tests replay every literal from an upright origin with `fuel=demonstratedMinimum`, using the
-exact production fixed-step gimbal/assist physics and translated canonical sampled geometry. Each
-must land at its literal success vector. A second replay with
+exact production fixed-step gimbal/assist physics and translated strict-X native/corridor geometry.
+Each must land at its literal success vector. A second replay with
 `fuel=demonstratedMinimum-FUEL_QUANTUM` must match its literal fuel-exhaustion witness before target
-contact. Exhaustively validate all three entries and command indexes. This establishes a
-conservative demonstrated minimum at the catalog's fixed schedule and fuel resolution; it makes no
-claim about a lower-fuel schedule or a global physical optimum.
+contact. Exhaustively validate all nine entries and command indexes. This establishes a conservative
+demonstrated minimum at the catalog's fixed schedule and fuel resolution; it makes no claim about a
+lower-fuel schedule or a global physical optimum.
 
 At site creation, direct selection translates the chosen literal geometry and constructs a
 provisional checkpoint identical to the future real checkpoint except for fuel and the proof being
@@ -1381,11 +1347,22 @@ NOC. For each of exactly two defensive replays, replace only fuel: first with th
 demonstrated minimum, then with one quantum less. Neither replay reads carried reserve or refuel
 ratio. The first must reproduce success and the second its checked-in failure. Any mismatch takes
 the defensive `generation-error` path; there is no runtime search, optimization, descent, retry, or
-alternate-template loop. If any of the three reviewed templates has no safe derivation inside its
+alternate-template loop. If any of the nine reviewed templates has no safe derivation inside its
 finite v3 recipe and the 256-combination per-template ceiling, implementation stops and reports the
 exact exhausted ranges, exact evaluated count, and collision/fuel witnesses. It must not enlarge a
 recipe beyond 256, ship partial catalog data, widen the safe envelope beyond section 9, lower
 terrain, add a third runtime replay, or substitute runtime search.
+
+A design probe applied the Phase 4I `0.8` total, `30 degree` vector, and `2.4 m` clearance to the
+old v2 recipes without changing their ranges. As expected, `route-78-flat` exhausted all 81 old
+candidates without contact; the first old candidate ended after 2,335 steps at relative
+`(x,y)=(71.20621062728333,23.345187498493207)` with
+`(vx,vy)=(-2.737007272427576,-0.5102185054586155)`. This proves that reusing the Phase 4H recipes is
+invalid; it is not evidence that the finite v3 constructive family is infeasible. Implementation
+must produce all nine new proofs or stop with the required exhaustion evidence. It may not silently
+restore old force or structure values. Here "v2 recipes" names the retired
+`agw-lander-route-recipes/v2` family only; the independent Phase 4L probe above uses the required
+`agw-lander-route-geometry/v3` schema and current v3 recipes.
 
 ### 10.3 Demonstrated minimum and award
 
@@ -1443,70 +1420,6 @@ the same current ratio, different carried reserves also produce the same award; 
 changes only the award, never the proof. The player-commanded departure spends from real checkpoint
 fuel in actual play. Carried excess can therefore compensate for a later flight that uses more than
 the reference route.
-
-### 10.4 Phase 4P feasibility probe
-
-The current catalog contains only the three flat entries `route-78-flat`, `route-93-flat`, and
-`route-102-flat`, in that order. Their existing command runs, schedule digests, demonstrated minima,
-success vectors, and one-quantum exhaustion vectors remain literal and unchanged. Their geometry
-sets `deckDelta=0` and keeps the reviewed constant `clearanceKnots=-.65 m` route envelope. The real
-canonical terrain upper bound is `platformTop-2.4 m`, so every seed lies strictly below that proof
-envelope except at the theoretical exclusive PRNG endpoint. The platform, truss, columns, NOC, and
-mast keep the same coordinates relative to the deck; longer columns only extend colliders downward.
-Translation to deck `11.6 m` therefore creates no new swept feature and changes no relative replay
-vector.
-
-An independent disposable replay at the amended datum established:
-
-| Template         | Minimum | Contact step | Maximum relative pose Y | Maximum absolute pose Y |
-| ---------------- | ------- | ------------ | ----------------------- | ----------------------- |
-| `route-78-flat`  | `8.05`  | `2839`       | `25.8006150396324`      | `37.4006150396324`      |
-| `route-93-flat`  | `8.15`  | `2875`       | `28.468203844856365`    | `40.068203844856365`    |
-| `route-102-flat` | `8.2`   | `2851`       | `23.49735860352811`     | `35.09735860352811`     |
-
-The highest constructive pose remains `15.931796155143635 m` below the unchanged
-`MAX_PLAYABLE_Y=56`. Each replay reproduced its checked success contact and its exact
-`demonstratedMinimum-.05` exhaustion step and pose. This is a feasibility proof for every allowed
-deck transition because `0 m` is the only allowed delta. The implementation-time independent deriver
-must reproduce it on the full seed/translation corpus or stop with the first exact collision,
-ceiling, contact, or exhaustion mismatch. It may not lower terrain, raise the ceiling, alter
-physics, loosen landing limits, or change a schedule to make the probe pass.
-
-Advance the geometry file and schema to `lander-route-geometry-v5.json` and
-`agw-lander-route-geometry/v5`. Its `siteGeometry` replaces `deckTiers` with the sole deck datum
-`[11.6]`, replaces the terrain wedge height with `.28125`, pins the canonical projection and full
-section 5.4 kernel formula, and changes the column/scaffold member limits to `9..89` and `41..281`.
-It contains exactly the three templates above. Advance the independent tool to
-`agw-lander-route-deriver/v6`; `agw-lander-route-recipes/v3` remains unchanged because the retained
-three finite phase families are byte-identical. Delete the six unused recipe families rather than
-keeping dead catalog data. An ordinary derivation evaluates exactly `3*4=12` candidates, not 36; the
-existing 256-candidate per-template hard guard remains. Selected verification performs exactly
-`3 templates * 9 worlds * 2 allowances = 54` replays.
-
-Advance output to `lander-route-derived-v5.json` and `agw-lander-route-derived/v5` with exactly 27
-world witnesses: three templates, seeds `[11,39,41]`, then translations `[36,117,-42]` in the
-existing nesting order. Each witness records deck level `116`; strict normalized and world terrain
-arrays; span anchor and warp values; per-segment grade and adjacent-grade change; reversal count;
-all variable scaffold members and colliders; maximum connected clear face; and the unchanged route
-record. No alternate terrain representation, terrain-modification field, local-minimum deck, or
-nonzero deck transition is present.
-
-Digest impact is exact by authority. `physicsDigest` remains
-`e08f8260b723dd245db88de9ae2cdbac54bf9a97cb0bed1b6f170eda362c48dc` because no command, physics,
-landing, collision-margin, fuel, or ceiling constant changes. `geometryDigest`, `worldDigest`, and
-`outputDigest` must all differ from v4 and are written only from the canonical v5 derivation bytes;
-production `ROUTE_DIGESTS` and both fixtures update atomically in the same implementation commit.
-The design does not pre-author those three hashes because the independent deriver is their sole
-authority. A retained v4 geometry/world/output hash, a changed physics hash, a partial fixture
-update, or production literals not projected byte-for-byte from v5 is a hard failure. Ordinary tests
-verify checked bytes and never regenerate expectations.
-
-`selectTemplate` validates the three-entry shape, computes section 5.4's seeded permutation, and
-returns the first entry after one constant-time check. Runtime still performs exactly the existing
-success and one-quantum failure replays against the actual retained terrain. Because every actual
-terrain segment is below the fixed route envelope, every complete v5 catalog succeeds for every
-seed. Generation error remains only an integrity response to missing or altered catalog data, never
-a seed-dependent outcome.
 
 ## 11. Input, focus, and lifecycle
 
@@ -1714,18 +1627,14 @@ signals; none is an accessible semantic meter.
 
 When visible, `#lander-fuel` is a pointer-transparent block positioned inside `#lander-scene-stage`
 at `left:clamp(0.5rem,2vw,1rem)` and `top:clamp(0.5rem,2vw,1rem)`. The track is exactly `1rem` wide
-and normally `7rem` tall. At `max-width:32rem`, its height is exactly `clamp(2.25rem,11.25vw,7rem)`,
-preserving the complete gauge while preventing overlap with the cue, lander, or rail; the reviewed
-320 CSS pixel and 400-percent-equivalent projection is `36px`, while the 960 CSS pixel projection
-remains `112px` at the default 16px root size. The track uses `box-sizing:border-box`, a three-pixel
-graphite outer border, dark `#20232a` background, square corners, the exact
-`inset 0 0 0 3px var(--fuel-level-color)` indicator, and the pinned outer block shadow. Its child
-occupies the inner track, uses `background:var(--fuel-level-color)`, and uses
-`transform:scaleY(var(--fuel-gauge-level))` with bottom-center origin. The label and value span
-remain in the accessibility tree through `.visually-hidden`; no CSS rule may use `display:none`,
-`visibility:hidden`, zero font size, or `aria-hidden` on either. CSS must select
-`#lander-fuel:not([hidden])`, preserve the global `[hidden]` authority, and avoid intercepting scene
-input.
+by `7rem` tall with `box-sizing:border-box`, a three-pixel graphite outer border, dark `#20232a`
+background, square corners, the exact `inset 0 0 0 3px var(--fuel-level-color)` indicator, and the
+pinned outer block shadow. Its child occupies the inner track, uses
+`background:var(--fuel-level-color)`, and uses `transform:scaleY(var(--fuel-gauge-level))` with
+bottom-center origin. The label and value span remain in the accessibility tree through
+`.visually-hidden`; no CSS rule may use `display:none`, `visibility:hidden`, zero font size, or
+`aria-hidden` on either. CSS must select `#lander-fuel:not([hidden])`, preserve the global
+`[hidden]` authority, and avoid intercepting scene input.
 
 For normal motion only, `data-refueling="true"` makes the sole `#lander-scene-stage::after`
 pseudo-element visible as a small blocky gas can. It contains no text and creates no DOM or world
@@ -1739,9 +1648,8 @@ At each render, read `stageRect=stage.getBoundingClientRect()` and
 
 ```text
 p = model.refuel.progress
-frozenCamera = cameraForPose(model.pose)
-sceneCanX = worldViewportX(site.center+3,frozenCamera)
-sceneCanY = worldViewportY(site.platformTop+1.5,frozenCamera)
+sceneCanX = (site.center+3)*10-cameraLeft*10
+sceneCanY = 548-(site.platformTop+1.5)*10
 canViewportX = stageRect.left+sceneCanX*scaleX
 canViewportY = stageRect.top+sceneCanY*scaleY
 gaugeViewportX = gaugeRect.left+gaugeRect.width/2
@@ -1878,8 +1786,8 @@ that retained site. Reduced motion creates no intermediate projection and applie
 three arches, powered state, and the `Agent Deployed!` banner atomically.
 
 Pure `agentInstalled(site)` returns `site.powered || (site.nocStage ?? 0)>=1`. The controller writes
-that result as `data-agent`. Set rendered SVG coordinates `B=worldSceneX(structure.buildingLeft)`
-and `T=worldSceneY(site.platformTop)`. For `absent`, the existing `.noc-entry` path is exactly
+that result as `data-agent`. Set rendered SVG coordinates `B=structure.buildingLeft*10` and
+`T=548-site.platformTop*10`. For `absent`, the existing `.noc-entry` path is exactly
 `M B (T-18) H (B+13) V T H B Z`, has no transform, and the exact
 `.lander-site[data-agent="absent"] .noc-entry` override restores
 `fill:#3b3f47;stroke:#4b4e55;stroke-width:2`, preserving the exact doorway.
@@ -1926,13 +1834,12 @@ Property `p` uses `u[p]=sampleUnit(seed,5,(key + Math.imul(p,0x9e3779b9)) >>> 0)
 `j%4`.
 
 Normal-motion crash duration is exactly 600 ms. `#crash-flash` stays outside the translated world
-group. At impact the controller freezes `impactCamera=cameraForPose(contactPose)` and pins the flash
-to `--crash-x=worldViewportX(contactX,impactCamera)px` and
-`--crash-y=worldViewportY(contactY,impactCamera)px`. The compact ellipse expands only within the SVG
-from 0 to `1.4` lander widths and is visible for the first 140 ms. Debris stays inside
-`#lander-world` in absolute world coordinates. A fragment follows `x=x0+vx*t`,
-`y=y0+vy*t-0.5*GRAVITY*t*t`, with its stored rotation. Clip it to the scene; remove all flash and
-fragment nodes at 600 ms; enter `failed`; reveal Retry; and set status exactly `Crashed!`.
+group. At impact the controller pins its scene coordinates to `--crash-x=(contactX-cameraLeft)*10px`
+and `--crash-y=(548-contactY*10)px`. The compact ellipse expands only within the SVG from 0 to `1.4`
+lander widths and is visible for the first 140 ms. Debris stays inside `#lander-world` in absolute
+world coordinates. A fragment follows `x=x0+vx*t`, `y=y0+vy*t-0.5*GRAVITY*t*t`, with its stored
+rotation. Clip it to the scene; remove all flash and fragment nodes at 600 ms; enter `failed`;
+reveal Retry; and set status exactly `Crashed!`.
 
 The former instructional failure sentence is deleted rather than retained as hidden or duplicate
 copy. Crash adds only the native Retry button beneath `Crashed!`; its smaller second line shows the
@@ -1953,101 +1860,90 @@ Numerical physics tests use tolerance `1e-10`; selected canonical route-pose rep
 seed values, DOM order, and serialized world descriptors are exact; section 4's authored prose is
 human-reviewed rather than asserted. Every schedule includes an explicit final callback.
 
-| Vector                | Input                                                                                                                         | Expected result                                                                                                                                  |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Gravity, 120 steps    | `(10,30,0,0)`, zero angle/engines, fuel 30                                                                                    | `x=10`, `y=28.4875`, `vx=0`, `vy=-3`, fuel `30`                                                                                                  |
-| Collective, 120 steps | Same pose, engines `(0.72,0.72)`                                                                                              | `y=35.0215`, `vy=9.96`, angle/x unchanged, fuel `28.56`                                                                                          |
-| Turn-only vector      | One step from same pose, raw engines `(0,0.375)`, `s=-1`                                                                      | `ax=-1.6875`, `ay=-0.07716426222751949`, `omega=-0.25`, angle `-0.00208333333333`, fuel `29.996875`                                              |
-| Combined turn vector  | One step from same pose, raw engines `(0.2125,0.5875)`, `s=-1`                                                                | `ax=-3.6`, `ay=3.235382907247959`, `omega=-0.25`, angle `-0.00208333333333`, fuel `29.993333333333332`                                           |
-| Angular assist        | One step, angle `0`, omega `15`, raw engines `(0.72,0.72)`                                                                    | engines `(0.66,0.78)`, `s=0`, omega `14.92`, angle `0.124333333333`, fuel `29.988`; total thrust unchanged                                       |
-| Vacuum coast          | One step, angle `0`, omega `15`, zero engines                                                                                 | omega remains `15`, angle `0.125`, `vy=-0.025`; no translational or angular damping                                                              |
-| Exhaustion            | Fuel `0.005`, one step, engines `(1,1)`                                                                                       | Effective engines `(0.3,0.3)`, fuel exactly `0`                                                                                                  |
-| Pointer vectors       | Rightward normalized drag `m=0,0.5,1`                                                                                         | `(.72,.72)`, `(.65375,.46625)`, `(.5875,.2125)`; leftward values mirror exactly                                                                  |
-| Mixed input ceiling   | Keyboard collective plus pointer full right                                                                                   | pointer owns `s=1`; engines `(.5875,.2125)`, total `.8`, never component-combined                                                                |
-| Keyboard steer owner  | Keyboard left plus pointer full right                                                                                         | keyboard owns `s=-1`; engines `(.2125,.5875)`, total `.8`                                                                                        |
-| Canceled steer owner  | Both keyboard steers plus pointer half right                                                                                  | keyboard cancels; pointer owns `s=.5`; engines `(.65375,.46625)`, total `1.12`                                                                   |
-| Empty-fuel direction  | Fuel `0`, raw engines `(.5875,.2125)`, retained physics `s=1`                                                                 | effective engines `(0,0)` and stored/rendered `commanded.vectorAngle=0`                                                                          |
-| Plumes                | `u=0,0.5,1`                                                                                                                   | scales `0.08,0.54,1`; opacities `0.25,0.625,1`                                                                                                   |
-| First site            | Any normalized seed                                                                                                           | ID `0`, center `36`, span `[31.2,49.8]`; deck level `116`; canonical sampled terrain remains exact                                               |
-| Deck termination      | Level `116`; complete three-entry catalog in seeded order                                                                     | first flat route qualifies in one ordinary check; three checks is the corruption guard                                                           |
-| Terrain continuity    | Retained range crossing chunks, both sites, and all twelve column-rail feet                                                   | one strict-X chain; boundary Ys equal; two render paths; open stroke has no floor/vertical/closing segment                                       |
-| Structure parity      | Static and dynamic site with platform top `p`                                                                                 | one 18.6 m path; 14 fixed truss members plus exactly three bounded variable lattice columns                                                      |
-| Truss envelope        | Relative chords `[-4.8,13.8] x [-1.1,-.35]`, member width `.2 m`                                                              | collider `[-4.9,13.9] x [-1.2,-.25]`; deck/NOC overlap; top remains `.25 m` below landing face                                                   |
-| Column envelopes      | rail pairs `0/1,8.8/9.8,17.6/18.6`; six sampled terrain feet; top `p-.35`                                                     | each collider is the exact stroked axis-aligned box through its lower foot; all members contained and joined                                     |
-| Aperture bounds       | Raw truss, `.8 m` lattice bays, and the native-slope wedge                                                                    | diameters `3.1894356867634124`, `1.2806248474865698`, and at most `1.0387981336621663`, all below hull `3.2`                                     |
-| Connected clear face  | Every independently split face for each pinned site descriptor                                                                | actual maximum axis-aligned envelope equals fixture fields; `hypot(width,height)<=3.1894356867634124`                                            |
-| Opening gauge         | Fresh run `fuel=15`, `fuelGaugeReference=30`                                                                                  | exact level `.5`, exact accessible reserve `15.0`; no cap or hidden extra fuel                                                                   |
-| Later gauge           | `fuel=37.5`, `fuelGaugeReference=50`, then checkpoint restore                                                                 | level `.75`, level `ready`; restore reproduces both values and never caps fuel                                                                   |
-| Gauge contrast        | danger/caution/ready against `#20232a`; gauge level zero                                                                      | ratios `5.068/8.584/8.243`; graphite boundary plus colored inset remain visible with zero-height fill                                            |
-| Refuel projection     | pre-award level `.25`; normal landed time `0,.15,.299,.3 s`                                                                   | levels `.25,.625,.9975,1`; one can follows the same linear progress and is absent after `.3`                                                     |
-| Refuel CSS frame      | landed camera `{left:0,down:0}`; stage rect `(100,50,1000,640)`; can world `(13,13.1)`; gauge rect `(120,70,16,112)`; `p=.25` | can scene `(130,217)`, viewport `(230,267)`, local endpoints `(130,217)` to `(28,76)`, transfer center `(104.5,181.75)`                          |
-| Transfer silhouette   | DPR 1, integer CSS-pixel center; computed `::after` plus paired on/off `20 by 22` crops                                       | six pinned layers/sizes/positions/colors; probes hit every outer/inner part and `(0,0)`/`(19,21)` match baseline                                 |
-| Reduced refuel        | Same contact with reduced motion                                                                                              | full model/fuel text/gauge/checkpoint atomically; `refuel=null`, no transfer pseudo-element                                                      |
-| Launch-ready hold     | 10 seconds zero or steer-only input after power                                                                               | centered pose, fuel, mission time, zero command, and status remain unchanged                                                                     |
-| Manual departure      | Launch-ready plus Space/Up, either plus vi/arrow steer, pointer/touch hold, or eligible tap                                   | every qualifying path uses the ordinary mixer; first step burns/integrates; `flying` starts only after `.05 m`                                   |
-| NOC stages            | Power sequence at `0,.2,.4,.6,.8,1,1.2,1.4 s`                                                                                 | stages `0..7`: installed agent at stage 1, four bars, then three arches; banner only at final stage                                              |
-| Agent travel          | Deploying time `0,.225,.45,.675,.899,.9 s`; then hide document for `.3 s` at `.45`                                            | progress `0,.25,.5,.75,.998888...,null`; hidden interval freezes `.5`; power still begins exactly at `.9`                                        |
-| Installed retention   | Powered sites retained through next leg, crash, and two checkpoint restores                                                   | each existing NOC-entry path stays installed; exact world count remains 75 and no can/power state duplicates                                     |
-| Outcome/action rail   | Launch-ready, then failed                                                                                                     | banner-only deployed state; crashed status plus Retry; Exit stays bottom-right in the active rail                                                |
-| Interactive pointer   | `pointerdown` targets Retry descendant and Exit descendant, then native click                                                 | Retry guard has no stage flight effect; Exit cannot reach stage; each native click runs exactly once                                             |
-| Interactive keyboard  | Focus Exit/Retry; target each button or nested span with Space, Enter, arrows, `h`, and `l`                                   | no flight prevention/held edge/queue/thrust; Space/Enter run one native action; arrows/`h`/`l` run no action                                     |
-| Outside-shell keys    | Active mission; target header, breadcrumb, and descendants with Escape, `r`, and flight keys                                  | no prevention, focus/state/action/input/model change; outside keyup is also inert after focusout clears input                                    |
-| Controls lines        | 320 px and 400%-equivalent layouts; keyboard child then touch child                                                           | one client rect per line; every relevant `scrollWidth<=clientWidth`; Exit in row 2; no authored-copy assertion                                   |
-| Refuel ratio          | Base `n=1,2,3,4`; test minimum `8`; carried fuel `7,20,5,4`                                                                   | ratios `2,1.5,1.25,1.125`; awards `16,12,10,9`; reserves `23,32,15,13`; next ratios direct from `n+1`                                            |
-| Ratio precision       | Direct Number formula at bases `52,53,54,100`                                                                                 | `1.0000000000000004`, `1.0000000000000002`, `1`, `1`; never below `1`, no bound or arbitrary precision                                           |
-| Safe inclusive edge   | Target top; `vx=2.2,vy=-3.6,angle=-18,omega=26`                                                                               | safe contact                                                                                                                                     |
-| Unsafe epsilon        | Four contacts, each increasing exactly one boundary magnitude by `1e-9`                                                       | each is unsafe; mirrored absolute-value signs and positive-`vy` rejection are independently covered                                              |
-| Swept unsafe equality | Hull only grazes terrain/truss/column/NOC/mast between step endpoints                                                         | closed 0.02 m expansion detects it; no visual tunneling                                                                                          |
-| Target-top separation | Safe descent over deck center; then a separate exact tangential graze                                                         | descent uses true top crossing and can be safe; unresolved graze is unsafe                                                                       |
-| Frame equivalence     | Initial approach, no input, callbacks to 1,000 ms at 30, 60, and 120Hz                                                        | 120 steps; `x=30.8`, `y=30.0875`, `vx=0.8`, `vy=-3.4`, fuel `15`                                                                                 |
-| First landing         | Any seed at deck `116`; zero `352`, collective `104`, then zero; opening fuel `15`                                            | last clear step `576` at `(33.8400000000006,11.60599999999987,.8,-3.5680000000000396,0,0)`; safe step `577`; pre-award fuel `13.751999999999953` |
-| Free exploration      | Cross `x=-5`, `101`, target right edge, then reverse across target and both values                                            | stays flying absent real contact/ceiling/overspeed; camera continuous; cue right/left/right; progress unchanged                                  |
-| Sky parallax          | Same seed, camera left `0,50,-50`; five derived sky chunks                                                                    | transform `0,-120,120 px`; 20 stars and 1-2 landmarks; two path nodes and exact regeneration on return                                           |
-| Checkpoint replay     | Award, manual launch, crash, Retry twice                                                                                      | exact deep checkpoint projection both times; no can, award, ratio, route, power, or progress duplication                                         |
-| Initial Retry         | Crash before first powered base, then click Retry and later use `r`                                                           | exact same-seed initial pose/site/window/fuel/progress/ratio; shell focus; no synthesized input                                                  |
-| Catalog quantum       | Every checked-in reference template                                                                                           | allowance `minimum` matches literal safe contact; `minimum-0.05` matches literal failure                                                         |
-| Short-tap capture     | Down at `0`, eligible up at `20`; release synchronously emits lost capture                                                    | token/deadline exist before release; pulse remains through `139.999`, ends once at `140`; later loss is no-op                                    |
-| Input overflow        | 65 alternating edges before one step at 30, 60, and 120 Hz                                                                    | queue becomes one next-step physical-state snapshot; all frame schedules produce the same result                                                 |
-| Long run              | 100 successful deterministic sites                                                                                            | ratios are non-increasing and `>=1`; O(1) direct formula; bounded nodes/edges; exact reserve accounting                                          |
+| Vector                | Input                                                                                        | Expected result                                                                                                  |
+| --------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Gravity, 120 steps    | `(10,30,0,0)`, zero angle/engines, fuel 30                                                   | `x=10`, `y=28.4875`, `vx=0`, `vy=-3`, fuel `30`                                                                  |
+| Collective, 120 steps | Same pose, engines `(0.72,0.72)`                                                             | `y=35.0215`, `vy=9.96`, angle/x unchanged, fuel `28.56`                                                          |
+| Turn-only vector      | One step from same pose, raw engines `(0,0.375)`, `s=-1`                                     | `ax=-1.6875`, `ay=-0.07716426222751949`, `omega=-0.25`, angle `-0.00208333333333`, fuel `29.996875`              |
+| Combined turn vector  | One step from same pose, raw engines `(0.2125,0.5875)`, `s=-1`                               | `ax=-3.6`, `ay=3.235382907247959`, `omega=-0.25`, angle `-0.00208333333333`, fuel `29.993333333333332`           |
+| Angular assist        | One step, angle `0`, omega `15`, raw engines `(0.72,0.72)`                                   | engines `(0.66,0.78)`, `s=0`, omega `14.92`, angle `0.124333333333`, fuel `29.988`; total thrust unchanged       |
+| Vacuum coast          | One step, angle `0`, omega `15`, zero engines                                                | omega remains `15`, angle `0.125`, `vy=-0.025`; no translational or angular damping                              |
+| Exhaustion            | Fuel `0.005`, one step, engines `(1,1)`                                                      | Effective engines `(0.3,0.3)`, fuel exactly `0`                                                                  |
+| Pointer vectors       | Rightward normalized drag `m=0,0.5,1`                                                        | `(.72,.72)`, `(.65375,.46625)`, `(.5875,.2125)`; leftward values mirror exactly                                  |
+| Mixed input ceiling   | Keyboard collective plus pointer full right                                                  | pointer owns `s=1`; engines `(.5875,.2125)`, total `.8`, never component-combined                                |
+| Keyboard steer owner  | Keyboard left plus pointer full right                                                        | keyboard owns `s=-1`; engines `(.2125,.5875)`, total `.8`                                                        |
+| Canceled steer owner  | Both keyboard steers plus pointer half right                                                 | keyboard cancels; pointer owns `s=.5`; engines `(.65375,.46625)`, total `1.12`                                   |
+| Empty-fuel direction  | Fuel `0`, raw engines `(.5875,.2125)`, retained physics `s=1`                                | effective engines `(0,0)` and stored/rendered `commanded.vectorAngle=0`                                          |
+| Plumes                | `u=0,0.5,1`                                                                                  | scales `0.08,0.54,1`; opacities `0.25,0.625,1`                                                                   |
+| First site            | Any normalized seed                                                                          | ID `0`, center `36`, span `[31.2,49.8]`; first of levels `83/91/99` clearing native max+2.4; native stays exact  |
+| Deck termination      | Any current level `83/91/99`; all nine candidates in seeded order                            | an exact level-99 route exists (`+16`, `+8`, or flat respectively); at most nine checks for every seed           |
+| Terrain continuity    | Retained range crossing chunks, both sites, and all twelve column-rail feet                  | one strict-X chain; boundary Ys equal; two render paths; open stroke has no floor/vertical/closing segment       |
+| Structure parity      | Static and dynamic site with platform top `p`                                                | one 18.6 m path; 14 fixed truss members plus exactly three bounded variable lattice columns                      |
+| Truss envelope        | Relative chords `[-4.8,13.8] x [-1.1,-.35]`, member width `.2 m`                             | collider `[-4.9,13.9] x [-1.2,-.25]`; deck/NOC overlap; top remains `.25 m` below landing face                   |
+| Column envelopes      | rail pairs `0/1,8.8/9.8,17.6/18.6`; six native feet; top `p-.35`                             | each collider is the exact stroked axis-aligned box through its lower foot; all members contained and joined     |
+| Aperture bounds       | Raw truss, `.8 m` lattice bays, and the native-slope wedge                                   | diameters `3.1894356867634124`, `1.2806248474865698`, and at most `1.2206555615733703`, all below hull `3.2`     |
+| Connected clear face  | Every independently split face for each pinned site descriptor                               | actual maximum axis-aligned envelope equals fixture fields; `hypot(width,height)<=3.1894356867634124`            |
+| Opening gauge         | Fresh run `fuel=15`, `fuelGaugeReference=30`                                                 | exact level `.5`, exact accessible reserve `15.0`; no cap or hidden extra fuel                                   |
+| Later gauge           | `fuel=37.5`, `fuelGaugeReference=50`, then checkpoint restore                                | level `.75`, level `ready`; restore reproduces both values and never caps fuel                                   |
+| Gauge contrast        | danger/caution/ready against `#20232a`; gauge level zero                                     | ratios `5.068/8.584/8.243`; graphite boundary plus colored inset remain visible with zero-height fill            |
+| Refuel projection     | pre-award level `.25`; normal landed time `0,.15,.299,.3 s`                                  | levels `.25,.625,.9975,1`; one can follows the same linear progress and is absent after `.3`                     |
+| Refuel CSS frame      | stage rect `(100,50,1000,640)`, can scene `(130,433)`, gauge rect `(120,70,16,112)`, `p=.25` | viewport can `(230,483)`, local endpoints `(130,433)` to `(28,76)`, transfer center `(104.5,343.75)`             |
+| Transfer silhouette   | DPR 1, integer CSS-pixel center; computed `::after` plus paired on/off `20 by 22` crops      | six pinned layers/sizes/positions/colors; probes hit every outer/inner part and `(0,0)`/`(19,21)` match baseline |
+| Reduced refuel        | Same contact with reduced motion                                                             | full model/fuel text/gauge/checkpoint atomically; `refuel=null`, no transfer pseudo-element                      |
+| Launch-ready hold     | 10 seconds zero or steer-only input after power                                              | centered pose, fuel, mission time, zero command, and status remain unchanged                                     |
+| Manual departure      | Launch-ready plus Space/Up, either plus vi/arrow steer, pointer/touch hold, or eligible tap  | every qualifying path uses the ordinary mixer; first step burns/integrates; `flying` starts only after `.05 m`   |
+| NOC stages            | Power sequence at `0,.2,.4,.6,.8,1,1.2,1.4 s`                                                | stages `0..7`: installed agent at stage 1, four bars, then three arches; banner only at final stage              |
+| Agent travel          | Deploying time `0,.225,.45,.675,.899,.9 s`; then hide document for `.3 s` at `.45`           | progress `0,.25,.5,.75,.998888...,null`; hidden interval freezes `.5`; power still begins exactly at `.9`        |
+| Installed retention   | Powered sites retained through next leg, crash, and two checkpoint restores                  | each existing NOC-entry path stays installed; exact world count remains 75 and no can/power state duplicates     |
+| Outcome/action rail   | Launch-ready, then failed                                                                    | banner-only deployed state; crashed status plus Retry; Exit stays bottom-right in the active rail                |
+| Interactive pointer   | `pointerdown` targets Retry descendant and Exit descendant, then native click                | Retry guard has no stage flight effect; Exit cannot reach stage; each native click runs exactly once             |
+| Interactive keyboard  | Focus Exit/Retry; target each button or nested span with Space, Enter, arrows, `h`, and `l`  | no flight prevention/held edge/queue/thrust; Space/Enter run one native action; arrows/`h`/`l` run no action     |
+| Outside-shell keys    | Active mission; target header, breadcrumb, and descendants with Escape, `r`, and flight keys | no prevention, focus/state/action/input/model change; outside keyup is also inert after focusout clears input    |
+| Controls lines        | 320 px and 400%-equivalent layouts; keyboard child then touch child                          | one client rect per line; every relevant `scrollWidth<=clientWidth`; Exit in row 2; no authored-copy assertion   |
+| Refuel ratio          | Base `n=1,2,3,4`; test minimum `8`; carried fuel `7,20,5,4`                                  | ratios `2,1.5,1.25,1.125`; awards `16,12,10,9`; reserves `23,32,15,13`; next ratios direct from `n+1`            |
+| Ratio precision       | Direct Number formula at bases `52,53,54,100`                                                | `1.0000000000000004`, `1.0000000000000002`, `1`, `1`; never below `1`, no bound or arbitrary precision           |
+| Safe inclusive edge   | Target top; `vx=2.2,vy=-3.6,angle=-18,omega=26`                                              | safe contact                                                                                                     |
+| Unsafe epsilon        | Four contacts, each increasing exactly one boundary magnitude by `1e-9`                      | each is unsafe; mirrored absolute-value signs and positive-`vy` rejection are independently covered              |
+| Swept unsafe equality | Hull only grazes terrain/truss/column/NOC/mast between step endpoints                        | closed 0.02 m expansion detects it; no visual tunneling                                                          |
+| Target-top separation | Safe descent over deck center; then a separate exact tangential graze                        | descent uses true top crossing and can be safe; unresolved graze is unsafe                                       |
+| Frame equivalence     | Initial approach, no input, callbacks to 1,000 ms at 30, 60, and 120Hz                       | 120 steps; `x=30.8`, `y=30.0875`, `vx=0.8`, `vy=-3.4`, fuel `15`                                                 |
+| First landing         | Seeds/levels `1/83,8/91,13/99`; section 7.1 off/on/off schedules; opening fuel `15`          | safe contacts at steps `554,501,512`; pre-award fuel `13.704,13.848,13.848` within `1e-12`                       |
+| Free exploration      | Cross `x=-5`, `101`, target right edge, then reverse across target and both values           | stays flying absent real contact/ceiling/overspeed; camera continuous; cue right/left/right; progress unchanged  |
+| Sky parallax          | Same seed, camera left `0,50,-50`; five derived sky chunks                                   | transform `0,-120,120 px`; 20 stars and 1-2 landmarks; two path nodes and exact regeneration on return           |
+| Checkpoint replay     | Award, manual launch, crash, Retry twice                                                     | exact deep checkpoint projection both times; no can, award, ratio, route, power, or progress duplication         |
+| Initial Retry         | Crash before first powered base, then click Retry and later use `r`                          | exact same-seed initial pose/site/window/fuel/progress/ratio; shell focus; no synthesized input                  |
+| Catalog quantum       | Every checked-in reference template                                                          | allowance `minimum` matches literal safe contact; `minimum-0.05` matches literal failure                         |
+| Short-tap capture     | Down at `0`, eligible up at `20`; release synchronously emits lost capture                   | token/deadline exist before release; pulse remains through `139.999`, ends once at `140`; later loss is no-op    |
+| Input overflow        | 65 alternating edges before one step at 30, 60, and 120 Hz                                   | queue becomes one next-step physical-state snapshot; all frame schedules produce the same result                 |
+| Long run              | 100 successful deterministic sites                                                           | ratios are non-increasing and `>=1`; O(1) direct formula; bounded nodes/edges; exact reserve accounting          |
 
-The first-landing witness uses an independently authored schedule and flat `9.2 m` worst-case
-terrain beneath the deck. It stops before service so catalog validation cannot disguise touchdown.
-Tests compare the last-clear pose, safe contact kind, step, and pre-award reserve within `1e-10` and
-do not call a production helper to construct the expected schedule.
+The three first-landing last-clear poses, in level order `83/91/99`, are exactly
+`(33.68666666666724,8.30415833333318,.8,-2.5610000000000563,0,0)`,
+`(33.333333333333854,9.121183333333207,.8,-2.5320000000000604,0,0)`, and
+`(33.4066666666672,9.912133333333205,.8,-2.807000000000054,0,0)`. The next fixed step reaches the
+safe target-top contact and settles to the platform center. Tests compare the contact kind, step,
+pre-award reserve, and pose with `1e-10` tolerance; none calls a production helper to build its
+expected schedule.
 
-### 14.1 Phase 4P relief vectors
+World tests pin complete JSON descriptors and route-proof digests for seeds `11`, `39`, and `41`,
+plus an independently authored static-scene vector. The fixtures begin with these exact values;
+traversal is `offset,direction; motifIndex(q=0..3)`:
 
-The independent world test pins these unrounded values before path serialization:
+| Seed                | `mixUint32(seed)` | Traversal      | Chunk 0 heights                                                                                                   | Native minimum; top      | Leg-1 template preference     |
+| ------------------- | ----------------- | -------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------ | ----------------------------- |
+| `11`                | `69794299`        | `0,1; 0,1,2,3` | `5.255777672748081,6.955116862594149,2.3544560524402183,4.953795242286287,1.3531344321323555,1.7524736219784245`  | `6.921715945067815; 8.3` | `99,84,96,81,93,78,90,102,87` |
+| `39`                | `1800816653`      | `1,3; 1,0,3,2` | `2.5975386273348704,0.5976523105753584,1.9977659938158465,5.097879677056335,3.997993360296823,3.0981070435373113` | `7.365893319045194; 8.3` | `90,102,87,99,84,96,81,93,78` |
+| `41`                | `1371730420`      | `2,3; 2,1,0,3` | `1.5861064405180514,3.1087847214890645,5.331463002460078,4.05414128343109,2.1768195644021042,4.699497845373116`   | `7.049044279753696; 8.3` | `78,90,102,87,99,84,96,81,93` |
+| `STATIC_WORLD_SEED` | `1076842847`      | `3,1; 3,0,1,2` | `4.29865836398676,3.1665419081225994,6.134425452258438,7.5,4.870192540530115,5.638076084665954`                   | `9.584423104863614; 9.9` | `78,90,102,87,99,84,96,81,93` |
 
-| Vector         | Seed/X or pose               | Expected result                                                                             |
-| -------------- | ---------------------------- | ------------------------------------------------------------------------------------------- |
-| Static anchor  | `STATIC_WORLD_SEED`, `x=0`   | normalized `0.4085759765235707`; world Y `-3.051137502491475`; scene Y `378.51137502491474` |
-| Static slope   | `STATIC_WORLD_SEED`, `x=100` | normalized `0.4399995140650219`; world Y `-1.0400310998385969`; scene Y `358.400310998386`  |
-| Initial camera | pose Y `32`                  | conservative pre-camera hull top `-39`; camera down `79`; deck viewport Y `311`             |
-| Ceiling camera | pose Y `56`                  | conservative pre-camera hull top `-279`; camera down `319`; deck viewport Y `551`           |
-
-The automated browser and independent world test use these exact repeatable windows. `Pose` is set
-directly in a test-owned run before render; `camera` must equal `cameraForPose(pose)`, and
-`viewport Y` must equal `worldViewportY(anchorWorldY,camera)`. Each anchor sits at scene X `500`; no
-browser test searches for a convenient feature or changes the seed after inspection.
-
-| Witness    | Seed and anchor                                  | Frozen pose `(x,y)` | Camera `{left,down}` | Exact viewport window and anchor projection                                         |
-| ---------- | ------------------------------------------------ | ------------------- | -------------------- | ----------------------------------------------------------------------------------- |
-| Low basin  | `11`, `x=-640`, normalized `0.10337466620840133` | `(-683.3,11.6)`     | `{-690,0}`           | X `[-690,-590]`; pre-camera and viewport Y `573.8402136266232`                      |
-| High ridge | `41`, `x=1920`, normalized `0.5986480843508616`  | `(1903.3,40)`       | `{1870,159}`         | X `[1870,1970]`; pre-camera Y `256.86522601544857`; viewport Y `415.86522601544857` |
-| Broad peak | `11`, `x=320`, normalized `0.5618129291338846`   | `(303.3,56)`        | `{270,319}`          | X `[270,370]`; pre-camera Y `280.43972535431385`; viewport Y `599.4397253543139`    |
-| Canyon     | `41`, `x=2560`, normalized `0.180077174003236`   | `(2543.3,32)`       | `{2510,79}`          | X `[2510,2610]`; pre-camera Y `524.750608637929`; viewport Y `603.750608637929`     |
-
-For the broad peak, the neighboring `320 m` anchors are `0.2593806899618357` and
-`0.11177473366260529`; for the canyon they are `0.31366599248722193` and `0.42724315242376176`.
-Those strict inequalities prove the named reversal rather than relying on a visual label. Low-basin
-and high-ridge anchors pin the requested band extrema; the peak and canyon pin broad reversal shape
-independently.
-
-For every fixed corpus range, tests regenerate left-to-right and right-to-left, serialize the
-strict-X `(x,normalized,worldY,sceneY)` chain, and require byte identity. A separate implementation
-computes each chord grade, adjacent-grade change, and nonzero-sign reversal count from those bytes.
-It rejects only behavior and numeric structure, never authored prose.
+The static row is the exact no-JavaScript site-0 descriptor for `0x41475731`; it is not an extra
+seed in the 81 derived descriptors. The implementation commit also records literal template
+schedules, success/failure vectors, envelopes, instantiated-site descriptors, and proof digests from
+section 10's independent derivation; tests must not generate expected values by calling the function
+under test. For each pinned derived seed, tests cover at least three sites, the exact motif bank and
+traversal across positive and negative chunks, terrain diversity, preference and eligibility order,
+guaranteed level-99 selection, six rail-foot interpolations per site, contact-time offscreen
+placement, both proof replays, exact award, and rolling-window eviction.
 
 ## 15. Verification matrix
 
@@ -2073,40 +1969,44 @@ static/lander-model.js
 static/lander-game.js
 ```
 
-Final ordinary generation and independent verification pin the canonical v5 geometry, world, and
-output hashes produced by section 10.4 and the unchanged physics hash
-`e08f8260b723dd245db88de9ae2cdbac54bf9a97cb0bed1b6f170eda362c48dc`. Tests reject every old v4
-geometry, world, and output hash and reject any physics-hash change.
+Final ordinary generation and independent verification pin geometry
+`a5120d97782b73afb43cabae038412252f644656f41c0ab9e33f5413da9be7ca`, physics
+`e08f8260b723dd245db88de9ae2cdbac54bf9a97cb0bed1b6f170eda362c48dc`, world
+`c666bb42918301f93386bb1373e92da662d333006d8684946fd80a10761d1e32`, and output
+`a922372760f850386810fd6eb60f7aa807bac8b03ee5f0a2b1dec1968ee27b69`. Geometry/world and every route
+record remain byte-identical; the final tolerance bump changes physics/output only.
 
-| Layer                                                                   | Required coverage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `node --test website/tests/lander-world.test.mjs`                       | Independently reconstruct the normalized kernel, monotone warp, `10 m` strict-X interpolation, `[.1,.6]` bound, fixed extrema, grade, adjacent-grade change, reversal density, `116` deck datum, one-check three-slot selection, two render paths, all `27` v5 witnesses, and static/runtime parity. Rebuild all `14` truss members and each `9..89`-member column, exact colliders, aperture proofs, geometry/world hashes, and the maximum 75 world descendants.                                                                                                                                                                                                                                                                                                                                                                      |
-| `node --test website/tests/lander-model.test.mjs`                       | All-three success and one-quantum exhaustion replays remain exact at deck `11.6`; prove the `route-93-flat` ceiling margin and actual terrain/structure collisions. Retain the four inclusive `2.2/3.6/18/26` landing limits, opening `15/30`, refuel ratios, carried excess, Retry, zero-fuel ballistics, `.9 s` agent travel, `.3/1.4 s` stages, reduced motion, and hidden-time freeze. No assertion encodes authored prose.                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `node --test website/tests/lander-phase4l.test.mjs`                     | Mutation-sensitive controller/DOM tests pin exactly two controls-line children in keyboard/touch order, Retry label-source and hint structure without asserting text, internal `RESTART` dispatch, crash focus stability, click/`r` teardown-render-focus order, shell focus with `preventScroll`, and no synthesized input. Existing outside-shell and native-button rejection coverage remains exact.                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `node --test website/tests/lander-phase4m.test.mjs`                     | Mutation-sensitive controller/DOM tests pin five sky chunks, 20 stars, one or two deterministic landmarks in exactly two paths, the complete two-arc crescent, all three one/two-ring profiles, exact circle/ellipse intersections, omitted rear-center arcs, and complete foreground arcs. They retain static/dynamic descriptor equality, bounded reconciliation, `.24` parallax transforms, negative/positive camera following, bidirectional cue changes, pass/reverse/return, and no horizontal-bound failure. They also pin the exact opening half-gauge, post-award full reference without cap, `.9 s` deploy travel, unchanged refuel/power timing, hidden-time freeze, reduced-motion atomic projection, and structural copy/link/accessibility sources without embedding authored wording.                                    |
-| Derivation CLI fixture verification                                     | Generate to a temporary output with v6 deriver, unchanged v3 recipes, geometry v5, and derived v5; review the canonical delta, update all hashes atomically, then run ordinary `--verify`. Generation and verification each evaluate exactly four combinations per template and 12 total. The 256/template guard remains. All 54 selected replays pass; all three retained route/failure literals stay byte-identical; all 27 world descriptors use the new relief authority; physics remains byte-identical.                                                                                                                                                                                                                                                                                                                           |
-| `python -m unittest discover -s website/tests -p 'test_*.py'`           | The validator pins one shared fragment, exact sky/site/stage/outcome/Retry/rail/controls/Exit parent and source order, exactly two sky paths, exactly two controls spans, native action label/hint sources, shortcut ARIA, direct fragment-free footer Lander destinations, equal nonempty footer `aria-label`/`title`, v5 fixture/schema names, and no obsolete terrain-generation, terrain-modification, regional, or pylon fields. It validates structure and accessible-name sources, never authored wording. Exact artifact, DOM budget, privacy, module DAG, route uniqueness, recovery, static-scene relief, and runtime parity remain.                                                                                                                                                                                          |
-| Automated Chromium projection witness                                   | At 320 px, 400%-equivalent, touch landscape, and 60rem, prove the controls/rail fit and crash/Retry focus behavior. Cross both `x=-5` and `x=101`, pass the target, reverse, and return; prove horizontal and vertical camera continuity, right/left/right cues, exact `.24` sky parallax, and exact terrain reconstruction. Drive the four exact section 14.1 viewport/camera windows. At each, the full hull remains in view; the full landing face, NOC, and mast are in view whenever the cue is absent, and the correctly directed cue is present otherwise. Terrain and both feet of a support may clip together at the stage, never overlap the rail, and HUD/cue/action geometry does not overlap. Retain the half/full/zero gauge, deployment, hidden-time, reduced-motion, and checkpoint witnesses.                          |
-| Pseudo-can computed-style and screenshot witness                        | For `getComputedStyle(stage,"::after")`, assert `width=20px`, `height=22px`, `pointer-events=none`, `image-rendering=pixelated`, transparent background color, exactly six gradient images, sizes `6px 2px,10px 6px,2px 4px,4px 8px,12px 14px,16px 18px`, positions `6px 2px,4px 0px,16px 10px,16px 8px,2px 6px,0px 4px`, `no-repeat` six times, and alternating normalized paints `rgb(217,74,30)`/`rgb(41,43,48)` in the pinned top-to-bottom order. At DPR 1 and an integer transfer center, take exact `20 by 22` CSS-pixel crops with refueling on and off: on-crop probes `(5,1)`, `(7,3)`, `(18,9)`, `(16,11)`, `(1,5)`, and `(3,7)` prove the six graphite/orange parts; `(0,0)` and `(19,21)` are byte-equal to the off-crop background, proving transparency. The crop visibly reads as one block can. No golden asset ships. |
-| Human-authored copy review                                              | A reviewer compares the document title, headings, 404 explanation, controls, outcome/status, action labels, and visible shortcut hints with sections 4 and 13. This is deliberately human evidence; automated suites do not encode authored phrases, substrings, or blacklists.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| Manual Chrome and Edge pre-merge; Firefox and Safari/WebKit post-launch | Confirm broad low basins, high ridges, peaks, and canyons use the requested `.1..6` scene band without sample chatter. The single global deck datum stays honestly supported by exactly three open lattice columns whose six feet meet untouched terrain, including the longest basin columns; there is no backing face, seam, floating foot, vertical artifact, or visible per-sample zigzag. Fly all section 14.1 windows and confirm the full hull; full landing face/NOC/mast when the cue is absent; correctly directed cue otherwise; and joint terrain/support-foot clipping at high camera-down. Retain free travel, rail separation, parallax sky, ring occlusion, mast color, current copy, direct route, gauge, deployment, Retry, and landing-edge acceptance.                                                              |
-| Responsive, zoom, focus, and accessibility acceptance                   | At 320 CSS pixels, 400-percent zoom, touch landscape, and `60rem`: stage and rail remain normal-flow separated; gauge/outcome, crash/Retry, controls lines, and Exit do not overlap or overflow; buttons are at least `44 by 44`. A real accessibility-tree witness derives expected names from current visible label nodes, proves hint exclusion and shortcut ARIA, one live region, controls IDREF, and tab order shell then Exit or shell then Retry then Exit. Retry returns to shell, Exit to Start; no trap. Authored strings are reviewed by a human, not embedded in automation.                                                                                                                                                                                                                                               |
-| Performance and longevity witness                                       | For each seed `11`, `39`, `41`, and `STATIC_WORLD_SEED`, generate and power 100 sequential sites with no generation error, more than one ordinary or three defensive preference checks, terrain ordering fault, or deck level other than `116`; pin the three-slot vectors below. Keep two terrain paths, at most three sites, eight fragments, 80 world descendants and exactly 75 at maximum, two native actions, at most 51 projected vertices, five sky chunks, 20 stars, one or two landmarks, and no retained terrain/sky history. Each site owns one bounded scaffold path even at 281 segments. Record generation, reconciliation, independent derivation, frame p95, and maximum times against the existing ceilings; do not exempt the deepest basin columns.                                                                 |
-| Permanent documentation and repository gates                            | `website/README.md` and browser checklist teach the changed actions, ordinary departure, tolerances, rail, accessibility, shared-fragment/no-JS behavior, and derivation workflow in lockstep. Focused suites, deterministic root/project builds, complete gates, file lint, locked-SDD, Rulesync drift, module-size report, and an exact intended-file diff pass. Permanent docs do not link to this SDD.                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Layer                                                                   | Required coverage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `node --test website/tests/lander-world.test.mjs`                       | Independently reconstruct native minima and integer deck levels; the bounded strict-X terrain projection; two open render paths; 14 fixed truss members; exactly three lattice columns with six independent native feet, bounded levels, alternating braces, exact variable member counts, exact stroked colliders, and all aperture proofs; static/dynamic parity; and complete 81-witness regeneration. Pin exact geometry/world digests and mutation-kill any floor closure, foot/member/order/style drift, collider mismatch, or aperture diameter at or above `3.2 m`. World descendants remain exactly 75 at maximum.                                                                                                                                                                                                                                                                                                                                             |
+| `node --test website/tests/lander-model.test.mjs`                       | All-nine success and one-quantum exhaustion replays remain exact. Pin all four inclusive `2.2/3.6/18/26` limits and their epsilon failures, plus real ceiling/overspeed/terrain/structure collision while crossing arbitrary negative and positive X without failure. Exact vectors cover opening `fuel=15` and reference `30`, the three independently authored first-contact schedules and reserves, direct O(1) refuel ratios, uncapped carried-excess addition, checkpoint restore of fuel and reference twice, exact initial Retry to `15/30`, zero-fuel ballistic continuation, `.9 s` agent travel, unchanged `.3/1.4 s` stages, reduced-motion atomic projection, and hidden-time freeze. No assertion encodes authored prose.                                                                                                                                                                                                                                  |
+| `node --test website/tests/lander-phase4l.test.mjs`                     | Mutation-sensitive controller/DOM tests pin exactly two controls-line children in keyboard/touch order, Retry label-source and hint structure without asserting text, internal `RESTART` dispatch, crash focus stability, click/`r` teardown-render-focus order, shell focus with `preventScroll`, and no synthesized input. Existing outside-shell and native-button rejection coverage remains exact.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `node --test website/tests/lander-phase4m.test.mjs`                     | Mutation-sensitive controller/DOM tests pin five sky chunks, 20 stars, one or two deterministic landmarks in exactly two paths, the complete two-arc crescent, all three one/two-ring profiles, exact circle/ellipse intersections, omitted rear-center arcs, and complete foreground arcs. They retain static/dynamic descriptor equality, bounded reconciliation, `.24` parallax transforms, negative/positive camera following, bidirectional cue changes, pass/reverse/return, and no horizontal-bound failure. They also pin the exact opening half-gauge, post-award full reference without cap, `.9 s` deploy travel, unchanged refuel/power timing, hidden-time freeze, reduced-motion atomic projection, and structural copy/link/accessibility sources without embedding authored wording.                                                                                                                                                                    |
+| Derivation CLI fixture verification                                     | Generate to a temporary output with v5 deriver, unchanged v3 recipes, geometry v4, and derived v4; review the canonical delta, update all digests atomically, then run ordinary `--verify`. Generation and verification each evaluate exactly 4 combinations per template, 36 total, while 256/template and 2,304 total remain ceilings. All 162 selected replays pass; all nine route/failure literals and 81 world descriptors remain byte-identical. Geometry/world retain section 10.2's literals; physics/output change to the final tolerance literals pinned there.                                                                                                                                                                                                                                                                                                                                                                                              |
+| `python -m unittest discover -s website/tests -p 'test_*.py'`           | The validator pins one shared fragment, exact sky/site/stage/outcome/Retry/rail/controls/Exit parent and source order, exactly two sky paths, exactly two controls spans, native action label/hint sources, shortcut ARIA, direct fragment-free footer Lander destinations, equal nonempty footer `aria-label`/`title`, v4 fixture/schema names, and no obsolete regional or pylon fields. It validates structure and accessible-name sources, never authored title, heading, 404, controls, status, action-label, or hover wording. Exact artifact, DOM-budget, privacy, module-DAG, route uniqueness, recovery, and static/dynamic parity contracts remain.                                                                                                                                                                                                                                                                                                           |
+| Automated Chromium projection witness                                   | At 320 px, 400%-equivalent, touch landscape, and 60rem, prove the controls/rail fit, Retry derives its computed name from the visible label while excluding the hint, and crash/Retry focus behavior remains exact. Cross both `x=-5` and `x=101`, pass the target, reverse, and return; prove no horizontal failure, continuous camera projection, right/left/right cue changes, exact `.24` sky parallax, five chunks, 20 stars, one or two landmarks, stable two-path DOM, and exact reconstruction on return. Begin at `15/30` and half fill; after award prove exact uncapped reserve/reference and full fill. At exact zero prove the red border/background plus the `700ms` stepped infinite blink; reduced motion retains the static red warning. Time normal, reduced, and hidden deployment vectors, then restore the checkpoint twice and initial approach once with no duplicate service work.                                                              |
+| Pseudo-can computed-style and screenshot witness                        | For `getComputedStyle(stage,"::after")`, assert `width=20px`, `height=22px`, `pointer-events=none`, `image-rendering=pixelated`, transparent background color, exactly six gradient images, sizes `6px 2px,10px 6px,2px 4px,4px 8px,12px 14px,16px 18px`, positions `6px 2px,4px 0px,16px 10px,16px 8px,2px 6px,0px 4px`, `no-repeat` six times, and alternating normalized paints `rgb(217,74,30)`/`rgb(41,43,48)` in the pinned top-to-bottom order. At DPR 1 and an integer transfer center, take exact `20 by 22` CSS-pixel crops with refueling on and off: on-crop probes `(5,1)`, `(7,3)`, `(18,9)`, `(16,11)`, `(1,5)`, and `(3,7)` prove the six graphite/orange parts; `(0,0)` and `(19,21)` are byte-equal to the off-crop background, proving transparency. The crop visibly reads as one block can. No golden asset ships.                                                                                                                                 |
+| Human-authored copy review                                              | A reviewer compares the document title, headings, 404 explanation, controls, outcome/status, action labels, and visible shortcut hints with sections 4 and 13. This is deliberately human evidence; automated suites do not encode authored phrases, substrings, or blacklists.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Manual Chrome and Edge pre-merge; Firefox and Safari/WebKit post-launch | Confirm untouched coarse/random terrain stays continuous beneath each elevated site; the shallow Warren truss and exactly three open lattice columns read as one integrated load-bearing structure from platform through NOC, with six honest native-terrain feet, no backing face, seam, floating foot, or vertical terrain artifact. Travel freely past and back across the target in both directions; inspect slower stars, recognizable crescents, and planets with one or two restrained rings without pop or gameplay effect. On every ring, confirm the rear center disappears behind the planet while the foreground arc remains visible. Confirm the fixed mast/head stay graphite while only signal arches gain color, plus the exact current Lander title/heading, 404 explanation, footer hover/accessibility copy, direct `/lander/` navigation, half-full opening gauge, normal/reduced deployment timing, checkpoint Retry, and inclusive landing edges. |
+| Responsive, zoom, focus, and accessibility acceptance                   | At 320 CSS pixels, 400-percent zoom, touch landscape, and `60rem`: stage and rail remain normal-flow separated; gauge/outcome, crash/Retry, controls lines, and Exit do not overlap or overflow; buttons are at least `44 by 44`. A real accessibility-tree witness derives expected names from current visible label nodes, proves hint exclusion and shortcut ARIA, one live region, controls IDREF, and tab order shell then Exit or shell then Retry then Exit. Retry returns to shell, Exit to Start; no trap. Authored strings are reviewed by a human, not embedded in automation.                                                                                                                                                                                                                                                                                                                                                                               |
+| Performance and longevity witness                                       | For each seed `11`, `39`, `41`, and `STATIC_WORLD_SEED`, generate and power 100 sequential sites with no generation error, more than nine eligibility checks, terrain ordering fault, or level outside `83/91/99`; the selection vectors below remain pinned. Keep exactly two terrain paths, at most three sites, eight fragments, 80 world descendants and exactly 75 at maximum, exactly two native action descendants, at most 51 projected terrain vertices, exactly five sky chunks represented by 20 stars and one or two landmarks in one group/two paths, and no retained sky history. Each site still owns one scaffold path despite variable lattice members. Refuel ratio, camera, and sky derivation remain bounded constant work; fixed timers, frame ceiling, lifecycle teardown, and bounded world history remain exact.                                                                                                                                |
+| Permanent documentation and repository gates                            | `website/README.md` and browser checklist teach the changed actions, ordinary departure, tolerances, rail, accessibility, shared-fragment/no-JS behavior, and derivation workflow in lockstep. Focused suites, deterministic root/project builds, complete gates, file lint, locked-SDD, Rulesync drift, module-size report, and an exact intended-file diff pass. Permanent docs do not link to this SDD.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 
-In template order `[78,93,102]`, the 99 generated legs after the initial site have exact
-selection-count vectors `[31,30,38]` for seed `11`, `[37,29,33]` for seed `39`, `[34,33,32]` for
-seed `41`, and `[29,33,37]` for `STATIC_WORLD_SEED`. Every site remains at deck level `116`. These
-vectors prove direct seeded construction rather than fixture-only route replay.
+In template order `[78,81,84,87,90,93,96,99,102]`, the 99 generated legs after the initial site have
+exact selection-count vectors `[11,9,16,11,4,15,11,7,15]` for seed `11`, `[11,5,19,5,0,26,7,12,14]`
+for seed `39`, `[9,6,16,8,3,28,7,10,12]` for seed `41`, and `[5,6,15,8,0,21,13,8,23]` for
+`STATIC_WORLD_SEED`. Each run visits all three levels, ends at level `91`, `91`, `91`, and `99`
+respectively, and proves bounded construction rather than fixture-only route replay.
 
 Mutation tests reject duplicated/moved shared markup, a second scheduler/controller/site authority,
 game checks added to the near-limit validator, artifact count drift, a sixth retained chunk, more or
 fewer than the exact fill/surface terrain pair, a stroked fill, closed surface, surface floor point,
 internal closure edge, concatenated per-chunk path, non-increasing X, same-X/different-Y pair, or
-chunk/site boundary mismatch. Section 5.4 owns the terrain numeric mutations. They also reject any
-motif bank, shelf/flat site replacement, discard/resume splice, column rail foot not equal to
-canonical interpolation, non-integer or accumulated deck-level authority, level outside `116`, or
-non-flat catalog candidate.
+chunk/site boundary mismatch. They reject `10 m`/boundary/motif-bank/selector/clamp drift, a single
+or repeated terrain motif, any shelf/flat site replacement/discard-resume splice, relief at a site
+footprint or corridor endpoint, a column rail foot not equal to native interpolation, minimum-deck
+arithmetic drift, non-integer or accumulated deck-level authority, a level outside `83/91/99`, or a
+candidate selected below its native minimum.
 
 Structure mutations reject pad-width/clearance drift, a filled scaffold face, backing rectangle,
 sky-colored artifact, scaffold fill other than `none`, member width/color/segment drift, a missing
@@ -2115,11 +2015,11 @@ a missing join attribute or join other than `round` (including miter), a rendere
 outside the exact `+/-0.1 m` expansion, any truss span other than `18.6 m`, truss bay count other
 than 12, bay width other than `1.55 m`, depth other than `.75 m`, or missing/extra chord or truss
 diagonal. Column mutations reject a count other than three; rail pairs other than
-`0/1,8.8/9.8,17.6/18.6`; a foot not independently interpolated from canonical terrain; a top other
-than `platformBottom`; a lattice floor other than the higher foot; a bay above `.8 m`; a level not
+`0/1,8.8/9.8,17.6/18.6`; a foot not independently interpolated from native terrain; a top other than
+`platformBottom`; a lattice floor other than the higher foot; a bay above `.8 m`; a level not
 produced by the exact ceiling/subdivision rule; a missing/extra rail, tie, or alternating diagonal;
-the wrong first diagonal; a per-column member count outside `9..89`; or a whole scaffold count
-outside `41..281`. They reject a regional perimeter, post grid, X brace, any surviving
+the wrong first diagonal; a per-column member count outside `9..27`; or a whole scaffold count
+outside `41..95`. They reject a regional perimeter, post grid, X brace, any surviving
 platform/connector/NOC underframe collider field, a truss collider other than
 `[-4.9,13.9] x [-1.2,-.25]`, any column collider other than the exact stroked axis-aligned box
 through its two feet, any raw-truss/lattice-bay/terrain-wedge aperture diameter at least `3.2 m`, a
@@ -2192,50 +2092,22 @@ any added world descendant, a maximum other than exact 75 or greater than 80, an
 route/physics/geometry/world/output digest change.
 
 Phase 4M/4O projection mutations reject a horizontal world-edge failure or clamp, a camera that
-cannot follow both signs of X, any camera dead zone other than exact closed `[6.7,33.3]` with
-section 6's two-sided formula, a cue that cannot produce `right/left/right` while passing and
-returning, cue absence while any part of the landing-face/NOC/mast interval remains outside the
-viewport, cue visibility after that full interval is inside, a building-right authority other than
-`siteStructure(target).buildingRight`, a duplicated building-right target field, or a mirrored cue
-with different geometry. They reject a sky speed other than `.24` of camera motion, a sky window
-other than five `50 m` chunks, a count other than four stars per chunk, sky X or group translation
-that bypasses `worldSceneX` and the named sky helpers, sky decorative Y outside its two named
-scene-lane helpers, a landmark cadence other than every fourth chunk, or a landmark other than the
-seeded crescent/planet choice. Planet mutations reject a profile other than exact radii `[(28,9)]`,
-`[(31,10)]`, or `[(28,9),(34,12)]`; a ring count outside one or two; circle-intersection drift; a
-visible rear-center arc; a missing foreground arc; quadratic geometry; or the old full ellipse. Sky
-mutations still reject a group/path count other than `1/2`, retained off-window sky history,
-nondeterministic regeneration, or any sky semantics, collision, network, or storage state.
+cannot follow both signs of X, any camera dead zone other than section 6's exact two-sided formula,
+a cue that cannot produce `right/left/right` while passing and returning, cue visibility after any
+part of the target enters the viewport, or a mirrored cue with different geometry. They reject a sky
+speed other than `.24` of camera motion, a sky window other than five `50 m` chunks, a count other
+than four stars per chunk, a landmark cadence other than every fourth chunk, or a landmark other
+than the seeded crescent/planet choice. Planet mutations reject a profile other than exact radii
+`[(28,9)]`, `[(31,10)]`, or `[(28,9),(34,12)]`; a ring count outside one or two; circle-intersection
+drift; a visible rear-center arc; a missing foreground arc; quadratic geometry; or the old full
+ellipse. Sky mutations still reject a group/path count other than `1/2`, retained off-window sky
+history, nondeterministic regeneration, or any sky semantics, collision, network, or storage state.
 Battery/signal mutations reject a mast or antenna head that changes from fixed `#292b30` at any
 power stage while retaining the three established arch colors and timings. They reject terrain
 projection beyond the visible buffered interval, more than 51 strict-X vertices, or retained
 offscreen sites expanding that projection. They also reject agent travel other than `.9 s`, any
 change to `.3 s` refuel or `1.4 s` power, hidden-time advancement, or reduced motion that exposes an
 intermediate stage.
-
-Phase 4P terrain mutations reject any normalized sample or interpolated point outside `[.1,.6]`; a
-corpus minimum above `.11` or maximum below `.59`; a span other than `320 m`; sample spacing other
-than `10 m`; streams other than `13/14`; smootherstep or monotone-warp drift; normalized grade above
-`.00439453125/m`; adjacent normalized grade change above `.0008985859292196934/m`; successive
-nonzero-sign reversals less than `320 m` apart; or more than one reversal in any aligned half-open
-`320 m` span. They reject an analytic/render/collision split, direct analytic support feet,
-non-collinear inserted points, non-increasing X, different forward/reverse bytes, an alternate
-terrain generator, height cap, shelf, local deck search, terrain retry, or retained terrain history.
-Projection mutations reject world conversion other than `64*h-29.2`; any scene conversion outside
-shared `worldSceneX/Y`; an overlay outside `#lander-world` that does not use the event's frozen
-camera through `worldViewportX/Y`; a world-group transform outside `worldGroupOffsetX/Y`; a world
-descendant that applies camera twice; camera-derived normalized height; camera-down outside
-`0..320`; a conservative hull outside scene X `[0,1000]` or above scene Y `40`; maximum-camera
-landing face/NOC bottom/roof/mast-top values other than `551/554.5/479/447`;
-cue/landing-face/NOC/mast visibility disagreement; sky vertical motion; rail overlap; independent
-clipping of terrain and either support rail foot; or a camera transform that collision code can
-observe. Structure mutations reject deck level other than `116`, an ordinary selection count other
-than one, more than three defensive checks, a nonzero deck transition, a catalog other than
-`78/93/102`, a column outside `3..43` bays or `9..89` members, a scaffold path outside `41..281`
-segments, or a terrain wedge higher than `.28125 m`. Fixture mutations reject geometry/derived
-schema other than v5, deriver other than v6, a recipe change from v3, candidate count other than 12,
-selected replay count other than 54, witness count other than 27, any retained v4
-geometry/world/output hash, or any change to the exact v4 physics hash.
 
 Input and physics mutations reject component-wise keyboard/pointer engine merging, mixed-input
 thrust above straight `1.44`, full-steer total other than `.8`, vector angle other than 30 degrees,
@@ -2280,13 +2152,13 @@ selection, quantized route poses or non-deck world/geometry values, canonical po
 a reference schedule without `[1,90]`, iterative refuel-ratio advancement, trusting a ratio
 inconsistent with `refuelRatioForBase(completedSites+1)`, runtime planning/search/fuel scan or a
 third runtime proof replay, an unreachable catalog command, production-derived fixtures, a geometry
-schema other than required v5, a route-derived schema other than v5, a deriver version other than
-v6, a recipe version other than unchanged v3, a per-template recipe ceiling outside `[2,256]`,
-early-success enumeration, more than 768 guarded candidates, an actual declared/evaluated count
-other than four per template and 12 total, confusing the 256/768 ceilings with enumerated counts,
+schema other than required v4, a route-derived schema other than v4, a deriver version other than
+v5, a recipe version other than unchanged v3, a per-template recipe ceiling outside `[2,256]`,
+early-success enumeration, more than 2,304 ordinary candidates, an actual declared/evaluated count
+other than four per template and 36 total, confusing the 256/2,304 ceilings with enumerated counts,
 missing selected verification replays, partial route/world regeneration, witness seeds other than
 `[11,39,41]`, wrong world-witness nesting, derivation-tool imports, or
-normalized-terrain/deck/column/27-descriptor digest drift that was not reviewed. Closed unsafe
+native/corridor/deck/column/81-descriptor digest drift that was not reviewed. Closed unsafe
 collision, unexpanded target-top handling, transactional initialization, fixed retention, reversible
 camera motion, normal crash debris, ballistic fragments, non-animated direction meaning, vacuum
 presentation, lifecycle cleanup, privacy, and zero-runtime-network constraints remain
@@ -2317,7 +2189,6 @@ require it to remain strictly above `1`.
 | R22, AC23: offscreen target and motion-safe bidirectional cue           | Sections 6, 8.2, 12, and 15          |
 | R23, AC24: vacuum crash and exact checkpoint Retry                      | Sections 7.3, 9, 13-15               |
 | R24, AC25: arcade gauge/transfer, outcome/Retry, rail, installed agent  | Sections 4, 6, 7, and 11-15          |
-| R26, AC27: broad bounded relief, datum, routes, and vertical camera     | Sections 5.4, 6, 10.4, 14.1, and 15  |
 | AC18: complete build only and exact local manifest                      | Sections 2 and 15                    |
 | Phase 4G: focused modules, bounded work, docs, and browser evidence     | Sections 2, 6, 14, and 15            |
 | Phase 4H: terrain, support, control, landing, and NOC tuning            | Sections 4-6, 8-10, 12, 14, and 15   |
@@ -2326,7 +2197,6 @@ require it to remain strictly above `1`.
 | Phase 4K: action rail, manual departure, and safe-contact envelope      | Sections 4, 6, 8-12, 14, and 15      |
 | Phase 4L: Retry, refuel ratio, relaxed landing, and continuous truss    | Sections 1, 4, 5, 7, 9, 10, 14, 15   |
 | Phase 4M: lattice, honest fuel, parallax sky, and free exploration      | Sections 1, 4-10, 12, and 14-15      |
-| Phase 4P: canonical broad terrain relief and vertical visibility        | Sections 5.4, 6, 10.4, 14.1, and 15  |
 
 Implementation treats this LLD as temporary design input. Permanent source, tests, and
 `website/README.md` stand on their own and do not link back to this SDD path.

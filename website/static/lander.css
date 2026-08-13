@@ -19,10 +19,9 @@
     --fuel-transfer-x: 0px;
     --fuel-transfer-y: 0px;
     --camera-x: 0px;
-    --camera-y: 79px;
     --sky-camera-x: 0px;
     --lander-x: 300px;
-    --lander-y: 28px;
+    --lander-y: 228px;
     --lander-angle: 0deg;
     --thrust-vector-angle: 0deg;
     --left-plume-scale: 0.08;
@@ -80,7 +79,7 @@
 }
 
 #lander-world {
-    transform: translate(var(--camera-x), var(--camera-y));
+    transform: translate(var(--camera-x), 0);
 }
 
 .terrain-fill {
@@ -521,10 +520,6 @@
 }
 
 @media (max-width: 32rem) {
-    #lander-fuel-gauge {
-        height: clamp(2.25rem, 11.25vw, 7rem);
-    }
-
     #lander-controls-rail:not([hidden]) {
         grid-template-columns: minmax(0, 1fr);
         row-gap: 0.4rem;

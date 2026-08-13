@@ -1,14 +1,10 @@
 export const STATIC_WORLD_SEED = 0x41475731;
-export const SCENE_HEIGHT = 640;
-export const WORLD_SCALE = 10;
-export const WORLD_ZERO_SCENE_Y = 348;
 export const CHUNK_WIDTH = 50;
 export const TERRAIN_SAMPLE_SPACING = 10;
-export const RELIEF_SPAN = 320;
 export const PLATFORM_WIDTH = 9.6;
 export const PLATFORM_THICKNESS = 0.35;
 export const PLATFORM_CLEARANCE = 2.4;
-export const DECK_LEVEL = 116;
+export const DECK_LEVELS = Object.freeze([83, 91, 99]);
 export const SCAFFOLD_MEMBER_WIDTH = 0.2;
 export const SCAFFOLD_MEMBER_HALF = SCAFFOLD_MEMBER_WIDTH / 2;
 export const TRUSS_BAY_COUNT = 12;
@@ -22,7 +18,13 @@ export const NOC_ROOF_OFFSET = 7.2;
 export const NOC_MAST_WIDTH = 0.5;
 export const NOC_MAST_HEIGHT = 3.2;
 
-const TEMPLATE_SLOT_ORDER = Object.freeze([78, 93, 102]);
+export const MOTIFS = Object.freeze([
+    Object.freeze([0, 2.4, -1.5, 1.8, -1.1, 0]),
+    Object.freeze([0, -2.1, -0.8, 2.2, 1, 0]),
+    Object.freeze([0, 0.9, 2.5, 0.6, -1.9, 0]),
+    Object.freeze([0, -1.4, 1.3, 2.4, -0.5, 0]),
+]);
+const TEMPLATE_SLOT_ORDER = Object.freeze([78, 81, 84, 87, 90, 93, 96, 99, 102]);
 
 function clamp(value, minimum, maximum) {
     return Math.min(maximum, Math.max(minimum, value));
@@ -57,39 +59,45 @@ export function sampleUnit(seed, stream, index) {
     return mixUint32(value) / 2 ** 32;
 }
 
+function boundaryHeight(seed, boundaryIndex) {
+    return 1.5 + 4.5 * sampleUnit(seed, 1, boundaryIndex >>> 0);
+}
+
 export function positiveModulo(value, modulus) {
     return ((value % modulus) + modulus) % modulus;
 }
 
-function smootherstep(value) {
-    return value * value * value * (value * (value * 6 - 15) + 10);
+export function motifSelection(seed) {
+    return freeze({
+        direction: sampleUnit(seed, 2, 1) < 0.5 ? 1 : 3,
+        offset: Math.floor(4 * sampleUnit(seed, 2, 0)),
+    });
 }
 
-export function terrainNormalizedKernel(seed, x) {
-    const span = Math.floor(x / RELIEF_SPAN);
-    const local = (x - span * RELIEF_SPAN) / RELIEF_SPAN;
-    const leftAnchor = sampleUnit(seed, 13, span >>> 0);
-    const rightAnchor = sampleUnit(seed, 13, (span + 1) >>> 0);
-    const bias = sampleUnit(seed, 14, span >>> 0) - 0.5;
-    const warped = local + bias * (smootherstep(local) - local);
-    return 0.1 + 0.5 * (leftAnchor + (rightAnchor - leftAnchor) * smootherstep(warped));
+export function motifIndex(seed, chunkIndex) {
+    const selection = motifSelection(seed);
+    return positiveModulo(selection.offset + selection.direction * chunkIndex, 4);
 }
 
-export function terrainNormalizedSample(seed, sampleIndex) {
-    return terrainNormalizedKernel(seed, sampleIndex * TERRAIN_SAMPLE_SPACING);
-}
-
-export function terrainNormalizedHeightAt(seed, x) {
-    const leftIndex = Math.floor(x / TERRAIN_SAMPLE_SPACING);
-    const leftX = leftIndex * TERRAIN_SAMPLE_SPACING;
-    const fraction = (x - leftX) / TERRAIN_SAMPLE_SPACING;
-    const left = terrainNormalizedSample(seed, leftIndex);
-    const right = terrainNormalizedSample(seed, leftIndex + 1);
-    return left + (right - left) * fraction;
+export function terrainSample(seed, sampleIndex) {
+    const chunkIndex = Math.floor(sampleIndex / 5);
+    const localIndex = sampleIndex - chunkIndex * 5;
+    if (localIndex === 0) {
+        return boundaryHeight(seed, chunkIndex);
+    }
+    const start = boundaryHeight(seed, chunkIndex);
+    const end = boundaryHeight(seed, chunkIndex + 1);
+    const base = start + (end - start) * (localIndex / 5);
+    return clamp(base + MOTIFS[motifIndex(seed, chunkIndex)][localIndex], 0.5, 7.5);
 }
 
 export function terrainHeightAt(seed, x) {
-    return 64 * terrainNormalizedHeightAt(seed, x) - 29.2;
+    const leftIndex = Math.floor(x / TERRAIN_SAMPLE_SPACING);
+    const leftX = leftIndex * TERRAIN_SAMPLE_SPACING;
+    const fraction = (x - leftX) / TERRAIN_SAMPLE_SPACING;
+    const left = terrainSample(seed, leftIndex);
+    const right = terrainSample(seed, leftIndex + 1);
+    return left + (right - left) * fraction;
 }
 
 export function terrainHeightFromVertices(vertices, x) {
@@ -207,11 +215,13 @@ export function siteScaffoldMembers(site) {
 }
 
 export function siteScaffoldPath(site) {
+    const projectX = (x) => Number((x * 10).toFixed(12));
+    const projectY = (y) => 548 - y * 10;
     return siteScaffoldMembers(site).map(({ start, end }, index) => {
         const [startX, startY] = start;
         const [endX, endY] = end;
-        if (index < 2) return `M${worldSceneX(startX)} ${worldSceneY(startY)}H${worldSceneX(endX)}`;
-        return `M${worldSceneX(startX)} ${worldSceneY(startY)}L${worldSceneX(endX)} ${worldSceneY(endY)}`;
+        if (index < 2) return `M${projectX(startX)} ${projectY(startY)}H${projectX(endX)}`;
+        return `M${projectX(startX)} ${projectY(startY)}L${projectX(endX)} ${projectY(endY)}`;
     }).join("");
 }
 
@@ -225,7 +235,7 @@ export function nativeTerrainVertices(seed, left, right) {
     for (let index = first; index <= last; index += 1) {
         const x = index * TERRAIN_SAMPLE_SPACING;
         if (x >= left && x <= right) {
-            vertices.push([x, terrainHeightAt(seed, x)]);
+            vertices.push([x, terrainSample(seed, index)]);
         }
     }
     if (right < last * TERRAIN_SAMPLE_SPACING) {
@@ -234,12 +244,23 @@ export function nativeTerrainVertices(seed, left, right) {
     return vertices;
 }
 
+function maximumTerrain(seed, left, right) {
+    return Math.max(...nativeTerrainVertices(seed, left, right).map((point) => point[1]));
+}
+
+function minimumDeckLevel(seed, center) {
+    const platformLeft = center - PLATFORM_WIDTH / 2;
+    const buildingRight = center + PLATFORM_WIDTH / 2 + NOC_CONNECTOR_WIDTH + NOC_WIDTH;
+    const minimumTop = maximumTerrain(seed, platformLeft, buildingRight) + PLATFORM_CLEARANCE;
+    return DECK_LEVELS.find((level) => level / 10 >= minimumTop);
+}
+
 export function createFirstSite(seed) {
     const normalized = normalizeSeed(seed);
     const center = 36;
     const platformLeft = center - PLATFORM_WIDTH / 2;
     const platformRight = center + PLATFORM_WIDTH / 2;
-    const deckLevel = DECK_LEVEL;
+    const deckLevel = minimumDeckLevel(normalized, center);
     const platformTop = deckLevel / 10;
     return freeze({
         id: 0,
@@ -258,10 +279,10 @@ export function createFirstSite(seed) {
 }
 
 export function templatePreference(seed, siteIndex) {
-    const base = Math.floor(3 * sampleUnit(seed, 3, siteIndex));
+    const base = Math.floor(9 * sampleUnit(seed, 3, siteIndex));
     const preferred = [];
-    for (let count = 0; count < 3; count += 1) {
-        preferred.push(TEMPLATE_SLOT_ORDER[(base + 2 * count) % 3]);
+    for (let count = 0; count < 9; count += 1) {
+        preferred.push(TEMPLATE_SLOT_ORDER[(base + 4 * count) % 9]);
     }
     return preferred;
 }
@@ -273,19 +294,36 @@ export function selectTemplate(seed, siteIndex, originSite, templates) {
         if (!template) {
             throw new Error(`Missing route template for ${distance} metres`);
         }
-        if (originSite.deckLevel === DECK_LEVEL && template.deckDelta === 0) {
+        const targetLevel = originSite.deckLevel + Math.round(template.deckDelta * 10);
+        const targetCenter = originSite.center + template.centerDelta;
+        if (DECK_LEVELS.includes(targetLevel) && targetLevel >= minimumDeckLevel(seed, targetCenter)) {
             return template;
         }
     }
     throw new Error("No eligible route template");
 }
 
+function interpolateKnots(knots, x) {
+    if (x <= knots[0][0]) {
+        return knots[0][1];
+    }
+    for (let index = 1; index < knots.length; index += 1) {
+        const right = knots[index];
+        const left = knots[index - 1];
+        if (x <= right[0]) {
+            const fraction = (x - left[0]) / (right[0] - left[0]);
+            return left[1] + (right[1] - left[1]) * fraction;
+        }
+    }
+    return knots.at(-1)[1];
+}
+
 export function instantiateTemplateSite(seed, siteIndex, originSite, template) {
     const center = originSite.center + template.centerDelta;
-    const deckLevel = DECK_LEVEL;
+    const deckLevel = originSite.deckLevel + Math.round(template.deckDelta * 10);
     const platformTop = deckLevel / 10;
-    if (originSite.deckLevel !== DECK_LEVEL || template.deckDelta !== 0) {
-        throw new RangeError(`Route template ${template.templateId} does not use the canonical deck datum`);
+    if (!DECK_LEVELS.includes(deckLevel) || deckLevel < minimumDeckLevel(seed, center)) {
+        throw new RangeError(`Route template ${template.templateId} does not clear native terrain`);
     }
     return freeze({
         id: siteIndex,
@@ -305,6 +343,23 @@ export function instantiateTemplateSite(seed, siteIndex, originSite, template) {
     });
 }
 
+export function corridorVertices(seed, originSite, targetSite) {
+    const originRight = originSite.platformRight + NOC_CONNECTOR_WIDTH + NOC_WIDTH;
+    const targetLeft = targetSite.platformLeft;
+    const vertices = [];
+    const firstIndex = Math.floor(originRight / TERRAIN_SAMPLE_SPACING) + 1;
+    const lastIndex = Math.ceil(targetLeft / TERRAIN_SAMPLE_SPACING) - 1;
+    for (let index = firstIndex; index <= lastIndex; index += 1) {
+        const x = index * TERRAIN_SAMPLE_SPACING;
+        const raw = terrainSample(seed, index);
+        const relativeX = x - originSite.center;
+        const cap = originSite.platformTop + interpolateKnots(targetSite.clearanceKnots, relativeX);
+        const y = raw > cap ? Math.max(0.5, cap - 0.15 * sampleUnit(seed, 4, index >>> 0)) : raw;
+        vertices.push([x, y]);
+    }
+    return vertices;
+}
+
 export function terrainVerticesForWindow(seed, sites, left, right) {
     const ordered = [...sites].sort((a, b) => a.center - b.center);
     const points = new Set(nativeTerrainVertices(seed, left, right).map(([x]) => x));
@@ -315,7 +370,19 @@ export function terrainVerticesForWindow(seed, sites, left, right) {
             if (x >= left && x <= right) points.add(x);
         });
     }
-    const vertices = [...points].sort((a, b) => a - b).map((x) => [x, terrainHeightAt(seed, x)]);
+    const corridors = [];
+    for (let index = 1; index < ordered.length; index += 1) {
+        if (ordered[index].clearanceKnots) {
+            const origin = ordered[index - 1];
+            const target = ordered[index];
+            corridors.push({ origin, target, byX: new Map(corridorVertices(seed, origin, target)) });
+        }
+    }
+    const vertices = [...points].sort((a, b) => a - b).map((x) => {
+        const corridor = corridors.find(({ origin, target }) =>
+            x > origin.platformRight + NOC_CONNECTOR_WIDTH + NOC_WIDTH && x < target.platformLeft);
+        return [x, corridor?.byX.get(x) ?? terrainHeightAt(seed, x)];
+    });
     if (vertices.some((point, index) => index > 0 && vertices[index - 1][0] >= point[0])) {
         throw new Error("Terrain vertices must have strictly increasing X coordinates");
     }
@@ -344,55 +411,21 @@ export function retainedSiteDescriptors(sites, activeSiteId, targetSiteId) {
     );
 }
 
-export function worldSceneX(worldX) {
-    return Number((worldX * WORLD_SCALE).toFixed(12));
-}
-
-export function worldSceneY(worldY) {
-    return WORLD_ZERO_SCENE_Y - worldY * WORLD_SCALE;
-}
-
 export function cameraLeftForPose(pose) {
-    if (pose.x < 6.7) return pose.x - 6.7;
-    if (pose.x > 33.3) return pose.x - 33.3;
+    if (pose.x < 5) return pose.x - 5;
+    if (pose.x > 35) return pose.x - 35;
     return 0;
-}
-
-export function cameraForPose(pose) {
-    const preCameraHullTop = worldSceneY(pose.y + 6.7);
-    return freeze({ left: cameraLeftForPose(pose), down: clamp(40 - preCameraHullTop, 0, 320) });
-}
-
-export function worldViewportX(worldX, camera) {
-    return worldSceneX(worldX) - worldSceneX(camera.left);
-}
-
-export function worldViewportY(worldY, camera) {
-    return worldSceneY(worldY) + camera.down;
-}
-
-export function worldGroupOffsetX(camera) {
-    return worldSceneX(-camera.left);
-}
-
-export function worldGroupOffsetY(camera) {
-    return camera.down;
 }
 
 export function targetDirectionForViewport(targetSite, cameraLeft) {
     if (!targetSite) return null;
-    const buildingRight = siteStructure(targetSite).buildingRight;
-    if (targetSite.platformLeft < cameraLeft) return "left";
-    if (buildingRight > cameraLeft + 100) return "right";
+    if (targetSite.platformLeft > cameraLeft + 100) return "right";
+    if (targetSite.platformRight < cameraLeft) return "left";
     return null;
 }
 
-function skyWorldLeftForCamera(camera) {
-    return camera.left * 0.24;
-}
-
-function skyChunkKeyForCamera(camera) {
-    const firstChunk = Math.floor(skyWorldLeftForCamera(camera) / 50) - 1;
+function skyChunkKeyForCamera(cameraLeft) {
+    const firstChunk = Math.floor(cameraLeft * 0.24 / 50) - 1;
     return Array.from({ length: 5 }, (_, index) => firstChunk + index).join(":");
 }
 
@@ -416,12 +449,12 @@ function occludedRingPath(x, y, radiusX, radiusY) {
     );
 }
 
-export function skyProjectionIdentityForCamera(seed, camera) {
-    return `${normalizeSeed(seed)}|${skyChunkKeyForCamera(camera)}`;
+export function skyProjectionIdentityForCamera(seed, cameraLeft) {
+    return `${normalizeSeed(seed)}|${skyChunkKeyForCamera(cameraLeft)}`;
 }
 
-export function skyProjectionForCamera(seed, camera) {
-    const key = skyChunkKeyForCamera(camera);
+export function skyProjectionForCamera(seed, cameraLeft) {
+    const key = skyChunkKeyForCamera(cameraLeft);
     const chunks = key.split(":").map(Number);
     const stars = [];
     const landmarks = [];
@@ -429,13 +462,13 @@ export function skyProjectionForCamera(seed, camera) {
     for (const chunk of chunks) {
         for (let index = 0; index < 4; index += 1) {
             const key = (Math.imul(chunk, 4) + index) >>> 0;
-            const x = worldSceneX(chunk * 50 + 4 + 42 * sampleUnit(seed, 6, key));
+            const x = (chunk * 50 + 4 + 42 * sampleUnit(seed, 6, key)) * 10;
             const y = 50 + 190 * sampleUnit(seed, 7, key);
             stars.push(`M${x} ${y}h2`);
         }
         if (positiveModulo(chunk - landmarkOffset, 4) !== 0) continue;
         const key = chunk >>> 0;
-        const x = worldSceneX(chunk * 50 + 10 + 30 * sampleUnit(seed, 9, key));
+        const x = 10 * (chunk * 50 + 10 + 30 * sampleUnit(seed, 9, key));
         const y = 90 + 110 * sampleUnit(seed, 10, key);
         if (sampleUnit(seed, 11, key) < 0.5) {
             landmarks.push(`M${x} ${y - 18}A18 18 0 1 0 ${x} ${y + 18}A13 18 0 0 1 ${x} ${y - 18}`);
@@ -449,15 +482,14 @@ export function skyProjectionForCamera(seed, camera) {
             );
         }
     }
-    return freeze({ key, chunks, groupOffsetX: worldSceneX(-skyWorldLeftForCamera(camera)),
-        starsPath: stars.join(""), landmarksPath: landmarks.join("") });
+    return freeze({ key, chunks, starsPath: stars.join(""), landmarksPath: landmarks.join("") });
 }
 
 export function terrainSurfacePath(vertices) {
     if (vertices.length === 0) {
         return "";
     }
-    const points = vertices.map(([x, y]) => `${worldSceneX(x)} ${worldSceneY(y)}`).join("L");
+    const points = vertices.map(([x, y]) => `${x * 10} ${548 - y * 10}`).join("L");
     return `M${points}`;
 }
 
@@ -465,5 +497,5 @@ export function terrainFillPath(vertices) {
     if (vertices.length === 0) {
         return "";
     }
-    return `${terrainSurfacePath(vertices)}L${worldSceneX(vertices.at(-1)[0])} 648L${worldSceneX(vertices[0][0])} 648Z`;
+    return `${terrainSurfacePath(vertices)}L${vertices.at(-1)[0] * 10} 648L${vertices[0][0] * 10} 648Z`;
 }
