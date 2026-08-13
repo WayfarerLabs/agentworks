@@ -428,7 +428,9 @@ Every displayed and colliding edge is the straight line segment between adjacent
 Strictly increasing X is mandatory. No smootherstep, spline, Bézier, quadratic/cubic SVG command,
 arc, rounded terrain join, CSS filter, sampled analytic curve, or presentation-only relief authority
 exists. The exact bounds are `16 m` cadence, maximum absolute grade `.36 m/m`, maximum grade angle
-`atan(.36)=19.798876354524932 degrees`, and maximum adjacent segment-grade change `.52 m/m`. Each
+`atan(.36)=19.798876354524932 degrees`, and maximum adjacent segment-grade change `.40 m/m`. Direct
+enumeration of every adjacent pair inside all eight rows and all eligible high/low block boundaries
+proves `.40`; L1's grades change from `-.16` to `.24` at its midpoint and attain the bound. Each
 block uses several intermediate levels and one broad monotone ascent and descent; two-level
 triangles, sawtooth repetition, and site-shaped low corridors are forbidden.
 
@@ -542,11 +544,12 @@ overlap but never reach the landing face.
 Before columns subdivide it, every complete Warren-truss opening fits inside `3.1 by .75 m`, whose
 diameter is `sqrt(10.1725)=3.1894356867634124 m < 3.2 m`; either end half-opening fits inside
 `1.55 by .75 m`, whose diameter is `1.7219186970537043 m`. A lattice bay fits inside `1 by .8 m`,
-whose diameter is `sqrt(1.64)=1.2806248474865698 m`. Section 5.2 bounds a `1 m` column's terrain
-wedge at `.36 m`, so that wedge fits inside `1 by .36 m`, with diameter `1.0628264204469138 m`.
-Added rails, ties, and braces can only subdivide these bounds, and member stroke can only shrink
-them. The conservative truss and column colliders are therefore honest: no complete `3.2 m` hull can
-enter an opening they reject while the narrower lattice remains visibly open.
+whose diameter is `sqrt(1.64)=1.2806248474865698 m`. The two rails of each column are exactly `1 m`
+apart, so section 5.2 gives `abs(footA-footD)<=.36*1=.36 m`. The terrain wedge therefore fits inside
+`1 by .36 m`, with exact diagonal `sqrt(1+.36^2)=sqrt(1.1296)=1.0628264204469138 m`. Added rails,
+ties, and braces can only subdivide these bounds, and member stroke can only shrink them. The
+conservative truss and column colliders are therefore honest: no complete `3.2 m` hull can enter an
+opening they reject while the narrower lattice remains visibly open.
 
 These are independently reconstructed conservative maxima, not a fixed inventory of opening counts.
 For each site descriptor, the independent test implementation overlays all 14 truss members, all
@@ -676,12 +679,13 @@ static and dynamic projections use the same helper output and never concatenate 
 Two SVG paths consume that one vertex array. `.terrain-fill` is the surface chain followed by the
 two outer retained-range edges down to scene `y=648` and the floor edge, closed with `Z`; it has
 `fill=#d7d2c4` and `stroke=none`. `.terrain-surface` is only the open surface chain, has
-`fill=none`, `stroke=#4b4e55`, `stroke-width=2`, and `stroke-linejoin=round`, and contains no `Z` or
-point at `y=648`. Therefore no fill closure can be painted, and the only stroked terrain path has
-strictly increasing world X with no vertical segment. Mutation witnesses reject any same-X pair, any
-different Y for a shared chunk/site boundary, a surface `V`, `Z`, or `L ... 648`, a fill stroke, or
-more than this one fill/surface pair. This directly prevents the former visible vertical lines at
-internal retained chunk boundaries, including during forward and backward reconciliation.
+`fill=none`, `stroke=#4b4e55`, `stroke-width=2`, `stroke-linejoin=miter`, and `stroke-miterlimit=2`,
+and contains no `Z` or point at `y=648`. Therefore no fill closure can be painted, and the only
+stroked terrain path has strictly increasing world X with no vertical segment. Mutation witnesses
+reject any same-X pair, any different Y for a shared chunk/site boundary, a surface `V`, `Z`, or
+`L ... 648`, a fill stroke, or more than this one fill/surface pair. This directly prevents the
+former visible vertical lines at internal retained chunk boundaries, including during forward and
+backward reconciliation.
 
 The visible interval is `[cameraLeft,cameraLeft+100]`. Retain chunks intersecting the interval plus
 `40 m` on each side, at most five `50 m` chunks. Retain the active checkpoint site, target site, and
@@ -783,15 +787,12 @@ creates site 0 as target, `fuel=15`, `fuelGaugeReference=30`, `completedSites=0`
 `refuelRatio=ratio(1)=2`, and the initial approach:
 `(x,y,vx,vy,angle,angularVelocity)=(30,32,0.8,-0.4,0,0)`.
 
-The opening reserve has an independent, fixed-step feasibility witness for every possible first-site
-deck. Starting from that exact pose with fuel `15`, command zero engines, then straight collective
-`(.72,.72)`, then zero engines until first contact. For deck levels `83`, `91`, and `99`, the first
-two run lengths are respectively `[396,108]`, `[396,96]`, and `[384,96]` steps. Representative seeds
-`1`, `8`, and `13` select those three levels and land safely after `554`, `501`, and `512` total
-steps with pre-award reserves `13.70399999999995`, `13.847999999999956`, and `13.847999999999956`.
-The last clear poses are pinned in section 14. This test-only schedule is not a runtime assist,
-planner, award input, or claim of minimum fuel. It proves the exact half-gauge opening remains
-comfortably feasible under the real collision and landing profile.
+The opening reserve has the eight independent, fixed-step H0-H3/L0-L3 feasibility witnesses in
+section 10.2. Each starts from this exact pose and fuel `15`, commands zero engines, then straight
+collective `(.72,.72)`, then zero engines until first contact. The schedules are test-only
+witnesses, not a runtime assist, planner, award input, or claim of minimum fuel. Together they cover
+every eligible first-site profile under the real collision and landing authority; no retired integer
+deck tier remains an opening authority.
 
 ### 7.2 State machine
 
@@ -1150,36 +1151,127 @@ synthesizer and checked proof records. It is derivation tooling, never a runtime
 performs one keyed lookup by the exact ordered endpoint-pair key and one exact replay; it does not
 scan templates, search commands, read carried fuel, reject terrain variants, or retry another seed.
 
-The synthesizer uses only the existing eight reachable command rows and exact 120 Hz production
-integration. Its bounded phases are: vertical mast-clearing launch; low-corridor horizontal
-acceleration; paired braking/capture inside the target aperture; and near-vertical descent. Search
-state contains the complete pose, remaining derivation fuel, fixed step, maximum swept hull top, and
-run-length-encoded commands. A deterministic quantized beam is only a candidate generator: exact
-production `classifySweptContact` over canonical terrain plus both platforms, trusses, lattice
-columns, NOCs, and masts is the sole success authority. The candidate must keep the complete hull at
-or below `MAX_PLAYABLE_Y=56`, respect all existing landing bounds, and contact by fixed step 4,320.
-No route changes terrain, structure, collision, controls, thrust, gravity, integration, or landing
-tolerance.
+All synthesis arithmetic is JavaScript Number arithmetic using the section 8 integrator at exactly
+120 Hz. Candidate fuel starts at `30`; fuel is a search cost only because every accepted schedule
+burns less than the section 10.3 allowance. The canonical expansion order and pre-assist engine
+requests are `0:(0,0)`, `1:(.72,.72)`, `2:(0,.375)`, `3:(.375,0)`, `4:(.2125,.5875)`, and
+`5:(.5875,.2125)`. Duplicate reachable zero/straight keyboard rows are never expanded. A pair search
+starts from the exact relative checkpoint `(x,y,vx,vy,angle,angularVelocity)=(0,0,0,0,0,0)`,
+`fuel=30`, with the origin platform's launch hold active. Every candidate begins with this exact
+1,087-step mast-clearing prefix:
 
-The finite input authority is section 5.3's 100 exact ordered endpoint pairs. Candidate search may
-share a schedule only when the proof constraints are byte-identical. For each ordered endpoint pair,
-derive one exact point-by-point conservative upper terrain envelope from the two closed-footprint
-native maxima, the `.36` grade limit, and the `.6` band ceiling. Every concrete assignment mapped to
-that pair is at or below the same envelope at every X, so the pair plus this derived envelope is the
-exact proof-equivalence key even when lower native facets differ. Passing the stronger envelope
-cannot conceal a terrain collision. Derived v7 retains the exhaustive assignment-to-key mapping, and
-final verification replays every concrete geometry, not merely the envelope.
+```text
+commands  1,  0, 1, 0, 2,5, 3,  0, 2,  0,  1,  0, 2
+counts   90,218,21,94,12,6,41,119,23,180,129,120,34
+```
 
-The exact feasibility corpus covers all 100 pairs without filtering. Its maximum authoritative
+Relative to the origin center/deck, its exact terminal state is
+`(x,y,vx,vy,angle,angularVelocity)=(9.369360750429012,11.213226284049306,4.16044150783088,1.3150456371170334,18.306988062798155,-6.99503284726514)`;
+burn is `3.2637500000001936`. Exact replay, including the origin-top exception only until both feet
+clear by `.05 m`, remains authoritative for the prefix on every geometry.
+
+The four phases are exact: `launch` is prefix steps `1..1087`; `corridor` is macro layers `1..190`;
+`capture` is layers `191..210`; and `descent` is layers `211..269`. The negative-delta desired-Y
+override below may begin during `corridor`, but it does not change the phase boundary, X waypoint,
+command vocabulary, or pruning authority. A retained beam state contains exactly the full-precision
+six-component relative pose, remaining candidate fuel, maximum absolute hull top so far, and merged
+run sequence; its layer and absolute fixed step are loop indexes, not mutable state fields.
+
+Set `MACRO_STEPS=12`, `MAX_LAYERS=269`, and `BEAM_WIDTH=6000`; therefore the final expanded substep
+is absolute fixed step `1087+269*12=4315`. For every beam state, advance each command for exactly 12
+ordinary fixed steps. Track the extrema at every substep. Reject a non-finite state, candidate fuel
+below zero, any substep `pose.y+6.5>56-originDeck`, minimum reference Y below
+`min(-.5,deckDelta-.5)`, X outside `[5,107]`, or reference Y below `envelope(x)-originDeck+1.65`.
+While `84<x<91.2`, also require `y>=deckDelta+11`; this is the target-approach barrier. These are
+candidate-pruning bounds only. They never replace rotated-hull, terrain, structure, ceiling, or
+landing classification in exact replay.
+
+Quantize only for beam deduplication:
+
+```text
+key = [
+  Math.round(x*2), Math.round(y*2), Math.round(vx*2), Math.round(vy*2),
+  Math.round(angle/5), Math.round(angularVelocity/5)
+].join(":")
+```
+
+Fuel, cost, and the full-precision pose remain on the retained state. For a duplicate key, retain
+the least tuple `(cost,-fuel,runs,pose)`; `runs` compares its flattened `[command,count,...]`
+integer sequence lexicographically, then pose compares `x,y,vx,vy,angle,angularVelocity` as raw
+Numbers. After deduplication, sort by that same tuple and retain the first 6,000. Expansion iterates
+the already-sorted beam outermost and commands in numeric order. Adjacent equal commands merge
+immediately, so every run count is positive and adjacent command indexes differ. These explicit
+comparisons replace reliance on map insertion order or sort stability.
+
+Let `l` be the one-based macro layer, `delta=deckDelta`, `cruiseY=max(11.5,delta+11.5)`, and
+initialize desired `vx=4.2,vy=0`. The exact waypoint authority is:
+
+```text
+l <= 190:
+  x = prefixX + (90-prefixX)*l/190
+  y = 11.5 + (cruiseY-11.5)*min(1,l/120)
+190 < l <= 210, q=(l-190)/20:
+  x = 90+4*q; vx = 4.2-3.2*q; y = cruiseY
+l > 210, q=min(1,(l-210)/50):
+  x = 94; vx = 1-q
+  y = cruiseY-(cruiseY-(delta+.7))*q; vy = -1.5
+```
+
+For `delta < -10`, override desired Y with `cruiseY+(delta+.7-cruiseY)*clamp((l-120)/140,0,1)` and,
+before the endpoint, desired VY with `(delta+.7-cruiseY)/14`. For `-10 <= delta < 0`, use the same
+expressions with `clamp((l-150)/110,0,1)` and divisor `11`; fixed step `150*12=1800` is the reviewed
+shallow-fall descent onset. At the endpoint desired VY is `-1.5`.
+
+For state `p` after layer `l`, define `terminalBias=max(0,l-210)*.08` and exactly:
+
+```text
+cost =
+  1.8*abs(p.x-desiredX) + 2.4*abs(p.y-desiredY)
+  + (2+terminalBias)*abs(p.vx-desiredVx)
+  + (2+terminalBias)*abs(p.vy-desiredVy)
+  + .045*abs(p.angle) + .035*abs(p.angularVelocity)
+  + .08*(30-fuel)
+```
+
+A terminal candidate has `x in [92.8,99.2]`, `y in [delta,delta+.3]`, `abs(vx)<=2.2`, `vy<=0`,
+`abs(vy)<=3.6`, `abs(angle)<=18`, and `abs(angularVelocity)<=26`. After each layer's 6,000-state
+truncation, examine its terminal states in beam order. Append command 0 only through fixed step
+4,320, merge it with an adjacent zero run, and replay from the exact checkpoint with the reviewed
+allowance. The first exact safe target contact is the selected record; trim its runs at that first
+contact. Stop after the first layer with a selected record. A contact after 4,320, any earlier
+unsafe contact, or hull top above 56 is not a candidate. If no layer succeeds, derivation fails.
+
+The deterministic ceiling per pair is 269 layers, 6 commands, 6,000 retained states, at most
+9,684,000 macro expansions, and at most 1,614,000 exact terminal replays. No random restart,
+wall-clock cutoff, worker-dependent merge, recipe widening, or early acceptance before exact replay
+exists. The schedule digest uses the existing FNV-1a command/low-count-byte/high-count-byte fold.
+The v8 derivation tool independently implements the integrator and swept-contact classifier and
+imports no production or test module. Its selected replay is necessary but not sufficient: permanent
+model verification replays every stored run against production `classifySweptContact` on both its
+conservative envelope and every concrete member assignment. Independent and production
+classification, first-contact step, canonical pose, burn, and hull maximum must agree before a
+record is usable. Runtime then performs the one defensive production replay already required above.
+
+For an ordered pair with origin deck `D0` and target deck `D1`, set `O=D0-2.5`, `T=D1-2.5`,
+`a=13.8`, and `b=91.2`. Its exact conservative envelope is `O` for `x<=a`, `T` for `x>=b`, and
+`min(29.2,O+.36*(x-a),T+.36*(b-x))` between them. Construct its strict-X polyline from `a,b` and
+every in-range intersection of those three affine branches; do not sample it on an approximate grid.
+Store `envelope` as increasing-X `[x,y]` pairs clipped to `[5,107]`, including those endpoints, `a`,
+`b`, and every active-branch intersection, then remove only adjacent byte-identical points. Every
+eligible terrain obeys the `.36` absolute-grade bound and is no higher than `O/T` across the two
+closed footprints, so it is at or below this envelope at every X. The proof-equivalence key is the
+exact ordered deck pair plus this derived envelope. Derived v7 retains the exhaustive
+assignment-to-key mapping, and verification replays every concrete assignment as well as its
+envelope.
+
+The exact feasibility corpus covers all 100 keys without filtering. Its maximum authoritative
 target-contact step is `4,317`; maximum controller burn is `13.00275000000213`; and maximum swept
 hull top is `53.4231353132934 m`. The maximum base-burn witness has origin deck `15.764 m`, delta
-`-2.336 m`, contact step `4,311`, and burn `13.00275000000213`. The extrema of the deck-delta range
-also pass: the `+26.52 m` rise contacts at step `4,255`, burns `12.86675000000205`, and reaches hull
-top `48.21512533862919 m`; the `-25.984 m` fall contacts at step `4,232`, burns `12.85325000000207`,
-and reaches hull top `53.4231353132934 m`. The three shallow-fall terminal cases
-`-2.368/-2.4/-2.968 m` use the same phases with descent beginning at fixed step 1,800 and contact at
-`4,171/4,137/4,181`. This timing choice is keyed by the exact constraint record, not discovered at
-runtime.
+`-2.336 m`, contact step `4,311`, and burn `13.00275000000213`. The `+26.52 m` rise contacts at step
+`4,255`, burns `12.86675000000205`, and reaches hull top `48.21512533862919 m`; the `-25.984 m` fall
+contacts at step `4,232`, burns `12.85325000000207`, and reaches hull top `53.4231353132934 m`. The
+exact algorithm, bounds, enumeration, and payload ordering in sections 10.1-10.2 must regenerate
+those records; a mismatch is a feasibility failure, not permission to relax collision or terrain.
 
 ### 10.2 Opening proof, fixture authority, and digests
 
@@ -1199,26 +1291,108 @@ terrain around the spawn:
 | L3      | 5.716    | 408 / 120          | 642          | 13.56          |
 
 The schedules are test-only witnesses, not runtime input. Static seed `0x41475731` selects a
-`29.356 m` site-0 deck and passes the H1 witness. No spawn-relative terrain or deck adjustment
+`6.356 m` site-0 deck and passes the L1 witness. No spawn-relative terrain or deck adjustment
 exists.
+
+The independent assignment enumeration is exact and finite. Use abstract origin-center phases in
+numeric order `[4,36,68,100]` within relative block 0, parity in order `[0,1]`, then four nested
+variant loops for relative signed blocks `[-1,0,1,2]`, each in order `[0,1,2,3]` with the `-1` block
+outermost and block `2` innermost. For relative block `q`, select H when
+`positiveModulo(q+parity,2)==0`, otherwise L, then select its loop variant. This produces exactly
+`4*2*4^4=2048` assignments in canonical order. Encode the assignment ID exactly as
+`p<phase>-q<parity>-v<v-1><v0><v1><v2>`, for example `p4-q0-v0000`.
+
+For each assignment independently evaluate both closed footprints centered at `phase` and
+`phase+96`. Convert an exact deck to integer millimeters with `Math.round(deck*1000)` and assert the
+round trip differs by at most `1e-12`; no rounded millimeter value feeds terrain or collision.
+Encode the proof key as `d:<originMillimeters>:<targetMillimeters>`. Group assignments only by that
+key and section 10.1's deterministically derived envelope. Sort keys by numeric origin millimeters,
+then numeric target millimeters. The result must be exactly 100 keys and 75 distinct signed deltas,
+with per-phase key counts `16,20,32,32` for phases `4,36,68,100`. Each record's membership array
+retains assignment IDs in canonical enumeration order.
+
+Each assignment descriptor contains exactly these fields, where `variants` is the four-number array
+for blocks `[-1,0,1,2]`:
+
+```text
+assignmentId,phase,parity,variants,originDeck,targetDeck,
+originMillimeters,targetMillimeters,deckDelta,pairKey
+```
+
+Each proof record contains exactly:
+
+```text
+pairKey,envelope,assignmentIds,assignmentMembershipDigest,runs,scheduleDigest,
+search,success,controllerBurn,baseBurn,climbSurcharge,allowance,maxHullTop
+```
+
+`search` contains `selectedLayer,macroExpansions,terminalReplays`. `selectedLayer` is one-based;
+`macroExpansions` counts every attempted 12-step child before pruning or deduplication;
+`terminalReplays` counts every post-truncation terminal candidate sent to exact replay. `success`
+contains `classification,contactStep,pose`. Each opening contains exactly
+`profile,deck,runs,contactStep,pose,burn,reserve,classification`. Object key order is immaterial
+only because canonical JSON sorts it; no optional field, null placeholder, duplicated derived value,
+or prose label is permitted.
 
 Bump the permanent inputs to geometry schema `agw-lander-route-geometry/v7`, derived schema
 `agw-lander-route-derived/v7`, deriver `agw-lander-route-deriver/v8`, and synthesizer recipe
 `agw-lander-corridor-synthesizer/v1`. Geometry v7 contains the exact eight profiles, block parity
 and indexed variant streams, 16/128 m lattice, normalized mapping, slope/change bounds, 96 m signed
-site formula, closed-footprint maximum, exact 2.5 m clearance, and unchanged structure/physics
-constants. Derived v7 contains the 100 ordered proof records, eight opening records, canonical pose
-precision, physics/geometry/proof/world/output digests, and the independent signed 100-site
-witnesses for seeds `11,39,41,STATIC_WORLD_SEED`.
+site formula, closed-footprint maximum, exact 2.5 m clearance, and unchanged structure inputs; the
+unchanged physics authority is the separate digest below. Derived v7 contains the ordered 2,048
+assignments, 100 proof records, eight opening records, `canonicalPoseDecimals:9`, all digests below,
+and independent signed 100-site witnesses. Record poses are canonicalized only for stored proof
+output, after exact classification, with `Number(value.toFixed(canonicalPoseDecimals))`; the raw
+pose used by burn, contact, collision, and selection is never rounded, nor are deck or terrain
+values. Digests consume the stored canonical record and otherwise raw values exactly as scoped
+below. Records are ordered by numeric proof key. Openings are ordered `H0,H1,H2,H3,L0,L1,L2,L3`.
+World witnesses are ordered seed outermost in `[11,39,41,STATIC_WORLD_SEED]`, direction `[-1,1]`,
+then ordinal `0..100`; site index is `direction*ordinal`. Each site-only witness contains exactly
+`descriptor,digest`, and `digest` hashes only its complete descriptor. A descriptor contains exactly
+`seed,siteIndex,directionlessPhase,terrainParity,blocks,site`, where
+`directionlessPhase=positiveModulo(C_siteIndex,128)`. `blocks` contains every signed block
+intersecting the site's closed footprint, once and in ascending block-index order; each block
+contains exactly `index,variant,profile,vertices`, with vertices in increasing X. `site` contains
+exactly `index,center,closedFootprint,localNativeMaximum,platformTop,supportFeet`, with the
+footprint in left/right order and the six feet in section 5.3 rail order. Route records separately
+cover every ordered endpoint pair. The duplicated ordinal-zero direction witnesses must therefore be
+byte-identical; direction is an enumeration instruction and is not stored in the directionless
+site-0 descriptor. The derived top-level payload contains exactly
 
-Canonical JSON recursively sorts object keys, preserves array order, uses compact `JSON.stringify`,
-hashes UTF-8 bytes with lowercase SHA-256, and adds one unhashed trailing LF. The independently
-unchanged physics digest remains exactly
+```text
+schema,deriverVersion,synthesizerVersion,canonicalPoseDecimals,
+geometryDigest,physicsDigest,assignments,assignmentDigest,records,openings,
+proofDigest,worldWitnesses,worldDigest,outputDigest
+```
+
+Canonical JSON recursively sorts object keys, preserves the pinned array orders, uses compact
+`JSON.stringify`, and hashes UTF-8 bytes with lowercase SHA-256. Hash payloads never include a
+trailing LF; fixture files add exactly one unhashed trailing LF. Digest scopes are exhaustive:
+
+- `geometryDigest` hashes the complete geometry-v7 input object.
+- `physicsDigest` hashes exactly `{commands,constants}`. `commands` is the unchanged ordered
+  eight-row pre-assist table. `constants` contains exactly the unchanged sorted names
+  `ANGULAR_ASSIST_DIFFERENTIAL`, `ANGULAR_ASSIST_FULL_SPEED`, `COLLISION_MARGIN`,
+  `ENGINE_ACCELERATION`, `FUEL_FLOW`, `FUEL_QUANTUM`, `GRAVITY`, `MAX_LANDING_ANGLE`,
+  `MAX_LANDING_ANGULAR_SPEED`, `MAX_LANDING_DESCENT_SPEED`, `MAX_LANDING_HORIZONTAL_SPEED`,
+  `MAX_PLAYABLE_Y`, `MAX_THRUST_VECTOR`, `STEP_SECONDS`, `TORQUE_ACCELERATION`, `TURN_DIFFERENTIAL`,
+  and `TURNING_TOTAL` with their section 8-9 values.
+- each `assignmentMembershipDigest` hashes only that record's ordered assignment-ID array;
+  `scheduleDigest` remains the section 10.1 unsigned FNV-1a fold over its ordered runs.
+- `assignmentDigest` hashes the complete ordered assignment-descriptor array.
+- `proofDigest` hashes exactly `{records,openings}` after their pose canonicalization.
+- `worldDigest` hashes exactly the complete ordered `worldWitnesses` array.
+- `outputDigest` hashes the complete derived-v7 object with only `outputDigest` omitted, so it
+  covers schemas/versions/precision, all preceding digest literals, assignments, records, openings,
+  and world witnesses.
+
+The independently unchanged physics digest remains exactly
 `e08f8260b723dd245db88de9ae2cdbac54bf9a97cb0bed1b6f170eda362c48dc`. Geometry, proof, world, and
 output literals are generated from the completed independent v8 tool and reviewed atomically before
 implementation merge; the LLD is not a second fixture authority and does not invent hashes before
 those canonical files exist. Verification recomputes every digest and fails on partial regeneration,
-an old v6 reader, missing pair/profile, reordered record, or changed physics digest.
+an old v6 reader, missing assignment/pair/profile, ordering drift, payload-scope drift, or changed
+physics digest.
 
 The exact CLI remains standard-library Node and accepts only:
 
@@ -1237,7 +1411,10 @@ ships in the 13-file site artifact.
 Set `FUEL_QUANTUM=.05` and define `quantumCeil(x)=ceil(x/FUEL_QUANTUM)*FUEL_QUANTUM`. For each proof
 record let `delta=targetDeck-originDeck` and
 `climbSurcharge=max(0,delta)*GRAVITY/ENGINE_ACCELERATION=max(0,delta)/3`; descent receives no
-credit. The corpus-wide controller base is exactly:
+credit. In each record, `controllerBurn` is the raw exact replay burn,
+`baseBurn=controllerBurn-climbSurcharge`, `climbSurcharge` is the expression above, `allowance` is
+the expression below, and `maxHullTop` is the greatest absolute transformed hull Y observed at any
+swept substep through first contact. The corpus-wide controller base is exactly:
 
 ```text
 B = quantumCeil(max over 100 records of
@@ -1781,7 +1958,7 @@ lattice geometry in section 5.3.
 
 Independent arithmetic pins `N=(640-sceneY)/640=(92+10*worldY)/640` and `worldY=64*N-9.2`. The eight
 profile rows reach exact `.10/.60` extrema, maximum absolute grade `.36`, angle
-`19.798876354524932 degrees`, and maximum adjacent grade change `.52`. For `C_i=36+96*i`, exhaustive
+`19.798876354524932 degrees`, and maximum adjacent grade change `.40`. For `C_i=36+96*i`, exhaustive
 signed phase/profile enumeration produces exactly four spatial phases, 2,048 assignments, 100 exact
 endpoint pairs, 75 deltas, decks `[3.476,31.7]`, and deltas `[-25.984,26.52]`. Representative seeds
 `11,39,41,STATIC_WORLD_SEED` over both signed 100-site directions exercise all eight profiles
@@ -1833,11 +2010,11 @@ alias.
 
 | Layer                                                                   | Required coverage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `node --test website/tests/lander-world.test.mjs`                       | Independently reconstruct the eight global profiles from seed and signed block index only, strict 16 m X cadence, exact normalized mapping/band, linear interpolation, four 96 m phases, all 2,048 assignments and 100 exact pairs, closed-footprint maximum, `+2.5 m` deck equality, grade/change limits, and signed regeneration. Rebuild 14 truss members, three uncapped finite lattice columns with six native feet, colliders, and aperture proofs. Mutation-kill site-conditioned terrain, phase lock, curves, rounding, a global datum, shelf/cap, vertical edge, foot drift, or aperture diameter at or above `3.2 m`.                                                                                                                                                                                                           |
+| `node --test website/tests/lander-world.test.mjs`                       | Independently reconstruct the eight global profiles from seed and signed block index only, strict 16 m X cadence, exact normalized mapping/band, linear interpolation, terrain miter join/limit `2`, exact `.36/.40` grade/change bounds, four 96 m phases, all 2,048 assignments and 100 exact pairs, closed-footprint maximum, `+2.5 m` deck equality, and signed regeneration. Rebuild 14 truss members, three uncapped finite lattice columns with six native feet, colliders, and exact `sqrt(1.1296)` terrain-wedge aperture. Mutation-kill site-conditioned terrain, phase lock, curves, rounding, a global datum, shelf/cap, vertical edge, foot drift, or aperture diameter at or above `3.2 m`.                                                                                                                                 |
 | `node --test website/tests/lander-model.test.mjs`                       | Replay all 100 success records and eight openings with exact swept collision, one keyed lookup per pair, contact `<=4320`, hull top `<=56`, unchanged inclusive `2.2/3.6/18/26` limits, and real terrain/structure collision. Pin `B=13.05`, climb surcharge, quantum ceiling, separate engine exhaustion arithmetic, and absence of `smallerFailure`/runtime search. Retain fuel, ratio, checkpoint, Retry, zero-fuel, deployment, reduced-motion, and hidden-time vectors. No assertion encodes authored prose.                                                                                                                                                                                                                                                                                                                         |
 | `node --test website/tests/lander-phase4l.test.mjs`                     | Mutation-sensitive controller/DOM tests pin exactly two controls-line children in keyboard/touch order, Retry label-source and hint structure without asserting text, internal `RESTART` dispatch, crash focus stability, click/`r` teardown-render-focus order, shell focus with `preventScroll`, and no synthesized input. Existing outside-shell and native-button rejection coverage remains exact.                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `node --test website/tests/lander-phase4m.test.mjs`                     | Mutation-sensitive controller/DOM tests pin five sky chunks, 20 stars, one or two deterministic landmarks in exactly two paths, the complete two-arc crescent, all three one/two-ring profiles, exact circle/ellipse intersections, omitted rear-center arcs, and complete foreground arcs. They retain static/dynamic descriptor equality, bounded reconciliation, `.24` parallax transforms, negative/positive camera following, bidirectional cue changes, pass/reverse/return, and no horizontal-bound failure. They also pin the exact opening half-gauge, post-award full reference without cap, `.9 s` deploy travel, unchanged refuel/power timing, hidden-time freeze, reduced-motion atomic projection, and structural copy/link/accessibility sources without embedding authored wording.                                      |
-| Derivation CLI fixture verification                                     | Generate temporary v7 output with v8 deriver and synthesizer v1, review the canonical delta, update geometry/proof/world/output digests atomically, then run ordinary `--verify`. Enumerate all 2,048 assignments into exactly 100 exact pair keys; replay all 100 routes and eight openings through independently implemented strict-X terrain, full structure collision, and the 4,320-step ceiling. Physics digest remains exact. No early-success omission, terrain-variant rejection, runtime fallback, fuel-wasting schedule, or partial fixture is permitted.                                                                                                                                                                                                                                                                      |
+| Derivation CLI fixture verification                                     | Generate temporary v7 output with v8 deriver and synthesizer v1, review the canonical delta, update geometry/assignment/proof/world/output digests atomically, then run ordinary `--verify`. Enumerate the exact `4 x 2 x 4^4` loop order into 2,048 assignments and 100 numeric-sorted exact pair keys. Regenerate with the pinned prefix, `12/269/6000` bounds, six-command expansion order, `Math.round` key, cost/tie tuple, first-safe-layer selection, and 4,320-step ceiling; exact independent and production replays must agree for all 100 routes and eight openings. Physics digest remains exact. No early-success omission, terrain-variant rejection, runtime fallback, fuel-wasting schedule, scope/order drift, or partial fixture is permitted.                                                                          |
 | `python -m unittest discover -s website/tests -p 'test_*.py'`           | The validator pins one shared fragment, structure, accessible-name sources, v7 fixture/schema names, and absence of old v6, Phase 4P, smootherstep, curve, global-datum, site-conditioned terrain, and vertical-camera fields. Exact artifact, DOM budget, privacy, module DAG, route uniqueness, recovery, and static/dynamic parity remain. It does not assert authored prose.                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | Automated Chromium projection witness                                   | At exact `1000 by 780` wide, `320 by 780` narrow, real 400-percent-equivalent `320 by 240`, and touch-landscape `667 by 320` CSS viewports, first assert `innerWidth/innerHeight` equal the requested pair. Then assert document `clientWidth==scrollWidth==innerWidth`, `clientHeight==scrollHeight==innerHeight`, and `scrollTop==0`; every action/landmark is inside the viewport; and wheel/touch/focus/game transitions preserve those values. Keep the `25/16` stage across preflight, low valley, summit, ceiling flight, crash, service, Retry, and reversal, with world Y transform exactly zero and no vertical-camera property/state. Capture seeds `11`, `41`, and static windows that show summit, valley, and rising next summit. Retain focus, cue, parallax, gauge, deployment, reduced-motion, and checkpoint witnesses. |
 | Pseudo-can computed-style and screenshot witness                        | For `getComputedStyle(stage,"::after")`, assert `width=20px`, `height=22px`, `pointer-events=none`, `image-rendering=pixelated`, transparent background color, exactly six gradient images, sizes `6px 2px,10px 6px,2px 4px,4px 8px,12px 14px,16px 18px`, positions `6px 2px,4px 0px,16px 10px,16px 8px,2px 6px,0px 4px`, `no-repeat` six times, and alternating normalized paints `rgb(217,74,30)`/`rgb(41,43,48)` in the pinned top-to-bottom order. At DPR 1 and an integer transfer center, take exact `20 by 22` CSS-pixel crops with refueling on and off: on-crop probes `(5,1)`, `(7,3)`, `(18,9)`, `(16,11)`, `(1,5)`, and `(3,7)` prove the six graphite/orange parts; `(0,0)` and `(19,21)` are byte-equal to the off-crop background, proving transparency. The crop visibly reads as one block can. No golden asset ships.   |
@@ -1865,13 +2042,14 @@ replay without requiring deck/profile repetition.
 Mutation tests reject duplicated/moved shared markup, a second scheduler/controller/site authority,
 game checks added to the near-limit validator, artifact count drift, a sixth retained chunk, more or
 fewer than the exact fill/surface terrain pair, a stroked fill, closed surface, surface floor point,
-internal closure edge, concatenated per-chunk path, non-increasing X, same-X/different-Y pair, or
-chunk/site boundary mismatch. They reject seed/global-block/variant/signed-index drift, a cadence
-other than 16 m, block width other than 128 m, any nonlinear or rounded terrain interpolation, an
-anchor outside `[.1,.6]`, grade above `.36`, adjacent-grade change above `.52`, a two-level
-sawtooth, any shelf/cap/blend/discard splice, terrain access during site-X selection, a column rail
-foot not equal to native interpolation, closed-footprint maximum drift, a deck not exactly `2.5 m`
-above that maximum, a global datum, or any candidate/terrain retry or variant rejection.
+internal closure edge, concatenated per-chunk path, non-increasing X, same-X/different-Y pair, a
+terrain join other than `miter`, terrain miter limit other than `2`, or chunk/site boundary
+mismatch. They reject seed/global-block/variant/signed-index drift, a cadence other than 16 m, block
+width other than 128 m, any nonlinear or rounded terrain interpolation, an anchor outside `[.1,.6]`,
+grade above `.36`, adjacent-grade change above `.40`, a two-level sawtooth, any
+shelf/cap/blend/discard splice, terrain access during site-X selection, a column rail foot not equal
+to native interpolation, closed-footprint maximum drift, a deck not exactly `2.5 m` above that
+maximum, a global datum, or any candidate/terrain retry or variant rejection.
 
 Structure mutations reject pad-width/clearance drift, a filled scaffold face, backing rectangle,
 sky-colored artifact, scaffold fill other than `none`, member width/color/segment drift, a missing
@@ -2023,10 +2201,15 @@ counts other than `2048/100/75`, a contact after step 4,320, hull top above 56, 
 success or eight opening replays, any `smallerFailure`, fuel-wasting/loitering schedule, base
 allowance other than 13.05, descent credit, partial route/world regeneration, witness seeds other
 than `[11,39,41,STATIC_WORLD_SEED]`, wrong witness nesting, derivation-tool imports, or reviewed
-digest drift. Closed unsafe collision, unexpanded target-top handling, transactional initialization,
-fixed retention, reversible camera motion, normal crash debris, ballistic fragments, non-animated
-direction meaning, vacuum presentation, lifecycle cleanup, privacy, and zero-runtime-network
-constraints remain mutation-protected.
+digest drift. Derivation mutations additionally reject any prefix run/count/state drift; phase,
+`12/269/6000`, candidate, expansion, or replay ceiling drift; command-order, `Math.round` key,
+waypoint, cost, comparison-tuple, first-safe-layer, or run-merging drift; a non-numeric pair-key
+sort; assignment loop/ID/member-order drift; a world-witness field/order drift; or any digest
+payload that adds, removes, rounds, or reorders authority outside its pinned scope. Closed unsafe
+collision, unexpanded target-top handling, transactional initialization, fixed retention, reversible
+camera motion, normal crash debris, ballistic fragments, non-animated direction meaning, vacuum
+presentation, lifecycle cleanup, privacy, and zero-runtime-network constraints remain
+mutation-protected.
 
 Phase 4R projection mutations additionally reject any world Y translation, `--camera-y`, vertical
 camera state/helper/import, pose-dependent viewBox or stage size, stage min-height growth, terrain-
