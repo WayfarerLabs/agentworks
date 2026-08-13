@@ -327,8 +327,9 @@ The settled rules for the species:
   These forms are still young; refine them here as they prove out.
 - Every PR belonging to a saga carries a `saga:<name>` label, where the name is the saga's feature
   directory without its date prefix (`saga:next-steps`). Sagas can run concurrently, so the label is
-  what lets a saga lead's watch enumerate its own children exactly rather than by inference. The
-  effort applies it when it opens the PR; work outside any saga carries no such label.
+  what lets a saga lead's watch enumerate its own surface rather than infer it. That surface is
+  everything the lead seeds and reviews, which is wider than the children that gate the lock. The
+  effort applies it when it opens the PR; work no saga lead watches carries no such label.
 - A saga constrains only its own scope. Work outside the saga is not paused by it and can be picked
   off whenever bandwidth allows; the saga's target-state should say explicitly what is out of scope
   so that boundary stays crisp.
