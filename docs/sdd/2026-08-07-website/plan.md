@@ -1,7 +1,6 @@
 # Plan: The agentworks.build Website
 
-- Status: Continuous Lander and canonical assistance integration complete; production acceptance
-  pending
+- Status: Phase 4Q terrain recovery design in progress; canonical assistance integrated
 - Date: 2026-08-07
 - Last revised: 2026-08-12
 - FRD: `frd.md`
@@ -27,7 +26,7 @@ PR #486 carries the reviewed continuous Lander work recorded by Phases 4A throug
 the established site, assistance projection, hosting, and routes while replacing the original
 bounded game with the accepted continuous expedition.
 
-`locked.md` never merges before AC1-AC27 and R1-R26 are accepted in production. Every earlier merge
+`locked.md` never merges before AC1-AC28 and R1-R27 are accepted in production. Every earlier merge
 is independently useful and operable. The first release was honest without an onboarding claim, and
 the integrated release consumes the canonical source from the same reviewed PR while preserving
 deterministic source identity; no permanent website code binds to a branch-only or duplicated
@@ -1053,6 +1052,34 @@ chatter; rendering, collision, support feet, sites, routes, ceiling, camera, and
 one deterministic authority; every canonical proof and long-run generation witness remains valid;
 and the reviewed browser artifact is deterministic, bounded, and gate-clean.
 
+The operator's 2026-08-12 hands-on review rejected this implementation despite its automated gates:
+terrain appeared locally flat, the global deck placed every structure far above the ground, and the
+vertical camera introduced scrolling. Completed Phase 4P records remain immutable history, but its
+shipping design is superseded by Phase 4Q and must not be presented as accepted.
+
+## Phase 4Q: terrain recovery and gameplay-scale relief
+
+- [ ] Restore the exact pre-Phase-4P terrain, deck, route, camera, static-scene, fixture, and test
+      behavior as a green checkpoint atop the merged canonical onboarding release. Preserve all
+      accepted Phase 4M-4O refinements and the thirteen-file website artifact.
+- [ ] Amend and independently review `brand-and-lander-lld.md` for gameplay-scale deterministic
+      peaks and valleys, bounded realistic slope/grade change, fixed vertical projection, and the
+      lowest collision-safe per-site deck derived from each local terrain envelope. Explicitly ban a
+      global deck datum, vertical camera, and vertical overflow.
+- [ ] Implement the reviewed relief through `agentworks-dev`, regenerate fixtures and route proofs
+      atomically, and add mutation-sensitive Node/Python/browser evidence for local deck minimality,
+      normal-window silhouettes, collision/support parity, fixed scene height, and zero vertical
+      scrolling.
+- [ ] Run complete website/repository gates, independent code review, fresh-eyes visual review,
+      exact-head CI/CodeQL, and refresh port 8766 only after the corrected immutable artifact is
+      clean. Do not claim success from numeric extrema alone.
+- [ ] Obtain operator hands-on acceptance of ordinary gameplay terrain and platform placement before
+      marking corrected relief complete.
+
+Definition of done: terrain is visibly varied and navigable at play scale, platforms sit only as
+high as their local ground requires, the scene never scrolls vertically, every deterministic and
+collision proof is green, and the operator accepts the actual game rather than only its tests.
+
 ## Phase 5: CI and default Pages deployment
 
 - [x] Delegate workflow implementation to an `agentworks-dev` subagent with ownership of the Pages
@@ -1163,7 +1190,7 @@ with no branch-only dependency, duplicated bootstrap, or website-owned continuin
       metadata/CSP, byte-equivalent Lander/404 game subtree, and compact 404 title after onboarding
       integration.
 
-Definition of done: R1-R26, AC2-AC3, and AC5-AC27 hold through the existing site and pipeline, with
+Definition of done: R1-R27, AC2-AC3, and AC5-AC28 hold through the existing site and pipeline, with
 the temporary notice removed rather than retained as configuration.
 
 ## Phase 9: complete acceptance and closeout
@@ -1188,7 +1215,7 @@ the temporary notice removed rather than retained as configuration.
       run final gates, obtain the required closeout review, and hand the ready PR to the operator
       for merge.
 
-Definition of done: AC1-AC27 hold at `https://agentworks.build`, R1-R26 and C1-C5 are production
+Definition of done: AC1-AC28 hold at `https://agentworks.build`, R1-R27 and C1-C5 are production
 facts, the deployment is operable without this SDD, all plan boxes are truthful, and the effort is
 locked.
 

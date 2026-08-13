@@ -1,7 +1,6 @@
 # HLA: The agentworks.build Website
 
-- Status: Continuous Lander and canonical assistance integration complete; production acceptance
-  pending
+- Status: Phase 4Q terrain recovery design in progress; canonical assistance integrated
 - Date: 2026-08-07
 - Last revised: 2026-08-12
 - FRD: `frd.md`
@@ -300,22 +299,18 @@ count. Decorative landmarks remain recognizable astronomical silhouettes: a cres
 circular planet with one or two modest elliptical rings. Planet geometry occludes each ring's rear
 center while retaining its foreground arc and the two exposed rear-side segments.
 
-Each deterministic site retains the same coarse, irregular terrain generator beneath its complete
-footprint; it does not replace a site span with a flat shelf. The world derives a sufficiently high
-level deck from the native terrain envelope rather than flattening the surface. One ordered terrain
-chain remains authoritative through site and chunk boundaries, so rendering and collision cannot
-disagree through duplicate horizontal positions or vertical closing segments. A pure deterministic
-single-scale relief kernel with a seeded monotone grade warp replaces the repeated motif bank. It
-derives a continuous terrain height in canonical, untransformed normalized scene space, bounded
-between `0.1` and `0.6` above the instruction rail at every point by a non-overshooting
-interpolation kernel, then projects that same value into world geometry for rendering, collision,
-site feet, and clearance. Smooth interpolation and independently tested grade, grade-change, and
-reversal bounds allow broad peaks and canyons without sample-to-sample chatter. The world/model
-contract jointly revises deck selection, route witnesses, ceiling handling, and any required
-vertical camera projection so the larger relief never creates an unreachable site or hides the
-active lander, target, HUD, or controls. Camera motion is applied only after canonical terrain/world
-projection and does not alter the normalized-height invariant. No presentation-only terrain offset
-is permitted.
+Each deterministic site retains native terrain beneath its complete footprint; it does not replace a
+site span with a flat shelf. One ordered terrain chain remains authoritative through site and chunk
+boundaries, so rendering and collision cannot disagree through duplicate horizontal positions or
+vertical closing segments. Phase 4Q first restores the accepted pre-R26 terrain/camera projection,
+then introduces a deterministic bounded relief kernel at ordinary gameplay scale. Its smooth,
+non-overshooting interpolation and independently tested grade, grade-change, and reversal bounds
+form visible peaks, valleys, ridges, and canyons without sample-to-sample chatter. Each site derives
+the lowest collision-safe deck from the maximum native terrain under that site's complete structural
+footprint plus the exact required clearance; no global deck datum exists. Rendering, collision, site
+feet, clearance, routes, and the static scene consume the same result. The scene retains one fixed
+vertical projection and clips its world internally: there is no vertical camera authority, no
+presentation-only terrain offset, and no page or game vertical scrolling.
 
 The materially elevated platform remains exactly three lander widths long beside one solid NOC
 building. One collider-backed open truss uses continuous top and bottom chords and a uniform
