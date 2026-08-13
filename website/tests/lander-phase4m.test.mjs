@@ -57,9 +57,9 @@ test("opening and post-award fuel use honest uncapped gauge references", async (
 
 test("half-tank opening lands at every deck tier with independent off-on-off schedules", () => {
     const cases = [
-        { seed: 1, level: 83, off: 396, on: 108, steps: 554, reserve: 13.70399999999995 },
+        { seed: 13, level: 83, off: 396, on: 108, steps: 554, reserve: 13.70399999999995 },
         { seed: 8, level: 91, off: 396, on: 96, steps: 501, reserve: 13.847999999999956 },
-        { seed: 13, level: 99, off: 384, on: 96, steps: 512, reserve: 13.847999999999956 },
+        { seed: 1, level: 99, off: 384, on: 96, steps: 512, reserve: 13.847999999999956 },
     ];
     for (const witness of cases) {
         let model = createRun({ seed: witness.seed });
@@ -202,7 +202,7 @@ test("deployment travel is 0.9 seconds while refuel and power timings remain ind
 });
 
 test("three native-foot lattice columns integrate with the one-path scaffold and honest colliders", async () => {
-    const derived = JSON.parse(await readFile(new URL("tests/fixtures/lander-route-derived-v4.json", ROOT), "utf8"));
+    const derived = JSON.parse(await readFile(new URL("tests/fixtures/lander-route-derived-v6.json", ROOT), "utf8"));
     for (const site of derived.worldWitnesses[0].descriptor.sites) {
         const descriptor = { seed: derived.worldWitnesses[0].descriptor.seed,
             platformLeft: site.platform.left, platformRight: site.platform.right,
@@ -232,7 +232,7 @@ test("three native-foot lattice columns integrate with the one-path scaffold and
 });
 
 test("independent planar overlay derives every connected clear-face maximum and kills member mutations", async () => {
-    const derived = JSON.parse(await readFile(new URL("tests/fixtures/lander-route-derived-v4.json", ROOT), "utf8"));
+    const derived = JSON.parse(await readFile(new URL("tests/fixtures/lander-route-derived-v6.json", ROOT), "utf8"));
     for (const witness of derived.worldWitnesses) {
         for (const site of witness.descriptor.sites) {
             assert.deepEqual(independentMaximumClearFace(site), site.clearApertures.actualMaximumConnectedFace);

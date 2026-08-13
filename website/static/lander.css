@@ -1,5 +1,6 @@
 .game-main {
     gap: clamp(0.75rem, 2.5vw, 1.5rem);
+    --controls-rail-block-size: 48px;
 }
 
 #not-found-message {
@@ -33,19 +34,25 @@
     --crash-x: 0px;
     --crash-y: 0px;
     --crash-progress: 0;
-    margin-block: clamp(0.5rem, 2vw, 1rem) 0;
+    display: grid;
+    place-items: center;
+    margin: 0;
 }
 
 #lander-scene-shell {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-rows: auto var(--controls-rail-block-size);
     width: min(100%, 60rem);
+    max-height: 100%;
     overflow: hidden;
 }
 
 #lander-scene-stage {
     position: relative;
+    width: min(100%, calc((100cqh - var(--controls-rail-block-size)) * 25 / 16));
     aspect-ratio: 25 / 16;
+    container-type: size;
+    justify-self: center;
     overflow: hidden;
 }
 
@@ -358,7 +365,7 @@
     display: block;
     box-sizing: border-box;
     width: 1rem;
-    height: 7rem;
+    height: min(7rem, calc(100cqh - 1rem));
     overflow: hidden;
     border: 3px solid #292b30;
     background: #20232a;
@@ -422,6 +429,18 @@
     transform: translateX(-50%);
 }
 
+@container (max-height: 100px) {
+    #lander-game:not([data-banner="none"]) #lander-outcome {
+        inset-block-start: 0.125rem;
+        inline-size: calc(100% - 3rem);
+        font-size: 0.625rem;
+    }
+
+    #lander-restart {
+        margin-block-start: 0.125rem;
+    }
+}
+
 #lander-status {
     margin: 0;
     line-height: 1.25;
@@ -464,6 +483,7 @@
 #lander-exit {
     display: inline-grid;
     min-inline-size: 44px;
+    block-size: 44px;
     min-block-size: 44px;
     align-content: center;
     padding: 0.5rem 0.75rem;
@@ -495,7 +515,7 @@
     width: 100%;
     min-block-size: 44px;
     margin: 0;
-    padding: clamp(0.4rem, 1.5vw, 0.65rem) clamp(0.6rem, 2vw, 1rem);
+    padding: 0 clamp(0.6rem, 2vw, 1rem);
     border-block-start: 4px solid #292b30;
     background: #20232a;
     color: #f5f2e8;
@@ -520,10 +540,14 @@
 }
 
 @media (max-width: 32rem) {
+    .game-main {
+        --controls-rail-block-size: 84px;
+    }
+
     #lander-controls-rail:not([hidden]) {
         grid-template-columns: minmax(0, 1fr);
-        row-gap: 0.4rem;
-        padding-inline: 0.4rem;
+        row-gap: 0;
+        padding: 0 0.4rem;
     }
 }
 

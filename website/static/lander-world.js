@@ -1,6 +1,5 @@
 export const STATIC_WORLD_SEED = 0x41475731;
 export const CHUNK_WIDTH = 50;
-export const TERRAIN_SAMPLE_SPACING = 10;
 export const PLATFORM_WIDTH = 9.6;
 export const PLATFORM_THICKNESS = 0.35;
 export const PLATFORM_CLEARANCE = 2.4;
@@ -18,17 +17,30 @@ export const NOC_ROOF_OFFSET = 7.2;
 export const NOC_MAST_WIDTH = 0.5;
 export const NOC_MAST_HEIGHT = 3.2;
 
-export const MOTIFS = Object.freeze([
-    Object.freeze([0, 2.4, -1.5, 1.8, -1.1, 0]),
-    Object.freeze([0, -2.1, -0.8, 2.2, 1, 0]),
-    Object.freeze([0, 0.9, 2.5, 0.6, -1.9, 0]),
-    Object.freeze([0, -1.4, 1.3, 2.4, -0.5, 0]),
-]);
-const TEMPLATE_SLOT_ORDER = Object.freeze([78, 81, 84, 87, 90, 93, 96, 99, 102]);
+export const TERRAIN_SUBDIVISIONS = 8;
+export const TERRAIN_GRADE_LIMIT = 0.32407407407407407;
+export const TERRAIN_GRADE_CHANGE_LIMIT = 0.15707517611697638;
 
-function clamp(value, minimum, maximum) {
-    return Math.min(maximum, Math.max(minimum, value));
-}
+const TERRAIN_FAMILIES = freeze([
+    {
+        id: "A",
+        blockWidth: 261,
+        slots: [
+            { terrainLevel: 59, templateId: "route-81-rise", centerDelta: 81 },
+            { terrainLevel: 75, templateId: "route-84-fall", centerDelta: 84 },
+            { terrainLevel: 67, templateId: "route-96-fall", centerDelta: 96 },
+        ],
+    },
+    {
+        id: "B",
+        blockWidth: 276,
+        slots: [
+            { terrainLevel: 59, templateId: "route-87-rise", centerDelta: 87 },
+            { terrainLevel: 67, templateId: "route-99-rise", centerDelta: 99 },
+            { terrainLevel: 75, templateId: "route-90-fall", centerDelta: 90 },
+        ],
+    },
+]);
 
 function freeze(value) {
     if (Array.isArray(value)) {
@@ -59,45 +71,81 @@ export function sampleUnit(seed, stream, index) {
     return mixUint32(value) / 2 ** 32;
 }
 
-function boundaryHeight(seed, boundaryIndex) {
-    return 1.5 + 4.5 * sampleUnit(seed, 1, boundaryIndex >>> 0);
-}
-
 export function positiveModulo(value, modulus) {
     return ((value % modulus) + modulus) % modulus;
 }
 
-export function motifSelection(seed) {
+export function terrainCycleForSeed(seed) {
+    const family = TERRAIN_FAMILIES[sampleUnit(seed, 13, 0) < 0.5 ? 0 : 1];
+    const phase = Math.floor(3 * sampleUnit(seed, 13, 1));
+    const slots = Array.from({ length: 3 }, (_, index) => family.slots[(phase + index) % 3]);
+    return freeze({ family: family.id, phase, blockWidth: family.blockWidth, slots });
+}
+
+export function terrainSiteForIndex(seed, siteIndex) {
+    if (!Number.isSafeInteger(siteIndex)) throw new TypeError("Site index must be a safe integer");
+    const cycle = terrainCycleForSeed(seed);
+    const block = Math.floor(siteIndex / 3);
+    const slotIndex = positiveModulo(siteIndex, 3);
+    let center = 36 + block * cycle.blockWidth;
+    for (let index = 0; index < slotIndex; index += 1) center += cycle.slots[index].centerDelta;
+    const slot = cycle.slots[slotIndex];
     return freeze({
-        direction: sampleUnit(seed, 2, 1) < 0.5 ? 1 : 3,
-        offset: Math.floor(4 * sampleUnit(seed, 2, 0)),
+        index: siteIndex,
+        center,
+        terrainLevel: slot.terrainLevel,
+        deckLevel: slot.terrainLevel + 24,
+        templateId: slot.templateId,
+        centerDelta: slot.centerDelta,
+        valleyLevel: 5 + Math.floor(16 * sampleUnit(seed, 14, siteIndex >>> 0)),
+        family: cycle.family,
+        phase: cycle.phase,
+        blockWidth: cycle.blockWidth,
     });
 }
 
-export function motifIndex(seed, chunkIndex) {
-    const selection = motifSelection(seed);
-    return positiveModulo(selection.offset + selection.direction * chunkIndex, 4);
+function terrainLegForX(seed, x) {
+    const cycle = terrainCycleForSeed(seed);
+    let siteIndex = Math.floor((x - 36) / cycle.blockWidth) * 3;
+    let left = terrainSiteForIndex(seed, siteIndex);
+    for (let offset = 0; offset < 3; offset += 1) {
+        const right = terrainSiteForIndex(seed, siteIndex + 1);
+        if (x <= right.center) return { left, right };
+        siteIndex += 1;
+        left = right;
+    }
+    throw new Error(`Terrain leg lookup failed at ${x}`);
 }
 
-export function terrainSample(seed, sampleIndex) {
-    const chunkIndex = Math.floor(sampleIndex / 5);
-    const localIndex = sampleIndex - chunkIndex * 5;
-    if (localIndex === 0) {
-        return boundaryHeight(seed, chunkIndex);
+function smootherstep(value) {
+    return 6 * value ** 5 - 15 * value ** 4 + 10 * value ** 3;
+}
+
+function designTerrainHeight(seed, x) {
+    const { left, right } = terrainLegForX(seed, x);
+    const middle = (left.center + right.center) / 2;
+    const valley = left.valleyLevel / 10;
+    if (x <= middle) {
+        const ratio = (x - left.center) / (middle - left.center);
+        return left.terrainLevel / 10 + (valley - left.terrainLevel / 10) * smootherstep(ratio);
     }
-    const start = boundaryHeight(seed, chunkIndex);
-    const end = boundaryHeight(seed, chunkIndex + 1);
-    const base = start + (end - start) * (localIndex / 5);
-    return clamp(base + MOTIFS[motifIndex(seed, chunkIndex)][localIndex], 0.5, 7.5);
+    const ratio = (x - middle) / (right.center - middle);
+    return valley + (right.terrainLevel / 10 - valley) * smootherstep(ratio);
 }
 
 export function terrainHeightAt(seed, x) {
-    const leftIndex = Math.floor(x / TERRAIN_SAMPLE_SPACING);
-    const leftX = leftIndex * TERRAIN_SAMPLE_SPACING;
-    const fraction = (x - leftX) / TERRAIN_SAMPLE_SPACING;
-    const left = terrainSample(seed, leftIndex);
-    const right = terrainSample(seed, leftIndex + 1);
-    return left + (right - left) * fraction;
+    if (!Number.isFinite(x)) throw new TypeError("Terrain X must be finite");
+    const { left, right } = terrainLegForX(seed, x);
+    const middle = (left.center + right.center) / 2;
+    const start = x <= middle ? left.center : middle;
+    const end = x <= middle ? middle : right.center;
+    const scaled = ((x - start) / (end - start)) * TERRAIN_SUBDIVISIONS;
+    const segment = Math.min(TERRAIN_SUBDIVISIONS - 1, Math.max(0, Math.floor(scaled)));
+    const segmentLeft = start + (end - start) * segment / TERRAIN_SUBDIVISIONS;
+    const segmentRight = start + (end - start) * (segment + 1) / TERRAIN_SUBDIVISIONS;
+    const leftHeight = designTerrainHeight(seed, segmentLeft);
+    const rightHeight = designTerrainHeight(seed, segmentRight);
+    return leftHeight + (rightHeight - leftHeight) * ((x - segmentLeft) / (segmentRight - segmentLeft));
 }
 
 export function terrainHeightFromVertices(vertices, x) {
@@ -225,167 +273,98 @@ export function siteScaffoldPath(site) {
     }).join("");
 }
 
-export function nativeTerrainVertices(seed, left, right) {
-    const first = Math.floor(left / TERRAIN_SAMPLE_SPACING);
-    const last = Math.ceil(right / TERRAIN_SAMPLE_SPACING);
-    const vertices = [];
-    if (left > first * TERRAIN_SAMPLE_SPACING) {
-        vertices.push([left, terrainHeightAt(seed, left)]);
-    }
-    for (let index = first; index <= last; index += 1) {
-        const x = index * TERRAIN_SAMPLE_SPACING;
-        if (x >= left && x <= right) {
-            vertices.push([x, terrainSample(seed, index)]);
-        }
-    }
-    if (right < last * TERRAIN_SAMPLE_SPACING) {
-        vertices.push([right, terrainHeightAt(seed, right)]);
-    }
-    return vertices;
-}
-
-function maximumTerrain(seed, left, right) {
-    return Math.max(...nativeTerrainVertices(seed, left, right).map((point) => point[1]));
-}
-
-function minimumDeckLevel(seed, center) {
-    const platformLeft = center - PLATFORM_WIDTH / 2;
-    const buildingRight = center + PLATFORM_WIDTH / 2 + NOC_CONNECTOR_WIDTH + NOC_WIDTH;
-    const minimumTop = maximumTerrain(seed, platformLeft, buildingRight) + PLATFORM_CLEARANCE;
-    return DECK_LEVELS.find((level) => level / 10 >= minimumTop);
-}
-
-export function createFirstSite(seed) {
+export function createSiteForIndex(seed, siteIndex, state = {}) {
     const normalized = normalizeSeed(seed);
-    const center = 36;
+    const terrainSite = terrainSiteForIndex(normalized, siteIndex);
+    const center = terrainSite.center;
     const platformLeft = center - PLATFORM_WIDTH / 2;
     const platformRight = center + PLATFORM_WIDTH / 2;
-    const deckLevel = minimumDeckLevel(normalized, center);
+    const deckLevel = terrainSite.deckLevel;
     const platformTop = deckLevel / 10;
     return freeze({
-        id: 0,
+        id: siteIndex,
         seed: normalized,
         center,
         deckLevel,
+        terrainLevel: terrainSite.terrainLevel,
         platformLeft,
         platformRight,
         platformTop,
         platformBottom: platformTop - PLATFORM_THICKNESS,
-        canCollected: false,
-        powered: false,
-        nocStage: 0,
-        templateId: "initial",
+        canCollected: state.canCollected ?? false,
+        powered: state.powered ?? false,
+        nocStage: state.nocStage ?? 0,
+        templateId: state.templateId ?? (siteIndex === 0 ? "initial" : null),
+        originSiteId: state.originSiteId ?? null,
+        clearanceKnots: state.clearanceKnots?.map((point) => [...point]) ?? null,
     });
 }
 
-export function templatePreference(seed, siteIndex) {
-    const base = Math.floor(9 * sampleUnit(seed, 3, siteIndex));
-    const preferred = [];
-    for (let count = 0; count < 9; count += 1) {
-        preferred.push(TEMPLATE_SLOT_ORDER[(base + 4 * count) % 9]);
-    }
-    return preferred;
+export function createFirstSite(seed) {
+    return createSiteForIndex(seed, 0);
 }
 
 export function selectTemplate(seed, siteIndex, originSite, templates) {
-    const byDistance = new Map(templates.map((template) => [template.centerDelta, template]));
-    for (const distance of templatePreference(seed, siteIndex)) {
-        const template = byDistance.get(distance);
-        if (!template) {
-            throw new Error(`Missing route template for ${distance} metres`);
-        }
-        const targetLevel = originSite.deckLevel + Math.round(template.deckDelta * 10);
-        const targetCenter = originSite.center + template.centerDelta;
-        if (DECK_LEVELS.includes(targetLevel) && targetLevel >= minimumDeckLevel(seed, targetCenter)) {
-            return template;
-        }
+    const origin = terrainSiteForIndex(seed, siteIndex - 1);
+    const target = terrainSiteForIndex(seed, siteIndex);
+    if (originSite.id !== siteIndex - 1 || originSite.center !== origin.center ||
+        originSite.deckLevel !== origin.deckLevel || target.center - origin.center !== origin.centerDelta) {
+        throw new Error(`Site ${siteIndex - 1} does not match its direct terrain cycle`);
     }
-    throw new Error("No eligible route template");
-}
-
-function interpolateKnots(knots, x) {
-    if (x <= knots[0][0]) {
-        return knots[0][1];
+    const template = templates.find((candidate) => candidate.templateId === origin.templateId);
+    const deckDelta = (target.deckLevel - origin.deckLevel) / 10;
+    if (!template || template.centerDelta !== origin.centerDelta || template.deckDelta !== deckDelta) {
+        throw new Error(`Missing exact route template ${origin.templateId}`);
     }
-    for (let index = 1; index < knots.length; index += 1) {
-        const right = knots[index];
-        const left = knots[index - 1];
-        if (x <= right[0]) {
-            const fraction = (x - left[0]) / (right[0] - left[0]);
-            return left[1] + (right[1] - left[1]) * fraction;
-        }
-    }
-    return knots.at(-1)[1];
+    return template;
 }
 
 export function instantiateTemplateSite(seed, siteIndex, originSite, template) {
-    const center = originSite.center + template.centerDelta;
-    const deckLevel = originSite.deckLevel + Math.round(template.deckDelta * 10);
-    const platformTop = deckLevel / 10;
-    if (!DECK_LEVELS.includes(deckLevel) || deckLevel < minimumDeckLevel(seed, center)) {
-        throw new RangeError(`Route template ${template.templateId} does not clear native terrain`);
+    const origin = terrainSiteForIndex(seed, siteIndex - 1);
+    const target = terrainSiteForIndex(seed, siteIndex);
+    if (originSite.id !== siteIndex - 1 || originSite.center !== origin.center ||
+        originSite.deckLevel !== origin.deckLevel || template.templateId !== origin.templateId ||
+        template.centerDelta !== target.center - origin.center ||
+        template.deckDelta !== (target.deckLevel - origin.deckLevel) / 10) {
+        throw new RangeError(`Route template ${template.templateId} does not match the direct terrain cycle`);
     }
-    return freeze({
-        id: siteIndex,
-        seed: normalizeSeed(seed),
-        center,
-        deckLevel,
-        platformLeft: center - PLATFORM_WIDTH / 2,
-        platformRight: center + PLATFORM_WIDTH / 2,
-        platformTop,
-        platformBottom: platformTop - PLATFORM_THICKNESS,
-        canCollected: false,
-        powered: false,
-        nocStage: 0,
+    return createSiteForIndex(seed, siteIndex, {
         templateId: template.templateId,
         originSiteId: originSite.id,
-        clearanceKnots: template.clearanceKnots.map((point) => [...point]),
+        clearanceKnots: template.clearanceKnots,
     });
 }
 
-export function corridorVertices(seed, originSite, targetSite) {
-    const originRight = originSite.platformRight + NOC_CONNECTOR_WIDTH + NOC_WIDTH;
-    const targetLeft = targetSite.platformLeft;
-    const vertices = [];
-    const firstIndex = Math.floor(originRight / TERRAIN_SAMPLE_SPACING) + 1;
-    const lastIndex = Math.ceil(targetLeft / TERRAIN_SAMPLE_SPACING) - 1;
-    for (let index = firstIndex; index <= lastIndex; index += 1) {
-        const x = index * TERRAIN_SAMPLE_SPACING;
-        const raw = terrainSample(seed, index);
-        const relativeX = x - originSite.center;
-        const cap = originSite.platformTop + interpolateKnots(targetSite.clearanceKnots, relativeX);
-        const y = raw > cap ? Math.max(0.5, cap - 0.15 * sampleUnit(seed, 4, index >>> 0)) : raw;
-        vertices.push([x, y]);
-    }
-    return vertices;
-}
-
 export function terrainVerticesForWindow(seed, sites, left, right) {
-    const ordered = [...sites].sort((a, b) => a.center - b.center);
-    const points = new Set(nativeTerrainVertices(seed, left, right).map(([x]) => x));
-    for (const site of ordered) {
+    if (!Number.isFinite(left) || !Number.isFinite(right) || right < left) {
+        throw new RangeError("Terrain range must be finite and ordered");
+    }
+    const points = new Set([left, right]);
+    let siteIndex = terrainLegForX(seed, left).left.index;
+    while (terrainSiteForIndex(seed, siteIndex).center < right) {
+        const origin = terrainSiteForIndex(seed, siteIndex);
+        const target = terrainSiteForIndex(seed, siteIndex + 1);
+        const middle = (origin.center + target.center) / 2;
+        for (const [start, end] of [[origin.center, middle], [middle, target.center]]) {
+            for (let step = 0; step <= TERRAIN_SUBDIVISIONS; step += 1) {
+                const x = start + (end - start) * step / TERRAIN_SUBDIVISIONS;
+                if (x >= left && x <= right) points.add(x);
+            }
+        }
+        siteIndex += 1;
+    }
+    for (const site of sites) {
         [site.platformLeft, site.platformLeft + 1, site.platformLeft + 8.8,
             site.platformLeft + 9.6, site.platformLeft + 9.8, site.platformLeft + 11.6,
             site.platformLeft + 17.6, site.platformLeft + 18.6].forEach((x) => {
             if (x >= left && x <= right) points.add(x);
         });
     }
-    const corridors = [];
-    for (let index = 1; index < ordered.length; index += 1) {
-        if (ordered[index].clearanceKnots) {
-            const origin = ordered[index - 1];
-            const target = ordered[index];
-            corridors.push({ origin, target, byX: new Map(corridorVertices(seed, origin, target)) });
-        }
-    }
-    const vertices = [...points].sort((a, b) => a - b).map((x) => {
-        const corridor = corridors.find(({ origin, target }) =>
-            x > origin.platformRight + NOC_CONNECTOR_WIDTH + NOC_WIDTH && x < target.platformLeft);
-        return [x, corridor?.byX.get(x) ?? terrainHeightAt(seed, x)];
-    });
+    const vertices = [...points].sort((a, b) => a - b).map((x) => [x, terrainHeightAt(seed, x)]);
     if (vertices.some((point, index) => index > 0 && vertices[index - 1][0] >= point[0])) {
         throw new Error("Terrain vertices must have strictly increasing X coordinates");
     }
+    if (vertices.length > 72) throw new Error(`Terrain projection exceeds 72 vertices: ${vertices.length}`);
     return freeze(vertices);
 }
 

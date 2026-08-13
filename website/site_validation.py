@@ -407,10 +407,11 @@ def _validate_shared_shell(name: str, template: str) -> None:
         [i for i in _children(parser, html_index) if elements[i].tag == "body"],
         f"{name}: one body is required",
     )
+    body_attributes = {"class": "game-page"} if name in {"lander.html", "404.html"} else {}
     if (
         elements[html_index].attributes != {"lang": "en"}
         or elements[head_index].attributes
-        or elements[body_index].attributes
+        or elements[body_index].attributes != body_attributes
     ):
         raise ValueError(f"{name}: html, head, and body root attributes are invalid")
     title_index = _one(

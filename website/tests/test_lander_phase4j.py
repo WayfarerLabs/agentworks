@@ -39,7 +39,7 @@ class ArcadeMarkupTests(unittest.TestCase):
             r"#lander-controls-rail:not\(\[hidden\]\) \{([^}]*)\}", self.css
         ) if "border-block-start" in rule)
         self.assertNotIn("aspect-ratio", shell)
-        self.assertIn("flex-direction: column", shell)
+        self.assertIn("grid-template-rows: auto var(--controls-rail-block-size)", shell)
         self.assertIn("aspect-ratio: 25 / 16", stage)
         self.assertIn("border-block-start: 4px solid #292b30", controls)
         self.assertIn("min-block-size: 44px", controls)
@@ -213,7 +213,7 @@ class ArcadeCssTests(unittest.TestCase):
         gauge = self.rule("#lander-fuel-gauge")
         fill = self.rule("#lander-fuel-gauge-fill")
         self.assertIn("width: 1rem", gauge)
-        self.assertIn("height: 7rem", gauge)
+        self.assertIn("height: min(7rem, calc(100cqh - 1rem))", gauge)
         self.assertIn("border: 3px solid #292b30", gauge)
         self.assertIn("background: #20232a", gauge)
         self.assertIn("inset 0 0 0 3px var(--fuel-level-color)", gauge)

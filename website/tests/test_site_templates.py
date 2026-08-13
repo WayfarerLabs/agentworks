@@ -213,7 +213,7 @@ class TemplateContractTests(RepositoryFixture):
                     '<header class="site-header" hidden>',
                     1,
                 ),
-                template.replace("<body>", "<body hidden>", 1),
+                template.replace("<body", "<body hidden", 1),
                 template.replace(
                     '<nav class="service-links" aria-label="External">',
                     '<nav class="service-links" aria-label="External" aria-hidden="true">',
@@ -384,7 +384,7 @@ class TemplateContractTests(RepositoryFixture):
         mutations = (
             template.replace('class="site-scaffold"', 'class="missing-support"', 1),
             template.replace("M312 452.5H498", "M313 452.5H498", 1),
-            template.replace("M488 484.5L498 491.77281586216765", "M488 485L498 491.77281586216765", 1),
+            template.replace("M498 476.5L488 482.6528819444444", "M498 477L488 482.6528819444444", 1),
             template.replace(bar_one, "BATTERY_SWAP", 1)
             .replace(bar_four, bar_one, 1)
             .replace(

@@ -381,9 +381,9 @@ def validate_game_contract(template: str) -> None:
         len(scaffold) != 1
         or any(scaffold[0].get(key) != value for key, value in scaffold_contract.items())
         or not (scaffold[0].get("d") or "").startswith("M312 452.5H498M312 460H498M312 452.5L327.5 460")
-        or (scaffold[0].get("d") or "").count("M") != 51
+        or (scaffold[0].get("d") or "").count("M") != 43
         or "Z" in (scaffold[0].get("d") or "")
-        or not (scaffold[0].get("d") or "").endswith("M488 484.5L498 491.77281586216765")
+        or not (scaffold[0].get("d") or "").endswith("M498 476.5L488 482.6528819444444")
     ):
         raise ValueError("lander-game.html: static open scaffold geometry is invalid")
     battery_contract = (

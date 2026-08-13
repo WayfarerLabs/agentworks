@@ -1,6 +1,6 @@
 # Lunar Deployment Browser Checklist
 
-<!-- cspell:ignore underframe -->
+<!-- cspell:ignore underframe viewports -->
 
 The full-site demo uses the same builder and game sources:
 
@@ -33,7 +33,25 @@ uncapped post-award full reference. Run
 `python3 -m unittest discover -s website/tests -p 'test_lander_phase4m_browser.py'`. It is automated
 projection evidence, not the qualitative or cross-engine signoff below.
 
+The Phase 4Q Chromium witness runs exact `320 by 780`, `320 by 240` 400-percent-equivalent,
+`667 by 320` touch-landscape, and `1000 by 780` viewports. Before and after seed changes, crash,
+Retry, and Exit it records document, body, main, game, shell, stage, rail, and action width/height
+client/scroll metrics. It requires exact viewport and document equality, zero scroll, fixed stage
+dimensions and `25:16` ratio, zero world Y translation, in-viewport components, and 44-pixel native
+actions. Run `python3 -m unittest discover -s website/tests -p 'test_lander_phase4q_browser.py'`.
+This is automated Chromium evidence; it does not replace the qualitative terrain or cross-engine
+acceptance below.
+
 ## Arcade presentation acceptance
+
+- [ ] Fly representative seed 11, seed 41, and one fresh run. In each ordinary 100 m window, verify
+      a smooth local summit, broad valley, and rise to the next summit, without sawtooth, flatness,
+      shelves, caps, seams, or vertical terrain artifacts.
+- [ ] Confirm every deck is visibly only 2.4 m above its own summit and all three open lattice
+      columns are reasonably sized, independently meet native terrain, and never expose a backing
+      face or floating foot.
+- [ ] During low-valley flight, summit flight, ceiling flight, crash, service, Retry, reversal, and
+      Exit, confirm the scene never follows vertically, changes height, grows the page, or scrolls.
 
 - [ ] At normal and 400-percent-equivalent reflow, verify the game is a 25:16 scene stage followed
       by a separate normal-flow controls rail. Terrain, fuel, outcomes, and actions stay inside the
@@ -73,14 +91,15 @@ projection evidence, not the qualitative or cross-engine signoff below.
 
 - [ ] Record the exact source SHA and current Chrome and Edge versions. Exercise both `/lander/` and
       `/404.html`; confirm their `#lander-game` subtrees are byte-equivalent.
-- [ ] Fly and safely service at least three sites across four visibly different coarse terrain
-      motifs. Each target has one elevated H platform exactly three lander widths long, one gas can,
-      and one solid NOC. Confirm native terrain remains visible beneath it, with one continuous
-      twelve-bay Warren truss and exactly three one-metre lattice columns terminating at six
-      independent native-terrain feet, with no internal closure stroke, vertical artifact, filled
-      backing face, or pale artifact. The can disappears once, fuel increases once, the agent
-      enters, the four battery bars fill red/orange/pale-yellow/mint from bottom to top, the three
-      signal arches power in order, and manual departure returns to player-controlled flight.
+- [ ] Fly and safely service both three-site terrain families at different seeded phases. Each
+      ordinary leg shows its summit, seeded valley, and next rise. Each target has one elevated H
+      platform exactly three lander widths long, one gas can, and one solid NOC. Confirm native
+      terrain remains visible beneath it, with one continuous twelve-bay Warren truss and exactly
+      three one-metre lattice columns terminating at six independent native-terrain feet, with no
+      internal closure stroke, vertical artifact, filled backing face, or pale artifact. The can
+      disappears once, fuel increases once, the agent enters, the four battery bars fill
+      red/orange/pale-yellow/mint from bottom to top, the three signal arches power in order, and
+      manual departure returns to player-controlled flight.
 - [ ] Confirm the next site begins fully offscreen right after service. Pass it, reverse, and
       return; the solid arrow changes right, left, then right and hides whenever any target edge is
       visible. It blinks only while offscreen, is static with reduced motion, and has equivalent

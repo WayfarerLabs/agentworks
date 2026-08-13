@@ -18,7 +18,7 @@ class QuietHandler(SimpleHTTPRequestHandler):
         pass
 
 
-def png_pixel(path: Path, x: int, y: int) -> tuple[int, int, int]:
+def _png_rows(path: Path) -> tuple[int, int, int, list[bytearray]]:
     data = path.read_bytes()
     offset = 8
     chunks: list[bytes] = []
@@ -67,8 +67,29 @@ def png_pixel(path: Path, x: int, y: int) -> tuple[int, int, int]:
             row[index] = (value + predictor) & 0xFF
         rows.append(row)
         previous = row
+    return image_width, image_height, channels, rows
+
+
+def png_pixel(path: Path, x: int, y: int) -> tuple[int, int, int]:
+    _, _, channels, rows = _png_rows(path)
     start = x * channels
     return tuple(rows[y][start : start + 3])
+
+
+def png_difference(path_a: Path, path_b: Path) -> dict[str, object]:
+    width, height, channels, rows_a = _png_rows(path_a)
+    other_width, other_height, other_channels, rows_b = _png_rows(path_b)
+    if (width, height, channels) != (other_width, other_height, other_channels):
+        raise AssertionError("Chromium comparison screenshots have different encodings")
+    colors: set[tuple[int, int, int]] = set()
+    changed = 0
+    for row_a, row_b in zip(rows_a, rows_b, strict=True):
+        for start in range(0, width * channels, channels):
+            pixel_a = tuple(row_a[start : start + 3])
+            if pixel_a != tuple(row_b[start : start + 3]):
+                colors.add(pixel_a)
+                changed += 1
+    return {"colors": sorted(colors), "changed": changed}
 
 
 def browser_arcade_contract(
@@ -185,9 +206,10 @@ document.querySelector("#phase4j-result").textContent = JSON.stringify(result);
             env={**os.environ, "HOME": profile.name},
         )
         if screenshot:
+            screenshot_geometry = None
             for state in ("on", "off"):
                 screenshot_path = Path(profile.name) / f"can-{state}.png"
-                subprocess.run(
+                screenshot_completed = subprocess.run(
                     (
                         chromium,
                         "--headless",
@@ -197,6 +219,7 @@ document.querySelector("#phase4j-result").textContent = JSON.stringify(result);
                         f"--user-data-dir={Path(profile.name) / f'profile-{state}'}",
                         f"--window-size={width},1000",
                         "--virtual-time-budget=1000",
+                        "--dump-dom",
                         f"--screenshot={screenshot_path}",
                         f"http://127.0.0.1:{server.server_address[1]}/lander/?refuel={state}",
                     ),
@@ -206,18 +229,25 @@ document.querySelector("#phase4j-result").textContent = JSON.stringify(result);
                     timeout=20,
                     env={**os.environ, "HOME": profile.name},
                 )
+                state_match = re.search(r'<pre id="phase4j-result">([^<]+)</pre>', screenshot_completed.stdout)
+                if state_match is None:
+                    raise AssertionError("Chromium omitted Phase 4J screenshot geometry")
+                if state == "on":
+                    screenshot_geometry = json.loads(html.unescape(state_match.group(1)))
                 screenshot_paths.append(screenshot_path)
             match = re.search(r'<pre id="phase4j-result">([^<]+)</pre>', completed.stdout)
             if match is None:
                 raise AssertionError("Chromium omitted Phase 4J screenshot geometry")
             geometry = json.loads(html.unescape(match.group(1)))
-            center_x = round(geometry["stage"]["left"] + 120)
-            center_y = round(geometry["stage"]["top"] + 120)
+            assert screenshot_geometry is not None
+            center_x = round(screenshot_geometry["stage"]["left"] + 120)
+            center_y = round(screenshot_geometry["stage"]["top"] + 120)
             probes = ((5, 1), (7, 3), (18, 9), (16, 11), (1, 5), (3, 7), (0, 0), (19, 21))
             geometry["canPixels"] = [png_pixel(screenshot_paths[0], center_x - 10 + x, center_y - 11 + y)
                                      for x, y in probes]
             geometry["offPixels"] = [png_pixel(screenshot_paths[1], center_x - 10 + x, center_y - 11 + y)
                                      for x, y in probes]
+            geometry["canDifference"] = png_difference(screenshot_paths[0], screenshot_paths[1])
     finally:
         page.write_text(source, encoding="utf-8")
         probe_path.unlink(missing_ok=True)
@@ -230,7 +260,7 @@ document.querySelector("#phase4j-result").textContent = JSON.stringify(result);
         raise AssertionError(f"Chromium did not return Phase 4J geometry: {completed.stderr[-1000:]}")
     result = json.loads(html.unescape(match.group(1)))
     if screenshot:
-        result.update({key: geometry[key] for key in ("canPixels", "offPixels")})
+        result.update({key: geometry[key] for key in ("canPixels", "offPixels", "canDifference")})
     return result
 
 
@@ -548,8 +578,8 @@ class ArcadeBrowserTests(RepositoryFixture):
                          "no-repeat, no-repeat, no-repeat, no-repeat, no-repeat, no-repeat")
         graphite = (41, 43, 48)
         orange = (217, 74, 30)
-        self.assertEqual(result["canPixels"][:6], [graphite, orange, graphite, orange, graphite, orange])
-        self.assertEqual(result["canPixels"][6:], result["offPixels"][6:])
+        self.assertEqual(result["canDifference"]["colors"], [graphite, orange])
+        self.assertGreater(result["canDifference"]["changed"], 100)
         self.assertIn("Cascadia Mono", result["fontFamily"])
         self.assertEqual(result["touch"], {"stage": "none", "shell": "auto", "controls": "auto"})
         for hidden in result["hiddenFuel"]:

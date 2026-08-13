@@ -18,10 +18,10 @@ import { FakeElement, controllerClasses, controllerFixture } from "./lander-test
 
 const ROOT = new URL("../", import.meta.url);
 const EXPECTED_DIGESTS = Object.freeze({
-    geometryDigest: "a5120d97782b73afb43cabae038412252f644656f41c0ab9e33f5413da9be7ca",
-    outputDigest: "a922372760f850386810fd6eb60f7aa807bac8b03ee5f0a2b1dec1968ee27b69",
+    geometryDigest: "d0393f958f4a8b2657dbf21ef5184f40527be2c8c8d5cf860e6e81e3d2971fa2",
+    outputDigest: "ac653b9bbb909ca39a2175c8b26065a81701d375dab14468f928b558638cea93",
     physicsDigest: "e08f8260b723dd245db88de9ae2cdbac54bf9a97cb0bed1b6f170eda362c48dc",
-    worldDigest: "c666bb42918301f93386bb1373e92da662d333006d8684946fd80a10761d1e32",
+    worldDigest: "502d34c5c1a447b50eebcb458b40bbf8169f7efc7774edc1322af76ab9d0f215",
 });
 
 async function controllerAt(model = createRun({ seed: 1 })) {
@@ -61,7 +61,7 @@ function inputSnapshot(controller) {
     };
 }
 
-test("Phase 4K pins the exact landing profile, digests, and sole changed route", () => {
+test("landing profile and the finite route catalog remain exact", () => {
     assert.deepEqual([
         MAX_LANDING_HORIZONTAL_SPEED,
         MAX_LANDING_DESCENT_SPEED,
@@ -69,23 +69,12 @@ test("Phase 4K pins the exact landing profile, digests, and sole changed route",
         MAX_LANDING_ANGULAR_SPEED,
     ], [2.2, 3.6, 18, 26]);
     assert.deepEqual(ROUTE_DIGESTS, EXPECTED_DIGESTS);
-    const route = REFERENCE_TEMPLATES.find(({ templateId }) => templateId === "route-93-flat");
-    assert.deepEqual(route.runs.slice(24), [[3, 46], [4, 1], [3, 36], [4, 49]]);
-    assert.equal(route.scheduleDigest, 1498651857);
-    assert.deepEqual(route.success, {
-        contactStep: 2875,
-        burn: 8.121999999999856,
-        classification: "safe",
-        pose: { x: 91.590782713, y: 0.269134094, vx: 1.608662298, vy: -1.223992666,
-            angle: -9.683765214, angularVelocity: 5.733285716 },
-    });
-    assert.deepEqual(route.smallerFailure, {
-        allowance: 8.1,
-        burn: 8.100000000000005,
-        exhaustionStep: 2872,
-        pose: { x: 91.562983183, y: 0.290173104, vx: 1.699073271, vy: -1.281241753,
-            angle: -9.783560214, angularVelocity: 6.322201732 },
-    });
+    assert.deepEqual(REFERENCE_TEMPLATES.map(({ templateId }) => templateId), [
+        "route-81-rise", "route-84-fall", "route-96-fall",
+        "route-87-rise", "route-99-rise", "route-90-fall",
+    ]);
+    assert.equal(REFERENCE_TEMPLATES.reduce((total, route) =>
+        total + route.combinationsEvaluated, 0), 24);
 });
 
 test("production, validator, and fake DOM sources contain no native Launch authority", async () => {
