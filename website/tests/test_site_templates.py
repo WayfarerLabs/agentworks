@@ -379,12 +379,16 @@ class TemplateContractTests(RepositoryFixture):
 
     def test_fragment_support_and_battery_geometry_fail_closed(self) -> None:
         template = (self.root / "website/templates/lander-game.html").read_text(encoding="utf-8")
-        bar_one = '<path class="battery-bar battery-bar-1" d="M457 423h12v5h-12Z" />'
-        bar_four = '<path class="battery-bar battery-bar-4" d="M457 399h12v5h-12Z" />'
+        bar_one = '<path class="battery-bar battery-bar-1" d="M457 458.44h12v5h-12Z" />'
+        bar_four = '<path class="battery-bar battery-bar-4" d="M457 434.44h12v5h-12Z" />'
         mutations = (
             template.replace('class="site-scaffold"', 'class="missing-support"', 1),
-            template.replace("M312 452.5H498", "M313 452.5H498", 1),
-            template.replace("M498 476.5L488 482.6528819444444", "M498 477L488 482.6528819444444", 1),
+            template.replace("M312 487.94H498", "M313 487.94H498", 1),
+            template.replace(
+                "M498 543.9399999999999L488 551.68",
+                "M498 544L488 551.68",
+                1,
+            ),
             template.replace(bar_one, "BATTERY_SWAP", 1)
             .replace(bar_four, bar_one, 1)
             .replace(

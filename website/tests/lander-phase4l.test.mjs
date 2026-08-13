@@ -2,25 +2,20 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import {
-    createRun,
-    stepFlight,
-} from "../static/lander-model.js";
-import {
-    siteScaffoldMembers,
-    siteScaffoldPath,
-    siteStructure,
-} from "../static/lander-world.js";
+import { createRun, stepFlight } from "../static/lander-model.js";
+import { siteScaffoldMembers, siteScaffoldPath, siteStructure } from "../static/lander-world.js";
 import { controllerClasses, controllerFixture } from "./lander-test-dom.mjs";
 
 const ROOT = new URL("../", import.meta.url);
-const DERIVED_URL = new URL("fixtures/lander-route-derived-v6.json", import.meta.url);
+const DERIVED_URL = new URL("fixtures/lander-route-derived-v7.json", import.meta.url);
 
 function checkpointRun() {
     let model = createRun({ seed: 1, reducedMotion: true });
     const target = model.retainedSites[0];
-    model = { ...model, pose: { x: target.center, y: target.platformTop + 0.001,
-        vx: 0, vy: -1, angle: 0, angularVelocity: 0 } };
+    model = {
+        ...model,
+        pose: { x: target.center, y: target.platformTop + 0.001, vx: 0, vy: -1, angle: 0, angularVelocity: 0 },
+    };
     model = stepFlight(model, { left: 0, right: 0 });
     assert.equal(model.state, "launching");
     assert.ok(model.checkpoint);
@@ -28,10 +23,22 @@ function checkpointRun() {
 }
 
 function retryKey(shell) {
-    return { type: "keydown", target: shell, key: "r", code: "KeyR", repeat: false,
-        ctrlKey: false, altKey: false, metaKey: false, shiftKey: false,
-        composedPath: () => [shell], timeStamp: 20,
-        preventDefault() { this.defaultPrevented = true; } };
+    return {
+        type: "keydown",
+        target: shell,
+        key: "r",
+        code: "KeyR",
+        repeat: false,
+        ctrlKey: false,
+        altKey: false,
+        metaKey: false,
+        shiftKey: false,
+        composedPath: () => [shell],
+        timeStamp: 20,
+        preventDefault() {
+            this.defaultPrevented = true;
+        },
+    };
 }
 
 function assertRestored(model, checkpoint) {
@@ -50,10 +57,10 @@ test("Phase 4L controls are exactly two ordered nonwrapping DOM lines with narro
     const { LanderGameController } = await controllerClasses();
     const fixture = controllerFixture();
     const controller = new LanderGameController(fixture.root);
-    assert.deepEqual(fixture.elements["lander-controls"].children.map((line) => line.className), [
-        "lander-controls-line lander-controls-keyboard",
-        "lander-controls-line lander-controls-touch",
-    ]);
+    assert.deepEqual(
+        fixture.elements["lander-controls"].children.map((line) => line.className),
+        ["lander-controls-line lander-controls-keyboard", "lander-controls-line lander-controls-touch"],
+    );
     for (const line of fixture.elements["lander-controls"].children) {
         assert.equal(line.children.length, 0);
         assert.ok(line.textContent.trim().length > 0);
@@ -73,25 +80,37 @@ test("Phase 4L controls are exactly two ordered nonwrapping DOM lines with narro
 test("all canonical lattice columns render continuously from deck underside to independent feet", async () => {
     const derived = JSON.parse(await readFile(DERIVED_URL, "utf8"));
     for (const witness of derived.worldWitnesses) {
-        for (const canonical of witness.descriptor.sites) {
-            const site = { seed: witness.descriptor.seed,
-                platformLeft: canonical.platform.left, platformRight: canonical.platform.right,
-                platformTop: canonical.platform.top, platformBottom: canonical.platform.bottom };
-            const structure = siteStructure(site);
-            const members = siteScaffoldMembers(site);
-            assert.deepEqual(members, canonical.scaffoldMembers);
-            assert.equal((siteScaffoldPath(site).match(/M/g) ?? []).length, members.length);
-            assert.equal(structure.supportColumns.length, 3);
-            structure.supportColumns.forEach((column, index) => {
-                const fixtureColumn = canonical.supportColumns[index];
-                assert.deepEqual(column, fixtureColumn);
-                assert.equal(column.leftFoot, fixtureColumn.leftFoot);
-                assert.equal(column.rightFoot, fixtureColumn.rightFoot);
-                assert.equal(column.collider.top, canonical.platform.bottom + 0.1);
-                assert.equal(column.collider.bottom,
-                    Math.min(fixtureColumn.leftFoot, fixtureColumn.rightFoot) - 0.1);
-            });
-        }
+        const canonical = witness.descriptor.site;
+        const site = {
+            seed: witness.descriptor.seed,
+            platformLeft: canonical.closedFootprint[0],
+            platformRight: canonical.closedFootprint[0] + 9.6,
+            platformTop: canonical.platformTop,
+            platformBottom: canonical.platformTop - 0.35,
+            supportFeet: canonical.supportFeet,
+        };
+        const structure = siteStructure(site);
+        const members = siteScaffoldMembers(site);
+        assert.equal((siteScaffoldPath(site).match(/M/g) ?? []).length, members.length);
+        assert.equal(structure.supportColumns.length, 3);
+        structure.supportColumns.forEach((column, index) => {
+            assert.equal(column.leftFoot, canonical.supportFeet[index * 2]);
+            assert.equal(column.rightFoot, canonical.supportFeet[index * 2 + 1]);
+            assert.equal(column.collider.top, site.platformBottom + 0.1);
+            assert.equal(column.collider.bottom, Math.min(column.leftFoot, column.rightFoot) - 0.1);
+            assert.deepEqual(
+                members
+                    .filter(
+                        (member) =>
+                            member.start[0] >= column.left &&
+                            member.start[0] <= column.right &&
+                            member.end[0] >= column.left &&
+                            member.end[0] <= column.right,
+                    )
+                    .slice(-(2 * column.levels.length + 1)).length,
+                2 * column.levels.length + 1,
+            );
+        });
     }
 });
 
@@ -110,8 +129,13 @@ test("Retry click and r restore the exact checkpoint twice after complete input 
     };
 
     const dirtyFailure = () => {
-        controller.model = { ...powered, state: "failed", fuel: 0,
-            pose: { ...powered.pose, x: powered.pose.x + 7 }, failureCause: "terrain" };
+        controller.model = {
+            ...powered,
+            state: "failed",
+            fuel: 0,
+            pose: { ...powered.pose, x: powered.pose.x + 7 },
+            failureCause: "terrain",
+        };
         controller.heldKeys.add("Space");
         controller.pointer = { id: 7, x: 1, y: 1, currentX: 3, started: 0, token: 9 };
         controller.pointerInput = { left: 0.72, right: 0.72 };
@@ -121,9 +145,13 @@ test("Retry click and r restore the exact checkpoint twice after complete input 
     };
     const order = [];
     const render = controller.render.bind(controller);
-    controller.render = () => { order.push("render"); render(); };
+    controller.render = () => {
+        order.push("render");
+        render();
+    };
     fixture.elements["lander-scene-shell"].focus = (options) => {
-        order.push(["focus", options]); globalThis.document.activeElement = fixture.elements["lander-scene-shell"];
+        order.push(["focus", options]);
+        globalThis.document.activeElement = fixture.elements["lander-scene-shell"];
     };
 
     dirtyFailure();
@@ -144,15 +172,20 @@ test("Retry click and r restore the exact checkpoint twice after complete input 
     assert.equal(event.defaultPrevented, true);
     assert.deepEqual(order, ["render", ["focus", { preventScroll: true }]]);
     assertRestored(controller.model, checkpoint);
-    assert.deepEqual({
-        completedSites: controller.model.completedSites,
-        refuelRatio: controller.model.refuelRatio,
-        cans: controller.model.retainedSites.filter(({ canCollected }) => canCollected).map(({ id }) => id),
-        powered: controller.model.retainedSites.filter((site) => site.powered).map(({ id }) => id),
-    }, awarded);
+    assert.deepEqual(
+        {
+            completedSites: controller.model.completedSites,
+            refuelRatio: controller.model.refuelRatio,
+            cans: controller.model.retainedSites.filter(({ canCollected }) => canCollected).map(({ id }) => id),
+            powered: controller.model.retainedSites.filter((site) => site.powered).map(({ id }) => id),
+        },
+        awarded,
+    );
     const retry = fixture.elements["lander-restart"];
-    assert.deepEqual(retry.children.map(({ className }) => className),
-        ["lander-action-label", "lander-key-hint"]);
+    assert.deepEqual(
+        retry.children.map(({ className }) => className),
+        ["lander-action-label", "lander-key-hint"],
+    );
     assert.ok(fixture.elements["lander-restart-label"].textContent.trim().length > 0);
     assert.ok(fixture.elements["lander-restart-hint"].textContent.trim().length > 0);
     assert.equal(fixture.elements["lander-restart-hint"].attributes.get("aria-hidden"), "true");

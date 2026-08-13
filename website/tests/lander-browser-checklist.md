@@ -50,14 +50,20 @@ listener inventories and stabilized DOM counts must remain unchanged across all 
 automated Chromium evidence; it does not replace the qualitative terrain or cross-engine acceptance
 below.
 
+The Phase 4R witness adds the shipped seed corpus for the global 16/128 m straight-polyline terrain,
+all eight opening profiles, closed-footprint 2.5 m deck clearance, independently native-footed
+supports, the 100-key proof catalog, sufficient climb allowance, and unchanged fixed-height metrics
+at the same four viewports. Its screenshots are qualitative artifacts for operator inspection; no
+test approves wording or golden pixels.
+
 ## Arcade presentation acceptance
 
-- [ ] Fly representative seed 11, seed 41, and one fresh run. In each ordinary 100 m window, verify
-      a smooth local summit, broad valley, and rise to the next summit, without sawtooth, flatness,
-      shelves, caps, seams, or vertical terrain artifacts.
-- [ ] Confirm every deck is visibly only 2.4 m above its own summit and all three open lattice
-      columns are reasonably sized, independently meet native terrain, and never expose a backing
-      face or floating foot.
+- [ ] Fly representative seeds 11, 39, 41, and the static seed. Verify visibly straight angular
+      facets, broad high/low profiles, substantial use of the normalized 0.1-0.6 band, and no
+      curves, rounded terrain joins, shelves, seams, or vertical terrain artifacts.
+- [ ] Confirm every deck is visibly exactly 2.5 m above its complete local native footprint and all
+      three open lattice columns are reasonably sized, independently meet native terrain, and never
+      expose a backing face or floating foot.
 - [ ] During low-valley flight, summit flight, ceiling flight, crash, service, Retry, reversal, and
       Exit, confirm the scene never follows vertically, changes height, grows the page, or scrolls.
 

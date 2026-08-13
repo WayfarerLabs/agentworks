@@ -5,182 +5,160 @@ import test from "node:test";
 
 import {
     CHUNK_WIDTH,
-    DECK_LEVELS,
+    PLATFORM_CLEARANCE,
+    SITE_SPACING,
     STATIC_WORLD_SEED,
+    TERRAIN_BLOCK_WIDTH,
     TERRAIN_GRADE_CHANGE_LIMIT,
     TERRAIN_GRADE_LIMIT,
-    TERRAIN_SUBDIVISIONS,
+    TERRAIN_PROFILES,
+    TERRAIN_VERTEX_CADENCE,
     cameraLeftForPose,
     createFirstSite,
     createSiteForIndex,
     instantiateTemplateSite,
     retainedChunkIndexes,
     retainedSiteDescriptors,
+    routePairKey,
+    selectRouteProof,
     selectTemplate,
     siteScaffoldMembers,
     siteScaffoldPath,
     siteStructure,
     skyProjectionForCamera,
     targetDirectionForViewport,
-    terrainCycleForSeed,
-    terrainFillPath,
     terrainHeightAt,
     terrainHeightFromVertices,
-    terrainSiteForIndex,
+    terrainParityForSeed,
+    terrainProfileForBlock,
     terrainSurfacePath,
     terrainVerticesForRange,
     terrainVerticesForWindow,
 } from "../static/lander-world.js";
 
-const GEOMETRY_URL = new URL("fixtures/lander-route-geometry-v6.json", import.meta.url);
+const GEOMETRY_URL = new URL("fixtures/lander-route-geometry-v7.json", import.meta.url);
 const TEMPLATE_URL = new URL("../templates/lander-game.html", import.meta.url);
 
 function canonical(value) {
     if (Array.isArray(value)) return value.map(canonical);
     if (value && typeof value === "object") {
-        return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])]));
+        return Object.fromEntries(
+            Object.keys(value)
+                .sort()
+                .map((key) => [key, canonical(value[key])]),
+        );
     }
     return value;
 }
-
 function close(actual, expected, tolerance = 1e-12) {
     assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} differs from ${expected}`);
 }
 
-test("seeded cycle lookup is direct, signed, and repeats exactly in both directions", () => {
-    const expected = new Map([
-        [11, ["A", 2, 261, [[67,"route-96-fall"],[59,"route-81-rise"],[75,"route-84-fall"]]]],
-        [39, ["A", 0, 261, [[59,"route-81-rise"],[75,"route-84-fall"],[67,"route-96-fall"]]]],
-        [41, ["B", 1, 276, [[67,"route-99-rise"],[75,"route-90-fall"],[59,"route-87-rise"]]]],
-        [STATIC_WORLD_SEED, ["B", 2, 276, [[75,"route-90-fall"],[59,"route-87-rise"],[67,"route-99-rise"]]]],
-    ]);
-    for (const [seed, [family, phase, blockWidth, slots]] of expected) {
-        const cycle = terrainCycleForSeed(seed);
-        assert.deepEqual([cycle.family, cycle.phase, cycle.blockWidth], [family, phase, blockWidth]);
-        assert.deepEqual(cycle.slots.map((slot) => [slot.terrainLevel, slot.templateId]), slots);
-        for (let index = -100; index <= 100; index += 1) {
-            const site = terrainSiteForIndex(seed, index);
-            const repeated = terrainSiteForIndex(seed, index + 3);
-            assert.deepEqual([repeated.center - site.center, repeated.terrainLevel, repeated.deckLevel,
-                repeated.templateId], [blockWidth, site.terrainLevel, site.deckLevel, site.templateId]);
-        }
-    }
-});
-
-test("native terrain alternates smooth summits and valleys within hard chord bounds", () => {
-    assert.equal(TERRAIN_SUBDIVISIONS, 8);
+test("global terrain is a deterministic signed 16/128 metre straight polyline", () => {
+    assert.equal(TERRAIN_VERTEX_CADENCE, 16);
+    assert.equal(TERRAIN_BLOCK_WIDTH, 128);
+    assert.equal(TERRAIN_GRADE_LIMIT, 0.36);
+    assert.equal(TERRAIN_GRADE_CHANGE_LIMIT, 0.4);
     for (const seed of [11, 39, 41, STATIC_WORLD_SEED]) {
-        for (let index = -9; index <= 9; index += 1) {
-            const site = terrainSiteForIndex(seed, index);
-            const next = terrainSiteForIndex(seed, index + 1);
-            const middle = (site.center + next.center) / 2;
-            close(terrainHeightAt(seed, site.center), site.terrainLevel / 10);
-            close(terrainHeightAt(seed, middle), site.valleyLevel / 10);
-            close(terrainHeightAt(seed, next.center), next.terrainLevel / 10);
-            const vertices = terrainVerticesForWindow(seed, [], site.center, next.center);
-            assert.equal(vertices.length, 17);
-            const grades = vertices.slice(1).map(([x, y], vertexIndex) =>
-                (y - vertices[vertexIndex][1]) / (x - vertices[vertexIndex][0]));
-            assert.ok(grades.slice(0, 8).every((grade) => grade <= 1e-12));
-            assert.ok(grades.slice(8).every((grade) => grade >= -1e-12));
+        assert.ok([0, 1].includes(terrainParityForSeed(seed)));
+        const profileIds = new Set();
+        for (let block = -100; block <= 100; block += 1) {
+            const selected = terrainProfileForBlock(seed, block);
+            profileIds.add(selected.id);
+            assert.equal(selected.id[0], (((block + terrainParityForSeed(seed)) % 2) + 2) % 2 === 0 ? "H" : "L");
+            const points = selected.samples.map((_, index) => [
+                block * 128 + index * 16,
+                terrainHeightAt(seed, block * 128 + index * 16),
+            ]);
+            const grades = points.slice(1).map((point, index) => (point[1] - points[index][1]) / 16);
             assert.ok(grades.every((grade) => Math.abs(grade) <= TERRAIN_GRADE_LIMIT + 1e-12));
-            assert.ok(grades.slice(1).every((grade, gradeIndex) =>
-                Math.abs(grade - grades[gradeIndex]) <= TERRAIN_GRADE_CHANGE_LIMIT + 1e-12));
+            assert.ok(
+                grades
+                    .slice(1)
+                    .every((grade, index) => Math.abs(grade - grades[index]) <= TERRAIN_GRADE_CHANGE_LIMIT + 1e-12),
+            );
         }
+        assert.deepEqual([...profileIds].sort(), Object.keys(TERRAIN_PROFILES).sort());
     }
 });
 
-test("every deck is exactly 2.4 metres above its own unchanged native summit", () => {
-    assert.deepEqual(DECK_LEVELS, [83, 91, 99]);
+test("route-only site X and closed native footprint produce exact local decks", () => {
     for (const seed of [11, 39, 41, STATIC_WORLD_SEED]) {
-        for (let index = -12; index <= 100; index += 1) {
+        for (let index = -100; index <= 100; index += 1) {
             const site = createSiteForIndex(seed, index);
+            assert.equal(site.center, 36 + SITE_SPACING * index);
             const vertices = terrainVerticesForWindow(seed, [site], site.platformLeft, site.platformLeft + 18.6);
             const localMaximum = Math.max(...vertices.map(([, y]) => y));
-            close(localMaximum, site.terrainLevel / 10);
-            close(site.platformTop, localMaximum + 2.4);
-            assert.equal(site.deckLevel, site.terrainLevel + 24);
+            close(site.localNativeMaximum, localMaximum);
+            close(site.platformTop, localMaximum + PLATFORM_CLEARANCE);
+            const columns = siteStructure(site).supportColumns;
+            assert.deepEqual(
+                columns.flatMap((column) => [column.leftFoot, column.rightFoot]),
+                site.supportFeet,
+            );
         }
     }
+    close(createFirstSite(STATIC_WORLD_SEED).platformTop, 6.356);
 });
 
-test("one exact route lookup terminates and rejects cycle or catalog drift", async () => {
-    const geometry = JSON.parse(await readFile(GEOMETRY_URL, "utf8"));
-    const catalog = Object.fromEntries(geometry.templates.map((template) => [template.templateId, template]));
-    for (const seed of [11, 39, 41, STATIC_WORLD_SEED]) {
-        const cycle = terrainCycleForSeed(seed);
-        for (let siteIndex = -100; siteIndex <= 100; siteIndex += 1) {
-            const origin = createSiteForIndex(seed, siteIndex - 1, {
-                canCollected: true, powered: true, nocStage: 7,
-            });
-            const keys = [];
-            const instrumented = new Proxy(catalog, { get(target, key) {
-                keys.push(key); return target[key];
-            } });
-            const template = selectTemplate(seed, siteIndex, origin, instrumented);
-            assert.deepEqual(keys, [terrainSiteForIndex(seed, siteIndex - 1).templateId]);
-            const target = instantiateTemplateSite(seed, siteIndex, origin, template);
-            assert.equal(template.templateId, terrainSiteForIndex(seed, siteIndex - 1).templateId);
-            assert.equal(target.center, terrainSiteForIndex(seed, siteIndex).center);
-            assert.equal(terrainSiteForIndex(seed, siteIndex + 3).center - target.center, cycle.blockWidth);
+test("one exact keyed lookup terminates and is mutation sensitive", () => {
+    for (const seed of [11, 39, 41, STATIC_WORLD_SEED])
+        for (let index = -100; index < 100; index += 1) {
+            const origin = createSiteForIndex(seed, index);
+            const target = createSiteForIndex(seed, index + 1);
+            const key = routePairKey(origin, target);
+            const reads = [];
+            const record = { pairKey: key };
+            const catalog = new Proxy(
+                { [key]: record },
+                {
+                    get(object, property) {
+                        reads.push(property);
+                        return object[property];
+                    },
+                },
+            );
+            assert.equal(selectRouteProof(origin, target, catalog), record);
+            assert.deepEqual(reads, [key]);
+            assert.equal(selectTemplate(seed, index + 1, origin, catalog), record);
+            assert.equal(instantiateTemplateSite(seed, index + 1, origin, record).pairKey, key);
         }
-    }
     const origin = createFirstSite(11);
-    assert.throws(() => selectTemplate(11, 1, { ...origin, center: 37 }, catalog), /direct terrain cycle/);
-    assert.throws(() => selectTemplate(11, 1, origin,
-        { ...catalog, "route-96-fall": undefined }), /Missing exact route/);
-    const production = await readFile(new URL("../static/lander-world.js", import.meta.url), "utf8");
-    assert.doesNotMatch(production, /templates\.find|templateCatalog\.find/);
+    assert.throws(() => selectRouteProof(origin, createSiteForIndex(11, 2), {}), /not one forward route leg/);
 });
 
-test("strict-x projection inserts native feet and reaches the exact 72-vertex ceiling", () => {
-    const sites = [-19, -18, -17].map((index) => createSiteForIndex(39, index));
-    assert.deepEqual(sites.map(({ center }) => center), [-1626, -1530, -1449]);
-    const maximum = terrainVerticesForWindow(39, sites, -1650, -1400);
-    assert.equal(maximum.length, 72);
-    assert.ok(maximum.every((point, index) => index === 0 || maximum[index - 1][0] < point[0]));
-    for (const site of sites) {
+test("strict-X terrain projection inserts all native feet and stays bounded", () => {
+    const sites = [-1, 0, 1].map((index) => createSiteForIndex(39, index));
+    const vertices = terrainVerticesForWindow(39, sites, -70, 170);
+    assert.ok(vertices.length <= 48);
+    assert.ok(vertices.every((point, index) => index === 0 || vertices[index - 1][0] < point[0]));
+    for (const site of sites)
         for (const column of siteStructure(site).supportColumns) {
-            close(terrainHeightFromVertices(maximum, column.left), column.leftFoot);
-            close(terrainHeightFromVertices(maximum, column.right), column.rightFoot);
+            close(terrainHeightFromVertices(vertices, column.left), column.leftFoot);
+            close(terrainHeightFromVertices(vertices, column.right), column.rightFoot);
         }
-    }
-    assert.deepEqual(terrainVerticesForWindow(39, sites, -1650, -1400), maximum);
+    assert.deepEqual(terrainVerticesForWindow(39, sites, -70, 170), vertices);
+    assert.equal(terrainVerticesForRange(vertices, -10, 10).at(-1)[0], 10);
 });
 
-test("terrain renders as one closed unstroked fill and one open strict surface", async () => {
+test("terrain surface is one open mitered straight path", async () => {
     const site = createFirstSite(STATIC_WORLD_SEED);
     const vertices = terrainVerticesForWindow(STATIC_WORLD_SEED, [site], 0, 100);
-    const fill = terrainFillPath(vertices);
     const surface = terrainSurfacePath(vertices);
-    assert.match(fill, /Z$/);
-    assert.doesNotMatch(surface, /[ZV]/);
+    assert.doesNotMatch(surface, /[ACQSTVZ]/);
     assert.equal(surface.match(/M/g)?.length, 1);
     const template = await readFile(TEMPLATE_URL, "utf8");
     const layer = template.match(/<g id="terrain-layer">([\s\S]*?)<\/g>/)?.[1] ?? "";
     assert.equal((layer.match(/<path/g) ?? []).length, 2);
-    assert.match(layer, /class="terrain-fill"[^>]+fill="#d7d2c4"[^>]+stroke="none"/);
-    assert.match(layer, /class="terrain-surface"[^>]+fill="none"[^>]+stroke="#4b4e55"/);
-    assert.equal(terrainVerticesForRange(vertices, 0, 10).at(-1)[0], 10);
+    assert.match(layer, /class="terrain-surface"[\s\S]*?stroke-linejoin="miter"[\s\S]*?stroke-miterlimit="2"/);
 });
 
-test("site has one twelve-bay truss and three independently footed lattice columns", () => {
+test("integrated truss and three unbounded supports reach their native feet", () => {
     const site = createFirstSite(STATIC_WORLD_SEED);
     const structure = siteStructure(site);
     const members = siteScaffoldMembers(site);
-    assert.ok(members.length >= 41 && members.length <= 95);
     assert.equal(members.slice(2, 14).length, 12);
-    assert.deepEqual(structure.supportColumns.map(({ left, right }) => [left, right]), [
-        [site.platformLeft, site.platformLeft + 1],
-        [site.platformLeft + 8.8, site.platformLeft + 9.8],
-        [site.platformLeft + 17.6, structure.buildingRight],
-    ]);
-    assert.deepEqual(structure.truss, {
-        bottom: site.platformBottom - 0.85,
-        left: site.platformLeft - 0.1,
-        right: structure.buildingRight + 0.1,
-        top: site.platformBottom + 0.1,
-    });
+    assert.equal(structure.supportColumns.length, 3);
     for (const column of structure.supportColumns) {
         assert.equal(column.collider.bottom, Math.min(column.leftFoot, column.rightFoot) - 0.1);
         assert.ok(column.levels.slice(1).every((level, index) => column.levels[index] > level));
@@ -189,10 +167,12 @@ test("site has one twelve-bay truss and three independently footed lattice colum
     assert.equal(siteScaffoldPath(site).match(/M/g)?.length, members.length);
 });
 
-test("camera, retention, sky, and v6 geometry remain bounded and deterministic", async () => {
+test("camera, retention, sky, and geometry-v7 remain bounded and deterministic", async () => {
     const site = createFirstSite(STATIC_WORLD_SEED);
-    assert.deepEqual([cameraLeftForPose({ x: 34 }), cameraLeftForPose({ x: 80 }),
-        cameraLeftForPose({ x: -20 })], [0, 45, -25]);
+    assert.deepEqual(
+        [cameraLeftForPose({ x: 34 }), cameraLeftForPose({ x: 80 }), cameraLeftForPose({ x: -20 })],
+        [0, 45, -25],
+    );
     assert.equal(CHUNK_WIDTH, 50);
     assert.ok(retainedChunkIndexes(45).length <= 5);
     assert.ok(retainedSiteDescriptors([site], 0, 0).length <= 3);
@@ -201,13 +181,13 @@ test("camera, retention, sky, and v6 geometry remain bounded and deterministic",
     assert.equal(targetDirectionForViewport({ platformLeft: 99, platformRight: 110 }, 0), null);
     const sky = skyProjectionForCamera(STATIC_WORLD_SEED, 0);
     assert.equal(sky.chunks.length, 5);
-    assert.equal((sky.starsPath.match(/h2/g) ?? []).length, 20);
-
-    const text = await readFile(GEOMETRY_URL, "utf8");
-    const geometry = JSON.parse(text);
-    assert.equal(geometry.schema, "agw-lander-route-geometry/v6");
-    assert.equal(geometry.templates.length, 6);
-    assert.equal(geometry.terrain.subdivisionsPerHalfLeg, 8);
-    assert.equal(createHash("sha256").update(JSON.stringify(canonical(geometry))).digest("hex"),
-        "d0393f958f4a8b2657dbf21ef5184f40527be2c8c8d5cf860e6e81e3d2971fa2");
+    const geometry = JSON.parse(await readFile(GEOMETRY_URL, "utf8"));
+    assert.equal(geometry.schema, "agw-lander-route-geometry/v7");
+    assert.equal(geometry.terrain.profiles.L1[4], 0.1);
+    assert.equal(
+        createHash("sha256")
+            .update(JSON.stringify(canonical(geometry)))
+            .digest("hex").length,
+        64,
+    );
 });

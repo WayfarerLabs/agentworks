@@ -139,7 +139,7 @@ const warmup = (seed) => {
             controller.render();
         }
         model = serviceTarget(model);
-        if (model.targetRouteProof?.success && model.targetRouteProof?.smallerFailure) proofPaths += 2;
+        if (model.targetRouteProof?.success && !("smallerFailure" in model.targetRouteProof)) proofPaths += 1;
         const active = model.retainedSites.find((site) => site.id === model.activeSiteId);
         if (active?.powered && active.nocStage === 7 && model.checkpoint) poweredCheckpoints += 1;
         controller.model = model;
@@ -168,7 +168,7 @@ const longevity = (seed) => {
         const started = performance.now();
         model = serviceTarget(model);
         generationValues.push(performance.now() - started);
-        if (model.targetRouteProof?.success && model.targetRouteProof?.smallerFailure) proofPaths += 2;
+        if (model.targetRouteProof?.success && !("smallerFailure" in model.targetRouteProof)) proofPaths += 1;
         const active = model.retainedSites.find((site) => site.id === model.activeSiteId);
         if (active?.powered && active.nocStage === 7 && model.checkpoint) poweredCheckpoints += 1;
         maxima.sites = Math.max(maxima.sites, model.retainedSites.length);
@@ -315,20 +315,21 @@ def browser_phase4q_contract(
                 stages.append(connection.evaluate("phase4q.snapshot('touch')"))
             stages.append(connection.evaluate("phase4q.leave()"))
             result["viewports"][name] = stages
+            for seed, x in ((11, 55), (41, 170), (1095194417, 250)):
+                connection.evaluate(f"phase4q.useSeed({seed}, {x}, 30, 'screenshot-{seed}')")
+                png = base64.b64decode(connection.call("Page.captureScreenshot", {
+                    "format": "png", "captureBeyondViewport": False,
+                })["data"])
+                screenshot = screenshot_directory / f"phase4q-{seed}-{width}x{height}.png"
+                screenshot.write_bytes(png)
+                png_width, png_height = struct.unpack(">II", png[16:24])
+                result["screenshots"].append({
+                    "seed": seed, "width": png_width, "height": png_height,
+                    "bytes": len(png), "sha256": hashlib.sha256(png).hexdigest(),
+                    "path": str(screenshot),
+                })
+            connection.evaluate("phase4q.leave()")
             if name == "desktop":
-                for seed, x in ((11, 55), (41, 55), (1095194417, 55)):
-                    connection.evaluate(f"phase4q.useSeed({seed}, {x}, 30, 'screenshot-{seed}')")
-                    png = base64.b64decode(connection.call("Page.captureScreenshot", {
-                        "format": "png", "captureBeyondViewport": False,
-                    })["data"])
-                    screenshot = screenshot_directory / f"phase4q-{seed}-{width}x{height}.png"
-                    screenshot.write_bytes(png)
-                    png_width, png_height = struct.unpack(">II", png[16:24])
-                    result["screenshots"].append({
-                        "seed": seed, "width": png_width, "height": png_height,
-                        "bytes": len(png), "sha256": hashlib.sha256(png).hexdigest(),
-                        "path": str(screenshot),
-                    })
                 result["listeners"].append(_listener_counts(connection))
                 for seed in (11, 39, 41, 1095194417):
                     result["longevity"].append(connection.evaluate(f"phase4q.longevity({seed})"))
@@ -379,12 +380,12 @@ class Phase4QBrowserTests(RepositoryFixture):
             with self.subTest(seed=witness["seed"], contract="longevity"):
                 self.assertEqual(witness["warmup"], {
                     "completedSites": 12,
-                    "proofPaths": 24,
+                    "proofPaths": 12,
                     "poweredCheckpoints": 12,
                 })
                 self.assertEqual(witness["completedSites"], 100)
                 self.assertEqual(witness["finalState"], "launching")
-                self.assertEqual(witness["proofPaths"], 200)
+                self.assertEqual(witness["proofPaths"], 100)
                 self.assertEqual(witness["poweredCheckpoints"], 100)
                 self.assertEqual(witness["generation"]["samples"], 100)
                 self.assertLess(witness["generation"]["p95"], 25)
@@ -395,7 +396,7 @@ class Phase4QBrowserTests(RepositoryFixture):
                 self.assertLess(witness["frames"]["maximum"], 25)
                 self.assertEqual(witness["maxima"]["sites"], 3)
                 self.assertLessEqual(witness["maxima"]["chunks"], 5)
-                self.assertLessEqual(witness["maxima"]["terrainVertices"], 72)
+                self.assertLessEqual(witness["maxima"]["terrainVertices"], 48)
                 self.assertLessEqual(witness["maxima"]["world"], 80)
                 self.assertEqual(witness["maxima"]["document"], witness["finalDom"]["document"])
                 self.assertEqual(witness["maxima"]["world"], witness["finalDom"]["world"])
@@ -470,11 +471,13 @@ class Phase4QBrowserTests(RepositoryFixture):
             self.assertGreater(first_width, 0)
             self.assertGreater(first_height, 0)
         screenshots = result["screenshots"]
-        self.assertEqual([item["seed"] for item in screenshots], [11, 41, 1095194417])
-        self.assertTrue(all(item["width"] == 1000 and item["height"] == 780 for item in screenshots))
-        self.assertTrue(all(item["bytes"] > 20_000 for item in screenshots))
+        self.assertEqual([item["seed"] for item in screenshots], [11, 41, 1095194417] * 4)
+        self.assertEqual([(item["width"], item["height"]) for item in screenshots],
+                         [(320, 780)] * 3 + [(320, 240)] * 3 + [(667, 320)] * 3 +
+                         [(1000, 780)] * 3)
+        self.assertTrue(all(item["bytes"] > 3_000 for item in screenshots))
         self.assertTrue(all(Path(item["path"]).is_file() for item in screenshots))
-        self.assertEqual(len({item["sha256"] for item in screenshots}), 3)
+        self.assertEqual(len({item["sha256"] for item in screenshots}), 12)
         self.assert_longevity_contract(result)
 
     def test_longevity_witness_rejects_reduced_workload_mutation(self) -> None:

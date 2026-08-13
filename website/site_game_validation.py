@@ -363,7 +363,8 @@ def validate_game_contract(template: str) -> None:
         or surface.get("fill") != "none"
         or surface.get("stroke") != "#4b4e55"
         or surface.get("stroke-width") != "2"
-        or surface.get("stroke-linejoin") != "round"
+        or surface.get("stroke-linejoin") != "miter"
+        or surface.get("stroke-miterlimit") != "2"
         or "Z" in surface_path
         or "V" in surface_path
         or " 648" in surface_path
@@ -380,18 +381,18 @@ def validate_game_contract(template: str) -> None:
     if (
         len(scaffold) != 1
         or any(scaffold[0].get(key) != value for key, value in scaffold_contract.items())
-        or not (scaffold[0].get("d") or "").startswith("M312 452.5H498M312 460H498M312 452.5L327.5 460")
-        or (scaffold[0].get("d") or "").count("M") != 43
+        or not (scaffold[0].get("d") or "").startswith("M312 487.94H498M312 495.44H498M312 487.94L327.5 495.44")
+        or (scaffold[0].get("d") or "").count("M") != 57
         or "Z" in (scaffold[0].get("d") or "")
-        or not (scaffold[0].get("d") or "").endswith("M498 476.5L488 482.6528819444444")
+        or not (scaffold[0].get("d") or "").endswith("M498 543.9399999999999L488 551.68")
     ):
         raise ValueError("lander-game.html: static open scaffold geometry is invalid")
     battery_contract = (
-        '<rect x="452" y="393" width="22" height="40" />',
-        '<path class="battery-bar battery-bar-1" d="M457 423h12v5h-12Z" />',
-        '<path class="battery-bar battery-bar-2" d="M457 415h12v5h-12Z" />',
-        '<path class="battery-bar battery-bar-3" d="M457 407h12v5h-12Z" />',
-        '<path class="battery-bar battery-bar-4" d="M457 399h12v5h-12Z" />',
+        '<rect x="452" y="428.44" width="22" height="40" />',
+        '<path class="battery-bar battery-bar-1" d="M457 458.44h12v5h-12Z" />',
+        '<path class="battery-bar battery-bar-2" d="M457 450.44h12v5h-12Z" />',
+        '<path class="battery-bar battery-bar-3" d="M457 442.44h12v5h-12Z" />',
+        '<path class="battery-bar battery-bar-4" d="M457 434.44h12v5h-12Z" />',
     )
     battery_positions = [template.find(fragment) for fragment in battery_contract]
     if -1 in battery_positions or battery_positions != sorted(battery_positions):
@@ -399,9 +400,9 @@ def validate_game_contract(template: str) -> None:
     if "battery-terminal" in template:
         raise ValueError("lander-game.html: battery terminal is forbidden")
     signal_contract = (
-        'd="M455 339Q463 331 471 339"',
-        'd="M448 338Q463 323 478 338"',
-        'd="M440 337Q463 314 486 337"',
+        'd="M455 374.44Q463 366.44 471 374.44"',
+        'd="M448 373.44Q463 358.44 478 373.44"',
+        'd="M440 372.44Q463 349.44 486 372.44"',
     )
     if any(fragment not in template for fragment in signal_contract):
         raise ValueError("lander-game.html: static symmetric antenna signal geometry is invalid")

@@ -97,7 +97,8 @@
 .terrain-surface {
     fill: none;
     stroke: #4b4e55;
-    stroke-linejoin: round;
+    stroke-linejoin: miter;
+    stroke-miterlimit: 2;
     stroke-width: 2;
 }
 

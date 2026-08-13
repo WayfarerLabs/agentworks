@@ -1,6 +1,6 @@
 # Agentworks Website
 
-<!-- cspell:ignore refuel reprojection sdds smootherstep -->
+<!-- cspell:ignore refuel reprojection sdds -->
 
 This directory owns the static source for `agentworks.build`. A standard-library Python builder
 combines semantic templates, local CSS and JavaScript, the AGW rocket asset, and selected passages
@@ -79,23 +79,23 @@ use the same bounded mixer: press for collective, drag horizontally to steer, an
 retains a 140 ms pulse. Safe landing limits are inclusive at 2.2 m/s horizontal speed, 3.6 m/s
 descent, 18 degrees of tilt, and 26 degrees/s rotation.
 
-Terrain is deterministic per run. Two finite three-site families repeat summit levels of 5.9, 6.7,
-and 7.5 m in different orders and select one exact terminating route per outgoing leg. A seeded
-phase rotates the family in constant time for positive or negative site indexes. Each half-leg uses
-eight canonical smootherstep subdivisions from its summit to a seeded 0.5-2.0 m valley and back to
-the next summit. One strict-X polyline is the collision, support-foot, fixture, and rendering
-authority; it projects as one closed fill without a stroke and one open stroked surface. Each 9.6 m
-deck is derived exactly 2.4 m above its own unchanged native summit, producing 8.3, 9.1, or 9.9 m
-without a global datum, scan, retry, shelf, or terrain-shaped exception. A continuous 18.6 m, 0.75
-m-deep twelve-bay Warren truss reaches from the deck's left edge through the NOC's right edge. Three
-one-metre, two-rail lattice columns extend from its underside to six independently interpolated
-native-terrain feet. Their ties and alternating braces use the truss member style. Exact closed
-colliders cover the truss and each complete column; the NOC begins at the deck underside. The NOC
-battery fills four colored bars bottom-to-top, then three symmetric signal arches power outward; its
-fixed mast and antenna head remain graphite at every stage. The parallax sky uses recognizable
-crescent moons and circular planets with one or two restrained elliptical rings. Each ring keeps its
-foreground arc while the planet hides its rear center. These shapes, fills, and outlines preserve
-their meaning without relying on color alone.
+Terrain is deterministic per run. A seed-selected global stream alternates high and low 128 m
+blocks, each made only from eight straight 16 m segments and one of four angular profiles. Every
+height stays within the normalized 0.1-0.6 scene band, with absolute grade at most 0.36 and adjacent
+grade change at most 0.4. Sites use the terrain-independent formula `36+96*i` for positive and
+negative indexes. One strict-X polyline is the collision, support-foot, fixture, and rendering
+authority; it projects as one closed fill without a stroke and one open miter-joined stroked
+surface. Each 9.6 m deck is derived exactly 2.5 m above the maximum native terrain over the complete
+closed platform-to-NOC footprint, without a global datum, scan, retry, shelf, or terrain-shaped
+exception. A continuous 18.6 m, 0.75 m-deep twelve-bay Warren truss reaches from the deck's left
+edge through the NOC's right edge. Three one-metre, two-rail lattice columns extend from its
+underside to six independently interpolated native-terrain feet. Their ties and alternating braces
+use the truss member style. Exact closed colliders cover the truss and each complete column; the NOC
+begins at the deck underside. The NOC battery fills four colored bars bottom-to-top, then three
+symmetric signal arches power outward; its fixed mast and antenna head remain graphite at every
+stage. The parallax sky uses recognizable crescent moons and circular planets with one or two
+restrained elliptical rings. Each ring keeps its foreground arc while the planet hides its rear
+center. These shapes, fills, and outlines preserve their meaning without relying on color alone.
 
 Flight has no horizontal world edge: the lander can pass a target or explore in either direction
 until it collides or crosses the vertical ceiling. The camera follows both directions with a stable
@@ -133,34 +133,25 @@ This is the builder's only output shape. The manifest is explicit in `build.py`;
 recursively copies source directories or permits a generated local link outside the manifest.
 
 The game keeps its route catalog reviewable and independent from runtime generation. Geometry lives
-in `tests/fixtures/lander-route-geometry-v6.json`; it contains no schedule or fuel result.
+in `tests/fixtures/lander-route-geometry-v7.json`; it contains no schedule or fuel result.
 Regenerate to a temporary path and verify the reviewed fixture with:
 
 ```bash
 node website/tools/derive_lander_routes.mjs \
-  --geometry website/tests/fixtures/lander-route-geometry-v6.json \
-  --output /tmp/lander-route-derived-v6.json \
-  --verify website/tests/fixtures/lander-route-derived-v6.json
+  --geometry website/tests/fixtures/lander-route-geometry-v7.json \
+  --output /tmp/lander-route-derived-v7.json \
+  --verify website/tests/fixtures/lander-route-derived-v7.json
 ```
 
-The v7 deriver uses the v6 geometry schema and unchanged v3 recipe family, Node built-ins, versioned
-finite compact phase ranges, reachable keyboard commands, and independent copies of the physics,
-collision geometry, native terrain, strict-X projection, truss, lattice columns, NOC, and mast. Each
-template begins with the exact player-reachable `[1,90]` request and evaluates four candidates from
-two independently variable pre-contact ranges, for 24 total and well below the 256-per-template and
-1,536-total bounds. The comparator selects among materially distinct safe outcomes; no selected
-schedule is embedded phase-for-phase as its own verifier. Its reviewed output contains all six
-routes and 24 ordered world descriptors. Verification also replays each selected success and
-one-quantum failure across all 24 worlds, for 48 selected replays. A successful route is classified
-using the raw replay. Only its reviewed success and exhaustion pose components are serialized to
-nine decimal places, keeping native trigonometric last-bit variation out of the canonical fixture
-while remaining inside the runtime proof tolerance. World descriptors retain their exact unrounded
-values. A deliberate route or world change updates the ranges, reviewed v6 fixture, copied
-production literals, and all four digests atomically. Runtime code performs exactly the successful
-and one-quantum-smaller proof replays for the directly selected literal. The frozen route catalog is
-keyed once at module initialization; each generated site performs one exact template-ID property
-lookup. Runtime never imports the tool, scans the template collection or fuel allowances, retries
-another route, or plans a route in the browser.
+The v8 deriver uses Node built-ins and independent copies of the terrain, physics, collision,
+structure, and proof authorities. It exhaustively enumerates 2,048 terrain assignments into 100
+exact ordered deck-pair keys, then applies the bounded 269-layer, 6,000-state four-phase corridor
+synthesizer. Every selected route is replayed against its conservative envelope and all concrete
+member assignments. Derived v7 also records all eight opening profiles and signed 100-site world
+witnesses for four seeds. Runtime performs one exact keyed proof lookup and one defensive replay; it
+never imports the tool, scans a catalog, searches commands, retries a route, or conditions site X on
+terrain. Fuel uses the sufficient `12.65 + max(0, deckDelta)/3` allowance rounded upward to the 0.05
+quantum; it does not claim that one quantum less makes the physical route impossible.
 
 During a run, the model retains at most five terrain chunk indexes while the DOM always uses exactly
 two terrain paths, the active and target sites plus one previous powered site, one input queue of at
