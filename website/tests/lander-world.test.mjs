@@ -106,20 +106,31 @@ test("every deck is exactly 2.4 metres above its own unchanged native summit", (
 
 test("one exact route lookup terminates and rejects cycle or catalog drift", async () => {
     const geometry = JSON.parse(await readFile(GEOMETRY_URL, "utf8"));
+    const catalog = Object.fromEntries(geometry.templates.map((template) => [template.templateId, template]));
     for (const seed of [11, 39, 41, STATIC_WORLD_SEED]) {
-        let origin = createFirstSite(seed);
-        for (let siteIndex = 1; siteIndex <= 100; siteIndex += 1) {
-            const template = selectTemplate(seed, siteIndex, origin, geometry.templates);
+        const cycle = terrainCycleForSeed(seed);
+        for (let siteIndex = -100; siteIndex <= 100; siteIndex += 1) {
+            const origin = createSiteForIndex(seed, siteIndex - 1, {
+                canCollected: true, powered: true, nocStage: 7,
+            });
+            const keys = [];
+            const instrumented = new Proxy(catalog, { get(target, key) {
+                keys.push(key); return target[key];
+            } });
+            const template = selectTemplate(seed, siteIndex, origin, instrumented);
+            assert.deepEqual(keys, [terrainSiteForIndex(seed, siteIndex - 1).templateId]);
             const target = instantiateTemplateSite(seed, siteIndex, origin, template);
             assert.equal(template.templateId, terrainSiteForIndex(seed, siteIndex - 1).templateId);
-            origin = target;
+            assert.equal(target.center, terrainSiteForIndex(seed, siteIndex).center);
+            assert.equal(terrainSiteForIndex(seed, siteIndex + 3).center - target.center, cycle.blockWidth);
         }
-        assert.equal(origin.id, 100);
     }
     const origin = createFirstSite(11);
-    assert.throws(() => selectTemplate(11, 1, { ...origin, center: 37 }, geometry.templates), /direct terrain cycle/);
+    assert.throws(() => selectTemplate(11, 1, { ...origin, center: 37 }, catalog), /direct terrain cycle/);
     assert.throws(() => selectTemplate(11, 1, origin,
-        geometry.templates.filter(({ templateId }) => templateId !== "route-96-fall")), /Missing exact route/);
+        { ...catalog, "route-96-fall": undefined }), /Missing exact route/);
+    const production = await readFile(new URL("../static/lander-world.js", import.meta.url), "utf8");
+    assert.doesNotMatch(production, /templates\.find|templateCatalog\.find/);
 });
 
 test("strict-x projection inserts native feet and reaches the exact 72-vertex ceiling", () => {

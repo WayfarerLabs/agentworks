@@ -14,6 +14,7 @@ import {
     MAX_PLAYABLE_Y,
     FAILURE_STATUS,
     FUEL_QUANTUM,
+    REFERENCE_TEMPLATE_CATALOG,
     REFERENCE_TEMPLATES,
     ROUTE_DIGESTS,
     STEP_SECONDS,
@@ -47,13 +48,16 @@ import {
     STATIC_WORLD_SEED,
     createSiteForIndex,
     instantiateTemplateSite,
+    selectTemplate,
     siteScaffoldMembers,
     siteStructure,
+    terrainCycleForSeed,
     terrainHeightAt,
     terrainFillPath,
     terrainSurfacePath as terrainPath,
     terrainVerticesForRange,
     terrainVerticesForWindow,
+    terrainSiteForIndex,
 } from "../static/lander-world.js";
 
 const ROOT = new URL("../", import.meta.url).pathname;
@@ -218,8 +222,11 @@ test("independent v7 derivation reproduces v6 bytes and all 48 selected replays"
         await readFile(join(ROOT, "tools/lander_clear_faces.mjs"), "utf8"), "utf8");
     const geometry = join(ROOT, "tests/fixtures/lander-route-geometry-v6.json");
     const fixture = join(ROOT, "tests/fixtures/lander-route-derived-v6.json");
+    const derivationStarted = performance.now();
     execFileSync(process.execPath, [tool, "--geometry", geometry, "--output", output,
         "--verify", fixture]);
+    const derivationMilliseconds = performance.now() - derivationStarted;
+    assert.ok(derivationMilliseconds < 10_000, `derivation took ${derivationMilliseconds} ms`);
     assert.equal(await readFile(output, "utf8"), await readFile(fixture, "utf8"));
 
     const derived = JSON.parse(await readFile(fixture, "utf8"));
@@ -850,10 +857,7 @@ test("worst-case world projection stays within eighty descendants during a crash
     let model = createRun({ seed: 1 });
     const sites = [model.retainedSites[0]];
     for (let id = 1; id < 3; id += 1) {
-        const template = REFERENCE_TEMPLATES.find((candidate) => {
-            try { instantiateTemplateSite(model.seed, id, sites.at(-1), candidate); return true; }
-            catch { return false; }
-        });
+        const template = selectTemplate(model.seed, id, sites.at(-1), REFERENCE_TEMPLATE_CATALOG);
         sites.push(instantiateTemplateSite(model.seed, id, sites.at(-1), template));
     }
     model = updateRetention({ ...model, pose: { ...model.pose, x: sites[1].center }, retainedSites: sites,
@@ -879,27 +883,38 @@ test("worst-case world projection stays within eighty descendants during a crash
     controller.destroy();
 });
 
-test("100-site deterministic mission keeps generation and retention bounded", () => {
-    let model = updateRetention(createRun({ seed: 0x12345678, reducedMotion: true }));
-    let maximumGenerationMilliseconds = 0;
-    for (let completed = 0; completed < 100; completed += 1) {
-        if (model.state === "launching") {
-            for (let step = 0; step < 90 && model.state === "launching"; step += 1) {
-                model = updateRetention(stepFlight(model, { left: 0.72, right: 0.72 }));
+test("four seeded 100-site powered missions keep lifecycle and generation timing bounded", () => {
+    const durations = [];
+    for (const seed of [11, 39, 41, STATIC_WORLD_SEED]) {
+        let model = updateRetention(createRun({ seed, reducedMotion: true }));
+        const cycle = terrainCycleForSeed(seed);
+        for (let completed = 0; completed < 100; completed += 1) {
+            if (model.state === "launching") {
+                for (let step = 0; step < 90 && model.state === "launching"; step += 1) {
+                    model = updateRetention(stepFlight(model, { left: 0.72, right: 0.72 }));
+                }
             }
+            const target = model.retainedSites.find((site) => site.id === model.targetSiteId);
+            model = { ...model, pose: { x: target.center, y: target.platformTop + 0.001, vx: 0, vy: -1,
+                angle: 0, angularVelocity: 0 } };
+            const started = performance.now();
+            model = updateRetention(stepFlight(model, { left: 0, right: 0 }));
+            durations.push(performance.now() - started);
+            assert.equal(model.state, "launching");
+            const powered = model.retainedSites.find((site) => site.id === model.activeSiteId);
+            assert.deepEqual([powered.powered, powered.nocStage], [true, 7]);
+            assert.ok(model.checkpoint);
+            assert.ok(model.retainedSites.length <= 3);
+            assert.ok(model.retainedChunks.length <= 5);
+            assert.ok(model.terrainVertices.length <= 72);
+            assert.equal(terrainSiteForIndex(seed, completed + 3).center -
+                terrainSiteForIndex(seed, completed).center, cycle.blockWidth);
         }
-        const target = model.retainedSites.find((site) => site.id === model.targetSiteId);
-        model = { ...model, pose: { x: target.center, y: target.platformTop + 0.001, vx: 0, vy: -1,
-            angle: 0, angularVelocity: 0 } };
-        const started = performance.now();
-        model = updateRetention(stepFlight(model, { left: 0, right: 0 }));
-        maximumGenerationMilliseconds = Math.max(maximumGenerationMilliseconds, performance.now() - started);
-        assert.equal(model.state, "launching");
-        assert.ok(model.retainedSites.length <= 3);
-        assert.ok(model.retainedChunks.length <= 5);
-        assert.ok(model.fuel >= 0);
+        assert.equal(model.completedSites, 100);
+        assert.ok(model.refuelRatio >= 1);
     }
-    assert.equal(model.completedSites, 100);
-    assert.ok(model.refuelRatio >= 1);
-    assert.ok(maximumGenerationMilliseconds < 50);
+    durations.sort((left, right) => left - right);
+    const p95 = durations[Math.ceil(durations.length * 0.95) - 1];
+    assert.ok(p95 < 25, `generation p95 was ${p95} ms`);
+    assert.ok(durations.at(-1) < 50, `generation maximum was ${durations.at(-1)} ms`);
 });

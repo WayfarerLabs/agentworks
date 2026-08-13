@@ -304,14 +304,14 @@ export function createFirstSite(seed) {
     return createSiteForIndex(seed, 0);
 }
 
-export function selectTemplate(seed, siteIndex, originSite, templates) {
+export function selectTemplate(seed, siteIndex, originSite, templateCatalog) {
     const origin = terrainSiteForIndex(seed, siteIndex - 1);
     const target = terrainSiteForIndex(seed, siteIndex);
     if (originSite.id !== siteIndex - 1 || originSite.center !== origin.center ||
         originSite.deckLevel !== origin.deckLevel || target.center - origin.center !== origin.centerDelta) {
         throw new Error(`Site ${siteIndex - 1} does not match its direct terrain cycle`);
     }
-    const template = templates.find((candidate) => candidate.templateId === origin.templateId);
+    const template = templateCatalog[origin.templateId];
     const deckDelta = (target.deckLevel - origin.deckLevel) / 10;
     if (!template || template.centerDelta !== origin.centerDelta || template.deckDelta !== deckDelta) {
         throw new Error(`Missing exact route template ${origin.templateId}`);

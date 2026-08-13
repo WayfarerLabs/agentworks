@@ -103,6 +103,9 @@ function routeRecord(row, failureLiteral) {
 }
 
 export const REFERENCE_TEMPLATES = freeze(ROUTES.map((row, index) => routeRecord(row, FAILURE_LITERALS[index])));
+export const REFERENCE_TEMPLATE_CATALOG = freeze(Object.fromEntries(
+    REFERENCE_TEMPLATES.map((template) => [template.templateId, template]),
+));
 
 const STEP_MILLISECONDS = STEP_SECONDS * 1000;
 const HULL = Object.freeze([[-1.6, 0], [1.6, 0], [1.6, 6.5], [-1.6, 6.5]]);
@@ -557,7 +560,7 @@ function routeContext(template, supplied = null) {
             const candidate = createSiteForIndex(seed, index, {
                 canCollected: true, powered: true, nocStage: 7,
             });
-            if (selectTemplate(seed, index + 1, candidate, REFERENCE_TEMPLATES) !== template) continue;
+            if (selectTemplate(seed, index + 1, candidate, REFERENCE_TEMPLATE_CATALOG) !== template) continue;
             return { seed, originSite: candidate,
                 targetSite: instantiateTemplateSite(seed, index + 1, candidate, template) };
         }
@@ -654,7 +657,7 @@ function prepareService(model, contactPose) {
         const poweredBaseNumber = model.completedSites + 1;
         const ratio = refuelRatioForBase(poweredBaseNumber);
         if (model.refuelRatio !== ratio) throw new Error("Stored refuel ratio does not match mission progress");
-        const template = selectTemplate(model.seed, model.generatorCursor, contacted, REFERENCE_TEMPLATES);
+        const template = selectTemplate(model.seed, model.generatorCursor, contacted, REFERENCE_TEMPLATE_CATALOG);
         const nextSite = instantiateTemplateSite(model.seed, model.generatorCursor, contacted, template);
         const serviced = { ...contacted, canCollected: true };
         const proof = proveTemplate(template, provisionalProofContext(model, serviced, nextSite, contactPose));

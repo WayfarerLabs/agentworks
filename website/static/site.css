@@ -103,6 +103,27 @@ body.game-page #lander-game {
         padding-block: 0;
     }
 
+    body.game-page .header-mark {
+        width: 1rem;
+        height: 1.5rem;
+    }
+
+    body.game-page .site-footer {
+        flex-direction: row;
+        flex-wrap: nowrap;
+        align-items: center;
+        gap: 0.25rem;
+        font-size: 0.5rem;
+        line-height: 1;
+    }
+
+    body.game-page .site-footer nav {
+        flex: 1 1 auto;
+        flex-wrap: nowrap;
+        justify-content: flex-end;
+        gap: 0.25rem;
+    }
+
     body.game-page .game-main {
         grid-template-rows: 0 0 minmax(0, 1fr);
         gap: 0;
@@ -574,11 +595,6 @@ code {
         width: auto;
     }
 
-    body.game-page .footer-game-link {
-        width: 16px;
-        height: 24px;
-        flex-basis: 16px;
-    }
 }
 
 @media (prefers-reduced-motion: reduce) {

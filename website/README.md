@@ -157,8 +157,10 @@ nine decimal places, keeping native trigonometric last-bit variation out of the 
 while remaining inside the runtime proof tolerance. World descriptors retain their exact unrounded
 values. A deliberate route or world change updates the ranges, reviewed v6 fixture, copied
 production literals, and all four digests atomically. Runtime code performs exactly the successful
-and one-quantum-smaller proof replays for the directly selected literal. It never imports the tool,
-scans fuel allowances, or plans a route in the browser.
+and one-quantum-smaller proof replays for the directly selected literal. The frozen route catalog is
+keyed once at module initialization; each generated site performs one exact template-ID property
+lookup. Runtime never imports the tool, scans the template collection or fuel allowances, retries
+another route, or plans a route in the browser.
 
 During a run, the model retains at most five terrain chunk indexes while the DOM always uses exactly
 two terrain paths, the active and target sites plus one previous powered site, one input queue of at

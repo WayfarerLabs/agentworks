@@ -34,13 +34,17 @@ uncapped post-award full reference. Run
 projection evidence, not the qualitative or cross-engine signoff below.
 
 The Phase 4Q Chromium witness runs exact `320 by 780`, `320 by 240` 400-percent-equivalent,
-`667 by 320` touch-landscape, and `1000 by 780` viewports. Before and after seed changes, crash,
-Retry, and Exit it records document, body, main, game, shell, stage, rail, and action width/height
-client/scroll metrics. It requires exact viewport and document equality, zero scroll, fixed stage
-dimensions and `25:16` ratio, zero world Y translation, in-viewport components, and 44-pixel native
-actions. Run `python3 -m unittest discover -s website/tests -p 'test_lander_phase4q_browser.py'`.
-This is automated Chromium evidence; it does not replace the qualitative terrain or cross-engine
-acceptance below.
+`667 by 320` touch-landscape, and `1000 by 780` viewports. It observes actual preflight; seed 11,
+seed 41, and static summit/valley windows; ceiling and bidirectional flight; normal-motion service;
+crash; Retry; Exit; footer focus; wheel; and touch transitions. Every stage records width and height
+client/scroll metrics for the document, body, header, main, game, shell, stage, rail, footer, footer
+navigation, and every header/footer/action descendant. It requires exact viewport and document
+equality, zero scroll, fixed stage dimensions and `25:16` ratio, zero world Y translation,
+in-viewport descendants, and 44-pixel native actions. The witness also emits three distinct desktop
+PNG artifacts and applies the frame-time ceiling without asserting authored prose or golden pixels.
+Run `python3 -m unittest discover -s website/tests -p 'test_lander_phase4q_browser.py'`. This is
+automated Chromium evidence; it does not replace the qualitative terrain or cross-engine acceptance
+below.
 
 ## Arcade presentation acceptance
 
