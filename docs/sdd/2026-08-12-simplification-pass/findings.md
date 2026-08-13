@@ -21,6 +21,10 @@ grew 7.8 KB to 30.6 KB.
   `github-input-trust` unless the invoking prompt or persona carries the content.
 - Open sub-question: whether harness-created worktrees (Agent tool `isolation: "worktree"`) land
   inside or outside the project path. Verify before relying on either answer.
+- Scope caveat (integration-tester, 2026-08-13): all three probes exercised Claude delivery only.
+  Codex and Copilot delivery of the same surfaces is unprobed; the personas are generated for more
+  than one harness, so self-heal instructions reference the canonical `.rulesync/rules/` sources
+  rather than any harness-specific path, and the phase 0 probe item covers Codex.
 
 ## Guide and discovery (#428, #462)
 
@@ -160,7 +164,11 @@ grew 7.8 KB to 30.6 KB.
   classifier; `backup.py:512-521`, `database.py:70-104`, `database.py:177-192`, and
   `database.py:198-210` each re-derive read-and-classify with their own gaps. This is the direct
   mechanism behind the #503/#504 two-PR patch sequence: BUSY had to be hand-threaded through sites
-  that never call the classifier.
+  that never call the classifier. Entry-path inventory for the consolidation (integration-tester
+  addition, 2026-08-13): read-only open, writable open, migrate, and the prepare/open lock paths
+  where #504's BUSY translation was observed; the consolidation must preserve BUSY at every one.
+  Backup qualification of arbitrary operator-supplied files is boundary validation, not interior
+  classification, and keeps its own failure semantics.
 - **D2** `SCHEMA_SENTINELS` (`db/migrations.py:631-758`): a hand-maintained shadow model of every
   historical schema version, mechanically derivable by replaying `MIGRATIONS` (which the drift test
   already does independently).
@@ -219,18 +227,26 @@ grew 7.8 KB to 30.6 KB.
   fixed, non-extensible pages. The shape to revisit if W2/W3 are tackled; documented as intentional
   house style in `website/README.md`, so this is a design-revision decision.
 - **W10** Payload vs machinery: 2,278 lines of content (1,223 excluding the lander game) against
-  6,308 lines of build system plus tests. The lander game (1,055 JS + 530 tests + Chromium test
-  - 300-line manual checklist) wants its own scope decision.
+  6,308 lines of build system plus tests. The lander game (1,055 JS lines, 530 test lines, the
+  Chromium test, and a 300-line manual checklist) wants its own scope decision.
 
 ## Process tree (~35 docs PRs)
 
-- **PR1** The testing trio (`integration-testing`, `agw-test-env`, `agentworks-tester`) is ~40%
-  self-duplicated: 17 statements in 2+ files, one instruction five times, with diverged copies (two
-  incompatible model-tier vocabularies) and stale restatements that miss the `awaiting-direction`
-  convention.
-- **PR2** `agentic-dev-process` sections 6/6a: 9.2 KB of handoff/label/stack machinery, of which the
-  `review-requested` label has zero uses ever and PR stacks have one throwaway probe plus one
-  depth-2 docs pair. The draft/ready convention and handoff definition are exercised daily and stay.
+- **PR1** The testing trio (`integration-testing`, `agw-test-env`, `agentworks-tester`) restates 17
+  statements in 2+ files, with diverged copies (two incompatible model-tier vocabularies) and stale
+  restatements that miss the `awaiting-direction` convention. Operator caution (2026-08-12 review):
+  the three files serve different perspectives and some repetition is deliberate reinforcement. The
+  target is therefore divergence, not repetition: contradictory and stale copies get one
+  authoritative home, while intentional cross-perspective restatement stays.
+- **PR2** `agentic-dev-process` sections 6/6a: PR stacks have one throwaway probe plus one depth-2
+  docs pair of real usage, and the stack section carries lab-notebook narration (see PR8). The
+  draft/ready convention and handoff definition are exercised daily and stay. Correction
+  (2026-08-12): this finding originally claimed the `review-requested` label had zero uses ever.
+  That was wrong. The study queried current labels (`gh pr list --label ...`), but the convention
+  removes the label after each absorbed checkpoint, so compliant past use is invisible to that
+  query. Timeline events show heavy use: 16 label events on #479, 14 on #480, plus #475 and #486.
+  The label convention is exercised and stays; the method lesson (query events, not current state,
+  for anything a convention cleans up after itself) is recorded here so the pass does not repeat it.
 - **PR3** "A published review is not authorization" is stated in six places across four documents,
   cross-referencing in a cycle. Section 7a is canonical; the rest become pointers.
 - **PR4** `ask-questions`, `push-back`, `permission-to-fail` (2,090 B always-on) are fully restated

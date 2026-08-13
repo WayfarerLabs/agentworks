@@ -7,15 +7,15 @@ first PR.
 ## Phase 0: guidance and delivery (R1, R7.1)
 
 - [ ] Probe whether harness-created worktrees (`isolation: "worktree"`) receive `paths:`-scoped
-      rules; record the answer in findings.md and in the delegation section of
-      `agentic-dev-process`. Done when: probe transcript summarized in findings.md, skill text
-      states the verified behavior.
+      rules, and how Codex delivery behaves for the same surfaces; record the answers in findings.md
+      and in the delegation section of `agentic-dev-process`. Done when: probe transcripts
+      summarized in findings.md, skill text states the verified behavior per harness.
 - [ ] Author the trust-boundary rule (R1.1) as a frontmatter-less rule under 25 lines, naming the
-      three current boundaries, the interior-trust principle, the validator-names-its- boundary
-      convention, and `secrets/line_safety.py` as exemplar. Done when: merged and confirmed present
-      in a no-tool subagent probe.
+      four boundaries (including persisted cross-execution state), the interior-trust principle, the
+      validator-names-its-boundary convention, and `secrets/line_safety.py` plus `inspect_schema` as
+      exemplars. Done when: merged and confirmed present in a no-tool subagent probe.
 - [ ] Author the test-value rule (R1.2) as a frontmatter-less rule under 25 lines, generalizing
-      `no-prose-policing-tests` to all authored artifacts and stating derivation-over- duplication.
+      `no-prose-policing-tests` to all authored artifacts and stating derivation over duplication.
       Done when: merged and confirmed present in a no-tool subagent probe; `no-prose-policing-tests`
       cross-references it rather than duplicating it.
 - [ ] Add the persona self-heal preamble to `agentworks-dev` and `agentworks-reviewer` (R1.4) and
@@ -30,9 +30,13 @@ Each item is one PR, pure subtraction plus named structural replacements, full s
       Keep `test_resolution_timeout_cleanup.py` (trim its two wording pins). Rename kept fixtures
       off the `phase7` name. Done when: suite green, no `phase7` path or
       `validate_interaction_policy` reference remains, CI wall time reduction noted in the PR.
-- [ ] Delete `website/tests/test_pages_workflows.py` (W1); retain at most a minimal check that the
-      pages workflow still runs the double-build diff. Done when: suite green, the retained check
-      (if any) contains no hardcoded workflow text.
+- [ ] Replace `website/tests/test_pages_workflows.py` (W1): delete the hand-rolled YAML parser and
+      every verbatim script/shape pin, and rewrite the real policy invariants as focused checks over
+      a proper YAML load: least-privilege workflow permissions, credential non-persistence, deploy
+      triggered only from main, source-SHA/artifact binding, and the double-build diff. Done when:
+      suite green, the replacement contains no hardcoded workflow text beyond the specific keys each
+      policy check reads, and each check's docstring names the invariant it guards
+      (integration-tester finding, 2026-08-13).
 - [ ] Delete guide dead surface (G8) and the typed-to-dict re-parse round trip (G2); fix the vacuous
       monkeypatch test and add the persisted-enum parity test (G11). Done when: suite green,
       `parse_topic_contribution` accepts only decoded data, enum parity test fails on a synthetic
@@ -44,9 +48,19 @@ Each item is one PR, pure subtraction plus named structural replacements, full s
       projections, identity comprehensions, the stdout retry loop; name `schema_version` as a
       constant with one comment stating when it increments. Done when: suite green, JSON output
       byte-identical for a fixture corpus captured before the change.
-- [ ] Deliver the prose-policing findings (G12, C10, D4, P6, W4, W6, and the #470 manifesto pin) to
-      the prose-test-purge effort as a message file per SDD conventions. Done when: message merged
-      to main via this effort's PR, prose-test-purge lead notified through the operator.
+- [ ] Absorb the prose-test-purge effort (FRD Absorption): supersession note and lockfile in
+      `docs/sdd/2026-08-11-prose-test-purge/` ride the seeding PR; the saga ledger implication is
+      flagged to the saga lead through the operator. Done when: the absorbed directory is locked
+      with a pointer here and the operator has been asked to route the ledger note.
+- [ ] Pure-deletion prose tier (R2.3, absorbed R2): verbatim content pins, required-phrase loops,
+      and every wording blacklist across the estate (the absorbed survey's file list plus G12, C10,
+      D4, P6, W4, W6, and the #470 manifesto pin), in PRs separate from production changes. Done
+      when: the survey's pure-deletion class is empty at HEAD, collected-test count and wall time
+      reported before and after.
+- [ ] Riding-along prose trims (R2.3, absorbed R3): remove prose assertions riding inside legitimate
+      behavioral tests, keeping the tests; cases whose only observable is a sentence route to the
+      R2.5 item instead. Done when: `pytest.raises(..., match=)` sites matching authored sentences
+      are eliminated or individually justified in this plan.
 - [ ] Website contained trims: shared fixture adoption in `test_lander_404.py` (W5), exported status
       constant (W6), threshold-not-exact contrast assertions (W4), drop the Chromium duplicate (W8),
       simplify atomic-install to write-temp-and-rename (W7). Done when: suite green without Chromium
@@ -54,32 +68,61 @@ Each item is one PR, pure subtraction plus named structural replacements, full s
 
 ## Phase 2: consolidations (R4)
 
-- [ ] Database: collapse the five schema-version readers onto `inspect_schema` (D1); derive
-      `SCHEMA_SENTINELS` by replaying `MIGRATIONS` (D2); extract the doctor translation helper (D6);
-      mock the real-sleep deadline test like its sibling (D3). Done when: suite green, exactly one
-      function reads `schema_version`, BUSY classification covered by one test per entry path.
+- [ ] Real observables for sentence-only behaviors (R2.5, absorbed R4): manager result records for
+      repair/grant/revoke/console-sync reporting, the structured schema-problem seam as a supported
+      test target, stable error codes or narrowed subtypes for message-discriminated siblings, a
+      stable doctor-check id. Each lands in the same PR as the deletions it enables, with mutation
+      evidence that the replacement fails when the behavior breaks (R2.6). Done when: the four
+      absorbed R4 items each have a landed PR or a written deferral.
+- [ ] Write the sentinel-derivation LLD (D2): how sentinels derive from replaying `MIGRATIONS` when
+      migrations are callables whose effects only exist after execution (the expected shape: replay
+      against a scratch database and introspect, the mechanism the drift test already uses), and
+      where backup qualification's boundary validation stays distinct from interior classification.
+      Done when: LLD reviewed before the database consolidation PR opens.
+- [ ] Database: consolidate schema-state classification onto `inspect_schema` as the single
+      authority (D1), with entry paths (read-only open, writable open, migrate, prepare/open lock
+      paths) translating its `SchemaState` rather than re-deriving it, and BUSY preserved at every
+      path; backup validation of arbitrary operator-supplied files remains boundary work (HLA
+      doctrine 1, boundary 4) and may share the low-level reader without sharing failure semantics.
+      Derive `SCHEMA_SENTINELS` per the LLD (D2); extract the doctor translation helper (D6); mock
+      the real-sleep deadline test like its sibling (D3). Done when: suite green, exactly one
+      classification authority exists, BUSY covered by one test per entry path, sentinels have no
+      hand-maintained table.
+- [ ] Write the secrets-consolidation LLD: the narrowed client protocol (S3), the single resolve
+      path (S6), which conformance checks survive as the call-shape gate per HLA doctrine 1
+      (integration-tester finding, 2026-08-13), and the S7 deletions with each input's provenance
+      classified. Done when: LLD reviewed before the secrets consolidation PR opens.
 - [ ] Secrets: single post-boundary resolve path (S6) or one recorded exception statement;
       remediation derived from failure kind (S3, S4); protocol narrowed to what implementers use
-      (S3); bridge relocated to the quarantine (S8); broker dispatch on a declared flag (S9); stale
-      docstrings fixed (S6, S10). Done when: suite green, `resolve_for_command` gone or its survival
-      documented in one place, no generic module names a builtin source in a string literal.
+      (S3); interior re-validation of our own parsers' outputs removed per the LLD's provenance
+      classification (S7); bridge relocated to the quarantine (S8); broker dispatch on a declared
+      flag (S9); stale docstrings fixed (S6, S10). Done when: suite green, `resolve_for_command`
+      gone or its survival documented in one place, no generic module names a builtin source in a
+      string literal, the call-shape registration check retained and its boundary named.
 - [ ] Platforms: extract the shared catalog selector (P1); factor gcp insert-reconciliation (P2,
       carefully, against the existing suite); create the gcp shared test fixture module (P5); remove
       the pass-through wrapper and table-drive the guidance text (P3). Done when: suite green, the
       three platform config modules import one selector, gcp tests define the operation fake once.
+- [ ] Write the guide boundary-surgery LLD: which contract checks survive as the future contribution
+      boundary, where the manifest-description string enters validation, and the provenance
+      classification for each deleted check (G1, G3, G7). Done when: LLD reviewed before the guide
+      consolidation PR opens.
 - [ ] Guide interior trust (R3.1 remainder, R3.2, R3.3): remove the adversarial layer from
-      first-party parsing, keep and document the boundary skeleton per hla.md doctrine 1, route the
-      manifest-description string through the retained boundary check (G1, G3, G7), fix colocation
-      so packages own their content without core edits (G9), split summaries or re-register them for
-      human surfaces (G10). Done when: suite green, every surviving validator's docstring names its
-      boundary, a manifest description containing markup renders escaped in the index.
+      first-party parsing per the LLD, keep and document the boundary skeleton per hla.md doctrine
+      1, route the manifest-description string through the retained boundary check (G1, G3, G7), fix
+      colocation so packages own their content without core edits (G9), split summaries or
+      re-register them for human surfaces (G10). Done when: suite green, every surviving validator's
+      docstring names its boundary, a manifest description containing markup renders escaped in the
+      index.
 - [ ] Process tree: delete the three absorbed rules folding phrasings into the principles (PR4);
       merge the five collateral rules into one (PR5); collapse the review-authority statement to
-      section 7a with pointers (PR3); dedupe the testing trio to one home per claim (PR1, PR10);
-      trim sections 6/6a to exercised content, parking `review-requested` per operator direction
-      (PR2); register and journey pass (PR7, PR8, PR9). Done when: always-on rule bytes measurably
-      reduced and recorded in the PR, consistency review (per `agentic-dev-process`) run at top tier
-      over the changed tree with findings triaged.
+      section 7a with pointers (PR3); consolidate the testing trio's diverged and contradictory
+      copies to one authoritative home while keeping deliberate cross-perspective reinforcement
+      (PR1, PR10, operator caution 2026-08-12); trim the stack section's narration, leaving the
+      exercised `review-requested` convention untouched (PR2 as corrected); register and journey
+      pass (PR7, PR8, PR9). Done when: always-on rule bytes measurably reduced and recorded in the
+      PR, consistency review (per `agentic-dev-process`) run at top tier over the changed tree with
+      findings triaged.
 
 ## Phase 3: 0.14 reshapes (R5, R6), each PR writing its migration-guidance footer
 

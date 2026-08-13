@@ -1,5 +1,12 @@
 # FRD: Prose-Policing Test Purge
 
+**Superseded (2026-08-12, before work started).** By operator direction on the simplification-pass
+seeding PR (#509), this effort is absorbed into
+[`2026-08-12-simplification-pass`](../2026-08-12-simplification-pass/frd.md), whose R2 carries every
+requirement below (the survey basis, the three-way resolution rule, tiering, the real-observables
+production changes, the guardrails, and the demonstration requirement). No work had begun under this
+SDD; nothing here records shipped behavior. See `locked.md`.
+
 Seeded by the saga lead for the `2026-08-04-next-steps` saga. This is a seed FRD: it records the
 requirements and the constraints the saga has already settled. The effort lead owns it from the
 merge of the seeding PR onward, along with the HLA, plan, and any LLDs.
