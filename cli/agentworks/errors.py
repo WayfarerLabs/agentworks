@@ -95,6 +95,39 @@ class BrokenStateError(StateError):
     """
 
 
+class BusyStateError(StateError):
+    """The state database is busy: another process holds a lock on the
+    database (for example another process inside BEGIN EXCLUSIVE).
+
+    Distinct from other StateErrors because it is transient: retrying once
+    the other connection finishes is expected to succeed, unlike a durable
+    state problem such as a malformed schema. Named for the kind, not the
+    entity, per this module's taxonomy; ``entity_kind`` carries "database".
+    Takes no arguments: the message and hint are fixed by the type itself,
+    so no caller can inject remediation prose into the message field. One
+    consequence: instances are not picklable, since the default exception
+    reduction replays construction with the original positional message.
+    Nothing serializes an exception today; if that ever becomes a real
+    contract, solve it once across the whole AgentworksError hierarchy
+    rather than special-casing this subtype.
+
+    Covers every state-database busy surface: inspect_schema's
+    classification (the writable path and Database.check_schema), the
+    read-only constructor's own connect (used directly by
+    open_completion_database, doctor, and the guide service), and the
+    migration lock. ``BackupError`` remains separately scoped to the
+    backup and restore operation boundary (``_raise_sqlite_error``); this
+    type does not cover it.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "state database is busy",
+            entity_kind="database",
+            hint="Retry after the other database user finishes.",
+        )
+
+
 class ConnectivityError(AgentworksError):
     """Network or transport-level failure (SSH, Tailscale, host unreachable)."""
 

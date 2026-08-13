@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
 from agentworks.db.migrations import LATEST_VERSION, SCHEMA_SENTINELS
-from agentworks.errors import BackupError, NotFoundError, StateError, ValidationError
+from agentworks.errors import BackupError, BusyStateError, NotFoundError, StateError, ValidationError
 from agentworks.path_rendering import format_host_path
 
 if TYPE_CHECKING:
@@ -60,6 +60,7 @@ class SchemaState(Enum):
     STALE = auto()
     CURRENT = auto()
     FUTURE = auto()
+    BUSY = auto()
     MALFORMED = auto()
 
 
@@ -114,11 +115,13 @@ def inspect_schema(database_path: Path, *, timeout: float | None = None) -> Sche
     """Inspect schema version and cookie without creating or migrating state.
 
     ``timeout`` bounds how long SQLite retries against a busy database
-    (``sqlite3.connect``'s own ``timeout`` parameter) before raising
-    "database is locked", which this function reports as
-    :attr:`SchemaState.MALFORMED`. Omit it (the default) to keep the
-    driver's own default wait; callers that must not block a fast path
-    (completion) pass an explicit, tight bound.
+    (``sqlite3.connect``'s own ``timeout`` parameter) before giving up.
+    Omit it (the default) to keep the driver's own default wait; callers
+    that must not block a fast path (completion) pass an explicit, tight
+    bound. A database still busy when the wait expires is reported as
+    :attr:`SchemaState.BUSY`, a distinct, transient classification from
+    :attr:`SchemaState.MALFORMED`: retrying once the other connection
+    finishes is expected to succeed, unlike genuine corruption.
     """
     if not database_path.exists():
         return SchemaInspection(SchemaState.ABSENT, 0, LATEST_VERSION, None)
@@ -146,10 +149,16 @@ def inspect_schema(database_path: Path, *, timeout: float | None = None) -> Sche
             raise StateError("state database schema cookie is invalid")
     except (OSError, sqlite3.DatabaseError, StateError) as error:
         if isinstance(error, StateError) and "schema version is invalid" in str(error):
-            message = str(error)
-        else:
-            message = "state database schema is unavailable or malformed"
-        return SchemaInspection(SchemaState.MALFORMED, 0, LATEST_VERSION, None, message)
+            return SchemaInspection(SchemaState.MALFORMED, 0, LATEST_VERSION, None, str(error))
+        if _is_busy(error):
+            return SchemaInspection(SchemaState.BUSY, 0, LATEST_VERSION, None)
+        return SchemaInspection(
+            SchemaState.MALFORMED,
+            0,
+            LATEST_VERSION,
+            None,
+            "state database schema is unavailable or malformed",
+        )
     finally:
         if connection is not None:
             connection.close()
@@ -171,10 +180,7 @@ def prepare_database_open(database_path: Path) -> DatabaseOpenPlan:
 
     lock = _acquire_migration_lock(database_path, timeout=MIGRATION_LOCK_TIMEOUT_SECONDS)
     if lock is None:
-        raise StateError(
-            "state database migration lock is busy",
-            hint="Retry after the other Agentworks command finishes.",
-        )
+        raise BusyStateError()
     try:
         qualified = inspect_schema(database_path)
         _raise_if_unopenable(qualified)
@@ -227,10 +233,7 @@ def open_database_safely(
 
     lock = _acquire_migration_lock(database_path, timeout=MIGRATION_LOCK_TIMEOUT_SECONDS)
     if lock is None:
-        raise StateError(
-            "state database migration lock is busy",
-            hint="Retry after the other Agentworks command finishes.",
-        )
+        raise BusyStateError()
     backup: AutomaticBackupResult | None = None
     try:
         current = inspect_schema(database_path)
@@ -331,6 +334,17 @@ def render_restore_command(backup_path: Path, *, platform: str | None = None) ->
     return f"agw database restore {argument}"
 
 
+def _raise_if_busy(inspection: SchemaInspection) -> None:
+    """Raise BusyStateError if BUSY; no-op otherwise. Shared by the two
+    BUSY raise sites (_raise_if_unopenable below and Database.check_schema)
+    so both construct the exact same exception rather than each carrying
+    its own copy; BusyStateError takes no arguments, so this has no way to
+    pass caller-suppliable text through either.
+    """
+    if inspection.state is SchemaState.BUSY:
+        raise BusyStateError()
+
+
 def _raise_if_unopenable(inspection: SchemaInspection) -> None:
     if inspection.state is SchemaState.FUTURE:
         raise StateError(
@@ -338,6 +352,7 @@ def _raise_if_unopenable(inspection: SchemaInspection) -> None:
             f"Agentworks release supports ({inspection.latest_version})",
             hint="Preserve it with `agw database backup`, then use a release that understands its schema.",
         )
+    _raise_if_busy(inspection)
     if inspection.state is SchemaState.MALFORMED:
         raise StateError(
             inspection.error_message or "state database schema is unavailable or malformed",
@@ -374,8 +389,7 @@ def _acquire_migration_lock(database_path: Path, *, timeout: float) -> sqlite3.C
     except sqlite3.DatabaseError as error:
         if connection is not None:
             connection.close()
-        code = getattr(error, "sqlite_errorcode", None)
-        if code is not None and code & 0xFF in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+        if _is_busy(error):
             return None
         raise StateError(f"state database migration lock is unavailable: {error}") from error
 
@@ -557,9 +571,17 @@ def _validate_sqlite_file(path: Path, *, source_kind: str) -> sqlite3.Connection
         _raise_sqlite_error(error, source_kind=source_kind)
 
 
-def _raise_sqlite_error(error: sqlite3.DatabaseError, *, source_kind: str) -> NoReturn:
+def _is_busy(error: BaseException) -> bool:
+    """True for SQLITE_BUSY/SQLITE_LOCKED, masking off SQLite's extended
+    result-code bits in ``sqlite_errorcode`` (the low byte is the primary
+    code). Safe to call on any exception: one without that attribute (a
+    non-SQLite error) simply is not busy."""
     code = getattr(error, "sqlite_errorcode", None)
-    if code is not None and code & 0xFF in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+    return code is not None and code & 0xFF in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED)
+
+
+def _raise_sqlite_error(error: sqlite3.DatabaseError, *, source_kind: str) -> NoReturn:
+    if _is_busy(error):
         raise BackupError(f"{source_kind} is busy; retry after other database users finish") from error
     raise StateError(f"{source_kind} is unavailable or malformed") from error
 
