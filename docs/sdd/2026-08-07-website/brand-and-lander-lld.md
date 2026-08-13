@@ -1218,9 +1218,14 @@ l > 210, q=min(1,(l-210)/50):
 ```
 
 For `delta < -10`, override desired Y with `cruiseY+(delta+.7-cruiseY)*clamp((l-120)/140,0,1)` and,
-before the endpoint, desired VY with `(delta+.7-cruiseY)/14`. For `-10 <= delta < 0`, use the same
-expressions with `clamp((l-150)/110,0,1)` and divisor `11`; fixed step `150*12=1800` is the reviewed
-shallow-fall descent onset. At the endpoint desired VY is `-1.5`.
+before the endpoint, desired VY with `(delta+.7-cruiseY)/14`. This early descent is safe because the
+target barrier top is at relative Y `delta+11<=1`, below the corridor-safe trajectory. For
+`-10 <= delta < 0`, retain the ordinary corridor desired Y/VY until the candidate's full-precision
+post-layer reference X satisfies `pose.x>=b=91.2`; only then use the same expressions with
+`clamp((l-150)/110,0,1)` and divisor `11`. This exact geometry-derived predicate keeps a
+shallow-fall candidate above the target barrier and NOC envelope until it has cleared their strict-X
+boundary. `delta=-10` belongs to this shallow branch; there is no epsilon or rounded comparison. At
+the endpoint desired VY is `-1.5`.
 
 For state `p` after layer `l`, define `terminalBias=max(0,l-210)*.08` and exactly:
 
@@ -1264,20 +1269,26 @@ exact ordered deck pair plus this derived envelope. Derived v7 retains the exhau
 assignment-to-key mapping, and verification replays every concrete assignment as well as its
 envelope.
 
-The exact feasibility corpus covers all 100 keys without filtering. Its maximum authoritative
-target-contact step is `4,317`; maximum controller burn is `13.00275000000213`; and maximum swept
-hull top is `53.4231353132934 m`. The maximum base-burn witness has origin deck `15.764 m`, delta
-`-2.336 m`, contact step `4,311`, and burn `13.00275000000213`. The `+26.52 m` rise contacts at step
-`4,255`, burns `12.86675000000205`, and reaches hull top `48.21512533862919 m`; the `-25.984 m` fall
-contacts at step `4,232`, burns `12.85325000000207`, and reaches hull top `53.4231353132934 m`. The
-exact algorithm, bounds, enumeration, and payload ordering in sections 10.1-10.2 must regenerate
-those records; a mismatch is a feasibility failure, not permission to relax collision or terrain.
+The exact feasibility corpus covers all 100 keys without filtering: 36 use the deep-fall branch, 12
+use the shallow-fall branch, and 52 are flat or rising. No enumerated key has exactly `delta=-10`,
+but the recipe's inclusive shallow tie remains mutation-protected. The maximum authoritative
+target-contact step is `4,249` for `d:5716:19476`; maximum controller burn is `12.643250000000306`
+for `d:3476:28076`; and maximum swept hull top is `53.4231353132934 m` for `d:31700:5716`. The
+maximum base-burn witness is `d:15828:13996`, with origin deck `15.828 m`, delta `-1.832 m`, contact
+step `4,170`, and burn/base burn `12.617125000000128`. The `+26.52 m` rise `d:3476:29996` contacts
+at step `4,221`, burns `12.526750000000197`, and reaches hull top `48.23789101647469 m`; the
+`-25.984 m` fall `d:31700:5716` contacts at step `4,189`, burns `12.396750000000315`, and reaches
+hull top `53.4231353132934 m`. The largest observed search uses 9,097,092 macro expansions, one
+terminal replay, and selected layer 262; all remain inside the declared ceilings. The exact
+algorithm, bounds, enumeration, and payload ordering in sections 10.1-10.2 must regenerate those
+records; a mismatch is a feasibility failure, not permission to relax collision or terrain.
 
 ### 10.2 Opening proof, fixture authority, and digests
 
 The initial approach remains exactly `(x,y,vx,vy,angle,angularVelocity)=(30,32,.8,-.4,0,0)` with
-fuel `15`. Exact swept replays cover all eight possible site-0 profiles rather than conditioning
-terrain around the spawn:
+fuel `15`. Its proof world sets `originSiteId=null`: the craft has not departed a checkpoint, so the
+origin-platform top exception is disabled throughout opening replay. Exact swept replays cover all
+eight possible site-0 profiles rather than conditioning terrain around the spawn:
 
 | Profile | Deck top | Off/on fixed steps | Contact step | Fuel remaining |
 | ------- | -------- | ------------------ | ------------ | -------------- |
@@ -1419,7 +1430,8 @@ swept substep through first contact. The corpus-wide controller base is exactly:
 ```text
 B = quantumCeil(max over 100 records of
     (successfulControllerBurn - max(0,deckDelta)/3))
-  = 13.05
+  = quantumCeil(12.617125000000128)
+  = 12.65
 allowance(deckDelta) = quantumCeil(B + max(0,deckDelta)/3)
 ```
 
@@ -1937,7 +1949,7 @@ human-reviewed rather than asserted. Every schedule includes an explicit final c
 | Sky parallax          | Same seed, camera left `0,50,-50`; five derived sky chunks                                   | transform `0,-120,120 px`; 20 stars and 1-2 landmarks; two path nodes and exact regeneration on return             |
 | Checkpoint replay     | Award, manual launch, crash, Retry twice                                                     | exact deep checkpoint projection both times; no can, award, ratio, route, power, or progress duplication           |
 | Initial Retry         | Crash before first powered base, then click Retry and later use `r`                          | exact same-seed initial pose/site/window/fuel/progress/ratio; shell focus; no synthesized input                    |
-| Allowance arithmetic  | All 100 proof records and independent engine exhaustion vectors                              | `B=13.05`; exact climb surcharge/quantum ceiling; partial final burn then zero thrust, without route-failure claim |
+| Allowance arithmetic  | All 100 proof records and independent engine exhaustion vectors                              | `B=12.65`; exact climb surcharge/quantum ceiling; partial final burn then zero thrust, without route-failure claim |
 | Short-tap capture     | Down at `0`, eligible up at `20`; release synchronously emits lost capture                   | token/deadline exist before release; pulse remains through `139.999`, ends once at `140`; later loss is no-op      |
 | Input overflow        | 65 alternating edges before one step at 30, 60, and 120 Hz                                   | queue becomes one next-step physical-state snapshot; all frame schedules produce the same result                   |
 | Long run              | 100 successful deterministic sites                                                           | ratios are non-increasing and `>=1`; O(1) direct formula; bounded nodes/edges; exact reserve accounting            |
@@ -1965,11 +1977,12 @@ endpoint pairs, 75 deltas, decks `[3.476,31.7]`, and deltas `[-25.984,26.52]`. R
 without terrain-conditioned placement.
 
 The bounded deterministic solver first certified equal-deck 96 m, then every exact pair. Final
-authority was production swept collision, not the beam score. All 100 contact by step 4,317 with
-burn at most `13.00275000000213` and hull top at most `53.4231353132934`. The complete opening
-corpus in section 10.2 passes from the unchanged fixed initial pose and reserve. This proves design
-feasibility only; implementation must independently generate v7 fixtures and fresh real-browser
-evidence from shipped code.
+authority was production swept collision, not the beam score. All 100 contact by step 4,249 with
+burn at most `12.643250000000306` and hull top at most `53.4231353132934`. The exact branch census
+is 36 deep falls, 12 shallow falls, and 52 flat/rises. The complete opening corpus in section 10.2
+passes from the unchanged fixed initial pose and reserve with `originSiteId=null`. This proves
+design feasibility only; implementation must independently generate v7 fixtures and fresh
+real-browser evidence from shipped code.
 
 The fixed-height layout witness retains exact viewport metrics:
 `clientWidth=scrollWidth=innerWidth`, `clientHeight=scrollHeight=innerHeight`, and `scrollTop=0` at
@@ -2011,7 +2024,7 @@ alias.
 | Layer                                                                   | Required coverage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `node --test website/tests/lander-world.test.mjs`                       | Independently reconstruct the eight global profiles from seed and signed block index only, strict 16 m X cadence, exact normalized mapping/band, linear interpolation, terrain miter join/limit `2`, exact `.36/.40` grade/change bounds, four 96 m phases, all 2,048 assignments and 100 exact pairs, closed-footprint maximum, `+2.5 m` deck equality, and signed regeneration. Rebuild 14 truss members, three uncapped finite lattice columns with six native feet, colliders, and exact `sqrt(1.1296)` terrain-wedge aperture. Mutation-kill site-conditioned terrain, phase lock, curves, rounding, a global datum, shelf/cap, vertical edge, foot drift, or aperture diameter at or above `3.2 m`.                                                                                                                                 |
-| `node --test website/tests/lander-model.test.mjs`                       | Replay all 100 success records and eight openings with exact swept collision, one keyed lookup per pair, contact `<=4320`, hull top `<=56`, unchanged inclusive `2.2/3.6/18/26` limits, and real terrain/structure collision. Pin `B=13.05`, climb surcharge, quantum ceiling, separate engine exhaustion arithmetic, and absence of `smallerFailure`/runtime search. Retain fuel, ratio, checkpoint, Retry, zero-fuel, deployment, reduced-motion, and hidden-time vectors. No assertion encodes authored prose.                                                                                                                                                                                                                                                                                                                         |
+| `node --test website/tests/lander-model.test.mjs`                       | Replay all 100 success records and eight openings with exact swept collision, one keyed lookup per pair, contact `<=4320`, hull top `<=56`, unchanged inclusive `2.2/3.6/18/26` limits, and real terrain/structure collision. Pin `B=12.65`, climb surcharge, quantum ceiling, separate engine exhaustion arithmetic, and absence of `smallerFailure`/runtime search. Retain fuel, ratio, checkpoint, Retry, zero-fuel, deployment, reduced-motion, and hidden-time vectors. No assertion encodes authored prose.                                                                                                                                                                                                                                                                                                                         |
 | `node --test website/tests/lander-phase4l.test.mjs`                     | Mutation-sensitive controller/DOM tests pin exactly two controls-line children in keyboard/touch order, Retry label-source and hint structure without asserting text, internal `RESTART` dispatch, crash focus stability, click/`r` teardown-render-focus order, shell focus with `preventScroll`, and no synthesized input. Existing outside-shell and native-button rejection coverage remains exact.                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `node --test website/tests/lander-phase4m.test.mjs`                     | Mutation-sensitive controller/DOM tests pin five sky chunks, 20 stars, one or two deterministic landmarks in exactly two paths, the complete two-arc crescent, all three one/two-ring profiles, exact circle/ellipse intersections, omitted rear-center arcs, and complete foreground arcs. They retain static/dynamic descriptor equality, bounded reconciliation, `.24` parallax transforms, negative/positive camera following, bidirectional cue changes, pass/reverse/return, and no horizontal-bound failure. They also pin the exact opening half-gauge, post-award full reference without cap, `.9 s` deploy travel, unchanged refuel/power timing, hidden-time freeze, reduced-motion atomic projection, and structural copy/link/accessibility sources without embedding authored wording.                                      |
 | Derivation CLI fixture verification                                     | Generate temporary v7 output with v8 deriver and synthesizer v1, review the canonical delta, update geometry/assignment/proof/world/output digests atomically, then run ordinary `--verify`. Enumerate the exact `4 x 2 x 4^4` loop order into 2,048 assignments and 100 numeric-sorted exact pair keys. Regenerate with the pinned prefix, `12/269/6000` bounds, six-command expansion order, `Math.round` key, cost/tie tuple, first-safe-layer selection, and 4,320-step ceiling; exact independent and production replays must agree for all 100 routes and eight openings. Physics digest remains exact. No early-success omission, terrain-variant rejection, runtime fallback, fuel-wasting schedule, scope/order drift, or partial fixture is permitted.                                                                          |
@@ -2199,7 +2212,7 @@ lookup or defensive replay, an unreachable command, production-derived fixtures,
 schemas other than v7, deriver other than v8, synthesizer other than v1, assignment/pair/delta
 counts other than `2048/100/75`, a contact after step 4,320, hull top above 56, missing any of 100
 success or eight opening replays, any `smallerFailure`, fuel-wasting/loitering schedule, base
-allowance other than 13.05, descent credit, partial route/world regeneration, witness seeds other
+allowance other than 12.65, descent credit, partial route/world regeneration, witness seeds other
 than `[11,39,41,STATIC_WORLD_SEED]`, wrong witness nesting, derivation-tool imports, or reviewed
 digest drift. Derivation mutations additionally reject any prefix run/count/state drift; phase,
 `12/269/6000`, candidate, expansion, or replay ceiling drift; command-order, `Math.round` key,
