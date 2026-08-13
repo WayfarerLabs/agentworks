@@ -1,0 +1,73 @@
+# Migration Strategy: Notes Over Shims
+
+Operator direction (2026-08-13): the strategy for every breaking change in this pass is worth
+capturing as its own artifact. It is deliberately not a cutover plan, because there is nothing to
+cut over: 0.14 is unreleased, there is no deployed fleet, and no compat window to bridge. The
+strategy is that migration knowledge is captured once, at commit time, and flows to the people and
+agents who need it through the release pipeline and the self-documenting features, instead of living
+as backward-compatibility code.
+
+## The pipeline
+
+One chain, no new machinery, every link already shipped:
+
+1. **Commit**: every breaking change writes its `BREAKING CHANGE:` footer as operator-actionable
+   migration guidance: what breaks, what to change, one before/after example.
+2. **Changelog**: release-please accumulates those footers into `cli/CHANGELOG.md` under the release
+   that ships them.
+3. **Wheel**: the changelog is packaged into the distribution, so the guidance is offline and
+   version-exact wherever the CLI is installed.
+4. **Guide**: `agw guide concept-release-notes/vX-Y-Z` renders the packaged section as bounded,
+   untrusted-evidence text, and `agw guide concept-migration` teaches consuming it across an
+   installed-version span.
+5. **Assistant agents**: the always-available assistance flow reads the guide, so an agent helping
+   an operator across a break works from the packaged notes for the exact versions involved, without
+   any in-code compat path to discover or maintain.
+
+The default answer to a break is therefore a note, not a shim. Compat code is the exception, and per
+this SDD's acceptance it requires an explicit operator decision with a recorded expiry.
+
+## Inventory: the breaks this pass ships (FRD R5)
+
+| Change                     | Current                                                                               | Target                                                 |
+| -------------------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| Secret mapping key (S5)    | `[secret_config].backends` holds source names; JSON emits both `source` and `backend` | key and JSON name say sources; one name for one fact   |
+| Token config (C3)          | five spellings via a one-arm tagged union                                             | the concrete stored-token shape, one spelling per fact |
+| Env entry compat flag (C4) | `canonicalize_null_companions` re-accepts and advertises a retired spelling           | retired spelling rejected; schema stops advertising it |
+| Compat layers (C7)         | four layers plus two uninventoried objects, no expiry                                 | deleted now, or quarantined with a recorded expiry     |
+
+Each change's PR carries its footer per the pipeline above and updates
+`docs/guides/upgrading-to-0.14.md` in the same PR, which remains the single consolidated
+operator-facing walkthrough for the release.
+
+## Worked example (S5 rename)
+
+Footer shape the convention requires:
+
+```text
+BREAKING CHANGE: [secret_config].backends is renamed to sources; the key
+always held source names. Rename the key in config.toml. Before:
+[secret_config] backends = { api-key = "onepassword-main" }. After:
+[secret_config] sources = { api-key = "onepassword-main" }. The secret
+inspection JSON emits source instead of backend.
+```
+
+What an operator or agent sees after upgrading: `agw guide concept-release-notes/v0-14-0` renders
+that text verbatim as packaged evidence; the assistance flow relays the rename and the one-line
+edit. Nothing in the CLI parses the old key; the error for an unknown `backends` key points at the
+upgrade guide.
+
+## Sequencing and safeguards
+
+- The convention text (CONTRIBUTING section plus the guide migration-topic update) merges before the
+  first R5 PR, so no break lands without its note (plan, phase 3).
+- Footers are reviewed like code: the reviewer checks the note actually enables the migration (names
+  the surface, shows the edit) rather than restating the diff.
+- If the 0.14 window closes before an R5 item lands, the item escalates to the operator for
+  replanning and an FRD amendment; no compat layer appears as an automatic fallback (FRD
+  Acceptance).
+- The bootstrap prompt's stop-path already prevents the worst mismatch: an assistant agent with no
+  compatible stable release available stops rather than improvising against the wrong version's
+  contracts.
+- Release-candidate verification includes rendering the release-notes topic for the candidate
+  version and confirming every R5 footer appears in it.

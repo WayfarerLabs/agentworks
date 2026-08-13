@@ -94,10 +94,11 @@ Phases (detailed in [plan.md](plan.md)):
    sentinels derivation, resolve-path unification, platform extractions, process-tree dedup. The
    three consolidations with real design content (sentinel derivation against callable migrations,
    the guide boundary re-siting, the secrets protocol narrowing) each get a short LLD in this
-   directory before implementation, per the plan. A full migration-strategy artifact is deliberately
-   not used: the R5 breaks are pre-release config and contract changes for which the upgrade guide,
-   the R6 notes, and per-item before/after examples are the proportionate transition design; there
-   is no deployed fleet, no rolling cutover, and no rollback surface for an unreleased version.
+   directory before implementation, per the plan. The transition design for the R5 breaks is
+   captured in [migration-strategy.md](migration-strategy.md) (operator direction, 2026-08-13):
+   notes over shims, delivered through the release pipeline and the self-documenting features. It is
+   deliberately not a cutover plan, because an unreleased version has no fleet, no rolling cutover,
+   and no rollback surface.
 3. **0.14 reshapes.** The breaking fixes ride the release window as one coordinated group (rename,
    union collapse, compat expiry), each writing its R6 migration note.
 4. **Promotion and closeout.** Plugin-boundary design recorded in a permanent home (`docs/arch/` or

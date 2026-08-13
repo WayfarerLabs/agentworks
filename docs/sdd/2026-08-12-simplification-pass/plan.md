@@ -126,10 +126,11 @@ Each item is one PR, pure subtraction plus named structural replacements, full s
 
 ## Phase 3: 0.14 reshapes (R5, R6), each PR writing its migration-guidance footer
 
-- [ ] Establish the migration-notes convention (R6.1, R6.2): a short section in `CONTRIBUTING.md` on
-      writing breaking-change footers as operator-actionable guidance, and the guide migration topic
-      updated to point at packaged release evidence. Done when: the convention text is on main
-      before the first R5 PR merges.
+- [ ] Establish the migration-notes convention (R6.1, R6.2, per
+      [migration-strategy.md](migration-strategy.md)): a short section in `CONTRIBUTING.md` on
+      writing breaking-change footers as operator-actionable guidance (the footer shape the
+      strategy's worked example shows), and the guide migration topic updated to point at packaged
+      release evidence. Done when: the convention text is on main before the first R5 PR merges.
 - [ ] Rename `[secret_config].backends` to name sources (S5, R5.1), updating loader, JSON keys,
       error labels, sample config, and the 0.14 upgrade guide together. Done when: suite green, no
       reconciling it-says-backends-but-means-sources prose remains.

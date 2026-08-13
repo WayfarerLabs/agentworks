@@ -148,6 +148,9 @@ These are settled inputs to this effort, recorded here so the requirements below
 
 ### R6: Breaking changes publish their own migration guidance
 
+The strategy is captured in [migration-strategy.md](migration-strategy.md): notes over shims,
+delivered through the release pipeline and the self-documenting features.
+
 - R6.1: A convention is established: every breaking change writes operator-actionable migration
   guidance into its conventional-commit breaking-change footer, so release-please accumulates it
   into the changelog that ships in the wheel and renders through the guide's release-notes topics.
