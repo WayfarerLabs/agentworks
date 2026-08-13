@@ -1,6 +1,6 @@
 # Plan: The agentworks.build Website
 
-- Status: Phase 4Q terrain recovery design in progress; canonical assistance integrated
+- Status: Phase 4Q terrain recovery implemented and review-clean; operator acceptance pending
 - Date: 2026-08-07
 - Last revised: 2026-08-12
 - FRD: `frd.md`
@@ -1061,14 +1061,14 @@ shipping design is superseded by Phase 4Q and must not be presented as accepted.
 
 ## Phase 4Q: terrain recovery and gameplay-scale relief
 
-- [ ] Restore the exact pre-Phase-4P terrain, deck, route, camera, static-scene, fixture, and test
+- [x] Restore the exact pre-Phase-4P terrain, deck, route, camera, static-scene, fixture, and test
       behavior as a green checkpoint atop the merged canonical onboarding release. Preserve all
       accepted Phase 4M-4O refinements and the thirteen-file website artifact.
-- [ ] Amend and independently review `brand-and-lander-lld.md` for gameplay-scale deterministic
+- [x] Amend and independently review `brand-and-lander-lld.md` for gameplay-scale deterministic
       peaks and valleys, bounded realistic slope/grade change, fixed vertical projection, and the
       lowest collision-safe per-site deck derived from each local terrain envelope. Explicitly ban a
       global deck datum, vertical camera, and vertical overflow.
-- [ ] Implement the reviewed relief through `agentworks-dev`, regenerate fixtures and route proofs
+- [x] Implement the reviewed relief through `agentworks-dev`, regenerate fixtures and route proofs
       atomically, and add mutation-sensitive Node/Python/browser evidence for local deck minimality,
       normal-window silhouettes, collision/support parity, fixed scene height, and zero vertical
       scrolling.

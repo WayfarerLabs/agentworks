@@ -1,6 +1,6 @@
 # FRD: The agentworks.build Website
 
-- Status: Phase 4Q terrain recovery design in progress; canonical assistance integrated
+- Status: Phase 4Q terrain recovery implemented and review-clean; operator acceptance pending
 - Date: 2026-08-07
 - Last revised: 2026-08-12
 - Seeded by: the saga lead, at operator request. This is a standalone effort, deliberately NOT a
