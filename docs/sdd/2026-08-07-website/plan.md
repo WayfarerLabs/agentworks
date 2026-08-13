@@ -1,8 +1,8 @@
 # Plan: The agentworks.build Website
 
-- Status: Phase 4Q terrain recovery implemented and review-clean; operator acceptance pending
+- Status: Phase 4R terrain-only correction in design; canonical assistance integrated
 - Date: 2026-08-07
-- Last revised: 2026-08-12
+- Last revised: 2026-08-13
 - FRD: `frd.md`
 - HLA: `hla.md`
 - Research: `prior-art-research.md`
@@ -24,11 +24,12 @@ retains ownership of production acceptance and the final closeout PR.
 
 PR #486 carries the continuous Lander work. Phases 4A through 4O are accepted gameplay history;
 Phase 4P's automated record remains immutable but its product behavior was rejected by the operator,
-and Phase 4Q restores the accepted baseline before introducing corrected relief. The PR preserves
-the established site, canonical assistance projection, hosting, and routes throughout that recovery.
+Phase 4Q restores the accepted fixed-scene baseline, and Phase 4R owns the terrain correction. The
+PR preserves the established site, canonical assistance projection, hosting, and routes throughout
+that recovery.
 
-`locked.md` never merges before R1-R25 and R27 plus AC1-AC26 and AC28 are accepted in production;
-superseded R26/AC27 are historical evidence, not closeout gates. Every earlier merge is
+`locked.md` never merges before R1-R25 and R28 plus AC1-AC26 and AC29 are accepted in production;
+superseded R26-R27 and AC27-AC28 are historical evidence, not closeout gates. Every earlier merge is
 independently useful and operable. The first release was honest without an onboarding claim, and the
 integrated release consumes the canonical source from the same reviewed PR while preserving
 deterministic source identity; no permanent website code binds to a branch-only or duplicated
@@ -1072,15 +1073,34 @@ shipping design is superseded by Phase 4Q and must not be presented as accepted.
       atomically, and add mutation-sensitive Node/Python/browser evidence for local deck minimality,
       normal-window silhouettes, collision/support parity, fixed scene height, and zero vertical
       scrolling.
-- [ ] Run complete website/repository gates, independent code review, fresh-eyes visual review,
-      exact-head CI/CodeQL, and refresh port 8766 only after the corrected immutable artifact is
-      clean. Do not claim success from numeric extrema alone.
-- [ ] Obtain operator hands-on acceptance of ordinary gameplay terrain and platform placement before
-      marking corrected relief complete.
 
-Definition of done: terrain is visibly varied and navigable at play scale, platforms sit only as
-high as their local ground requires, the scene never scrolls vertically, every deterministic and
-collision proof is green, and the operator accepts the actual game rather than only its tests.
+The operator's 2026-08-13 hands-on review accepted the fixed-scene recovery but rejected Phase 4Q's
+curved, insufficiently varied terrain and terrain-coupled site cycle. Completed Phase 4Q work
+remains immutable history; Phase 4R replaces only terrain generation, terrain-derived deck/support
+geometry, and the proofs and permanent documentation that necessarily consume them.
+
+## Phase 4R: straight-segment lunar terrain
+
+- [ ] Amend and independently review `brand-and-lander-lld.md` for a strict-X straight-segment
+      terrain authority whose complete surface remains in normalized `[0.1,0.6]`, visibly exercises
+      that band in ordinary gameplay, and retains bounded navigable grade and grade change.
+- [ ] Prove horizontal site placement is selected without terrain-height input, then pin the deck
+      exactly `2.5 m` above the independently reconstructed maximum terrain height beneath the full
+      closed platform-to-NOC footprint; extend the existing integrated supports to native terrain
+      without an artificial height cap.
+- [ ] Implement only the reviewed terrain, terrain-derived structure geometry, route fixtures, and
+      their required validators, tests, and permanent docs. Do not change controls, vehicle physics,
+      landing tolerance, fuel, mission copy, sky, power-up behavior, or any other presentation.
+- [ ] Run derivation feasibility, complete website/repository gates, independent code review, and
+      fresh-eyes browser review. Prove collision/render/static parity, forward/reverse determinism,
+      fixed `25/16` projection, and zero vertical scrolling at all required viewport sizes.
+- [ ] Refresh port 8766 only after the exact reviewed head and exact-head CI/CodeQL are green, then
+      obtain operator hands-on acceptance before marking Phase 4R complete.
+
+Definition of done: the actual game shows angular straight-line lunar terrain spanning the requested
+vertical band, every platform is placed independently and then lifted exactly 2.5 m above its own
+under-footprint maximum, supports reach native terrain, no unrelated behavior changes, and the
+operator accepts the hands-on result with no vertical scrolling.
 
 ## Phase 5: CI and default Pages deployment
 
@@ -1192,7 +1212,7 @@ with no branch-only dependency, duplicated bootstrap, or website-owned continuin
       metadata/CSP, byte-equivalent Lander/404 game subtree, and compact 404 title after onboarding
       integration.
 
-Definition of done: R1-R25 and R27, AC2-AC3, and AC5-AC26 plus AC28 hold through the existing site
+Definition of done: R1-R25 and R28, AC2-AC3, and AC5-AC26 plus AC29 hold through the existing site
 and pipeline, with the temporary notice removed rather than retained as configuration.
 
 ## Phase 9: complete acceptance and closeout
@@ -1217,7 +1237,7 @@ and pipeline, with the temporary notice removed rather than retained as configur
       run final gates, obtain the required closeout review, and hand the ready PR to the operator
       for merge.
 
-Definition of done: AC1-AC26 and AC28 hold at `https://agentworks.build`, R1-R25 and R27 plus C1-C5
+Definition of done: AC1-AC26 and AC29 hold at `https://agentworks.build`, R1-R25 and R28 plus C1-C5
 are production facts, the deployment is operable without this SDD, all plan boxes are truthful, and
 the effort is locked.
 

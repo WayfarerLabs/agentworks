@@ -1,8 +1,8 @@
 # HLA: The agentworks.build Website
 
-- Status: Phase 4Q terrain recovery implemented and review-clean; operator acceptance pending
+- Status: Phase 4R terrain-only correction in design; canonical assistance integrated
 - Date: 2026-08-07
-- Last revised: 2026-08-12
+- Last revised: 2026-08-13
 - FRD: `frd.md`
 - Research: `prior-art-research.md`
 - Brand direction: `brand-direction.md`
@@ -300,17 +300,18 @@ circular planet with one or two modest elliptical rings. Planet geometry occlude
 center while retaining its foreground arc and the two exposed rear-side segments.
 
 Each deterministic site retains native terrain beneath its complete footprint; it does not replace a
-site span with a flat shelf. One ordered terrain chain remains authoritative through site and chunk
-boundaries, so rendering and collision cannot disagree through duplicate horizontal positions or
-vertical closing segments. Phase 4Q first restores the accepted pre-R26 terrain/camera projection,
-then introduces a deterministic bounded relief kernel at ordinary gameplay scale. Its smooth,
-non-overshooting interpolation and independently tested grade, grade-change, and reversal bounds
-form visible peaks, valleys, ridges, and canyons without sample-to-sample chatter. Each site derives
-the lowest collision-safe deck from the maximum native terrain under that site's complete structural
-footprint plus the exact required clearance; no global deck datum exists. Rendering, collision, site
-feet, clearance, routes, and the static scene consume the same result. The scene retains one fixed
-vertical projection and clips its world internally: there is no vertical camera authority, no
-presentation-only terrain offset, and no page or game vertical scrolling.
+site span with a flat shelf. One ordered strict-X terrain chain remains authoritative through site
+and chunk boundaries, so rendering and collision cannot disagree through duplicate horizontal
+positions or vertical closing segments. Phase 4R uses only linear interpolation between canonical
+vertices: the visible lunar and collision surface contains no curve or smoothing authority. Its
+vertices span the requested normalized `[0.1,0.6]` vertical band at ordinary gameplay scale while
+independently tested segment length, grade, and adjacent-grade-change bounds prevent noisy
+sample-to-sample chatter. Site horizontal position is derived from mission progression without
+terrain-height input. Once its complete structural footprint is fixed, the deck is derived exactly
+`2.5 m` above the maximum native terrain beneath that closed footprint. Rendering, collision, site
+feet, clearance, routes, and the static scene consume the same terrain and derived deck result. The
+scene retains one fixed vertical projection and clips its world internally: there is no vertical
+camera authority, presentation-only terrain offset, page growth, or game/page vertical scrolling.
 
 The materially elevated platform remains exactly three lander widths long beside one solid NOC
 building. One collider-backed open truss uses continuous top and bottom chords and a uniform

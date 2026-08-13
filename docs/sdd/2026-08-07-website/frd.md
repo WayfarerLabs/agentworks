@@ -1,8 +1,8 @@
 # FRD: The agentworks.build Website
 
-- Status: Phase 4Q terrain recovery implemented and review-clean; operator acceptance pending
+- Status: Phase 4R terrain-only correction in design; canonical assistance integrated
 - Date: 2026-08-07
-- Last revised: 2026-08-12
+- Last revised: 2026-08-13
 - Seeded by: the saga lead, at operator request. This is a standalone effort, deliberately NOT a
   child of the 2026-08-04-next-steps saga (see that saga's `target-state.md` out-of-scope section
   for the recorded relationship). It follows the ordinary SDD process: the effort lead owns the HLA
@@ -233,17 +233,33 @@ recorded as a growth path so nothing forecloses it, and none of it is in scope n
   route proof, ceiling behavior, and static no-JavaScript scene all consume the same terrain
   authority. Platforms remain honestly supported above untouched native terrain, and the player and
   target remain visible and reachable across the expanded relief.
-- R27. The operator's hands-on review supersedes R26's exact global relief-band interpretation and
-  rejects its shipping behavior. The game keeps one fixed-height scene with no vertical camera,
-  page-height growth, or vertical scrolling. Terrain variation must be obvious within ordinary
-  gameplay windows as broad navigable peaks, valleys, ridges, and canyons, not only across distant
-  mathematical witnesses; bounded slope and grade change still prevent noisy sawtooth profiles. Each
-  platform uses the lowest collision-safe deck derived from the native terrain envelope under that
-  individual platform and NOC footprint, plus only the required structural clearance. A global deck
-  datum and unnecessarily tall supports are forbidden. Rendering, collision, support feet, site
-  clearance, routes, and the static scene still consume one terrain authority. The known-good
-  pre-R26 terrain/camera behavior is restored before corrected relief is introduced, so a visually
-  rejected redesign never remains the branch baseline merely because automated tests pass.
+- R27. **Superseded historical requirement; not active for shipping.** The operator's hands-on
+  review supersedes R26's exact global relief-band interpretation and rejects its shipping behavior.
+  The game keeps one fixed-height scene with no vertical camera, page-height growth, or vertical
+  scrolling. Terrain variation must be obvious within ordinary gameplay windows as broad navigable
+  peaks, valleys, ridges, and canyons, not only across distant mathematical witnesses; bounded slope
+  and grade change still prevent noisy sawtooth profiles. Each platform uses the lowest
+  collision-safe deck derived from the native terrain envelope under that individual platform and
+  NOC footprint, plus only the required structural clearance. A global deck datum and unnecessarily
+  tall supports are forbidden. Rendering, collision, support feet, site clearance, routes, and the
+  static scene still consume one terrain authority. The known-good pre-R26 terrain/camera behavior
+  is restored before corrected relief is introduced, so a visually rejected redesign never remains
+  the branch baseline merely because automated tests pass.
+- R28. The operator's hands-on review supersedes Phase 4Q's curved summit terrain and
+  terrain-coupled site cycle. Terrain is one deterministic lunar-lander polyline made exclusively of
+  straight segments between canonical vertices: no spline, smoothed interpolation, Bézier, curve
+  command, rounded interpolation, or presentation-only relief authority is permitted. With zero at
+  the top of the instruction rail and one at the top of the fixed scene, every point on the polyline
+  lies inclusively within normalized height `[0.1,0.6]`, and ordinary gameplay windows visibly
+  exercise substantial height variation rather than clustering near one level. Slopes and changes
+  between adjacent segment grades remain bounded so peaks and valleys are navigable rather than
+  noisy. Horizontal site placement is selected from the mission route without consulting terrain
+  height. After the full platform-to-NOC footprint is fixed, its deck is exactly `2.5 m` above the
+  maximum native terrain height under that closed footprint; exposed supports extend independently
+  from the structure to their native terrain contacts, however long that local geometry requires.
+  Rendering, collision, support feet, static recovery, and route proof consume the same polyline.
+  The scene retains its fixed `25/16` projection with no vertical camera, document growth, or
+  vertical scroll.
 
 ## Settled constraints (inherited; do not reopen)
 
@@ -453,16 +469,32 @@ merged and settled on `main`. The first slice must not build toward them specula
   without generation failure. Real browser evidence covers a low basin, high ridge, broad peak, and
   canyon at wide and narrow layouts while the lander, target, cue, HUD, and instruction rail remain
   visible and non-overlapping.
-- AC28. The recovery checkpoint reproduces the pre-R26 terrain, deck, camera, route, and static
-  behavior while preserving later accepted Lander refinements and canonical onboarding. Corrected
-  relief then demonstrates multiple locally visible peaks and valleys in real-browser ordinary
-  gameplay windows, with independently bounded slope and grade change. Every site deck is
-  reconstructed as the lowest permitted value above its own native terrain envelope; fixtures reject
-  a global datum or avoidable support height. Wide, 320 CSS pixel, and 400-percent zoom evidence
-  proves a fixed scene and zero page/game vertical overflow, with no vertical camera transform.
-  Route, collision, first-landing, Retry, 100-site retention, deterministic build, and
-  static/runtime parity evidence remains green, and human review confirms the terrain reads as a
-  navigable landscape rather than a flat line beneath towers.
+- AC28. **Superseded historical criterion; not active for closeout.** The recovery checkpoint
+  reproduces the pre-R26 terrain, deck, camera, route, and static behavior while preserving later
+  accepted Lander refinements and canonical onboarding. Corrected relief then demonstrates multiple
+  locally visible peaks and valleys in real-browser ordinary gameplay windows, with independently
+  bounded slope and grade change. Every site deck is reconstructed as the lowest permitted value
+  above its own native terrain envelope; fixtures reject a global datum or avoidable support height.
+  Wide, 320 CSS pixel, and 400-percent zoom evidence proves a fixed scene and zero page/game
+  vertical overflow, with no vertical camera transform. Route, collision, first-landing, Retry,
+  100-site retention, deterministic build, and static/runtime parity evidence remains green, and
+  human review confirms the terrain reads as a navigable landscape rather than a flat line beneath
+  towers.
+- AC29. Independent reconstruction proves that the shipped terrain contains only strict-X
+  straight-line segments and that every vertex and interpolated point has normalized height within
+  `[0.1,0.6]`. A reviewed seed/window corpus reaches both the lower and upper portions of that band
+  and shows navigable peaks, valleys, rises, and descents at ordinary gameplay scale while enforcing
+  the LLD's exact segment-length, grade, and adjacent-grade-change limits. For every retained site,
+  tests first derive its horizontal placement without terrain-height reads, then independently
+  compute the maximum native height beneath the closed platform-to-NOC footprint and prove exact
+  `deck=max+2.5 m` equality. Every support foot equals the native terrain at its own horizontal
+  coordinate and every rendered member stays within its conservative collider. Forward/reverse
+  generation, canonical success and one-quantum failure proofs, collision/render parity, static
+  recovery, Retry, and 100-site retention remain deterministic and bounded. Real-browser evidence at
+  wide, 320 CSS pixel, 400-percent-equivalent short-height, and touch-landscape viewport sizes
+  proves the fixed `25/16` scene, zero vertical transform, and equality of document client and
+  scroll heights throughout preflight, flight, service, crash, Retry, reversal, and Exit. Operator
+  hands-on acceptance of the actual terrain is required before closeout.
 
 ## Settled implementation rulings
 
