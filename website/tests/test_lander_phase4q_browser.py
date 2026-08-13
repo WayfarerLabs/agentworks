@@ -97,22 +97,98 @@ const retry = () => { restart.click(); return snapshot("retry"); };
 const leave = () => { exit.click(); return snapshot("exit"); };
 const focusFooter = () => { document.querySelector(".footer-game-link").focus({preventScroll: true});
     return snapshot("focus-footer"); };
-const frameTimings = () => {
-    const values = [];
-    for (let index = 0; index < 250; index += 1) {
-        const started = performance.now(); controller.render(); values.push(performance.now() - started);
+const timingSummary = (values) => {
+    const ordered = values.toSorted((left, right) => left - right);
+    return {samples: ordered.length, p95: ordered[Math.ceil(ordered.length * .95) - 1],
+        maximum: ordered.at(-1)};
+};
+const domCounts = () => ({document: document.querySelectorAll("*").length,
+    world: world.querySelectorAll("*").length, worldChildren: world.children.length,
+    terrainPaths: document.querySelectorAll("#terrain-layer > path").length,
+    siteGroups: document.querySelectorAll("#site-layer > .lander-site").length});
+const recordRender = (values, states, maxima) => {
+    const started = performance.now(); controller.render(); values.push(performance.now() - started);
+    states[controller.model.state] = (states[controller.model.state] ?? 0) + 1;
+    const counts = domCounts();
+    maxima.document = Math.max(maxima.document, counts.document);
+    maxima.world = Math.max(maxima.world, counts.world);
+};
+const longevity = (seed) => {
+    const generationValues = [];
+    const frameValues = [];
+    const frameStates = {};
+    const maxima = {sites: 0, chunks: 0, terrainVertices: 0, document: 0, world: 0};
+    let proofPaths = 0;
+    let poweredCheckpoints = 0;
+    let stabilizedDom = null;
+    let model = updateRetention(createRun({seed, reducedMotion: true}));
+    controller.model = model;
+    recordRender(frameValues, frameStates, maxima);
+    for (let completed = 0; completed < 100; completed += 1) {
+        if (model.state === "launching") {
+            for (let step = 0; step < 90 && model.state === "launching"; step += 1) {
+                model = updateRetention(stepFlight(model, {left: .72, right: .72}));
+            }
+            controller.model = model;
+            recordRender(frameValues, frameStates, maxima);
+        }
+        const target = model.retainedSites.find((site) => site.id === model.targetSiteId);
+        model = {...model, pose: {x: target.center, y: target.platformTop + .001,
+            vx: 0, vy: -1, angle: 0, angularVelocity: 0}};
+        const started = performance.now();
+        model = updateRetention(stepFlight(model, zero));
+        generationValues.push(performance.now() - started);
+        if (model.targetRouteProof?.success && model.targetRouteProof?.smallerFailure) proofPaths += 2;
+        const active = model.retainedSites.find((site) => site.id === model.activeSiteId);
+        if (active?.powered && active.nocStage === 7 && model.checkpoint) poweredCheckpoints += 1;
+        maxima.sites = Math.max(maxima.sites, model.retainedSites.length);
+        maxima.chunks = Math.max(maxima.chunks, model.retainedChunks.length);
+        maxima.terrainVertices = Math.max(maxima.terrainVertices, model.terrainVertices.length);
+        controller.model = model;
+        recordRender(frameValues, frameStates, maxima);
+        if (completed === 1) stabilizedDom = domCounts();
     }
-    values.sort((left, right) => left - right);
-    return {p95: values[Math.ceil(values.length * .95) - 1], maximum: values.at(-1)};
+    return {seed, completedSites: model.completedSites, finalState: model.state, proofPaths,
+        poweredCheckpoints,
+        generation: timingSummary(generationValues), frames: timingSummary(frameValues), frameStates,
+        maxima, stabilizedDom, finalDom: domCounts(), cleanupCount: controller.cleanups.length};
 };
 const valleyX = (seed) => (terrainSiteForIndex(seed, 0).center + terrainSiteForIndex(seed, 1).center) / 2;
-window.phase4q = {snapshot, useSeed, service, fail, retry, leave, focusFooter, frameTimings,
-    valleyX, STATIC_WORLD_SEED};
+window.phase4q = {snapshot, useSeed, service, fail, retry, leave, focusFooter, longevity,
+    valleyX, STATIC_WORLD_SEED, listenerTargets: {motion: controller.motion}};
 document.documentElement.dataset.phase4qReady = "true";
 """
 
+LISTENER_TARGETS = {
+    "window": "window",
+    "document": "document",
+    "start": "document.querySelector('#lander-start')",
+    "exit": "document.querySelector('#lander-exit')",
+    "restart": "document.querySelector('#lander-restart')",
+    "shell": "document.querySelector('#lander-scene-shell')",
+    "stage": "document.querySelector('#lander-scene-stage')",
+    "motion": "phase4q.listenerTargets.motion",
+}
 
-def browser_phase4q_contract(output: Path) -> dict[str, object]:
+
+def _listener_counts(connection: DevToolsConnection) -> dict[str, dict[str, int]]:
+    counts: dict[str, dict[str, int]] = {}
+    for name, expression in LISTENER_TARGETS.items():
+        evaluated = connection.call("Runtime.evaluate", {"expression": expression})
+        object_id = evaluated["result"].get("objectId")
+        if object_id is None:
+            raise AssertionError(f"Chromium listener target {name} has no remote object")
+        listeners = connection.call("DOMDebugger.getEventListeners", {"objectId": object_id})["listeners"]
+        by_type: dict[str, int] = {}
+        for listener in listeners:
+            event_type = listener["type"]
+            by_type[event_type] = by_type.get(event_type, 0) + 1
+        counts[name] = by_type
+        connection.call("Runtime.releaseObject", {"objectId": object_id})
+    return counts
+
+
+def browser_phase4q_contract(output: Path, probe_source: str = PROBE) -> dict[str, object]:
     chromium = next(
         (candidate for name in ("google-chrome", "chromium", "chromium-browser")
          if (candidate := shutil.which(name))),
@@ -129,7 +205,7 @@ def browser_phase4q_contract(output: Path) -> dict[str, object]:
     process: subprocess.Popen[bytes] | None = None
     connection: DevToolsConnection | None = None
     try:
-        probe_path.write_text(PROBE, encoding="utf-8")
+        probe_path.write_text(probe_source, encoding="utf-8")
         page.write_text(
             source.replace("</body>", '<script type="module" src="/phase4q-browser.js"></script></body>', 1),
             encoding="utf-8",
@@ -157,7 +233,8 @@ def browser_phase4q_contract(output: Path) -> dict[str, object]:
 
         screenshot_directory = output / "_phase4q-screenshots"
         screenshot_directory.mkdir(exist_ok=True)
-        result: dict[str, object] = {"viewports": {}, "screenshots": [], "frameTimings": None}
+        result: dict[str, object] = {"viewports": {}, "screenshots": [], "longevity": [],
+                                    "listeners": []}
         viewports = (
             ("narrow", 320, 780, False),
             ("zoomEquivalent", 320, 240, False),
@@ -213,7 +290,10 @@ def browser_phase4q_contract(output: Path) -> dict[str, object]:
                         "bytes": len(png), "sha256": hashlib.sha256(png).hexdigest(),
                         "path": str(screenshot),
                     })
-                result["frameTimings"] = connection.evaluate("phase4q.frameTimings()")
+                result["listeners"].append(_listener_counts(connection))
+                for seed in (11, 39, 41, 1095194417):
+                    result["longevity"].append(connection.evaluate(f"phase4q.longevity({seed})"))
+                    result["listeners"].append(_listener_counts(connection))
         return result
     finally:
         if connection is not None:
@@ -235,6 +315,52 @@ def browser_phase4q_contract(output: Path) -> dict[str, object]:
 
 
 class Phase4QBrowserTests(RepositoryFixture):
+    def assert_longevity_contract(self, result: dict[str, object]) -> None:
+        witnesses = result["longevity"]
+        self.assertEqual([witness["seed"] for witness in witnesses], [11, 39, 41, 1095194417])
+        listener_snapshots = result["listeners"]
+        self.assertEqual(len(listener_snapshots), 5)
+        self.assertTrue(all(snapshot == listener_snapshots[0] for snapshot in listener_snapshots))
+        self.assertEqual(listener_snapshots[0], {
+            "window": {"blur": 1, "resize": 1},
+            "document": {"keydown": 1, "keyup": 1, "visibilitychange": 1},
+            "start": {"click": 1},
+            "exit": {"click": 1},
+            "restart": {"click": 1},
+            "shell": {"focusout": 1},
+            "stage": {event: 1 for event in (
+                "pointerdown", "pointermove", "pointerup", "pointercancel", "lostpointercapture"
+            )},
+            "motion": {"change": 1},
+        })
+        listener_count = sum(
+            sum(types.values()) for types in listener_snapshots[0].values()
+        )
+        for witness in witnesses:
+            with self.subTest(seed=witness["seed"], contract="longevity"):
+                self.assertEqual(witness["completedSites"], 100)
+                self.assertEqual(witness["finalState"], "launching")
+                self.assertEqual(witness["proofPaths"], 200)
+                self.assertEqual(witness["poweredCheckpoints"], 100)
+                self.assertEqual(witness["generation"]["samples"], 100)
+                self.assertLess(witness["generation"]["p95"], 25)
+                self.assertLess(witness["generation"]["maximum"], 50)
+                self.assertEqual(witness["frames"]["samples"], 200)
+                self.assertEqual(witness["frameStates"], {"flying": 100, "launching": 100})
+                self.assertLess(witness["frames"]["p95"], 4)
+                self.assertLess(witness["frames"]["maximum"], 25)
+                self.assertEqual(witness["maxima"]["sites"], 3)
+                self.assertLessEqual(witness["maxima"]["chunks"], 5)
+                self.assertLessEqual(witness["maxima"]["terrainVertices"], 72)
+                self.assertLessEqual(witness["maxima"]["world"], 80)
+                self.assertEqual(witness["maxima"]["document"], witness["finalDom"]["document"])
+                self.assertEqual(witness["maxima"]["world"], witness["finalDom"]["world"])
+                self.assertEqual(witness["stabilizedDom"], witness["finalDom"])
+                self.assertEqual(witness["finalDom"]["worldChildren"], 5)
+                self.assertEqual(witness["finalDom"]["terrainPaths"], 2)
+                self.assertEqual(witness["finalDom"]["siteGroups"], 3)
+                self.assertEqual(witness["cleanupCount"], listener_count + 1)
+
     def test_fixed_scene_has_no_page_growth_or_scroll_across_lifecycle(self) -> None:
         result = browser_phase4q_contract(self.build())
         expected = {
@@ -305,5 +431,11 @@ class Phase4QBrowserTests(RepositoryFixture):
         self.assertTrue(all(item["bytes"] > 20_000 for item in screenshots))
         self.assertTrue(all(Path(item["path"]).is_file() for item in screenshots))
         self.assertEqual(len({item["sha256"] for item in screenshots}), 3)
-        self.assertLess(result["frameTimings"]["p95"], 4)
-        self.assertLess(result["frameTimings"]["maximum"], 25)
+        self.assert_longevity_contract(result)
+
+    def test_longevity_witness_rejects_reduced_workload_mutation(self) -> None:
+        mutation = PROBE.replace("completed < 100", "completed < 10", 1)
+        self.assertNotEqual(mutation, PROBE)
+        result = browser_phase4q_contract(self.build(), mutation)
+        with self.assertRaises(AssertionError):
+            self.assertEqual(result["longevity"][0]["completedSites"], 100)
