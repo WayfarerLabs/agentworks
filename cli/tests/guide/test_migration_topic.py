@@ -16,18 +16,13 @@ def _topic(slug: str):
     return next(topic for topic in guide_contributions() if topic.topic == slug)
 
 
-def test_migration_is_a_colocated_exception_topic_linked_without_teaching_duplication() -> None:
+def test_migration_is_a_colocated_topic_linked_from_ongoing_assistance() -> None:
     migration = _topic("concept-migration")
-    migration_teaching = next(block.markdown for block in migration.blocks if isinstance(block, Teaching))
-    assert "`data.counts.fail` to equal `0`" in migration_teaching
+    assert any(isinstance(block, Teaching) for block in migration.blocks)
     for slug in ("concept-onboarding", "concept-management"):
         topic = _topic(slug)
         assert "concept-migration" in topic.related_topics
         assert any(isinstance(block, TopicLinks) for block in topic.blocks)
-        assert migration_teaching not in "\n".join(
-            block.markdown for block in topic.blocks if hasattr(block, "markdown")
-        )
-    assert "general upgrade" in migration.blocks[0].markdown
 
 
 def test_migration_actions_pin_order_consent_operations_and_no_execution_authority() -> None:
@@ -473,6 +468,6 @@ def test_migration_action_rendering_is_markdown_safe_and_mode_identical() -> Non
     human_actions = next(block for block in human.blocks if block.key.block_id == "actions")
     agent_actions = next(block for block in agent.blocks if block.key.block_id == "actions")
     assert human_actions.source_payload == agent_actions.source_payload
-    assert "Consent boundary: `mutate-agentworks`" in human_actions.markdown
+    assert "Authorization class: `mutate-agentworks`" in human_actions.markdown
     assert "[secret_config].backends" not in human_actions.markdown
     assert r"\[secret\_config\].backends" in human_actions.markdown

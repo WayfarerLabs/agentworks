@@ -1,0 +1,12 @@
+{
+  "name": "agentworks",
+  "version": "1.0.0",
+  "description": "Bootstrap the Agentworks CLI and hand off to its built-in agent guide.",
+  "author": {
+    "name": "Wayfarer Labs",
+    "url": "https://github.com/WayfarerLabs"
+  },
+  "homepage": "https://github.com/WayfarerLabs/agentworks",
+  "repository": "https://github.com/WayfarerLabs/agentworks",
+  "license": "MIT"
+}

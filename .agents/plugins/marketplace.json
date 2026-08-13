@@ -1,0 +1,20 @@
+{
+  "name": "agentworks",
+  "interface": {
+    "displayName": "Agentworks"
+  },
+  "plugins": [
+    {
+      "name": "agentworks",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codex/agentworks"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

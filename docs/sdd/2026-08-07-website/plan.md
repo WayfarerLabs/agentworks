@@ -1,32 +1,30 @@
 # Plan: The agentworks.build Website
 
-- Status: Interim implementation complete; release acceptance in progress
+- Status: Canonical assistance integration implemented; production acceptance pending
 - Date: 2026-08-07
-- Last revised: 2026-08-09
+- Last revised: 2026-08-11
 - FRD: `frd.md`
 - HLA: `hla.md`
 - Research: `prior-art-research.md`
 
 ## Delivery shape
 
-This effort now uses two complete website releases, a small interim acceptance-evidence PR, and a
-final closeout PR. The operator's 2026-08-08 direction still governs incomplete design/demo work:
-the existing website PR (number 439) remains draft and does not merge merely to publish artifacts or
-the game. The 2026-08-09 direction defines a new complete first release: that PR may become ready
-and merge when the useful interim Home, Manifesto, Security, dedicated Lander, selected brand,
-accepted custom 404, shared footer/game contracts, CI, automatic Pages deployment, runbook, and
-default-host acceptance are all complete. The custom-domain activation then publishes that honest
-interim release at `agentworks.build`, and the small evidence PR records the observed result.
+This effort records two complete website releases and a final closeout. Phases 0 through 6 preserve
+the first-release journey: PR #439 delivered the useful Home, Manifesto, Security, Lander, custom
+404, shared shell/game contracts, CI, Pages deployment, and runbook without pretending the still-
+developing assistance prompt existed.
 
-After onboarding Phase 3 lands on `main`, a separately reviewed integration PR replaces the bounded
-availability notice with the canonical README bootstrap and copy enhancement. It does not redesign
-the page, fork the content, or create another deployment path. A final closeout PR records complete
-production acceptance, final truthful checkbox flips, and `locked.md`.
+The operator's 2026-08-10 correction then authorized the onboarding-and-discovery effort lead to
+integrate the canonical assistance source and reconcile this effort's FRD, HLA, plan, and shell LLD
+inside PR #480. Phases 7 and 8 are that jointly delivered integration, not a later main-only PR: the
+same feature PR replaces the retired availability notice with the canonical prompt and copy
+enhancement without redesigning the site or creating another deployment path. The website effort
+retains ownership of production acceptance and the final closeout PR.
 
-`locked.md` never merges before AC1-AC19 and R1-R18 are accepted in production. Every earlier merge
-is independently useful and operable: the interim release does not claim onboarding exists, and the
-onboarding release consumes only the eventual canonical contract from `main`. No website code binds
-to the onboarding feature branch.
+`locked.md` never merges before AC1-AC19 and R1-R18 are accepted in production. The first release
+was independently useful and operable without an onboarding claim. The integrated release consumes
+the canonical source from the same reviewed PR while preserving deterministic source identity; no
+permanent website code binds to a branch-only or duplicated contract.
 
 ## Phase 0: design convergence and coordination
 
@@ -476,104 +474,59 @@ evidence commit, PR-body refresh, and scoped exact-head comment, with no further
 
 Definition of done: R3 and AC2 are implemented as a least-privilege automatic pipeline, and the
 interim artifact is merged and live at the default Pages URL without a routine manual publish step;
-Phase 6 retains the one-time same-run root-base redeployment gate before DNS cutover.
+Phase 9 owns the remaining production acceptance and closeout work.
 
-## Phase 6: interim domain activation and acceptance
+## Phase 6: superseded interim activation
 
-- [ ] Start the interim-acceptance branch from `main`, confirm the implementation commit is deployed
-      at the default Pages URL, and keep the branch limited to evidence and truthful documentation
-      updates while the external activation proceeds.
-- [ ] Re-inventory GoDaddy `A`, `AAAA`, `CNAME`, `MX`, `TXT`, and `CAA` records immediately before
-      cutover; save the non-secret before-state and exact rollback record in the feature evidence,
-      commit it, push it, and open the draft evidence PR before any mutation. If any record's
-      purpose is unclear, stop rather than remove it. Ensure any restrictive CAA policy permits
-      `letsencrypt.org`.
-- [ ] Verify `agentworks.build` at the WayfarerLabs organization level before attaching DNS; retain
-      the generated TXT record and record non-secret evidence.
-- [ ] Reconfirm the deployed default Pages URL, set `agentworks.build` as this repository's custom
-      domain, and enforce HTTPS when GitHub makes the option available.
-- [ ] Use GitHub's `Re-run all jobs` on the already verified implementation merge-push workflow;
-      verify the same `main` SHA built with `site_base=/`, deployed successfully, and serves
-      root-based assets and routes before authorizing any DNS mutation. If the run is no longer
-      available for rerun, stop until a separately reviewed activation path exists.
-- [ ] If the custom-domain setting is attached but the root-base rerun fails or cannot be verified,
-      detach the custom domain, use `Re-run all jobs` on that same latest verified `main` push
-      workflow, prove the same SHA rebuilt with `site_base=/agentworks/`, verify the default project
-      URL, leave DNS unchanged, and stop until the complete activation path can be retried.
-- [ ] With explicit operator approval for the recorded cutover, remove only identified conflicting
-      parking/forwarding records; add the then-current GitHub-documented apex `A` records and `www`
-      CNAME. Do not add a wildcard.
-- [ ] Verify DNS answers, certificate hostname, HTTPS, apex canonical metadata, `www` redirect, and
-      the saved record inventory plus approved delta after propagation.
-- [ ] Verify the production home page has sourced product content, permanent links, the semantic
-      availability notice, and no bootstrap, install instruction, copy affordance, external runtime
-      request, analytics, storage, or unexpanded token.
-- [ ] Verify the secondary home-page security link and stable deep-dive URL, sourced threat,
-      boundary, and limitation content, private reporting path, no-JavaScript behavior, and
-      non-preachy hierarchy.
-- [ ] Verify the production footer rocket on all five pages is the final lower-right footer item,
-      has one `/lander/#lander-game` destination, an independent accessible name, at least a 24 by
-      24 CSS-pixel target, visible focus, and no narrow-width or zoom overlap.
-- [ ] Verify the production `/lander/` metadata/CSP, compact heading, static no-JavaScript scene,
-      original twin-plume mark, hidden preflight, keyboard/vi and touch controls, independent plume
-      response, deployment sequence, exact success status, reset boundaries, lifecycle pause, and
-      reduced-motion presentation.
-- [ ] Verify the production custom 404 compact title, explanatory copy, route-home fallback, and
-      byte-equivalent shared game subtree preserve the same game and no-JavaScript contracts.
-- [ ] Run the deferred production compatibility pass in Firefox and Safari/WebKit, with a spoken
-      screen reader, on physical mobile/touch hardware, and on at least one additional computer or
-      device outside the pre-merge machine. Smoke all five pages, record device/OS/browser evidence,
-      and route defects into the next website work round before final closeout.
-- [ ] Run interim accessibility acceptance: keyboard-only flow, visible focus, landmarks/headings,
-      320 CSS pixel reflow, 400 percent zoom, contrast evidence, reduced motion, and recognizable
-      controls independent of terminal familiarity.
-- [ ] Run clean-context interim acceptance: a newcomer understands what Agentworks is, recognizes
-      that guided onboarding is not yet published, and can choose the repository, package,
-      rationale, or security path without explanation. Record timing and any intervention.
-- [ ] Record dated, non-secret interim acceptance evidence and all load-bearing operating facts in
-      `website/README.md` and this feature directory on the existing evidence branch; mark its draft
-      PR ready, obtain review, and merge it. Do not create `locked.md` or claim AC3/AC4.
+The operator's 2026-08-10 integration ruling superseded this unexecuted interim-only phase before it
+began. Phase 2 and Phase 9 retain the durable production browser, accessibility, and device
+acceptance obligations. Availability-notice, no-bootstrap, and unpublished-onboarding checks no
+longer describe a possible shipped state.
 
-Definition of done: R3-R11 and R13-R18 plus AC1, AC2, AC5-AC11, and AC13-AC19's interim conditions
-hold at `https://agentworks.build`; the public site is useful and honest while onboarding remains
-pending.
+## Phase 7: canonical assistance pickup and contract reconciliation
 
-## Phase 7: merged onboarding pickup and integration LLD
+The operator's 2026-08-10 thin-bootstrap correction superseded the unexecuted plan to publish the
+startup disclosure in the website prompt. PR #480 intentionally carries the canonical source and its
+website consumer together. The website projects only the thin install, verification, and guide
+handoff; the installed guide owns disclosure and source review.
 
-- [ ] Check the website feature directory on `origin/main` for late messages before starting.
-- [ ] Confirm onboarding Phase 3 is merged to `main`; inspect its canonical bootstrap source,
-      generator, README block markers, tests, and permanent docs at HEAD. If it has no clean
-      consumer seam, raise the incompatibility rather than parsing a generated harness wrapper.
-- [ ] Confirm the merged canonical disclosure explicitly states intended-workstation placement, full
-      file inspection and command execution access as the workstation account without implicit root,
-      separately explicit elevation, and a concrete strict-posture recommendation. If not, stop and
-      coordinate with the onboarding owner rather than adding website-owned wording.
-- [ ] Delegate `onboarding-integration-lld.md` to an `agentworks-dev` subagent. It pins exact source
-      paths, README fence semantics, byte/newline rules, builder inputs and errors, notice removal,
-      access-disclosure semantics, bootstrap DOM, copy states, and the complete-release test matrix.
-- [ ] Lead reviews the LLD against R1/R2, C1/C3/C5, D3/D6/D10, and the merged onboarding contract.
-- [ ] `agentworks-reviewer` reviews the LLD; all valid findings are resolved and re-reviewed.
+- [x] Check the website feature directory and latest `main` before starting, preserving the merged
+      Manifesto source-path change.
+- [x] Inspect the canonical assistance source, generator, README block markers, tests, and permanent
+      docs at the integrated feature head; consume the authored source rather than a harness
+      wrapper.
+- [x] Reconcile the FRD, HLA, and shell LLD to the thin-bootstrap placement, exact
+      `docs/manifesto.md` source, and four permanent website content inputs.
+- [x] Pin exact source paths, README fence semantics, byte/newline rules, builder inputs and errors,
+      notice removal, semantic bootstrap DOM, copy states, and the complete-release test matrix in
+      the existing shell and bootstrap-packaging LLDs without adding a second integration design.
+- [x] Lead reviews the contract against R1/R2, C1/C3/C5, D3/D6/D10, and the current onboarding
+      contract.
+- [x] `agentworks-reviewer` reviews the implementation contract; valid findings are resolved and
+      re-reviewed.
 
-Definition of done: the final content seam is pinned at file and symbol level against merged code,
-with no branch-only dependency or duplicated bootstrap.
+Definition of done: the final content seam is pinned at file and symbol level against current code,
+with no branch-only dependency, duplicated bootstrap, or website-owned continuing-assistance prose.
 
-## Phase 8: canonical onboarding integration
+## Phase 8: canonical assistance integration
 
-- [ ] Delegate implementation to an `agentworks-dev` subagent with ownership of the main-page
-      onboarding integration, copy enhancement, focused tests, and permanent documentation. The
-      subagent is not alone in the codebase and must preserve concurrent changes.
-- [ ] Delete the interim notice and make the canonical bootstrap a required builder input; enforce
+- [x] Implement the main-page assistance projection, copy enhancement, focused tests, and permanent
+      documentation in an isolated lane based on current `main`.
+- [x] Delete the interim notice and make the canonical bootstrap a required builder input; enforce
       byte identity across source, README, and decoded built HTML, including newline and fence-edge
       cases.
-- [ ] Add the real semantic `pre`/`code` region and progressive copy behavior with accessible
+- [x] Add the real semantic `pre`/`code` region and progressive copy behavior with accessible
       success/failure feedback and a fully usable no-JavaScript path. Do not change the established
       URLs, information architecture, visual system, 404, hosting, or DNS.
-- [ ] Invert interim guards: forbid the availability notice and require canonical bootstrap markup,
-      identity, access-disclosure semantics, copy behavior, and absence of unsupported installation
-      or security prose.
-- [ ] Run focused tests, full CI-equivalent gates, locked-SDD checks, and file-quality lint.
-- [ ] `agentworks-reviewer` and a fresh-eyes reviewer inspect content identity, accessibility,
+- [x] Invert interim guards: forbid the availability notice and require canonical bootstrap markup,
+      identity, thin-scope semantics, copy behavior, and absence of website-owned source-review,
+      startup-disclosure, or security-posture prose.
+- [x] Run focused tests, full CI-equivalent gates, locked-SDD checks, and file-quality lint.
+- [x] `agentworks-reviewer` and a fresh-eyes reviewer inspect content identity, accessibility,
       migration cleanliness, and scope; resolve valid findings and re-review.
+- [x] Apply the operator's 2026-08-12 prose-test simplification: remove the website-owned semantic
+      phrase guard while retaining canonical byte identity, DOM structure, copy behavior, and
+      accessibility coverage. Authored bootstrap wording remains review-owned.
 - [ ] Open the integration PR ready for review, triage Copilot comments, request the saga lead's
       review, resolve all valid findings, and hand the reviewed PR to the operator for merge.
 - [ ] Verify the matching commit deploys automatically to production and that the interim notice is
@@ -595,7 +548,8 @@ pipeline, with the temporary notice removed rather than retained as configuratio
       block to an agent in under one minute. Record timing and any unexplained intervention.
 - [ ] Run complete accessibility acceptance: keyboard-only flow, visible focus, landmarks/headings,
       copy status, 320 CSS pixel reflow, 400 percent zoom, contrast evidence, reduced motion, screen
-      reader, and touch behavior.
+      reader, and physical touch behavior. Complete the production compatibility pass in Firefox and
+      Safari/WebKit on at least one additional device outside the pre-merge machine.
 - [ ] Reverify the production `/lander/`, footer rocket, shared Lander/404 game subtree, and custom
       404 contracts and confirm the onboarding change did not disturb them.
 - [ ] Reverify the home/security information architecture, non-preachy security path, sourced
@@ -612,11 +566,10 @@ locked.
 
 ## Escalation triggers
 
-- The onboarding canonical bootstrap lands without a source or consumer interface the website can
-  use without parsing generated wrappers.
-- The onboarding canonical disclosure omits intended-workstation placement, full workstation-account
-  file/command access without implicit root, separately explicit elevation, or strict-posture
-  requirements, or exposes no stable way to verify them.
+- The canonical assistance source or README parity seam changes so the website would need to parse a
+  generated harness wrapper or maintain a second prompt.
+- The canonical website prompt grows source-review, startup-disclosure, security-posture, or
+  operating guidance instead of handing those concerns to `agw guide --agent`.
 - GitHub Pages policy no longer permits the intended project site, or the site gains a commercial
   transaction/SaaS purpose.
 - The repository or organization plan cannot enable Pages or a custom domain.

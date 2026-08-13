@@ -381,7 +381,9 @@ Every full guide request follows this order:
    unavailable dynamic topics in requested order, or emit nothing if any slug is unknown.
 
 The markdown includes the same framed error message and hint the CLI would show, without traceback
-or raw configuration. It exits 1 because live facts were requested but unavailable. No output begins
+or raw configuration. A missing configuration file is normal guide input on a clean workstation: the
+authored or unavailable topic content and framed setup guidance render with exit 0 for an index or
+selected topic. Unreadable, malformed, or otherwise invalid configuration exits 1. No output begins
 before atomic existence validation, and no partial dynamic facts from a failed build are retained.
 Catalog issues and system failure are independent sections. Completion uses the same attempt but
 degrades to retained authored names plus code-owned bare kind names and exits 0.
@@ -390,10 +392,10 @@ degrades to retained authored names plus code-owned bare kind names and exits 0.
 unavailable and assessment classifies it as `unverifiable`; it must not trigger a doctor action as
 if a host check had actually failed.
 
-Missing configuration is broken configuration, not a cue to create it or prompt. Guide code never
-changes interactivity, catches a prompt, substitutes a prompt backend, or retries with a reduced
-registry. A test installs a prompt handler that raises and proves both successful and broken view
-construction leave it untouched.
+Missing configuration is not a cue to create it or prompt. Guide code never changes interactivity,
+catches a prompt, substitutes a prompt backend, or retries with a reduced registry. A test installs
+a prompt handler that raises and proves both successful and broken view construction leave it
+untouched.
 
 ## Inert onboarding actions
 

@@ -285,14 +285,16 @@ new run records the refined source.
       retains its heading and named scene, and 404 retains its message, named scene, and breadcrumb
       route-home action. No surface depends on terminal familiarity.
 - [ ] Keyboard-only traversal reaches each visible skip link, breadcrumb home crumb, GitHub, PyPI,
-      all three footer links, and both Lander/404 start controls in source order with a visible
-      focus outline. The footer rocket target is at least 24 by 24 CSS pixels and is not clipped.
+      Home copy button, all three footer links, and both Lander/404 start controls in source order
+      with a visible focus outline. Copy success or failure does not move focus. The footer rocket
+      target is at least 24 by 24 CSS pixels and is not clipped.
 - [ ] A screen reader reports each page title, header, main, footer, one `h1`, nested section
       headings, breadcrumb current state, named navigation, visible CTA labels without decorative
-      icon noise, sourced links, and 404 status/focus behavior. Initial game controls remain hidden.
+      icon noise, sourced links, copy status, and 404 status/focus behavior. Initial game controls
+      remain hidden.
 - [ ] With reduced motion enabled, Home, Manifesto, and Security remain motion-free and 404 follows
       the existing no-cue, direct-success contract. Human touch checks confirm page scroll outside
       the active scene and tap, hold, and drag behavior inside it.
-- [x] In a clean context, a visitor identifies what Agentworks is, sees that guided onboarding is
-      not yet published, and can choose GitHub, PyPI, Manifesto, or Security without explanation.
-      Record timing and any intervention.
+- [ ] In a clean context, a visitor identifies what Agentworks is, sees and can manually select the
+      canonical bootstrap, and can copy it when clipboard writing is available. Confirm the copied
+      bytes match `packaging/agentworks/assistance.md`; record timing and any intervention.

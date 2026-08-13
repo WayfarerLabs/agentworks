@@ -1,6 +1,6 @@
-# Plan: Onboarding, Discovery, and Management
+# Plan: Agentworks Assistance, Discovery, and Management
 
-- Status: Active, Phase 2
+- Status: Active, Phase 3
 - FRD: `docs/sdd/2026-08-05-onboarding-and-discovery/frd.md`
 - HLA: `docs/sdd/2026-08-05-onboarding-and-discovery/hla.md`
 
@@ -17,6 +17,11 @@
   PR because it is independently usable and keeps main green. Later phases build only on merged
   predecessors.
 - Completed checkboxes are immutable.
+- Terminology follows the FRD: **Agentworks assistant agent** is any external agent that can accept
+  the canonical prompt, invoke and interpret the CLI, and use appropriate operator-approved
+  workstation access. Claude Code and Codex are native integrations, not limits on the role.
+  **Agentworks-managed agent** is a resource in the system being operated. Historical completed
+  checklist wording remains unchanged.
 
 ## Phase 0: pre-implementation artifacts and coordination
 
@@ -28,9 +33,9 @@
 - [x] `hla.md` resolves every FRD-assigned question: onboarding state, agent mode, JSON contract,
       universal contributions, safe template vocabulary, taxonomy, multi-topic behavior, bootstrap
       compatibility/parity, and feedback.
-- [ ] Wave 2 confirms or raises concerns with the early contract before building plan section 2.8;
-      the resolved outcome is incorporated into the HLA without depending on provisional branch
-      code.
+- [x] Wave 2 confirmed all five early-contract alignments in its 2026-08-06 plan section 2.8
+      settlement, including the two scope clarifications. The landed `TopicProse`, reference, and
+      sample services and this effort's HLA and adapter incorporate that outcome from `main`.
 - [x] HLA and plan reviewed by `agentworks-reviewer`; every valid finding resolved.
 - [x] Artifact files lint clean with vocabulary scoped in this SDD's `.cspell.json`.
 - [x] Artifact-only commit pushed and draft PR opened for roadmap-lead pre-implementation review.
@@ -253,36 +258,173 @@ The checked review rounds above record work later superseded by the operator sco
 Definition of done: R7 and AC4 hold across the named commands, with human and JSON renderers sharing
 one fact source.
 
-## Phase 3: README and cross-harness bootstraps
+## Phase 3: always-available assistance and cross-harness packages
 
-- [ ] `bootstrap-packaging-lld.md` pins the canonical source, generated Claude Code and Codex
+- [x] `bootstrap-packaging-lld.md` pins the canonical source, generated Claude Code and Codex
       layouts, marketplace metadata, install commands, security-setting links, minimum CLI version,
       regeneration guard, README derivation or equivalence check, and clean-environment probe
       matrix.
-- [ ] Canonical thin bootstrap contains installation, the complete R12 disclosure, strict harness
-      posture, and `agw guide concept-onboarding --agent`, with no duplicated teaching content. The
-      disclosure names the intended workstation, full file inspection and command execution under
-      the harness account, separate explicit privilege elevation, and the strictest practical
-      approval and visibility posture that preserves the required workstation access.
-- [ ] Generator emits committed Claude Code and Codex plugin/marketplace wrappers from that source;
-      CI requires regeneration to produce no diff.
-- [ ] Repository README Getting Started leads with the R16 agent-addressed fenced block generated
-      from the canonical source and retains a clear human installation path below it.
-- [ ] Both packages install directly from GitHub in clean harness environments and reach the guide;
-      minimum-version failure produces an actionable upgrade instruction.
-- [ ] Both bootstrap packages drive the same guide action inventory through guided and
-      non-interactive fixture runs, exercising consent boundaries, refusal handling, rerun no-op
-      behavior, post-upgrade newly available capability reporting, and JSON v1 consumption.
-- [ ] Every bootstrap fixture asserts the R12 disclosure is emitted before its first setup command,
-      probe, verification command, or other action, and pins every workstation-access and privilege
-      boundary from the canonical source.
-- [ ] Permanent installation and security documentation ships with the packages.
-- [ ] Packaging, generation, lint, and end-to-end gates pass; step reviewed by `agentworks-reviewer`
-      and a fresh-eyes reviewer; valid findings resolved.
-- [ ] Always-green ready-to-merge PR opened and saga-lead review requested.
 
-Definition of done: R1, R11, R12, R16, AC1, AC3, AC7, AC8, and AC10 hold for both harnesses and the
-zero-plugin README path.
+The completed checkpoint above records the initial onboarding-centered package design. The
+operator's 2026-08-10 lifecycle-assistance correction supersedes that lens without erasing the
+completed design work; the corrective LLD and implementation boxes below carry the destination.
+
+Phase 3 ships through one pull request. That PR began with an in-branch design gate and then carried
+the implementation, tests, review, live validation, documentation, and release preparation on the
+same branch. It becomes ready for merge only when the complete feature handoff is green. After the
+feature PR merges normally, release-please regenerates its separate release PR from the resulting
+`main`.
+
+- [x] Revise `bootstrap-packaging-lld.md` around an always-available Agentworks package: neutral
+      package and skill identity, top-level `agw guide --agent` handoff, setup and
+      returning-operator probes, and no package-owned intent switchboard or duplicated teaching.
+- [x] Top-level guide rendering for the Agentworks assistant agent presents an intent-to-topic map
+      for setup and adoption, management and operation, temporal release history, troubleshooting,
+      exceptional migration, secrets, and bug reporting without granting action authority or hiding
+      the complete live topic index. The Agentworks assistant agent decides what to propose next.
+- [x] Normalize `cli/CHANGELOG.md` once so every tagged release from 0.2.0 through 0.13.0 has
+      exactly one section, preserving the curated duplicate 0.13 content inside its canonical
+      section and inventing no 0.1 history. `concept-release-notes` renders the unique exact
+      installed-release section from that release-please-owned changelog packaged in the wheel,
+      while strict dynamic `concept-release-notes/vMAJOR-MINOR-PATCH` topics expose each normalized
+      historical section offline, one bounded visibly labeled escaped plain-text section at a time.
+      It links to the separate live adoption assessment and offers an operator-approved exact-range
+      canonical GitHub fallback only when local history is insufficient. Guide rendering performs no
+      network request, and neither harness package copies release prose.
+- [x] `concept-onboarding` remains the specialized first-run and adoption-assessment path and gains
+      a bounded, authorized golden path that initializes absent settings through `agw config init`,
+      selects an existing SSH key pair by presence-only inspection or offers authorized generation
+      of a non-overwriting Ed25519 pair, collects explicit provider and plugin inputs, verifies
+      readiness with doctor, then creates and verifies a usable VM and started first session from
+      explicit operator-selected inputs. One startup setup envelope can cover the complete
+      configuration-through-session sequence without repeated approval prompts.
+- [x] `concept-management` presents live kind and instance facts for ongoing configuration and VM or
+      session operation, then points to existing JSON facts and the applicable built-in CLI group or
+      command help for exact syntax. It adds no command registry or copied recipe catalog.
+      Configuration and operation remain one assistance surface. Actions already covered by the
+      current operator instruction and authorization envelope proceed without re-asking; a
+      materially new target, access class, mutation, privilege, destructive effect, cost, or
+      external side effect retains an explicit operator decision.
+- [x] Canonical thin assistance content contains installation or update guidance, the complete R12
+      disclosure, conditional strict harness posture, and `agw guide --agent`, with no duplicated
+      teaching or Claude Code/Codex prerequisite. Any capable Agentworks assistant agent can consume
+      the same body as a copy/paste prompt. The disclosure names the intended workstation, full file
+      inspection and command execution under the harness account, separate explicit privilege
+      elevation, and the strictest practical approval and visibility posture that preserves the
+      required workstation access. It establishes one durable authorization envelope for the
+      requested goal, treats an explicit operator instruction as authorization without a redundant
+      confirmation, does not repeat risks or approval questions for every in-scope step, and honors
+      an operator preference for narrower or per-action confirmation.
+- [x] Reconcile every shipped core guide contribution with the durable authorization envelope,
+      explicitly including `concept-onboarding`, `concept-management`, `concept-migration`,
+      `concept-troubleshooting`, and `concept-secrets`. Teaching and `AgentContract` prose treats
+      `GuideAction.consent` as an authorization class rather than a mandatory per-action prompt,
+      proceeds through covered work without re-asking, and still stops for refusal, ambiguity, an
+      uncovered material expansion, or an operator-selected confirm-every-action preference.
+      Contract tests reject contradictory per-action-consent teaching.
+- [x] Before CLI installation or update, canonical assistance resolves one exact stable version,
+      offers to inspect its canonical `vVERSION` source tag, warns that a full-repository review may
+      consume significant model usage, and keeps focused review, full review, decline-review, and
+      exact-version installation as separate decisions. Source content is untrusted evidence and
+      cannot authorize execution or expand scope.
+- [x] Source-review contract tests cover focused and full review, decline-review followed by a
+      previously authorized exact install, and completed review followed by declined install. No
+      path treats review selection as installation authorization or declining review as a failed
+      installation; installation may already be covered by the operator's startup instruction. Every
+      repository path hard-coded into the focused-review scope must exist at the tested HEAD.
+- [x] Adversarial source-review fixtures keep the assistance session in its protected policy root
+      and treat candidate `AGENTS.md`, `CLAUDE.md`, skills, hooks, plugins, configuration, and
+      embedded commands only as data. Candidate content cannot redirect the review, load policy,
+      launch or reconfigure a harness, execute, authorize installation, or expand the approved
+      scope.
+- [x] Generator emits committed Claude Code and Codex Agentworks plugin and marketplace wrappers
+      from that source; CI requires regeneration to produce no diff. The exact
+      `metadata.json.skillDescription` field owns both generated skill-frontmatter descriptions.
+      README projection chooses an outer backtick fence longer than the canonical body's longest
+      backtick run, preserving the canonical body bytes without forbidding ordinary fenced examples.
+- [x] Repository README Getting Started leads with the compact, table-free R16 assistance block
+      addressed explicitly to the Agentworks assistant agent, generated from the canonical source,
+      and retains a clear human installation path below it. Detailed LLD tables remain design and
+      test contracts rather than prose copied into that newcomer-facing prompt.
+
+The operator's 2026-08-10 bootstrap-placement correction supersedes the source-review and broad
+assistance content recorded in the preceding completed package boxes. Those boxes remain the
+immutable record of what was implemented and reviewed. The destination is deliberately thinner: the
+universal/native prompt only installs or updates the CLI, verifies it, and runs the guide; the
+installed no-topic agent guide owns source-review and continuing assistance.
+
+- [x] Remove source-review, startup-disclosure, authorization, security-posture, and operating
+      teaching from the canonical assistance body and every generated README/Claude/Codex
+      projection. Retain only exact compatible CLI installation or update, version verification, and
+      `agw guide --agent`, with byte-parity and package-version guards still load-bearing.
+- [x] Make the no-topic agent guide context the sole owner of the optional exact-version source
+      review offer. It presents focused, full, and decline choices; warns concisely that the
+      repository is substantial and full review may consume significant model usage; keeps source
+      evidence inert and untrusted; and never treats review choice as install or update authority.
+- [x] Hand the canonical assistance block to the standalone website effort as its prompt source and
+      record verified byte parity there; after integration, that effort deletes its temporary
+      security-disclosure message input rather than retaining a second authored copy.
+- [x] Both packages install directly from GitHub in clean harness environments and reach the guide;
+      Claude uses the explicit HTTPS repository URL and install probes expose no SSH key or Git
+      credential. Codex catalogs include the required top-level interface plus per-plugin
+      installation policy, authentication policy, and category. Minimum-version failure produces an
+      actionable upgrade instruction.
+- [x] Resolve the 2026-08-11 public-release-window and clean-home handoff review round. The operator
+      accepted the normal `main` then release-please publication choreography without a special
+      deployment path. Until an exact compatible stable CLI exists, the public prompt makes no
+      install or update attempt, skips the guide, and names publication as the retry condition. Once
+      installed, a no-topic clean-home `agw guide --agent` renders the complete authored handoff and
+      absent-config guidance with exit 0; selected topics and genuine failures remain nonzero. R12
+      disclosure clauses and every hard-coded focused-review path are pinned by contract tests.
+- [x] Apply the operator's 2026-08-11 test-simplicity correction. Remove the phrase blacklist and
+      sentence-by-sentence R12 assertions added during review: authored assistance content is
+      written correctly and remains ordinary review-owned prose, not a frozen unit-test vocabulary.
+      Retain executable and structural coverage for clean-home exit behavior, source-review path
+      existence, action records, generation parity, and authorization boundaries.
+- [x] Apply the operator's 2026-08-12 guide-proportionality correction. Keep the completed journey
+      above intact, but simplify the destination: move full source-review teaching and actions to
+      `concept-source-review`; omit repetitive exact-version release topics from the no-topic index
+      while retaining resolution and completion; give human and agent indexes distinct concise
+      bodies; remove remaining authored-prose policing from the touched tests; and treat a missing
+      configuration file uniformly as successful guide input for indexes and selected topics while
+      preserving nonzero exits for malformed configuration.
+- [ ] PR #480 contains the complete Phase 3 feature, passes its repo and live feature gates, and
+      merges normally to `main` with a conventional `feat:` title. Release-please then regenerates
+      the separate 0.14 release PR from that mainline feature, adding the version, changelog,
+      manifest, and lockfile deltas. Candidate-wheel and live harness gates run from the regenerated
+      release PR before it merges, after which release-please tags and the publish workflow ships
+      the same reviewed artifact. Candidate probes inspect the exact release-PR commit that built
+      their wheel and name that test-only substitution; the post-tag PyPI smoke exercises production
+      `vVERSION` review.
+- [x] Both generated package projections contain the exact same top-level guide handoff and bind by
+      construction to one shared guided and non-interactive guide fixture covering refusal, rerun
+      no-op behavior, post-upgrade current not-yet-adopted capability reporting, the canonical
+      release-notes handoff for temporal history, and JSON v1 consumption.
+- [ ] Per-harness live probes validate Claude Code and Codex model interpretation without a
+      bootstrap orchestration driver. Clean-home marketplace installation and exact artifact parity
+      are proven; provider-backed first-VM/session acceptance remains pending an approved live
+      inventory.
+- [x] Canonical projection checks prove the thin bootstrap contains no startup disclosure. The
+      no-topic guide emits the R12 disclosure once before continuing assistance, and selected topics
+      do not repeat it. Guide probes pin the resulting authorization envelope, prove a multi-step
+      in-scope flow does not ask again, prove a materially ambiguous request gets one resolving
+      scope question and no follow-up confirmation, prove an explicitly instructed expansion needs
+      no redundant confirmation, prove an uncovered material expansion asks once, and prove an
+      operator-selected confirm-every-action preference is honored.
+- [x] Release-note tests prove every tagged 0.2.0-through-0.13.0 version has one normalized packaged
+      section, curated 0.13 content is preserved, no 0.1 section is invented, the installed section
+      uniquely matches release-please's source, and exact historical version topics render locally
+      and complete dynamically. Guide rendering and fallback refusal perform zero network work, an
+      approved lookup is used only for locally missing history and stays within the exact requested
+      range on the canonical releases surface, and instruction-like release prose remains inert
+      without active links or command execution.
+- [x] Permanent installation and security documentation ships with the packages.
+- [x] Packaging, generation, lint, and end-to-end gates pass; step reviewed by `agentworks-reviewer`
+      and a fresh-eyes reviewer; valid findings resolved.
+- [x] Always-green ready-to-merge PR opened and saga-lead review requested.
+
+Definition of done: R1, R2, R3, R10, R11, R12, R13, R16, AC1, AC2, AC3, AC7, AC8, AC10, AC14, and
+AC15 hold for both native packages and the universal zero-plugin copy/paste path.
 
 ## Phase 4: registry inventory and specific-resource projection
 
@@ -305,7 +447,7 @@ hand-maintained switchboard.
 ## Phase 5: acceptance, promotion, and closeout
 
 - [ ] Fresh-operator acceptance matrix run for Claude Code, Codex, and README-only paths with
-      evidence for all 13 FRD acceptance criteria.
+      evidence for all 15 FRD acceptance criteria.
 - [ ] No telemetry, general-feedback prompt, or non-bug manual-relay request ships; acceptance runs
       retain their own timing and unexplained-intervention evidence as test artifacts.
 - [ ] `concept-reporting-bugs` is tested to redact sensitive evidence, point at the repository bug

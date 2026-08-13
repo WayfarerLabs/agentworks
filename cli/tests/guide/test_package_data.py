@@ -27,6 +27,7 @@ def test_installed_wheel_contains_every_authored_guide_block(tmp_path: Path) -> 
         packaged = set(archive.namelist())
         assert authored <= packaged
         assert not any(name.endswith("guide-content/.markdownlint.jsonc") for name in packaged)
+        assert archive.read("agentworks/CHANGELOG.md") == (project / "CHANGELOG.md").read_bytes()
 
     wheel_environment = tmp_path / "wheel-environment"
     subprocess.run(
