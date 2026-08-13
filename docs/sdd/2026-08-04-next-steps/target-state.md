@@ -1,7 +1,7 @@
 # Target State
 
 - Status: North star, accumulating settled rulings
-- Last updated: 2026-08-08
+- Last updated: 2026-08-13
 
 This document describes where Agentworks is going across this saga effort, synthesized from the
 perspectives in `inputs/`. It is the target of these waves, not a forever vision: when
@@ -84,6 +84,12 @@ live example of the artifact need (operator observation, 2026-08-05): this works
 GitHub through a custom git credential helper serving fine-grained PATs by full HTTP path,
 environment knowledge an agent currently must be told in conversation; a feature provisioning such a
 helper should emit exactly that fact as a skill.
+
+**Ruling (operator, 2026-08-12):** `agw guide` with no topic becomes a **trail sign** — point at the
+topics, do not teach — and the onboarding walkthrough it currently carries (the source-review offer
+and the rest) moves into a dedicated onboarding topic. The same round takes whatever other
+simplifications the onboarding and discovery track has accumulated; the operator's own reading is
+that earlier phases of that effort landed tech debt while unattended.
 
 ### Declarative model (destination 2)
 
@@ -213,6 +219,11 @@ only what is essential to what a VM is. An existing config referencing a moved s
 owning plugin enabled fails with a crisp disabled error naming the surface, the plugin, and the
 exact remediation, per the remediation posture below. This gives the internal plugin boundary
 first-party exercise ahead of wave 8's external promises.
+
+**Scope correction (operator, 2026-08-13):** the effort is the bucketing and nothing more. "I
+literally just wanted to bucket the existing installers." The disabled-error experience described
+above is a nice-to-have, not this effort's work, so the paragraph's crisp-disabled-error requirement
+is deferred rather than dropped.
 
 ### Plugin namespace and name stability (operator ruling, 2026-08-07)
 

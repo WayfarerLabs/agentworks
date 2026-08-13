@@ -1,7 +1,7 @@
 # Child SDDs
 
 - Status: Active ledger
-- Last updated: 2026-08-11
+- Last updated: 2026-08-13
 
 This is the saga's tracking document, the analog of an ordinary SDD's `plan.md`. Completed
 checkboxes are immutable records, per the standard rule. The saga SDD locks when every entry here is
@@ -85,6 +85,14 @@ locked.
       mutation-verified fixes (UserAbort re-raise, malformed-schema fail-closed, restored VM-state
       warning); the plan's checked history restored per the plan-history ruling (see Standing
       process rulings)
+- [x] Assistance phase merged (PR #480, 2026-08-13): always-available Agentworks assistance, with
+      the operator's own simplification rounds on it and the R16 ruling that one full canonical
+      assistance body is the only source
+- [ ] Simplification and trail-sign phase (operator rulings, 2026-08-12; see `target-state.md`):
+      `agw guide` becomes a trail sign, the walkthrough moves to a dedicated onboarding topic, and
+      the track's accumulated tech debt is simplified. Runs first in the pre-0.14 sequence, ahead of
+      the grammar rewrite. This modifies the effort's own SDD; the effort lead owns that revision,
+      including whether its remaining phases still hold as planned
 - [ ] Remaining phases (bootstraps including the README bootstrap that gates 0.14, wave 2 adoption,
       closeout) per the effort's per-phase PR plan
 - [ ] Locked
@@ -138,7 +146,12 @@ locked.
       inventory findings genuinely resolved; conditions are the saga-rename absorption on rebase,
       two LLD self-contradictions, and naming the reserved-built-ins-become-replaceable consequence;
       the shadow-validation machinery question carries a trim-unless-justified presumption)
-- [ ] Implementation complete (moves, disabled errors, guide topics, upgrade-guide step)
+- [x] Scope cut back to the bucketing (operator, 2026-08-13; see `target-state.md`): "I literally
+      just wanted to bucket the existing installers. Nothing more." The disabled-error experience is
+      deferred as a nice-to-have. The design set endorsed above is therefore larger than the work;
+      the effort lead trims the plan to the moves before implementing
+- [ ] Implementation complete (the moves, plus whatever guide-topic and upgrade-guide steps the
+      moves themselves require)
 - [ ] Ships in 0.14.0 (gates the cut per `phasing.md` release mapping)
 - [ ] Locked
 
@@ -210,25 +223,30 @@ Planned children, seeded when their prerequisites land (see `phasing.md`):
 - Wave 6: agentic artifacts and distillation
 - Wave 7: structured control
 - Wave 8: external plugin API
-- Pre-0.14 test-consolidation child (operator ruling, 2026-08-09): an aggressive trim pass runs just
-  before the 0.14.0 cut, soft-gating the tag; the saga lead's accumulating dossier (including the
-  wave 3 enforcement-suite structural pins, whose deferral comments name this child as owner) is its
-  R1 input. The closeout-wave pass remains the final sweep.
-- Resource-CLI grammar child (pending operator decision): `describe-kind` becomes `explain`
-  (matching kubectl's verb), a top-level `agw graph` command owns all relational views with
-  focal-node, kind-filter, direction, depth, and format axes, `describe`'s fate is an open A-or-B
-  (remove, or rebuild as the kind-aware card with a per-kind detail hook), `--write` semantics
-  unify, and the CLI-hygiene audit bundle rides along; breaking, so it shares the pre-0.14 window
-- Prose-test-purge child (seeded 2026-08-11, PR #494 pending): removes the authored-wording
-  assertions the `no-prose-policing-tests` rule now forbids. A dispatched survey put it at roughly
-  190 to 230 wholly prose-policing test functions plus 620 to 700 carrying one riding-along
-  assertion, about one function in five, concentrated in workspaces, agents, guide, sessions and
-  vms; the widest instance is `pytest.raises(match=)` on authored sentences (362 of 609 sites), not
-  the guide content that prompted the ruling. Its R4 items are small production changes (result
-  records for repair/grant/revoke/console-sync, the schema layer's existing structured problems
-  promoted to a test seam, stable error codes, doctor check IDs) and do not gate 0.14 unless the
-  operator asks. Distinct from the test-consolidation child above: that one trims redundancy, this
-  one removes a category of assertion.
+- CLI grammar child (**ruled in and gating, operator, 2026-08-12**; seed PR #491 open in draft):
+  `describe-kind` becomes `explain` (matching kubectl's verb), a top-level `agw graph` command owns
+  all relational views with focal-node, kind-filter, direction, depth, and format axes, `describe`'s
+  fate is an open A-or-B (remove, or rebuild as the kind-aware card with a per-kind detail hook),
+  `--write` semantics unify, and the CLI-hygiene audit bundle rides along. No longer conditional:
+  0.14.0 does not ship until it lands. Runs second in the pre-0.14 sequence, after the onboarding
+  simplification and trail-sign phase, and it owns updating any guide content and docs its renames
+  touch.
+- Pre-0.14 test-consolidation child (operator ruling, 2026-08-09): an aggressive trim pass; the saga
+  lead's accumulating dossier (including the wave 3 enforcement-suite structural pins, whose
+  deferral comments name this child as owner) is its R1 input. Sequenced last (operator, 2026-08-13)
+  as one cleanup pass with the prose-test purge below, after the grammar rewrite lands. The
+  closeout-wave pass remains the final sweep.
+- Prose-test-purge child (seeded 2026-08-11, PR #494 merged; **do not start before the grammar
+  rewrite lands**, operator sequencing 2026-08-13): removes the authored-wording assertions the
+  `no-prose-policing-tests` rule now forbids. A dispatched survey put it at roughly 190 to 230
+  wholly prose-policing test functions plus 620 to 700 carrying one riding-along assertion, about
+  one function in five, concentrated in workspaces, agents, guide, sessions and vms; the widest
+  instance is `pytest.raises(match=)` on authored sentences (362 of 609 sites), not the guide
+  content that prompted the ruling. Its R4 items are small production changes (result records for
+  repair/grant/revoke/console-sync, the schema layer's existing structured problems promoted to a
+  test seam, stable error codes, doctor check IDs) and do not gate 0.14 unless the operator asks.
+  Distinct from the test-consolidation child above: that one trims redundancy, this one removes a
+  category of assertion.
 - Security-architecture doc child: seeds after wave 3 merges; carries the per-platform
   durable-surface inventory (what each provider retains) so provider-boundary reviews check a list
   rather than rediscovering the class incident-by-incident (lesson from wave 3's three-round class
@@ -265,33 +283,34 @@ the interim domain with onboarding still pending, and `website/README.md`, FRD R
 permit that pre-onboarding cutover. Those definitions of done, the runbook, and the README now need
 to state both prerequisites; the saga lead has flagged it on PR #486 rather than editing another
 effort's artifacts. Onboarding's own remaining gate is the live acceptance carried on the
-regenerated 0.14 release PR, so the cutover sits behind that too. No saga coupling follows:
-`target-state.md` stays as written, because the website is out of saga scope and this gate binds two
-adjacent efforts to each other rather than to the saga lock.
+regenerated 0.14 release PR, so the cutover sits behind that too. The ruling is recorded in
+`target-state.md`, which now qualifies its no-structural-coupling statement: one bounded coupling
+exists between two adjacent efforts, and it creates no wave gate, no reverse dependency in
+`phasing.md`, and no saga-lock edge.
 
 GCP scope extraction (operator ruling, 2026-08-11): PR #479 had absorbed a shared install-predicate
 contract change and an AWS installer rewrite discovered during its live acceptance. The shared
 predicate change left the PR. The ruling generalizes: outside of bug fixes for the work in question,
-core-logic modifications are their own efforts. Its permanent home is in review rather than landed:
-PR #497 (dev-process section 1a plus reviewer check 12b) is open with findings outstanding. Two
-follow-ups were filed rather than absorbed:
+core-logic modifications are their own efforts. Its permanent home merged as PR #497 (dev-process
+section 1a plus reviewer check 12b, 2026-08-12). Two follow-ups were filed rather than absorbed:
 [issue 492](https://github.com/WayfarerLabs/agentworks/issues/492) (SSH known-hosts state escapes an
 isolated `HOME` at eleven call sites, every platform) and
 [issue 496](https://github.com/WayfarerLabs/agentworks/issues/496) (the install-command predicate
 contract plus transactional AWS installer completion, carrying the extracted commits and seven open
 findings, among them the predicate test that asserted CI hosts provide zsh and reddened every matrix
-job). Completed as of this round: the shared runner-predicate change left the PR. **Still pending in
-draft at `3ab7ee98`:** the AWS CLI recipe and its install-command teaching remain, and their removal
-is in flight on the operator's instruction after it emerged that the framework already ships
-declarative `snap` support (`vm_template.snap`), which the saga lead's three reviews of that
-machinery never checked for: craftsmanship verified, existence never priced. The replacement needs
-classic-confinement support in the `snap` template field, itself a shared-machinery change and so
-its own small effort.
+job). The AWS CLI recipe and its install-command teaching came out too, on the operator's
+instruction, after it emerged that the framework already ships declarative `snap` support
+(`vm_template.snap`), which the saga lead's three reviews of that machinery never checked for:
+craftsmanship verified, existence never priced. The replacement needs classic-confinement support in
+the `snap` template field, itself a shared-machinery change and so its own small effort. **PR #479
+merged 2026-08-12** with the extraction complete.
 
 Filed the same day but from a different source, so not a GCP follow-up:
 [issue 495](https://github.com/WayfarerLabs/agentworks/issues/495), a doctor TTY color-test flake
-observed on docs-only PR #494, where the tests fake a terminal by patching `isatty` on a stream that
-capture replaces, so parallel CI decides colorization differently from run to run.
+observed on docs-only PR #494, where the tests faked a terminal by patching `isatty` on a stream
+that capture replaces, so parallel CI decided colorization differently from run to run. Fixed and
+closed by PR #499 (2026-08-12): the two independent color readers are now tested directly instead of
+through the capture path.
 
 ## Standing process rulings
 
@@ -302,13 +321,33 @@ review triggers matching them. (A previously recorded enforcement-calibration no
 the operator on 2026-08-10 as personal guidance to the saga lead, not process; the dev-process
 poller rule stands as merged in PR #481, and PR #489 closed unmerged.)
 
-- **Plan-history ruling (operator, 2026-08-10):** completed plan steps may never be removed — no
+- **Only the operator directs (operator, 2026-08-11; permanent homes merged as PRs #500, #501 and
+  #510):** a published review informs, it never authorizes. The author posts a reading, applies
+  `awaiting-direction`, and stops; the fix round begins on the operator's authenticated direction,
+  and the label drops only once every reading has a disposition. The line is drawn by channel, not
+  by reviewer identity: a session's own private pre-handoff reviews keep their fix loop.
+  Bot-maintained lanes (dependabot, release-please) are exempt from the handoff mechanics, since
+  their head moves are server state. The `operator-authority` rule generalizes it past GitHub: one
+  operator, one authority chain, and everything else is input.
+- **Sagas label their PRs (2026-08-13, PR #510):** a `saga:<name>` label on every PR a saga lead
+  seeds or reviews, so concurrent sagas can each enumerate their own surface rather than infer it.
+  This saga uses `saga:next-steps`. Open question filed as issue #511: whether always-on rules
+  reliably reach an agent before its first consequential action, which applies to all fourteen rules
+  rather than to any one of them.
+- **Use the database, not its sidecars (operator, 2026-08-12, from issue #502):** read state through
+  SQLite itself; do not inspect WAL files or other on-disk artifacts to guess whether a read is
+  safe. The completion path had vetoed itself whenever any process held the database open, which
+  broke completions outright. Fixed in PR #503, with the busy-versus-malformed misclassification it
+  exposed fixed in PR #504. Four follow-ups filed rather than absorbed: issues #505 (the remaining
+  database-open seams), #506 (`GuideResponse` should carry the typed system error), #507 (doctor
+  pays the busy wait three times) and #508 (`BusyStateError` documentation truth).
+- **Plan-history ruling (operator, 2026-08-10):** completed plan steps may never be removed, with no
   exception for never-merged, superseded, or expunged work. Everything else strips clean under a
   scope correction (narration, correction framing, abandoned unchecked boxes, definitions of done,
   evidence prose, PR bodies). The sdd skill's checkbox rule stands as written; a clarifying sentence
   lands in the skill so this is not re-litigated.
 - **Contract pricing (operator, 2026-08-09, from the twin scope corrections on #462 and #453):**
-  adversarial verification verifies the contract — it never expands it. More than two or three fix
+  adversarial verification verifies the contract; it never expands it. More than two or three fix
   rounds on one finding is a contract smell: stop and re-price the requirement with the operator
   instead of growing machinery. Reviewers price requirements, not just implementations.
 - **No prose policing (operator, 2026-08-11; permanent home merged as PR #493):** we do not
@@ -319,14 +358,14 @@ poller rule stands as merged in PR #481, and PR #489 closed unmerged.)
   a clarifying paragraph so "enforce invariants" is never read as "assert the sentence", and the
   reviewer asks for deletion rather than a stronger pin. Note for future rounds: a stronger pin is
   the same mistake one size larger, which the saga lead proposed twice before it stuck.
-- **Findings outside an effort's machinery (operator, 2026-08-11; permanent home PENDING in PR #497,
-  open with findings outstanding):** outside of bug fixes for the work in question, core-logic and
-  shared-contract modifications are their own efforts even when another effort found the bug. The
-  test is whether the fix touches machinery this effort owns, settled by asking whether the bug
-  reproduces with the effort reverted and whether the fix changes behavior for consumers who never
-  asked for it. File the finding with root cause and call sites; move already-written commits to
-  their own branch rather than merging them. Reviewers are bound symmetrically: asking for an
-  out-of-scope fix is how scope grows.
+- **Findings outside an effort's machinery (operator, 2026-08-11; permanent home merged as PR #497,
+  2026-08-12):** outside of bug fixes for the work in question, core-logic and shared-contract
+  modifications are their own efforts even when another effort found the bug. The test is whether
+  the fix touches machinery this effort owns, settled by asking whether the bug reproduces with the
+  effort reverted and whether the fix changes behavior for consumers who never asked for it. File
+  the finding with root cause and call sites; move already-written commits to their own branch
+  rather than merging them. Reviewers are bound symmetrically: asking for an out-of-scope fix is how
+  scope grows.
 - **Class sweeps (saga lead, 2026-08-10, from wave 3's provider-boundary rounds):** the first
   instance of a contract-violation class triggers enumeration of every implementation of the same
   seam, each verified on its durable surface, before the class is called fixed.
@@ -403,3 +442,12 @@ open-ended research placeholder.
     consent-teaching reconciliation sweep covers every shipped guide topic family, and the
     operator's R16 ruling keeps one full canonical assistance body as the only source. The last 0.14
     hard gate is in implementation.
+17. Gate status (2026-08-13, post-#480): PR #480 merged, so the assistance phase is done. The cut
+    now has a longer runway by ruling, not by slip: **0.14.0 waits for the CLI grammar rewrite**
+    (operator, 2026-08-12), and the pre-0.14 sequence is (1) the onboarding trail-sign and
+    simplification round, (2) the grammar rewrite, (3) one test cleanup pass absorbing the
+    prose-test purge and the test consolidation. Open 0.14 gates: that sequence, plus the
+    installer-plugins moves (now scope-reduced to the bucketing) and the README bootstrap. Next
+    saga-lead actions: task the onboarding effort with the trail-sign round as a modification to its
+    own SDD, hold the prose-test-purge child until the grammar rewrite lands, and keep the grammar
+    seed (PR #491) moving as the new long pole.
