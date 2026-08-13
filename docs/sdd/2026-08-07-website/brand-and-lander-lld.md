@@ -1397,12 +1397,20 @@ trailing LF; fixture files add exactly one unhashed trailing LF. Digest scopes a
   covers schemas/versions/precision, all preceding digest literals, assignments, records, openings,
   and world witnesses.
 
-The independently unchanged physics digest remains exactly
-`e08f8260b723dd245db88de9ae2cdbac54bf9a97cb0bed1b6f170eda362c48dc`. Geometry, proof, world, and
-output literals are generated from the completed independent v8 tool and reviewed atomically before
-implementation merge; the LLD is not a second fixture authority and does not invent hashes before
-those canonical files exist. Verification recomputes every digest and fails on partial regeneration,
-an old v6 reader, missing assignment/pair/profile, ordering drift, payload-scope drift, or changed
+The independently generated and atomically reviewed digest set is exactly:
+
+```text
+geometryDigest   17af6e4d762acc6dfee5f170d19b2f2952ac86e0844b49837b9f1a848255e8d8
+physicsDigest    e08f8260b723dd245db88de9ae2cdbac54bf9a97cb0bed1b6f170eda362c48dc
+assignmentDigest 82dec99b18672c2c5dd45bac43d19530cd4680e456f7329d183adbed3f9a4102
+proofDigest      3607ac69f8f639694fd0919b61f6786163c5a6bba25665c6baa6d2c238a2d147
+worldDigest      ab4348a78e029553b659e99c14bc3b447b3f6a018943b77c179cf21664445d8f
+outputDigest     f2af9f25bfc91bf9b19600a083bdf2b0d53f8cc050b3e58237b1c8376f213490
+```
+
+The fixture remains primary authority; these review literals detect substitution and do not create a
+second derivation source. Verification recomputes every digest and fails on partial regeneration, an
+old v6 reader, missing assignment/pair/profile, ordering drift, payload-scope drift, or changed
 physics digest.
 
 The exact CLI remains standard-library Node and accepts only:
