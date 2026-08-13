@@ -25,10 +25,10 @@ EMAIL_ADDRESS_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-INTERIM_NOTICE: Final = (
-    "Guided onboarding is not yet published. You can still explore the repository, PyPI package, "
-    "rationale, and security model."
-)
+ASSISTANCE_SOURCE: Final = Path("packaging/agentworks/assistance.md")
+ASSISTANCE_README_BEGIN: Final = b"<!-- BEGIN GENERATED AGENTWORKS ASSISTANCE -->"
+ASSISTANCE_README_END: Final = b"<!-- END GENERATED AGENTWORKS ASSISTANCE -->"
+ASSISTANCE_FENCE_PATTERN = re.compile(br"(`{3,})markdown\n\Z")
 
 REPOSITORY_URL: Final = "https://github.com/WayfarerLabs/agentworks"
 README_SOURCE_URL: Final = f"{REPOSITORY_URL}/blob/main/README.md"
@@ -149,6 +149,58 @@ def _read_utf8(
         if contract is not None:
             raise ContractError(contract, "invalid UTF-8 or byte-order mark") from error
         raise ValueError(f"{path}: invalid UTF-8 or byte-order mark") from error
+
+
+def _read_exact_utf8(path: Path) -> bytes:
+    """Read one real UTF-8 file without newline or byte normalization."""
+    try:
+        if not stat.S_ISREG(path.lstat().st_mode) or path.is_symlink():
+            raise OSError("input is not a regular file")
+        raw = path.read_bytes()
+    except OSError as error:
+        raise ValueError(f"missing/unreadable input: {path}") from error
+    if raw.startswith(b"\xef\xbb\xbf"):
+        raise ValueError(f"{path}: invalid UTF-8 or byte-order mark")
+    try:
+        raw.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ValueError(f"{path}: invalid UTF-8 or byte-order mark") from error
+    return raw
+
+
+def extract_assistance_prompt(repo_root: Path) -> str:
+    """Return the canonical bootstrap prompt after proving README byte parity."""
+    source_path = repo_root / ASSISTANCE_SOURCE
+    source = _read_exact_utf8(source_path)
+    if not source or not source.endswith(b"\n") or b"\r" in source or b"\x00" in source:
+        raise ValueError(f"{source_path}: assistance source must be nonempty NUL-free LF-terminated UTF-8")
+
+    readme_path = repo_root / "README.md"
+    readme = _read_exact_utf8(readme_path)
+    if readme.count(ASSISTANCE_README_BEGIN) != 1 or readme.count(ASSISTANCE_README_END) != 1:
+        raise ValueError(f"{readme_path}: assistance projection markers must each occur exactly once")
+    begin = readme.index(ASSISTANCE_README_BEGIN) + len(ASSISTANCE_README_BEGIN)
+    end = readme.index(ASSISTANCE_README_END)
+    if begin >= end:
+        raise ValueError(f"{readme_path}: assistance projection markers are out of order")
+    projection = readme[begin:end]
+    if not projection.startswith(b"\n\n") or not projection.endswith(b"\n\n"):
+        raise ValueError(f"{readme_path}: assistance projection framing is invalid")
+    fenced = projection[2:-2]
+    opener_end = fenced.find(b"\n")
+    if opener_end < 0:
+        raise ValueError(f"{readme_path}: assistance projection fence is invalid")
+    opener = fenced[: opener_end + 1]
+    match = ASSISTANCE_FENCE_PATTERN.fullmatch(opener)
+    if match is None:
+        raise ValueError(f"{readme_path}: assistance projection fence is invalid")
+    closer = match.group(1)
+    if not fenced.endswith(closer):
+        raise ValueError(f"{readme_path}: assistance projection fence is invalid")
+    projected_source = fenced[opener_end + 1 : -len(closer)]
+    if projected_source != source:
+        raise ValueError(f"{readme_path}: assistance projection differs from canonical source")
+    return source.decode("utf-8")
 
 
 def _fenced_line_indexes(source: str, contract: ContentContract) -> set[int]:
@@ -602,6 +654,7 @@ def extract_content(repo_root: Path) -> dict[str, str]:
             _plain_inline(str(home_blocks[0].value), home_contract, {}),
             quote=True,
         ),
+        "ONBOARDING_PROMPT": html.escape(extract_assistance_prompt(repo_root), quote=False),
     }
     for contract in DOCUMENT_CONTRACTS:
         source = _read_utf8(repo_root / contract.source, contract)

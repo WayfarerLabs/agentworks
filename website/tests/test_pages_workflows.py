@@ -12,12 +12,7 @@ CI_PATH = REPO_ROOT / ".github/workflows/ci.yml"
 PAGES_PATH = REPO_ROOT / ".github/workflows/pages.yml"
 
 PYTHON_TEST_COMMAND = "python3 -m unittest discover -s website/tests -p 'test_*.py'"
-NODE_TEST_COMMAND = (
-    "node --test website/tests/lander-world.test.mjs website/tests/lander-model.test.mjs "
-    "website/tests/lander-phase4i.test.mjs website/tests/lander-phase4j.test.mjs "
-    "website/tests/lander-phase4k.test.mjs website/tests/lander-phase4l.test.mjs "
-    "website/tests/lander-phase4m.test.mjs website/tests/lander-phase4p.test.mjs"
-)
+NODE_TEST_COMMAND = "node --test website/tests/*.test.mjs"
 
 CI_DETERMINISTIC_BUILD_SCRIPT = '''\
 python3 website/build.py --repo-root . --output "${RUNNER_TEMP}/site-root-a" --site-base /
@@ -239,7 +234,7 @@ class WorkflowContractTests(unittest.TestCase):
                 ("Check out source commit", frozenset({"name", "uses", "with"})),
                 ("Set up Node.js", frozenset({"name", "uses", "with"})),
                 ("Python website tests", frozenset({"name", "run"})),
-                ("Node website model tests", frozenset({"name", "run"})),
+                ("Node website tests", frozenset({"name", "run"})),
                 ("Verify deterministic full builds", frozenset({"name", "run"})),
             ),
         )
@@ -264,7 +259,7 @@ class WorkflowContractTests(unittest.TestCase):
             PYTHON_TEST_COMMAND,
         )
         self.assertEqual(
-            step_mapping(website_steps["Node website model tests"])["run"],
+            step_mapping(website_steps["Node website tests"])["run"],
             NODE_TEST_COMMAND,
         )
         self.assertEqual(
@@ -341,7 +336,7 @@ class WorkflowContractTests(unittest.TestCase):
                 ("Check out source commit", frozenset({"name", "uses", "with"})),
                 ("Set up Node.js", frozenset({"name", "uses", "with"})),
                 ("Python website tests", frozenset({"name", "run"})),
-                ("Node website model tests", frozenset({"name", "run"})),
+                ("Node website tests", frozenset({"name", "run"})),
                 ("Verify tested source state", frozenset({"name", "id", "env", "run"})),
                 ("Configure GitHub Pages", frozenset({"name", "id", "uses"})),
                 ("Normalize Pages base path", frozenset({"name", "id", "shell", "env", "run"})),
@@ -404,7 +399,7 @@ class WorkflowContractTests(unittest.TestCase):
             PYTHON_TEST_COMMAND,
         )
         self.assertEqual(
-            step_mapping(build_steps["Node website model tests"])["run"],
+            step_mapping(build_steps["Node website tests"])["run"],
             NODE_TEST_COMMAND,
         )
         self.assertEqual(

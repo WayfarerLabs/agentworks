@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "agentworks",
+  "description": "Bootstrap the Agentworks CLI and hand off to its built-in agent guide.",
+  "owner": {
+    "name": "Wayfarer Labs"
+  },
+  "plugins": [
+    {
+      "name": "agentworks",
+      "description": "Bootstrap the Agentworks CLI and hand off to its built-in agent guide.",
+      "source": "./plugins/claude-code/agentworks"
+    }
+  ]
+}

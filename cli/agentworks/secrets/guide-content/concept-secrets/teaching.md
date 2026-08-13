@@ -10,11 +10,13 @@ optional timeout; each secret maps that source name directly to one scalar `op:/
 configured backend name `onepassword` is not a source alias. The synthesized source names `env-var`
 and `prompt` remain valid directly in `[secret_config].backends`.
 
-Use `agw secret describe NAME` for non-resolving prediction. Use `agw secret verify NAME...` only
-after consent for a real batch proof; it reports one value-free typed outcome per unique name and
-exits nonzero if any outcome is not resolved. Verification refuses interactive sources by default.
-Ask separately before adding `--allow-interaction`, then resolve through the ordinary secure input
-boundary and its injected interaction policy. Never inspect a source broadly to find the value.
+Use `agw secret describe NAME` for non-resolving prediction. Use `agw secret verify NAME...` for a
+real batch proof when the exact names and value-free resolution class are inside the current
+envelope; it reports one value-free typed outcome per unique name and exits nonzero if any outcome
+is not resolved. Verification refuses interactive sources by default. Add `--allow-interaction` only
+when prompt, biometric, or renewed-authentication impact is already explicit in the operator's
+instruction or after one resolving decision. Then resolve through the ordinary secure input boundary
+and its injected interaction policy. Never inspect a source broadly to find the value.
 
 Secret resolution accepts structured multiline text without compaction or alternate encoding. It
 preserves carriage returns, line feeds, and terminal line endings exactly; NUL is the one globally

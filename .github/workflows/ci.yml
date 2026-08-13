@@ -62,6 +62,10 @@ jobs:
         working-directory: cli
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Assistance package fingerprint tests compare installed artifacts
+          # with the actual PR or push base rather than a guessed version.
+          fetch-depth: 0
 
       - uses: astral-sh/setup-uv@v7
         with:
@@ -73,6 +77,8 @@ jobs:
 
       - name: Pytest
         run: uv run pytest tests/ -m 'not integration'
+        env:
+          AGENTWORKS_PACKAGE_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
 
   # File-quality linters and the rulesync drift check both run via the same
   # scripts contributors use locally (./scripts/lint-files.sh, ./scripts/rulesync-upgen.sh
@@ -145,8 +151,8 @@ jobs:
       - name: Python website tests
         run: python3 -m unittest discover -s website/tests -p 'test_*.py'
 
-      - name: Node website model tests
-        run: node --test website/tests/lander-world.test.mjs website/tests/lander-model.test.mjs website/tests/lander-phase4i.test.mjs website/tests/lander-phase4j.test.mjs website/tests/lander-phase4k.test.mjs website/tests/lander-phase4l.test.mjs website/tests/lander-phase4m.test.mjs website/tests/lander-phase4p.test.mjs
+      - name: Node website tests
+        run: node --test website/tests/*.test.mjs
 
       - name: Verify deterministic full builds
         run: |

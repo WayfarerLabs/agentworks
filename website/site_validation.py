@@ -13,7 +13,6 @@ from site_content import (
     CLI_SECRETS_URL,
     EMAIL_ADDRESS_PATTERN,
     IDEMPOTENCY_URL,
-    INTERIM_NOTICE,
     PYPI_URL,
     README_SOURCE_URL,
     REPORTING_URL,
@@ -96,6 +95,7 @@ TEMPLATE_TOKENS: Final = {
         SITE_BASE_TOKEN,
         "{{HOME_META_DESCRIPTION}}",
         "{{HOME_IDENTITY}}",
+        "{{ONBOARDING_PROMPT}}",
     },
     "manifesto.html": {
         SITE_BASE_TOKEN,
@@ -113,7 +113,9 @@ TEMPLATE_TOKENS: Final = {
 }
 TEMPLATE_REQUIRED_LITERALS: Final = {
     "index.html": {
-        "Guided onboarding is not yet published. You can still explore the repository, PyPI package,",
+        f'<script type="module" src="{SITE_BASE_TOKEN}static/onboarding-copy.js"></script>',
+        '<button id="copy-onboarding-prompt" type="button" hidden>Copy prompt</button>',
+        '<p id="copy-status" role="status" aria-live="polite" aria-atomic="true"></p>',
     },
     "manifesto.html": set(),
     "security.html": set(),
@@ -130,6 +132,7 @@ CONTENT_TOKEN_PLACEMENTS: Final = {
     "index.html": {
         "{{HOME_META_DESCRIPTION}}": ("meta", "description"),
         "{{HOME_IDENTITY}}": ("section-class", "identity-panel"),
+        "{{ONBOARDING_PROMPT}}": ("element-id", "onboarding-prompt"),
     },
     "manifesto.html": {
         "{{MANIFESTO_META_DESCRIPTION}}": ("meta", "description"),
@@ -167,8 +170,6 @@ class _TemplatePlacementParser(HTMLParser):
         self.placements: dict[str, list[tuple[str, str, tuple[tuple[str, dict[str, str | None]], ...]]]] = {}
         self.exact_text_placements: set[str] = set()
         self.description_content_tokens: set[str] = set()
-        self.document_text: list[str] = []
-        self.onboarding_text: list[str] = []
         self.onboarding_sections: list[dict[str, str | None]] = []
         self.onboarding_headings = 0
         self.anchors: list[tuple[str, dict[str, str | None], list[str]]] = []
@@ -219,12 +220,8 @@ class _TemplatePlacementParser(HTMLParser):
                 break
 
     def handle_data(self, data: str) -> None:
-        self.document_text.append(data)
         for anchor_index in self.active_anchor_indexes:
             self.anchors[anchor_index][2].append(data)
-        in_onboarding = any(tag == "section" and attrs.get("id") == "onboarding" for tag, attrs in self.stack)
-        if in_onboarding:
-            self.onboarding_text.append(data)
         for token in TOKEN_PATTERN.findall(data):
             location = self.stack[-1][0] if self.stack else "document"
             self.placements.setdefault(token, []).append(("text", location, tuple(self.stack)))
@@ -393,10 +390,8 @@ def _validate_shared_shell(name: str, template: str) -> None:
     parser.feed(template)
     elements = parser.elements
     expected_title, expected_canonical = TEMPLATE_METADATA[name]
-
     if any(element.tag == "style" or "style" in element.attributes for element in elements):
         raise ValueError(f"{name}: inline style cannot alter the reviewed shell visibility")
-
     html_index = _one(
         parser,
         [i for i, element in enumerate(elements) if element.tag == "html"],
@@ -553,7 +548,6 @@ def _validate_shared_shell(name: str, template: str) -> None:
             "alt": "",
         }:
             raise ValueError(f"{name}: small header rocket contract is invalid")
-
     if elements[breadcrumb_index].attributes != {
         "class": "breadcrumbs",
         "aria-label": "Breadcrumb",
@@ -583,7 +577,6 @@ def _validate_shared_shell(name: str, template: str) -> None:
         CURRENT_PAGE_LABELS[name],
         f"{name}: breadcrumb current-page state is invalid",
     )
-
     if elements[external_index].attributes != {
         "class": "service-links",
         "aria-label": "External",
@@ -606,7 +599,6 @@ def _validate_shared_shell(name: str, template: str) -> None:
         or len([element for element in elements if element.tag == "svg"]) != 2
     ):
         raise ValueError(f"{name}: header must contain only the two reviewed service icons")
-
     images = [index for index, element in enumerate(elements) if element.tag == "img"]
     if len(images) != 2:
         raise ValueError(f"{name}: document must contain exactly its header/hero and footer rocket images")
@@ -737,6 +729,17 @@ def _validate_content_token_placements(name: str, template: str) -> _TemplatePla
             ):
                 raise ValueError(f"{name}: metadata token {token} must be the exact description content attribute")
             continue
+        if placement_kind == "element-id":
+            if (
+                kind != "text"
+                or location != "code"
+                or token not in parser.exact_text_placements
+                or not ancestors
+                or ancestors[-1] != ("code", {"id": placement_value})
+                or not any(tag == "section" and attrs.get("id") == "onboarding" for tag, attrs in ancestors)
+            ):
+                raise ValueError(f"{name}: prompt token {token} must be the exact onboarding code text")
+            continue
         allowed_locations = {"div"} if placement_kind != "article-class" else {"article"}
         if kind != "text" or location not in allowed_locations or token not in parser.exact_text_placements:
             raise ValueError(f"{name}: block token {token} must be text in its sourced-content container")
@@ -757,19 +760,88 @@ def _validate_content_token_placements(name: str, template: str) -> _TemplatePla
     return parser
 
 
-def _validate_interim_template(name: str, parser: _TemplatePlacementParser) -> None:
+def _validate_onboarding_template(name: str, parser: _TemplatePlacementParser, template: str) -> None:
     if name != "index.html":
         return
-    document_text = " ".join("".join(parser.document_text).split())
-    onboarding_text = " ".join("".join(parser.onboarding_text).split())
-    if document_text.count(INTERIM_NOTICE) != 1 or onboarding_text.count(INTERIM_NOTICE) != 1:
-        raise ValueError("index.html: interim availability notice must occur exactly once inside onboarding")
     if len(parser.onboarding_sections) != 1:
         raise ValueError("index.html: exactly one onboarding section is required")
-    if parser.onboarding_sections[0].get("aria-labelledby") != "onboarding-heading":
-        raise ValueError("index.html: onboarding section must reference onboarding-heading")
-    if parser.onboarding_headings != 1 or not onboarding_text:
-        raise ValueError("index.html: onboarding must contain its nonempty reviewed heading and notice")
+    if parser.onboarding_headings != 1:
+        raise ValueError("index.html: onboarding requires its reviewed heading")
+    shell = _ShellParser()
+    shell.feed(template)
+    elements = shell.elements
+    section = _one(
+        shell,
+        [index for index, element in enumerate(elements) if element.tag == "section" and element.attributes.get("id") == "onboarding"],
+        "index.html: exactly one onboarding section is required",
+    )
+    if elements[section].attributes != {
+        "id": "onboarding",
+        "class": "status-panel",
+        "aria-labelledby": "onboarding-heading",
+    }:
+        raise ValueError("index.html: onboarding section attributes are invalid")
+    children = _children(shell, section)
+    if [elements[index].tag for index in children] != ["p", "h2", "p", "pre", "div"]:
+        raise ValueError("index.html: onboarding content structure is invalid")
+    label, heading, introduction, prompt, controls = children
+    _validate_visible_leaf(
+        shell,
+        label,
+        {"class": "status-label"},
+        "Get started / Agent",
+        "index.html: onboarding label is invalid",
+    )
+    _validate_visible_leaf(
+        shell,
+        heading,
+        {"id": "onboarding-heading"},
+        "Agentworks CLI bootstrap",
+        "index.html: onboarding heading is invalid",
+    )
+    _validate_visible_leaf(
+        shell,
+        introduction,
+        {},
+        "Copy this prompt into any capable assistant.",
+        "index.html: onboarding introduction is invalid",
+    )
+    prompt_children = _children(shell, prompt)
+    if (
+        elements[prompt].attributes != {"class": "onboarding-prompt"}
+        or len(prompt_children) != 1
+        or elements[prompt_children[0]].tag != "code"
+        or elements[prompt_children[0]].attributes != {"id": "onboarding-prompt"}
+        or _children(shell, prompt_children[0])
+        or "".join(elements[prompt_children[0]].text) != "{{ONBOARDING_PROMPT}}"
+    ):
+        raise ValueError("index.html: onboarding prompt projection is invalid")
+    control_children = _children(shell, controls)
+    if elements[controls].attributes != {"class": "copy-controls"} or [
+        elements[index].tag for index in control_children
+    ] != ["button", "p"]:
+        raise ValueError("index.html: onboarding copy controls are invalid")
+    button, status = control_children
+    if (
+        elements[button].attributes
+        != {"id": "copy-onboarding-prompt", "type": "button", "hidden": None}
+        or _children(shell, button)
+        or _normalized_text(elements[button].text) != "Copy prompt"
+    ):
+        raise ValueError("index.html: onboarding copy button is invalid")
+    if (
+        elements[status].attributes
+        != {"id": "copy-status", "role": "status", "aria-live": "polite", "aria-atomic": "true"}
+        or _children(shell, status)
+        or _normalized_text(elements[status].text)
+    ):
+        raise ValueError("index.html: onboarding copy status is invalid")
+    scripts = [index for index, element in enumerate(elements) if element.tag == "script"]
+    if len(scripts) != 1 or elements[scripts[0]].attributes != {
+        "type": "module",
+        "src": f"{SITE_BASE_TOKEN}static/onboarding-copy.js",
+    }:
+        raise ValueError("index.html: onboarding copy module is invalid")
 
 
 def _validate_game_shell_placement(name: str, parser: _TemplatePlacementParser) -> None:
@@ -813,7 +885,7 @@ def _validate_template(name: str, template: str) -> None:
     if missing_literals:
         raise ValueError(f"{name}: template is missing required reviewed literals: {missing_literals}")
     parser = _validate_content_token_placements(name, template)
-    _validate_interim_template(name, parser)
+    _validate_onboarding_template(name, parser, template)
     _validate_game_shell_placement(name, parser)
     if name == "lander-game.html":
         validate_game_contract(template)

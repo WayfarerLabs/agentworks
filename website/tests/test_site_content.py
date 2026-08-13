@@ -1,6 +1,23 @@
 # ruff: noqa: F405
 
+import html
+
 from site_test_support import *  # noqa: F403
+
+
+def write_assistance_projection(root: Path, source: bytes) -> None:
+    source_path = root / site_builder.ASSISTANCE_SOURCE
+    source_path.write_bytes(source)
+    readme = root / "README.md"
+    content = readme.read_bytes()
+    begin_marker = site_builder.ASSISTANCE_README_BEGIN
+    end_marker = site_builder.ASSISTANCE_README_END
+    begin = content.index(begin_marker) + len(begin_marker)
+    end = content.index(end_marker)
+    longest = max((len(match.group()) for match in re.finditer(br"`+", source)), default=2)
+    fence = b"`" * max(3, longest + 1)
+    projection = b"\n\n" + fence + b"markdown\n" + source + fence + b"\n\n"
+    readme.write_bytes(content[:begin] + projection + content[end:])
 
 
 def synthetic_document(contract, body: str = "") -> str:  # noqa: ANN001
@@ -20,6 +37,7 @@ class SourceContractTests(RepositoryFixture):
             {
                 "HOME_IDENTITY",
                 "HOME_META_DESCRIPTION",
+                "ONBOARDING_PROMPT",
                 "MANIFESTO_CONTENT",
                 "MANIFESTO_META_DESCRIPTION",
                 "SECURITY_CONTENT",
@@ -29,6 +47,7 @@ class SourceContractTests(RepositoryFixture):
         self.assertIn("<strong>Durable agents</strong>", content["HOME_IDENTITY"])
         self.assertIn("<strong>SSH-over-Tailscale control plane</strong>", content["HOME_IDENTITY"])
         self.assertTrue(content["HOME_META_DESCRIPTION"].startswith("A toolkit for managing"))
+        self.assertEqual(content["ONBOARDING_PROMPT"], html.escape(ONBOARDING_PROMPT, quote=False))
         for contract in site_builder.DOCUMENT_CONTRACTS:
             rendered = content[f"{contract.contract_id}_CONTENT"]
             self.assertEqual(rendered.count("<h1 "), 1)
@@ -103,8 +122,8 @@ class SourceContractTests(RepositoryFixture):
         production = (WEBSITE / "site_content.py").read_text(encoding="utf-8")
         self.assertNotIn("docs/why-agentworks.md", production)
 
-    def test_crlf_does_not_break_home_or_complete_documents(self) -> None:
-        paths = [Path("README.md"), *(contract.source for contract in site_builder.DOCUMENT_CONTRACTS)]
+    def test_crlf_does_not_break_complete_documents(self) -> None:
+        paths = [contract.source for contract in site_builder.DOCUMENT_CONTRACTS]
         for relative in paths:
             path = self.root / relative
             path.write_bytes(path.read_text(encoding="utf-8").replace("\n", "\r\n").encode())
@@ -112,6 +131,74 @@ class SourceContractTests(RepositoryFixture):
         self.assertIn("HOME_IDENTITY", content)
         for contract in site_builder.DOCUMENT_CONTRACTS:
             self.assertIn(f"{contract.contract_id}_CONTENT", content)
+
+    def test_assistance_projection_is_exactly_canonical_and_html_escaped(self) -> None:
+        source = b"# Bootstrap <agent> & helper\n\nRun `agw guide --agent`.\n"
+        write_assistance_projection(self.root, source)
+        self.assertEqual(
+            site_builder.extract_assistance_prompt(self.root),
+            source.decode("utf-8"),
+        )
+        self.assertEqual(
+            site_builder.extract_content(self.root)["ONBOARDING_PROMPT"],
+            "# Bootstrap &lt;agent&gt; &amp; helper\n\nRun `agw guide --agent`.\n",
+        )
+        document = parse((self.build() / "index.html").read_text(encoding="utf-8"))
+        self.assertEqual(document.text_by_id["onboarding-prompt"].encode(), source)
+
+    def test_website_sources_do_not_duplicate_the_authored_prompt_body(self) -> None:
+        template = (self.root / "website/templates/index.html").read_text(encoding="utf-8")
+        self.assertNotIn(ONBOARDING_PROMPT, template)
+        self.assertEqual(template.count("{{ONBOARDING_PROMPT}}"), 1)
+        for path in WEBSITE.rglob("*"):
+            if path.is_file() and "tests" not in path.parts:
+                with self.subTest(path=path.relative_to(WEBSITE)):
+                    self.assertNotIn(ONBOARDING_PROMPT.encode(), path.read_bytes())
+
+    def test_assistance_projection_drift_and_framing_fail_closed(self) -> None:
+        readme = self.root / "README.md"
+        original = readme.read_bytes()
+        begin_marker = site_builder.ASSISTANCE_README_BEGIN
+        end_marker = site_builder.ASSISTANCE_README_END
+        variants = (
+            original.replace(begin_marker, b"<!-- changed -->", 1),
+            original.replace(end_marker, begin_marker, 1),
+            original.replace(b"```markdown\n", b"```text\n", 1),
+            original.replace(b"# Agentworks CLI bootstrap", b"# Drifted bootstrap", 1),
+            original.replace(begin_marker, begin_marker + b"\n" + begin_marker, 1),
+        )
+        for changed in variants:
+            readme.write_bytes(changed)
+            with self.subTest(change=changed[:80]), self.assertRaisesRegex(
+                ValueError,
+                "projection|markers|fence",
+            ):
+                site_builder.extract_assistance_prompt(self.root)
+
+    def test_assistance_source_requires_exact_regular_lf_utf8(self) -> None:
+        source_path = self.root / site_builder.ASSISTANCE_SOURCE
+        original = source_path.read_bytes()
+        variants = (
+            b"",
+            original.rstrip(b"\n"),
+            original.replace(b"\n", b"\r\n"),
+            b"A\x00B\n",
+            b"\xef\xbb\xbf" + original,
+            b"\xff\n",
+        )
+        for changed in variants:
+            source_path.write_bytes(changed)
+            with self.subTest(change=changed[:20]), self.assertRaisesRegex(ValueError, "UTF-8|NUL-free|LF-terminated"):
+                site_builder.extract_assistance_prompt(self.root)
+
+    def test_missing_or_symlinked_assistance_source_fails_closed(self) -> None:
+        source_path = self.root / site_builder.ASSISTANCE_SOURCE
+        source_path.unlink()
+        with self.assertRaisesRegex(ValueError, "missing/unreadable"):
+            site_builder.extract_assistance_prompt(self.root)
+        source_path.symlink_to(self.root / "README.md")
+        with self.assertRaisesRegex(ValueError, "missing/unreadable"):
+            site_builder.extract_assistance_prompt(self.root)
 
     def test_document_structure_failures_are_closed(self) -> None:
         path = self.root / site_builder.MANIFESTO_CONTRACT.source

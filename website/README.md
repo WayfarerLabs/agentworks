@@ -7,15 +7,14 @@ combines semantic templates, local CSS and JavaScript, the AGW rocket asset, and
 and complete documents from permanent repository sources. Generated output stays outside the
 repository and can be published by any static host.
 
-The current release is intentionally useful without guided onboarding. The compact Home page renders
-the repository-sourced identity and states that guided onboarding is not yet published. A generated
+The compact Home page renders the repository-sourced identity and the canonical thin CLI bootstrap
+from `packaging/agentworks/assistance.md`. The same bootstrap is projected into the top-level
+README; the build fails unless those two source representations are byte-identical. A generated
 Manifesto presents the complete long-form argument from `docs/manifesto.md`, while a separate
 Security page provides practical depth and a GitHub reporting route. The shared header places the
 GitHub and PyPI destinations once per page. A dedicated Lander page presents the same continuous
 lunar-deployment expedition used as progressive enhancement on the useful 404 fallback. The shared
-footer places the Manifesto, Security, and icon-only Lander destinations once per page. Home
-contains no substitute command or copy control. A later change will replace the notice with the
-canonical onboarding source after that source is available on `main`.
+places the Manifesto, Security, and icon-only Lander destinations once per page.
 
 ## Local build and test
 
@@ -46,14 +45,7 @@ Run the automated suites and repository checks:
 
 ```bash
 python3 -m unittest discover -s website/tests -p 'test_*.py'
-node --test website/tests/lander-model.test.mjs
-node --test website/tests/lander-world.test.mjs
-node --test website/tests/lander-phase4i.test.mjs
-node --test website/tests/lander-phase4j.test.mjs
-node --test website/tests/lander-phase4k.test.mjs
-node --test website/tests/lander-phase4l.test.mjs
-node --test website/tests/lander-phase4m.test.mjs
-node --test website/tests/lander-phase4p.test.mjs
+node --test website/tests/*.test.mjs
 ./scripts/lint-files.sh
 ./scripts/check-locked-sdds.sh
 ./scripts/rulesync-upgen.sh --check
@@ -123,6 +115,7 @@ security/index.html
 static/lander-game.js
 static/lander-model.js
 static/lander-world.js
+static/onboarding-copy.js
 static/lander.css
 static/site.css
 ```
@@ -227,10 +220,13 @@ repository is rejected, a successful build creates no Git status residue.
 
 ## Content ownership
 
-The builder reads three permanent repository inputs:
+The builder reads four permanent repository inputs:
 
 - `README.md` owns the concise product identity rendered on the landing page. Its short design
-  summary remains repository documentation, not additional landing-page content.
+  summary remains repository documentation, not additional landing-page content. Its generated
+  assistance fence is also checked as an exact projection, not treated as an authored second body.
+- `packaging/agentworks/assistance.md` is the single authored source for the Home onboarding prompt.
+  It remains a thin install-or-update, version-verification, and `agw guide --agent` handoff.
 - `docs/manifesto.md` owns every body heading and block rendered on the Manifesto page.
 - `SECURITY.md` owns every body heading and block rendered on the Security page, including the
   private vulnerability reporting channel and URL.
@@ -268,10 +264,10 @@ Allowed absolute source links are preserved. Any other relative link or an unapp
 fails closed.
 
 Templates own only navigation, destination labels, metadata placement, presentation-neutral
-connective text, game-page headings, and the bounded interim availability notice. `website/` does
-not own long-form body headings, product behavior, security claims, vulnerability contact details,
-or installation instructions. The selected SVG and lander implementation are permanent assets and
-must not be regenerated from design-history files.
+connective text, game-page headings, and the semantic container around the canonical onboarding
+projection. `website/` does not own the prompt body, long-form body headings, product behavior,
+security claims, vulnerability contact details, or installation instructions. The selected SVG and
+lander implementation are permanent assets and must not be regenerated from design-history files.
 
 Home, Manifesto, Security, Lander, and 404 use the same breadcrumb-led header and traditional
 footer. The header has exactly one linked `Agentworks` home crumb, a hidden visual separator, a
@@ -290,20 +286,20 @@ mark there and update the favicon projection in the same reviewed change.
 Build artifacts are disposable projections of the templates and permanent sources; maintain the
 sources, not generated HTML.
 
-## Release stages
+## Onboarding projection
 
-The interim release and completed onboarding release use the same URLs, templates, visual system,
-builder, and publishing path. There is no runtime release mode.
+The Home template contains one semantic `pre` and `code` container. The builder reads the canonical
+prompt as exact NUL-free, LF-terminated UTF-8, proves that the collision-proof generated README
+fence contains the same bytes, escapes it for HTML, and places it once. Missing, symlinked,
+malformed, normalized, or divergent inputs fail before output changes. The generated code element's
+decoded text is therefore byte-identical to the canonical source.
 
-The interim artifact must contain the ordinary-text availability notice exactly once and must not
-contain a bootstrap region, installation command, copy control, copy script, dormant onboarding
-token, disabled control, or empty placeholder. Home, Manifesto, and Security have no JavaScript.
-Lander and the custom 404 alone load the same-origin game module; their headings, static scene, and
-404 breadcrumb home route work without scripts.
-
-Once the canonical onboarding contract lands on `main`, a separately reviewed integration will
-delete the notice, add the canonical content as a required input, and prove byte identity with the
-README. Do not anticipate that interface or parse a branch-only wrapper.
+Without JavaScript, the prompt remains visible and manually selectable. The local
+`static/onboarding-copy.js` module reveals the copy button only when clipboard writing is available,
+writes the code element's exact `textContent` on user activation, and reports success or a manual
+fallback through a polite status region without moving focus. It reads no clipboard data, makes no
+network request, and provides no ongoing Agentworks guidance. Manifesto and Security have no
+JavaScript. Lander and the custom 404 load only the same-origin game module.
 
 ## GitHub Pages setup and deployment
 
@@ -316,28 +312,20 @@ custom domain. The `github-pages` environment uses custom deployment-branch poli
 protected branches and has exactly one policy: branch `main`. No site deployment is expected until
 the publishing workflow first runs from a merged `main` commit.
 
-The default project URL may host the useful interim release while onboarding is pending. Do not
-attach `agentworks.build` or change DNS until both the continuous Lander and the canonical
-onboarding integration have passed their recorded acceptance gates on the deployed `main` artifact.
-For the current onboarding effort, its remaining gate is the live acceptance carried by the
-regenerated 0.14 release PR; an implementation merge by itself does not authorize cutover.
-
 1. Set GitHub Pages to use GitHub Actions as its publishing source.
 2. Protect the `github-pages` environment so only the default branch can deploy.
 3. Merge the complete publishing workflow and verify the expected commit at the default Pages URL
    before attaching the custom domain.
-4. Verify that both the continuous Lander and the canonical onboarding integration have passed their
-   recorded acceptance gates on that deployed `main` artifact.
-5. Verify `agentworks.build` for the WayfarerLabs organization and retain the generated GitHub TXT
+4. Verify `agentworks.build` for the WayfarerLabs organization and retain the generated GitHub TXT
    record.
-6. Set `agentworks.build` as this repository's custom domain. Do not mutate DNS yet.
-7. On the same already verified implementation merge-push workflow, use GitHub's **Re-run all
+5. Set `agentworks.build` as this repository's custom domain. Do not mutate DNS yet.
+6. On the same already verified implementation merge-push workflow, use GitHub's **Re-run all
    jobs**. Prove the rerun checked out the same source SHA, normalized `site_base=/`, built and
-   uploaded the exact root-base twelve-file artifact, and deployed that artifact successfully. If
+   uploaded the exact root-base thirteen-file artifact, and deployed that artifact successfully. If
    the deployment fails or cannot be verified, execute the activation rollback below.
-8. Re-inventory DNS. Only after the same-SHA root deployment is proven, obtain explicit operator
+7. Re-inventory DNS. Only after the same-SHA root deployment is proven, obtain explicit operator
    approval for the exact cutover and then change only the identified parking records.
-9. Verify apex content, the `www` redirect, certificate hostname, and HTTPS enforcement.
+8. Verify apex content, the `www` redirect, certificate hostname, and HTTPS enforcement.
 
 The publishing workflow must build and test from a clean checkout on every push to `main`, without
 path filters. Authoritative inputs live outside `website/`, so a website-only trigger could publish
@@ -357,7 +345,7 @@ verified, leave all DNS records unchanged and detach the repository custom-domai
 the WayfarerLabs organization verification and its TXT record, along with every unrelated DNS
 record. On the same latest verified `main` push workflow, use **Re-run all jobs** again. Verify that
 `configure-pages` selected `/agentworks/`, that the rerun checked out the same source SHA, and that
-the exact project-base twelve-file artifact deployed successfully. Verify that same SHA at
+the exact project-base thirteen-file artifact deployed successfully. Verify that same SHA at
 `https://wayfarerlabs.github.io/agentworks/`, then stop. Retry custom-domain activation only through
 the full reviewed sequence above.
 

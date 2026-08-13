@@ -954,6 +954,59 @@ def _installed_agw() -> Path:
     return Path(sys.executable).with_name(f"agw{suffix}")
 
 
+def _isolated_subprocess_env(home: Path) -> dict[str, str]:
+    """Build a subprocess environment isolated to `home`, verified by
+    construction rather than assumed from a POSIX-only test run.
+
+    `HOME` governs ``Path.home()`` on POSIX; `USERPROFILE` governs it on
+    Windows. `agw`'s own `CONFIG_DIR` is `Path.home() / ".config" /
+    "agentworks"` (computed at import time), so whichever variable the
+    platform actually reads is what determines which config and state
+    database a spawned `agw` touches. Setting only one leaves the other
+    platform silently reading the operator's real home and state (a live
+    Windows review of issue #503 caught exactly this: tests that isolated
+    only `HOME` spawned probes against the operator's real config and
+    database, and passed anyway for an unrelated reason). Resolving
+    `Path.home()` in a throwaway child with this exact environment, rather
+    than trusting the two assignments above, is what makes this correct by
+    construction: a future platform where neither variable governs fails
+    this assertion loudly instead of silently reading real state.
+    """
+    env = {**os.environ, "HOME": str(home), "USERPROFILE": str(home)}
+    resolved = subprocess.run(
+        [sys.executable, "-c", "from pathlib import Path; print(Path.home())"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert Path(resolved.stdout.strip()).resolve() == home.resolve()
+    return env
+
+
+def _assert_no_committed_writes(config_dir: Path, database_path: Path, before: dict[str, bytes]) -> None:
+    """Assert a completion probe committed no writes to the state database.
+
+    The main database file's bytes never change and no rollback-journal
+    appears. Merely opening a real (non-immutable) read connection to a
+    WAL-mode database can create or update the `-wal`/`-shm` coordination
+    sidecars, even when the probe ultimately refuses; that is intrinsic
+    SQLite WAL-reader bookkeeping (issue #502's fix trades the old veto on
+    those sidecars' mere existence for accepting this harmless side effect
+    of reading through them correctly), so a freshly appearing `-wal` is
+    only checked for staying empty, and `-shm` is not checked at all.
+    """
+    after = {entry.name: entry.read_bytes() for entry in config_dir.iterdir()}
+    assert after[database_path.name] == before[database_path.name]
+    wal_name = f"{database_path.name}-wal"
+    if wal_name in after:
+        assert after[wal_name] == b""
+    shm_name = f"{database_path.name}-shm"
+    unrelated = (set(before) | set(after)) - {wal_name, shm_name}
+    for name in unrelated:
+        assert after.get(name) == before.get(name), name
+
+
 def _write_warning_config(home: Path) -> Path:
     config_dir = home / ".config" / "agentworks"
     config_dir.mkdir(parents=True)
@@ -985,7 +1038,7 @@ def test_marker_probe_refuses_stale_database_for_every_dynamic_path_without_side
     connection.commit()
     connection.close()
     before = {entry.name: entry.read_bytes() for entry in config_dir.iterdir()}
-    env = {**os.environ, "HOME": str(tmp_path)}
+    env = _isolated_subprocess_env(tmp_path)
     env["PATH"] = f"{_installed_agw().parent}{os.pathsep}{env.get('PATH', '')}"
     command = f"agw --completion-probe {' '.join(command_path)} --names-only 2>/dev/null"
 
@@ -997,10 +1050,10 @@ def test_marker_probe_refuses_stale_database_for_every_dynamic_path_without_side
         check=False,
     )
 
-    assert completed.returncode != 0
+    assert completed.returncode == 1
     assert completed.stdout == ""
     assert completed.stderr == ""
-    assert {entry.name: entry.read_bytes() for entry in config_dir.iterdir()} == before
+    _assert_no_committed_writes(config_dir, database_path, before)
     assert not backup_directory(database_path).exists()
 
 
@@ -1011,7 +1064,7 @@ def test_shell_wrapped_probe_suppresses_config_warning_and_preserves_database_by
     database_path = config_dir / "agentworks.db"
     Database(database_path).close()
     before = {entry.name: entry.read_bytes() for entry in config_dir.iterdir()}
-    env = {**os.environ, "HOME": str(tmp_path)}
+    env = _isolated_subprocess_env(tmp_path)
     env["PATH"] = f"{_installed_agw().parent}{os.pathsep}{env.get('PATH', '')}"
 
     direct = subprocess.run(
@@ -1035,7 +1088,7 @@ def test_shell_wrapped_probe_suppresses_config_warning_and_preserves_database_by
     assert completed.returncode == 0
     assert completed.stdout == ""
     assert completed.stderr == ""
-    assert {entry.name: entry.read_bytes() for entry in config_dir.iterdir()} == before
+    _assert_no_committed_writes(config_dir, database_path, before)
 
 
 def test_shell_wrapped_probe_consumes_empty_stdout_when_config_is_invalid(tmp_path: Path) -> None:
@@ -1046,7 +1099,7 @@ def test_shell_wrapped_probe_consumes_empty_stdout_when_config_is_invalid(tmp_pa
     Database(config_dir / "agentworks.db").close()
     (config_dir / "config.toml").write_text("[database\n")
     before = {entry.name: entry.read_bytes() for entry in config_dir.iterdir()}
-    env = {**os.environ, "HOME": str(tmp_path)}
+    env = _isolated_subprocess_env(tmp_path)
     env["PATH"] = f"{_installed_agw().parent}{os.pathsep}{env.get('PATH', '')}"
 
     completed = subprocess.run(
@@ -1057,7 +1110,7 @@ def test_shell_wrapped_probe_consumes_empty_stdout_when_config_is_invalid(tmp_pa
         check=False,
     )
 
-    assert completed.returncode != 0
+    assert completed.returncode == 1
     assert completed.stdout == ""
     assert completed.stderr == ""
     assert {entry.name: entry.read_bytes() for entry in config_dir.iterdir()} == before
@@ -1081,7 +1134,7 @@ def test_marker_free_legacy_probe_refuses_stale_database_without_side_effects(tm
     master, slave = pty.openpty()
     process = subprocess.Popen(
         [str(_installed_agw()), "vm", "list", "--names-only"],
-        env={**os.environ, "HOME": str(tmp_path)},
+        env=_isolated_subprocess_env(tmp_path),
         stdin=slave,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -1093,5 +1146,5 @@ def test_marker_free_legacy_probe_refuses_stale_database_without_side_effects(tm
 
     assert process.returncode != 0
     assert stdout == ""
-    assert {entry.name: entry.read_bytes() for entry in config_dir.iterdir()} == before
+    _assert_no_committed_writes(config_dir, database_path, before)
     assert not backup_directory(database_path).exists()

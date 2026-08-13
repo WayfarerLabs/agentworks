@@ -1,30 +1,32 @@
 # FRD: The agentworks.build Website
 
-- Status: Phase 4P implementation review complete; operator acceptance pending
+- Status: Continuous Lander and canonical assistance integration complete; production acceptance
+  pending
 - Date: 2026-08-07
 - Last revised: 2026-08-12
 - Seeded by: the saga lead, at operator request. This is a standalone effort, deliberately NOT a
   child of the 2026-08-04-next-steps saga (see that saga's `target-state.md` out-of-scope section
   for the recorded relationship). It follows the ordinary SDD process: the effort lead owns the HLA
   and plan; the saga lead reviews PRs.
+- Integration delegation: on 2026-08-10 the operator authorized the onboarding-and-discovery effort
+  lead to reconcile this FRD, HLA, plan, and shell LLD while integrating the canonical assistance
+  source in PR #480. The website effort retains production acceptance and closeout ownership.
 
 ## Purpose
 
 Agentworks gets a public front door at `agentworks.build` (domain purchased 2026-08-07): the place a
-curious human or their agent lands first and learns what Agentworks is. In the completed site, they
-leave with the one copy-paste block that starts onboarding. Until that contract is ready, the public
-site gives them useful product/security depth, permanent project links, and an honest availability
-notice.
+curious human or their agent lands first and learns what Agentworks is. They leave with the one
+copy-paste block that installs or updates the CLI, verifies it, and hands continuing assistance to
+`agw guide --agent`, alongside useful product/security depth and permanent project links.
 
 The operator's sizing mandate is the controlling constraint: **super simple at first**. The first
 slice is a small static site, its publishing pipeline, and one optional interactive surprise shared
 by a dedicated Lander page and the otherwise useful 404 page. The operator later selected the
-continuous expedition in R21-R23 as the bounded form of that surprise; it adds no product surface,
-backend, framework, persistence, telemetry, or activation dependency to PR #439. The site may ship
-in two complete stages: a useful public landing page while the onboarding contract is still in
-development, followed by the canonical bootstrap as soon as that contract lands. Every ambition
-beyond the accepted static site and continuous surprise is recorded as a growth path so nothing
-forecloses it, and none of it is in scope now.
+continuous expedition in R21-R26 as the bounded form of that surprise; it adds no product surface,
+backend, framework, persistence, telemetry, or activation dependency. The first release shipped an
+honest availability notice while onboarding was still in development; PR #480 replaced it with the
+canonical bootstrap. Every ambition beyond the accepted static site and continuous surprise is
+recorded as a growth path so nothing forecloses it, and none of it is in scope now.
 
 ## Requirements (first slice)
 
@@ -37,11 +39,9 @@ forecloses it, and none of it is in scope now.
 - R3. An integrated deployment pipeline: routine site-source merges to `main` deploy automatically,
   with no manual publish step. The one-time default-host to custom-domain base-path transition uses
   an explicitly invoked deployment of the same `main` commit after the custom domain is attached and
-  before DNS changes, because a Pages settings change does not trigger a build. That transition may
-  begin only after the continuous Lander and canonical onboarding integration have both passed their
-  recorded acceptance gates. The restricted activation is setup, not a second publishing path. The
-  site source and pipeline live in this repository unless the effort lead makes a recorded case
-  otherwise.
+  before DNS changes, because a Pages settings change does not trigger a build. That restricted
+  activation is setup, not a second publishing path. The site source and pipeline live in this
+  repository unless the effort lead makes a recorded case otherwise.
 - R4. Static only. No backend, no accounts, no data collection beyond whatever minimal analytics the
   operator explicitly approves (none is the default).
 - R5. The site serves humans and agents alike, consistent with destination 1's spirit: content is
@@ -77,14 +77,9 @@ forecloses it, and none of it is in scope now.
   in-memory run. After activation, native visible `Exit mission` and crash-state `Retry` buttons
   provide touch and assistive-technology equivalents to Escape and `r`; they remain hidden during
   hint-free preflight.
-- R10. Before the onboarding effort's canonical bootstrap source lands, an **interim public
-  release** may serve the complete site shell, repository-sourced problem and principle content,
-  selected brand, permanent links, custom 404, and deployment pipeline at the default GitHub Pages
-  project URL. It states plainly that guided onboarding is not yet published and provides no
-  substitute installation command, bootstrap text, disabled copy affordance, or implication that
-  onboarding is available. The later bootstrap integration replaces this bounded notice; it does not
-  require a redesign or a second site. `agentworks.build` is not attached or cut over until both
-  that canonical onboarding integration and the continuous Lander have passed acceptance.
+- R10. The completed site replaces the former bounded onboarding-availability notice with the one
+  canonical bootstrap source. It retains the established shell, brand, permanent links, custom 404,
+  deployment pipeline, and domain; no runtime mode, second site, or dormant interim notice remains.
 - R11. The main page includes the restrained link text `We take security seriously.` as optional
   depth, not a warning gate or dominant call to action. It leads to a dedicated static security page
   that renders the complete root `SECURITY.md` as HTML. That document is the single authority for
@@ -92,14 +87,10 @@ forecloses it, and none of it is in scope now.
   posture, and GitHub-only vulnerability-reporting path. The website adds no selected passages or
   separately maintained security prose. The page is candid and specific without assuming every
   visitor wants a security lecture.
-- R12. The completed onboarding surface makes the access tradeoff plain before setup: the onboarding
-  agent runs on the machine the operator intends to use as their workstation and needs full file
-  inspection and command execution access with the permissions of the workstation account running
-  the harness. This does not grant root implicitly; privilege elevation remains a separate, explicit
-  action. It recommends a strict harness security posture for approval and visibility, not a sandbox
-  that prevents the access onboarding needs. This language remains owned by onboarding's canonical
-  bootstrap/disclosure contract; the website must consume or link that source, never paraphrase it
-  into a drifting second copy.
+- R12. The website consumes the canonical thin bootstrap source byte-for-byte and does not append a
+  security recital, source-review offer, or operating guidance. That prompt only installs or updates
+  an exact compatible CLI, verifies it, and invokes `agw guide --agent`; the installed guide owns
+  the startup disclosure, authorization posture, optional source review, and continuing assistance.
 - R13. The visual language hints at terminal and TUI paradigms while remaining a modern website:
   monospaced accents, crisp bounded regions, compact status-like details, strong hierarchy, and
   efficient use of space should communicate `simple but powerful`. It must not become a fake
@@ -107,13 +98,12 @@ forecloses it, and none of it is in scope now.
   readability, pointer use, or accessibility.
 - R14. The landing page is a deliberately compact single-page product handoff, not a rendered
   manifesto. It shows the selected rocket mark as a dominant hero element at two to three times its
-  original header scale, gives only the concise product identity and onboarding availability, and
-  offers one link each to the repository, package, deeper rationale, and security deep dive. A
-  destination must not be repeated in the landing page's header, body, and footer. Visitors who want
-  the longer problem statement or principles follow the single Manifesto link to a page generated
-  from their permanent repository source. The dedicated Manifesto, security, Lander, and
-  host-required 404 pages remain separate optional/play/error surfaces rather than being folded into
-  the landing page.
+  original header scale, gives only the concise product identity and canonical bootstrap, and offers
+  one link each to the repository, package, deeper rationale, and security deep dive. A destination
+  must not be repeated in the landing page's header, body, and footer. Visitors who want the longer
+  problem statement or principles follow the single Manifesto link to a page generated from their
+  permanent repository source. The dedicated Manifesto, security, Lander, and host-required 404
+  pages remain separate optional/play/error surfaces rather than being folded into the landing page.
 - R15. Navigation follows familiar page conventions without reintroducing duplicate destinations.
   Home, Manifesto, Security, Lander, and 404 use the same responsive header structure: a breadcrumb
   at the upper left and one GitHub and one PyPI call to action at the upper right. Each external
@@ -136,9 +126,8 @@ forecloses it, and none of it is in scope now.
   maintained site copy or selected-passage contract. Relative source links are deliberately mapped
   to their permanent repository destinations. Missing or unreadable input, invalid UTF-8,
   unsupported Markdown, invalid links, or an invalid whole-document structure fails the build before
-  output replacement. The reviewed 2026-08-10 repository rename changed the single configured source
-  path from `docs/why-agentworks.md` to `docs/manifesto.md` and removed the former path; the website
-  has no fallback, autodetection, or simultaneous support for both paths.
+  output replacement. The website has no fallback, autodetection, or simultaneous support for the
+  retired source path.
 - R17. The builder emits only the complete linked site artifact. The earlier `--only 404` partial
   demo mode is retired because the accepted 404 now shares navigation with Home, Manifesto, and
   Security; emitting only `404.html` would make its sole recovery action and footer links dead. Game
@@ -260,10 +249,10 @@ forecloses it, and none of it is in scope now.
   `agw guide` and the reference surfaces.
 - C4. The logo and lander are local SVG and plain JavaScript, not a reason to add a framework,
   package ecosystem, canvas renderer, remote asset, or general game engine.
-- C5. The interim release is a real, useful release, not a preview mode or a parallel product. It
-  introduces no runtime flag, alternate URL, duplicated product prose, speculative onboarding
-  contract, or permanent staging architecture. Each public stage must be honest and operable on its
-  own terms.
+- C5. The interim release was a real, useful release, not a preview mode or a parallel product. It
+  introduced no runtime flag, alternate URL, duplicated product prose, speculative onboarding
+  contract, or permanent staging architecture. Each public stage was honest and operable on its own
+  terms.
 
 ## Growth path (recorded, explicitly out of scope now)
 
@@ -308,38 +297,29 @@ merged and settled on `main`. The first slice must not build toward them specula
   fixed-step physics across representative frame schedules, seeded terrain and site generation,
   route-home fallback, hidden-until-start instructions, fuel and checkpoint transitions, reduced
   motion, keyboard focus, narrow screens, bounded runtime work, and paused background behavior.
-- AC9. Before onboarding is available, the default GitHub Pages project URL serves the useful
-  interim release described by R10 over TLS. The page contains no bootstrap code region, copy
-  control, installation instruction, empty onboarding container, or unexpanded template token, and
-  its availability notice is exposed in ordinary semantic markup. Custom-domain activation remains
-  blocked until the accepted continuous Lander and canonical onboarding integration are both present
-  in the deployed `main` artifact.
-- AC10. The interim release satisfies AC1, AC2, and AC5-AC8 independently. AC3 and AC4 remain
-  explicitly unaccepted until the canonical bootstrap is integrated; replacing the interim notice
-  with that bootstrap leaves the established information architecture, visual system, URLs, 404, and
-  deployment path intact.
+- AC9. `https://agentworks.build` contains exactly one semantic canonical bootstrap region and no
+  retired availability notice, empty onboarding container, or unexpanded template token.
+- AC10. Canonical bootstrap integration leaves the established information architecture, visual
+  system, URLs, 404, and deployment path intact.
 - AC11. The home-page security link is visible but visually secondary, works without JavaScript, and
   resolves to a semantic security page at a stable URL. That page distinguishes claims, boundaries,
   current limitations, operator practices, and private vulnerability reporting; every
   product/security claim is sourced from or verified against permanent repository documentation.
-- AC12. Before the onboarding integration is accepted, tooling or a pinned contract test proves the
-  canonical disclosure explicitly covers the intended-workstation requirement, full
-  workstation-account file/command access, separately explicit elevation, and strict-posture
-  recommendation. The interim release does not invent or imply that disclosure while the upstream
-  contract is absent.
+- AC12. Tooling proves the website and README decode to the canonical thin bootstrap bytes and that
+  this surface contains no source-review, security-posture, or startup-disclosure substitute. A
+  clean guide invocation proves the installed guide, rather than the website, owns that context.
 - AC13. The landing, Manifesto, security, Lander, and 404 surfaces share a restrained
   terminal/TUI-derived visual system at desktop and narrow widths. Text remains real semantic
   content, ordinary links and controls remain recognizable, and the design meets the existing
   contrast, focus, zoom, reflow, reduced-motion, keyboard, and touch requirements without depending
   on terminal familiarity.
-- AC14. In a clean-context interim-release check, a visitor with no prior Agentworks knowledge can
-  understand what the project is, recognize that guided onboarding is not yet published, and choose
-  the repository, package, rationale, or security path without explanation. This is the interim
-  usefulness bar; it does not claim AC4's completed onboarding handoff.
+- AC14. In a clean-context check, a visitor with no prior Agentworks knowledge can understand what
+  the project is, copy the bootstrap, and choose the repository, package, rationale, or security
+  path without explanation.
 - AC15. The landing page contains exactly one navigable anchor for each of the GitHub repository,
   PyPI package, deeper rationale, and security destinations; it contains no rendered problem-space
   or principles section. The selected rocket is a prominent hero element without displacing the page
-  identity, availability notice, or four destinations at 320 CSS pixels or 400 percent zoom.
+  identity, canonical bootstrap, or four destinations at 320 CSS pixels or 400 percent zoom.
 - AC16. Generated Home, Manifesto, Security, Lander, and 404 documents expose the shared responsive
   header and footer landmarks with the exact per-page breadcrumb current item. Home has no small
   header mark; every other page has exactly one small header mark, and 404 has no separate body home
@@ -469,5 +449,5 @@ merged and settled on `main`. The first slice must not build toward them specula
   check.
 - The first slice is a landing page, Manifesto, security deep-dive, dedicated Lander page, and the
   host-required custom 404 error surface.
-- The first public release intentionally omits onboarding rather than blocking the rest of the site;
-  canonical onboarding follows as a separately reviewed additive release.
+- The first public release intentionally omitted onboarding rather than blocking the rest of the
+  site; PR #480 delivered canonical onboarding as a separately reviewed additive release.

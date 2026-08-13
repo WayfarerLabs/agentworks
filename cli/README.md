@@ -18,6 +18,15 @@ uv tool install agentworks-cli
 The everyday command is `agw`. The longer form `agentworks` is also installed if you ever want to
 type it out; examples throughout this document use `agw`.
 
+Run `agw guide --agent` to give an Agentworks assistant agent the current assistance contract,
+intent map, and useful live topic index. The assistant decides what to do next; the guide does not
+route requests or grant authorization. Use `concept-onboarding` for repeatable first setup and
+current adoption, `concept-management` for ongoing operation, `concept-release-notes` for the
+installed version's packaged canonical history, and `concept-source-review` for an optional
+read-only review of exact canonical source. Current facts are not a version-to-version delta. Exact
+historical release-note topics remain addressable and completable but stay out of the index because
+their templated summaries do not help choose between versions.
+
 ```bash
 # Initial setup
 agw config init                          # creates ~/.config/agentworks/config.toml

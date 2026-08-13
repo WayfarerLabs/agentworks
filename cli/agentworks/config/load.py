@@ -22,7 +22,7 @@ from agentworks.config.loaders_database import _load_database_config
 from agentworks.config.loaders_secrets import _load_plugins, _load_secret_config
 from agentworks.config.loaders_sessions import _load_session_config
 from agentworks.config.models import Config, _SectionLineMap
-from agentworks.errors import ConfigError
+from agentworks.errors import ConfigError, ConfigFileNotFoundError
 from agentworks.path_rendering import format_host_path
 from agentworks.source_location import scan_section_lines
 
@@ -238,7 +238,7 @@ def load_config(
     config_path = path or CONFIG_PATH
     if not config_path.exists():
         if raise_errors:
-            raise ConfigError(
+            raise ConfigFileNotFoundError(
                 f"configuration file not found: {format_host_path(config_path)}",
                 hint="Create it to get started. See the documentation for the schema.",
             )

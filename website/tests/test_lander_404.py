@@ -30,6 +30,7 @@ EXPECTED_FILES = frozenset(
         Path("static/lander-game.js"),
         Path("static/lander-model.js"),
         Path("static/lander-world.js"),
+        Path("static/onboarding-copy.js"),
         Path("static/lander.css"),
         Path("static/site.css"),
     }

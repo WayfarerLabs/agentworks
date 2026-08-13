@@ -303,16 +303,17 @@ class GeneratedDocumentTests(RepositoryFixture):
                 skip_links = [tag for tag in document.tags("a") if tag.get("class") == "skip-link"]
                 self.assertEqual([tag.get("href") for tag in skip_links], ["#main-content"])
 
-    def test_home_outline_and_interim_guards_are_exact(self) -> None:
+    def test_home_onboarding_is_the_exact_canonical_thin_bootstrap(self) -> None:
         document = self.documents["home"]
-        self.assertEqual(document.headings, ["Agentworks", "Guided onboarding"])
+        self.assertEqual(document.headings, ["Agentworks", "Agentworks CLI bootstrap"])
         self.assertNotIn("problem", document.ids)
         self.assertNotIn("principles", document.ids)
         self.assertFalse(document.tags("article"))
-        notice = " ".join(document.text_by_id["onboarding-availability"].split())
-        self.assertEqual(notice, NOTICE)
-        document_text = " ".join("".join(document.all_text).split())
-        self.assertEqual(document_text.count(NOTICE), 1)
+        self.assertEqual(document.text_by_id["onboarding-prompt"], ONBOARDING_PROMPT)
+        self.assertEqual(
+            document.text_by_id["onboarding-prompt"].encode(),
+            (self.root / site_builder.ASSISTANCE_SOURCE).read_bytes(),
+        )
         onboarding = [
             attributes
             for tag, attributes, _ in document.elements
@@ -329,27 +330,24 @@ class GeneratedDocumentTests(RepositoryFixture):
             and any(parent == "section" and attrs.get("id") == "onboarding" for parent, attrs in ancestors)
         ]
         self.assertEqual(len(headings), 1)
+        prompts = [tag for tag in document.tags("pre") if tag.get("class") == "onboarding-prompt"]
+        self.assertEqual(prompts, [{"class": "onboarding-prompt"}])
+        buttons = [tag for tag in document.tags("button") if tag.get("id") == "copy-onboarding-prompt"]
+        self.assertEqual(
+            buttons,
+            [{"id": "copy-onboarding-prompt", "type": "button", "hidden": None}],
+        )
+        statuses = [tag for tag in document.tags("p") if tag.get("id") == "copy-status"]
+        self.assertEqual(
+            statuses,
+            [{"id": "copy-status", "role": "status", "aria-live": "polite", "aria-atomic": "true"}],
+        )
         hero = [image for image in document.tags("img") if image.get("class") == "hero-mark"]
         self.assertEqual(len(hero), 1)
         self.assertEqual(hero[0].get("src"), "/assets/agw-rocket.svg")
         self.assertEqual(hero[0].get("alt"), "AGW rocket mark")
-        forbidden = (
-            "<pre",
-            "clipboard",
-            "copy",
-            "bootstrap",
-            "disabled",
-            "uv tool install",
-            "pipx install",
-            "git clone",
-            "agw config init",
-            "preview mode",
-            "release mode",
-        )
-        lowered = self.pages["home"].lower()
-        for value in forbidden:
-            self.assertNotIn(value, lowered)
-        self.assertFalse(document.tags("script"))
+        scripts = document.tags("script")
+        self.assertEqual(scripts, [{"type": "module", "src": "/static/onboarding-copy.js"}])
 
     def test_shared_header_footer_breadcrumb_icons_and_logo_exception_are_exact(
         self,
@@ -469,7 +467,11 @@ class GeneratedDocumentTests(RepositoryFixture):
             outcome = next(tag for tag in document.tags("div") if tag.get("id") == "lander-outcome")
             self.assertIn("hidden", outcome)
             self.assertEqual(len(document.tags("script")), 1)
-        for name in ("home", "manifesto", "security"):
+        self.assertEqual(
+            self.documents["home"].tags("script"),
+            [{"type": "module", "src": "/static/onboarding-copy.js"}],
+        )
+        for name in ("manifesto", "security"):
             self.assertFalse(self.documents[name].tags("script"))
 
     def test_footer_game_target_and_focus_area_are_pinned_in_ordinary_flow(
