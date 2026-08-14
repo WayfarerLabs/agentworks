@@ -242,8 +242,8 @@ wave's test-consolidation item shrinks to a verification sweep.
 carries the deletable scaffolding means the rewrite carries it too, so the pass's wave 0 and its
 wave 1 deletions land first. Wave 0 leads in turn, because establishing that always-on rules
 actually reach the agents they bind (issue #511) has to precede adding deletion criteria to those
-rules. Wave 2, the process-tree subtraction, runs in parallel rather than on that spine; the pass's
-reassessment and lock wait for both waves (`phasing.md` carries the detail).
+rules. Wave 2, the process and rule subtraction, runs in parallel rather than on that spine; the
+pass's reassessment and lock wait for both waves (`phasing.md` carries the detail).
 
 **The 0.14 breaking-truth items travel separately.** The four contract-truth fixes that are free
 only while 0.14 is unreleased (the secret mapping key that names sources, the one-arm token union,
