@@ -187,7 +187,7 @@ spec:{mapping_block}
 
 def _case_implied_env(executable: Path, shim: Path, root: Path, closed_bin: Path) -> None:
     home = root / "implied-env"
-    _write_fixture(home, settings='[secret_config]\nbackends = ["env-var"]', manifests=_secret_manifest("implied-env"))
+    _write_fixture(home, settings='[secret_config]\nsources = ["env-var"]', manifests=_secret_manifest("implied-env"))
     result = _run(
         executable,
         shim,
@@ -207,7 +207,7 @@ def _case_implied_env(executable: Path, shim: Path, root: Path, closed_bin: Path
 
 def _case_prompt_refusal(executable: Path, shim: Path, root: Path, closed_bin: Path) -> None:
     home = root / "prompt-refusal"
-    _write_fixture(home, settings='[secret_config]\nbackends = ["prompt"]', manifests=_secret_manifest("prompt-only"))
+    _write_fixture(home, settings='[secret_config]\nsources = ["prompt"]', manifests=_secret_manifest("prompt-only"))
     result = _run(executable, shim, home, "secret", "verify", "prompt-only", path_dir=closed_bin)
     _require(result.returncode == 1, "prompt refusal did not return the aggregate failure exit")
     _require("refused-interaction" in result.output, "prompt refusal outcome was not typed")
@@ -218,7 +218,7 @@ def _case_prompt_refusal(executable: Path, shim: Path, root: Path, closed_bin: P
 def _case_variadic_mixed(executable: Path, shim: Path, root: Path, closed_bin: Path) -> None:
     home = root / "variadic-mixed"
     manifests = "---\n".join((_secret_manifest("implied-env"), _secret_manifest("missing-env")))
-    _write_fixture(home, settings='[secret_config]\nbackends = ["env-var"]', manifests=manifests)
+    _write_fixture(home, settings='[secret_config]\nsources = ["env-var"]', manifests=manifests)
     result = _run(
         executable,
         shim,
@@ -238,7 +238,7 @@ def _case_variadic_mixed(executable: Path, shim: Path, root: Path, closed_bin: P
 
 def _case_direct_backend_remediation(executable: Path, shim: Path, root: Path, closed_bin: Path) -> None:
     home = root / "direct-backend"
-    settings = '[plugins]\nsystem = ["onepassword"]\n\n[secret_config]\nbackends = ["onepassword"]'
+    settings = '[plugins]\nsystem = ["onepassword"]\n\n[secret_config]\nsources = ["onepassword"]'
     _write_fixture(home, settings=settings, manifests=_secret_manifest("op-token"))
     result = _run(executable, shim, home, "secret", "list", path_dir=closed_bin)
     _require(result.returncode == 1, "direct onepassword source name was not rejected")
@@ -277,7 +277,7 @@ sys.stdout.write(os.environ["AGW_SECRET_DRIVE_SENTINEL"])
 
 def _case_declared_onepassword(executable: Path, interpreter: Path, shim: Path, root: Path) -> None:
     home = root / "declared-onepassword"
-    settings = '[plugins]\nsystem = ["onepassword"]\n\n[secret_config]\nbackends = ["work-op"]'
+    settings = '[plugins]\nsystem = ["onepassword"]\n\n[secret_config]\nsources = ["work-op"]'
     manifests = """\
 apiVersion: agentworks/v1
 kind: secret-source

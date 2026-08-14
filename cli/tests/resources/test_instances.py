@@ -417,7 +417,7 @@ def test_secret_instances_empty_when_no_session_reaches_it(
         cfg,
         extras="""
         [secret_config]
-        backends = ["env-var"]
+        sources = ["env-var"]
         """,
         manifests=[ManifestDoc("secret", "dead-key", description="Declared but nothing references it")],
     )

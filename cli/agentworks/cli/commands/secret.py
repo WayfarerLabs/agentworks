@@ -39,7 +39,7 @@ def secret_list(
     """Show declared secrets and how each active source would look them up.
 
     Rows are declared secrets; columns are the active sources in
-    ``[secret_config].backends`` precedence order. Each cell says what that
+    ``[secret_config].sources`` precedence order. Each cell says what that
     source would do for the secret: its lookup identifier (env var name,
     op:// URI, etc.), ``would attempt`` (no static key, e.g. prompt),
     ``not ready: <reason>`` (its host tool is missing), or ``won't attempt``

@@ -427,7 +427,7 @@ def test_migration_teaching_covers_cutover_validation_backends_and_auth_choices(
         "`Config` with status `fail`",
         "no check with either name to have status `warn` or `fail`",
         "`[secret_backends.*]`",
-        "`[secret_config].backends`",
+        "`[secret_config].sources`",
         "Inspect every pre-existing and TOML-derived site manifest",
         "Omitted `auth` defaults to ambient authentication",
         "`auth.secret` names the client secret",
@@ -469,5 +469,5 @@ def test_migration_action_rendering_is_markdown_safe_and_mode_identical() -> Non
     agent_actions = next(block for block in agent.blocks if block.key.block_id == "actions")
     assert human_actions.source_payload == agent_actions.source_payload
     assert "Authorization class: `mutate-agentworks`" in human_actions.markdown
-    assert "[secret_config].backends" not in human_actions.markdown
-    assert r"\[secret\_config\].backends" in human_actions.markdown
+    assert "[secret_config].sources" not in human_actions.markdown
+    assert r"\[secret\_config\].sources" in human_actions.markdown

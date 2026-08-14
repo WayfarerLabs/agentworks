@@ -24,11 +24,11 @@ if TYPE_CHECKING:
 
 _ENV_PROMPT = """
 [secret_config]
-backends = ["env-var", "prompt"]
+sources = ["env-var", "prompt"]
 """
 _ENV_ONLY = """
 [secret_config]
-backends = ["env-var"]
+sources = ["env-var"]
 """
 
 
@@ -324,14 +324,14 @@ def test_not_ready_backend_annotated_and_skipped_in_preview(tmp_path: Path, monk
         system = ["onepassword"]
 
         [secret_config]
-        backends = ["onepassword", "prompt"]
+        sources = ["work-op", "prompt"]
         """,
         manifests=[
-            ManifestDoc("secret-source", "onepassword", {"backend": {"name": "onepassword"}}),
+            ManifestDoc("secret-source", "work-op", {"backend": {"name": "onepassword"}}),
             ManifestDoc(
                 "secret",
                 "api-key",
-                {"backend_mappings": {"onepassword": "op://Vault/api/field"}},
+                {"backend_mappings": {"work-op": "op://Vault/api/field"}},
                 description="API key",
             ),
         ],
@@ -341,9 +341,10 @@ def test_not_ready_backend_annotated_and_skipped_in_preview(tmp_path: Path, monk
     desc = describe_secret(config, registry, "api-key")
 
     op = next(m for m in desc.source_mappings if m.backend == "onepassword")
+    assert op.source == "work-op"
     assert op.would_attempt is True
     assert op.not_ready_reason == "op CLI not installed"
-    assert SkippedSource(source="onepassword", reason="op CLI not installed") in desc.resolution.skipped_not_ready
+    assert SkippedSource(source="work-op", reason="op CLI not installed") in desc.resolution.skipped_not_ready
     assert desc.resolution.source == "prompt"  # not-ready op does not count
     assert desc.resolution.category is PreviewCategory.ATTEMPTABLE
 
@@ -363,7 +364,7 @@ def test_render_shows_not_ready_annotation_and_skip(
         system = ["onepassword"]
 
         [secret_config]
-        backends = ["onepassword", "prompt"]
+        sources = ["onepassword", "prompt"]
         """,
         manifests=[
             ManifestDoc("secret-source", "onepassword", {"backend": {"name": "onepassword"}}),
@@ -400,7 +401,7 @@ def test_interactive_optimism_preview_unchanged_under_readiness(tmp_path: Path, 
         system = ["onepassword"]
 
         [secret_config]
-        backends = ["onepassword", "prompt"]
+        sources = ["onepassword", "prompt"]
         """,
         manifests=[
             ManifestDoc("secret-source", "onepassword", {"backend": {"name": "onepassword"}}),

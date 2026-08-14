@@ -275,7 +275,7 @@ def active_sources(config: Config, registry: Registry) -> tuple[ActiveSource, ..
                 name=name,
                 registry=registry,
                 referrer=SettingReference(
-                    setting="[secret_config].backends",
+                    setting="[secret_config].sources",
                     kind="secret-source",
                     name=name,
                 ),
@@ -284,7 +284,7 @@ def active_sources(config: Config, registry: Registry) -> tuple[ActiveSource, ..
                 raise error
             registered = sorted(row.name for row in registry.iter_kind("secret-source"))
             raise ConfigError(
-                f"[secret_config].backends names unknown secret-source {name!r}",
+                f"[secret_config].sources names unknown secret-source {name!r}",
                 hint=f"declared secret sources: {registered}",
             ) from None
         source, backend_class = selected

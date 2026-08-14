@@ -137,7 +137,7 @@ def _site_graph(tmp_path: Path, chain: str) -> tuple[object, object, list[object
 
     config = write_operator_config(
         tmp_path,
-        PLUGINS_ENABLED + f"[secret_config]\nbackends = [{chain}]\n",
+        PLUGINS_ENABLED + f"[secret_config]\nsources = [{chain}]\n",
         manifests=[proxmox_site()],
     )
     registry = build_registry(config)

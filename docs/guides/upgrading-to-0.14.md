@@ -359,7 +359,7 @@ resources guide before editing an appended file.
 
 - **`[secret_backends.*]`** rows are deleted. They never carried configuration. For every desired
   non-default backend, declare a `secret-source` manifest that selects it, then list that source's
-  name in `[secret_config].backends`, which is a setting and stays in `config.toml`. They are named
+  name in `[secret_config].sources`, which is a setting and stays in `config.toml`. They are named
   by the resource-section error like every other section, with that declaration step spelled out in
   place of a direct rewrite instruction.
 
@@ -498,11 +498,31 @@ Which of the four you actually need follows from what your resources reference, 
 local path needs no `[plugins]` entry at all; "System plugins" in the
 [resources guide](resources.md) has the mapping.
 
+## Secret source precedence key
+
+The source precedence setting is renamed from `[secret_config].backends` to
+`[secret_config].sources`. The list always held `secret-source` names, so only the TOML key changes.
+Rename it in `config.toml`:
+
+```toml
+# before
+[secret_config]
+backends = ["env-var", "prompt"]
+
+# after
+[secret_config]
+sources = ["env-var", "prompt"]
+```
+
+The rename does not change `agw secret describe --output json`: its `source` and `backend` fields
+remain distinct. `source` identifies the configured source instance, while `backend` identifies the
+capability that implements it.
+
 ## Secret backend names now require configured sources
 
-`[secret_config].backends` keeps its spelling, but in 0.14 its entries are `secret-source` resource
-names. Each key under a secret's `backend_mappings` is also a source name. The synthesized `env-var`
-and `prompt` sources work as-is, so the default `["env-var", "prompt"]` chain needs no changes.
+`[secret_config].sources` contains `secret-source` resource names. Each key under a secret's
+`backend_mappings` is also a source name. The synthesized `env-var` and `prompt` sources work as-is,
+so the default `["env-var", "prompt"]` chain needs no changes.
 
 Direct configured-backend references such as `onepassword` intentionally break. Enable its plugin,
 declare a source, move the old mapping's account to that source, and make each mapping a scalar
@@ -530,7 +550,7 @@ spec:
     work-op: op://Engineering/npm/token
 ```
 
-Replace `onepassword` with `work-op` in `[secret_config].backends`. Agentworks does not create a
+Replace `onepassword` with `work-op` in `[secret_config].sources`. Agentworks does not create a
 compatibility source or parse the old `{account, reference}` mapping table. If an unknown source
 name exactly matches a backend, the configuration error prints the source declaration and the
 reference-specific rewrite.

@@ -27,7 +27,7 @@ def test_secret_decl_carries_mappings_keyed_by_backend_name() -> None:
 
 def test_secret_config_default_chain() -> None:
     """SecretConfig defaults to the standard env-var + prompt chain when no
-    [secret_config].backends is provided. Operators who don't use secrets
+    [secret_config].sources is provided. Operators who don't use secrets
     pay nothing; operators who do get sensible zero-config resolution."""
     from agentworks.secrets.base import DEFAULT_SOURCE_CHAIN
 

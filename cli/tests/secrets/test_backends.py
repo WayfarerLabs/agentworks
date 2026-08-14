@@ -62,7 +62,7 @@ def test_one_descriptor_row_per_backend_class_and_builtin_sources(tmp_path: Path
 
 
 def test_active_chain_selects_source_rows_not_backend_rows(tmp_path: Path) -> None:
-    config = _config(tmp_path, '[secret_config]\nbackends = ["env-var", "prompt"]\n')
+    config = _config(tmp_path, '[secret_config]\nsources = ["env-var", "prompt"]\n')
     sources = active_sources(config, build_registry(config))
     assert [source.name for source in sources] == ["env-var", "prompt"]
     assert [source.backend_class.name for source in sources] == ["env-var", "prompt"]
@@ -71,7 +71,7 @@ def test_active_chain_selects_source_rows_not_backend_rows(tmp_path: Path) -> No
 def test_direct_backend_name_in_chain_gets_source_rewrite(tmp_path: Path) -> None:
     config = _config(
         tmp_path,
-        '[plugins]\nsystem = ["onepassword"]\n[secret_config]\nbackends = ["onepassword"]\n',
+        '[plugins]\nsystem = ["onepassword"]\n[secret_config]\nsources = ["onepassword"]\n',
     )
     with pytest.raises(ConfigError) as caught:
         build_registry(config)

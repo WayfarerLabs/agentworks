@@ -187,14 +187,14 @@ def test_prompt_cell_has_no_static_identifier(tmp_path: Path) -> None:
 
 
 def test_column_order_matches_backend_chain_precedence(tmp_path: Path) -> None:
-    """The columns appear in [secret_config].backends order so operators
+    """The columns appear in [secret_config].sources order so operators
     see the resolution order directly in the table layout."""
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
         settings="""
         [secret_config]
-        backends = ["prompt", "env-var"]
+        sources = ["prompt", "env-var"]
         """,
         admin_env={"TOKEN": {"secret": "x"}},
         manifests=[ManifestDoc("secret", "x", description="x")],
@@ -236,7 +236,7 @@ def test_names_only_lists_every_registry_secret(tmp_path: Path, monkeypatch) -> 
 
 
 def test_empty_backend_chain_yields_no_columns(tmp_path: Path) -> None:
-    """``backends = []`` opts out of all resolution; the table has no
+    """``sources = []`` opts out of all resolution; the table has no
     backend columns. Operator-declared secrets in this state would
     trip the unreachable-secret config-load error. The
     auto-declared ``tailscale-auth-key`` row (Phase 1c) is still
@@ -248,7 +248,7 @@ def test_empty_backend_chain_yields_no_columns(tmp_path: Path) -> None:
         cfg_file,
         settings="""
         [secret_config]
-        backends = []
+        sources = []
         """,
     )
     table = _build_table(cfg_file)
@@ -347,7 +347,7 @@ def _readiness_grid_config(tmp_path: Path) -> Path:
         system = ["onepassword"]
 
         [secret_config]
-        backends = ["env-var", "onepassword", "prompt"]
+        sources = ["env-var", "onepassword", "prompt"]
         """,
         admin_env={
             "A": {"secret": "mapped-op"},

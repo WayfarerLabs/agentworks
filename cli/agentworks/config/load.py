@@ -109,7 +109,7 @@ def _raise_for_resource_sections(data: dict[str, object]) -> None:
     be rewritten directly. It never carried backend configuration. Delete it,
     keep using the implied ``env-var`` / ``prompt`` sources as-is, or declare a
     ``secret-source`` manifest that selects another desired backend, then place
-    that source name in ``[secret_config].backends``. Sending an
+    that source name in ``[secret_config].sources``. Sending an
     operator to write a ``secret-backend`` manifest would send them to a
     command that errors, since ``secret-backend`` is a capability kind with
     no declarable form. Hence the two clauses below rather than one message: a
@@ -184,7 +184,7 @@ def _raise_for_resource_sections(data: dict[str, object]) -> None:
         message += " [secret_backends.*] carries no configuration, so delete it."
         hint_parts.append(
             "Use the implied env-var and prompt source names as-is. For another backend, declare a "
-            "secret-source manifest that selects it, then list the source name in [secret_config].backends, "
+            "secret-source manifest that selects it, then list the source name in [secret_config].sources, "
             "which is a setting and stays in config.toml."
         )
     hint_parts.append(

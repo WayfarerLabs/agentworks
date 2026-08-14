@@ -197,7 +197,7 @@ def render_secret_table(table: SecretTable) -> None:
 
     - ``No secrets in the resource registry.`` -- nothing declared or
       auto-declared.
-    - ``No active secret sources.`` -- ``[secret_config].backends = []``.
+    - ``No active secret sources.`` -- ``[secret_config].sources = []``.
 
     Otherwise a header + table with one column per active (opted-in) backend
     in chain order. Cell semantics, per R9.7 (never the overloaded
@@ -217,7 +217,7 @@ def render_secret_table(table: SecretTable) -> None:
         return
     if not table.sources:
         output.info(
-            "No active secret sources. Set [secret_config].backends to source "
+            "No active secret sources. Set [secret_config].sources to source "
             "names (or leave it unset to use env-var then prompt).",
         )
         return
@@ -281,6 +281,7 @@ class SourceMapping:
     Fields express what the backend would do at resolution time without
     actually resolving (no I/O):
 
+    - ``source``: the configured source name.
     - ``backend``: the backend name (``"env-var"``, ``"prompt"``, ...).
     - ``would_attempt``: True if the backend would try this secret at
       resolution time. False = explicit opt-out via
@@ -511,7 +512,7 @@ def render_secret_description(desc: SecretDescription) -> None:
     output.info("")
     output.info("Backend mappings:")
     if not desc.source_mappings:
-        output.detail("(no active sources in [secret_config].backends)")
+        output.detail("(no active sources in [secret_config].sources)")
     else:
         provenance_labels = {
             SourceProvenance.OPERATOR_OVERRIDE: "operator override of synthesized default",

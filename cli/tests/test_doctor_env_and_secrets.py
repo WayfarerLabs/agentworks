@@ -95,7 +95,7 @@ def test_secret_resolves_via_env_var_when_set(
         tmp_path,
         settings="""
         [secret_config]
-        backends = ["env-var", "prompt"]
+        sources = ["env-var", "prompt"]
         """,
         admin_env={"TOKEN": {"secret": "shared"}},
         manifests=[ManifestDoc("secret", "shared", description="Shared API token")],
@@ -118,7 +118,7 @@ def test_doctor_accepts_mapping_keyed_by_differently_named_declared_source(
         tmp_path,
         settings="""
         [secret_config]
-        backends = ["work-env"]
+        sources = ["work-env"]
         """,
         manifests=[
             ManifestDoc("secret-source", "work-env", {"backend": {"name": "env-var"}}),
@@ -149,7 +149,7 @@ def test_secret_resolves_via_prompt_when_env_var_unset(
         tmp_path,
         settings="""
         [secret_config]
-        backends = ["env-var", "prompt"]
+        sources = ["env-var", "prompt"]
         """,
         admin_env={"TOKEN": {"secret": "shared"}},
         manifests=[ManifestDoc("secret", "shared", description="Shared API token")],
@@ -174,7 +174,7 @@ def test_secret_not_available_when_env_var_unset_and_prompt_opted_out(
         tmp_path,
         settings="""
         [secret_config]
-        backends = ["env-var", "prompt"]
+        sources = ["env-var", "prompt"]
         """,
         admin_env={"TOKEN": {"secret": "opted-out"}},
         manifests=[
@@ -261,7 +261,7 @@ def test_check_secrets_flags_a_not_ready_only_backend(tmp_path: Path, monkeypatc
         system = ["onepassword"]
 
         [secret_config]
-        backends = ["onepassword"]
+        sources = ["onepassword"]
         """,
         admin_env={"TOKEN": {"secret": "op-only"}},
         manifests=[
@@ -327,7 +327,7 @@ def test_mapping_to_undeclared_kind_hard_errors_at_build(tmp_path: Path) -> None
         tmp_path,
         settings="""
         [secret_config]
-        backends = ["env-var", "prompt"]
+        sources = ["env-var", "prompt"]
         """,
         admin_env={"TOKEN": {"secret": "shared"}},
         manifests=[
@@ -348,7 +348,7 @@ def test_mapping_to_multiple_undeclared_kinds_hard_errors_at_build(tmp_path: Pat
         tmp_path,
         settings="""
         [secret_config]
-        backends = ["env-var", "prompt"]
+        sources = ["env-var", "prompt"]
         """,
         admin_env={"TOKEN": {"secret": "shared"}},
         manifests=[
@@ -565,7 +565,7 @@ def _sp_site_config(tmp_path: Path) -> Path:
         system = ["azure"]
 
         [secret_config]
-        backends = ["env-var", "prompt"]
+        sources = ["env-var", "prompt"]
         """,
     )
     write_manifests(tmp_path, _AZURE_SP_SITE, filename="site.yaml")

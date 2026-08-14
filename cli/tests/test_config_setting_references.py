@@ -4,7 +4,7 @@ A settings value naming a row that does not exist is a hard error (operator
 ruling, 2026-08-07), wherever it appears, in the same shape a dangling
 MANIFEST reference gets at finalize. Before this, one question had three
 answers: a hard finalize error for manifests, a hand-written per-subsystem
-check for ``defaults.site`` and for ``[secret_config].backends`` (each with
+check for ``defaults.site`` and for ``[secret_config].sources`` (each with
 its own wording), and a settings-load refusal for ``[secret_backends.*]``
 that fired on correctly-spelled plugin backends.
 
@@ -45,7 +45,7 @@ if TYPE_CHECKING:
 #: and what the error prints.
 _SETTING_TOML = {
     "defaults.site": '[defaults]\nsite = "{name}"\n',
-    "[secret_config].backends": '[secret_config]\nbackends = ["{name}"]\n',
+    "[secret_config].sources": '[secret_config]\nsources = ["{name}"]\n',
 }
 
 #: One name that DOES resolve, per setting: a row the standard publishers
@@ -53,7 +53,7 @@ _SETTING_TOML = {
 #: raise) and by the ordering test.
 _RESOLVING_NAME = {
     "defaults.site": "lima-local",
-    "[secret_config].backends": "prompt",
+    "[secret_config].sources": "prompt",
 }
 
 
@@ -128,7 +128,7 @@ def test_declarable_kind_hint_points_at_the_sample_command(tmp_path: Path) -> No
 def test_secret_source_hint_points_at_the_declarable_sample(tmp_path: Path) -> None:
     """The active chain names declarable ``secret-source`` rows."""
     with pytest.raises(ConfigError) as excinfo:
-        _build(tmp_path, _SETTING_TOML["[secret_config].backends"].format(name="no-such-row"))
+        _build(tmp_path, _SETTING_TOML["[secret_config].sources"].format(name="no-such-row"))
     hint = excinfo.value.hint or ""
     assert "agw resource sample secret-source" in hint
 
@@ -152,10 +152,10 @@ def test_list_setting_yields_one_reference_per_name(tmp_path: Path) -> None:
     """A list-valued setting flattens: callers see (setting, kind, name)
     triples regardless of the setting's shape."""
     config = load_config(
-        write_cfg(tmp_path, settings='[secret_config]\nbackends = ["env-var", "prompt"]\n'),
+        write_cfg(tmp_path, settings='[secret_config]\nsources = ["env-var", "prompt"]\n'),
         warn_issues=False,
     )
-    chain = [ref.name for ref in setting_references(config) if ref.setting == "[secret_config].backends"]
+    chain = [ref.name for ref in setting_references(config) if ref.setting == "[secret_config].sources"]
     assert chain == ["env-var", "prompt"]
 
 
@@ -174,7 +174,7 @@ def test_same_name_declared_source_wins_before_direct_backend_remediation(tmp_pa
         tmp_path,
         ManifestDoc("secret-source", "onepassword", {"backend": {"name": "onepassword"}}),
     )
-    registry = _build(tmp_path, '[secret_config]\nbackends = ["env-var", "onepassword"]\n')
+    registry = _build(tmp_path, '[secret_config]\nsources = ["env-var", "onepassword"]\n')
     assert registry.lookup("secret-source", "onepassword") is not None
     assert not registry.graph.readiness_of("secret-source", "onepassword").is_ready
 
@@ -206,7 +206,7 @@ def test_a_misspelled_backend_reports_as_a_bad_name_not_an_unreachable_secret(tm
 
     write_manifests(tmp_path, ManifestDoc("secret", "npm-token", description="npm token"))
     with pytest.raises(ConfigError) as excinfo:
-        _build(tmp_path, '[secret_config]\nbackends = ["envvar"]\n')
+        _build(tmp_path, '[secret_config]\nsources = ["envvar"]\n')
     message = str(excinfo.value)
     assert "references unknown secret-source 'envvar'" in message
     assert "unreachable" not in message

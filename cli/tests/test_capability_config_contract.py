@@ -434,7 +434,7 @@ def test_declared_mapping_for_non_opted_in_backend_is_validated_at_build(tmp_pat
         tmp_path,
         """
         [secret_config]
-        backends = ["prompt"]
+        sources = ["prompt"]
         """,
     )
     with pytest.raises(ConfigError, match="backend_mappings.env-var: must be a string"):

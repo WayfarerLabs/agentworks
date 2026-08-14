@@ -151,7 +151,7 @@ has a current shape and its mode and secret-reference intent are confirmed.
 sources keep their names and work without manifests. For every desired non-default backend, use
 `agw resource sample secret-source` to declare an operator-named source whose tagged
 `spec.backend.name` selects that implementation. Move implementation config to that backend block,
-then put the source name in `[secret_config].backends` and use it as the key in each secret's
+then put the source name in `[secret_config].sources` and use it as the key in each secret's
 `backend_mappings`. The synthesized `env-var` and `prompt` names remain valid without manifests. For
 OnePassword, move the old mapping's account to the source and make every mapping one scalar `op://`
 reference. The optional positive timeout is new source configuration. A direct configured-backend

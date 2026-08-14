@@ -131,7 +131,7 @@ def test_settings_only_config_loads_without_error(tmp_path: Path) -> None:
         tmp_path,
         """
         [secret_config]
-        backends = ["env-var", "prompt"]
+        sources = ["env-var", "prompt"]
 
         [defaults]
         """,
@@ -197,7 +197,7 @@ def test_secret_backends_is_told_to_delete_and_declare_a_source(tmp_path: Path) 
     hint = excinfo.value.hint or ""
     assert "Use the implied env-var and prompt source names as-is" in hint
     assert "declare a secret-source manifest" in hint
-    assert "list the source name in [secret_config].backends" in hint
+    assert "list the source name in [secret_config].sources" in hint
 
 
 def test_mixed_sections_get_both_remediations_in_one_read(tmp_path: Path) -> None:

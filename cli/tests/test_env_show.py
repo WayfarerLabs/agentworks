@@ -273,7 +273,7 @@ def test_secret_redacted_by_default(db: Database, tmp_path: Path) -> None:
         tmp_path,
         settings="""
         [secret_config]
-        backends = ["env-var", "prompt"]
+        sources = ["env-var", "prompt"]
         """,
         admin=ManifestDoc(
             "admin-template", "default", {"shell": "zsh", "env": {"API_KEY": {"secret": "shared-token"}}}
@@ -300,7 +300,7 @@ def test_secret_revealed_with_flag(
         tmp_path,
         settings="""
         [secret_config]
-        backends = ["env-var", "prompt"]
+        sources = ["env-var", "prompt"]
         """,
         admin=ManifestDoc(
             "admin-template", "default", {"shell": "zsh", "env": {"API_KEY": {"secret": "shared-token"}}}
@@ -333,7 +333,7 @@ def test_secret_reveal_rejects_multiline_before_rendering(
     monkeypatch.setenv("AW_SECRET_SHARED_TOKEN", value)
     cfg = _write_config(
         tmp_path,
-        settings='[secret_config]\nbackends = ["env-var"]\n',
+        settings='[secret_config]\nsources = ["env-var"]\n',
         admin=ManifestDoc(
             "admin-template", "default", {"shell": "zsh", "env": {"API_KEY": {"secret": "shared-token"}}}
         ),

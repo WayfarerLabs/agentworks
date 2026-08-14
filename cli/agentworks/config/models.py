@@ -86,7 +86,7 @@ class Config:
     # the registry (built from the bundled + operator manifests), never from
     # Config.
 
-    # Top-level [secret_config] table; carries the enabled-backends precedence list.
+    # Top-level [secret_config] table; carries the active-source precedence list.
     secret_config_data: SecretConfig = field(default_factory=SecretConfig)
     # The [plugins] table's ``system`` key; the opt-in list of enabled
     # system plugin names (R4). Named ``enabled_system_plugins`` (not a

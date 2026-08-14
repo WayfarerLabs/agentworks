@@ -153,7 +153,7 @@ def test_real_env_source_and_operation_resolver_deliver_exact_downloaded_json(
     config = load_config(
         write_cfg(
             tmp_path,
-            settings='[secret_config]\nbackends = ["env-var"]\n',
+            settings='[secret_config]\nsources = ["env-var"]\n',
         ),
         warn_issues=False,
         warn_deprecations=False,

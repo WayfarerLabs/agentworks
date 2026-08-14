@@ -596,7 +596,7 @@ def test_template_node_declares_the_key_and_the_sweep_predicts_it(
     from agentworks.vms.templates import ResolvedVMTemplate
     from tests.orchestrated_fixtures import write_operator_config
 
-    config = write_operator_config(tmp_path, '[secret_config]\nbackends = ["env-var"]\n')
+    config = write_operator_config(tmp_path, '[secret_config]\nsources = ["env-var"]\n')
     registry = build_registry(config)
     node = vm_template_node(ResolvedVMTemplate(name="default"))
     ctx = RunContext(config=config)

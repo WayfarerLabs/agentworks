@@ -317,7 +317,7 @@ def _env_only_setup(tmp_path: Path) -> tuple[Config, Registry]:
     from agentworks.bootstrap import build_registry
     from tests.orchestrated_fixtures import write_operator_config
 
-    config = write_operator_config(tmp_path, '[secret_config]\nbackends = ["env-var"]\n')
+    config = write_operator_config(tmp_path, '[secret_config]\nsources = ["env-var"]\n')
     return config, build_registry(config)
 
 
@@ -327,7 +327,7 @@ def _env_and_prompt_setup(tmp_path: Path) -> tuple[Config, Registry]:
     from agentworks.bootstrap import build_registry
     from tests.orchestrated_fixtures import write_operator_config
 
-    config = write_operator_config(tmp_path, '[secret_config]\nbackends = ["env-var", "prompt"]\n')
+    config = write_operator_config(tmp_path, '[secret_config]\nsources = ["env-var", "prompt"]\n')
     return config, build_registry(config)
 
 
@@ -448,7 +448,7 @@ def _px_site_setup(tmp_path: Path, chain: str = '"env-var"') -> tuple[Config, Re
 
     config = write_operator_config(
         tmp_path,
-        PLUGINS_ENABLED + f"[secret_config]\nbackends = [{chain}]\n",
+        PLUGINS_ENABLED + f"[secret_config]\nsources = [{chain}]\n",
         manifests=[proxmox_site()],
     )
     return config, build_registry(config)

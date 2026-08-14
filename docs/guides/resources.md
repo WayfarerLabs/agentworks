@@ -11,7 +11,7 @@ opt-in plugins, the manifest validation that tightened) is in
 ## The split: config vs resources
 
 `~/.config/agentworks/config.toml` is for **settings**: your identity (SSH keys), paths, CLI
-defaults, and the secret source chain (`[secret_config].backends`). Settings configure your install;
+defaults, and the secret source chain (`[secret_config].sources`). Settings configure your install;
 they are not named, referenceable entities.
 
 **Resources** are the named things everything else refers to: a `secret` called `npm-token`, a
@@ -560,9 +560,8 @@ Three pieces have separate jobs:
 - A **secret source** is a declarable `secret-source` resource. Its `spec.backend` selects and
   configures one backend implementation. Agentworks synthesizes `env-var` and `prompt`; additional
   sources are ordinary YAML resources.
-- `[secret_config].backends` keeps its established setting name, but its entries are source names in
-  precedence order. Each `backend_mappings` key is also a source name. The default remains
-  `["env-var", "prompt"]`.
+- `[secret_config].sources` lists source names in precedence order. Each `backend_mappings` key is
+  also a source name. The default remains `["env-var", "prompt"]`.
 
 For example, a configured 1Password source owns its account and an optional operation timeout:
 
@@ -598,7 +597,7 @@ should you when reading them:
   default); the core backends (`env-var`, `prompt`) are always enabled.
 - **ready / not-ready**: whether the configured source can run on this host. A source selecting
   `onepassword` is not-ready when `op` is absent. Readiness is not resolvability.
-- **active**: named in `[secret_config].backends`. Only active sources are columns in
+- **active**: named in `[secret_config].sources`. Only active sources are columns in
   `agw secret list`.
 - **would-attempt**: for this secret, the selected backend has a mapping or is mapping-optional. A
   pure function of the secret and its `backend_mappings`, independent of readiness. `won't attempt`

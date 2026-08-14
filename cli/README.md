@@ -176,8 +176,7 @@ Settings sections (`config.toml`, permanent):
 - `[defaults]`: `site`, the default vm-site for `vm create`
 - `[database]`: automatic pre-migration backup policy (safe default: enabled)
 - `[session.config]` -- session defaults (history limit)
-- `[secret_config]` -- active secret source chain; its `backends` key keeps the established spelling
-  but contains `secret-source` names
+- `[secret_config]` -- active secret source chain; its `sources` key names `secret-source` resources
 - `[plugins]`: the plugin-subsystem namespace; its `system` key is the opt-in list of enabled system
   plugins (see [System Plugins](#system-plugins) below)
 
@@ -234,7 +233,7 @@ spec:
 ```
 
 Every secret reference points to a `secret` resource declaration (auto-declared with a
-framework-synthesized description if you skip it). `[secret_config].backends` lists configured
+framework-synthesized description if you skip it). `[secret_config].sources` lists configured
 `secret-source` resource names in precedence order. Agentworks synthesizes two sources, so the
 simple default stays behavior-identical without a manifest:
 
@@ -293,7 +292,7 @@ agw secret list
 # tailscale-auth-key   (auto) the Tailscale auth key for vm-template:default (and 1 more)          AW_SECRET_TAILSCALE_AUTH_KEY  would attempt
 ```
 
-Columns are the active sources in `[secret_config].backends` precedence order. Cells show each
+Columns are the active sources in `[secret_config].sources` precedence order. Cells show each
 source's static lookup identifier (env var name, vault path, `op://` URI), `won't attempt`,
 `would attempt`, or `not ready: <reason>`. The Description column shows the operator-supplied text
 for operator-declared secrets, or a framework-synthesized `(auto) <usage> for <kind>:<name>` (plus
