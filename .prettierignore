@@ -21,3 +21,4 @@ cli/.venv64/
 # Canonical route bytes are generated, hashed, and independently verified.
 website/tests/fixtures/lander-route-derived-v7.json
 website/tests/fixtures/lander-route-geometry-v7.json
+website/static/lander-route-proofs.generated.js

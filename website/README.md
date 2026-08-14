@@ -141,6 +141,10 @@ node website/tools/derive_lander_routes.mjs \
   --geometry website/tests/fixtures/lander-route-geometry-v7.json \
   --output /tmp/lander-route-derived-v7.json \
   --verify website/tests/fixtures/lander-route-derived-v7.json
+
+node website/tools/project_lander_route_proofs.mjs \
+  --fixture website/tests/fixtures/lander-route-derived-v7.json \
+  --output website/static/lander-route-proofs.generated.js
 ```
 
 The v8 deriver uses Node built-ins and independent copies of the terrain, physics, collision,
@@ -153,11 +157,15 @@ never imports the tool, scans a catalog, searches commands, retries a route, or 
 terrain. Fuel uses the sufficient `12.65 + max(0, deckDelta)/3` allowance rounded upward to the 0.05
 quantum; it does not claim that one quantum less makes the physical route impossible.
 
+The projection command deterministically converts the reviewed record order into a compact,
+source-only generated module. The builder verifies its provenance, composes it into
+`static/lander-model.js`, and still emits the exact 13-file artifact; no fourteenth module ships.
+
 During a run, the model retains at most five terrain chunk indexes while the DOM always uses exactly
 two terrain paths, the active and target sites plus one previous powered site, one input queue of at
 most 64 records, and eight crash fragments. The worst-case world projection has at most 80
 descendants. Fuel has no capacity cap: unused reserve carries forward. At one-indexed powered base
-`n`, each collected can adds the next route's demonstrated minimum multiplied by the direct
+`n`, each collected can adds the next route's sufficient allowance multiplied by the direct
 constant-time ratio `1 + 0.5 ** (n - 1)`. Runtime number precision reaches exactly 1 at base 54 and
 remains 1 through base 100. Exit and reload discard the in-memory run; crash Retry restores the last
 powered pad without recollecting fuel or advancing progress.

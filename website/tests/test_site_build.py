@@ -240,6 +240,48 @@ class BuildAndInstallTests(RepositoryFixture):
         with self.assertRaisesRegex(ValueError, "JavaScript module import is absent from manifest"):
             site_builder._validate_local_references(changed, EXPECTED_FILES, "/")
 
+    def test_generated_proof_source_is_composed_without_growing_the_manifest(self) -> None:
+        rendered, manifest = site_builder._render_artifact(self.root, "/")
+        model = rendered[Path("static/lander-model.js")].decode()
+        self.assertEqual(manifest, EXPECTED_FILES)
+        self.assertNotIn(site_builder.GENERATED_PROOF_SOURCE, manifest)
+        self.assertNotIn(site_builder.GENERATED_PROOF_IMPORT, model)
+        self.assertIn("const GENERATED_ROUTE_ROWS", model)
+        self.assertIn("export const REFERENCE_PROOF_CATALOG", model)
+
+        source = self.root / "website/static/lander-model.js"
+        source.write_text(
+            source.read_text(encoding="utf-8").replace(
+                site_builder.GENERATED_PROOF_IMPORT,
+                site_builder.GENERATED_PROOF_IMPORT.replace(".generated", ".missing"),
+            ),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ValueError, "exactly one generated proof import"):
+            site_builder._render_artifact(self.root, "/")
+
+    def test_generated_proof_projection_requires_exact_provenance(self) -> None:
+        generated = self.root / "website" / site_builder.GENERATED_PROOF_SOURCE
+        generated.write_text(
+            generated.read_text(encoding="utf-8").replace("// @generated", "// generated", 1),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ValueError, "exact provenance marker"):
+            site_builder._render_artifact(self.root, "/")
+
+    def test_authored_lander_modules_and_tests_stay_below_the_review_ceiling(self) -> None:
+        authored = [
+            WEBSITE / "static/lander-game.js",
+            WEBSITE / "static/lander-model.js",
+            WEBSITE / "static/lander-world.js",
+            WEBSITE / "tools/derive_lander_routes.mjs",
+            WEBSITE / "tools/project_lander_route_proofs.mjs",
+            *sorted((WEBSITE / "tests").glob("*.test.mjs")),
+        ]
+        for path in authored:
+            with self.subTest(path=path.relative_to(REPO_ROOT)):
+                self.assertLess(len(path.read_text(encoding="utf-8").splitlines()), 1_000)
+
     def test_output_rejects_dot_traversal(self) -> None:
         target = Path(self.temporary.name) / "parent" / ".." / "escaped"
         with self.assertRaisesRegex(ValueError, "dot traversal"):

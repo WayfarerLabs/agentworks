@@ -3,6 +3,7 @@
 import { createHash } from "node:crypto";
 import { readFile, rename, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const DERIVER_VERSION = "agw-lander-route-deriver/v8";
 const SYNTHESIZER_VERSION = "agw-lander-corridor-synthesizer/v1";
@@ -120,8 +121,13 @@ function sampleUnit(seed, stream, index) {
         2 ** 32
     );
 }
-function quantumCeil(value) {
-    return Math.ceil((value - 1e-12) / FUEL_QUANTUM) * FUEL_QUANTUM;
+export function quantumCeil(value) {
+    return Math.ceil(value / FUEL_QUANTUM) * FUEL_QUANTUM;
+}
+export function millimeterDeltaCensus(assignments) {
+    return new Set(
+        assignments.map(({ originMillimeters, targetMillimeters }) => targetMillimeters - originMillimeters),
+    ).size;
 }
 
 function validateGeometry(geometry) {
@@ -271,7 +277,7 @@ function groupAssignments(assignments) {
             left.assignments[0].targetMillimeters - right.assignments[0].targetMillimeters,
     );
     if (groupsOrdered.length !== 100) throw new Error(`Expected 100 pair keys, got ${groupsOrdered.length}`);
-    if (new Set(groupsOrdered.map(([, g]) => g.assignments[0].deckDelta.toFixed(12))).size !== 75) {
+    if (millimeterDeltaCensus(groupsOrdered.map(([, group]) => group.assignments[0])) !== 75) {
         throw new Error("Expected 75 exact deck deltas");
     }
     return groupsOrdered;
@@ -990,4 +996,4 @@ async function main() {
         process.exitCode = 1;
     }
 }
-await main();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await main();

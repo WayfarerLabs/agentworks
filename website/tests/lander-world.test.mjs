@@ -16,12 +16,10 @@ import {
     cameraLeftForPose,
     createFirstSite,
     createSiteForIndex,
-    instantiateTemplateSite,
     retainedChunkIndexes,
     retainedSiteDescriptors,
     routePairKey,
     selectRouteProof,
-    selectTemplate,
     siteScaffoldMembers,
     siteScaffoldPath,
     siteStructure,
@@ -120,8 +118,6 @@ test("one exact keyed lookup terminates and is mutation sensitive", () => {
             );
             assert.equal(selectRouteProof(origin, target, catalog), record);
             assert.deepEqual(reads, [key]);
-            assert.equal(selectTemplate(seed, index + 1, origin, catalog), record);
-            assert.equal(instantiateTemplateSite(seed, index + 1, origin, record).pairKey, key);
         }
     const origin = createFirstSite(11);
     assert.throws(() => selectRouteProof(origin, createSiteForIndex(11, 2), {}), /not one forward route leg/);

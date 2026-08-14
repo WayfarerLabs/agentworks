@@ -7,22 +7,21 @@ import {
     MAX_LANDING_ANGULAR_SPEED,
     MAX_LANDING_DESCENT_SPEED,
     MAX_LANDING_HORIZONTAL_SPEED,
-    REFERENCE_TEMPLATES,
-    ROUTE_DIGESTS,
     createRun,
     mixDigitalInput,
     pointerEngineRequests,
     stepFlight,
 } from "../static/lander-model.js";
+import { REFERENCE_PROOFS, ROUTE_DIGESTS } from "../static/lander-route-proofs.generated.js";
 import { FakeElement, controllerClasses, controllerFixture } from "./lander-test-dom.mjs";
 
 const ROOT = new URL("../", import.meta.url);
 const EXPECTED_DIGESTS = Object.freeze({
     assignmentDigest: "82dec99b18672c2c5dd45bac43d19530cd4680e456f7329d183adbed3f9a4102",
     geometryDigest: "17af6e4d762acc6dfee5f170d19b2f2952ac86e0844b49837b9f1a848255e8d8",
-    outputDigest: "f2af9f25bfc91bf9b19600a083bdf2b0d53f8cc050b3e58237b1c8376f213490",
+    outputDigest: "dea7263fe5b01ea1c0a442a1f2fefb3f4dad472cbe8668b8bf00793cde5afef7",
     physicsDigest: "e08f8260b723dd245db88de9ae2cdbac54bf9a97cb0bed1b6f170eda362c48dc",
-    proofDigest: "3607ac69f8f639694fd0919b61f6786163c5a6bba25665c6baa6d2c238a2d147",
+    proofDigest: "ca09ed720e3e752745af046cbb2013c99c36227963e9799b1f1cd8961b49f354",
     worldDigest: "ab4348a78e029553b659e99c14bc3b447b3f6a018943b77c179cf21664445d8f",
 });
 
@@ -71,10 +70,10 @@ test("landing profile and the finite route catalog remain exact", () => {
         [2.2, 3.6, 18, 26],
     );
     assert.deepEqual(ROUTE_DIGESTS, EXPECTED_DIGESTS);
-    assert.equal(REFERENCE_TEMPLATES.length, 100);
-    assert.equal(new Set(REFERENCE_TEMPLATES.map(({ pairKey }) => pairKey)).size, 100);
+    assert.equal(REFERENCE_PROOFS.length, 100);
+    assert.equal(new Set(REFERENCE_PROOFS.map(({ pairKey }) => pairKey)).size, 100);
     assert.ok(
-        REFERENCE_TEMPLATES.every((proof) => proof.success.classification === "safe" && !("smallerFailure" in proof)),
+        REFERENCE_PROOFS.every((proof) => proof.success.classification === "safe" && !("smallerFailure" in proof)),
     );
 });
 
