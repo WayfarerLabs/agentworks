@@ -113,10 +113,12 @@ worktree, disjoint by file: `.rulesync/` and the generated rule and skill trees 
 `website/` there. The pre-change always-on rule byte count is 33,863 ([baseline.md](baseline.md));
 R3.2 requires the after number to be lower.
 
-- [ ] Rules: delete the three principle-absorbed rules folding their concrete phrasings into the
+- [x] Rules: delete the three principle-absorbed rules folding their concrete phrasings into the
       principles (PR4); merge the five collateral-sync rules into one (PR5); collapse the
       review-authority statement to its canonical home with pointers (PR3). Done when: net deletion,
-      always-on rule bytes reported and reduced.
+      always-on rule bytes reported and reduced. **PR #521**: seventeen rule files to ten, 33,863
+      always-on bytes to 32,215 (-1,648). The two testing-trio restatements `findings.md` PR3 counts
+      ride the skills item below, which owns those files.
 - [ ] Skills: consolidate the testing trio's diverged and contradictory copies to one authoritative
       home, keeping deliberate cross-perspective reinforcement (PR1, PR10, operator caution
       2026-08-12); trim journey narration and register across the process tree (PR7, PR8, PR9),

@@ -20,16 +20,23 @@ hashes it, and hands both to one of the three shell backends.
 2. **Dynamic values are not baked in.** `DYNAMIC_COMPLETIONS` in `spec.py` maps a
    `(command path, parameter name)` pair to an abstract completer id such as `workspaces`, `vms`, or
    `resource_kinds`. Only that id reaches the generated script. Each backend then renders the id
-   into a snippet that calls back into the CLI at completion time (`agw workspace list --names-only`
-   and friends), so completions always reflect current state rather than state frozen at install
-   time. This table is where the package stops inferring and starts asking you to say what you
-   meant.
+   into a snippet, and for every completer but one that snippet calls back into the CLI at
+   completion time (`agw workspace list --names-only` and friends), so completions always reflect
+   current state rather than state frozen at install time. The exception is `files`, which renders
+   to each shell's native filesystem completion (`compgen -f`, `_files`, `CompleteFilename`) because
+   the shell already knows the answer. This table is where the package stops inferring and starts
+   asking you to say what you meant.
 
 3. **Callbacks into a live CLI are kept safe.** Database-backed completers pass a hidden
    `--completion-probe` flag, which puts the CLI in completion mode: the database opens read-only
    and refuses to migrate rather than doing work behind an operator who only pressed Tab.
    `is_legacy_database_completion` recognizes the marker-free command shapes that shipped before
-   0.14, so scripts installed by an older version still take that safe path.
+   0.14, so scripts installed by an older version still take that safe path; `_app.py` gates that
+   recognizer on the completion-shaped stream pair (stdin a tty, stderr not) so an ordinary
+   interactive run of the same command is never mistaken for a completion probe.
+
+   `spec.py` drops `hidden=True` parameters from the tree, which is why `--completion-probe` itself
+   never completes.
 
 4. **The version stamp catches staleness.** `completion_version(spec)` hashes the tree, and every
    generated script carries the result in a header comment. `agw doctor` compares the stamp in each
@@ -75,3 +82,6 @@ The tree itself needs nothing, but four things are hand-maintained and the tests
 
 Any list command backing a completer also owes `--names-only` per the `cli-conventions` rule: one
 name per line, no header, no formatting, and no round-trips that make pressing Tab slow.
+`agw resource list` is the one deliberate divergence: it emits `kind/name`, because two kinds can
+publish the same name, and every backend slices the prefix off shell-side. A registry-backed
+completer that forgets the slice emits `kind/name` candidates.
