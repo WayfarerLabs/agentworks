@@ -173,10 +173,14 @@ item shrinks to a verification sweep.
 - [x] Seeded by the effort lead (findings, FRD, HLA, plan, migration strategy; PR #509 in draft
       artifact review). The first draft was a 35-item coordinated program, cut by operator direction
       to three steps: rule adjustment, deletion waves, reassess
-- [ ] Prose-test-purge child absorbed (operator, 2026-08-12). The supersession header and the
-      directory lock are written but not yet on `main`; they ride PR #509. This box checks when that
-      lands. The seed FRD's survey and guardrails carry forward into this effort's wave 1 deletion
-      charter
+- [x] Prose-test-purge child absorbed (operator, 2026-08-12): the supersession header and directory
+      lock landed on `main` with PR #509. The seed FRD's survey and guardrails carry forward into
+      this effort's wave 1 deletion charter
+- [x] Artifacts merged and authoritative (PR #509, 2026-08-14), with two known one-line nits
+      accepted by operator disposition rather than a sixth review round: `VMIssueCode` actually
+      lives in `vms/manager/inspect.py`, and the two absence checks read as scoped to production and
+      test surfaces, this SDD's own findings excluded. The implementing lead folds both on first
+      touch; the plan is mutable until lock
 - [ ] Wave 0: establish that always-on rules reach the agents they bind (issue #511) before adding
       criteria to them, then land the trust-boundary and authored-artifact amendments. Moved into
       wave 0 by operator direction (2026-08-13) from a file-it-and-defer posture. The delivery
