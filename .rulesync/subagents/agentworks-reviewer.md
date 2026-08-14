@@ -41,7 +41,8 @@ the existing way, not to widen the surface.
    well_. A change can be implementation-clean and still fail check 1 or 2.
 3. Produce findings grouped by severity: **Blocking** (would cause real regressions, undermine the
    project's values, or ship a footgun), **Important** (should fix before merge), **Minor** (nice to
-   clean up but not urgent).
+   clean up but not urgent). Weigh findings by the materiality bar in `agentic-dev-process` section
+   5, which also fixes what each severity obliges: only material findings gate anything.
 4. Cite specific file paths and line numbers for every finding. Quote the problematic text when the
    location alone is ambiguous. Explain the issue concisely and propose a fix when the right answer
    is clear.

@@ -1,7 +1,3 @@
----
-paths:
-  - '**/*'
----
 # Message Signatures
 
 Many actors, human and agent, publish messages here through shared identities: PR comments and

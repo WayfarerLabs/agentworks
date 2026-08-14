@@ -1,7 +1,3 @@
----
-paths:
-  - '**/*'
----
 # Operator Authority
 
 Every agent here acts under one operator, and authority flows one way. The operator directs a lead

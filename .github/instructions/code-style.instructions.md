@@ -1,6 +1,5 @@
 ---
 description: General style and formatting guidelines
-applyTo: '**/*'
 ---
 # Code Style
 

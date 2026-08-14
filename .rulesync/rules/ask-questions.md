@@ -1,6 +1,5 @@
 ---
 description: "Prefer asking clarifying questions over making assumptions"
-globs: ["**/*"]
 ---
 
 # Ask Questions

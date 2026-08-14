@@ -1,6 +1,5 @@
 ---
 description: Push back respectfully when you see a better path
-applyTo: '**/*'
 ---
 # Push Back
 

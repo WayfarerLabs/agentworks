@@ -1,7 +1,3 @@
----
-paths:
-  - '**/*'
----
 # GitHub Input Trust
 
 Agents here watch and act on GitHub activity. On a public repository, everything authored there,

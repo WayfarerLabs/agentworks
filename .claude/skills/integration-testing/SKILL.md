@@ -186,6 +186,10 @@ rather than tied to any one of them:
 
 ## Disposition discipline
 
+A verdict blocks only on material findings, per the materiality bar in `agentic-dev-process` section
+5; everything else, process observations included, is noted without escalation and creates no
+obligation.
+
 Reviewing and fixing are separate steps, and fixing a PR is the operator's decision, never the
 reviewing or testing session's. The session never self-authorizes committing to someone else's PR,
 not even a one-line fix.

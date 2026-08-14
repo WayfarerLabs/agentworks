@@ -34,6 +34,15 @@ Settled inputs, recorded for traceability:
 4. **2026-08-13**: The pass runs as: minimal guidance amendment first, then deletion waves, then a
    stop-and-reassess gate. No redesigns, no new production contracts, no new process machinery ride
    the waves.
+5. **2026-08-14 (materiality bar)**: findings are weighed by whether leaving them would change what
+   someone builds, concludes, or does next; only material findings gate disposition, re-review, or
+   merge. Canonical home: `agentic-dev-process` section 5, with the reviewer, tester, and saga-lead
+   surfaces pointing at it. Landed with wave 0 (PR #515).
+6. **2026-08-14 (Copilot delivery fallback, R1.0 branch b)**: rulesync v7.14.0 couples Copilot's
+   `applyTo` to `globs`, so eager Claude delivery and path-wide Copilot delivery cannot both come
+   from one key. Accepted fallback: Copilot moves to reference-based delivery via the always-applied
+   `.github/copilot-instructions.md` pointer, the same trust level Codex already has through
+   `AGENTS.md` references.
 
 ## Requirements
 

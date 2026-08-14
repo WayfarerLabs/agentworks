@@ -1,6 +1,5 @@
 ---
 description: "Follow the standard agentic development process on every effort"
-globs: ["**/*"]
 ---
 
 # Development Process
