@@ -89,5 +89,5 @@ def test_a_token_table_requires_its_union_tag(tmp_path: Path) -> None:
         ManifestDoc("git-credential", "github", {"provider": {"name": "github", "token": {"secret": "x"}}}),
     )
     config = load_config(cfg, warn_issues=False)
-    with pytest.raises(ConfigError, match="token: mode is required; registered: 'stored'"):
+    with pytest.raises(ConfigError, match="token: mode is required; registered: 'secret'"):
         build_registry(config)

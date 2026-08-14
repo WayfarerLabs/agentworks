@@ -184,9 +184,9 @@ capability and the remaining keys are that provider's configuration, which
 `agw resource describe-kind git-credential-provider/<name>` documents.
 
 A provider's `token` field is a tagged acquisition choice with one supported arm:
-`token: {mode: stored, secret: my-github-token}` names a secret holding a stored token. Omitting
+`token: {mode: secret, secret: my-github-token}` names the secret holding the token. Omitting
 `token` selects that arm and defaults its secret to `git-token-<credential name>`, while the scalar
-`token: my-github-token` is shorthand for the same stored arm.
+`token: my-github-token` is shorthand for the same secret arm.
 
 A github credential may carry a scope there, and the choice is the part worth explaining:
 `repos: ["owner/name", ...]` pins the credential to specific repositories (always a list, even for

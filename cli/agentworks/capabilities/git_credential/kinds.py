@@ -83,7 +83,7 @@ class _GitCredentialKind:
         provider capability and carries its config; admin and agent templates refer to
         the credential by name through `git_credentials`.
 
-        The provider's `token` field says how the token is obtained. Its `stored` arm
+        The provider's `token` field says how the token is obtained. Its `secret` arm
         names a SECRET and defaults to `git-token-<this credential's name>`; a bare
         secret name is shorthand for that arm. The secret resolves through the source
         chain at VM-init time. Because the default name derives from this resource's

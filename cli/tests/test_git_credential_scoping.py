@@ -124,15 +124,15 @@ def test_token_override_in_provider_config() -> None:
     assert _refs({"token": "my-secret"}, owner_name="gh") == [("secret", "my-secret")]
 
 
-def test_every_stored_token_spelling_extracts_the_same_secret_edge() -> None:
-    """Omitted, scalar shorthand, and the full stored arm all reach the
+def test_every_secret_token_spelling_extracts_the_same_secret_edge() -> None:
+    """Omitted, scalar shorthand, and the full secret arm all reach the
     graph through the model's SecretRef declaration."""
     assert _refs({}, owner_name="gh") == [("secret", "git-token-gh")]
     assert _refs({"token": "my-secret"}, owner_name="gh") == [("secret", "my-secret")]
-    assert _refs({"token": {"mode": "stored", "secret": "my-secret"}}, owner_name="gh") == [("secret", "my-secret")]
+    assert _refs({"token": {"mode": "secret", "secret": "my-secret"}}, owner_name="gh") == [("secret", "my-secret")]
 
 
-def test_token_acquisition_stays_a_one_arm_union_defaulting_only_to_stored() -> None:
+def test_token_acquisition_stays_a_one_arm_union_defaulting_only_to_secret() -> None:
     """The ambition ceiling and omission-history rule as model facts.
 
     A future minted mechanism grows this arm set additively, but it may
@@ -141,8 +141,8 @@ def test_token_acquisition_stays_a_one_arm_union_defaulting_only_to_stored() -> 
     from agentworks.capabilities.git_credential.github import GitHubConfig
 
     token = next(doc for doc in iter_field_docs(GitHubConfig) if doc.path == ("token",))
-    assert [arm.tag for arm in token.union_arms] == ["stored"]
-    assert token.default == {"mode": "stored"}
+    assert [arm.tag for arm in token.union_arms] == ["secret"]
+    assert token.default == {"mode": "secret"}
     assert not token.required
 
 
@@ -155,6 +155,11 @@ def test_shipped_providers_use_the_version_2_token_acquisition_contract() -> Non
 def test_empty_token_rejected_by_validation() -> None:
     with pytest.raises(ConfigError, match="token.secret: must not be empty"):
         _validate({"token": ""}, owner_name="gh")
+
+
+def test_stored_token_mode_is_rejected() -> None:
+    with pytest.raises(ConfigError):
+        _validate({"token": {"mode": "stored", "secret": "my-secret"}}, owner_name="gh")
 
 
 def test_extraction_total_on_malformed_config() -> None:

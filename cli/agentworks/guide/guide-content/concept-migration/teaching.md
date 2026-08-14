@@ -73,20 +73,18 @@ live implementation reference: `[azure]` selects `spec.platform.name: azure-vm`,
 
 For every pre-existing or TOML-derived `git-credential`, inspect that provider's live reference and
 preserve its token acquisition intent inside `spec.provider`. An omitted `provider.token` still
-selects a stored token and the default secret name. A scalar such as `token: gh-pat` is still
-accepted as shorthand for the stored arm, but the canonical current spelling is the tagged shape:
+selects a secret token and the default secret name. A scalar such as `token: gh-pat` is still
+accepted as shorthand for the secret arm, but the canonical current spelling is the tagged shape:
 
 ```yaml
 token:
-  mode: stored
+  mode: secret
   secret: gh-pat
 ```
 
 Within that arm, omitting `token.secret` or writing `secret: null` selects the default secret name.
-The old outer spelling `token: null` is retired: delete that line to preserve its omission behavior,
-or replace it exactly with `token: {mode: stored}` to record the same choice explicitly. A retired
-TOML scalar may still become the accepted scalar shorthand, but write the canonical tagged spelling
-above during this migration. No `minted` arm exists in the current contract.
+A retired TOML scalar may still become the accepted scalar shorthand, but write the canonical tagged
+spelling above during this migration. No `minted` arm exists in the current contract.
 
 Write one manifest at a time at its pre-recorded intended path while leaving every retired TOML
 section in place. The edit must consume its existing expected identity without changing the
@@ -110,11 +108,10 @@ retired TOML. If validation reports a written legacy `service_principal`, `crede
 field written as explicit null selected the same mode as omission: delete the retired null line and
 write `auth: {mode: ambient}`, `auth: {mode: ambient}`, or `placement: {mode: local}`, respectively.
 A manifest that omitted the old outer field needs no shape edit because the new tagged field has the
-same default. For a retired outer `provider.token: null`, delete the line or write
-`token: {mode: stored}`. Convert a retained scalar token to the canonical tagged stored arm while
-preserving its secret name. Validate the changed manifest again before reviewing it. Any manifest
-validation hard error returns that manifest to this edit loop; it does not advance to read-only
-review or cutover.
+same default. Convert a retained scalar token to the canonical tagged secret arm while preserving
+its secret name. Validate the changed manifest again before reviewing it. Any manifest validation
+hard error returns that manifest to this edit loop; it does not advance to read-only review or
+cutover.
 
 ## Review authentication, placement, and changed secret references
 
