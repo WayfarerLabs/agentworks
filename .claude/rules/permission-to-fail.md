@@ -1,7 +1,3 @@
----
-paths:
-  - '**/*'
----
 # Permission to Fail
 
 It is perfectly acceptable -- and strongly preferred -- to say:

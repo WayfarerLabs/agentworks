@@ -73,3 +73,16 @@ concurrent writer still fails a completion probe quickly instead of freezing it.
 recorded under "What shipped" and "Verification" still stands; this note narrows only the
 sidecar-gating and immutable-read clauses of the completion-probe bullet under "What shipped" and
 the "completion immutability" item in the shipped-CLI validation list under "Verification".
+
+## Supersession (2026-08-13)
+
+The follow-on to the above, pull request 504, extended this effort's classifier rather than only
+using it, so it is recorded here for the same reason. A database held by a concurrent writer was
+classified `MALFORMED` and reported to the operator as damaged state, with remediation advice to
+restore from a backup, when nothing was wrong beyond another process holding the file. The
+classifier gains a `BUSY` member and a matching `BusyStateError`, and the surfaces that pull request
+touched (the read-only and writable opens, migrate, and the prepare and open lock paths) now
+distinguish busy from corrupt. Other database-open seams still classify inconsistently; issue 505
+tracks them, so this is a narrowing of the vocabulary rather than a claim about every seam. The
+exact-shape validation, the migration lock protocol, and the backup and restore contracts are
+untouched: this note narrows only the classification vocabulary recorded under "What shipped".

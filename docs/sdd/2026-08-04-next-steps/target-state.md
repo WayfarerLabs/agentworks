@@ -85,11 +85,11 @@ GitHub through a custom git credential helper serving fine-grained PATs by full 
 environment knowledge an agent currently must be told in conversation; a feature provisioning such a
 helper should emit exactly that fact as a skill.
 
-**Ruling (operator, 2026-08-12):** `agw guide` with no topic becomes a **trail sign** — point at the
-topics, do not teach — and the onboarding walkthrough it currently carries (the source-review offer
-and the rest) moves into a dedicated onboarding topic. The same round takes whatever other
-simplifications the onboarding and discovery track has accumulated; the operator's own reading is
-that earlier phases of that effort landed tech debt while unattended.
+**Ruling (operator, 2026-08-12):** `agw guide` with no topic becomes a **trail sign** that points at
+the topics rather than teaching, and the onboarding walkthrough it currently carries (the
+source-review offer and the rest) moves into a dedicated onboarding topic. The same round takes
+whatever other simplifications the onboarding and discovery track has accumulated; the operator's
+own reading is that earlier phases of that effort landed tech debt while unattended.
 
 ### Declarative model (destination 2)
 
@@ -225,6 +225,33 @@ literally just wanted to bucket the existing installers." The disabled-error exp
 above is a nice-to-have, not this effort's work, so the paragraph's crisp-disabled-error requirement
 is deferred rather than dropped.
 
+### Core surface: subtraction before the cut (operator rulings, 2026-08-13)
+
+Six days of high-velocity agentic development left a scaffolding tax around sound core models:
+119,584 lines of tests against 83,151 lines of `cli/` code, adversarial validation of first-party
+content, tests that police form rather than behavior, and generality with no shipped consumer. Three
+rulings follow, recorded here as settled; `phasing.md` carries the ordering detail.
+
+**The simplification pass is a child of this saga** (`docs/sdd/2026-08-12-simplification-pass/`),
+not standalone work. It touches every wave's output, its deferred findings route through the saga
+lead, and adopting it collapses ledger structure rather than adding it: the pre-0.14
+test-consolidation child and the prose-test-purge child are both absorbed into it, and the closeout
+wave's test-consolidation item shrinks to a verification sweep.
+
+**Deletion precedes the grammar rewrite.** Rewriting the CLI grammar over a surface that still
+carries the deletable scaffolding means the rewrite carries it too, so the pass's wave 0 and its
+wave 1 deletions land first. Wave 0 leads in turn, because establishing that always-on rules
+actually reach the agents they bind (issue #511) has to precede adding deletion criteria to those
+rules. Wave 2, the process and rule subtraction, runs in parallel rather than on that spine; the
+pass's reassessment and lock wait for both waves (`phasing.md` carries the detail).
+
+**The 0.14 breaking-truth items travel separately.** The four contract-truth fixes that are free
+only while 0.14 is unreleased (the secret mapping key that names sources, the one-arm token union,
+the env-entry compat flag, the compat layers missing from the retired-shapes inventory) run as their
+own dispatched task rather than as a rider on the grammar rewrite, which is already large. Migration
+guidance for them flows through `BREAKING CHANGE:` footers, the packaged changelog, and the guide
+release-notes topics rather than through compat code.
+
 ### Plugin namespace and name stability (operator ruling, 2026-08-07)
 
 **One name, one source.** In-repo contributions (built-ins and system plugins) share one curated
@@ -232,11 +259,15 @@ namespace in which a collision is a defect, caught at registration seat time wit
 a runtime policy question. Third-party plugins (wave 8) MUST NOT collide with in-repo names, and use
 their unique plugin name as a namespace so cross-plugin uniqueness is structural rather than
 policed; the guide's plugin-topic namespacing with its ownership gate (settled in the onboarding
-child's design, landing with its phase 1) is the shape wave 8 inherits. Operator declarations
-interact with provided names through the collision semantics settled in the installer-plugins child
-(name-is-the-contract; silent collision is a hard error naming both remediations;
-disable-and-redeclare is the sanctioned replacement with provenance surfaced; defaults-with-override
-is reserved for surfaces that declare it, wave 3's synthesized sources being canonical).
+child's design, landing with its phase 1) is the shape wave 8 inherits. How operator declarations
+interact with provided names is **open, not settled** (correction, 2026-08-13): the collision
+semantics recorded here (name-is-the-contract; silent collision a hard error naming both
+remediations; disable-and-redeclare as the sanctioned replacement with provenance surfaced) came
+from the installer-plugins child's broader design, which the same day's scope correction cut back to
+bucketing the existing installers. That child now preserves current same-name override behavior
+unchanged, so collision redesign is deferred to whichever effort next needs it, wave 8 being the
+likely home. Defaults-with-override remains reserved for surfaces that declare it, wave 3's
+synthesized sources being canonical.
 
 ### Compatibility posture (all destinations)
 

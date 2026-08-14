@@ -1,7 +1,3 @@
----
-paths:
-  - '**/*'
----
 # Latest Stable Version
 
 When installing/importing/updating software, unless otherwise instructed, always check to see what

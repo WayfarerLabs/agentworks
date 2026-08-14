@@ -1,6 +1,5 @@
 ---
 description: Sign every outward-facing message with your session identity
-applyTo: '**/*'
 ---
 # Message Signatures
 

@@ -160,9 +160,12 @@ section 7a instead):
 
 - Push back on findings that are genuinely incorrect; a reviewer is not infallible, and a wrong
   finding followed blindly makes the code worse.
-- Otherwise, err on the side of fixing anything valid, including the minor and the merely-nicer.
-- Iterate until everyone is happy. Do not move on from a step with a live, unaddressed valid finding
-  hanging over it.
+- Weigh every finding by materiality: a finding is material when leaving it would change what
+  someone builds, concludes, or does next. Fix material findings and do not move on from a step
+  while one is live and unresolved. Everything else is optional: severity buckets still describe it,
+  but it needs no disposition, never independently triggers another round or re-review, and fixing
+  it is a courtesy, not a requirement. This bar is canonical here; the reviewer, tester, and
+  saga-lead surfaces point at it rather than restating it.
 - For a finding outside the work itself, section 1a's three conditions decide whether you fold the
   fix in or file it.
 
@@ -336,11 +339,12 @@ after the first review is the failure mode here.
 
 A fix round starts only on the operator's direction through their authenticated channel: go draft,
 do what was directed and nothing more, push, and post a round comment citing the direction; the
-citation is what makes an overgrown round visible. The label comes off only when every reading has a
-disposition (a directed fix, an accepted pushback, or an explicit accepted risk); a round that
-leaves any finding undirected keeps it on. The boundary is the channel, not the reviewer: anything
-published waits for direction, whoever produced it, while your own private reviews (section 5) keep
-their fix loop.
+citation is what makes an overgrown round visible. Disposition tracks material findings only
+(section 5's bar): the label comes off when every material finding has one (a directed fix, an
+accepted pushback, or an explicit accepted risk), while optional nits are simply acknowledged in the
+reading and create no further obligation, wedge no merge, and trigger no re-review. The boundary is
+the channel, not the reviewer: anything published waits for direction, whoever produced it, while
+your own private reviews (section 5) keep their fix loop.
 
 ## 8. Escalate the big stuff; otherwise keep moving
 
