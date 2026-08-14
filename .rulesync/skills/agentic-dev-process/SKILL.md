@@ -161,9 +161,13 @@ section 7a instead):
 
 - Push back on findings that are genuinely incorrect; a reviewer is not infallible, and a wrong
   finding followed blindly makes the code worse.
-- Otherwise, err on the side of fixing anything valid, including the minor and the merely-nicer.
-- Iterate until everyone is happy. Do not move on from a step with a live, unaddressed valid finding
-  hanging over it.
+- Filter every finding through materiality first: would leaving it change what someone builds,
+  concludes, or does next? Fix material findings; iterate until all of them are resolved or
+  explicitly dispositioned, and do not move on from a step with a live, undispositioned material
+  finding hanging over it.
+- Minor findings are optional. They need no disposition, they never independently trigger another
+  round or re-review, and fixing one is a courtesy, not a requirement. Reviewers apply the same
+  filter before writing: a finding that does not matter is noise wearing a severity label.
 - For a finding outside the work itself, section 1a's three conditions decide whether you fold the
   fix in or file it.
 

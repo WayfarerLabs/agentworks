@@ -1,6 +1,5 @@
 ---
 description: "Never write unit tests that assert on the wording of prose we author ourselves"
-globs: ["**/*"]
 ---
 
 # Don't Unit-Test Our Own Prose
@@ -10,6 +9,11 @@ CLI help and messages, docs, skills, rules, packaged prompts, disclosures, contr
 That includes asserting a sentence is present, asserting a phrase is absent, matching normalized
 prose against a blacklist of forbidden wordings, and pinning a body of text verbatim so that any
 edit fails a test.
+
+The target is every authored artifact, not prose alone: config files, workflow files, CSS tokens,
+and the spelling of our own source code are all things we author and review, and pinning their exact
+form has the same failure mode as pinning a sentence. When two artifacts must agree, derive one from
+the other mechanically and test the derivation, never a second hand-maintained copy.
 
 Prose we commit is correct because we wrote it correctly and reviewed it, the same way every other
 line in the repo is correct. A test that restates the sentence proves nothing the diff did not

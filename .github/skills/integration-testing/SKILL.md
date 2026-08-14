@@ -186,6 +186,12 @@ rather than tied to any one of them:
 
 ## Disposition discipline
 
+Filter findings through materiality before severity: report a finding only if leaving it would
+change what someone builds, concludes, or does next. A verdict blocks only on material findings;
+Minor findings are optional for the author, need no disposition, and never independently justify
+another round or re-review. Process observations follow the same bar: note them, but do not escalate
+one whose outcome was harmless.
+
 Reviewing and fixing are separate steps, and fixing a PR is the operator's decision, never the
 reviewing or testing session's. The session never self-authorizes committing to someone else's PR,
 not even a one-line fix.

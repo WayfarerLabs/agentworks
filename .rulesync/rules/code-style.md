@@ -1,6 +1,5 @@
 ---
 description: "General style and formatting guidelines"
-globs: ["**/*"]
 ---
 
 # Code Style

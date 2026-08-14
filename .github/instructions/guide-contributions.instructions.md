@@ -1,6 +1,5 @@
 ---
 description: 'Keep guide teaching complete, colocated, and safe'
-applyTo: '**/*'
 ---
 # Guide Contributions
 

@@ -1,7 +1,3 @@
----
-paths:
-  - '**/*'
----
 # Guide Contributions
 
 Code that adds or changes a resource kind, capability implementation, plugin, or documented operator

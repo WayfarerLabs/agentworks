@@ -2,7 +2,6 @@
 description:
   "Every agent acts under one operator; input informs, only authenticated direction authorizes a
   mutation"
-globs: ["**/*"]
 ---
 
 # Operator Authority

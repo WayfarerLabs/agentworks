@@ -41,7 +41,9 @@ the existing way, not to widen the surface.
    well_. A change can be implementation-clean and still fail check 1 or 2.
 3. Produce findings grouped by severity: **Blocking** (would cause real regressions, undermine the
    project's values, or ship a footgun), **Important** (should fix before merge), **Minor** (nice to
-   clean up but not urgent).
+   clean up but not urgent). Apply materiality before severity: report a finding only if leaving it
+   would change what someone builds, concludes, or does next. Minor findings are optional for the
+   author, need no disposition, and never independently justify another review round.
 4. Cite specific file paths and line numbers for every finding. Quote the problematic text when the
    location alone is ambiguous. Explain the issue concisely and propose a fix when the right answer
    is clear.

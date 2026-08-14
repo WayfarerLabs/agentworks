@@ -1,7 +1,3 @@
----
-paths:
-  - '**/*'
----
 # Ask Questions
 
 When something is ambiguous, unclear, or could reasonably go multiple ways, ask before proceeding.

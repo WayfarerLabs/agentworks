@@ -1,6 +1,5 @@
 ---
 description: Always use the latest stable version when installing or updating software
-applyTo: '**/*'
 ---
 # Latest Stable Version
 

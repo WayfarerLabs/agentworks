@@ -1,7 +1,3 @@
----
-paths:
-  - '**/*'
----
 # Code Style
 
 Please follow the style guidelines specified in the `.editorconfig` file.

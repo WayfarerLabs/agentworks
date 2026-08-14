@@ -1,7 +1,3 @@
----
-paths:
-  - '**/*'
----
 # Development Process
 
 All development here runs through one process, and the `agentic-dev-process` skill is its single

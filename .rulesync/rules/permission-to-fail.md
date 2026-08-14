@@ -1,6 +1,5 @@
 ---
 description: "It is ok to say you don't know or that something isn't working"
-globs: ["**/*"]
 ---
 
 # Permission to Fail
