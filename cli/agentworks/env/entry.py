@@ -57,7 +57,7 @@ class EnvEntry(
     AgwRootModel[
         Annotated[
             PlaintextEnvEntry | SecretEnvEntry,
-            StructuralUnion(canonicalize_null_companions=True),
+            StructuralUnion(),
         ]
     ]
 ):

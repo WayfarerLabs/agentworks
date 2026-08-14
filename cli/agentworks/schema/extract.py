@@ -65,7 +65,7 @@ from agentworks.schema._shape import (
     addressed_arm_model,
     model_fields_of,
     shape_of,
-    structural_arm_and_value,
+    structural_arm_for,
     table_addresses_block,
 )
 from agentworks.schema.reference import ConfigReference
@@ -188,11 +188,7 @@ def _below(node: _Node) -> Iterator[_Node]:
         elif shape.arms and shape.discriminator is not None:
             yield from _arm_block(shape.arms, shape.discriminator, shape.union_scalar_shorthand, value)
         elif shape.structural_arms:
-            yield from _structural_block(
-                shape.structural_arms,
-                value,
-                canonicalize_null_companions=shape.structural_null_companions,
-            )
+            yield from _structural_block(shape.structural_arms, value)
         elif shape.union_model is not None:
             yield from _union_block(shape.union_model, shape.union_members, value)
 
@@ -275,11 +271,7 @@ def _element_nodes(shape: FieldShape, element: object) -> Iterator[_Node]:
             element,
         )
     elif shape.item_structural_arms:
-        yield from _structural_block(
-            shape.item_structural_arms,
-            element,
-            canonicalize_null_companions=shape.item_structural_null_companions,
-        )
+        yield from _structural_block(shape.item_structural_arms, element)
     elif shape.item_union_model is not None:
         yield from _union_block(shape.item_union_model, shape.item_union_members, element)
 
@@ -329,17 +321,11 @@ def _arm_block(
 def _structural_block(
     arms: tuple[type[BaseModel], ...],
     value: object,
-    *,
-    canonicalize_null_companions: bool,
 ) -> Iterator[_Block]:
     """The one closed arm a raw table's required and allowed keys select."""
-    arm, canonical = structural_arm_and_value(
-        arms,
-        value,
-        canonicalize_null_companions=canonicalize_null_companions,
-    )
+    arm = structural_arm_for(arms, value)
     if arm is not None:
-        yield _Block(model=arm, blob=canonical)
+        yield _Block(model=arm, blob=value)
 
 
 def _union_block(model: type[BaseModel], members: tuple[object, ...], value: object) -> Iterator[_Block]:
