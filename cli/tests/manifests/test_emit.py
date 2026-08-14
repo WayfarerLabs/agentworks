@@ -287,12 +287,14 @@ def test_env_sources_emit_as_an_untagged_structural_one_of() -> None:
     env_entry = schema["$defs"]["EnvEntry"]
 
     assert "anyOf" not in env_entry
-    plaintext, secret = env_entry["oneOf"]
+    assert len(env_entry["oneOf"]) == 2
+    plaintext = schema["$defs"]["PlaintextEnvEntry"]
+    secret = schema["$defs"]["SecretEnvEntry"]
     assert plaintext["anyOf"][0] == {"type": "string"}
     assert plaintext["anyOf"][1]["required"] == ["value"]
-    assert plaintext["anyOf"][1]["properties"]["secret"] == {"type": "null"}
+    assert set(plaintext["anyOf"][1]["properties"]) == {"value"}
     assert secret["required"] == ["secret"]
-    assert secret["properties"]["value"] == {"type": "null"}
+    assert set(secret["properties"]) == {"secret"}
 
 
 @pytest.mark.parametrize(
@@ -301,8 +303,6 @@ def test_env_sources_emit_as_an_untagged_structural_one_of() -> None:
         "text",
         {"value": "text"},
         {"secret": "api-token"},
-        {"value": "text", "secret": None},
-        {"value": None, "secret": "api-token"},
     ],
 )
 def test_the_emitted_schema_accepts_every_env_source_spelling(entry: object) -> None:
@@ -315,7 +315,15 @@ def test_the_emitted_schema_accepts_every_env_source_spelling(entry: object) -> 
     assert _errors(document_schema("vm-template"), document) == []
 
 
-@pytest.mark.parametrize("entry", [{}, {"value": "text", "secret": "api-token"}])
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {},
+        {"value": "text", "secret": "api-token"},
+        {"value": "text", "secret": None},
+        {"value": None, "secret": "api-token"},
+    ],
+)
 def test_the_emitted_schema_rejects_env_tables_that_match_no_arm(entry: object) -> None:
     document = {
         "apiVersion": API_VERSION,

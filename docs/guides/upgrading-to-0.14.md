@@ -838,6 +838,41 @@ so a schema-aware editor completes and checks whichever arm you are writing (see
 ["Editing manifests with schema support"](resources.md#editing-manifests-with-schema-support) in the
 resources guide).
 
+### Env entries reject null companion fields now
+
+An environment entry selects exactly one source: plaintext or a declared secret. The two old
+persisted spellings that wrote the unused source as `null` are no longer accepted. Remove the null
+companion field when you find one:
+
+```yaml
+# before: plaintext
+EDITOR: {value: vim, secret: null}
+
+# after
+EDITOR: {value: vim}
+
+# before: secret
+GITHUB_TOKEN: {value: null, secret: github-token}
+
+# after
+GITHUB_TOKEN: {secret: github-token}
+```
+
+The ordinary plaintext spellings remain `EDITOR: vim` and `EDITOR: {value: vim}`. The secret
+spelling remains `GITHUB_TOKEN: {secret: github-token}`. `agw resource schema --write` now rejects
+the two retired mappings in an editor as well as during manifest loading.
+
+To find likely flow-style entries in the normal manifest directory, run:
+
+```bash
+grep -rniE '(^|[,{[:space:]])(value|secret):[[:space:]]*null([,}]|$)' \
+  ~/.config/agentworks/resources
+```
+
+Inspect every hit in its containing mapping. The scan finds both field names but cannot prove they
+are an env entry, and it can miss multiline or quoted keys. Rewrite only the two mappings above; an
+explicit `null` in another field can have a different documented meaning.
+
 ### Types are checked now
 
 Values are no longer coerced. A quoted number is a string, and a string is not a boolean.
@@ -1005,8 +1040,7 @@ whose `inherits` names more than one parent, and any parent that declares little
 - **Install commands may now combine `test_exec`, `test_file`, and `test_dir`.** Documents that set
   more than one were previously rejected and now load. Installation is skipped only when every
   non-empty declared test passes; with no non-empty tests, the command always runs.
-- **`{value: x}` is a new accepted env spelling**, alongside a bare string and `{secret: name}`.
-  Additive: nothing you have written stops working, but a config can now say something it could not.
+- **`{value: x}` is an accepted env spelling**, alongside a bare string and `{secret: name}`.
 
 ### If you maintain a VM platform outside this tree
 
