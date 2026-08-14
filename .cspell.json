@@ -232,7 +232,8 @@
     "worklist",
     "workstream",
     "workstreams",
-    "worktree"
+    "worktree",
+    "xdist"
   ],
   "ignoreRegExpList": ["`[^`\\r\\n]+`"],
   "useGitignore": true,

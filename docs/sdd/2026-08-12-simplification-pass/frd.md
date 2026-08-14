@@ -43,6 +43,15 @@ Settled inputs, recorded for traceability:
    from one key. Accepted fallback: Copilot moves to reference-based delivery via the always-applied
    `.github/copilot-instructions.md` pointer, the same trust level Codex already has through
    `AGENTS.md` references.
+7. **2026-08-14 (wave 2 ownership)**: the implementing effort lead owns both waves. Running them as
+   parallel worktree sessions or serializing them is the lead's call. R3.3's file-disjointness still
+   binds: wave 2 stays in `.rulesync/` and the generated rule and skill trees, wave 1 stays in
+   `cli/` and `website/`.
+8. **2026-08-14 (website deferral)**: wave 1's website-touching work waits for PR #486
+   (continuous-lander) to merge. That PR is actively rewriting `test_pages_workflows.py`,
+   `test_lander_404.py`, `lander-model.test.mjs`, and `site_validation.py`, which are exactly the
+   files W1, W4, W5, W6, W8 and the sweep's website rows would edit. This is the coordination the
+   plan's wave 1 preamble called for, resolved by ordering rather than by negotiation.
 
 ## Requirements
 

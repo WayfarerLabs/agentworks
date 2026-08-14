@@ -2,11 +2,12 @@
 
 Finding IDs reference [findings.md](findings.md); requirements reference [frd.md](frd.md). Wave 0
 merges before any wave 1 PR; wave 1 PRs are independent and unordered; the reassessment closes the
-effort.
+effort. The pre-wave-1 measurements the reassessment compares against are in
+[baseline.md](baseline.md).
 
 ## Wave 0: rule delivery, then the amendments (R1)
 
-- [ ] Resolve rule delivery (R1.0, issue #511): probe fresh-session, no-file-tools, and
+- [x] Resolve rule delivery (R1.0, issue #511): probe fresh-session, no-file-tools, and
       isolated-worktree delivery per configured target (Claude, Codex, Copilot), confirm the
       Rulesync emission for a rule without `globs`, then drop the filter from the twelve broad
       always-on rules, keeping `cli-conventions.md` narrow. Done when, either branch (FRD R1.3): (a)
@@ -14,11 +15,17 @@ effort.
       (b) the probe shows this shape cannot work and the operator's recorded disposition places the
       full criteria text into every affected lane (charter-carried at minimum). Escalation alone
       completes nothing: until one branch holds, wave 0 stays open and wave 1 does not start.
-- [ ] Amend `development-principles` with the trust-boundary doctrine (the four boundaries, interior
+      **Closed on branch (a), 2026-08-14**: the effort lead's own session, the first started after
+      #515 merged, carried all twelve rules with full text at launch before any tool use, and
+      correctly omitted `cli-conventions.md`. Recorded on issue #511. The isolated-worktree
+      sub-question rides the same channel but stays unobserved; wave 1's worktree devs report their
+      launch context and the issue closes on that.
+- [x] Amend `development-principles` with the trust-boundary doctrine (the four boundaries, interior
       trust, validator-names-its-boundary; ~10 lines) plus the principle-3 test-quality
       counterweight (R1.1), and `no-prose-policing-tests` with the authored-artifacts generalization
       (~3 sentences), one PR. Done when: merged, and the wave 1 items below cite the amendments in
-      their delegation charters.
+      their delegation charters. **Merged in PR #515**; wave 1 charters carry both criteria in full
+      rather than by citation, so a dev that loses the rule channel still has them.
 
 ## Wave 1: deletion (R2)
 
@@ -29,6 +36,24 @@ domain to about three (cli core; guide and machine output; website and test scaf
 review rounds match the work rather than the item count. The website items coordinate with the
 in-flight continuous-lander effort (PR #486) before starting, since they touch test files it is
 actively changing.
+
+**Sequencing (effort lead, 2026-08-14).** Two facts constrain the "unordered by design" freedom, so
+the items run in three groups rather than all at once:
+
+1. **The `phase7` item goes first and alone on `cli/`.** `validate_interaction_policy` has 175
+   references across 45 files in 13 directories, so it is a repo-wide sweep that collides with every
+   other cli item. It lands before the contained items start.
+2. **Then the contained cli items run in parallel**, each in its own worktree, file-disjoint:
+   descriptor generality (C1, C5) in `schema/`; guide dead surface with `machine_output` (G8, G2,
+   G11, G6); interior secrets validation (S2, S7); and the gcp test scaffolding (P5), which pairs
+   naturally with the sweep's gcp prose rows (P6).
+3. **The prose-and-form sweep runs last of the three**, because its exclusion rule is defined
+   against files the other items own; running it after they land means it inventories a settled
+   tree. Its read-only decision inventory is produced up front and does not wait.
+
+**Website work is deferred** to a final wave 1 PR after #486 merges (operator ruling 8): W1, W4, W5,
+W6, W8 and the sweep's website rows. Wave 1 does not close until that PR lands. The gcp half of the
+contained-trims item (P5) does not wait, since it shares no files with the website half.
 
 - [ ] Delete the `phase7` corpus and `validate_interaction_policy` with its 152 call sites (S1).
       Keep `test_resolution_timeout_cleanup.py` (trim its two wording pins); rename kept fixtures
@@ -82,6 +107,11 @@ actively changing.
       installed, the gcp operation fake is defined once.
 
 ## Wave 2: process and rule subtraction (R3)
+
+Owned by the same lead as wave 1 (operator ruling 7) and running in parallel with it, in a separate
+worktree, disjoint by file: `.rulesync/` and the generated rule and skill trees here, `cli/` and
+`website/` there. The pre-change always-on rule byte count is 33,863 ([baseline.md](baseline.md));
+R3.2 requires the after number to be lower.
 
 - [ ] Rules: delete the three principle-absorbed rules folding their concrete phrasings into the
       principles (PR4); merge the five collateral-sync rules into one (PR5); collapse the
