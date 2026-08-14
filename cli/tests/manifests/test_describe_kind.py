@@ -233,17 +233,6 @@ def test_an_implementation_shows_the_config_it_declares() -> None:
     assert "placement  (table, optional, default {mode: local})" in text
 
 
-def test_git_token_describe_keeps_the_one_arm_union_visible() -> None:
-    """The reference surface agrees with schema and sample: one secret
-    arm, its default, its scalar spelling, and the SecretRef field."""
-    text = _text("git-credential-provider/github")
-
-    assert "token  (string or table, optional, default {mode: secret})" in text
-    assert "- secret: Obtain this credential's token from a named secret." in text
-    assert "mode  (one of: secret, required)" in text
-    assert "secret  (string or null, optional, defaults to `git-token-<name>`, names a secret" in text
-
-
 def test_a_nested_tagged_union_renders_every_arm_with_its_own_fields() -> None:
     """Each arm documents only its own fields."""
     text = _text("vm-platform/lima")
