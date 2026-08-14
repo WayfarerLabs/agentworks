@@ -495,12 +495,12 @@ open-ended research placeholder.
     moves (now scope-reduced to the bucketing), and the breaking-truth task. The README bootstrap
     gate is satisfied (PR #480; see the onboarding entry).
 
-    Four lanes run in parallel with the spine, and these are the boundaries that keep them apart:
-    the onboarding trail-sign round (guide content, while the pass owns guide machinery), the
-    breaking-truth task (`env/entry.py` and the token union, while the pass owns the inert
-    descriptor fields), the installer-plugins bucketing (independent), and the grammar rewrite's
-    design and seeding (only its implementation waits). Wave 1's eight deletion work items are
-    unordered by design and are themselves the largest parallelism available. One coordination
+    Besides wave 2, four other lanes run in parallel with the spine, and these are the boundaries
+    that keep them apart: the onboarding trail-sign round (guide content, while the pass owns guide
+    machinery), the breaking-truth task (`env/entry.py` and the token union, while the pass owns the
+    inert descriptor fields), the installer-plugins bucketing (independent), and the grammar
+    rewrite's design and seeding (only its implementation waits). Wave 1's eight deletion work items
+    are unordered by design and are themselves the largest parallelism available. One coordination
     hazard is recorded: the pass's website items touch test files the continuous-lander effort
     (#486) is actively changing, so those sequence behind #486 or coordinate with that lead first.
 

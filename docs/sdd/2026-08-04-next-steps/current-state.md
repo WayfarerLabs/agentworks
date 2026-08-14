@@ -3,9 +3,9 @@
 - Snapshot date: 2026-08-13, post-assistance (update at wave boundaries)
 - Baseline: Agentworks 0.13.0 plus the phase 1 TOML sunset (PR #316), the 0.14 expired-compat
   removals (PR #406), declarative-schema phase 2 through the descriptor (PR #414), the onboarding
-  guide first slice (PR #428), the operational JSON output contract (PR #462), and the
-  always-available assistance flow with the README bootstrap (PR #480); the 0.14.0 release itself is
-  pending per the `phasing.md` release mapping
+  guide first slice (PR #428), wave 3 secret sources (PR #453), the operational JSON output contract
+  (PR #462), and the always-available assistance flow with the README bootstrap (PR #480); the
+  0.14.0 release itself is pending per the `phasing.md` release mapping
 
 This document records where the system actually is, verified by code reconnaissance rather than
 assumed from the perspectives. It is the ground truth the phasing rests on; when a wave lands,
@@ -88,15 +88,12 @@ and the manifest surface has no warn-window channel (the standing consequence re
   preserved.
 - Each capability implementation registers exactly one config model; validation is one blob at a
   time against the tagged union assembled at the registration boundary, cached on its arms. The
-  secret-backend constructed-singleton policy is a descriptor-carried interim exception for wave 3
-  to remove. `_VMPlatformKind` moved into `capabilities/` with its siblings.
-- The secret-source direction still goes with the grain: the backend/source split is specified in
-  `target-state.md`, and the descriptor contract records the open readiness-shape choice for the
-  `secret-source` kind as wave 3's call, which the descriptor must record once made.
-- The map-keyed `backend_mappings` escalation from the wave 2 closeout is ruled (saga, 2026-08-07,
-  recorded in `capability-descriptor-contract.md`): the descriptor gains a field recording where a
-  map-keyed capability is hosted, schema emission as first consumer, landing with wave 3 (its seed's
-  R8); the `onepassword` trigger has fired.
+  secret-backend constructed-singleton exception is removed (wave 3, PR #453, merged and locked
+  2026-08-10). `_VMPlatformKind` moved into `capabilities/` with its siblings.
+- Wave 3 shipped the two-level secret model: synthesized sources over backends, the resolution API,
+  map-keyed hosting recorded in the descriptor's `mapping_host` field with schema emission consuming
+  it, and the 0.14 hard break for direct backend references. The readiness-shape choice for the
+  `secret-source` kind is settled and recorded in that SDD's lock.
 
 ## Session runtime (observability groundwork)
 
