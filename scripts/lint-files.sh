@@ -128,13 +128,22 @@ echo "=== cspell ==="
 # are intentionally excluded: identifier-style "misspellings" are noisy and
 # the dictionary maintenance cost outweighs the benefit. Mirrored in
 # .cspell.json's ignorePaths so direct invocations behave the same way.
+#
+# .cspell.json also sets gitignoreRoot so cspell stops looking for .gitignore
+# files at the tree it is run in. Agent worktrees live under .claude/, which
+# the root .gitignore excludes wholesale, so without it every file in a
+# worktree looks ignored and the check silently covers nothing. Keeping this
+# in the config rather than as a flag here means a direct cspell run and an
+# editor integration get the same behavior.
 if "${PKGRUN[@]}" cspell@"$CSPELL_VERSION" --no-progress '**/*.md'; then
     echo "  ok"
 else
     echo ""
-    echo "  cspell flags cannot be auto-fixed. For each unknown word:"
+    echo "  If cspell reported unknown words, they cannot be auto-fixed. For each:"
     echo "    - correct the spelling, OR"
     echo "    - add the word to .cspell.json's \"words\" list."
+    echo "  If it reported \"Files checked: 0\", nothing was spell-checked at all."
+    echo "  That is an ignore-configuration problem, not a spelling one."
     FAIL=1
 fi
 

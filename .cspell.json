@@ -237,6 +237,7 @@
   ],
   "ignoreRegExpList": ["`[^`\\r\\n]+`"],
   "useGitignore": true,
+  "gitignoreRoot": ".",
   "ignorePaths": [
     "node_modules",
     "cli/.venv/**",
