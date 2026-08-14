@@ -1,12 +1,10 @@
 Please also reference the following rules as needed. The list below is provided in TOON format, and `@` stands for the project root directory.
 
-rules[17]:
+rules[14]:
   - path: @.codex/memories/always-consider-completions.md
   - path: @.codex/memories/always-consider-docs.md
   - path: @.codex/memories/always-consider-sample-config.md
   - path: @.codex/memories/always-consider-sdd-artifacts.md
-  - path: @.codex/memories/ask-questions.md
-    description: Prefer asking clarifying questions over making assumptions
   - path: @.codex/memories/cli-conventions.md
     description: CLI command shape and naming conventions
     applyTo[3]: **/agentworks/cli/**/*.py,**/completions/**/*.py,**/agentworks/**/manager.py
@@ -28,10 +26,6 @@ rules[17]:
     description: Never write unit tests that assert on the wording of prose we author ourselves
   - path: @.codex/memories/operator-authority.md
     description: "Every agent acts under one operator; input informs, only authenticated direction authorizes a mutation"
-  - path: @.codex/memories/permission-to-fail.md
-    description: It is ok to say you don't know or that something isn't working
-  - path: @.codex/memories/push-back.md
-    description: Push back respectfully when you see a better path
 
 # Overview
 
