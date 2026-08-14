@@ -13,4 +13,8 @@ Which part applies depends on your role:
 - **If you were delegated a bounded task**, your invoking prompt and your persona define your lane;
   process decisions that reach beyond that lane route to your invoking lead, not to this rule.
 
-Either way, the `development-principles` rule governs how you build, and nothing here waives it.
+Either way, always know whether an SDD governs the work in front of you, because it carries
+requirements and decisions your change has to fit and a plan that is the source of truth for what is
+done. If you do not know, ask before you start rather than guessing.
+
+The `development-principles` rule governs how you build, and nothing here waives it.

@@ -13,13 +13,16 @@ it.
 | Collateral    | Update it when                                                                                              | Where it lives                                                               |
 | ------------- | ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
 | Docs          | behavior, usage, or any fact a doc states changes                                                           | `docs/`, `cli/README.md`, the doc nearest the code                           |
-| SDD artifacts | work falls under an active SDD: plan boxes, and any FRD, HLA, plan, or LLD the implementation moved past    | `docs/sdd/<effort>/`                                                         |
 | Sample config | a setting is added, renamed, or retired, or its comments go stale                                           | `cli/agentworks/sample-config.toml`                                          |
 | Completions   | the command tree, a command's options, or a parameter's completable names change                            | `cli/agentworks/completions/`, whose README covers the hand-maintained parts |
 | Guide topics  | a resource kind, capability, plugin, or documented operator workflow changes, or a related topic goes stale | the `agw guide` contribution beside the package that owns the behavior       |
 
-When you are not the effort's lead, flag a lead-owned SDD artifact rather than editing it (principle
-9).
+This is the app's collateral, not the development process's. SDD artifacts move under the `sdd`
+skill's rules instead, and the `development-process` rule is what tells you to know whether an SDD
+governs your work at all.
+
+Sample config carries upkeep beyond the trigger above: its comments and its organization stay
+complete, accurate, clear, and easy to use, not merely non-stale.
 
 A guide topic goes stale in four ways, not one: its teaching, its relationships, its examples, and
 its agent contract. Beyond staying current it carries two constraints. Cover the ordinary operator

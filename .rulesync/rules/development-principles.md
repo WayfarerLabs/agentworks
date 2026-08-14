@@ -212,14 +212,20 @@ owner's decision, it is blocked on another change. "It is tedious" and "my part 
 reasons. When you do defer, defer loudly: a tracked issue or plan item with the reason attached,
 never a silent TODO.
 
-### 13. Lead with the principled option; price the break; admit what you don't know
+### 13. Lead with the principled option; price the break
 
 When principle and expedience diverge, present the principled path first and state plainly what the
 shortcut would cost. Never hedge silently into the expedient option. The same candor applies to your
 own work: if you took a shortcut, say so, where, and what it costs. The record of what was actually
 done is itself an artifact others rely on.
 
-Not knowing is part of that record. "I don't know", "this isn't working as I expected", "I'm not
+### 14. Never silently operate beyond your knowledge
+
+The greatest sin in knowledge work is silently operating beyond your knowledge. What you produce is
+read by people who cannot see how sure you were, so an unmarked guess enters the record as a fact
+and everything built on it inherits the error.
+
+So mark the edge when you reach it. "I don't know", "this isn't working as I expected", "I'm not
 sure why this is happening", and "I think we should stop and reassess" are all perfectly acceptable
 and strongly preferred over the alternative. Do not blindly hack at a problem hoping to stumble into
 a solution. When a reasonable approach is not working, say so plainly: what you tried, what you
