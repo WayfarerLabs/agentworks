@@ -1,8 +1,9 @@
 # Plan: The agentworks.build Website
 
-- Status: Phase 4R terrain-only correction in design; canonical assistance integrated
+- Status: Phase 4S free-flight and terrain-variety correction in design; canonical assistance
+  integrated
 - Date: 2026-08-07
-- Last revised: 2026-08-13
+- Last revised: 2026-08-14
 - FRD: `frd.md`
 - HLA: `hla.md`
 - Research: `prior-art-research.md`
@@ -24,16 +25,16 @@ retains ownership of production acceptance and the final closeout PR.
 
 PR #486 carries the continuous Lander work. Phases 4A through 4O are accepted gameplay history;
 Phase 4P's automated record remains immutable but its product behavior was rejected by the operator,
-Phase 4Q restores the accepted fixed-scene baseline, and Phase 4R owns the terrain correction. The
-PR preserves the established site, canonical assistance projection, hosting, and routes throughout
-that recovery.
+Phase 4Q restores the accepted fixed-scene baseline, Phase 4R owns the straight-terrain correction,
+and Phase 4S owns the final free-flight and terrain-variety follow-up. The PR preserves the
+established site, canonical assistance projection, hosting, and routes throughout that recovery.
 
-`locked.md` never merges before R1-R25 and R28 plus AC1-AC26 and AC29 are accepted in production;
-superseded R26-R27 and AC27-AC28 are historical evidence, not closeout gates. Every earlier merge is
-independently useful and operable. The first release was honest without an onboarding claim, and the
-integrated release consumes the canonical source from the same reviewed PR while preserving
-deterministic source identity; no permanent website code binds to a branch-only or duplicated
-contract.
+`locked.md` never merges before R1-R25 and R28-R29 plus AC1-AC26 and AC29-AC30 are accepted in
+production; superseded R26-R27 and AC27-AC28 are historical evidence, not closeout gates. Every
+earlier merge is independently useful and operable. The first release was honest without an
+onboarding claim, and the integrated release consumes the canonical source from the same reviewed PR
+while preserving deterministic source identity; no permanent website code binds to a branch-only or
+duplicated contract.
 
 ## Phase 0: design convergence and coordination
 
@@ -1105,6 +1106,41 @@ vertical band, every platform is placed independently and then lifted exactly 2.
 under-footprint maximum, supports reach native terrain, no unrelated behavior changes, and the
 operator accepts the hands-on result with no vertical scrolling.
 
+The operator's 2026-08-14 hands-on review accepted the straight terrain, local decks, supports, and
+fixed scene but rejected the forced alternating hill/valley rhythm and the remaining synthetic
+ceiling and excessive-speed failures. Completed Phase 4R records remain immutable history; Phase 4S
+changes only terrain variety and the two non-contact failure classifications.
+
+## Phase 4S: free flight and less-periodic straight terrain
+
+- [ ] Amend and independently review `brand-and-lander-lld.md` for a deterministic global
+      straight-vertex authority without mandatory high/low alternation or a short repeating
+      silhouette. Retain normalized `[0.1,0.6]`, exact grade/grade-change bounds,
+      terrain-independent site positions, local `max+2.5 m` decks, native support feet, and zero
+      vertical scrolling.
+- [ ] Delete the vertical-ceiling crash and replace the 64-slice excessive-speed failure with a
+      bounded, complete swept-collision traversal. Fuel depletion must suppress thrust without
+      failing until a real terrain or structure contact occurs. A finite world is permitted only
+      with a visible physical terminus whose contact causes the failure; no retained-window edge or
+      pose within generated terrain may fail as a boundary.
+- [ ] Regenerate terrain/world/route fixtures and proof projections atomically as required. Prove
+      every concrete route geometry, opening, Retry checkpoint, static scene, and retained-world
+      bound against the new terrain without changing controls, physics, landing tolerance, fuel,
+      mission pacing, sky, site geometry, copy, or routes.
+- [ ] Add mutation-sensitive model, world, derivation, static, and real-browser witnesses for former
+      ceiling and excessive-speed crossings, zero-fuel ballistic contact, less-periodic seeded
+      angular terrain, exact height/grade limits, local decks/supports, collision/render parity, and
+      no scrolling at every required viewport.
+- [ ] Run full website and repository gates, independent code and fresh-eyes browser review, refresh
+      port 8766 only at an exact reviewed green head, and obtain operator hands-on acceptance before
+      marking Phase 4S complete.
+
+Definition of done: the lander can fly past its target throughout the known world while fuel and
+actual collisions permit, empty fuel leads to ballistic descent rather than a synthetic explosion,
+and any finite world edge is a visible contact-backed structure rather than a random failure. The
+terrain is visibly less predictable while remaining straight, bounded, navigable, site-independent,
+locally supported, and free of vertical page scrolling.
+
 ## Phase 5: CI and default Pages deployment
 
 - [x] Delegate workflow implementation to an `agentworks-dev` subagent with ownership of the Pages
@@ -1215,8 +1251,8 @@ with no branch-only dependency, duplicated bootstrap, or website-owned continuin
       metadata/CSP, byte-equivalent Lander/404 game subtree, and compact 404 title after onboarding
       integration.
 
-Definition of done: R1-R25 and R28, AC2-AC3, and AC5-AC26 plus AC29 hold through the existing site
-and pipeline, with the temporary notice removed rather than retained as configuration.
+Definition of done: R1-R25 and R28-R29, AC2-AC3, and AC5-AC26 plus AC29-AC30 hold through the
+existing site and pipeline, with the temporary notice removed rather than retained as configuration.
 
 ## Phase 9: complete acceptance and closeout
 
@@ -1240,9 +1276,9 @@ and pipeline, with the temporary notice removed rather than retained as configur
       run final gates, obtain the required closeout review, and hand the ready PR to the operator
       for merge.
 
-Definition of done: AC1-AC26 and AC29 hold at `https://agentworks.build`, R1-R25 and R28 plus C1-C5
-are production facts, the deployment is operable without this SDD, all plan boxes are truthful, and
-the effort is locked.
+Definition of done: AC1-AC26 and AC29-AC30 hold at `https://agentworks.build`, R1-R25 and R28-R29
+plus C1-C5 are production facts, the deployment is operable without this SDD, all plan boxes are
+truthful, and the effort is locked.
 
 ## Escalation triggers
 

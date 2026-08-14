@@ -1,8 +1,9 @@
 # HLA: The agentworks.build Website
 
-- Status: Phase 4R terrain-only correction in design; canonical assistance integrated
+- Status: Phase 4S free-flight and terrain-variety correction in design; canonical assistance
+  integrated
 - Date: 2026-08-07
-- Last revised: 2026-08-13
+- Last revised: 2026-08-14
 - FRD: `frd.md`
 - Research: `prior-art-research.md`
 - Brand direction: `brand-direction.md`
@@ -312,6 +313,21 @@ terrain-height input. Once its complete structural footprint is fixed, the deck 
 feet, clearance, routes, and the static scene consume the same terrain and derived deck result. The
 scene retains one fixed vertical projection and clips its world internally: there is no vertical
 camera authority, presentation-only terrain offset, page growth, or game/page vertical scrolling.
+
+The global terrain sampler does not force alternating hill and valley blocks or cycle through a
+short profile silhouette. Seeded global vertex authority supplies a less periodic angular sequence
+while retaining exact normalized-height, segment-grade, and adjacent-grade-change bounds; every
+consumer still linearly interpolates the same strict-X vertices. Site generation remains a separate
+mission-index calculation and samples terrain only after its horizontal footprint is immutable.
+Flight inside generated terrain has no invisible positional or synthetic vehicle-safety failure
+boundary. The swept-collision routine adapts its traversal to the complete relevant path instead of
+converting a large subdivision count into `overspeed`, and the model does not classify crossing a
+vertical ceiling as a crash. Empty fuel only removes thrust. The crash state is reachable solely
+through a concrete swept intersection with the canonical terrain, a platform, support, NOC collider,
+or an explicitly rendered physical terminus if the implementation chooses a finite world. Such a
+terminus is optional, visible before contact, and separate from the bounded rolling render window;
+crossing a retained-window edge is never a crash. These changes do not introduce a vertical camera,
+page growth, scrolling, or unbounded retained world state.
 
 The materially elevated platform remains exactly three lander widths long beside one solid NOC
 building. One collider-backed open truss uses continuous top and bottom chords and a uniform

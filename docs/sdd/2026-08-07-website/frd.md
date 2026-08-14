@@ -1,8 +1,9 @@
 # FRD: The agentworks.build Website
 
-- Status: Phase 4R terrain-only correction in design; canonical assistance integrated
+- Status: Phase 4S free-flight and terrain-variety correction in design; canonical assistance
+  integrated
 - Date: 2026-08-07
-- Last revised: 2026-08-13
+- Last revised: 2026-08-14
 - Seeded by: the saga lead, at operator request. This is a standalone effort, deliberately NOT a
   child of the 2026-08-04-next-steps saga (see that saga's `target-state.md` out-of-scope section
   for the recorded relationship). It follows the ordinary SDD process: the effort lead owns the HLA
@@ -264,6 +265,23 @@ recorded as a growth path so nothing forecloses it, and none of it is in scope n
   Rendering, collision, support feet, static recovery, and route proof consume the same polyline.
   The scene retains its fixed `25/16` projection with no vertical camera, document growth, or
   vertical scroll.
+- R29. The operator's follow-up review rejects Phase 4R's forced alternating hill/valley rhythm and
+  the remaining non-contact flight failures. The straight terrain remains deterministic and bounded
+  within normalized height `[0.1,0.6]`, but its seeded global vertices vary without a fixed
+  high-block/low-block alternation or a short repeating silhouette. Ordinary windows show a less
+  predictable mix of rises, descents, peaks, shelves, and intermediate angular facets while exact
+  segment-grade and adjacent-grade-change limits keep the surface navigable rather than noisy.
+  Terrain generation remains wholly independent of site placement; decks and supports retain the
+  exact R28 `max+2.5 m` rule after each site position is fixed. Passing a target, traveling anywhere
+  inside the generated world, crossing the former vertical ceiling, or moving farther than a bounded
+  collision subdivision budget can cover must never itself enter the crash sequence. The collision
+  implementation must continue checking the complete swept path without converting large motion into
+  a synthetic failure. Fuel exhaustion suppresses thrust but is not itself a crash; only a
+  subsequent real collision with terrain or a platform, support, NOC structure, or an explicitly
+  rendered physical world boundary can destroy the lander. Infinite horizontal scrolling is not
+  required, but any finite world edge must be visible before contact and cannot cause a failure
+  while the lander remains inside known terrain. The fixed `25/16` scene and zero vertical page
+  scrolling remain unchanged.
 
 ## Settled constraints (inherited; do not reopen)
 
@@ -445,22 +463,22 @@ merged and settled on `main`. The first slice must not build toward them specula
   Crossing either former horizontal mission boundary causes no crash and no implicit target
   completion; deterministic tests and browser input drive the lander past the target and back from
   both directions while the camera, bounded retained world, collision terrain, and bidirectional cue
-  remain coherent. Fuel exhaustion still suppresses thrust, and only actual terrain, platform, or
-  building contact, the vertical ceiling, or the excessive-speed vehicle-safety classification can
-  enter the crash sequence. Fixed-seed browser evidence shows stars moving with the world at the
-  pinned parallax rate and deterministic occasional celestial landmarks entering and leaving a
-  bounded sky projection without extra requests or accessibility nodes. Crescent moons remain closed
-  astronomical silhouettes. Each planet has one or two modest elliptical rings; each ring's rear
-  center is hidden by the planet while its foreground arc remains visible. The NOC's physical mast
-  and antenna head remain black at every power stage while only the radiating signal arches gain
-  their established colors. Every retained site renders exactly three independently reconstructed
-  open lattice support columns whose member pixels lie inside their fixture-derived colliders, whose
-  feet meet native terrain, and whose visual rhythm joins the platform truss. Normal motion
-  completes the agent's pre-NOC travel in half its Phase 4L duration, reduced motion remains atomic,
-  and refuel plus power-stage timings are byte-for-byte unchanged. The built footer resolves
-  directly to `/lander/`, its live accessible name and hover text agree, and the reviewed Lander/404
-  copy uses the shortened operator wording without adding a fragment redirect or a second game
-  route.
+  remain coherent. Fuel exhaustion still suppresses thrust, and only actual terrain, platform,
+  support, or building contact can enter the crash sequence; the former vertical ceiling and
+  excessive-speed fallback are not failures. Fixed-seed browser evidence shows stars moving with the
+  world at the pinned parallax rate and deterministic occasional celestial landmarks entering and
+  leaving a bounded sky projection without extra requests or accessibility nodes. Crescent moons
+  remain closed astronomical silhouettes. Each planet has one or two modest elliptical rings; each
+  ring's rear center is hidden by the planet while its foreground arc remains visible. The NOC's
+  physical mast and antenna head remain black at every power stage while only the radiating signal
+  arches gain their established colors. Every retained site renders exactly three independently
+  reconstructed open lattice support columns whose member pixels lie inside their fixture-derived
+  colliders, whose feet meet native terrain, and whose visual rhythm joins the platform truss.
+  Normal motion completes the agent's pre-NOC travel in half its Phase 4L duration, reduced motion
+  remains atomic, and refuel plus power-stage timings are byte-for-byte unchanged. The built footer
+  resolves directly to `/lander/`, its live accessible name and hover text agree, and the reviewed
+  Lander/404 copy uses the shortened operator wording without adding a fragment redirect or a second
+  game route.
 - AC27. **Superseded historical criterion; not active for closeout.** Before any camera transform,
   every point on the independently reconstructed continuous terrain surface has canonical normalized
   height `(640-sceneY)/640` inclusively within `[0.1,0.6]`; the interpolation kernel is
@@ -500,6 +518,18 @@ merged and settled on `main`. The first slice must not build toward them specula
   fixed `25/16` scene, zero vertical transform, and equality of document client and scroll heights
   throughout preflight, flight, service, crash, Retry, reversal, and Exit. Operator hands-on
   acceptance of the actual terrain is required before closeout.
+- AC30. Long-duration browser and model witnesses fly beyond the current target in both directions,
+  cross the former `56 m` ceiling, and exceed the former 64-slice collision-sweep threshold without
+  a failure, progress mutation, or collision omission. A zero-fuel witness continues ballistic
+  flight until an independently reconstructed real surface or structure contact and crashes only at
+  that contact. Independent terrain reconstruction rejects any mandatory high/low block alternation,
+  short repeating profile cycle, curve command, value outside normalized `[0.1,0.6]`, site input, or
+  mismatch among rendered, colliding, static, and support-foot terrain. Reviewed wide and narrow
+  seed windows visibly differ and contain irregular angular sequences without exceeding the pinned
+  grade or grade-change bounds. If the implementation uses finite horizontal bounds, browser
+  evidence proves a visible physical terminus and contact-backed failure there while every pose
+  inside the generated terrain remains free of boundary failure. Existing local deck equality,
+  route-proof, retention, fixed-scene, and zero-scroll acceptance remains green.
 
 ## Settled implementation rulings
 
