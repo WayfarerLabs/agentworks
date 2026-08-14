@@ -4,8 +4,8 @@ Config lives at ~/.config/agentworks/config.toml. It is read-only at runtime.
 
 This package holds the settings dataclasses and the settings-section
 loaders; nothing else. config.toml is settings only now (ADR 0022): the
-TOML resource loaders are gone and a resource-declaring section is a hard
-error at load. The declarable-resource dataclasses (VMTemplate,
+TOML resource loaders are gone and a resource-declaring section is an
+unexpected top-level key. The declarable-resource dataclasses (VMTemplate,
 AgentTemplate, AdminConfig, WorkspaceTemplate, SessionTemplate,
 NamedConsoleConfig, GitCredentialConfig) live in their domain packages;
 kind definitions live there too (see ``agentworks.resources.kinds`` for the
@@ -30,8 +30,7 @@ import path ``agentworks.config`` unchanged:
   post-finalize check that they resolve. Not a loader: the registry does not
   exist yet at load time, so the loaders validate shape and this validates
   existence, from ``bootstrap.build_registry``.
-- ``load``: the ``load_config`` entry point (drives the settings loaders and
-  the resource-section hard error).
+- ``load``: the ``load_config`` entry point (drives the settings loaders).
 
 This ``__init__.py`` re-exports the public surface (and the handful of
 private helpers that the manifest decoder and tests reach into directly) so

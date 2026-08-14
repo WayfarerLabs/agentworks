@@ -386,66 +386,6 @@ def test_agentworks_identity_override_surfaces_in_configuration(
     assert any("AGENTWORKS_SESSION" in (c.message or "") for c in warns), [(c.name, c.message) for c in warns]
 
 
-def test_doctor_resource_sections_fail_row_and_continues(tmp_path: Path, monkeypatch) -> None:
-    """config.toml declaring resources is a hard error now (ADR 0022). Doctor
-    must NOT truncate the report to one fail row for the mid-migration
-    operator it helps most: it renders the Config fail row, then retries
-    settings-only (``resources=False``) and continues with the rest of the
-    report (SSH rows, registry)."""
-    # This test needs a config that genuinely still declares resources in TOML
-    # (the mid-migration state), so it writes those sections directly rather
-    # than through the manifest-based helper.
-    pub = tmp_path / "id.pub"
-    priv = tmp_path / "id"
-    pub.write_text("ssh-ed25519 AAAA...")
-    priv.write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
-    cfg = tmp_path / "config.toml"
-    cfg.write_text(
-        dedent(f"""\
-        [operator]
-        ssh_public_key = "{pub.as_posix()}"
-        ssh_private_key = "{priv.as_posix()}"
-
-        [vm_templates.default]
-
-        [admin.config]
-        shell = "zsh"
-        """)
-    )
-    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
-    g, config, registry = _check_config()
-    fails = [(c.name, c.message or "") for c in g.checks if c.status == Status.FAIL]
-    assert any(name == "Config" and "settings only" in message for name, message in fails), fails
-    # The report continued past the fail row rather than aborting: the
-    # settings-only retry produced a config, the SSH checks rendered, and the
-    # registry still built.
-    assert config is not None
-    assert any(c.name.startswith("SSH") for c in g.checks), [c.name for c in g.checks]
-    assert registry is not None
-
-
-def test_doctor_reports_secret_backends_as_a_fail_row_and_keeps_reporting(tmp_path: Path, monkeypatch) -> None:
-    """``[secret_backends.*]`` is a resource section now, so doctor renders
-    it as the Config FAIL row and the settings-only retry carries the rest of
-    the report.
-
-    Both halves matter. It used to be refused by the SETTINGS load, which the
-    retry cannot skip, so this section truncated the whole report to one fail
-    row with every later group reporting `skipped`, and nothing on screen said
-    a ``[secret_backends.*]`` section was the reason. That is the operator
-    doctor helps most, mid-migration, so the row-plus-report shape is the
-    point of the move, not a side effect of it.
-    """
-    cfg = _write_config(tmp_path, settings="[secret_backends.env-var]\n")
-    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
-    g, config, _ = _check_config()
-    fails = [(c.name, c.message or "") for c in g.checks if c.status == Status.FAIL]
-    assert any(name == "Config" and "[secret_backends.*]" in message for name, message in fails), fails
-    # The retry succeeded, so the report goes on rather than truncating.
-    assert config is not None
-    assert any(c.name.startswith("SSH") for c in g.checks), [c.name for c in g.checks]
-
-
 def test_manifest_issues_surface_as_doctor_rows(tmp_path: Path, monkeypatch, capsys) -> None:
     """A load-time advisory on a manifest-declared resource (here an
     ``AGENTWORKS_*`` env key the runtime prelude will override) used to

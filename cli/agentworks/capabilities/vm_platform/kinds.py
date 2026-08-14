@@ -145,7 +145,6 @@ VM_PLATFORM_DESCRIPTOR = CapabilityKindDescriptor(
     manifest_section=HostSurface(
         host_kind="vm-site",
         naming_field="platform",
-        config_field="platform_config",
     ),
 )
 """The vm-platform record in the capability-kind descriptor table

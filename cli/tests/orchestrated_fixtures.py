@@ -40,9 +40,8 @@ system = ["proxmox"]
 
 def proxmox_site() -> ManifestDoc:
     """The proxmox ``vm-site`` as a resources/ manifest: the declarative
-    replacement for the retired legacy ``[proxmox]`` TOML section (a hard error
-    now under ADR 0022; the breaking change is pinned in
-    ``tests/vms/test_legacy_site_sections.py``).
+    replacement for the retired legacy ``[proxmox]`` TOML section (now an
+    ordinary unexpected top-level key under ADR 0022).
 
     A function (not a module constant) so each caller gets a fresh spec
     dict, since ``ManifestDoc`` is shared and its ``spec`` is mutable.

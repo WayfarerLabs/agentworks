@@ -7,11 +7,10 @@ Two neighbours are deliberately absent. The ``[secrets.*]`` resource loader
 (``_load_secrets``) is gone: config.toml stopped declaring resources
 (ADR 0022), and secrets are decoded from YAML manifests by
 ``agentworks.manifests.decode``. ``[secret_backends.*]`` is gone the same
-way: it was a retired backend-selection row that carried no configuration, so
-it is swept by
-``_raise_for_resource_sections`` in ``agentworks.config.load`` alongside
-every other retired resource section, instead of being half-warned and
-half-refused here against the built-in backend registry.
+way: it was a retired backend-selection row that carried no configuration.
+Like every retired resource section, it is now an unexpected top-level key
+instead of being half-warned and half-refused here against the built-in
+backend registry.
 
 ``[secret_config].sources`` NAMES declared ``secret-source`` resources and
 stays, because choosing and ordering them is configuration. Only its SHAPE is checked here:

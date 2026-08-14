@@ -56,7 +56,6 @@ from pydantic import Field
 from pydantic import ValidationError as PydanticValidationError
 
 from agentworks.capabilities.descriptor import descriptor_for, descriptor_for_impl
-from agentworks.capabilities.retired_shapes import retired_shape_error
 from agentworks.errors import StateError
 from agentworks.schema import (
     AgwRootModel,
@@ -171,12 +170,6 @@ def validate_capability_config(
     impl = _seated_impl(descriptor, selected)
     if impl is None:
         return None
-    # Before validation, so a pre-migration document gets its exact
-    # rewrite rather than the unconnected pair of problems the model layer
-    # would answer it with. Framed with the same ``location`` the
-    # validation below is given, because it is an error about the same
-    # document. Release-scoped; see the module it lives in.
-    retired_shape_error(getattr(impl, "retired_shape", None), config, owner, location)
     hint = reference_hint(kind, selected)
     if descriptor.config_schema.discriminator is None:
         model = offered_model(impl)
@@ -236,7 +229,6 @@ def validate_own_config(
     can only be a framework mistake (a call site handing over a table
     where a config belongs), so it is a ``StateError``.
     """
-    retired_shape_error(getattr(impl, "retired_shape", None), config, owner)
     descriptor = descriptor_for_impl(impl)
     discriminator = descriptor.config_schema.discriminator if descriptor is not None else None
     payload: Mapping[str, object] = config

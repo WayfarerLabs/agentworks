@@ -349,23 +349,21 @@ def resource_edit(
     from agentworks.schema import location_text
     from agentworks.source_location import SourceLocation
 
+    config = load_config()
     try:
-        config = load_config()
         registry = load_request_registry(config)
         path, line = edit_location(registry, kind, name)
     except ConfigError as exc:
-        # The fix-it path: a config failing validation is exactly when
+        # The fix-it path: a manifest set failing validation is exactly when
         # the operator needs edit most, so fall back to a tolerant,
-        # validation-free scan of the manifests directory. Only
-        # ConfigError (config-broken) triggers this; ValidationError /
-        # NotFoundError (wrong invocation, wrong name) propagate with
-        # their better messages.
-        from agentworks.config import load_config as load_settings
+        # validation-free scan of the manifests directory. Config loading has
+        # already succeeded; a ConfigError from the registry path triggers
+        # this fallback, while ValidationError / NotFoundError (wrong
+        # invocation, wrong name) propagate with their better messages.
         from agentworks.manifests import RESOURCES_DIRNAME
         from agentworks.manifests.loader import locate_document
 
-        settings = load_settings(resources=False)
-        resources_dir = settings.source_path.parent / RESOURCES_DIRNAME
+        resources_dir = config.source_path.parent / RESOURCES_DIRNAME
         found = locate_document(resources_dir, kind, name)
         if found.location is None:
             if found.unreadable:
@@ -430,10 +428,7 @@ def resource_sample(
 
     from agentworks.config import load_config
 
-    # Settings-only load: --write needs nothing but source_path to locate
-    # the resources directory, so the resource sections (and their
-    # deprecation nudge -- this command is the remediation path) stay out.
-    config = load_config(resources=False)
+    config = load_config()
     resources_dir = config.source_path.parent / RESOURCES_DIRNAME
     path, outcome = write_sample(resources_dir, write, kind, all_kinds=all_kinds)
     verb = "Appended sample to" if outcome == "appended" else "Wrote sample to"
@@ -520,9 +515,7 @@ def resource_schema(
     from agentworks.config import load_config
     from agentworks.manifests.loader import RESOURCES_DIRNAME
 
-    # Settings-only, like `sample --write`: locating the resources
-    # directory needs `source_path` and nothing else.
-    config = load_config(resources=False)
+    config = load_config()
     schema_dir = config.source_path.parent / RESOURCES_DIRNAME / SCHEMA_DIRNAME
     written = write_schema_set(schema_dir)
     output.info(f"Wrote {len(written)} schemas to {format_host_path(schema_dir)}")

@@ -1,5 +1,5 @@
 """The Lima VM platform: local limactl, or limactl over SSH, whichever
-the site's ``platform_config.placement`` selects."""
+the site's tagged platform ``placement`` selects."""
 
 from __future__ import annotations
 
@@ -18,7 +18,6 @@ from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
 from pydantic import Field
 
 from agentworks import output
-from agentworks.capabilities.retired_shapes import RetiredPresenceShape
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
 from agentworks.capabilities.vm_platform.bootstrap_script import (
     REBOOT_SENTINEL_PATH,
@@ -157,17 +156,6 @@ class LimaPlatform(VMPlatform):
     name: ClassVar[str] = "lima"
     description: ClassVar[str] = "Lima VMs (local, or on a remote host via SSH)"
     config_model: ClassVar[type[LimaConfig]] = LimaConfig
-    # A lima site that WROTE ``vm_host`` (or wrote it null) crosses this
-    # break and gets its exact rewrite; the zero-config local site that
-    # wrote nothing lands on the local default and was never broken.
-    # Release-scoped.
-    retired_shape: ClassVar[RetiredPresenceShape | None] = RetiredPresenceShape(
-        retired_field="vm_host",
-        union_field="placement",
-        present_mode="ssh",
-        absent_mode="local",
-        scalar_field="host",
-    )
     prose: ClassVar[TopicProse | None] = TopicProse(
         title="Lima",
         overview="""

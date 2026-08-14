@@ -8,7 +8,6 @@ import sys
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
 from agentworks import output
-from agentworks.capabilities.retired_shapes import RetiredPresenceShape
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES, generate_cloud_init
@@ -86,16 +85,6 @@ class AzureVMPlatform(VMPlatform):
     name: ClassVar[str] = "azure-vm"
     description: ClassVar[str] = "Azure Virtual Machines (subscription + resource group)"
     config_model: ClassVar[type[AzureVMConfig]] = AzureVMConfig
-    # An azure-vm site that WROTE ``service_principal`` (or wrote it
-    # null) crosses this break and gets its exact rewrite; a site that
-    # omitted it lands on the ambient default and was never broken.
-    # Release-scoped.
-    retired_shape: ClassVar[RetiredPresenceShape | None] = RetiredPresenceShape(
-        retired_field="service_principal",
-        union_field="auth",
-        present_mode="service-principal",
-        absent_mode="ambient",
-    )
     prose: ClassVar[TopicProse | None] = TopicProse(
         title="Azure VMs",
         overview="""

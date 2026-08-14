@@ -104,9 +104,9 @@ class Config:
     # issues stay sharp for tests and callers, and so --no-deprecations can
     # silence only these.
     #
-    # EMPTY TODAY, and honestly so: both nudges that ever rode it are hard
-    # errors now (the TOML resource sections, then the ``[secret_backends.*]``
-    # no-op that was the last producer), so nothing populates it. It is kept
+    # EMPTY TODAY, and honestly so: both nudges that ever rode it are retired
+    # now (the TOML resource sections, then the ``[secret_backends.*]`` no-op
+    # that was the last producer), so nothing populates it. It is kept
     # as the mechanism, not as a half-migration: it is generic, it is backed
     # by an operator-facing CLI flag, and the next deprecation wants it.
     # KEPT DELIBERATELY, not pending retirement (operator ruling,
