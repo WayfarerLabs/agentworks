@@ -865,13 +865,14 @@ the two retired mappings in an editor as well as during manifest loading.
 To find likely flow-style entries in the normal manifest directory, run:
 
 ```bash
-grep -rniE '(^|[,{[:space:]])(value|secret):[[:space:]]*null([,}]|$)' \
+grep -rniE '(^|[,{[:space:]])(value|secret):[[:space:]]*(null|~)?[[:space:]]*([,}]|$)' \
   ~/.config/agentworks/resources
 ```
 
-Inspect every hit in its containing mapping. The scan finds both field names but cannot prove they
-are an env entry, and it can miss multiline or quoted keys. Rewrite only the two mappings above; an
-explicit `null` in another field can have a different documented meaning.
+The `-i` catches `Null` and `NULL`, while `(null|~)?` also catches `~` and a bare key with no value,
+which YAML decodes as null. Inspect every hit in its containing mapping. The scan finds both field
+names but cannot prove they are an env entry, and it can miss multiline or quoted keys. Rewrite only
+the two mappings above; an explicit null in another field can have a different documented meaning.
 
 ### Types are checked now
 
