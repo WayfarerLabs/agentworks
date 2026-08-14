@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import StateError
 from agentworks.secrets.outcomes import _safe_diagnostic_text
-from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
+from agentworks.secrets.policy import InteractionPolicy
 from agentworks.secrets.resolve import ActiveSource, _BackendProtocolError, _lookup_projection
 
 if TYPE_CHECKING:
@@ -120,5 +120,4 @@ def preview_operation_resolution(
     interaction: InteractionPolicy,
 ) -> ResolutionPreview:
     """Predict whether an operation has a source under an exact interaction policy."""
-    interaction = validate_interaction_policy(interaction)
     return _preview(secret, sources, interaction=interaction)

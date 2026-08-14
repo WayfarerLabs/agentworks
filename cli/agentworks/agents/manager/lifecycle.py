@@ -19,7 +19,6 @@ from agentworks.errors import (
     UserAbort,
 )
 from agentworks.naming import validate_name
-from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 from agentworks.vms.manager import gated_vm_boundary
 
 from ._common import MAX_AGENT_NAME_LENGTH, _require_vm, agent_scope
@@ -29,6 +28,7 @@ if TYPE_CHECKING:
 
     from agentworks.config import Config
     from agentworks.db import Database
+    from agentworks.secrets.policy import InteractionPolicy
     from agentworks.vms.nodes import LiveVMNode
 
 # ``_mgr`` binds this module's own package object (safe: by the time
@@ -65,7 +65,6 @@ def create_agent(
     realization log exists here.
     """
 
-    interaction = validate_interaction_policy(interaction)
     from agentworks.agents.templates import resolve_template
     from agentworks.bootstrap import load_request_registry
 
@@ -242,7 +241,6 @@ def delete_agent(
     platform) is what keeps a teardown from silently falling into the
     boundary-building standalone branch.
     """
-    interaction = validate_interaction_policy(interaction)
     agent = db.get_agent(name)
     if agent is None:
         raise NotFoundError(
@@ -419,7 +417,6 @@ def reinit_agent(
     before.
     """
 
-    interaction = validate_interaction_policy(interaction)
     from agentworks.agents.templates import resolve_template
     from agentworks.bootstrap import load_request_registry
 

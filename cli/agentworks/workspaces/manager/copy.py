@@ -11,7 +11,6 @@ from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH
 from agentworks.errors import AlreadyExistsError, ExternalError, NotFoundError, StateError
 from agentworks.naming import validate_name
 from agentworks.path_rendering import format_host_path
-from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.backends.vm import default_workspace_path
 from agentworks.workspaces.manager._common import _guard_vm_status, _resolve_vm, _workspace_scope
@@ -19,6 +18,7 @@ from agentworks.workspaces.manager._common import _guard_vm_status, _resolve_vm,
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
+    from agentworks.secrets.policy import InteractionPolicy
 
 
 def copy_workspace(
@@ -47,7 +47,6 @@ def copy_workspace(
     source composition with no second boundary. The multi-root walk
     stays available for the batch commands that already coalesce.
     """
-    interaction = validate_interaction_policy(interaction)
     import contextlib
     import tempfile
     from pathlib import Path

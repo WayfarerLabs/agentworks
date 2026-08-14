@@ -23,7 +23,7 @@ from agentworks.capabilities.secret_backend.client import (
 from agentworks.capabilities.secret_backend.prompt import PromptBackend, PromptSourceConfig
 from agentworks.cli import app
 from agentworks.config import load_config
-from agentworks.errors import NotFoundError, StateError, UserAbort, ValidationError
+from agentworks.errors import NotFoundError, UserAbort, ValidationError
 from agentworks.plugins import SYSTEM_PLUGINS
 from agentworks.plugins.onepassword.backend import (
     OnePasswordBackend,
@@ -488,16 +488,6 @@ def test_verify_rejects_empty_or_unsafe_names_without_echo(names: list[str]) -> 
         )
     assert "bad\nname" not in str(caught.value)
     assert caught.value.__cause__ is None
-
-
-def test_verify_rejects_non_exact_policy_before_other_work() -> None:
-    with pytest.raises(StateError, match="exact InteractionPolicy"):
-        verify_secrets(
-            SimpleNamespace(),  # type: ignore[arg-type]
-            _registry(),  # type: ignore[arg-type]
-            [],
-            interaction="refuse",  # type: ignore[arg-type]
-        )
 
 
 @pytest.mark.parametrize(

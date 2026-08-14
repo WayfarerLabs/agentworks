@@ -18,7 +18,6 @@ from agentworks.errors import (
     UserAbort,
 )
 from agentworks.naming import MAX_VM_NAME_LENGTH
-from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 
 from ._helpers import _require_vm, _vm_scope
 from .boundary import _platform_ops_ctx
@@ -27,6 +26,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
     from agentworks.machine_output import JsonObject
+    from agentworks.secrets.policy import InteractionPolicy
 
 # NAME-column truncation cap for ``vm list``, derived from the VM-name cap so
 # the two cannot drift: a valid name (<= MAX_VM_NAME_LENGTH) never truncates,
@@ -436,7 +436,6 @@ def vm_description(
     interaction: InteractionPolicy,
 ) -> VMDescription:
     """Collect safe VM detail facts, degrading bounded live reads to issues."""
-    interaction = validate_interaction_policy(interaction)
     import agentworks.vms.manager as _mgr
     from agentworks.bootstrap import load_request_registry
     from agentworks.capabilities.base import RunContext
@@ -707,5 +706,4 @@ def describe_vm(
     interaction: InteractionPolicy,
 ) -> None:
     """Show VM details through the shared inspection fact record."""
-    interaction = validate_interaction_policy(interaction)
     render_vm_description(vm_description(db, config, name, interaction=interaction))

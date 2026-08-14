@@ -35,7 +35,6 @@ from agentworks.errors import (
     unknown_template_error,
 )
 from agentworks.naming import MAX_VM_NAME_LENGTH, validate_name
-from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 
 from ._helpers import _require_vm
 
@@ -44,6 +43,7 @@ if TYPE_CHECKING:
 
     from agentworks.config import Config
     from agentworks.db import Database
+    from agentworks.secrets.policy import InteractionPolicy
 
 # NOTE on the initializer imports (``verify_tailscale_available``,
 # ``announce_git_credentials``, ``bootstrap_vm``, ``run_initialization``):
@@ -132,7 +132,6 @@ def create_vm(
     declared admin-template resource; an unknown name fails here, before
     any DB or backend work.
     """
-    interaction = validate_interaction_policy(interaction)
     import agentworks.vms.manager as _mgr
     from agentworks.bootstrap import load_request_registry
     from agentworks.vms.templates import resolve_template
@@ -568,7 +567,6 @@ def reinit_vm(
     nothing to unwind; a failed init leaves the VM re-runnable, as
     before.
     """
-    interaction = validate_interaction_policy(interaction)
     import agentworks.vms.manager as _mgr
     from agentworks.bootstrap import load_request_registry
     from agentworks.transports import transport

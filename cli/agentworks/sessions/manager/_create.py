@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 import agentworks.sessions.manager as _mgr
 from agentworks import output
 from agentworks.errors import StateError
-from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 
 from ._create_build import _build_session_graph
 from ._create_plan import _resolve_session_plan
@@ -16,6 +15,7 @@ from ._create_roll import _roll_forward
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
+    from agentworks.secrets.policy import InteractionPolicy
     from agentworks.sessions.tmux import RunCommand
     from agentworks.transports import Transport
 
@@ -75,7 +75,6 @@ def _preflight_and_resolve(
     any prompt or mutation, the earlier-failure win) and is ``None`` for
     a pending or admin target.
     """
-    interaction = validate_interaction_policy(interaction)
     from agentworks.capabilities.base import RunContext
     from agentworks.orchestration.readiness import preflight_all
 
@@ -185,7 +184,6 @@ def create_session(
             pins the VM; required when no other anchor does. When
             specified alongside other anchors, must agree with them.
     """
-    interaction = validate_interaction_policy(interaction)
     from agentworks.bootstrap import load_request_registry
 
     # build_registry runs first so framework miss-policies (e.g. typos

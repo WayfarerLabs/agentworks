@@ -31,7 +31,6 @@ from agentworks.errors import (
 )
 from agentworks.name_filters import validate_name_filters
 from agentworks.resources.access import named_console_template
-from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 from agentworks.sessions.tmux import tmux_cmd
 from agentworks.vms.manager import gated_vm_boundary
 
@@ -45,6 +44,7 @@ if TYPE_CHECKING:
     from agentworks.db import Database, SessionRow, ShellEntry, VMRow
     from agentworks.machine_output import JsonObject
     from agentworks.resources.registry import Registry
+    from agentworks.secrets.policy import InteractionPolicy
     from agentworks.transports import Transport
 
 # NAME-column truncation cap for ``console list``. Console names are freeform
@@ -258,7 +258,6 @@ def _prepare_vm_target_for_attach(
     resolve their own targets on the documented conditional-need
     path).
     """
-    interaction = validate_interaction_policy(interaction)
     from agentworks.transports import transport
 
     vm = db.get_vm(vm_name)
@@ -482,7 +481,6 @@ def attach_console(
     Returns the interactive attach's exit code; the CLI layer owns the
     translation to process exit (check 9: no sys.exit in the service).
     """
-    interaction = validate_interaction_policy(interaction)
     if os.environ.get("TMUX") and not allow_nesting:
         raise StateError(
             "already inside a tmux session. Nesting is not recommended "

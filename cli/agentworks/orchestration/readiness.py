@@ -18,13 +18,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks.errors import TokenRejectedError
-from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
     from agentworks.capabilities.base import RunContext
     from agentworks.resources.registry import Registry
+    from agentworks.secrets.policy import InteractionPolicy
 
     from .node import Node, Readiness
 
@@ -69,7 +69,6 @@ def preflight_all(
     ``registry`` is what prediction reads declarations from; every
     caller builds its nodes from one already.
     """
-    interaction = validate_interaction_policy(interaction)
     from agentworks.orchestration.secrets import require_predicted_refs
 
     for node in nodes:

@@ -20,7 +20,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentworks.errors import StateError
-from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -32,6 +31,7 @@ if TYPE_CHECKING:
     from agentworks.orchestration.node import Node
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
+    from agentworks.secrets.policy import InteractionPolicy
     from agentworks.vms.nodes import LiveVMNode
 
     from .templates import ResolvedAgentTemplate
@@ -156,7 +156,6 @@ class PendingAgentNode:
         *,
         interaction: InteractionPolicy,
     ) -> None:
-        interaction = validate_interaction_policy(interaction)
         self._db = db
         self._config = config
         self._name = name
@@ -218,7 +217,6 @@ class PendingAgentNode:
         self._realized = True
 
     def teardown(self) -> None:
-        interaction = validate_interaction_policy(self._interaction)
         from agentworks.agents.manager import delete_agent
 
         try:
@@ -229,7 +227,7 @@ class PendingAgentNode:
                 force=True,
                 yes=True,
                 vm_node=self._vm,
-                interaction=interaction,
+                interaction=self._interaction,
             )
         except Exception as exc:
             # The teardown contract: name the artifact left standing.
@@ -298,7 +296,6 @@ def pending_agent_node(
     dep, any readiness that watches the target) must receive this same
     object, so the orchestrator's ``mark_realized`` flip is observed by
     all of them."""
-    interaction = validate_interaction_policy(interaction)
     return PendingAgentNode(
         db,
         config,

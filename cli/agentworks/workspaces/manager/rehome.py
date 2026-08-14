@@ -15,7 +15,6 @@ from agentworks.errors import (
     ValidationError,
 )
 from agentworks.path_rendering import format_host_path
-from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.manager._common import _guard_vm_status, _workspace_scope
 from agentworks.workspaces.manager.repair import _rehome_partial_state_hint
@@ -23,6 +22,7 @@ from agentworks.workspaces.manager.repair import _rehome_partial_state_hint
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, WorkspaceRow
+    from agentworks.secrets.policy import InteractionPolicy
 
 
 def rehome_workspace(
@@ -36,7 +36,6 @@ def rehome_workspace(
     interaction: InteractionPolicy,
 ) -> None:
     """Move a workspace to a new directory path."""
-    interaction = validate_interaction_policy(interaction)
     ws = db.get_workspace(name)
     if ws is None:
         raise NotFoundError(
@@ -129,7 +128,6 @@ def _rehome_vm(
     the operator confirms.
     """
 
-    interaction = validate_interaction_policy(interaction)
     from agentworks.bootstrap import load_request_registry
     from agentworks.ssh import SSHError, SSHLogger
     from agentworks.transports import transport

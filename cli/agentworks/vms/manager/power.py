@@ -9,7 +9,6 @@ from agentworks import output
 from agentworks.capabilities.base import RunContext
 from agentworks.db import VMStatus
 from agentworks.errors import StateError, UserAbort
-from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 
 from ._helpers import (
     _guard_failed_vm,
@@ -23,6 +22,7 @@ from .boundary import _live_vm_boundary, _platform_ops_ctx
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
+    from agentworks.secrets.policy import InteractionPolicy
     from agentworks.vms.nodes import LiveVMNode
 
 
@@ -42,7 +42,6 @@ def start_vm(
     start IS this command's operation, and the operator-stopped flag
     is CLEARED by it, never consulted.
     """
-    interaction = validate_interaction_policy(interaction)
     import agentworks.vms.manager as _mgr
     from agentworks.bootstrap import load_request_registry
 
@@ -130,7 +129,6 @@ def stop_vm(
     activation gate (the stop IS the operation), power ops through the
     node's held platform.
     """
-    interaction = validate_interaction_policy(interaction)
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
     vm_node, ops_ctx = _live_vm_boundary(db, config, vm, interaction=interaction)
@@ -188,7 +186,6 @@ def delete_vm(
     the best-effort spans may not downgrade: an abort at the
     boundary's secret prompt or inside an op span must keep the row.
     """
-    interaction = validate_interaction_policy(interaction)
     import agentworks.vms.manager as _mgr
 
     vm = _require_vm(db, name)
@@ -324,7 +321,6 @@ def rekey_vm(
     any gate, so rekey never auto-starts one outside the same race
     HEAD had.
     """
-    interaction = validate_interaction_policy(interaction)
     import ipaddress
     import time
 
