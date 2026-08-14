@@ -16,11 +16,13 @@ onto the CLI grammar rewrite, which is already large.
 
 Anchors verified at HEAD `c7093147`; treat them as starting points, not coordinates.
 
-1. **S5, the mapping key names the wrong thing.** `[secret_config].backends` holds source names, not
-   backend names (`cli/agentworks/secrets/base.py:254-271` documents the mismatch in prose rather
-   than fixing it), and `SourceMapping` emits both `source` and `backend` keys into the JSON
-   contract. Target: the key and the JSON both say sources, one name per fact, and the reconciling
-   prose in the four files carrying it goes away.
+1. **S5, the config key names the wrong thing.** `[secret_config].backends` holds an ordered
+   precedence list of source names, not backend names (`cli/agentworks/secrets/base.py:254-271`
+   documents the mismatch in prose rather than fixing it). Target: the key becomes `sources`, and
+   the reconciling prose in the four files carrying it goes away. The scope is the configuration key
+   only: `SourceMapping`'s `source` and `backend` JSON fields are two different facts (the
+   configured source instance and its implementing backend capability, divergent whenever a source
+   is backed by a differently named backend) and both stay, per the locked secret-sources design.
 2. **C3, five spellings of one fact.** `TokenAcquisition` is a one-arm tagged union that drags in
    the whole `UnionScalarShorthand` mechanism as its sole production instantiation, plus a provider
    contract bump and a `TokenSourcedConfig` tombstone with no release-scope marker. Target: the
