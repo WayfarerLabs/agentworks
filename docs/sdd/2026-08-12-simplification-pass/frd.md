@@ -1,7 +1,10 @@
 # Simplification Pass: Functional Requirements
 
-Effort start: 2026-08-12. Evidence base: [findings.md](findings.md), the consolidated inventory from
-a seven-lane review of the 2026-08-06..12 merge window.
+Effort start: 2026-08-12. Parent: the `2026-08-04-next-steps` saga (adopted as a child by operator
+ruling, 2026-08-13; its `phasing.md` carries the ordering against the grammar rewrite). The saga
+lead currently owns these artifacts, pending handoff to an implementing effort lead. Evidence base:
+[findings.md](findings.md), the consolidated inventory from a seven-lane review of the
+2026-08-06..12 merge window.
 
 ## Background
 
@@ -34,17 +37,31 @@ Settled inputs, recorded for traceability:
 
 ## Requirements
 
-### R1 (Wave 0): bare minimum rule adjustment
+### R1 (Wave 0): rule delivery, then the amendments
 
+- R1.0: Establish that always-on rules actually reach the agents they bind, before adding criteria
+  to those rules (operator direction, 2026-08-13; issue #511 is the tracking home). The expected
+  resolution is removing the path filter: `globs`/`paths:` frontmatter is what forces lazy loading,
+  and the frontmatter-free `always-consider-*` rules already load eagerly. Probe delivery across the
+  configured targets (Claude, Codex, Copilot), confirm what Rulesync emits for a rule without
+  `globs`, then drop the filter from the twelve broad rules; `cli-conventions.md` keeps its narrow
+  globs on purpose. If the probe surfaces a reason this simple shape cannot work, escalate to the
+  operator rather than building a delivery mechanism.
 - R1.1: The trust-boundary doctrine (the four boundaries, interior trust, and the
   validator-names-its-boundary convention; hla.md doctrine 1) is folded into
-  `development-principles` as a compact amendment. No new rule file.
+  `development-principles` as a compact amendment. In the same amendment, principle 3 gains a
+  test-quality counterweight (operator direction, 2026-08-13): a test earns its place by guarding an
+  invariant that can actually regress; a test that can only fail when someone edits the thing it
+  restates is cost, not coverage; assert behavior at a boundary, not the shape of the
+  implementation, and deleting a worthless test is the same virtue as writing a worthy one. No new
+  rule file.
 - R1.2: `no-prose-policing-tests` gains a short generalization: the rule's target is every authored
   artifact (prose, config files, workflow files, CSS tokens, the spelling of our own source), not
   prose alone; when two artifacts must agree, derive one from the other and test the derivation. No
   new rule file.
 - R1.3: Wave 0 merges before any wave 1 PR, and wave 1 delegation charters cite both amendments, so
-  the deletion criteria are on main before deletions are judged against them.
+  the deletion criteria are on main before deletions are judged against them (and reach worktree
+  subagents regardless of what R1.0 concludes).
 
 ### R2 (Wave 1): deletion
 
@@ -74,8 +91,10 @@ justification for a new production contract.
   stays (operator caution, 2026-08-12).
 - R3.2: A journey-and-register trim removes narration and definitional prose from operating
   instructions. Always-on rule bytes are reported before and after and must go down.
-- R3.3: No persona changes, no new delivery mechanisms, no probes ride this wave. The rule-delivery
-  gap (findings, rule-delivery section) is filed as its own tracked issue and pursued separately.
+- R3.3: No persona changes and no new delivery mechanisms ride this wave. The rule-delivery gap is
+  wave 0's to resolve (R1.0); this wave's subtraction builds on whatever delivery shape wave 0
+  landed. Wave 2 runs in parallel with wave 1 on its own session (operator, 2026-08-13),
+  file-disjoint from it; the R4 reassessment waits for both waves.
 
 ### R4: stop and reassess
 
@@ -88,9 +107,12 @@ justification for a new production contract.
 ## Out of scope, recorded as candidates
 
 - **The 0.14 contract-truth items** (S5 backends-to-sources, C3 token-union collapse, C4 compat
-  flag, C7 compat expiry, and the migration-notes convention): out of scope for this pass, and
-  recorded as candidates for the broader saga, with [migration-strategy.md](migration-strategy.md)
-  as their seed. The saga lead routes them; flagged through the operator.
+  flag, C7 compat expiry, and the migration-notes convention): out of scope for this pass. Routed
+  (operator, 2026-08-13): they run as their own dispatched task, briefed on the
+  `refactor/breaking-truth-0-14` branch, in parallel with the deletion waves. That task owns
+  `env/entry.py` and the token union; this pass owns the inert descriptor fields (C1, C5).
+  [migration-strategy.md](migration-strategy.md) is the task's authoritative strategy, read from
+  this directory.
 - **Subsystem redesigns** (D1/D2 database classification and sentinels, S3/S4/S6 secrets protocol
   and resolve paths, G1/G3 guide boundary surgery, C8 `ResolvedSessionTemplate`, G5 JSON/human
   traversal, W7/W9/W10 website philosophy and lander scope, P1/P2 platform extractions, P4 error
@@ -98,7 +120,8 @@ justification for a new production contract.
 - **External-plugin trust design**: not designed or promoted in this pass. The checks kept by the
   wave 1 charter (constructibility, call-shape compatibility at registration) are the seam; findings
   and the boundary sketch go into the reassessment as seed material for the loader effort.
-- **The rule-delivery bug**: filed as its own issue (R3.3), not fixed by in-repo machinery here.
+- **New rule-delivery machinery**: wave 0 resolves the delivery gap by removing the path filter
+  (R1.0), never by building a delivery mechanism; anything beyond that shape escalates.
 - No new user-facing features, no harness changes, no SDD-directory cleanup beyond the directed
   prose-test-purge supersession.
 

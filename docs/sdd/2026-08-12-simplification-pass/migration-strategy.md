@@ -1,9 +1,9 @@
 # Migration Strategy: Notes Over Shims
 
 **Status (2026-08-13)**: the breaking changes inventoried below are out of scope for this pass (FRD,
-Out of scope) and recorded as candidates for the broader saga. This artifact is their seed: it
-captures the strategy the operator directed be captured, and travels with the candidates when the
-saga routes them.
+Out of scope) and are routed: they run as a dispatched task briefed on the
+`refactor/breaking-truth-0-14` branch, in parallel with this pass's deletion waves. This artifact is
+that task's authoritative strategy, read from this directory once this SDD is on `main`.
 
 Operator direction (2026-08-13): the strategy for breaking changes is worth capturing as its own
 artifact. It is deliberately not a cutover plan, because there is nothing to cut over: 0.14 is

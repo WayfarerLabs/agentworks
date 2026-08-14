@@ -11,6 +11,12 @@ grew 7.8 KB to 30.6 KB.
 
 ## Rule-delivery facts (probed 2026-08-12, three controlled subagent probes)
 
+Tracked as [issue 511](https://github.com/WayfarerLabs/agentworks/issues/511); wave 0 resolves it
+(FRD R1.0). Exact source inventory as of 2026-08-13: 18 files in `.rulesync/rules/`; thirteen
+declare `globs: ["**/*"]` including `root.md` (which projects to `CLAUDE.md` and always loads);
+generated, five load unconditionally and thirteen are path-conditioned, twelve broad plus the
+deliberately narrow `cli-conventions.md`.
+
 - Rules with `paths:` frontmatter are injected lazily, after the first tool call that touches a file
   under the primary project directory.
 - A subagent that uses no tools, or that works only in a checkout outside the project root (for

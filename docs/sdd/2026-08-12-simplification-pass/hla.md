@@ -42,20 +42,25 @@ actually regress, and never as a new production contract whose only consumer is 
 
 ## Guidance delivery
 
-Wave 0 amends the two existing rules (`development-principles`, `no-prose-policing-tests`); no new
-files, personas, or delivery mechanisms. The probed rule-delivery facts stay recorded in
-findings.md; the delivery gap itself (paths-scoped rules never reach out-of-tree checkouts, Codex
-behavior unprobed) is filed as its own tracked issue. Until it is fixed, wave 1 delegation charters
-simply cite the two amended rules, which costs a sentence per charter.
+Wave 0 first resolves rule delivery (issue #511), then amends the two existing rules
+(`development-principles`, `no-prose-policing-tests`); no new files, personas, or delivery
+mechanisms. The expected delivery resolution is subtraction-shaped: the `globs`/`paths:` frontmatter
+is what forces lazy loading, so after the probes confirm the emission shape, the twelve broad
+always-on rules drop the filter and load eagerly, as the frontmatter-free `always-consider-*` rules
+already do. Wave 1 delegation charters cite the two amended rules regardless, which costs a sentence
+per charter and covers any delivery edge the probes miss.
 
 ## Waves and vehicle
 
-- **Wave 0**: one small PR, merged first (FRD R1).
-- **Wave 1**: independent, contained deletion PRs off main, each judged locally against the two
-  doctrines, each green on the full suite. No ordering between them.
-- **Wave 2**: process-tree subtraction PRs under the net-deletion constraint.
-- **Reassess**: the lead writes the reassessment and the candidate proposals; the operator decides
-  what, if anything, is promoted.
+- **Wave 0**: the delivery resolution plus one small amendment PR, merged first (FRD R1).
+- **Wave 1**: independent, contained deletion work off main, each item judged locally against the
+  two doctrines, each PR green on the full suite. No ordering between items; PR batching per the
+  plan. Precedes the CLI grammar rewrite (saga `phasing.md`).
+- **Wave 2**: process and rule subtraction PRs under the net-deletion constraint, in parallel with
+  wave 1 on its own session (file-disjoint: `.rulesync/` and the skills tree versus `cli/` and
+  `website/`).
+- **Reassess**: waits for both waves; the lead writes the reassessment and the candidate proposals;
+  the operator decides what, if anything, is promoted.
 
 ## Risks
 

@@ -4,21 +4,29 @@ Finding IDs reference [findings.md](findings.md); requirements reference [frd.md
 merges before any wave 1 PR; wave 1 PRs are independent and unordered; the reassessment closes the
 effort.
 
-## Wave 0: bare minimum rule adjustment (R1)
+## Wave 0: rule delivery, then the amendments (R1)
 
+- [ ] Resolve rule delivery (R1.0, issue #511): probe fresh-session, no-file-tools, and
+      isolated-worktree delivery per configured target (Claude, Codex, Copilot), confirm the
+      Rulesync emission for a rule without `globs`, then drop the filter from the twelve broad
+      always-on rules, keeping `cli-conventions.md` narrow. Done when: the probes are recorded on
+      issue #511 and the twelve rules are delivered unconditionally, or the blocker is escalated to
+      the operator.
 - [ ] Amend `development-principles` with the trust-boundary doctrine (the four boundaries, interior
-      trust, validator-names-its-boundary; ~10 lines) and `no-prose-policing-tests` with the
-      authored-artifacts generalization (~3 sentences), one PR. Done when: merged, and the wave 1
-      items below cite the amendments in their delegation charters.
-- [ ] File the rule-delivery gap as its own tracked issue, with the probe evidence from findings.md
-      (paths-scoped rules never reach out-of-tree checkouts; harness-worktree and Codex behavior
-      unverified). Done when: the issue exists and findings.md links it; nothing else in this pass
-      depends on it.
+      trust, validator-names-its-boundary; ~10 lines) plus the principle-3 test-quality
+      counterweight (R1.1), and `no-prose-policing-tests` with the authored-artifacts generalization
+      (~3 sentences), one PR. Done when: merged, and the wave 1 items below cite the amendments in
+      their delegation charters.
 
 ## Wave 1: deletion (R2)
 
-Each item is one PR: subtraction judged locally against the doctrines, full suite green, R2.1
-provenance gate applied, no new production types or contract changes (R2.2).
+Eight work items, unordered by design: subtraction judged locally against the doctrines, full suite
+green, R2.1 provenance gate applied, no new production types or contract changes (R2.2). How many
+PRs they land as is the implementing lead's call; the saga lead's recommendation is to batch by
+domain to about three (cli core; guide and machine output; website and test scaffolding) so operator
+review rounds match the work rather than the item count. The website items coordinate with the
+in-flight continuous-lander effort (PR #486) before starting, since they touch test files it is
+actively changing.
 
 - [ ] Delete the `phase7` corpus and `validate_interaction_policy` with its 152 call sites (S1).
       Keep `test_resolution_timeout_cleanup.py` (trim its two wording pins); rename kept fixtures
