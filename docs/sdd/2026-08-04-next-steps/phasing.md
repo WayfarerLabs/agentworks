@@ -112,15 +112,16 @@ off whenever bandwidth allows, on its own merits and its own schedule.
 - **0.14.0 (held; operator ruling, 2026-08-06):** the breaking cleanup does not ship alone. The cut
   waits for the guide first slice (guide command core, `concept-onboarding`, the README bootstrap),
   so the release that rejects old inputs also ships the CLI that teaches the new ones; newcomers
-  ride the forgiving 0.13.0 until then. That gate is partially satisfied: the guide command core and
-  `concept-onboarding` merged 2026-08-08 via PR #428, while the README bootstrap arrives with the
-  onboarding child's bootstraps phase, so the gate stays open until it lands. The installer-plugins
-  child (operator ruling, 2026-08-07; launchable whenever, see Tracks) also gates the cut: its moves
-  are breaking and belong in the same well-cushioned release. The 0.13.0 warnings stay true because
-  the version number attaches to the breaking content, not the date. If wave 2's
-  generic-discriminator hard error lands in the same window, it folds in: one well-cushioned
-  breaking release instead of two. The vm-platform mode contract (PR #444, merged 2026-08-08) folds
-  in the same way: its written-old-shape hard errors ride the cushioned release, and its
+  ride the forgiving 0.13.0 until then. That gate is satisfied: the guide command core and
+  `concept-onboarding` merged 2026-08-08 via PR #428, and the README bootstrap shipped with the
+  assistance phase (PR #480, 2026-08-13; the generated block pins version 0.14.0 or newer, so it
+  resolves for operators when the release itself ships). The installer-plugins child (operator
+  ruling, 2026-08-07; launchable whenever, see Tracks) also gates the cut: its moves are breaking
+  and belong in the same well-cushioned release. The 0.13.0 warnings stay true because the version
+  number attaches to the breaking content, not the date. If wave 2's generic-discriminator hard
+  error lands in the same window, it folds in: one well-cushioned breaking release instead of two.
+  The vm-platform mode contract (PR #444, merged 2026-08-08) folds in the same way: its
+  written-old-shape hard errors ride the cushioned release, and its
   omission-equals-historical-default posture means manifests that never wrote the retired blocks
   cross without edits. The git-credential one-arm union restructure (operator ruling, 2026-08-08,
   ahead of credential minting) landed 2026-08-08 via PR #455, following the same pattern, together
@@ -143,13 +144,15 @@ off whenever bandwidth allows, on its own merits and its own schedule.
   ship until it lands, so it joins the cut as a hard gate. **Sequence (operator, 2026-08-13, revised
   the same day):** the simplification pass runs before the grammar rewrite, not after it. The order
   is (1) that pass's wave 0, which establishes that always-on rules actually reach the agents they
-  bind (issue #511) and lands the deletion criteria, (2) its deletion waves, (3) the grammar
+  bind (issue #511) and lands the deletion criteria, (2) its wave 1 deletions, (3) the grammar
   rewrite, (4) its reassessment. Rewriting the CLI grammar over a surface that still carries the
-  deletable scaffolding means the rewrite carries it too. The onboarding trail-sign round runs
-  alongside rather than ahead, split by boundary: the simplification pass owns guide machinery, the
-  onboarding effort owns guide content. The 0.14 breaking-truth items (S5, C3, C4, C7) run as their
-  own dispatched task in parallel, since folding them into the grammar rewrite would grow an already
-  massive effort (operator, 2026-08-13).
+  deletable scaffolding means the rewrite carries it too. The pass's wave 2 (process and rule
+  subtraction) is not on this spine: it runs fully in parallel on its own session, file-disjoint
+  from wave 1, and the reassessment and lock wait for both waves. The onboarding trail-sign round
+  also runs alongside rather than ahead, split by boundary: the simplification pass owns guide
+  machinery, the onboarding effort owns guide content. The 0.14 breaking-truth items (S5, C3, C4,
+  C7) run as their own dispatched task in parallel, since folding them into the grammar rewrite
+  would grow an already massive effort (operator, 2026-08-13).
 
 - **Later:** remaining waves map to releases as they prove out; no need to pin numbers now.
 

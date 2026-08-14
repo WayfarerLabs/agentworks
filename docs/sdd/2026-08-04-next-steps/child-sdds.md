@@ -94,8 +94,9 @@ locked.
       rather than ahead of it (see `phasing.md`), split by boundary: this effort owns guide content,
       the simplification pass owns guide machinery. This modifies the effort's own SDD; the effort
       lead owns that revision, including whether its remaining phases still hold as planned
-- [ ] Remaining phases (bootstraps including the README bootstrap that gates 0.14, wave 2 adoption,
-      closeout) per the effort's per-phase PR plan
+- [ ] Remaining phases (wave 2 adoption, closeout) per the effort's per-phase PR plan. The README
+      bootstrap shipped with the assistance phase (PR #480), so the bootstraps gate is satisfied;
+      the generated block pins version 0.14.0 or newer and resolves when the release ships
 - [ ] Locked
 
 ### Wave 3: 2026-08-07-secret-sources
@@ -189,7 +190,9 @@ item shrinks to a verification sweep.
       full suite. How many PRs they land as is the child's call: its plan already allows the prose
       sweep to span several, and the saga lead has recommended batching by domain to about three so
       the round count matches the work rather than the item count
-- [ ] Wave 2: process and rule subtraction under a strict net-deletion constraint
+- [ ] Wave 2: process and rule subtraction under a strict net-deletion constraint. Runs in parallel
+      with wave 1 on its own session (operator, 2026-08-13), file-disjoint from it; the reassessment
+      below waits for both waves
 - [ ] Reassessment delivered; surviving findings proposed individually or dropped
 - [ ] Locked
 
@@ -487,9 +490,10 @@ open-ended research placeholder.
     now has a longer runway by ruling, not by slip: **0.14.0 waits for the CLI grammar rewrite**
     (operator, 2026-08-12), and the simplification pass is adopted as a child and runs before it.
     The serial spine is: the pass's wave 0 (rule delivery, issue #511, then the deletion criteria),
-    its deletion waves, the grammar rewrite, its reassessment. Open 0.14 gates: that spine, the
-    installer-plugins moves (now scope-reduced to the bucketing), the README bootstrap, and the
-    breaking-truth task.
+    its wave 1 deletions, the grammar rewrite, its reassessment; wave 2 runs in parallel off the
+    spine and the reassessment waits for it too. Open 0.14 gates: that spine, the installer-plugins
+    moves (now scope-reduced to the bucketing), and the breaking-truth task. The README bootstrap
+    gate is satisfied (PR #480; see the onboarding entry).
 
     Four lanes run in parallel with the spine, and these are the boundaries that keep them apart:
     the onboarding trail-sign round (guide content, while the pass owns guide machinery), the

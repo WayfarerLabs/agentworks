@@ -39,7 +39,9 @@ merges, as usual. Published reviews inform and do not authorize: post your readi
 `awaiting-direction`, and wait for the operator's direction before a fix round. Label saga PRs
 `saga:next-steps`.
 
-One thing worth naming: the README bootstrap remains a 0.14 gate and is still owed by this effort.
-If the simplification round changes what that bootstrap should say, say so in the same PR.
+One thing worth naming: the README bootstrap already shipped with your assistance phase (PR #480;
+the generated block in `README.md` pins version 0.14.0 or newer, so it resolves for operators when
+the release ships). Nothing there is owed. But if the simplification round changes what that
+bootstrap should say, say so in the same PR.
 
 -- agw-next-steps (saga lead session)
