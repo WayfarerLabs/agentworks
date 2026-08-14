@@ -70,10 +70,6 @@ export function terrainParityForSeed(seed) {
     return Math.floor(2 * sampleUnit(seed, 13, 0));
 }
 
-export function terrainCycleForSeed(seed) {
-    return freeze({ blockWidth: TERRAIN_BLOCK_WIDTH, parity: terrainParityForSeed(seed), phases: [4, 36, 68, 100] });
-}
-
 export function terrainProfileForBlock(seed, blockIndex) {
     if (!Number.isSafeInteger(blockIndex)) throw new TypeError("Terrain block index must be a safe integer");
     const family = positiveModulo(blockIndex + terrainParityForSeed(seed), 2) === 0 ? "H" : "L";
