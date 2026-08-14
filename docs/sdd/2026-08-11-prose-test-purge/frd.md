@@ -1,5 +1,14 @@
 # FRD: Prose-Policing Test Purge
 
+**Superseded (2026-08-12, before work started).** By operator direction on the simplification-pass
+seeding PR (#509), this effort is absorbed into
+[`2026-08-12-simplification-pass`](../2026-08-12-simplification-pass/frd.md), whose wave 1 deletion
+charter (its R2) owns this estate. The survey basis and the out-of-scope guardrails below carry
+forward as inputs; a later operator ruling (2026-08-13) simplified the resolution posture:
+sentence-only observables are decided case by case, mostly by deletion, and R4's new production
+observables are not mandated. No work had begun under this SDD; nothing here records shipped
+behavior. See `locked.md`.
+
 Seeded by the saga lead for the `2026-08-04-next-steps` saga. This is a seed FRD: it records the
 requirements and the constraints the saga has already settled. The effort lead owns it from the
 merge of the seeding PR onward, along with the HLA, plan, and any LLDs.
